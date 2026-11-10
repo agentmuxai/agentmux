@@ -698,8 +698,8 @@ async function initAppInner() {
                 // (irrelevant — app.tsx replaces this window's content
                 // entirely for credential-approval).
                 let coldMeta: Record<string, unknown> | undefined;
-                // The memory-adoption approval window is the same kind.
-                const approvalViews = ["credential-approval", "memory-adoption-approval", "ssh-approval"];
+                // The SSH approval window is the same kind.
+                const approvalViews = ["credential-approval", "ssh-approval"];
                 const seedView =
                     coldInitialView && !approvalViews.includes(coldInitialView) ? coldInitialView : undefined;
                 if (seedView) {

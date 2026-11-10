@@ -1056,12 +1056,20 @@
             "send": "null"
         },
         {
+            "command": "agent:memory:adopt",
+            "method": "NativeMemoryAdoptCommand"
+        },
+        {
             "command": "agent:memory:adoption_list",
             "method": "NativeMemoryAdoptionListCommand"
         },
         {
             "command": "agent:memory:claims",
             "method": "NativeMemoryClaimsCommand"
+        },
+        {
+            "command": "agent:memory:release",
+            "method": "NativeMemoryReleaseCommand"
         },
         {
             "command": "agent:memory:diff",

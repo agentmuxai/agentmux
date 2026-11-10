@@ -9,16 +9,16 @@
  *
  * A claim keeps a folder away from every other agent. It is released on
  * its own when the agent is deleted, not when it moves on — this is how a
- * human releases a stale one. Like adoption, "Release…" only opens the
- * host's confirmation window; it can't release by itself.
+ * human releases a stale one. Like adoption, "Release…" only asks, in a
+ * modal over this pane (`memory-confirms.tsx`); it can't release by itself.
  */
 
-import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 import { RpcApi, type NativeMemoryClaimList, type NativeMemoryClaimedFolder } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getApi } from "@/store/global";
 import { Button } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
+import { askInPane, ReleaseConfirm } from "./memory-confirms";
 
 interface MemoryClaimsPanelProps {
     agentId: string;
@@ -71,16 +71,7 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
         load(id);
     }));
 
-    let unlisten: (() => void) | undefined;
-    void getApi().listen<any>("memory-adoption-result", (payload) => {
-        if (payload?.agent_id !== props.agentId || payload?.kind !== "release") return;
-        setWaiting(null);
-        setOutcome(releaseOutcome(payload));
-        load(props.agentId);
-    }).then((u) => {
-        unlisten = u;
-    });
-    onCleanup(() => unlisten?.());
+    let root: HTMLElement | undefined;
 
     const folders = () => list()?.folders ?? [];
 
@@ -89,23 +80,26 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
         if (!l || waiting() !== null) return;
         setOutcome(null);
         setWaiting(f.index);
-        try {
-            await getApi().approvals.requestMemoryRelease({
-                window_label: await getApi().getWindowLabel(),
-                agent_id: props.agentId,
-                list_id: l.list_id,
-                index: f.index,
-                summary: { agentName: props.agentName, dir: f.dir ?? undefined },
-            });
-        } catch (e) {
-            setWaiting(null);
-            setOutcome({ status: "failed", text: `Couldn't open the confirmation window: ${e}` });
-        }
+        const agentId = props.agentId;
+        const act = () =>
+            RpcApi.NativeMemoryReleaseCommand(TabRpcClient, { agent_id: agentId, list_id: l.list_id, index: f.index }).then(
+                (report) => void setOutcome(releaseOutcome({ status: "done", report })),
+                (e) => void setOutcome(releaseOutcome({ status: "failed", error: e instanceof Error ? e.message : String(e) }))
+            );
+        const ended = await askInPane(root, ReleaseConfirm, { agentName: props.agentName, dir: f.dir ?? undefined }, act, {
+            summary: `Release ${props.agentName}'s claim on a memory folder?`,
+            text: "Releasing a memory folder needs your answer",
+            what: "asks before releasing a memory folder",
+        });
+        setWaiting(null);
+        if (ended === "no-pane") return void setOutcome({ status: "failed", text: "Couldn't ask: Memory isn't open in a pane." });
+        if (ended === "declined") setOutcome(releaseOutcome({ status: "declined" }));
+        load(agentId);
     };
 
     return (
         <Show when={folders().length > 0 || outcome()}>
-            <section class="memory-claims-panel" aria-label="Memory folders this agent claims">
+            <section ref={root} class="memory-claims-panel" aria-label="Memory folders this agent claims">
                 <Show when={folders().length > 0}>
                     <Button
                         density="compact"

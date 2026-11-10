@@ -521,7 +521,7 @@ impl AgentMuxHandler {
                     if pending_kind == WindowKind::Subwindow {
                         unsafe { skip_taskbar(hwnd); }
                     }
-                    // Approval pages (credential / memory-adoption) must never
+                    // Approval pages (credential / SSH) must never
                     // sit behind an "Always on top" floater — they are
                     // security prompts. Registered here, they are kept above
                     // tacked floaters (topmost only while those are, re-raised
@@ -1420,9 +1420,7 @@ impl AgentMuxHandler {
         // pane-close cleanup below, just window-close instead of
         // pane-close.
         if let Some(ref lbl) = label {
-            // Same for a memory-adoption approval window (`memory_adoption`).
-            crate::memory_adoption::cancel_for_window(&self.state, lbl);
-            // And an SSH approval window: its request goes back unanswered.
+            // Same for an SSH approval window: its request goes back unanswered.
             crate::ssh_approval::cancel_for_window(lbl);
             let cancelled = crate::credential_broker::approval::cancel_for_window(lbl);
             if !cancelled.is_empty() {
