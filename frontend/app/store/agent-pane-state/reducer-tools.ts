@@ -188,5 +188,8 @@ export function onOutputStreamed(state: AgentPaneState, command: Extract<AgentPa
     const phase: ModelActivityPhase | null =
         command.kind === "thinking" ? "thinking" : command.kind === "text" ? "writing" : command.kind === "tool_input" ? "composing" : null;
     const activity = phase ? withPhase(state.activity, phase, nowMs) : state.activity;
-    return { state: { ...state, turnTokens: next, activity }, events: [] };
+    // Live output is stream activity like a token count or a tool call: it moves the turn into Streaming
+    // and refreshes liveness. A model that only thinks for minutes (a route model, say) sends neither of
+    // those, and without this the pane read Idle and the stuck-stream clock ran while it worked.
+    return { state: bumpEvent({ ...state, turnTokens: next, activity }, nowMs, 0), events: [] };
 }
