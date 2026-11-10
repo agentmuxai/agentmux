@@ -8,7 +8,9 @@
 //! relaunched harness runs decides it, and a request the new place refuses puts the agent back where it was and says why.
 //!
 //! The trial is armed when the harness is relaunched on the new place ([`arm`], from the launch): a turn that was still
-//! running on the old one when the change was recorded must not settle it.
+//! running on the old one when the change was recorded must not settle it. It is armed for that pane: an agent's other
+//! panes, still on the old place, do not decide it. (A late frame of a process the pane has since replaced is dropped
+//! by the pane's reader before it gets here.)
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -33,6 +35,9 @@ pub struct Trial {
     /// The harness was relaunched on the new place: its next turn settles the change.
     #[serde(default)]
     pub armed: bool,
+    /// The pane whose harness was relaunched; only its turns settle the change.
+    #[serde(default)]
+    pub block: String,
 }
 
 /// What a turn's end says about the change.
@@ -73,13 +78,15 @@ pub fn begin(mstore: &Store, def_id: &str, from: &Previous, to: &Previous) -> Re
         clear(mstore, def_id);
         return Ok(());
     }
-    save(mstore, def_id, &Trial { from: origin, armed: false })
+    save(mstore, def_id, &Trial { from: origin, armed: false, block: String::new() })
 }
 
-/// The harness of the agent was relaunched on its recorded place.
-pub fn arm(mstore: &Store, def_id: &str) {
-    let Some(mut trial) = pending(mstore, def_id).filter(|t| !t.armed) else { return };
+/// The harness of the agent in pane `block_id` was relaunched on its recorded place. The latest relaunch is the pane
+/// that decides: one that was closed before its first turn cannot leave the change waiting for good.
+pub fn arm(mstore: &Store, def_id: &str, block_id: &str) {
+    let Some(mut trial) = pending(mstore, def_id).filter(|t| !t.armed || t.block != block_id) else { return };
     trial.armed = true;
+    trial.block = block_id.to_string();
     if let Err(e) = save(mstore, def_id, &trial) {
         tracing::warn!(def_id, error = %e, "model route: the trial of a change was not armed");
     }
@@ -113,10 +120,10 @@ pub struct Undone {
     pub tried: Previous,
 }
 
-/// A turn of the agent ended with `frame`. When it settles an armed trial, the change stands (`None`) or is undone
+/// A turn of the agent in pane `block_id` ended with `frame`. When it settles an armed trial, the change stands (`None`) or is undone
 /// (`Some`: the record is back on the old place and the pane says why; the caller restarts the harness).
 pub fn settle(mstore: &Store, def_id: &str, block_id: &str, frame: &Value) -> Option<Undone> {
-    let trial = pending(mstore, def_id).filter(|t| t.armed)?;
+    let trial = pending(mstore, def_id).filter(|t| t.armed && t.block == block_id)?;
     let status = match verdict(frame) {
         Verdict::Commit => {
             clear(mstore, def_id);
@@ -125,7 +132,8 @@ pub fn settle(mstore: &Store, def_id: &str, block_id: &str, frame: &Value) -> Op
         Verdict::Wait => return None,
         Verdict::Refused(status) => status,
     };
-    let tried = launch::choice_of(mstore, def_id).map(|c| Previous { route: c.route, model: c.model })?;
+    // An empty place is the harness's own sign-in: a change onto it can be refused and undone like any other.
+    let tried = switch::place_of(launch::choice_of(mstore, def_id).as_ref());
     if let Err(e) = switch::restore(mstore, def_id, &trial.from) {
         tracing::warn!(def_id, error = %e, "model route: a refused change was not undone");
         return None;

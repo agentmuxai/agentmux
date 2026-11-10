@@ -51,7 +51,7 @@ fn a_change_is_undone_when_its_first_turn_is_refused_and_it_is_not_before_the_ha
     let refused = error_frame("API Error: 400 history refused");
     assert!(settle(&s, "a1", "blk", &refused).is_none(), "not armed: the turn was the old place's");
     assert_eq!(launch::choice_of(&s, "a1"), Some(on(FLASH)));
-    arm(&s, "a1");
+    arm(&s, "a1", "blk");
     let undone = settle(&s, "a1", "blk", &refused).unwrap();
     assert_eq!((undone.back_on.route.as_str(), undone.tried.model.as_str()), ("", FLASH));
     assert_eq!(launch::choice_of(&s, "a1"), None, "back on the harness's own sign-in");
@@ -66,7 +66,7 @@ fn a_change_whose_first_turn_worked_stands_and_one_that_met_a_limit_waits_for_an
     to(&s, FLASH);
     to(&s, PRO);
     assert_eq!(pending(&s, "a1").unwrap().from, Previous { route: String::new(), model: String::new() }, "a second change before a relaunch keeps the first place");
-    arm(&s, "a1");
+    arm(&s, "a1", "blk");
     assert!(settle(&s, "a1", "blk", &error_frame("API Error: 429 rate limited")).is_none());
     assert!(pending(&s, "a1").is_some(), "a limit says nothing about the history");
     assert!(settle(&s, "a1", "blk", &ok_frame()).is_none());
@@ -78,10 +78,10 @@ fn a_change_whose_first_turn_worked_stands_and_one_that_met_a_limit_waits_for_an
 fn a_refused_change_goes_back_to_the_model_the_agent_worked_on() {
     let s = store();
     to(&s, FLASH);
-    arm(&s, "a1");
+    arm(&s, "a1", "blk");
     settle(&s, "a1", "blk", &ok_frame());
     to(&s, PRO);
-    arm(&s, "a1");
+    arm(&s, "a1", "blk");
     let undone = settle(&s, "a1", "blk", &error_frame("API Error: 400 history refused")).unwrap();
     assert_eq!((undone.back_on.model.as_str(), undone.tried.model.as_str()), (FLASH, PRO));
     assert_eq!(launch::choice_of(&s, "a1"), Some(on(FLASH)));
@@ -92,9 +92,48 @@ fn a_refused_change_goes_back_to_the_model_the_agent_worked_on() {
 fn a_change_back_to_where_the_agent_was_ends_the_trial() {
     let s = store();
     to(&s, FLASH);
-    arm(&s, "a1");
+    arm(&s, "a1", "blk");
     settle(&s, "a1", "blk", &ok_frame());
     to(&s, PRO);
     to(&s, FLASH);
+    assert!(pending(&s, "a1").is_none());
+}
+
+#[test]
+fn a_change_onto_the_harness_own_sign_in_is_undone_like_any_other() {
+    let s = store();
+    to(&s, FLASH);
+    arm(&s, "a1", "blk");
+    settle(&s, "a1", "blk", &ok_frame());
+    move_to(&s, "a1", "claude", Target::OwnLogin, |_| true).unwrap();
+    arm(&s, "a1", "blk");
+    let undone = settle(&s, "a1", "blk", &error_frame("API Error: 400 history refused")).unwrap();
+    assert_eq!((undone.back_on.model.as_str(), undone.tried.route.as_str()), (FLASH, ""));
+    assert_eq!(launch::choice_of(&s, "a1"), Some(on(FLASH)), "back on the route");
+    assert_eq!(switch::previous_of(&s, "a1"), Some(Previous { route: String::new(), model: String::new() }));
+    assert!(pending(&s, "a1").is_none());
+}
+
+#[test]
+fn only_the_pane_whose_harness_was_relaunched_settles_the_change() {
+    let s = store();
+    to(&s, FLASH);
+    arm(&s, "a1", "relaunched");
+    let refused = error_frame("API Error: 400 history refused");
+    assert!(settle(&s, "a1", "other-pane", &refused).is_none(), "another pane of the agent is still on the old place");
+    assert!(pending(&s, "a1").is_some());
+    assert_eq!(launch::choice_of(&s, "a1"), Some(on(FLASH)));
+    assert!(settle(&s, "a1", "relaunched", &refused).is_some());
+}
+
+#[test]
+fn the_latest_relaunch_decides_so_a_closed_pane_cannot_hold_the_change() {
+    let s = store();
+    to(&s, FLASH);
+    arm(&s, "a1", "closed-before-its-first-turn");
+    arm(&s, "a1", "second");
+    assert!(settle(&s, "a1", "closed-before-its-first-turn", &ok_frame()).is_none());
+    assert!(pending(&s, "a1").is_some(), "the first pane no longer decides it");
+    assert!(settle(&s, "a1", "second", &ok_frame()).is_none());
     assert!(pending(&s, "a1").is_none());
 }
