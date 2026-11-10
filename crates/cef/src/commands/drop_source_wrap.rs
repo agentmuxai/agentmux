@@ -11,7 +11,7 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use windows_sys::Win32::Foundation::{GetLastError, BOOL, HMODULE, HWND};
-use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, GetWindowRgn, SetWindowRgn, NULLREGION};
+use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject, GetWindowRgn, SetWindowRgn, NULLREGION};
 use windows_sys::Win32::System::Com::{DVASPECT_CONTENT, FORMATETC, STGMEDIUM, TYMED_HGLOBAL};
 use windows_sys::Win32::System::DataExchange::RegisterClipboardFormatW;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -218,10 +218,14 @@ unsafe fn set_shell_drag_image_visible(data: *mut c_void, visible: bool) {
         }
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, &mut pid);
-        // The system owns the region it is given, so each call makes its own (or none).
+        // The system owns the region it is given on success, so each call makes its own (or none); a refused one
+        // (a window of an elevated process, or one gone since it was listed) stays ours to free, on every feedback.
         let region = if visible { std::ptr::null_mut() } else { CreateRectRgn(0, 0, 0, 0) };
         let ok = SetWindowRgn(hwnd, region, 0);
         let error = if ok == 0 { GetLastError() } else { 0 };
+        if ok == 0 && !region.is_null() {
+            DeleteObject(region);
+        }
         if !visible && ok != 0 {
             PICTURE_CUTS.fetch_add(1, Ordering::Relaxed);
         }
