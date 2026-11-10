@@ -28,8 +28,11 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
         "C:\Users\me\.agentmux\channels\stable\data"
     <div class="status-bar-popover-divider">
     <div class="status-bar-popover-row">
-      <span class="status-bar-popover-label">
-        "LAN discovery"
+      <span style="display:inline-flex;align-items:center;gap:var(--space-2)">
+        <span data-testid="lan-state-diamond" style="color:var(--accent-color)">
+          "◆"
+        <span class="status-bar-popover-label">
+          "LAN discovery"
       <span class="status-bar-toggle" style="margin-left:auto" data-tip="Disable">
         <button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="true" aria-label="LAN discovery">
           <span class="ui-switch-thumb">
@@ -46,9 +49,7 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
         "⚠ Other machines can't see this one, even though it may see them. Another program may be using the mDNS port (UDP 5353). AgentMux keeps retrying on its own ("
         "2"
         "so far); turning LAN off and on retries at once."
-    <div class="status-bar-popover-row" style="padding-left:12px">
-      <span style="color:var(--accent-color)">
-        "◆"
+    <div class="status-bar-popover-row">
       <span>
         "2"
         "peer"
