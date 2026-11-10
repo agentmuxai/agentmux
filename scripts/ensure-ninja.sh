@@ -86,7 +86,12 @@ invalidate_stale_cef_caches() {
         prog=$(sed -n 's/^CMAKE_MAKE_PROGRAM:FILEPATH=//p' "$cache" 2>/dev/null | head -1)
         [ -n "$prog" ] || continue
         prog_posix=$(printf '%s' "$prog" | tr '\\' '/')
-        if usable "$prog_posix"; then continue; fi
+        # On Windows a symlink is the WinGet "Links" alias: Git Bash can run
+        # it, so `usable` says yes, but native CMake cannot start it. A cache
+        # that pinned the alias is stale even though it answers --version.
+        if usable "$prog_posix" && { [ "$IS_WINDOWS" -eq 0 ] || [ ! -L "$prog_posix" ]; }; then
+            continue
+        fi
         rm -f "$cache"
         printf '[ensure-ninja] removed stale CMake cache (CMAKE_MAKE_PROGRAM=%s cannot run): %s\n' "$prog" "$cache" >&2
     done

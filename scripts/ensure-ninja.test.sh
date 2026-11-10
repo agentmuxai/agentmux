@@ -128,16 +128,25 @@ mkdir -p "$TMP/target/release/build/cef-dll-sys-bad/out/build"
 mkdir -p "$TMP/target/debug/build/cef-dll-sys-good/out/build"
 printf 'CMAKE_MAKE_PROGRAM:FILEPATH=%s\n' "$TMP/broken/ninja" > "$TMP/target/release/build/cef-dll-sys-bad/out/build/CMakeCache.txt"
 printf 'CMAKE_MAKE_PROGRAM:FILEPATH=%s\n' "$TMP/real/ninja" > "$TMP/target/debug/build/cef-dll-sys-good/out/build/CMakeCache.txt"
+# A cache pinned to the runnable symlink alias is stale as well: Git Bash can
+# run it, but native CMake cannot start it. Only meaningful where `ln -s` made
+# a symlink (Git Bash copies instead otherwise).
+alias_cache="$TMP/target/release/build/cef-dll-sys-alias/out/build/CMakeCache.txt"
+if [ -L "$TMP/links/ninja" ]; then
+    mkdir -p "${alias_cache%/*}"
+    printf 'CMAKE_MAKE_PROGRAM:FILEPATH=%s\n' "$TMP/links/ninja" > "$alias_cache"
+fi
 out=$(PATH="$TMP/bin:$TMP/broken:/usr/bin:/bin" HOME="$TMP/home" \
       AGENTMUX_NINJA_SEARCH="$TMP/real" AGENTMUX_TARGET_DIR="$TMP/target" \
       sh "$SCRIPT" 2>"$TMP/err4"); rc=$?
 if [ "$rc" -eq 0 ] \
    && [ ! -f "$TMP/target/release/build/cef-dll-sys-bad/out/build/CMakeCache.txt" ] \
    && [ -f "$TMP/target/debug/build/cef-dll-sys-good/out/build/CMakeCache.txt" ] \
+   && { [ ! -L "$TMP/links/ninja" ] || [ ! -f "$alias_cache" ]; } \
    && grep -q 'removed stale CMake cache' "$TMP/err4"; then
-  ok "a stale cef-dll-sys CMake cache is removed, a good one kept"
+  ok "a stale cef-dll-sys CMake cache (including a runnable alias) is removed, a good one kept"
 else
-  bad "a stale cef-dll-sys CMake cache is removed, a good one kept" "rc=$rc $(cat "$TMP/err4")"
+  bad "a stale cef-dll-sys CMake cache (including a runnable alias) is removed, a good one kept" "rc=$rc $(cat "$TMP/err4")"
 fi
 
 # --check is read-only and names the real ninja.
