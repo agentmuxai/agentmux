@@ -201,6 +201,26 @@ describe("what else can be in front of a pane", () => {
         expect(coverLines(info)).toEqual([]);
     });
 
+    it("logShowCover keeps one timing when the block it reads the agent from changes meanwhile", () => {
+        vi.useFakeTimers();
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        const [name, setName] = createSignal<string | undefined>(undefined);
+        const dispose = createRoot((d) => {
+            logShowCover("0123456789", () => true, name);
+            return d;
+        });
+        vi.advanceTimersByTime(1000);
+        setName("Agent2");
+        vi.advanceTimersByTime(1000);
+        dispose();
+        expect(coverLines(info)).toEqual([
+            "block=0123456 show-cover shown",
+            "block=0123456 show-cover still-shown for=1000ms",
+            'block=0123456 agent="Agent2" show-cover still-shown for=2000ms',
+            'block=0123456 agent="Agent2" show-cover cleared after=2000ms',
+        ]);
+    });
+
     it("logShowCover logs each time the show-cover goes up, once, and says nothing without a block id", () => {
         vi.useFakeTimers();
         const info = vi.spyOn(console, "info").mockImplementation(() => {});

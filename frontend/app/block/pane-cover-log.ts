@@ -218,7 +218,8 @@ export function logShowCover(blockId: string | undefined, covered: () => boolean
     if (!blockId) return;
     const up = createMemo(covered);
     createEffect(() => {
-        if (up()) logWhileShown(blockId, "show-cover", agent);
+        // Untracked: the agent accessor reads the block, and a change to it must not restart the timing.
+        if (up()) untrack(() => logWhileShown(blockId, "show-cover", agent));
     });
 }
 
