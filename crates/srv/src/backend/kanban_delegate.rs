@@ -20,8 +20,8 @@ fn refuse(code: &'static str, words: impl Into<String>) -> Refusal {
     Refusal { code, words: words.into() }
 }
 
-pub fn not_in_review(num: i64, state: &str) -> Refusal {
-    refuse("not_in_review", format!("#{num} is {}, not in Review.", state.replace('_', " ")))
+pub fn not_in_review(name: &str, state: &str) -> Refusal {
+    refuse("not_in_review", format!("{name} is {}, not in Review.", state.replace('_', " ")))
 }
 
 pub fn sensitive_quote() -> Refusal {

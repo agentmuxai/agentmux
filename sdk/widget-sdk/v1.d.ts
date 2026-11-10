@@ -125,8 +125,12 @@ export interface AgentInfo {
 
 /** A Kanban task, as `tasks:read` shows it: not its prompt, the user's words or its result. */
 export interface TaskInfo {
-    /** The task's number, `#12`. */
+    /** The task's number on its board, `#12`. */
     num: number;
+    /** How to name it: `#12` on the default board, else `work#12`. Numbers repeat across boards; this does not. */
+    ref: string;
+    /** The slug of the board it is on. */
+    board: string;
     title: string;
     state: "open" | "held" | "claimed" | "blocked" | "review" | "done" | "failed" | "cancelled";
     /** The agent on it, else the one it waits for; `""` for anyone. */

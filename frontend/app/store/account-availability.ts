@@ -71,7 +71,7 @@ export function episodeReason(ep: Pick<AccountAvailability, "state" | "resets_at
 /** "Account Work: out of quota until Sun 7:00 PM · Naki-2, Loap-3 · holding #163, #140" (spec §6.2). */
 export function episodeLine(ep: AccountAvailability): string {
     const parts = [`Account ${ep.account_label}: ${episodeReason(ep)}`, ep.agents.map((a) => a.agent_name).join(", ")];
-    if (ep.tasks.length > 0) parts.push(`holding ${ep.tasks.map((t) => `#${t.number}`).join(", ")}`);
+    if (ep.tasks.length > 0) parts.push(`holding ${ep.tasks.map((t) => t.task_ref).join(", ")}`);
     // A login whose agents already moved has none to name.
     return parts.filter((p) => p !== "").join(" · ");
 }
