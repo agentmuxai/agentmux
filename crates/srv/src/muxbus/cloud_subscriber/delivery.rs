@@ -181,8 +181,9 @@ pub(super) async fn claim_and_deliver(
         // doesn't carry `reply` yet, so a WAN message never arrives marked `REPLY=none`.
         note_arrival(mstore, &req);
         // Verified, and its agent can't work now: kept here until it can. Injected now it would be lost in
-        // a failed turn, or given back to the relay to come again.
-        if crate::server::jekt_hold::hold_wan_for_unavailable(mstore, handler, &req) {
+        // a failed turn, or given back to the relay to come again. Or a routine message to a session gone
+        // cold, which waits for its next activity as a local or LAN one does (#2263).
+        if crate::server::jekt_hold::hold_wan_for_unavailable(mstore, handler, &req) || crate::server::jekt_cold::hold_relayed(&req).await {
             delivered_count += 1;
             steps::record_delivered(&checked);
             continue;
