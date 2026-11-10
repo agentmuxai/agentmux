@@ -806,6 +806,7 @@ partial list.
 | [`SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25`](SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md) | SPEC: one resume gate, and native continuation across logins of the same identity |
 | [`SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13`](SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md) | SPEC: Resume phases: the "Given to the agent" card in its place, then the agent catches up and tells the user where it is |
 | [`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27`](SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md) | SPEC: one way to reveal a block — including a background tab in a multi-tab pane |
+| [`SPEC_ROUTE_AGENT_BRAKES_2026_11_10`](SPEC_ROUTE_AGENT_BRAKES_2026_11_10.md) | Route agent brakes: a spend cap, budgeted compaction and loop detection |
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01`](SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01.md) | settings.json lists every setting with its default commented out, kept 1-to-1 by a guard, safe to copy and paste |
