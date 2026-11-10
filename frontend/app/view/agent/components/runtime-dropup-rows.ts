@@ -17,7 +17,7 @@ import {
 } from "../runtime-capabilities";
 import type { EffortLevel, PermissionMode } from "../../../agent-model/types";
 import type { DropupAgreement } from "./runtime-dropup-agreement";
-import { backRow, BACK_VALUE, parseRouteValue, routeRows } from "./runtime-dropup-routes";
+import { backRow, BACK_VALUE, parseCompactValue, parseRouteValue, routeRows } from "./runtime-dropup-routes";
 import {
     EFFORT_OPTIONS,
     MODE_OPTIONS,
@@ -161,7 +161,16 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
             }
         };
         const target = parseRouteValue(value);
-        if (value === BACK_VALUE && panel?.previous) await move(panel.previous.route, panel.previous.model, true);
+        const compactTarget = parseCompactValue(value);
+        if (compactTarget && s.props.compactThenSwitch) {
+            try {
+                await s.props.compactThenSwitch(compactTarget.route, compactTarget.model);
+                s.setApplyError(null);
+                await s.routes.refresh();
+            } catch (err: any) {
+                s.setApplyError(err?.message ?? String(err));
+            }
+        } else if (value === BACK_VALUE && panel?.previous) await move(panel.previous.route, panel.previous.model, true);
         else if (target) await move(target.route, target.model, true);
         // A harness model: the runtime setting it always was (which shows its own failure), from a route after leaving it.
         else if (!(s.routeModel() || s.routes.onSavedRoute()) || (await move("", "", false))) await s.updateRuntime({ model: value });

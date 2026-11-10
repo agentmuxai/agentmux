@@ -159,6 +159,8 @@ interface AgentComposerStripProps {
      * already takes today.
      */
     onCompact?: () => void;
+    /** Compacts the conversation, then moves the agent to the model on the route: the model panel's rows for a model too small for it. */
+    onCompactThenSwitch?: (route: string, model: string) => Promise<void>;
     /** The View chip's text (the pane's view: "Standard", "Replies · this pane"); none while the pane shows everything. */
     viewChip?: string | null;
     /** The View popover is open, for the chip's expanded state. */
@@ -283,6 +285,7 @@ function runtimeSlot(props: AgentComposerStripProps): Slot {
                 lastReplyModel={props.lastReplyModel}
                 contextTokens={props.contextTokens}
                 conversationImages={props.conversationImages}
+                compactThenSwitch={props.onCompactThenSwitch}
             />
         ),
     };
