@@ -4,20 +4,14 @@
 use std::sync::Arc;
 
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::rpc_types::{
-    COMMAND_WRITE_AGENT_CONFIG,
-    CommandWriteAgentConfigData, CommandWriteAgentConfigResult,
-};
+use crate::backend::rpc_types::{COMMAND_WRITE_AGENT_CONFIG, CommandWriteAgentConfigData};
 use crate::backend::agent_config::BUNDLE_SECTION_HEADING;
 use crate::backend::base::expand_home_dir_safe;
 use crate::backend::rpc_types::{
-    UnwatchMediaDirReq, WatchEditorFileReq, WatchMediaDirReq,
-    CommandReadEditorFileData, CommandReadEditorFileResult, CommandWriteEditorFileData,
-    DirEntry, EditorDrive, EditorRootsReq, GetEditorHomeResult, GetEditorRootsResult,
-    ListEditorDirReq, ListEditorDirResult,
-    CreateEditorDirReq, CreateEditorDirResult, CreateEditorFileReq, CreateEditorFileResult,
-    CreateScratchFileReq, CreateScratchFileResult, DeleteEditorFileReq, MoveScratchFileReq,
-    MoveScratchFileResult, OpenInShellReq, RenameEditorFileReq, RenameEditorFileResult,
+    CommandReadEditorFileData, CommandWriteEditorFileData, CreateEditorDirReq, CreateEditorFileReq,
+    CreateScratchFileReq, DeleteEditorFileReq, EditorDrive, EditorRootsReq, GetEditorHomeResult, GetEditorRootsResult,
+    ListEditorDirReq, MoveScratchFileReq, OpenInShellReq, RenameEditorFileReq, UnwatchMediaDirReq, WatchEditorFileReq,
+    WatchMediaDirReq,
 };
 use crate::backend::storage::store::Store;
 
