@@ -1317,6 +1317,19 @@ declare global {
         // Bootstrap flags (set before app init)
         __AGENTMUX_IPC_PORT__?: number;
         __AGENTMUX_IPC_TOKEN__?: string;
+        /**
+         * The host's process-message lane for a command, put on an app
+         * window's main frame by the host's renderer (crates/cef/src/ipc_query.rs).
+         * Used through `invokeFastCommand` (app/platform/ipc-query.ts).
+         */
+        agentmuxQuery?: (query: {
+            request: string;
+            persistent?: boolean;
+            onSuccess: (response: string) => void;
+            onFailure: (code: number, message: string) => void;
+        }) => number;
+        /** A lab's probe: every host command roundtrip, when a script has put an array here (perf/index.ts). */
+        __agentmuxIpcProbe?: Array<{ command: string; durationMs: number; at: number }>;
         __WAVE_SERVER_WS_ENDPOINT__?: string;
         __WAVE_SERVER_WEB_ENDPOINT__?: string;
         __startupPerfStart?: number;
