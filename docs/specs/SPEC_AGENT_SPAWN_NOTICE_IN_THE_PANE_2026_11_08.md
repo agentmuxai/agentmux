@@ -115,3 +115,11 @@ I have not read the source of #7 and #8 to their end; their rows come from their
 3. 30 s.
 4. No window connected: proceed at once and log it.
 5. Other windows, as §6 proposes: rows 1, 2, 5 and 8 move into the pane with notice, countdown and Always; the ssh `secret` prompt (row 4) and credential release (row 7) stay out of the window; rows 3 and 6 become modals in their own panes. Row 4's host-key yes/no and info notices follow row 2's pattern where they name an agent's pane.
+
+## 12. Row 8 as built (2026-11-10)
+
+- **The Memory pane asks, and only a yes reaches srv.** Adopting an agent's earlier memory and releasing its claim on a memory folder are confirmed in a modal over the Memory pane whose button was pressed (`frontend/app/view/native-memory/memory-confirms.tsx`, a `paneRequests` modal, operator-only like every pane request). Cancel, Escape and a closed pane leave the memory as it was.
+- **Two commands the window alone may call** replace the host-only service: `agent:memory:adopt` and `agent:memory:release` (`crates/srv/src/server/native_memory_adopt_handlers.rs`, both `operator_only`). They take what the service took, `(list_id, index, dir_hash)` from a list srv issued, never a path.
+- **Unlike rows 3 and 6, srv does not ask.** There the command that acts is one an agent can call, so srv puts the question to the person. Here nothing an agent can call acts: the list and the choice are the Memory pane's own, and the command that acts is the window's.
+- **Removed:** the host's `memory_adoption` module with its three commands and the `memory-adoption-approval` view, the approval window's page, and srv's `memoryadopt` service.
+- **What an agent can do is unchanged.** It can press Memory's "Adopt selected…" or "Release…" and so open the question (the pane then shows as waiting on the person); it can neither read nor answer it, nor call the two commands.
