@@ -10,7 +10,7 @@
 # agentmuxai/cef commit (docs/cef-build/CEF_FORK_MAINTENANCE.md §8), together
 # with windows-runtime-pin.sh (the Windows tag must match its
 # CEF_WINDOWS_RELEASE_TAG; release-core.yml fails the release otherwise).
-CEF_WINDOWS_RUNTIME_TAG="cef-windows-x86_64-154.0.8037.58-r4"
+CEF_WINDOWS_RUNTIME_TAG="cef-windows-x86_64-154.0.8037.98-r1"
 # r5 is r4's fork commit rebuilt against Chromium's Debian sysroot (glibc 2.31 floor), so it moves alone; the
 # archive's sha256 is checked by verify-runtime-archive.sh when a build downloads it.
 CEF_LINUX_RUNTIME_TAG="cef-linux-x86_64-154.0.8037.58-codecs-r5"
