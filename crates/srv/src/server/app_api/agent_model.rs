@@ -190,9 +190,22 @@ fn panel_model(route: &Route, model: &Model, current: Option<&Choice>, key_prese
     }
 }
 
+/// The images in the agent's conversation, as its transcript lists them: the pane's own count only sees the feed it has
+/// loaded, and a text-only model chosen for a conversation that still holds an image fails on it. 0 when it is not known.
+fn images_in_conversation(def: &AgentDefinition) -> u32 {
+    let Some(gfs) = crate::backend::agent_session::global_transcript_store() else { return 0 };
+    let zone = crate::backend::agent_session::agent_current_zone(&def.id);
+    crate::backend::transcript::images::count_in_zone(gfs, &zone).unwrap_or_else(|e| {
+        tracing::warn!(agent = %def.slug, error = %e, "model panel: the images in the conversation were not counted");
+        0
+    })
+}
+
 fn panel(state: &AppState, req: &AgentModelPanelReq) -> Result<AgentModelPanel, String> {
     let def = agent_of_block(state, &req.blockid)?;
     let harness = state.id_store.resolve_effective_provider_id(&def);
+    // The pane's count is a hint: the larger of the two is the one to go by.
+    let req = &AgentModelPanelReq { images: Some(req.images.unwrap_or(0).max(images_in_conversation(&def))), ..req.clone() };
     let current = launch::choice_of(&state.mstore, &def.id);
     let routes = catalog::ROUTES
         .iter()
@@ -216,11 +229,23 @@ fn panel(state: &AppState, req: &AgentModelPanelReq) -> Result<AgentModelPanel, 
     })
 }
 
+/// A model that cannot read the images in the conversation is refused, with the reason the panel gives for it. A route or
+/// model that does not validate is left to the switch, which says so.
+fn refuse_unreadable(harness: &str, route: &str, model: &str, images: u32) -> Result<(), String> {
+    match catalog::validate(harness, route, model) {
+        Ok((r, m)) => unavailable(r, m, true, images).map_or(Ok(()), Err),
+        Err(_) => Ok(()),
+    }
+}
+
 fn switch_model(state: &AppState, req: &AgentModelSwitchReq) -> Result<AgentModelSwitchResult, String> {
     let def = agent_of_block(state, &req.blockid)?;
     let harness = state.id_store.resolve_effective_provider_id(&def);
     let route = req.route.trim();
     let target = if route.is_empty() { Target::OwnLogin } else { Target::Route { route, model: req.model.trim() } };
+    if let Target::Route { route, model } = target {
+        refuse_unreadable(&harness, route, model, images_in_conversation(&def))?;
+    }
     let moved = switch::move_to(&state.mstore, &def.id, &harness, target, |r| route_key::present(&state.identity_store, r.key_label))?;
     if !moved.changed() || !req.restart {
         return Ok(AgentModelSwitchResult { changed: moved.changed(), restarted: 0, failed: Vec::new() });
@@ -296,6 +321,15 @@ mod tests {
         assert_eq!(unavailable(route, pro, true, 3).unwrap(), "can't read images (3 in this conversation)");
         let flash = route.model("deepseek/deepseek-v4.1-flash-1017").unwrap();
         assert!(unavailable(route, flash, true, 3).is_none(), "this one reads images");
+    }
+
+    #[test]
+    fn a_switch_to_a_model_that_cannot_read_the_conversations_images_is_refused_with_the_panels_reason() {
+        let pro = "deepseek/deepseek-v4-pro-0813";
+        assert_eq!(refuse_unreadable("claude", "openrouter", pro, 2).unwrap_err(), "can't read images (2 in this conversation)");
+        assert!(refuse_unreadable("claude", "openrouter", pro, 0).is_ok(), "no image, no refusal");
+        assert!(refuse_unreadable("claude", "openrouter", "deepseek/deepseek-v4.1-flash-1017", 2).is_ok(), "this one reads images");
+        assert!(refuse_unreadable("claude", "openrouter", "nobody/retired", 2).is_ok(), "the switch says what is wrong with it");
     }
 
     #[test]
