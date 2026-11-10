@@ -9,12 +9,15 @@
 //! list of counters (operator screenshot, 2026-11-10). One begin per process
 //! is all the splash needs; later arms and retries are the same wait.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::Instant;
 
 const STAGE: &str = "paint";
 
 static BEGAN_AT: OnceLock<Instant> = OnceLock::new();
+/// The first window's paint gate resolved, so the splash is being dismissed: the row is final.
+static FINISHED: AtomicBool = AtomicBool::new(false);
 
 /// Report the "paint" stage begin the first time a window arms its paint
 /// gate in this process, and never again.
@@ -24,11 +27,21 @@ pub(super) fn report_begin_once() {
     }
 }
 
+/// A paint gate resolved: the splash is on its way out, so the row is final.
+pub(super) fn mark_finished() {
+    FINISHED.store(true, Ordering::Relaxed);
+}
+
 /// The main page failed to load and will be retried: say why on the paint row
 /// instead of leaving it counting up. A later successful reveal ends the row
-/// again, as ok. Does nothing before the first paint gate was armed.
-pub(super) fn report_load_retry(error_text: &str) {
+/// again, as ok. Does nothing before the first paint gate was armed, after a
+/// gate resolved, or for a window that carries its own label in its URL (a
+/// tear-off, floating or pooled window is not the startup window).
+pub(super) fn report_load_retry(failed_url: &str, error_text: &str) {
     let Some(began) = BEGAN_AT.get() else { return };
+    if FINISHED.load(Ordering::Relaxed) || failed_url.contains("windowLabel=") {
+        return;
+    }
     crate::launcher_ipc::report_startup_stage_end(STAGE, began.elapsed().as_millis() as u64, "warn", Some(retry_detail(error_text)));
 }
 

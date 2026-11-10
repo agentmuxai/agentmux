@@ -212,6 +212,7 @@ fn finish_gated_reveal(
 /// either shown or permanently unshowable — never any earlier.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn signal_gated_reveal_complete(elapsed_ms: u64, reason: &'static str, status: &str) {
+    super::startup_paint::mark_finished();
     crate::launcher_ipc::report_startup_stage_end(
         "paint",
         elapsed_ms,
@@ -1044,10 +1045,6 @@ impl AgentMuxHandler {
             }
         }
 
-        #[cfg(any(target_os = "linux", target_os = "windows"))]
-        if !self.is_browser_pane && !is_permanent_load_error(error_code_i32) {
-            super::startup_paint::report_load_retry(&error_text);
-        }
         show_load_error_page(frame, &failed_url, error_code_i32, &error_text, self.is_browser_pane);
     }
 }
@@ -1218,6 +1215,10 @@ pub(crate) fn show_load_error_page(
     error_text: &str,
     is_browser_pane: bool,
 ) {
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    if !is_browser_pane && !is_permanent_load_error(error_code_i32) {
+        super::startup_paint::report_load_retry(failed_url, error_text);
+    }
     let html = render_load_error_html(failed_url, error_code_i32, error_text, is_browser_pane);
     load_html_page(frame, &html, failed_url);
 }
