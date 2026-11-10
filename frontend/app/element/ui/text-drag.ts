@@ -44,8 +44,16 @@ export function textFieldOf(target: EventTarget | null): HTMLInputElement | HTML
     return field;
 }
 
+/** How far the pointer moves, in CSS px, before a press in a field counts as a drag. */
+export const DRAG_SLOP_PX = 4;
+
 interface Drag {
     field: HTMLInputElement | HTMLTextAreaElement;
+    /** Where the press was, to tell a drag from a click. */
+    x: number;
+    y: number;
+    /** The attributes are on: the pointer has moved since the press. */
+    marked: boolean;
     /** Where the selection was when the focus left, to put back. */
     lost: { start: number; end: number; dir: "forward" | "backward" | "none" } | null;
 }
@@ -56,9 +64,23 @@ export function installTextDragGuard(win: Window = window): () => void {
 
     const end = (): void => {
         if (!drag) return;
-        drag.field.removeAttribute(FIELD_ATTR);
-        doc.documentElement.removeAttribute(ROOT_ATTR);
+        if (drag.marked) {
+            drag.field.removeAttribute(FIELD_ATTR);
+            doc.documentElement.removeAttribute(ROOT_ATTR);
+        }
         drag = null;
+    };
+
+    // The attributes go on at the first move, not at the press. `html[data-text-drag] *` restyles the
+    // whole document (5,000-plus elements, about 45 ms on a six-pane layout), and setting it at the
+    // press and clearing it at the release did that twice for every click into a composer, which is why
+    // clicking into an input box lagged where clicking a pane's body did not (#45977). A click never
+    // moves; nothing else is under the pointer until it leaves the field, and the `dragstart` stop and
+    // the focus restore below work from the press alone.
+    const mark = (d: Drag): void => {
+        d.marked = true;
+        d.field.setAttribute(FIELD_ATTR, "");
+        doc.documentElement.setAttribute(ROOT_ATTR, "");
     };
 
     const restoreFocus = (d: Drag): void => {
@@ -79,9 +101,7 @@ export function installTextDragGuard(win: Window = window): () => void {
         if (p.button !== 0 || (p.pointerType && p.pointerType !== "mouse" && p.pointerType !== "pen")) return;
         const field = textFieldOf(p.target);
         if (!field) return;
-        drag = { field, lost: null };
-        field.setAttribute(FIELD_ATTR, "");
-        doc.documentElement.setAttribute(ROOT_ATTR, "");
+        drag = { field, x: p.clientX, y: p.clientY, marked: false, lost: null };
     };
 
     const onDragStart = (e: Event): void => {
@@ -110,8 +130,13 @@ export function installTextDragGuard(win: Window = window): () => void {
 
     const onMove = (e: Event): void => {
         if (!drag) return;
+        const p = e as PointerEvent;
         // The release happened where we could not see it, or the field was replaced under the drag.
-        if ((e as PointerEvent).buttons === 0 || !drag.field.isConnected) end();
+        if (p.buttons === 0 || !drag.field.isConnected) {
+            end();
+            return;
+        }
+        if (!drag.marked && Math.hypot(p.clientX - drag.x, p.clientY - drag.y) >= DRAG_SLOP_PX) mark(drag);
     };
 
     const listeners: Array<[string, EventListener, boolean | undefined]> = [
