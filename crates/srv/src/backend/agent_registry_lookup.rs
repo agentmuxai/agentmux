@@ -39,11 +39,16 @@ fn active_records_matching_slug(agent_id: &str) -> Option<Vec<NamedAgentRecord>>
 }
 
 /// The active registry record whose `instance_name` normalizes to the same
-/// slug as `agent_id` — **only if exactly one does**.
+/// slug as `agent_id` — **only if it names one agent**.
+///
+/// One record matching is one agent. Several records that all name one
+/// non-empty `definition_id` are also one agent, recorded more than once (the
+/// move to definition-id keys left the old record beside the new): the
+/// preferred record answers (see [`preferred`]).
 ///
 /// `None` when the registry is unavailable, unreadable, nothing matches, or
-/// **more than one record matches**. Callers treat the first three the same
-/// way (fall back to another source), so they are not distinguished.
+/// **records of different definitions match**. Callers treat the first three
+/// the same way (fall back to another source), so they are not distinguished.
 ///
 /// **Why ambiguity returns `None` rather than the first match** (reagentx P1,
 /// PR #3480): registry records are keyed by `instance_id`, and nothing
@@ -108,18 +113,21 @@ fn same_definition(records: &[NamedAgentRecord]) -> bool {
 /// empty.
 fn preferred(records: Vec<NamedAgentRecord>) -> NamedAgentRecord {
     let leases = crate::registry::resolve_shared_registry_dir().and_then(|dir| crate::registry::LeaseStore::open(&dir).ok());
+    // Read once per record: each read takes the instance's lease lock.
     let live = |r: &NamedAgentRecord| {
         leases.as_ref().is_some_and(|l| l.live_holder_other_than(&r.data.instance_id, "").ok().flatten().is_some())
     };
     records
         .into_iter()
-        .max_by(|a, b| {
-            live(a)
-                .cmp(&live(b))
+        .map(|r| (live(&r), r))
+        .max_by(|(live_a, a), (live_b, b)| {
+            live_a
+                .cmp(live_b)
                 .then(a.data.last_launched_at_ms.cmp(&b.data.last_launched_at_ms))
                 .then(a.data.created_at_ms.cmp(&b.data.created_at_ms))
                 .then(b.data.instance_id.cmp(&a.data.instance_id))
         })
+        .map(|(_, r)| r)
         .expect("records is not empty")
 }
 
