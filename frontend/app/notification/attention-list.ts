@@ -9,6 +9,7 @@
  */
 
 import { paneRoleColor } from "@/app/block/pane-color-scheme";
+import { describePaneTab } from "@/app/element/pane-tab-model";
 import { isLightThemeActive } from "@/app/block/pane-identity";
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { MOS, workspace } from "@/app/store/global";
@@ -18,8 +19,10 @@ import { waitingPanes, type WaitingPane } from "./waiting-for-you";
 export interface AttentionItem {
     /** The pane that asks; the click reveals it. */
     blockId: string;
-    /** The agent's name, or "An agent" when srv has no row for the pane. */
+    /** The agent's name; the pane's own name when it is not an agent's; "An agent" when neither is known. */
     name: string;
+    /** Set when the pane is not an agent's (Remotes, Memory, a browser): the toast then says "pane", not "agent". */
+    pane?: true;
     /** The agent's id, when srv has a row for the pane: what "Open" needs for an agent that has no pane. */
     agentId?: string;
     /** The agent's pane colour, from the shared palette, once it has had one. */
@@ -43,20 +46,23 @@ export function mergeAttention(
     panes: WaitingPane[],
     rows: AgentRuntime[],
     seen: (blockId: string) => number,
-    here: (blockId: string) => boolean | undefined = () => undefined
+    here: (blockId: string) => boolean | undefined = () => undefined,
+    paneName: (blockId: string) => string | undefined = () => undefined
 ): AttentionItem[] {
     const byBlock = new Map<string, AgentRuntime>();
     for (const r of rows) if (r.block_id) byBlock.set(r.block_id, r);
     const items: AttentionItem[] = panes.map((p) => {
         const row = byBlock.get(p.blockId);
+        const own = row ? undefined : paneName(p.blockId);
         return {
             blockId: p.blockId,
-            name: row?.name || "An agent",
+            name: row?.name || own || "An agent",
             agentId: row?.agent_id,
             color: row?.color,
             what: p.what,
             since: p.since,
             local: true,
+            ...(own ? { pane: true as const } : {}),
         };
     });
     const have = new Set(panes.map((p) => p.blockId));
@@ -88,6 +94,14 @@ function paneIsHere(blockId: string): boolean | undefined {
     return unknown ? undefined : false;
 }
 
+/** What a pane that is not an agent's is called: its tab's label ("Connectors · Remotes"). None for an agent's pane. */
+function ownPaneName(blockId: string): string | undefined {
+    const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
+    const view = meta?.view as string | undefined;
+    if (!view || view === "agent") return undefined;
+    return describePaneTab({ blockId, view, meta, ordinal: 0, liveViewModel: null }).label || undefined;
+}
+
 // When this window first saw a pane that srv alone reports waiting, so its row has an age; forgotten once it stops.
 const firstSeen = new Map<string, number>();
 
@@ -105,7 +119,8 @@ export function attentionItems(): AttentionItem[] {
             }
             return t;
         },
-        paneIsHere
+        paneIsHere,
+        ownPaneName
     );
     const live = new Set(items.map((i) => i.blockId));
     for (const id of firstSeen.keys()) if (!live.has(id)) firstSeen.delete(id);

@@ -169,7 +169,7 @@ pub async fn ask_for(state: &AppState, block_id: &str, question: Question, windo
     }
     state.broker.publish_event::<crate::backend::mps_events::PaneConfirm>(&view, vec![], REPLAY_EVENTS);
     // The pane's waiting tone, tab badge and notification, while it waits.
-    let _asking = crate::backend::user_attention::Asking::start(&state.broker, &state.mstore, block_id, "consent", &view.title);
+    let _asking = crate::backend::user_attention::Asking::start(&state.broker, &state.mstore, block_id, "confirm", &view.title);
     tracing::info!(request_id = %id, block_id, title = %view.title, "pane confirm: asked");
 
     // Ends the question however this ends: the caller can be dropped while it waits (its request
@@ -304,6 +304,21 @@ mod tests {
         assert_eq!(task.await.unwrap().unwrap(), Answer { answered: true, approve: true, checkbox: false });
         assert!(pending().iter().all(|p| p.block_id != b), "the question goes with its answer");
         assert_eq!(decide(&v.id, true, false), "too_late");
+    }
+
+    /// The toast and the "waiting on you" list word a `confirm` for a pane the person
+    /// clicked in; `consent` is worded for an agent that asks.
+    #[tokio::test]
+    async fn the_attention_it_raises_is_a_panes_question_not_an_agents_consent() {
+        let state = with_window().await;
+        let b = block();
+        let task = spawn_ask(&state, &b, question(), Duration::from_secs(60));
+        let v = asked_in(&b).await;
+        let raised = crate::backend::user_attention::open_requests().into_iter().find(|a| a.block_id == b);
+        assert_eq!(raised.map(|a| a.kind).as_deref(), Some("confirm"));
+        decide(&v.id, false, false);
+        task.await.unwrap().unwrap();
+        assert!(crate::backend::user_attention::open_requests().iter().all(|a| a.block_id != b));
     }
 
     #[tokio::test]

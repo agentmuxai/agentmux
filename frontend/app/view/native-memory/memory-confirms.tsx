@@ -50,7 +50,6 @@ export function AdoptConfirm(props: { agentName: string; folders: AdoptionFolder
             scope="pane"
             title={`Adopt earlier memory into ${props.agentName}?`}
             confirmLabel="Adopt"
-            attention
             {...answers(props)}
         >
             <p class="text-sm">
@@ -81,7 +80,6 @@ export function ReleaseConfirm(props: { agentName: string; dir?: string } & Answ
             scope="pane"
             title={`Release ${props.agentName}'s claim on this folder?`}
             confirmLabel="Release"
-            attention
             {...answers(props)}
         >
             <p class="text-sm font-mono break-all">{props.dir ?? "(folder not recorded)"}</p>

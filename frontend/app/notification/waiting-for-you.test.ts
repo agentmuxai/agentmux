@@ -137,9 +137,12 @@ describe("waiting for you", () => {
         applyUserAttention(a, "w1");
         applyUserAttention({ ...a, key: "k2", block_id: "b3", kind: "widget" }, "w1");
         applyUserAttention({ ...a, key: "k3", block_id: "" }, "w1");
+        // A pane asking about the person's own click (add a host, install a tool) is not an agent's consent.
+        applyUserAttention({ ...a, key: "k4", block_id: "b4", kind: "confirm" }, "w1");
         expect(waitingPanes().map((p) => [p.blockId, p.what])).toEqual([
             ["b2", "asks for your consent"],
             ["b3", "asks to install a widget"],
+            ["b4", "asks you to confirm"],
         ]);
     });
 });

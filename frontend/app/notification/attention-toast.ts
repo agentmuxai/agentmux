@@ -79,7 +79,7 @@ export function buildToast(
             message: `${i.what}${where(i)}`,
             timestamp: "",
             live: "status",
-            actions: [{ label: "Go to agent", actionKey: goKey(i.blockId) }],
+            actions: [{ label: i.pane ? "Go to pane" : "Go to agent", actionKey: goKey(i.blockId) }],
         };
     }
     const more = items.length - shown.length;
@@ -90,7 +90,7 @@ export function buildToast(
         icon: "bell",
         type: "warning",
         expiresWithActions: true,
-        title: `${items.length} agents need you`,
+        title: `${items.length} ${items.some((i) => i.pane) ? "panes" : "agents"} need you`,
         message: lines.join("\n"),
         timestamp: "",
         live: "status",
