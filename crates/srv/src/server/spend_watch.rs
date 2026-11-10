@@ -194,7 +194,11 @@ pub(crate) fn change_cap(state: &AppState, def_id: &str, to: Option<f64>) -> Res
     let now = agentmux_common::time::now_ms();
     let spent = spend::today(&def.slug, now).cost_usd;
     let level = to.map_or(0, |c| cap::level(spent, c));
-    spend::set_alerted(&def.slug, level, now);
+    // A raised cap takes the level down. A lowered one leaves it where it was: the next response, or the next request the
+    // gateway refuses, finds the level above it and sends the warning or the stop, which setting it here would skip.
+    if level < spend::alerted(&def.slug, now) {
+        spend::set_alerted(&def.slug, level, now);
+    }
     if level < 100 {
         clear(state, def_id, STOPPED_META_KEY);
     }
