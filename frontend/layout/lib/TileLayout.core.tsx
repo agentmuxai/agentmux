@@ -556,6 +556,9 @@ function useMagnifiedLeafMount(
     });
 }
 
+/** A reflowing tile's place, read from the two properties its glide runs on. */
+const REFLOW_TRANSFORM = "translate3d(var(--reflow-x), var(--reflow-y), 0)";
+
 function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     const addlProps = () => nodeModel.additionalProps();
     const tileTransform = () => addlProps()?.transform;
@@ -576,34 +579,38 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // visibility+opacity treatment for the whole-tab reveal gate.
     const isRevealGated = () => gatingNodeIds().has(props.node.id);
     // The live reflow of a pane drag (liveReflow.ts): every tile takes the rect the armed drop leaves it. Its
-    // place glides as a transform; its size is set at once (`box`) and shown through a clip that glides to the
-    // rect's size, so neighbours' edges travel together. The dragged tile is the drop's own preview, so it
-    // loses a dragged tile's blur. Essential spatial motion, so it glides under reduced motion too, shorter.
-    // With no drop armed a tile keeps the transition on its own rect, so it glides back; the plain style takes
-    // over in the same batch as the drop's real rect, so nothing glides twice
-    // (docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md §3).
+    // place glides; its size is set at once (`box`) and shown through a clip that glides to the rect's size.
+    // The place is two registered properties (tilelayout.scss) the transform reads, not the transform itself:
+    // a transform's transition runs on the compositor and a clip's on the main thread, and with the main
+    // thread busy laying the panes out the two came apart, a gap beside every pane. Two main-thread
+    // transitions keep neighbours' edges together. A tile carries its corner in them at rest too, so the first
+    // glide starts from there (docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md §3).
     const reflow = () => props.layoutModel.reflowFor(props.node.id);
     const tileStyle = createMemo<JSX.CSSProperties>(() => {
         const entry = reflow();
         const reduce = shouldReduceMotion("transition");
+        const corner = entry?.rect ?? addlProps()?.rect;
         const style: JSX.CSSProperties = {
             ...(tileTransform() as JSX.CSSProperties),
+            ...(corner && { "--reflow-x": `${Math.floor(corner.left)}px`, "--reflow-y": `${Math.floor(corner.top)}px` }),
             visibility: isRevealGated() ? "hidden" : undefined,
             opacity: reduce ? undefined : isRevealGated() ? 0 : 1,
             transition: reduce ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
         };
         if (!entry) return style;
+        // Essential spatial motion, so it glides under reduced motion too, shorter. The plain style takes over
+        // in the same batch as the drop's real rect, so nothing glides twice.
         const timing = `var(${reduce ? "--duration-fast" : "--duration-base"}) ${EASE_OUT}`;
-        const glide = `transform ${timing}, clip-path ${timing}`;
-        const transform = `translate3d(${entry.rect.left}px,${entry.rect.top}px, 0)`;
+        const glide = `--reflow-x ${timing}, --reflow-y ${timing}, clip-path ${timing}`;
         return {
             ...style,
-            transform,
-            WebkitTransform: transform,
+            transform: REFLOW_TRANSFORM,
+            WebkitTransform: REFLOW_TRANSFORM,
             width: `${entry.box.width}px`,
             height: `${entry.box.height}px`,
             "clip-path": clipTo(entry.rect),
             "will-change": "transform, clip-path",
+            // The dragged tile in its landing rect is the drop's own preview: not blurred as a dragged tile is.
             filter: entry.moved ? "none" : undefined,
             transition: reduce ? glide : `${glide}, ${style.transition}`,
         };

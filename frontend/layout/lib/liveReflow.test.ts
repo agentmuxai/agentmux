@@ -10,6 +10,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, createSignal } from "solid-js";
 import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
+import { setAnimationSettings } from "@/app/motion/motion";
+import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { deferWhileSizesHeld, paneSizesHeld, resetPaneSizeHoldForTests } from "@/app/platform/pane-size-hold";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import {
@@ -18,6 +20,7 @@ import {
     landingRectOf,
     REFLOW_MAX_PANES,
     REFLOW_SETTLE_MS,
+    reflowSettleMs,
     wholePx,
     type ReflowEntry,
 } from "@/layout/lib/liveReflow";
@@ -237,6 +240,24 @@ describe("the live reflow of a pane drag", () => {
         expect(inner()).toEqual({ width: `600px - ${gap}px`, height: `400px - ${gap}px` });
     });
 
+    it("waits out the glide as this window plays it: at a slower animation speed a shrink settles later", () => {
+        vi.useFakeTimers();
+        setAnimationSettings({ "animation:preset": "slow" });
+        try {
+            expect(reflowSettleMs()).toBe(DURATION_BASE_MS * 1.5 + (REFLOW_SETTLE_MS - DURATION_BASE_MS));
+            const m = modelOf(three());
+            drag(m, "a", "c", DropDirection.Bottom);
+            const to = futureOf(m, "b");
+            // The designed time is over and the slower glide is not: the tile keeps its height under the clip.
+            vi.advanceTimersByTime(REFLOW_SETTLE_MS);
+            expect(m.reflowFor("b")!.box.height).toBe(own(m, "b").height);
+            vi.advanceTimersByTime(reflowSettleMs() - REFLOW_SETTLE_MS);
+            expect(m.reflowFor("b")!.box).toEqual(sizeOf(to));
+        } finally {
+            setAnimationSettings({});
+        }
+    });
+
     it("never lays a pane out for a candidate that is replaced inside the glide, if it ends at the size it had", () => {
         vi.useFakeTimers();
         // a over (b | c). a on c's bottom makes b and c taller; clearing it inside the glide sends them back.
@@ -312,12 +333,14 @@ describe("the live reflow of a pane drag", () => {
         expect(m2.reflowFor("b")).toBeDefined();
     });
 
-    it("moves nothing while the dragged pane's picture is still being taken", () => {
+    it("moves nothing while the dragged pane's picture is still being taken, with every tile's entry at rest for the first glide to start from", () => {
         const m = modelOf(three());
         const captured = beginPaneCapture();
         drag(m, "a", "c", DropDirection.Bottom);
         expect(m.liveReflowActive()).toBe(false);
-        expect(m.reflowFor("b")).toBeUndefined();
+        for (const id of ["a", "b", "c"]) {
+            expect(m.reflowFor(id)).toEqual({ rect: own(m, id), box: sizeOf(own(m, id)), moved: false });
+        }
         captured();
         expect(m.liveReflowActive()).toBe(true);
         expect(m.reflowFor("b")!.rect).toEqual(futureOf(m, "b"));

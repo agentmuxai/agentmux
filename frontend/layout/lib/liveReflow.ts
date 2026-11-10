@@ -11,7 +11,7 @@
  * the size it had to the size it gets, so the edges of neighbours move together and no gap or overlap opens
  * while they travel. A tile is laid out once per armed candidate: one that grows on an axis takes the new size
  * at once (the clip uncovers it), and one that shrinks keeps the larger size under the closing clip until the
- * glide is over (`REFLOW_SETTLE_MS`), then takes its real size. So a candidate that is replaced inside the
+ * glide is over (`reflowSettleMs`), then takes its real size. So a candidate that is replaced inside the
  * glide never costs the shrinking panes a layout.
  *
  * Nothing here touches the tree or the layout's own rects: they stay the drag's hit-test snapshot
@@ -24,7 +24,8 @@
 
 import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
-import { DURATION_BASE_MS } from "@/app/motion/tokens";
+import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
+import { DURATION_BASE_MS, DURATION_FAST_MS } from "@/app/motion/tokens";
 import { holdPaneSizes } from "@/app/platform/pane-size-hold";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { getObjectValue, makeORef } from "@/app/store/mos";
@@ -55,8 +56,19 @@ export interface ReflowEntry {
 
 /** With more panes than this the layout does not reflow: nothing moves until the drop (§5). */
 export const REFLOW_MAX_PANES = 24;
-/** How long after a candidate arms a shrinking tile takes its real size: the glide's length, and a frame or two. */
-export const REFLOW_SETTLE_MS = DURATION_BASE_MS + 40;
+/** A frame or two after the glide, before a shrinking tile takes its real size. */
+const SETTLE_MARGIN_MS = 40;
+/** How long after a candidate arms a shrinking tile takes its real size, at the designed timing. */
+export const REFLOW_SETTLE_MS = DURATION_BASE_MS + SETTLE_MARGIN_MS;
+
+/**
+ * The same as this window plays it: the length of the glide a tile is given (TileLayout.core.tsx: the base
+ * duration, the fast one under reduced motion, both scaled by the animation speed) and the margin. A tile that
+ * took its smaller size while its clip was still closing would be cut short of it, a gap beside the neighbour.
+ */
+export function reflowSettleMs(): number {
+    return scaledMs(shouldReduceMotion("transition") ? DURATION_FAST_MS : DURATION_BASE_MS) + SETTLE_MARGIN_MS;
+}
 
 export interface LiveReflow {
     /** How the tile of `nodeId` takes part in the reflow now, or undefined when the reflow is off. */
@@ -131,20 +143,31 @@ function sameTargets(a: Targets | undefined, b: Targets | undefined): boolean {
     return true;
 }
 
+/** Run `fn` on the next frame, or at once where there are no frames (a test). Returns what cancels it. */
+function onNextFrame(fn: () => void): () => void {
+    if (typeof requestAnimationFrame !== "function") {
+        fn();
+        return () => {};
+    }
+    const id = requestAnimationFrame(fn);
+    return () => cancelAnimationFrame(id);
+}
+
 /** The reflow entries for a drag of `model`, kept in the model's reactive owner. */
 export function createLiveReflow(model: LayoutModel): LiveReflow {
     const enabled = getSettingsKeyAtom("layout:livereflow");
 
     // Where each tile goes. While a drag is live every pane the reflow can move has a target, even when no
     // candidate is armed (then it is its own layout rect), so a tile's transition stays on from the drag's
-    // start to its end and only the end takes it off, in the same batch as the drop's real rects. Nothing
-    // moves while the dragged pane's picture is still being taken: it is a capture of the window, and must
-    // show the pane as it stood (pane-capture-gate.ts).
+    // start to its end and only the end takes it off, in the same batch as the drop's real rects. No drop is
+    // shown while the dragged pane's picture is still being taken (a capture of the window, which must show
+    // the pane as it stood, pane-capture-gate.ts), but each tile has its entry at rest by then: the first
+    // candidate's clip glides from the resting one, where from no clip at all it would jump.
     const targets = createMemo((): Targets | undefined => {
-        if (!enabled() || !model.activeDrag() || paneCaptureInFlight()) return undefined;
+        if (!enabled() || !model.activeDrag()) return undefined;
         const leafs = model.leafs();
         if (leafs.length > REFLOW_MAX_PANES) return undefined;
-        const future = model.futureLayout();
+        const future = paneCaptureInFlight() ? undefined : model.futureLayout();
         const current = model.additionalProps();
         const futureRectOfBlock = new Map<string, Dimensions>();
         for (const id of future?.leafIds ?? []) {
@@ -174,13 +197,20 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         onCleanup(() => holdPaneSizes(model, false));
     });
 
-    // The targets whose glide is over: every tile then has exactly its rect's size.
+    // The targets whose glide is over: every tile then has exactly its rect's size. Timed from the frame the
+    // glide starts on, not from the arming: that frame lays the panes out and can be a long time coming.
     const [settled, setSettled] = createSignal<Targets | undefined>(undefined);
     createEffect(
         on(targets, (t) => {
             if (!t) return;
-            const timer = setTimeout(() => setSettled(t), REFLOW_SETTLE_MS);
-            onCleanup(() => clearTimeout(timer));
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const cancelFrame = onNextFrame(() => {
+                timer = setTimeout(() => setSettled(t), reflowSettleMs());
+            });
+            onCleanup(() => {
+                cancelFrame();
+                clearTimeout(timer);
+            });
         })
     );
 

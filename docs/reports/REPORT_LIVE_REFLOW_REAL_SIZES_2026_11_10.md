@@ -50,10 +50,10 @@ The only way to show a pane at another size without distortion is to lay it out 
 
 For each armed candidate, `futureLayoutOf` already gives every pane's rect after the drop (the drop's own reducer on a copy of the tree, then the real layout pass). Each tile takes that rect:
 
-- **Place:** `transform: translate3d(...)` to the rect's corner, with a transition. Compositor only.
+- **Place:** `transform: translate3d(var(--reflow-x), var(--reflow-y), 0)`, with the transition on the two properties, which are registered as lengths (`tilelayout.scss`). Not a transition on the transform itself: that one runs on the compositor while the clip's runs on the main thread, and the two came apart (§9). The tile keeps its own layer, so a frame of the glide is a style pass over the tiles and a composite, with no layout and no repaint of pane content.
 - **Size:** `width` and `height` are set at once, with no transition. A size that animated would lay the pane out on every frame.
 - **Shown size:** `clip-path: inset(0 calc(100% - Wpx) calc(100% - Hpx) 0)`, with the same transition as the place. Written from the far edges, the clip shows exactly W by H whatever size the tile is laid out at, so a transition between two of them moves the shown edge in a straight line while the laid-out size steps underneath. Neighbours' edges therefore travel together: no gap opens and nothing overlaps during the glide.
-- **The envelope:** the tile is laid out at the larger, on each axis, of the size it has and the size it gets. Growth is laid out at once and uncovered by the clip. A shrink keeps the larger size under the closing clip and takes its real size `REFLOW_SETTLE_MS` (the glide's length plus 40 ms) after the candidate armed.
+- **The envelope:** the tile is laid out at the larger, on each axis, of the size it has and the size it gets. Growth is laid out at once and uncovered by the clip. A shrink keeps the larger size under the closing clip and takes its real size when the glide is over: the glide's length as the window plays it (scaled by the animation speed, the shorter one under reduced motion) plus 40 ms, counted from the frame the glide starts on (`reflowSettleMs`).
 - **The content follows the tile:** a pane's content does not fill its tile by CSS. It is given a width and height computed from the layout's own rect (`innerRect`, `layoutNodeModels.ts`, applied by `block.tsx`). During the reflow that size comes from the tile's laid-out size instead, so the content is laid out with the tile. (The first push of #6951 missed this; see §9.)
 - **No candidate armed:** every tile's target is its own layout rect, with the transition still on, so panes glide back.
 - **The dragged pane** takes its landing rect like the others, unblurred, under the landing zone's tint. It is the drop's own preview, at its real size.
@@ -127,6 +127,7 @@ See §1: sound, with one redundant single-child root row in the inspected layout
 ## 7. What is still not covered
 
 - **Browser panes** are native windows: a transform does not move them and a clip does not crop them, so they stay where they are during the drag (as before), and a layout with one still shows the old picture around it. That is phase 3, with the browser seat. Real sizes make it simpler than the spec planned: the placeholder tile can take its real future rect, the window is resized once per candidate, and the existing per-frame rect sampling (`paneReflowActive`, `use-pane-rect-sync.ts`) only has to stay open for the glide's length to move the window in lockstep.
+- **The dragged pane's own path.** Neighbours deform together, but the dragged pane jumps: it leaves its slot and crosses the panes it swaps with. For the length of one glide the slot it left is uncovered and the panes it crosses are covered twice (measured on macOS: up to 12 to 17% of the layout for about 160 ms). Any move of a pane past others has this; it is not the standing gap of §1.
 - **A terminal that grows** shows its background beyond its grid until the drop (§5). That is the one place a pane is not full of its final content, by choice.
 - **Hit-testing stays on the layout the drag started on** (the frozen snapshot of phase 1), while the panes now really move. That was already true of the transform reflow; the simplified zone model (the spec's last PR) is where it is revisited.
 
@@ -142,6 +143,10 @@ The first push gave every tile its real size and passed its tests, and on screen
 
 1. **The content is not sized by the tile.** It takes an explicit size from the layout's own rect (§3, "the content follows the tile"). Fixed in `layoutNodeModels.ts`: during the reflow the size is the tile's laid-out size.
 2. **The settle never came while the pointer was sampled.** The targets were new objects with every sample, and each new one started the settle timer again, so a tile that shrank kept its larger size for as long as the drag was sampled more often than every 200 ms, which is always. Fixed by comparing by value (§4).
+
+Two more from review of the same push. The settle time was the designed 200 ms whatever the animation speed, so at a slower speed a tile shrank while its clip was still closing; it now follows the speed. And while the pane's picture was being taken the tiles had no entry at all, so the first candidate's clip started from no clip, which cannot glide; they now rest in their entries during the capture, and only the drop waits.
+
+3. **The place and the clip ran on different threads.** Frames from the Linux check, taken on a host at 93 to 97% CPU, showed panes most of the way to their new place with their clips barely started: a 40 px gap beside each of three panes. A transition on `transform` is run by the compositor, which keeps going while the main thread is busy; a transition on `clip-path` is run by the main thread, which at that moment is laying the panes out at their new sizes. So the gap was widest exactly when a candidate armed. Both now run on the main thread (§3, "Place"), so under load the glide may stutter, but a pane's place and its shown size cannot disagree. The settle is timed from the glide's first frame for the same reason.
 
 A terminal was therefore never resized by the first push at all, so its hold (§5) passed without being exercised. With the content following the tile it is.
 

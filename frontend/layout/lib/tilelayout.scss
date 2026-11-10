@@ -2,6 +2,20 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// A tile's corner during a pane drag's live reflow (TileLayout.core.tsx). Registered as lengths so that a
+// transition on them glides: an unregistered custom property only flips half way through.
+@property --reflow-x {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
+@property --reflow-y {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
 .tile-layout {
     position: relative;
     height: 100%;
