@@ -12,6 +12,11 @@
  * controller waits on; `unmount` when the pane's view goes away, with the block's state at that moment; and, after a
  * cover that lasted `SLOW_COVER_MS` or more, one `settled` line with what the pane looks like two seconds after it
  * lifted (size, element count, the tallest scroller's position), for a pane that is live and still looks black.
+ *
+ * Two more things put the logo, or nothing, in front of a live agent pane, and neither is a phase of the cover:
+ * the block's Suspense fallback (its view suspended after the cover lifted) and the transcript's own show-cover
+ * (hidden for up to `SHOW_SETTLE_MAX_MS` after the pane is shown again). Each writes `shown`, `still-shown` once a
+ * second and `cleared` lines under the same tag, so a pane that went blank says which of the three it was.
  */
 import { createEffect, createMemo, on, onCleanup, untrack } from "solid-js";
 import { isParkedMeta } from "@/app/store/agent-parked";
@@ -37,6 +42,12 @@ export interface CoverLogContext {
     root?: () => Element | null;
 }
 
+/** The agent's name from a block's meta, when it has one. */
+export function agentNameOf(block: { meta?: Record<string, unknown> } | undefined): string | undefined {
+    const name = block?.meta?.agentName;
+    return typeof name === "string" ? name : undefined;
+}
+
 /** What the log reads from a block: its agent's name, why its view went away, and where to look at it, each when a line is written. */
 export function blockCoverContext(
     blockId: string,
@@ -45,10 +56,7 @@ export function blockCoverContext(
     pending: () => string[]
 ): CoverLogContext {
     return {
-        agent: () => {
-            const name = block()?.meta?.agentName;
-            return typeof name === "string" ? name : undefined;
-        },
+        agent: () => agentNameOf(block()),
         pending,
         why: () =>
             `block=${block() ? "present" : "gone"} parked=${isParkedMeta(block()?.meta)} ` +
@@ -177,6 +185,42 @@ export function logCoverPhases(
             )
         )
     );
+}
+
+/** What `thing` writes: `shown`, then `still-shown` once a second, then `cleared` (`thing` is the covering element's name). */
+export function shownLine(blockId: string, thing: string, state: "shown" | "still-shown" | "cleared", forMs: number, agent?: string): string {
+    const time = state === "shown" ? "" : ` ${state === "cleared" ? "after" : "for"}=${Math.round(forMs)}ms`;
+    return `${head(blockId, agent)} ${thing} ${state}${time}`;
+}
+
+/**
+ * Logs how long something in front of a pane stays up: `shown` now, `still-shown` once a second (at most
+ * `STILL_COVERED_MAX` lines), `cleared` when this scope is cleaned up. Call during setup of the covering component,
+ * or in an effect that runs only while the covering thing is up.
+ */
+export function logWhileShown(blockId: string, thing: string, agent: () => string | undefined): void {
+    const since = performance.now();
+    const log = (state: "shown" | "still-shown" | "cleared") => console.info("[pane-cover]", shownLine(blockId, thing, state, performance.now() - since, agent()));
+    log("shown");
+    let lines = 0;
+    const timer = setInterval(() => {
+        if (++lines > STILL_COVERED_MAX) return clearInterval(timer);
+        log("still-shown");
+    }, 1000);
+    onCleanup(() => {
+        clearInterval(timer);
+        log("cleared");
+    });
+}
+
+/** The transcript's show-cover (`data-show-cover`) for `blockId`: logged while it is up, as `show-cover`. */
+export function logShowCover(blockId: string | undefined, covered: () => boolean, agent: () => string | undefined = () => undefined): void {
+    if (!blockId) return;
+    const up = createMemo(covered);
+    createEffect(() => {
+        // Untracked: the agent accessor reads the block, and a change to it must not restart the timing.
+        if (up()) untrack(() => logWhileShown(blockId, "show-cover", agent));
+    });
 }
 
 /** What a Block calls: the log for its block's cover, reading what it needs from the block when a line is written. */
