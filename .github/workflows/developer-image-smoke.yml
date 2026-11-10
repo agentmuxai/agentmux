@@ -1,0 +1,79 @@
+name: Developer image smoke
+
+# Does the container agent developer image still build AgentMux? Runs scripts/smoke-developer-image.sh: the image's
+# tools are there, its Rust is the version rust-toolchain.toml pins, and a fresh clone passes
+# `cargo check --tests -p agentmux-srv`. With stage `dev` it also starts `agent-dev` (Xvfb + `task dev`) until the
+# window is up and stays up, and uploads a screenshot.
+#
+# By hand only, not on every pull request or release: the check stage is about 5 minutes cold and the dev stage
+# about 20 minutes and 12 GB of build output. Run it after a change to docker/Dockerfile.agent-developer,
+# docker/agent-dev, rust-toolchain.toml or the Taskfile's dev build, or to look at a published tag.
+# Spec: docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md section 6.
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/smoke-developer-image.sh'
+      - 'scripts/smoke-developer-image.test.sh'
+      - '.github/workflows/developer-image-smoke.yml'
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'The image to test (a published tag, or blank for the floating developer tag)'
+        required: false
+        default: ''
+      ref:
+        description: 'The branch, tag or commit of the repo to build inside it (blank: main)'
+        required: false
+        default: ''
+      stage:
+        description: 'check (cargo check) or dev (check, then task dev on Xvfb and a screenshot)'
+        required: false
+        default: 'check'
+        type: choice
+        options: [check, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  script-test:
+    name: The script's own test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/smoke-developer-image.test.sh
+
+  smoke:
+    name: Smoke (${{ inputs.stage || 'check' }})
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # The build output of the dev stage is 12 GB; a runner starts with less free than that.
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Smoke test
+        env:
+          IMAGE: ${{ inputs.image }}
+          REF: ${{ inputs.ref }}
+          STAGE: ${{ inputs.stage }}
+        run: |
+          bash scripts/smoke-developer-image.sh \
+            --image "${IMAGE:-ghcr.io/agentmuxai/agent-base:developer}" \
+            --ref "${REF:-main}" \
+            --stage "${STAGE:-check}" \
+            --out "$RUNNER_TEMP/smoke-out"
+
+      - name: Keep the screenshot
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: developer-image-smoke
+          path: ${{ runner.temp }}/smoke-out
+          if-no-files-found: ignore
