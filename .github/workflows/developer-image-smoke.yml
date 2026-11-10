@@ -5,8 +5,8 @@ name: Developer image smoke
 # `cargo check --tests -p agentmux-srv`. With stage `dev` it also starts `agent-dev` (Xvfb + `task dev`) until the
 # window is up and stays up, and uploads a screenshot.
 #
-# By hand only, not on every pull request or release: the check stage is about 5 minutes cold and the dev stage
-# about 20 minutes and 12 GB of build output. Run it after a change to docker/Dockerfile.agent-developer,
+# By hand only, not on every pull request or release: the check stage is about 7 minutes cold and the dev stage
+# about 16 minutes and 12 GB of build output. Run it after a change to docker/Dockerfile.agent-developer,
 # docker/agent-dev, rust-toolchain.toml or the Taskfile's dev build, or to look at a published tag.
 # Spec: docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md section 6.
 
