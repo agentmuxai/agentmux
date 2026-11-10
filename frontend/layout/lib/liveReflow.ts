@@ -7,10 +7,11 @@
  * size, so its content lays out as it will after the drop and the layout is covered edge to edge, with nothing
  * cropped, stretched or left empty. The drop then commits what is already on screen.
  *
- * A tile's place glides (a transform), and its size is set at once but shown through a clip that glides from
- * the size it had to the size it gets, so the edges of neighbours move together and no gap or overlap opens
- * while they travel. A tile is laid out once per armed candidate: one that grows on an axis takes the new size
- * at once (the clip uncovers it), and one that shrinks keeps the larger size under the closing clip until the
+ * What glides is a tile's four edges, each on its own (`reflowEdges`): its place and the clip it is shown
+ * through are both read from them, and its size is set at once underneath. An edge two neighbours share has
+ * the same target in both, so it moves as one line whatever else changes, and no gap or overlap opens while
+ * they travel. A tile is laid out once per armed candidate: one that grows on an axis takes the new size at
+ * once (the clip uncovers it), and one that shrinks keeps the larger size under the closing clip until the
  * glide is over (`reflowSettleMs`), then takes its real size. So a candidate that is replaced inside the
  * glide never costs the shrinking panes a layout.
  *
@@ -41,13 +42,13 @@ export interface BoxSize {
 /** How a tile takes part in the reflow while a drag is live. */
 export interface ReflowEntry {
     /**
-     * The rect the tile shows, in whole px as the layout's own transform rounds them (`setTransform`): where
-     * the armed drop leaves the pane, or its own layout rect while no drop is armed.
+     * The rect the tile shows, by its edges in whole px (`shownPx`): where the armed drop leaves the pane, or
+     * its own layout rect while no drop is armed.
      */
     rect: Dimensions;
     /**
-     * The size the tile is laid out at: `rect`'s, or larger on an axis while the glide to a smaller rect is
-     * running (the clip shows `rect`'s size either way).
+     * The size the tile is laid out at: the target's own (`wholePx`), or larger on an axis while the glide to
+     * a smaller rect is running (the clip shows `rect` either way).
      */
     box: BoxSize;
     /** The dragged pane, in its landing rect: the drop's own preview, so not blurred as a dragged tile otherwise is. */
@@ -97,13 +98,42 @@ export function wholePx(rect: Dimensions): Dimensions {
 }
 
 /**
- * The crop that shows `size` of a tile from its top-left corner, whatever size the tile is laid out at: the
- * insets are measured from the far edges (`100% - px`), so a transition between two of these moves the shown
- * edge in a straight line while the tile's own size steps underneath it.
+ * `rect` as a tile shows it: each edge rounded down on its own. Two panes side by side are laid out with the
+ * one's far edge as the other's near edge, the same number, so rounded this way the edge they share is one
+ * whole px in both, in every layout. (`wholePx` rounds a size up instead, which can put it a px past.)
  */
-export function clipTo(size: BoxSize): string {
-    return `inset(0px calc(100% - ${size.width}px) calc(100% - ${size.height}px) 0px)`;
+export function shownPx(rect: Dimensions): Dimensions {
+    const left = Math.floor(rect.left);
+    const top = Math.floor(rect.top);
+    return { left, top, width: Math.floor(rect.left + rect.width) - left, height: Math.floor(rect.top + rect.height) - top };
 }
+
+/**
+ * The four edges of a shown rect as the properties a tile's place and clip are read from (`REFLOW_TRANSFORM`,
+ * `REFLOW_CLIP`; registered as lengths in tilelayout.scss). The glide is a transition on each edge, not on
+ * the place and the size: a transition starts again only for a property whose target changed, so when a new
+ * candidate moved a pane's place and not its size, the place started again and the size carried on, and its
+ * far edge left its neighbour's (measured on macOS: up to 58 px for 275 ms). A shared edge has one target.
+ */
+export function reflowEdges(rect: Dimensions): Record<string, string> {
+    return {
+        "--reflow-l": `${rect.left}px`,
+        "--reflow-t": `${rect.top}px`,
+        "--reflow-r": `${rect.left + rect.width}px`,
+        "--reflow-b": `${rect.top + rect.height}px`,
+    };
+}
+
+/** The properties of `reflowEdges`, for a transition. */
+export const REFLOW_EDGES = ["--reflow-l", "--reflow-t", "--reflow-r", "--reflow-b"] as const;
+/** A reflowing tile's place: its near edges. */
+export const REFLOW_TRANSFORM = "translate3d(var(--reflow-l), var(--reflow-t), 0)";
+/**
+ * The clip a reflowing tile is shown through: from its corner to its far edges, whatever size it is laid out
+ * at (the insets are measured from the laid-out far edges, `100% - shown size`).
+ */
+export const REFLOW_CLIP =
+    "inset(0px calc(100% - (var(--reflow-r) - var(--reflow-l))) calc(100% - (var(--reflow-b) - var(--reflow-t))) 0px)";
 
 /**
  * The size a tile is laid out at for a new target: the larger, on each axis, of the size it is laid out at now
@@ -120,7 +150,8 @@ export function landingRectOf(model: Pick<LayoutModel, "futureLayout">): Dimensi
 }
 
 interface Targets {
-    byId: Map<string, { rect: Dimensions; moved: boolean }>;
+    /** Per tile: the rect it shows (`shownPx`), the size it is laid out at for it (`wholePx`), whether it is the dragged one. */
+    byId: Map<string, { rect: Dimensions; size: BoxSize; moved: boolean }>;
     /** Whether a drop is armed: the tiles show it, not their own layout. */
     showing: boolean;
 }
@@ -139,6 +170,7 @@ function sameTargets(a: Targets | undefined, b: Targets | undefined): boolean {
         if (!y || x.moved !== y.moved) return false;
         const [p, q] = [x.rect, y.rect];
         if (p.left !== q.left || p.top !== q.top || p.width !== q.width || p.height !== q.height) return false;
+        if (x.size.width !== y.size.width || x.size.height !== y.size.height) return false;
     }
     return true;
 }
@@ -174,7 +206,7 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
             const blockId = future!.leafBlockIds[id];
             if (blockId && future!.rects[id]) futureRectOfBlock.set(blockId, future!.rects[id]);
         }
-        const byId = new Map<string, { rect: Dimensions; moved: boolean }>();
+        const byId: Targets["byId"] = new Map();
         for (const leaf of leafs) {
             if (isBrowserBlock(shownBlockId(leaf))) continue;
             const from = current[leaf.id]?.rect;
@@ -182,7 +214,8 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
             // The dragged pane keeps its node id through the preview: its future rect is the landing rect.
             const moved = !!future && leaf.id === future.movedId;
             const to = moved ? future!.rects[leaf.id] : leaf.data?.blockId ? futureRectOfBlock.get(leaf.data.blockId) : undefined;
-            byId.set(leaf.id, { rect: wholePx(to ?? from), moved: moved && !!to });
+            const { width, height } = wholePx(to ?? from);
+            byId.set(leaf.id, { rect: shownPx(to ?? from), size: { width, height }, moved: moved && !!to });
         }
         return { byId, showing: !!future && byId.size > 0 };
     }, undefined, { equals: sameTargets });
@@ -222,10 +255,10 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         // Not tracked: a rect that changes under the drag changes the targets too.
         const current = untrack(() => model.additionalProps());
         for (const [id, target] of t.byId) {
-            const size = { width: target.rect.width, height: target.rect.height };
             // What the tile is laid out at now: its box from the previous target, or its own layout size.
             const laidOut = before.get(id)?.box ?? wholePx(current[id].rect);
-            out.set(id, { rect: target.rect, box: done ? size : envelope(laidOut, size), moved: target.moved });
+            const box = done ? target.size : envelope(laidOut, target.size);
+            out.set(id, { rect: target.rect, box, moved: target.moved });
         }
         return out;
     }, new Map());

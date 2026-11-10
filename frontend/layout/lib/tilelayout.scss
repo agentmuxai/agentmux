@@ -2,15 +2,27 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// A tile's corner during a pane drag's live reflow (TileLayout.core.tsx). Registered as lengths so that a
-// transition on them glides: an unregistered custom property only flips half way through.
-@property --reflow-x {
+// A tile's four edges during a pane drag's live reflow (liveReflow.ts `reflowEdges`). Registered as lengths
+// so that a transition on them glides: an unregistered custom property only flips half way through.
+@property --reflow-l {
     syntax: "<length>";
     inherits: false;
     initial-value: 0px;
 }
 
-@property --reflow-y {
+@property --reflow-t {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
+@property --reflow-r {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
+@property --reflow-b {
     syntax: "<length>";
     inherits: false;
     initial-value: 0px;

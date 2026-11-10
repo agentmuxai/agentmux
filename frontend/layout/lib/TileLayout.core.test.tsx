@@ -106,7 +106,7 @@ import { tileItemType } from "@/app/drag/drag-types";
 import { createTileLayout, type TileLayoutPlatform } from "./TileLayout.core";
 import { DRAG_PREVIEW_HOVER_MS } from "./drag-preview-size";
 import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
-import { clipTo, type ReflowEntry } from "./liveReflow";
+import { REFLOW_CLIP, REFLOW_TRANSFORM, type ReflowEntry } from "./liveReflow";
 import { dragState } from "./tilelayout-drag-state";
 import { LayoutTreeActionType, type TileLayoutContents } from "./types";
 
@@ -440,26 +440,27 @@ describe("createTileLayout: a tile", () => {
         const rect = { left: 300, top: 0, width: 40, height: 20 };
         const entry: ReflowEntry = { rect, box: { width: 40, height: 30 }, moved: false };
 
-        const placeOf = (el: HTMLElement) => [el.style.getPropertyValue("--reflow-x"), el.style.getPropertyValue("--reflow-y")];
+        /** The tile's four edges, as its style carries them: left, top, right, bottom. */
+        const edgesOf = (el: HTMLElement) => ["l", "t", "r", "b"].map((edge) => el.style.getPropertyValue(`--reflow-${edge}`));
 
-        it("gives a tile its future rect: the place as two gliding properties, the size at once, shown through a gliding crop", () => {
+        it("gives a tile its future rect: its four edges glide, its place and crop are read from them, its size is set at once", () => {
             const platform = makePlatform();
             const { el, node } = mountWithTile(platform);
             const before = node.additionalProps();
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
-            expect(el.style.transform).toBe("translate3d(var(--reflow-x), var(--reflow-y), 0)");
-            expect(placeOf(el)).toEqual(["300px", "0px"]);
+            expect(edgesOf(el)).toEqual(["300px", "0px", "340px", "20px"]);
+            expect(el.style.transform).toBe(REFLOW_TRANSFORM);
             // The tile is laid out at its box (here still its old height, under the closing crop) and shows its
             // rect's size whatever the box is.
             expect(el.style.width).toBe("40px");
             expect(el.style.height).toBe("30px");
-            expect(el.style.getPropertyValue("clip-path")).toBe(clipTo(rect));
-            // The place and the crop glide on the same thread, or they come apart when it is busy: the place is
-            // never a transition on the transform, which the compositor would run on its own.
-            expect(el.style.transition).toContain("--reflow-x var(--duration-base) ease-out");
-            expect(el.style.transition).toContain("--reflow-y var(--duration-base) ease-out");
-            expect(el.style.transition).toContain("clip-path var(--duration-base) ease-out");
-            expect(el.style.transition).not.toMatch(/(^|, )transform /);
+            expect(el.style.getPropertyValue("clip-path")).toBe(REFLOW_CLIP);
+            // Only the edges glide. A transition on the transform would run on the compositor, apart from the
+            // crop; one on the place and one on the size would start again separately when a candidate changes.
+            for (const edge of ["l", "t", "r", "b"]) {
+                expect(el.style.transition).toContain(`--reflow-${edge} var(--duration-base) ease-out`);
+            }
+            expect(el.style.transition).not.toMatch(/(^|, )(transform|clip-path) /);
             // Neither size is a transition: a size that animated would lay the pane out on every frame.
             expect(el.style.transition).not.toContain("width");
             expect(el.style.transition).not.toContain("height");
@@ -474,14 +475,14 @@ describe("createTileLayout: a tile", () => {
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { ...entry, box: { width: 40, height: 20 } }]]));
             expect(el.style.height).toBe("20px");
-            expect(el.style.getPropertyValue("clip-path")).toBe(clipTo(rect));
+            expect(edgesOf(el)).toEqual(["300px", "0px", "340px", "20px"]);
         });
 
         it("shows the dragged pane's own tile in its landing rect, unblurred and never hidden, so no slot is empty", () => {
             const { el } = mountWithTile(makePlatform());
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { ...entry, moved: true }]]));
             expect(el.style.visibility).toBe("");
-            expect(placeOf(el)).toEqual(["300px", "0px"]);
+            expect(edgesOf(el)).toEqual(["300px", "0px", "340px", "20px"]);
             expect(el.style.filter).toBe("none");
             // Another pane keeps whatever the stylesheet gives a dragged tile.
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
@@ -496,19 +497,21 @@ describe("createTileLayout: a tile", () => {
             expect(el.style.width).toBe("10px");
             expect(el.style.height).toBe("10px");
             expect(el.style.getPropertyValue("clip-path")).toBe("");
-            expect(el.style.transition).not.toContain("--reflow-x");
+            expect(el.style.transition).not.toContain("--reflow-");
             expect(el.style.visibility).toBe("");
         });
 
-        it("carries a tile's own corner in the glide's properties at rest, so the first glide starts from it and not from the origin", () => {
+        it("carries a tile's own edges at rest, so the first glide starts from them and not from the origin", () => {
             const { el, node } = mountWithTile(makePlatform());
             node.set.setProps({
                 transform: { transform: "translate3d(7px,9px, 0)", width: "10px", height: "10px" },
                 rect: { left: 7.4, top: 9.6, width: 10, height: 10 },
             });
-            expect(placeOf(el)).toEqual(["7px", "9px"]);
+            expect(edgesOf(el)).toEqual(["7px", "9px", "17px", "19px"]);
+            // Its place and size stay the layout's own, and nothing glides.
             expect(el.style.transform).toBe("translate3d(7px,9px, 0)");
-            expect(el.style.transition).not.toContain("--reflow-x");
+            expect(el.style.getPropertyValue("clip-path")).toBe("");
+            expect(el.style.transition).not.toContain("--reflow-");
         });
     });
 

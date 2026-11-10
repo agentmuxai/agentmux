@@ -15,12 +15,15 @@ import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { deferWhileSizesHeld, paneSizesHeld, resetPaneSizeHoldForTests } from "@/app/platform/pane-size-hold";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import {
-    clipTo,
     envelope,
     landingRectOf,
     REFLOW_MAX_PANES,
+    REFLOW_CLIP,
     REFLOW_SETTLE_MS,
+    REFLOW_TRANSFORM,
+    reflowEdges,
     reflowSettleMs,
+    shownPx,
     wholePx,
     type ReflowEntry,
 } from "@/layout/lib/liveReflow";
@@ -110,14 +113,21 @@ function preview(m: LayoutModel, dragged: string, target: string, direction: Dro
 const entries = (m: LayoutModel, ids: string[]): Record<string, ReflowEntry | undefined> =>
     Object.fromEntries(ids.map((id) => [id, m.reflowFor(id)]));
 
-/** The layout's own rect of `id`, in the whole px a tile is drawn at. */
-const own = (m: LayoutModel, id: string) => wholePx(m.additionalProps()[id].rect);
-/** Where the armed drop leaves the pane showing block `id`, in whole px. */
-function futureOf(m: LayoutModel, id: string) {
+/** The layout's own rect of `id`, as a tile shows it. */
+const own = (m: LayoutModel, id: string) => shownPx(m.additionalProps()[id].rect);
+/** Where the armed drop leaves the pane showing block `id`, unrounded. */
+function rawFutureOf(m: LayoutModel, id: string) {
     const future = m.futureLayout()!;
-    return wholePx(future.rects[future.leafIds.find((n) => future.leafBlockIds[n] === id)!]);
+    return future.rects[future.leafIds.find((n) => future.leafBlockIds[n] === id)!];
 }
+/** The same, as a tile shows it. */
+const futureOf = (m: LayoutModel, id: string) => shownPx(rawFutureOf(m, id));
 const sizeOf = (r: { width: number; height: number }) => ({ width: r.width, height: r.height });
+/** The size a tile is laid out at for a rect: the layout's own rounding. */
+const laidOutAt = (r: Dimensions) => sizeOf(wholePx(r));
+/** The size the tile of `id` is laid out at in the layout's own rect, and in the armed drop's. */
+const ownSize = (m: LayoutModel, id: string) => laidOutAt(m.additionalProps()[id].rect);
+const futureSize = (m: LayoutModel, id: string) => laidOutAt(rawFutureOf(m, id));
 
 beforeEach(() => {
     rows.clear();
@@ -137,8 +147,43 @@ describe("the pieces of a tile's reflow style", () => {
         expect(wholePx({ left: 10.6, top: 3.2, width: 99.1, height: 50 })).toEqual({ left: 10, top: 3, width: 100, height: 50 });
     });
 
-    it("crops to a size from the far edges, so the shown size does not depend on the size laid out", () => {
-        expect(clipTo({ width: 300, height: 200 })).toBe("inset(0px calc(100% - 300px) calc(100% - 200px) 0px)");
+    it("rounds a shown rect by its edges, so two panes side by side share one whole px in every layout", () => {
+        // A third and two thirds of 800: the edge between them is 266.67 in both.
+        const [first, second] = [
+            shownPx({ left: 0, top: 0, width: 100, height: 800 / 3 }),
+            shownPx({ left: 0, top: 800 / 3, width: 100, height: 1600 / 3 }),
+        ];
+        expect(first.top + first.height).toBe(second.top);
+        expect(second.top + second.height).toBe(800);
+        // Rounding the size up instead puts the first pane's far edge a px past its neighbour's near one.
+        const up = wholePx({ left: 0, top: 0, width: 100, height: 800 / 3 });
+        expect(up.top + up.height).toBe(second.top + 1);
+    });
+
+    it("writes a shown rect as its four edges, and reads a tile's place and clip from them", () => {
+        expect(reflowEdges({ left: 300, top: 20, width: 40, height: 60 })).toEqual({
+            "--reflow-l": "300px",
+            "--reflow-t": "20px",
+            "--reflow-r": "340px",
+            "--reflow-b": "80px",
+        });
+        expect(REFLOW_TRANSFORM).toBe("translate3d(var(--reflow-l), var(--reflow-t), 0)");
+        // From the far edges of whatever size the tile is laid out at, so the shown size does not depend on it.
+        expect(REFLOW_CLIP).toBe(
+            "inset(0px calc(100% - (var(--reflow-r) - var(--reflow-l))) calc(100% - (var(--reflow-b) - var(--reflow-t))) 0px)"
+        );
+    });
+
+    it("keeps an edge two neighbours share on one target through a change of candidate: it can only move as one line", () => {
+        // a | b | c | d. Both drops leave b and c side by side; between them only where they stand changes.
+        const m = modelOf(row("r", 10, leaf("a"), leaf("b"), leaf("c"), leaf("d")));
+        const shared = () => [reflowEdges(m.reflowFor("b")!.rect)["--reflow-r"], reflowEdges(m.reflowFor("c")!.rect)["--reflow-l"]];
+        drag(m, "a", "c", DropDirection.Right);
+        expect(shared()[0]).toBe(shared()[1]);
+        const first = shared()[0];
+        preview(m, "a", "d", DropDirection.Right);
+        expect(shared()[0]).toBe(shared()[1]);
+        expect(shared()[0]).toBe(first);
     });
 
     it("lays a tile out at the larger of what it has and what it gets, on each axis", () => {
@@ -179,7 +224,7 @@ describe("the live reflow of a pane drag", () => {
         drag(m, "a", "c", DropDirection.Bottom);
         expect(m.liveReflowActive()).toBe(true);
         const got = entries(m, ["a", "b", "c"]);
-        expect(got.a).toMatchObject({ rect: wholePx(landingRectOf(m)!), moved: true });
+        expect(got.a).toMatchObject({ rect: shownPx(landingRectOf(m)!), moved: true });
         expect(got.b).toMatchObject({ rect: futureOf(m, "b"), moved: false });
         expect(got.c).toMatchObject({ rect: futureOf(m, "c"), moved: false });
         // The three future rects tile the whole layout: their areas add up to it, within the gaps' rounding.
@@ -198,20 +243,20 @@ describe("the live reflow of a pane drag", () => {
         expect(to.width).toBeGreaterThan(600);
         expect(to.height).toBeLessThan(400);
         // At once: the new width, to be uncovered by the clip, and still the old height under the closing clip.
-        expect(m.reflowFor("b")!.box).toEqual({ width: to.width, height: own(m, "b").height });
+        expect(m.reflowFor("b")!.box).toEqual({ width: to.width, height: ownSize(m, "b").height });
         vi.advanceTimersByTime(REFLOW_SETTLE_MS - 1);
-        expect(m.reflowFor("b")!.box.height).toBe(own(m, "b").height);
-        // The glide is over: the tile takes exactly its rect's size.
+        expect(m.reflowFor("b")!.box.height).toBe(ownSize(m, "b").height);
+        // The glide is over: the tile takes the size the drop lays it out at, a px over what it shows at most.
         vi.advanceTimersByTime(1);
-        expect(m.reflowFor("b")!.box).toEqual(sizeOf(to));
+        expect(m.reflowFor("b")!.box).toEqual(futureSize(m, "b"));
         expect(m.reflowFor("b")!.rect).toEqual(to);
+        expect(m.reflowFor("b")!.box.height - to.height).toBeLessThanOrEqual(1);
     });
 
     it("takes a drop sampled again and again as one candidate: computed once, and its shrink still settles", () => {
         vi.useFakeTimers();
         const m = modelOf(three());
         drag(m, "a", "c", DropDirection.Bottom);
-        const to = futureOf(m, "b");
         const future = m.futureLayout();
         const entry = m.reflowFor("b");
         // A pointer held on the drop goes on being sampled, more often than the glide is long.
@@ -221,7 +266,7 @@ describe("the live reflow of a pane drag", () => {
             if (waited + 50 < REFLOW_SETTLE_MS) expect(m.reflowFor("b")).toBe(entry);
         }
         expect(m.futureLayout()).toBe(future);
-        expect(m.reflowFor("b")!.box).toEqual(sizeOf(to));
+        expect(m.reflowFor("b")!.box).toEqual(futureSize(m, "b"));
     });
 
     it("sizes a pane's content to the tile the reflow lays out, and back to the layout's own size after it", () => {
@@ -231,7 +276,7 @@ describe("the live reflow of a pane drag", () => {
         const inner = m.getNodeModel(m.leafs().find((l) => l.id === "b")!).innerRect!;
         expect(inner()).toEqual({ width: `600px - ${gap}px`, height: `400px - ${gap}px` });
         drag(m, "a", "c", DropDirection.Bottom);
-        const to = futureOf(m, "b");
+        const to = futureSize(m, "b");
         // Wider at once, so nothing is blank beside it; shorter only when the glide is over.
         expect(inner()).toEqual({ width: `${to.width}px - ${gap}px`, height: `400px - ${gap}px` });
         vi.advanceTimersByTime(REFLOW_SETTLE_MS);
@@ -247,12 +292,11 @@ describe("the live reflow of a pane drag", () => {
             expect(reflowSettleMs()).toBe(DURATION_BASE_MS * 1.5 + (REFLOW_SETTLE_MS - DURATION_BASE_MS));
             const m = modelOf(three());
             drag(m, "a", "c", DropDirection.Bottom);
-            const to = futureOf(m, "b");
             // The designed time is over and the slower glide is not: the tile keeps its height under the clip.
             vi.advanceTimersByTime(REFLOW_SETTLE_MS);
-            expect(m.reflowFor("b")!.box.height).toBe(own(m, "b").height);
+            expect(m.reflowFor("b")!.box.height).toBe(ownSize(m, "b").height);
             vi.advanceTimersByTime(reflowSettleMs() - REFLOW_SETTLE_MS);
-            expect(m.reflowFor("b")!.box).toEqual(sizeOf(to));
+            expect(m.reflowFor("b")!.box).toEqual(futureSize(m, "b"));
         } finally {
             setAnimationSettings({});
         }
@@ -262,7 +306,7 @@ describe("the live reflow of a pane drag", () => {
         vi.useFakeTimers();
         // a over (b | c). a on c's bottom makes b and c taller; clearing it inside the glide sends them back.
         const m = modelOf(col("r", 10, leaf("a"), row("row", 10, leaf("b"), leaf("c"))));
-        const before = sizeOf(own(m, "b"));
+        const before = ownSize(m, "b");
         drag(m, "a", "c", DropDirection.Right);
         // b gets narrower (a joins its row) and taller (a's row closes): the height is laid out, the width waits.
         const grown = sizeOf(m.reflowFor("b")!.box);
@@ -285,7 +329,7 @@ describe("the live reflow of a pane drag", () => {
         const got = entries(m, ["a", "b", "c"]);
         expect(got.a).toMatchObject({ moved: true });
         expect(got.b!.rect.left).toBeLessThan(own(m, "b").left);
-        expect(got.c).toEqual({ rect: own(m, "c"), box: sizeOf(own(m, "c")), moved: false });
+        expect(got.c).toEqual({ rect: own(m, "c"), box: ownSize(m, "c"), moved: false });
     });
 
     it("leaves every pane on its own rect, the dragged one in its own slot, when the drop would change nothing", () => {
@@ -295,8 +339,8 @@ describe("the live reflow of a pane drag", () => {
         drag(m, "a", "b", DropDirection.Left);
         expect(m.liveReflowActive()).toBe(false);
         expect(entries(m, ["a", "b"])).toEqual({
-            a: { rect: own(m, "a"), box: sizeOf(own(m, "a")), moved: false },
-            b: { rect: own(m, "b"), box: sizeOf(own(m, "b")), moved: false },
+            a: { rect: own(m, "a"), box: ownSize(m, "a"), moved: false },
+            b: { rect: own(m, "b"), box: ownSize(m, "b"), moved: false },
         });
     });
 
@@ -339,7 +383,7 @@ describe("the live reflow of a pane drag", () => {
         drag(m, "a", "c", DropDirection.Bottom);
         expect(m.liveReflowActive()).toBe(false);
         for (const id of ["a", "b", "c"]) {
-            expect(m.reflowFor(id)).toEqual({ rect: own(m, id), box: sizeOf(own(m, id)), moved: false });
+            expect(m.reflowFor(id)).toEqual({ rect: own(m, id), box: ownSize(m, id), moved: false });
         }
         captured();
         expect(m.liveReflowActive()).toBe(true);
