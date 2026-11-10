@@ -167,7 +167,7 @@ export function LanRows(props: Props): JSX.Element {
                 </div>
             </Show>
             <Show when={p.lanDiscoveryEnabled() && p.lanCount() > 0}>
-                <div class="status-bar-popover-row" style={{ "padding-left": "12px" }}>
+                <div class="status-bar-popover-row">
                     <span>{p.lanCount()} peer{p.lanCount() !== 1 ? "s" : ""}</span>
                 </div>
                 <LanPeerList peers={p.lanInstances()} selfHost={getHostName()} />

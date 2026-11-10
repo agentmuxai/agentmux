@@ -49,7 +49,7 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
         "⚠ Other machines can't see this one, even though it may see them. Another program may be using the mDNS port (UDP 5353). AgentMux keeps retrying on its own ("
         "2"
         "so far); turning LAN off and on retries at once."
-    <div class="status-bar-popover-row" style="padding-left:12px">
+    <div class="status-bar-popover-row">
       <span>
         "2"
         "peer"
