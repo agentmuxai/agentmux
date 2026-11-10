@@ -21,6 +21,8 @@ pub const CONTENT_TYPE: &str = "agent:model_route";
 pub const LEAVING_TYPE: &str = "agent:model_route_leaving";
 /// A model with a context of this many tokens or more gets Claude Code's `[1m]` mark, so it does not compact early.
 const LONG_CONTEXT: u32 = 1_000_000;
+/// The variable Claude Code reads for the window it auto-compacts in.
+const COMPACT_WINDOW_VAR: &str = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Choice {
@@ -75,7 +77,7 @@ pub fn env_for(route: &Route, model: &Model, token: &str, local_url: &str) -> Ve
     // The `[1m]` mark above makes the CLI take a 1M window and compact near its end; on a route that is a
     // million tokens re-read every turn. The CLI compacts at this budget instead (`autoCompactThreshold`).
     if let Some(budget) = model.compact_budget() {
-        env.push(var("CLAUDE_CODE_AUTO_COMPACT_WINDOW", budget.to_string()));
+        env.push(var(COMPACT_WINDOW_VAR, budget.to_string()));
     }
     env
 }
@@ -123,9 +125,20 @@ pub fn carry_for_block(mstore: &Store, block_id: &str, env_vars: &mut HashMap<St
         return;
     };
     let token = token::token_for(&def.slug, &def.id, route.id);
-    env_vars.extend(env_for(route, model, &token, &local_url));
+    merge_route_env(env_vars, route, model, &token, &local_url);
 }
 
+/// srv's route environment over the agent's own, except a compaction window the agent's own environment set below the
+/// budget (`Agents env_set`, My Agents): that one is the person's choice, not srv's.
+fn merge_route_env(env_vars: &mut HashMap<String, String>, route: &Route, model: &Model, token: &str, local_url: &str) {
+    let own_window = env_vars.get(COMPACT_WINDOW_VAR).and_then(|v| v.trim().parse::<u32>().ok());
+    env_vars.extend(env_for(route, model, token, local_url));
+    if let (Some(own), Some(budget)) = (own_window, model.compact_budget()) {
+        if own < budget {
+            env_vars.insert(COMPACT_WINDOW_VAR.to_string(), own.to_string());
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +168,21 @@ mod tests {
         assert_eq!(short.compact_budget(), None);
         let env: HashMap<_, _> = env_for(route, &short, "t", "http://127.0.0.1:4000").into_iter().collect();
         assert!(!env.contains_key("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), "a window within the budget needs no override");
+    }
+
+    #[test]
+    fn a_window_the_agent_set_lower_than_the_budget_is_kept_and_a_higher_one_is_not() {
+        let route = catalog::route("openrouter").unwrap();
+        let model = route.model("deepseek/deepseek-v4.1-flash-1017").unwrap();
+        let merged = |own: Option<&str>| {
+            let mut env: HashMap<String, String> = own.map(|v| (COMPACT_WINDOW_VAR.to_string(), v.to_string())).into_iter().collect();
+            merge_route_env(&mut env, route, model, "t", "http://127.0.0.1:4000");
+            env[COMPACT_WINDOW_VAR].clone()
+        };
+        assert_eq!(merged(None), "300000");
+        assert_eq!(merged(Some("150000")), "150000", "the person asked for earlier");
+        assert_eq!(merged(Some("900000")), "300000", "a window above the budget is what the budget is for");
+        assert_eq!(merged(Some("auto")), "300000", "not a number");
     }
 
     #[test]

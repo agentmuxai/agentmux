@@ -1,6 +1,6 @@
 # Route agent brakes: a spend cap, budgeted compaction and loop detection
 
-Status: approved by the operator on 2026-11-10 ("yes proceed with best recommendations", relayed by AgentY), with every decision in section 10 taken as recommended. Author: Agent5@narko, 2026-11-10. Task #46807 (spec), build #46808. Parent: [SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md](SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md) sections 9 and 11, which this replaces where they differ (the cap and its default). It also folds in #27459 P5 (spend on the card and lists, and the cap) and #31427 (the degenerate thinking loop).
+**Status:** active. Approved by the operator on 2026-11-10 ("yes proceed with best recommendations", relayed by AgentY), with every decision in section 10 taken as recommended. Author: Agent5@narko, 2026-11-10. Task #46807 (spec), build #46808. Parent: [SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md](SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md) sections 9 and 11, which this replaces where they differ (the cap and its default). It also folds in #27459 P5 (spend on the card and lists, and the cap) and #31427 (the degenerate thinking loop).
 
 ## 1. What happened, and what it says
 
