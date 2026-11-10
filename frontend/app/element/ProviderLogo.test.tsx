@@ -26,6 +26,17 @@ describe("ProviderLogo for a route's model vendors", () => {
         });
     }
 
+    it("draws Qwen and Zhipu mono at badge size, in the theme's text colour, and in colour in a list row", () => {
+        for (const vendor of ["qwen", "zhipu"]) {
+            const small = render(() => <ProviderLogo provider={vendor} size={8} />);
+            expect(small.container.querySelector("svg")?.getAttribute("fill")).toBe("currentColor");
+            cleanup();
+            const big = render(() => <ProviderLogo provider={vendor} size={40} />);
+            expect(big.container.querySelector("svg")?.getAttribute("fill")).toBeNull();
+            cleanup();
+        }
+    });
+
     it("still draws a letter for a vendor with no mark to use", () => {
         const { container } = render(() => <ProviderLogo provider="unmarked-vendor" />);
         expect(container.querySelector("text")?.textContent).toBe("U");

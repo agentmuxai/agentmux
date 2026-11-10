@@ -27,6 +27,8 @@ import grokSvg from "@lobehub/icons-static-svg/icons/grok.svg?raw";
 import deepseekColorSvg from "@lobehub/icons-static-svg/icons/deepseek-color.svg?raw";
 import qwenColorSvg from "@lobehub/icons-static-svg/icons/qwen-color.svg?raw";
 import zhipuColorSvg from "@lobehub/icons-static-svg/icons/zhipu-color.svg?raw";
+import qwenSvg from "@lobehub/icons-static-svg/icons/qwen.svg?raw";
+import zhipuSvg from "@lobehub/icons-static-svg/icons/zhipu.svg?raw";
 import openrouterColorSvg from "@lobehub/icons-static-svg/icons/openrouter-color.svg?raw";
 import xaiSvg from "@lobehub/icons-static-svg/icons/xai.svg?raw";
 import ollamaSvg from "@lobehub/icons-static-svg/icons/ollama.svg?raw";
@@ -50,12 +52,26 @@ const MUX_CODE_MARK = markSvg
 
 // Company marks: DeepSeek's (also the mark of its harness) and the makers of the models a route serves, which the
 // pane header's model badge shows.
+// Model vendors a route can resolve to (a Qwen Code agent on a route answers
+// as "openrouter", not "qwen"). The mono marks (xAI, Ollama) inherit the
+// theme's text color.
 const MAKER_MARKS = new Map<string, string>([
     ["dsh", deepseekColorSvg],
     ["deepseek", deepseekColorSvg],
     ["qwen", qwenColorSvg],
     ["zhipu", zhipuColorSvg],
+    ["openrouter", openrouterColorSvg],
+    ["xai", xaiSvg],
+    ["ollama", ollamaSvg],
+    ["meta", metaColorSvg],
 ]);
+
+// At badge size (8-10 px) a dark colour mark is a blob on the dark theme: the
+// mono variant, drawn in the theme's text colour, is what stays legible.
+const SMALL_MONO: Record<string, string> = { qwen: qwenSvg, zhipu: zhipuSvg };
+
+/** The mark for `p`, mono at badge size where the colour one would not read. */
+const markFor = (p: string, small: boolean): string | undefined => (small ? SMALL_MONO[p] : undefined) ?? MAKER_MARKS.get(p);
 
 export interface ProviderLogoProps {
     provider: string;
@@ -90,14 +106,7 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "opencode") return { html: opencodeSvg };
         if (p === "goose") return { html: gooseSvg };
         if (p === "grok") return { html: grokSvg };
-        // Model vendors a route can resolve to (a Qwen Code agent on a route
-        // answers as "openrouter", not "qwen"). Mono marks (xAI, Ollama)
-        // inherit the theme's text color.
-        if (p === "openrouter") return { html: openrouterColorSvg };
-        if (p === "xai") return { html: xaiSvg };
-        if (p === "ollama") return { html: ollamaSvg };
-        if (p === "meta") return { html: metaColorSvg };
-        const mark = MAKER_MARKS.get(p);
+        const mark = markFor(p, (props.size ?? 24) <= 12);
         if (mark) return { html: mark };
         // Plandex only: Pi (pi-coding-agent) is a different project, and
         // showing Plandex's mark on it named the wrong product.

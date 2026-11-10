@@ -34,7 +34,7 @@ export function readRouteModel(meta: Record<string, unknown> | null | undefined)
 }
 
 /** Model-id prefixes (OpenRouter's maker names) whose mark ProviderLogo knows under another id. */
-const MAKER_LOGO: Record<string, string> = { moonshotai: "moonshot", "z-ai": "zhipu" };
+const MAKER_LOGO: Record<string, string> = { moonshotai: "moonshot", "z-ai": "zhipu", "x-ai": "xai", "meta-llama": "meta" };
 
 /**
  * The logo id of the maker of a route model: the part of its id before the slash ("deepseek/…" is DeepSeek).

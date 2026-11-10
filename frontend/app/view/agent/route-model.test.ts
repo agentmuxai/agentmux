@@ -49,6 +49,8 @@ describe("modelMakerLogo", () => {
     it("maps a maker whose mark is filed under another name", () => {
         expect(logo("moonshotai/kimi-k3")).toBe("moonshot");
         expect(logo("z-ai/glm-5.3")).toBe("zhipu");
+        expect(logo("x-ai/grok-4")).toBe("xai");
+        expect(logo("meta-llama/llama-4-maverick")).toBe("meta");
     });
 
     it("falls back to the route when the id names no maker", () => {
