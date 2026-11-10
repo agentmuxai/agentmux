@@ -22,7 +22,7 @@
  * docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md.
  */
 
-import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { holdPaneSizes } from "@/app/platform/pane-size-hold";
@@ -113,6 +113,24 @@ interface Targets {
     showing: boolean;
 }
 
+/**
+ * Whether two sets of targets send every tile to the same place. Each sample of a drag lays the tree out
+ * again, so the targets are made again many times a second, and a pointer held on one drop makes the same
+ * ones each time: they must count as one, or the settle below would start again with every sample and a
+ * tile that shrinks would never take its real size.
+ */
+function sameTargets(a: Targets | undefined, b: Targets | undefined): boolean {
+    if (!a || !b) return a === b;
+    if (a.showing !== b.showing || a.byId.size !== b.byId.size) return false;
+    for (const [id, x] of a.byId) {
+        const y = b.byId.get(id);
+        if (!y || x.moved !== y.moved) return false;
+        const [p, q] = [x.rect, y.rect];
+        if (p.left !== q.left || p.top !== q.top || p.width !== q.width || p.height !== q.height) return false;
+    }
+    return true;
+}
+
 /** The reflow entries for a drag of `model`, kept in the model's reactive owner. */
 export function createLiveReflow(model: LayoutModel): LiveReflow {
     const enabled = getSettingsKeyAtom("layout:livereflow");
@@ -144,11 +162,14 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
             byId.set(leaf.id, { rect: wholePx(to ?? from), moved: moved && !!to });
         }
         return { byId, showing: !!future && byId.size > 0 };
-    });
+    }, undefined, { equals: sameTargets });
 
-    // Terminals keep their grid for as long as tiles can take a size the drop may never commit.
+    // Terminals keep their grid for as long as tiles can take a size the drop may never commit. On a boolean,
+    // not on the targets themselves: those are new for every candidate, and letting go and holding again
+    // between two candidates would fit every terminal once per candidate.
+    const reflowing = createMemo(() => !!targets());
     createEffect(() => {
-        if (!targets()) return;
+        if (!reflowing()) return;
         holdPaneSizes(model, true);
         onCleanup(() => holdPaneSizes(model, false));
     });
@@ -168,7 +189,8 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         const out = new Map<string, ReflowEntry>();
         if (!t) return out;
         const done = settled() === t;
-        const current = model.additionalProps();
+        // Not tracked: a rect that changes under the drag changes the targets too.
+        const current = untrack(() => model.additionalProps());
         for (const [id, target] of t.byId) {
             const size = { width: target.rect.width, height: target.rect.height };
             // What the tile is laid out at now: its box from the previous target, or its own layout size.

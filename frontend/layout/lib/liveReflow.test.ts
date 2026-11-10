@@ -204,6 +204,39 @@ describe("the live reflow of a pane drag", () => {
         expect(m.reflowFor("b")!.rect).toEqual(to);
     });
 
+    it("takes a drop sampled again and again as one candidate: computed once, and its shrink still settles", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        drag(m, "a", "c", DropDirection.Bottom);
+        const to = futureOf(m, "b");
+        const future = m.futureLayout();
+        const entry = m.reflowFor("b");
+        // A pointer held on the drop goes on being sampled, more often than the glide is long.
+        for (let waited = 0; waited < REFLOW_SETTLE_MS; waited += 50) {
+            vi.advanceTimersByTime(50);
+            preview(m, "a", "c", DropDirection.Bottom);
+            if (waited + 50 < REFLOW_SETTLE_MS) expect(m.reflowFor("b")).toBe(entry);
+        }
+        expect(m.futureLayout()).toBe(future);
+        expect(m.reflowFor("b")!.box).toEqual(sizeOf(to));
+    });
+
+    it("sizes a pane's content to the tile the reflow lays out, and back to the layout's own size after it", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        const gap = m.gapSizePx();
+        const inner = m.getNodeModel(m.leafs().find((l) => l.id === "b")!).innerRect!;
+        expect(inner()).toEqual({ width: `600px - ${gap}px`, height: `400px - ${gap}px` });
+        drag(m, "a", "c", DropDirection.Bottom);
+        const to = futureOf(m, "b");
+        // Wider at once, so nothing is blank beside it; shorter only when the glide is over.
+        expect(inner()).toEqual({ width: `${to.width}px - ${gap}px`, height: `400px - ${gap}px` });
+        vi.advanceTimersByTime(REFLOW_SETTLE_MS);
+        expect(inner()).toEqual({ width: `${to.width}px - ${gap}px`, height: `${to.height}px - ${gap}px` });
+        m.activeDrag._set(false);
+        expect(inner()).toEqual({ width: `600px - ${gap}px`, height: `400px - ${gap}px` });
+    });
+
     it("never lays a pane out for a candidate that is replaced inside the glide, if it ends at the size it had", () => {
         vi.useFakeTimers();
         // a over (b | c). a on c's bottom makes b and c taller; clearing it inside the glide sends them back.
@@ -291,6 +324,7 @@ describe("the live reflow of a pane drag", () => {
     });
 
     it("holds what terminals tell their programs about size for the drag's length, and lets them fit once at its end", () => {
+        vi.useFakeTimers();
         const m = modelOf(three());
         const fit = vi.fn();
         const onResize = deferWhileSizesHeld(fit);
@@ -300,6 +334,17 @@ describe("the live reflow of a pane drag", () => {
         // The reflow resizes the terminal's tile: its observer fires, and nothing is refitted or sent.
         onResize();
         onResize();
+        expect(fit).not.toHaveBeenCalled();
+        // Another candidate, then none, then a third: the hold is never let go between them.
+        preview(m, "a", "b", DropDirection.Top);
+        vi.advanceTimersByTime(20);
+        onResize();
+        m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        vi.advanceTimersByTime(20);
+        preview(m, "a", "c", DropDirection.Bottom);
+        vi.advanceTimersByTime(REFLOW_SETTLE_MS);
+        onResize();
+        expect(paneSizesHeld()).toBe(true);
         expect(fit).not.toHaveBeenCalled();
         m.activeDrag._set(false);
         expect(paneSizesHeld()).toBe(false);

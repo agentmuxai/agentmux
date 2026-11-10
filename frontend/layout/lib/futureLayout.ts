@@ -94,9 +94,16 @@ function shapeOf(model: LayoutModel): string {
     let shape = "";
     for (const leaf of model.leafs()) {
         const r = props[leaf.id]?.rect;
-        shape += r ? `${leaf.id}:${r.left},${r.top},${r.width},${r.height};` : `${leaf.id};`;
+        shape += r ? `${leaf.id}:${leaf.data?.blockId}:${r.left},${r.top},${r.width},${r.height};` : `${leaf.id};`;
     }
     return shape;
+}
+
+/** Whether two pending actions are the same move: every field alike (ids, an index, the moved node itself). */
+function sameAction(a: LayoutTreeAction, b: LayoutTreeAction): boolean {
+    const [x, y] = [a as unknown as Record<string, unknown>, b as unknown as Record<string, unknown>];
+    const keys = Object.keys(x);
+    return keys.length === Object.keys(y).length && keys.every((k) => x[k] === y[k]);
 }
 
 /**
@@ -110,13 +117,22 @@ function shapeOf(model: LayoutModel): string {
  * instead of holding rects computed from a stale move (#47354).
  */
 export function createPlacementPreview(model: LayoutModel) {
-    const armed = createMemo(() => {
-        const action = model.pendingTreeAction.throttledValueAtom();
-        return action ? { action, shape: untrack(() => shapeOf(model)) } : undefined;
-    });
+    // Every sample of a drag computes its action again and lays the tree out again (placementPreview.ts, the
+    // reducer's `updateTree`): a new action and new rect objects each time, and a pointer held still goes on
+    // being sampled. The same move on the same layout is the same armed drop, so the future layout is computed
+    // once for it.
+    const shape = createMemo(() => shapeOf(model));
+    const armed = createMemo(
+        () => {
+            const action = model.pendingTreeAction.throttledValueAtom();
+            return action ? { action, shape: untrack(shape) } : undefined;
+        },
+        undefined,
+        { equals: (a, b) => a === b || (!!a && !!b && a.shape === b.shape && sameAction(a.action, b.action)) }
+    );
     const futureLayout = createMemo(() => {
         const a = armed();
-        return a && shapeOf(model) === a.shape ? futureLayoutOf(model, a.action) : undefined;
+        return a && shape() === a.shape ? futureLayoutOf(model, a.action) : undefined;
     });
     const placementWireframe = createMemo((): { id: string; style: CSSProperties }[] => {
         const future = futureLayout();

@@ -1,6 +1,6 @@
 # Report: live reflow at real sizes (why the gaps, the design, what it costs)
 
-**Status:** implemented in the PR that adds this file (`frontend/layout/lib/liveReflow.ts`, `frontend/app/platform/pane-size-hold.ts`, `frontend/app/drag/pane-capture-gate.ts`).
+**Status:** implemented in #6951 (`frontend/layout/lib/liveReflow.ts`, `frontend/app/platform/pane-size-hold.ts`, `frontend/app/drag/pane-capture-gate.ts`).
 **Date:** 2026-11-10
 **Scope:** `frontend/layout/lib/` (liveReflow, futureLayout, TileLayout.core, tilelayout-shared), `frontend/app/drag/` (tearoff-snapshot, pane-live-follow, pane-capture-gate), `frontend/app/platform/pane-size-hold.ts`, the terminal resize paths (`frontend/app/view/term/term.tsx`, `frontend/app/view/agent/components/AgentShellSubblock.tsx`, `frontend/app/view/agent/hooks/usePtyWidth.ts`). Revises `docs/specs/SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md` §4, §5, §6 and §9.
 **Question (operator, 2026-11-10, with a screenshot of a drag):** "notice the long extended blank parts extending to the far right. sounds like it may need a rethink? how well structured is the tree?" Then: "lets deep dive into the most performant, efficient design. Also resolve any open questions, write the analysis to file, and then implement".
@@ -54,6 +54,7 @@ For each armed candidate, `futureLayoutOf` already gives every pane's rect after
 - **Size:** `width` and `height` are set at once, with no transition. A size that animated would lay the pane out on every frame.
 - **Shown size:** `clip-path: inset(0 calc(100% - Wpx) calc(100% - Hpx) 0)`, with the same transition as the place. Written from the far edges, the clip shows exactly W by H whatever size the tile is laid out at, so a transition between two of them moves the shown edge in a straight line while the laid-out size steps underneath. Neighbours' edges therefore travel together: no gap opens and nothing overlaps during the glide.
 - **The envelope:** the tile is laid out at the larger, on each axis, of the size it has and the size it gets. Growth is laid out at once and uncovered by the clip. A shrink keeps the larger size under the closing clip and takes its real size `REFLOW_SETTLE_MS` (the glide's length plus 40 ms) after the candidate armed.
+- **The content follows the tile:** a pane's content does not fill its tile by CSS. It is given a width and height computed from the layout's own rect (`innerRect`, `layoutNodeModels.ts`, applied by `block.tsx`). During the reflow that size comes from the tile's laid-out size instead, so the content is laid out with the tile. (The first push of #6951 missed this; see §9.)
 - **No candidate armed:** every tile's target is its own layout rect, with the transition still on, so panes glide back.
 - **The dragged pane** takes its landing rect like the others, unblurred, under the landing zone's tint. It is the drop's own preview, at its real size.
 - **End of the drag:** the entries go, and the plain style (the layout's own rect, no transform transition) takes over in the same batch as the committed tree. After a drop that is the rect the tile already shows. After a cancel it is the rect the drag started from.
@@ -62,7 +63,7 @@ The layout's own rects (`additionalProps().rect`) are untouched, so they stay th
 
 ## 4. What it costs
 
-**Per pointer sample:** nothing new. The candidate tracker runs as before.
+**Per pointer sample:** nothing new. The candidate tracker runs as before, and, as before, each sample computes its move again and the reducer lays the tree out again, so the action and every rect are new objects many times a second, also while the pointer is held still. The reflow compares by value: the same move on the same layout is one armed drop (`futureLayout.ts`), and targets that send every tile to the same place are the same targets (`liveReflow.ts`). So a held pointer computes no future layout, writes no style and lays nothing out.
 
 **Per armed candidate** (a few per second at most: the tracker arms on a slow pointer or after a 120 ms dwell):
 
@@ -131,8 +132,17 @@ See §1: sound, with one redundant single-child root row in the inspected layout
 
 ## 8. Tests
 
-- `liveReflow.test.ts`: every pane's rect is the drop's; the areas tile the layout; growth is laid out at once and a shrink at settle; a replaced candidate costs no layout; panes go back with no candidate; nothing moves during a capture; no timer lets go of a held drop; a layout change under the drag clears the preview and the next sample re-arms; sizes are held for the drag's length and released at its end.
+- `liveReflow.test.ts`: a drop sampled again and again is one candidate and its shrink still settles; a pane's content is sized to the tile the reflow lays out; every pane's rect is the drop's; the areas tile the layout; growth is laid out at once and a shrink at settle; a replaced candidate costs no layout; panes go back with no candidate; nothing moves during a capture; no timer lets go of a held drop; a layout change under the drag clears the preview and the next sample re-arms; sizes are held for the drag's length and released at its end.
 - `TileLayout.core.test.tsx`: the tile's transform, size, clip and transitions; no size transition; the dragged tile unblurred; the blur waits for the capture; everything drops in one step at the end.
 - `pane-size-hold.test.ts`, `pane-capture-gate.test.ts`, `pane-live-follow.test.ts` (cut, never pad), `placeholder.test.tsx` (the landing zone waits for the capture).
+
+## 9. What the first look check found (Linux, 2026-11-10)
+
+The first push gave every tile its real size and passed its tests, and on screen the content still stood at its old size: a blank strip in a pane that grew, a cut-off edge in one that shrank. Two causes, both invisible to the unit tests, which check the tile's style in a DOM with no layout:
+
+1. **The content is not sized by the tile.** It takes an explicit size from the layout's own rect (§3, "the content follows the tile"). Fixed in `layoutNodeModels.ts`: during the reflow the size is the tile's laid-out size.
+2. **The settle never came while the pointer was sampled.** The targets were new objects with every sample, and each new one started the settle timer again, so a tile that shrank kept its larger size for as long as the drag was sampled more often than every 200 ms, which is always. Fixed by comparing by value (§4).
+
+A terminal was therefore never resized by the first push at all, so its hold (§5) passed without being exercised. With the content following the tile it is.
 
 Agent: Agent2@narko

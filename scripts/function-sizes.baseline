@@ -455,7 +455,7 @@
 472 frontend/app/workspace/workspace.tsx::WorkspaceElem
 119 frontend/layout/lib/layoutInvariants.ts::validateLayoutInvariants
 170 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
-175 frontend/layout/lib/layoutNodeModels.ts::getNodeModel
+158 frontend/layout/lib/layoutNodeModels.ts::getNodeModel
 232 frontend/layout/lib/layoutPersistence.ts::handleBackendAction
 138 frontend/layout/lib/layoutResize.ts::onResizeMove
 201 frontend/layout/lib/layoutTree.ts::computeMoveNode
