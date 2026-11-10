@@ -741,6 +741,8 @@ declare global {
         }) => Promise<void>;
         /** Drop the picture now. Idempotent. */
         liveFollowEnd: () => Promise<void>;
+        /** Give the picture another size (DIP): cut or padded from the one first shown, never scaled. A no-op with no picture. */
+        liveFollowResize: (args: { windowWidth: number; windowHeight: number }) => Promise<void>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;

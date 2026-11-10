@@ -429,8 +429,7 @@ async fn route_command(
         "pool_window_ready" => commands::drag::pool_window_ready(state, args),
         "start_tab_drag_tracking" => commands::drag::start_tab_drag_tracking_blocking(state, args).await,
         "stop_tab_drag_tracking" => commands::drag::stop_tab_drag_tracking_blocking().await,
-        "live_follow_begin" => commands::live_follow::begin_blocking(state, args).await,
-        "live_follow_end" => commands::live_follow::end(),
+        "live_follow_begin" | "live_follow_end" | "live_follow_resize" => commands::live_follow::route(cmd, state, args).await,
         "pane_pool_window_ready" => commands::drag::pane_pool_window_ready(state, args),
         "tear_off_sc_move_handshake" => {
             // Wrap in spawn_blocking — the handler polls state.browsers

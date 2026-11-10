@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
-import { glideEntry, REFLOW_MAX_PANES, REFLOW_WATCHDOG_MS, type ReflowEntry } from "@/layout/lib/liveReflow";
+import { glideEntry, landingRectOf, REFLOW_MAX_PANES, REFLOW_WATCHDOG_MS, type ReflowEntry } from "@/layout/lib/liveReflow";
 import {
     DropDirection,
     FlexDirection,
@@ -114,14 +114,27 @@ describe("glideEntry", () => {
             kind: "glide",
             transform: "translate3d(300px,0px, 0)",
             clip: "inset(0px 0px 0px 0px)",
+            moved: false,
         });
-        expect(glideEntry(from, { top: 0, left: 0, width: 300, height: 400 })).toEqual({
+        expect(glideEntry(from, { top: 0, left: 0, width: 300, height: 400 }, true)).toEqual({
             kind: "glide",
             transform: "translate3d(0px,0px, 0)",
             clip: "inset(0px 300px 400px 0px)",
+            moved: true,
         });
         // A larger future rect is not stretched into: the tile shows at its own size until the drop fills it.
         expect(glideEntry(from, { top: 0, left: 0, width: 1200, height: 800 }).clip).toBe("inset(0px 0px 0px 0px)");
+    });
+});
+
+describe("landingRectOf", () => {
+    it("is the dragged pane's rect in the layout the armed drop leaves, and none without a drop", () => {
+        const m = modelOf(three());
+        expect(landingRectOf(m)).toBeUndefined();
+        drag(m, "a", "c", DropDirection.Bottom);
+        // a goes under c, at the column's full width and a third of the height.
+        expect(landingRectOf(m)).toMatchObject({ width: 1200 });
+        expect(landingRectOf(m)!.height).toBeLessThan(400);
     });
 });
 
@@ -140,15 +153,16 @@ describe("the live reflow of a pane drag", () => {
         expect(m.liveReflowActive()).toBe(false);
     });
 
-    it("hides the dragged pane and glides every other pane to its future rect", () => {
+    it("glides every pane to its future rect, the dragged one into its landing rect, so no slot is left empty", () => {
         const m = modelOf(three());
         // a goes under c: the column takes the whole width, b and c each lose height, and a's old slot closes.
         drag(m, "a", "c", DropDirection.Bottom);
         expect(m.liveReflowActive()).toBe(true);
         const got = entries(m, ["a", "b", "c"]);
-        expect(got.a).toEqual({ kind: "hidden" });
+        expect(got.a).toEqual(glideEntry(m.additionalProps()["a"].rect, landingRectOf(m)!, true));
         expect(got.b?.kind).toBe("glide");
         expect(got.c?.kind).toBe("glide");
+        expect([got.b!.moved, got.c!.moved]).toEqual([false, false]);
         // b's future rect is the layout's own rect for b after the same drop: the transform is a translate to its
         // corner, and the crop takes b's current 600 by 400 down to its share of the height (its width grows).
         const future = m.futureLayout()!;
@@ -166,9 +180,18 @@ describe("the live reflow of a pane drag", () => {
         const m = modelOf(row("r", 10, leaf("a"), leaf("b"), leaf("c")));
         drag(m, "a", "b", DropDirection.Right);
         const got = entries(m, ["a", "b", "c"]);
-        expect(got.a).toEqual({ kind: "hidden" });
+        expect(got.a).toMatchObject({ kind: "glide", moved: true });
         expect(got.b?.kind).toBe("glide");
-        expect(got.c).toEqual({ kind: "rest" });
+        expect(got.c).toEqual({ kind: "rest", moved: false });
+    });
+
+    it("leaves every pane at rest, the dragged one in its own slot, when the drop would change nothing", () => {
+        // a | b, and a dropped on b's left: the same layout, which the reducer refuses as a move, so no drop is
+        // shown and nothing glides; a's own slot is never emptied.
+        const m = modelOf(row("r", 10, leaf("a"), leaf("b")));
+        drag(m, "a", "b", DropDirection.Left);
+        expect(m.liveReflowActive()).toBe(false);
+        expect(entries(m, ["a", "b"])).toEqual({ a: { kind: "rest", moved: false }, b: { kind: "rest", moved: false } });
     });
 
     it("glides a pane back to its rest when the next candidate leaves it alone, instead of jumping there", () => {
@@ -185,17 +208,18 @@ describe("the live reflow of a pane drag", () => {
         m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
         vi.advanceTimersByTime(20);
         expect(m.liveReflowActive()).toBe(false);
-        expect(entries(m, ["a", "b", "c", "d"])).toEqual({ a: { kind: "rest" }, b: { kind: "rest" }, c: { kind: "rest" }, d: { kind: "rest" } });
+        const rest = { kind: "rest", moved: false };
+        expect(entries(m, ["a", "b", "c", "d"])).toEqual({ a: rest, b: rest, c: rest, d: rest });
     });
 
-    it("never transforms a browser pane, nor hides a dragged one: a native window does not follow CSS", () => {
+    it("never transforms a browser pane, dragged or not: a native window does not follow CSS", () => {
         const m = modelOf(row("r", 10, leaf("browser-x"), col("col", 10, leaf("b"), leaf("c"))));
         drag(m, "b", "browser-x", DropDirection.Left);
         const got = entries(m, ["browser-x", "b", "c"]);
         expect(got["browser-x"]).toBeUndefined();
-        expect(got.b).toEqual({ kind: "hidden" });
+        expect(got.b).toMatchObject({ kind: "glide", moved: true });
         expect(got.c?.kind).toBe("glide");
-        // The browser pane as the dragged one: it is not hidden either.
+        // The browser pane as the dragged one: it is left where it is too.
         const m2 = modelOf(three());
         m2.treeState.rootNode!.children![0].data!.blockId = "browser-a";
         m2.updateTree();
@@ -213,7 +237,7 @@ describe("the live reflow of a pane drag", () => {
         m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
         vi.advanceTimersByTime(20);
         expect(m.liveReflowActive()).toBe(false);
-        expect(m.reflowFor("b")).toEqual({ kind: "rest" });
+        expect(m.reflowFor("b")).toEqual({ kind: "rest", moved: false });
         drag(m, "a", "c", DropDirection.Bottom);
         vi.advanceTimersByTime(20);
         expect(m.liveReflowActive()).toBe(true);

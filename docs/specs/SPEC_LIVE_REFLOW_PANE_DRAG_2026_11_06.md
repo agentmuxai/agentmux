@@ -47,7 +47,8 @@ Acceptance: a recorded ±3 px oscillation across a diagonal produces at most one
 ## 4. What the user sees, and the motion
 
 - **Others:** each pane glides from its current rect to its future rect with `translate`, and a `clip-path` crop of its right and bottom edges when the future rect is smaller; its content keeps its real size and proportions, and a larger future rect shows the pane at its own size until the drop fills it. (Phase 2 first scaled to the future size; the operator on 2026-11-10: "the other panes have their aspect ratios squashed", so no scale.) Default 180 ms ease-out through the motion tokens (`--duration-*`, `--ease-out`), not a new constant.
-- **The slot:** the dragged pane's own tile is hidden (not blurred in place), and the gap is where it would land. For a pill the gap is empty space with the pill's name on a card (the OS drag image stays under the cursor; §6). On Windows the dragged pane is its own live-follow picture under the cursor from the drag's first move, inside the window too (#6909, operator 2026-11-09: "it should be the entire pane as soon as you start dragging"), so the hidden tile leaves nothing behind.
+- **The slot:** the dragged pane's own tile glides into its landing rect like the others (translate and crop, unblurred), under the landing zone's tint, so the layout never shows an empty slot: where the landing rect is larger than the tile, the tint fills the rest. (Phase 2 first hid the dragged tile and left the gap as the signal; the operator on 2026-11-10, seeing a large landing slot empty behind a small pane in hand: "should there ever be gaps? they should always cover everything, right? ... the dragged pane can change sizes and move, and the other panes must accommodate to the point where there are no empty spots".) For a pill the slot is empty space with the pill's name on a card (the OS drag image stays under the cursor; §6).
+- **The pane in hand (Windows):** the dragged pane is its own live-follow picture under the cursor from the drag's first move, inside the window too (#6909, operator 2026-11-09: "it should be the entire pane as soon as you start dragging"). While a drop is armed the picture takes the landing rect's size, cut or padded from the pane's picture, never scaled, so the pane in hand is the pane as it will land; with no drop armed it is the pane's own size again (operator 2026-11-10: "the floater should change size with the size of the landing site ... the same aspect-ratio correct height"; `pane-live-follow.ts`, `live_follow.rs`).
 - **Retarget in flight:** a new candidate starts the glide from each pane's **current visual rect** (read from the computed matrix), never from its layout rect, or panes jump.
 - **Shared primitives:** the glide is a `move` flight on the motion primitives (`SPEC_MOTION_PRIMITIVES_2026_10_29.md`, Agent1's #8673), with the same preset a pane **closing** uses (#15459, panes glide when one closes), so a close, a drop, a minimize and a drag all move panes the same way. If #15459 has not landed when the build starts, this spec's glide ships first and #15459 reuses it; the two share one `paneGlide` helper and one test.
 - **Reduced motion:** the glide is essential spatial motion (it says where the drop lands), as the ghost's glide already is (`tilelayout.scss`, "essential spatial motion"): it stays, shortened to 90 ms, and never becomes a jump cut.
@@ -108,7 +109,7 @@ So the polish on #26698 is kept small: the stand-in size fix and the visibility 
 
 0. **Measure.** `futureLayoutOf` timing on 2, 4 and 8 panes; candidate switch rate on scripted sweeps; per-frame `SetWindowPos` cost on Windows, macOS and Linux (a spike, with Clare and Maricon for the looks). *Gate: the budgets in §5.*
 1. **Frozen snapshot and the velocity gate** in the tracker (§3), with replayed-trace tests.
-2. **DOM-pane transform reflow**, with the source hidden and the cleanup contract. Counters for terminal `sendTermSize`, `browser_pane_resize` and `ResizeObserver` callbacks are 0 during a scripted drag.
+2. **DOM-pane transform reflow**, with the source gliding into its slot and the cleanup contract. Counters for terminal `sendTermSize`, `browser_pane_resize` and `ResizeObserver` callbacks are 0 during a scripted drag.
 3. **Browser panes** (§5): moves in lockstep, one resize at the end, or the card; with the browser seat.
 4. **Tear-off result in the source** and the pill hole (§2).
 5. **Cross-window** is a separate spec.
@@ -118,7 +119,7 @@ So the polish on #26698 is kept small: the stand-in size fix and the visibility 
 **Decisions (the operator took every recommendation, 2026-11-09):**
 
 1. **Browser panes during the glide:** move in lockstep and resize once at the end (§5.2); the card (§5.3) is the fallback if the per-frame move misses budget on a platform.
-2. **Resized terminals during the glide:** scale. Revised 2026-11-10 after the operator saw the scale squash the panes: crop, never scale (§4).
+2. **Resized terminals during the glide:** scale. Revised 2026-11-10 after the operator saw the scale squash the panes: crop, never scale (§4). The same day, the hidden source became the source gliding into its slot, and the pane in hand took the landing rect's size (§4): no empty slot, ever.
 3. **Join drops:** keep the header glow; the target does not shrink.
 4. **Cross-window reflow** in the destination: a later spec.
 5. **Default:** the flag turns on once phase 2 passes for DOM panes; browser panes stay on the ghost fallback until phase 3.
@@ -130,13 +131,13 @@ So the polish on #26698 is kept small: the stand-in size fix and the visibility 
 | PR | Phase | Content |
 |---|---|---|
 | 1 | 0 and 1 | this spec; the frozen hit-test snapshot and the velocity gate in `dropIntentTracker.ts`; `futureLayoutOf` timing as a test with a budget; replayed-trace tests |
-| 2 | 2 | the DOM-pane transform reflow behind `layout:livereflow`, source hidden, cleanup contract, zero-counters test |
+| 2 | 2 | the DOM-pane transform reflow behind `layout:livereflow`, the source gliding into its slot, the pane in hand sized to the landing, cleanup contract, zero-counters test |
 | 3 | 3 | browser panes in lockstep (with the browser seat), flag default on |
 | 4 | 4 | the tear-off result shown in the source, the pill hole |
 | 5 | zones | the simplified zone model (Camper's `determineDropDirection`), with Camper's review |
 
 ## 10. For Camper (layout and panes seat)
 
-Please review: the frozen snapshot and the tracker change (§3, `dropIntentTracker.ts`, `placementPreview.ts`); the use of `futureLayoutOf` and the blockId key (§6, `futureLayout.ts`, #6396 is yours); the hidden-source treatment and where the transforms are written (`tilelayout-shared.tsx`, `tilelayout.scss`, `layoutModel.ts`); and that the cleanup contract matches how a drag ends in the layout. The reflow needs no change to `layoutTree.ts` or `layoutIntentActions.ts`.
+Please review: the frozen snapshot and the tracker change (§3, `dropIntentTracker.ts`, `placementPreview.ts`); the use of `futureLayoutOf` and the blockId key (§6, `futureLayout.ts`, #6396 is yours); the source's glide into its slot and where the transforms are written (`tilelayout-shared.tsx`, `tilelayout.scss`, `layoutModel.ts`); and that the cleanup contract matches how a drag ends in the layout. The reflow needs no change to `layoutTree.ts` or `layoutIntentActions.ts`.
 
 Agent: Agent2@narko
