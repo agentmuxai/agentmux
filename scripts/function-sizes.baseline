@@ -408,7 +408,7 @@
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 232 frontend/app/view/agent/useAgentStream.ts::useAgentStream
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
-123 frontend/app/view/audit/audit-manager.tsx::AuditManager
+115 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
 394 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync

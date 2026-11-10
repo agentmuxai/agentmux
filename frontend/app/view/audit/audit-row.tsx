@@ -38,7 +38,7 @@ export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: s
     };
 
     return (
-        <li class="audit-row" data-variant={failed() ? "err" : "ok"} data-kind={props.entry.kind} data-lit={props.lit ? "true" : undefined}>
+        <li class="audit-row" data-row-id={props.entry.id} data-variant={failed() ? "err" : "ok"} data-kind={props.entry.kind} data-lit={props.lit ? "true" : undefined}>
             <Tooltip divClassName="audit-row-time" content={new Date(props.entry.ts_ms).toLocaleString()}>
                 {formatAge(ageMs(props.entry.ts_ms, props.now))} ago
             </Tooltip>

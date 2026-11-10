@@ -68,31 +68,66 @@ export function litRowId(entries: readonly AuditEntry[], sounds: readonly Played
     return undefined;
 }
 
+/** The line "♪ agent · Bash · 4s ago": who is left out when unknown. */
+export function soundText(sound: PlayedSound, who: string | undefined, now: number): string {
+    const what = sound.tool ?? SOUNDS[sound.event as keyof typeof SOUNDS]?.label ?? sound.event;
+    return `♪ ${[who, what, `${formatAge(ageMs(sound.at, now))} ago`].filter(Boolean).join(" · ")}`;
+}
+
+/** The newest sound, if it played in the last minute: what the Audit's bar and the status bar's item show. */
+export function lastSound(sounds: readonly PlayedSound[], now: number): PlayedSound | undefined {
+    const sound = sounds.at(-1);
+    return sound && now - sound.at <= LAST_SOUND_MS ? sound : undefined;
+}
+
 /** What the last sound was, for the line "♪ agent · Bash · 4s ago", and the pane to reveal; none after a minute. */
 export function lastSoundLine(entries: readonly AuditEntry[], sounds: readonly PlayedSound[], now: number): { text: string; blockId: string } | null {
-    const sound = sounds.at(-1);
-    if (!sound || now - sound.at > LAST_SOUND_MS) return null;
+    const sound = lastSound(sounds, now);
+    if (!sound) return null;
     const row = rowOf(entries, sound);
     const who = row ? (row.kind === "jekt" ? row.to?.agent_id : row.agent_id) : undefined;
-    const what = sound.tool ?? SOUNDS[sound.event as keyof typeof SOUNDS]?.label ?? sound.event;
-    return { text: `♪ ${[who, what, `${formatAge(ageMs(sound.at, now))} ago`].filter(Boolean).join(" · ")}`, blockId: sound.blockId };
+    return { text: soundText(sound, who, now), blockId: sound.blockId };
+}
+
+/** The kind of row a sound comes from, so the Audit can show that kind when it is asked for one. */
+export function kindOfSound(event: PlayedSound["event"]): string | undefined {
+    if (event === "tool") return "tool";
+    if (event.startsWith("agent.turn.")) return "turn";
+    if (event.startsWith("agent.message.")) return "jekt";
+    return undefined;
+}
+
+/** A sound as the Audit pane's `audit:sound` meta carries it: "block|event|at|ask". `ask` is the time of the ask,
+ *  so asking for the same sound again changes the meta and the Audit looks again. */
+export function encodeSoundRef(sound: PlayedSound, asked = Date.now()): string {
+    return [sound.blockId, sound.event, sound.at, asked].join("|");
+}
+
+export type SoundRef = PlayedSound & { asked: number };
+
+export function parseSoundRef(raw: unknown): SoundRef | undefined {
+    if (typeof raw !== "string") return undefined;
+    const [blockId, event, at, asked] = raw.split("|");
+    if (!blockId || !event || !Number.isFinite(Number(at))) return undefined;
+    return { blockId, event: event as PlayedSound["event"], at: Number(at), asked: Number(asked) || 0 };
 }
 
 /** What this window played, as a signal for as long as the caller lives. */
-function usePlayedSounds(): Accessor<readonly PlayedSound[]> {
+export function usePlayedSounds(): Accessor<readonly PlayedSound[]> {
     const [sounds, setSounds] = createSignal(recentSounds());
     onCleanup(subscribePlayedSounds(() => setSounds(recentSounds())));
     return sounds;
 }
 
 /** The Audit's reading of what played: which rows show a speaker, which one is lit, and the last sound's line. */
-export function createAuditSounds(entries: Accessor<readonly AuditEntry[]>, now: Accessor<number>) {
+export function createAuditSounds(entries: Accessor<readonly AuditEntry[]>, now: Accessor<number>, focused: Accessor<string | undefined> = () => undefined) {
     const badge = (entry: AuditEntry): boolean => {
         const sound = soundFor(entry);
         return sound !== null && soundIsOn(sound);
     };
     const sounds = usePlayedSounds();
-    const lit = createMemo(() => litRowId(entries(), sounds(), now()));
+    // The row a sound just came from, or the one the status bar's "last sound" asked to see.
+    const lit = createMemo(() => litRowId(entries(), sounds(), now()) ?? focused());
     const last = createMemo(() => lastSoundLine(entries(), sounds(), now()));
     return { badge, lit, last };
 }

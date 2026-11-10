@@ -5,7 +5,7 @@
 // and end, read from `audit.query` a page at a time with filters, and below it what agents did with the
 // person's secrets (vault-secrets.tsx). The list and how new entries reach it are audit-list.ts.
 
-import { createEffect, createMemo, createSignal, on, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { createMemo, createSignal, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
 import { Button, FilterInput, Select, SegmentedControl } from "@/app/element/ui";
@@ -14,7 +14,10 @@ import { AuditFeed } from "./audit-feed";
 import { AuditKindChips } from "./audit-kind-chips";
 import { AuditLiveBar } from "./audit-live-bar";
 import { createAuditList } from "./audit-list";
-import { createAuditSounds } from "./audit-sound";
+import { followAgentProp } from "./audit-agent-prop";
+import { createAuditSoundsAt } from "./audit-focus";
+import { revealSoundRow } from "./audit-reveal";
+import type { SoundRef } from "./audit-sound";
 import {
     emptyFilter,
     notRecordedNote,
@@ -30,7 +33,7 @@ import "./audit-manager.scss";
 
 const TYPING_PAUSE_MS = 250;
 
-export const AuditManager = (props: { paneBlockId: string; visible?: boolean; agent?: string }): JSX.Element => {
+export const AuditManager = (props: { paneBlockId: string; visible?: boolean; agent?: string; sound?: SoundRef }): JSX.Element => {
     const [filter, setFilter] = createSignal<AuditFilter>(emptyFilter(props.agent ?? ""));
     // What is typed in the two text boxes shows at once; the filter (and so a query, which makes srv rescan the
     // file for totals) follows once typing pauses.
@@ -41,25 +44,17 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     let body: HTMLDivElement | undefined; // the pane's scrolling body: the newest entries are at its top
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
-    const sounds = createAuditSounds(list.entries, now);
     const jumpToNewest = () => {
         list.showNewest();
         body?.scrollTo?.({ top: 0 });
     };
 
-    // The pane's `audit:agent` changing (the Swarm's "Audit for this agent") sets the filter, which starts the list over.
-    createEffect(
-        on(
-            () => props.agent,
-            (agent) => {
-                if (agent === undefined) return;
-                setAgentText(agent);
-                setFilter({ ...untrack(filter), agent });
-            },
-            { defer: true }
-        )
-    );
+    followAgentProp(() => props.agent, filter, setFilter, setAgentText);
     const set = (patch: Partial<AuditFilter>) => setFilter({ ...filter(), ...patch });
+    const sounds = createAuditSoundsAt(list.entries, now, () => props.sound, {
+        showKind: revealSoundRow(filter, setFilter, () => (setAgentText(""), setSearchText("")), list.showNewest),
+        body: () => body,
+    });
     const typed = () => {
         if (typing !== undefined) clearTimeout(typing);
         typing = setTimeout(() => {
