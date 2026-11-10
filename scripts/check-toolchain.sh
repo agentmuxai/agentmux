@@ -20,6 +20,8 @@
 # Windows in the first place.
 set -u
 
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+
 case "$(uname -s)" in
   Darwin) OS_NAME=macos ;;
   Linux) OS_NAME=linux ;;
@@ -63,6 +65,16 @@ check() {
   local raw
   raw="$("$cmd" --version 2>/dev/null | head -1)"
 
+  # A tool that cannot even print its version is not usable, whatever its name
+  # resolves to: a WinGet "Links" alias is on PATH but native programs cannot
+  # start it, which is how a broken ninja used to pass as OK (Kanban #31442).
+  if [ -z "$raw" ]; then
+    echo "  UNUSABLE  $name — '$cmd --version' produced no output"
+    echo "            $instructions"
+    FAIL=1
+    return
+  fi
+
   if [ -z "$min" ]; then
     echo "  OK   $name — $raw"
     return
@@ -103,7 +115,20 @@ case "$OS_NAME" in
   windows)
     check "rust (cargo)" cargo "1.77" "https://rustup.rs/ (rustup-init.exe), then install Visual Studio Build Tools with the 'Desktop development with C++' workload, or: rustup update"
     check "cmake" cmake "3.20" "Ships with Visual Studio Build Tools — install the 'Desktop development with C++' workload from https://visualstudio.microsoft.com/visual-cpp-build-tools/"
-    check "ninja" ninja "1.10" "Ships with Visual Studio but is not always on PATH — see CLAUDE.md's Build Prerequisites section for the exact copy command"
+    # ensure-ninja.sh knows the WinGet "Links" alias trap: native CMake cannot
+    # start that symlink, so `task dev` used to fail deep in cef-dll-sys with
+    # exit status 58 (Kanban #31442). It names the real ninja task dev will use.
+    if NINJA_LINE=$(sh "$SCRIPT_DIR/ensure-ninja.sh" --check); then
+      printf '%s\n' "$NINJA_LINE"
+      NINJA_VERSION=$(extract_version "$(printf '%s\n' "$NINJA_LINE" | head -1)")
+      if [ -n "$NINJA_VERSION" ] && ! version_ge "$NINJA_VERSION" "1.10"; then
+        echo "  TOO OLD  ninja — found $NINJA_VERSION, need >=1.10"
+        FAIL=1
+      fi
+    else
+      printf '%s\n' "$NINJA_LINE"
+      FAIL=1
+    fi
     # Only `task package` needs it (the portable is a .7z), so a note, not a
     # failure. Looked for where package-portable.sh looks.
     if command -v 7z >/dev/null 2>&1 || command -v 7za >/dev/null 2>&1 || [ -x "${PROGRAMFILES:-C:/Program Files}/7-Zip/7z.exe" ]; then

@@ -980,6 +980,13 @@ jobs:
       - name: prune-dev-builds self-test
         run: bash scripts/prune-dev-builds.test.sh
 
+      # `task dev` on Windows used to die inside cef-dll-sys with exit status 58
+      # because WinGet's ninja "Links" alias is a symlink native CMake cannot
+      # start, and a failed configure had cached it in CMakeCache.txt. Fake
+      # uname/PATH let this run anywhere. Kanban #31442
+      - name: ensure-ninja self-test
+        run: bash scripts/ensure-ninja.test.sh
+
       # bundle:windows refuses a CEF runtime that isn't the pinned tracer-off
       # build (a tracer-on libcef.dll deadlocks the app at a random later
       # moment). These are the ways that guard could wrongly pass.

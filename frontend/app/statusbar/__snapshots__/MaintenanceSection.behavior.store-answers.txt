@@ -30,7 +30,9 @@ host storeUpdateCheck
     "Maintenance"
   <div class="maintenance-update-row">
     <span class="maintenance-row-text maintenance-row-text--dim">
-      "The Microsoft Store has no newer version (checked <time>)"
+      "v0.59.27 is published, but the Microsoft Store hasn't listed it for this PC yet (checked <time>). This can take a while after the Store certifies a release."
+    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+      "Open Store page"
     <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
       "Check for update"
 rpc AppUpdateStatus
