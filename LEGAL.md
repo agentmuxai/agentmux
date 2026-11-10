@@ -2,11 +2,11 @@
 
 ## Corporate Entity
 
-AgentMux is developed and maintained by **AgentMux Corp.**, a corporation incorporated in the State of Delaware.
+AgentMux is developed and maintained by **AgentMux Corp**, a corporation incorporated in the State of Delaware.
 
 | | |
 |---|---|
-| **Legal name** | AgentMux Corp. |
+| **Legal name** | AgentMux Corp |
 | **Jurisdiction** | Delaware, United States |
 
 ## Contact
