@@ -543,7 +543,7 @@ fn reveal_top_level_window(
         // reveal_gated_window, whichever path below resolves it. Fired once
         // per arm regardless of which sub-path (early-signal vs timeout)
         // ends up resolving, by sitting above both.
-        crate::launcher_ipc::report_startup_stage_begin("paint", "Window paint");
+        super::startup_paint::report_begin_once();
         // The real paint signal can race ahead of this call (see
         // handle_first_paint_signal) — if it already arrived, reveal
         // immediately instead of arming a gate + safety timeout for a paint
@@ -1044,6 +1044,10 @@ impl AgentMuxHandler {
             }
         }
 
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        if !self.is_browser_pane && !is_permanent_load_error(error_code_i32) {
+            super::startup_paint::report_load_retry(&error_text);
+        }
         show_load_error_page(frame, &failed_url, error_code_i32, &error_text, self.is_browser_pane);
     }
 }
