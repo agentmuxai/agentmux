@@ -108,10 +108,11 @@ pub async fn inject_identity_env_async(
     broker: Option<Arc<Broker>>,
     block_id: String,
     env_vars: HashMap<String, String>,
+    own_claude_endpoint: bool,
 ) -> Result<HashMap<String, String>, SpawnGateError> {
     match tokio::task::spawn_blocking(move || {
         let mut env = env_vars;
-        inject_identity_env_with_broker(mstore, id_store, identity_store, broker, &block_id, &mut env)
+        inject_identity_env_for_spawn(mstore, id_store, identity_store, broker, &block_id, &mut env, own_claude_endpoint)
             .map(|()| env)
     })
     .await
@@ -498,6 +499,25 @@ pub fn inject_identity_env_with_broker(
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
 ) -> Result<(), SpawnGateError> {
+    inject_identity_env_for_spawn(mstore, id_store, identity_store, broker, block_id, env_vars, false)
+}
+
+/// [`inject_identity_env_with_broker`] for a spawn that may bring its own Claude endpoint.
+/// `own_claude_endpoint` is true for a Claude Code agent whose environment names a model server of its
+/// own (`spawn_env::endpoint`): the person's Claude account is discarded for that agent and its own
+/// authentication (a Vault key opened to it, or a placeholder) is put in after this step, so the
+/// account is neither injected nor required: an unlinked agent, or one whose account no longer
+/// resolves, is not refused for it. Every other check stays: the instance lookup, other providers'
+/// bindings, and the deleted-agent check at the gate's exit.
+pub fn inject_identity_env_for_spawn(
+    mstore: Arc<Store>,
+    id_store: Arc<Store>,
+    identity_store: Arc<Store>,
+    broker: Option<Arc<Broker>>,
+    block_id: &str,
+    env_vars: &mut HashMap<String, String>,
+    own_claude_endpoint: bool,
+) -> Result<(), SpawnGateError> {
     // Step 1: instance lookup — per-channel, always reads from mstore.
     let instance = match mstore.instance_get_active_for_block(block_id) {
         Ok(Some(i)) => i,
@@ -537,11 +557,16 @@ pub fn inject_identity_env_with_broker(
         injected_oauth: std::collections::HashSet::new(),
     };
     for binding in &bindings {
+        // The Claude account is discarded for an agent on its own endpoint: not injected, not required.
+        if own_claude_endpoint && resolve_provider_alias(&binding.provider) == "claude" {
+            continue;
+        }
         injector.inject(binding, env_vars)?;
     }
 
     // Step 5: the definition-provider gate (spec §2.2 edge case).
-    if !on_route { steps::gate_unbound_provider(def_provider, &injector.injected_oauth, &bindings, &identity_store, &instance, &parent_template_id)?; }
+    let brings_own_login = on_route || (own_claude_endpoint && def_provider.as_deref() == Some("claude"));
+    if !brings_own_login { steps::gate_unbound_provider(def_provider, &injector.injected_oauth, &bindings, &identity_store, &instance, &parent_template_id)?; }
 
     // #3577, re-checked at the gate's own exit.
     steps::recheck_agent_not_deleted(&mstore, &instance)
@@ -1569,6 +1594,62 @@ mod tests {
             Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: true }),
         );
         assert!(env.is_empty());
+    }
+
+    #[test]
+    fn an_unlinked_claude_agent_on_its_own_endpoint_is_not_refused_for_the_account() {
+        // #31509: the account's login is discarded for an agent on a model server of its own, so an agent with
+        // no linked Claude account launches; the same agent without an endpoint is refused (the canary below).
+        let store = make_store();
+        let mut def = gate_def(0);
+        store.agent_def_insert(&mut def).unwrap();
+        insert_block_for_agent(&store, "block-own-1", "def-1");
+        store.instance_create(&make_instance("block-own-1", "id-own")).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env_for_spawn(store.clone(), store.clone(), store.clone(), None, "block-own-1", &mut env, true);
+        assert_eq!(res, Ok(()));
+        assert!(env.is_empty(), "no account's login was put in");
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env_for_spawn(store.clone(), store.clone(), store, None, "block-own-1", &mut env, false);
+        assert_eq!(res, Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }));
+    }
+
+    #[test]
+    fn a_claude_agent_on_its_own_endpoint_is_not_refused_for_an_account_that_no_longer_resolves() {
+        let store = make_store();
+        let mut def = gate_def(0);
+        store.agent_def_insert(&mut def).unwrap();
+        let claude = make_account("acct-own-gone", "claude", SecretRef::OAuthConfigDir { dir: test_config_dir("id-own2") });
+        store.identity_upsert(&claude).unwrap();
+        store.agent_identity_link("def-1", "acct-own-gone", "claude").unwrap();
+        delete_account_row_keep_link(&store, "acct-own-gone");
+        insert_block_for_agent(&store, "block-own-2", "def-1");
+        store.instance_create(&make_instance("block-own-2", "id-own2")).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env_for_spawn(store.clone(), store.clone(), store.clone(), None, "block-own-2", &mut env, true);
+        assert_eq!(res, Ok(()));
+        assert!(env.is_empty());
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env_for_spawn(store.clone(), store.clone(), store, None, "block-own-2", &mut env, false);
+        assert_eq!(res, Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: true }));
+    }
+
+    #[test]
+    fn a_deleted_agent_is_refused_even_on_its_own_endpoint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = store_with_def_registry(&tmp);
+        let mut def = crate::backend::storage::agents::test_agent_def("agent-own-deleted", "Gone", "claude", "agent", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        assert!(store.agent_def_delete("agent-own-deleted").unwrap());
+        insert_block_for_agent(&store, "block-own-3", "agent-own-deleted");
+
+        let mut env = HashMap::new();
+        let res = inject_identity_env_for_spawn(store.clone(), store.clone(), store, None, "block-own-3", &mut env, true);
+        assert_eq!(res, Err(SpawnGateError::AgentDeleted { agent_id: "agent-own-deleted".to_string() }));
     }
 
     #[test]

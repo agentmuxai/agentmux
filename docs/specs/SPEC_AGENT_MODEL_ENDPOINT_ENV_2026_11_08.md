@@ -53,6 +53,9 @@ own environment still wins:
   are removed, `CLAUDE_CONFIG_DIR` is a private directory per agent (so the shared sign-in file is not
   read), and the agent's own key (or the `agentmux-no-key` placeholder) is set. A step that fails
   strips the account variables rather than leave them in.
+- The identity step does not require the Claude account for such an agent (#31509): the account is
+  not injected and the "no account bound" and "account no longer resolves" refusals do not apply, as
+  for a model route. Other providers' bindings, the instance lookup and the deleted-agent check stay.
 - `agent_runtime.rs` replaces srv's nominal `--model`/`--effort` with the endpoint's model
   (`ANTHROPIC_MODEL`, else the tier alias from `ANTHROPIC_DEFAULT_*_MODEL`).
 - The first switch away from Anthropic starts a fresh conversation, because the config directory changes.
