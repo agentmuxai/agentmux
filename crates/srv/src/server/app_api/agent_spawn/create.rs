@@ -45,15 +45,9 @@ pub(super) fn find_template(state: &AppState, wanted: &str) -> Result<AgentDefin
         })
 }
 
-fn message(leader: &str, name: &str, template: &str, placement: &Placement, account: Option<&WorkerAccount>, route_line: &str) -> String {
+fn message(template: &str, placement: &Placement, account: Option<&WorkerAccount>, route_line: &str) -> String {
     let on = account.map(|a| format!(" on the account {}", one_line(&a.label, 80))).unwrap_or_default();
-    format!(
-        "{} wants to add a new agent to My Agents: {}, from the template {}{}{on}.{route_line} It is not started until someone starts it. Add it?",
-        one_line(leader, 60),
-        one_line(name, 60),
-        one_line(template, 60),
-        placement.describe(),
-    )
+    format!("A new agent in My Agents, from the template {}{}{on}.{route_line} It is not started until someone starts it.", one_line(template, 60), placement.describe())
 }
 
 /// The route and model a created agent is asked to run on. A created agent has no leader to inherit from; the
@@ -94,21 +88,8 @@ async fn create(state: &AppState, caller: Option<&crate::server::caller::Caller>
     };
     let route_line = picked.as_ref().map(crate::backend::model_gateway::ask::consent_line).unwrap_or_default();
 
-    let provenance = blockcontroller::get_controller(&leader.block_id).and_then(|c| c.turn_provenance());
-    let asked_user = if crate::sagas::self_quit::gate(provenance.as_ref(), &req.user_instruction).is_err() || picked.is_some() {
-        tracing::info!(leader = %leader.def.name, "agent.create: asking the user");
-        let question = json!({
-            "kind": "consent",
-            "title": format!("{} wants to add an agent", one_line(&leader.def.name, 60)),
-            "message": message(&leader.def.name, name, &template.name, &placement, account.as_ref(), &route_line),
-            "checkbox": "",
-            "ok_label": "Add it",
-            "cancel_label": "Don't",
-        });
-        ask_consent(state, &leader, question, "an agent", "the agent").await?
-    } else {
-        false
-    };
+    let headline = format!("{} is adding an agent, {}", one_line(&leader.def.name, 60), one_line(name, 60));
+    let asked_user = announce_start(state, &leader, &req.user_instruction, picked.is_some(), headline, message(&template.name, &placement, account.as_ref(), &route_line), "").await?;
 
     let mut made = make(state, &leader, &template, name, &placement, account.as_ref(), asked_user)?;
     if let Some(p) = picked {

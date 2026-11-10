@@ -198,25 +198,37 @@ pub(crate) async fn handle_google_gmail(
     }
 }
 
-/// The person's yes or no, asked in the host's approval window over the agent's own pane: a window
-/// no agent can click (`connections::ask_user`). With no window connected, or no pane for the agent,
-/// there is no one to ask and nothing is done.
+/// Tells the person in the agent's own pane that it is about to act, with a countdown that goes ahead
+/// on its own (`agent_notice`): they can stop it, hurry it, or say "Always" for this agent. With no
+/// pane for the agent there is nowhere to tell them and nothing is done.
 struct HostApprover<'a> {
     state: &'a AppState,
 }
 
 impl Approver for HostApprover<'_> {
-    async fn ask(&self, def: &AgentDefinition, title: String, message: String, yes: &str, no: &str) -> Result<Answer, String> {
+    async fn ask(&self, def: &AgentDefinition, title: String, message: String, _yes: &str, _no: &str) -> Result<Answer, String> {
+        use crate::sagas::agent_notice::{self, Kind, Notice, Outcome};
         let block = super::app_api::agent_block::find_agent_block_by_uid(&self.state.mstore, &def.id)?
-            .ok_or("you have no pane open to ask the person in, so this can't be approved")?
+            .ok_or("you have no pane open to tell the person in, so this can't go ahead")?
             .block
             .oid;
-        let question = json!({ "kind": "consent", "title": title, "message": message, "checkbox": "", "ok_label": yes, "cancel_label": no });
-        let answer = super::app_api::connections::ask_user(self.state, &block, question).await?;
-        Ok(match (answer.answered, answer.approve) {
-            (true, true) => Answer::Yes,
-            (true, false) => Answer::No,
-            _ => Answer::Unanswered,
+        let notice = Notice {
+            kind: Kind::Google,
+            block_id: block.clone(),
+            agent_id: def.id.clone(),
+            agent: def.name.clone(),
+            connection: String::new(),
+            headline: title,
+            body: message,
+            quote: String::new(),
+            always_label: format!("Always allow {} to do this", super::app_api::connections::one_line(&def.name, 40)),
+            waived: None,
+        };
+        let outcome = agent_notice::announce(self.state, notice, || super::app_api::agent_spawn::requester_here(self.state, &block)).await;
+        Ok(match outcome {
+            Outcome::Go(_) => Answer::Yes,
+            Outcome::Stopped => Answer::No,
+            Outcome::Gone => Answer::Unanswered,
         })
     }
 }
