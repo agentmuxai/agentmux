@@ -175,8 +175,11 @@ async fn a_copy_of_an_older_certificate_cannot_move_a_pin_back_to_a_retired_key(
     let new_cert = cert(&sender, "maop-b", &new, now() + 5);
     move_if_vouched(&state, "maop-b", &new, Some(&new_cert), "automatic", false).await.unwrap();
 
+    // The old key is refused as retired; and the copy of its certificate is older than the pin on its own account.
     let err = move_if_vouched(&state, "maop-b", &old, Some(&old_cert), "automatic", true).await.unwrap_err();
-    assert!(err.contains("older than the pin"), "{err}");
+    assert!(err.contains("was retired on"), "{err}");
+    let (_, since) = state.mstore.lan_peer_pubkey_pin_since("maop-b").unwrap().unwrap();
+    assert_eq!(check_cert(&old_cert, "maop-b", &old, since, now()), Err("the certificate is older than the pin it would replace"));
     assert_eq!(pinned(&state, "maop-b"), BASE64.encode(new));
 }
 
@@ -199,7 +202,8 @@ async fn with_the_hosts_clock_ahead_an_older_certificate_still_cannot_move_the_p
     assert_eq!(since, new_cert.issued_at, "the pin is kept from the time of the certificate that moved it");
 
     let err = move_if_vouched(&state, "maop-c", &old, Some(&old_cert), "automatic", true).await.unwrap_err();
-    assert!(err.contains("older than the pin"), "{err}");
+    assert!(err.contains("was retired on"), "{err}");
+    assert_eq!(check_cert(&old_cert, "maop-c", &old, since, now()), Err("the certificate is older than the pin it would replace"));
     assert_eq!(pinned(&state, "maop-c"), BASE64.encode(new));
 }
 
@@ -535,4 +539,9 @@ async fn a_message_signed_with_a_retired_key_is_refused_as_retired_with_the_reas
     assert_eq!(pinned(&state, "maop-r1"), BASE64.encode(new));
     let why = lan_refusals::get("maop-r1").unwrap().why.unwrap();
     assert!(why.contains("was retired on") && why.contains(&vouch.instance_id), "{why}");
+
+    // The route an agent adopts through asks for the move itself, and gets the same answer.
+    let err = move_if_vouched(&state, "maop-r1", &old, Some(&cert(&sender, "maop-r1", &old, now() + 11)), "AgentX", true).await.unwrap_err();
+    assert!(err.contains("was retired on"), "{err}");
+    assert_eq!(pinned(&state, "maop-r1"), BASE64.encode(new));
 }

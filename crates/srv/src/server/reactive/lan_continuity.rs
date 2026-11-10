@@ -69,10 +69,6 @@ pub(crate) fn issue_cert(state: &AppState, agent: &str, public_key_b64: &str) ->
 /// else record why it stays refused. `true` means carry on verifying under the (moved) pin.
 pub(super) async fn on_mismatch(state: &AppState, claimed: &str, observed_key: &[u8]) -> bool {
     let cert = state.lan_discovery.cached_lan_cert(claimed);
-    if let Some(why) = retired_reason(state, claimed, observed_key) {
-        super::lan_refusals::pin_mismatch_with(claimed, &BASE64.encode(observed_key), cert, Some(why));
-        return false;
-    }
     match move_if_vouched(state, claimed, observed_key, cert.as_ref(), "automatic", false).await {
         Ok(_) => true,
         Err(why) => {
@@ -208,6 +204,10 @@ pub(crate) async fn move_if_vouched(
 ) -> Result<Path, String> {
     let now = agentmux_common::time::now_secs();
     let observed_b64 = BASE64.encode(observed_key);
+    // A key the name moved off is not taken back, whoever asks and whatever certificate comes with it.
+    if let Some(why) = retired_reason(state, agent, observed_key) {
+        return Err(why);
+    }
     // Per certifying install too: one install's refusal says nothing of another's certificate for the same key.
     let marker = (agent.to_lowercase(), format!("{observed_b64}|{}", cert.map_or("", |c| c.instance_id.as_str())));
     // Asked a moment ago and not vouched: say the same reason again, without asking again.
