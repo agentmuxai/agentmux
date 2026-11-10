@@ -560,9 +560,7 @@ function BlockFrame_Header(
     const [headerHovering, setHeaderHovering] = createSignal(false);
     let headerRef: HTMLDivElement | undefined;
     useHeaderFit(() => headerRef);
-    // The header's one horizontal range (#29325, SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md):
-    // tabs and their "+", the pane's inline header elements, the grip and the aux controls
-    // scroll together; the window controls stay pinned to the right.
+    // One horizontal range (#29325, SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md); the window controls stay pinned.
     const headerScroll = useHeaderScrollRange(() => headerRef);
     const viewName = createMemo(() => {
         const bd = blockData();
@@ -789,8 +787,6 @@ function BlockFrame_Header(
                     </div>
                 </Show>
             </div>
-            {/* Takes the free room while the header fits, so the tabs stay at the left
-                and the grip and aux controls at the right, as they always were. */}
             <div class="block-frame-header-spacer" aria-hidden="true" />
             {/* The pane's grip, outside the scrolling tab strip, just left of
                 the pane controls. The header's whole-pane drag is vetoed for a
