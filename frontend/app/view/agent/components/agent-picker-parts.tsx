@@ -9,6 +9,8 @@ import { CardGrid } from "@/app/element/ui/CardGrid";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
 import { Menu } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { Show, type JSX } from "solid-js";
 import { isAgentInstalling } from "../install-sessions";
@@ -25,10 +27,7 @@ import type { AgentPickerProps, AgentPickerState } from "./agent-picker-state";
  * (SPEC_ISOLATED_INSTALL_FOR_NON_NPM_CLIS_2026_11_05.md §4). */
 const ManagedCliNote = (): JSX.Element => (
     <p class="agent-picker-templates-hint" data-testid="agent-templates-managed-note">
-        AgentMux installs and runs its own copy of each agent CLI, kept apart from any you installed
-        yourself (to run yours instead, switch on "Use the CLI on my PATH" for it in Toolchain), and
-        keeps each agent's login and settings in its own folders. This isolates the tools, not what an
-        agent can do on your computer.
+        {t("agentPicker.templates.managedNote")}
     </p>
 );
 
@@ -47,9 +46,9 @@ export function EmptyPicker(part: { s: AgentPickerState }): JSX.Element {
             <Show when={!definitionsLoading()}>
                 <div class="agent-picker-empty">
                     <div class="agent-picker-empty-icon">{"\u2726"}</div>
-                    <div class="agent-picker-empty-title">No definitions configured</div>
+                    <div class="agent-picker-empty-title">{t("agentPicker.empty.title")}</div>
                     <div class="agent-picker-empty-desc">
-                        Use the ⚙ Agent settings to add your first definition.
+                        {t("agentPicker.empty.desc")}
                     </div>
                 </div>
             </Show>
@@ -103,11 +102,10 @@ function TemplatesTier(part: { s: AgentPickerState; props: AgentPickerProps }): 
     return (
         <>
             <div class="agent-picker-templates-header" data-testid="agent-templates-header">
-                <span>New Agent</span>
+                <span>{t("agentPicker.templates.header")}</span>
             </div>
             <p class="agent-picker-templates-hint" data-testid="agent-templates-hint">
-                Each card is a <strong>harness</strong> (the CLI that runs the agent, e.g. Claude Code,
-                Codex) — you'll pick which <strong>model</strong> it uses next.
+                <Rich k="agentPicker.templates.hint" />
             </p>
             <ManagedCliNote />
             <AgentCardFilters
@@ -123,7 +121,7 @@ function TemplatesTier(part: { s: AgentPickerState; props: AgentPickerProps }): 
                     §5.7): a card's panel opens below its row. */}
                 <CardGrid
                     class="agent-picker-list"
-                    ariaLabel="New agent"
+                    ariaLabel={t("agentPicker.templates.gridLabel")}
                     items={templates.shownTemplates()}
                     keyOf={(agent) => agent.id}
                     minCardWidth={240}
@@ -182,7 +180,7 @@ function LaunchNotices(part: { s: AgentPickerState }): JSX.Element {
                         <i class="fa-solid fa-circle-exclamation" />
                     </div>
                     <div class="nodejs-notice-content">
-                        <div class="nodejs-notice-title">Launch aborted</div>
+                        <div class="nodejs-notice-title">{t("agentPicker.notices.launchAborted")}</div>
                         <div class="nodejs-notice-text">{launch.launchError()}</div>
                     </div>
                     {/* SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 6 — no existing action row here, so an inline icon. */}
@@ -190,7 +188,7 @@ function LaunchNotices(part: { s: AgentPickerState }): JSX.Element {
                         variant="icon"
                         className="agent-nodejs-notice-copy"
                         report={() =>
-                            formatErrorReport({ title: "Launch aborted", message: launch.launchError() ?? "" })
+                            formatErrorReport({ title: t("agentPicker.notices.launchAborted"), message: launch.launchError() ?? "" })
                         }
                     />
                 </div>
@@ -201,10 +199,10 @@ function LaunchNotices(part: { s: AgentPickerState }): JSX.Element {
                         <i class="fa-solid fa-circle-exclamation" />
                     </div>
                     <div class="nodejs-notice-content">
-                        <div class="nodejs-notice-title">Node.js Required</div>
+                        <div class="nodejs-notice-title">{t("agentPicker.notices.nodeRequired")}</div>
                         <div class="nodejs-notice-text">{launch.nodejsError()}</div>
                         <div class="nodejs-notice-hint">
-                            After installing, restart AgentMux and try again.
+                            {t("agentPicker.notices.nodeHint")}
                         </div>
                     </div>
                 </div>
@@ -221,10 +219,10 @@ function TemplateMenu(part: { s: AgentPickerState }): JSX.Element {
             {(m) => (
                 <Menu
                     anchor={{ x: m.x, y: m.y }}
-                    aria-label="Template actions"
+                    aria-label={t("agentPicker.menu.label")}
                     items={[
                         {
-                            label: `Hide template "${m.agent.name || m.agent.slug || m.agent.id}"`,
+                            label: t("agentPicker.menu.hide", { name: m.agent.name || m.agent.slug || m.agent.id }),
                             icon: MENU_ICON.hide,
                             onSelect: () => templates.hideTemplate(m.agent),
                         },
