@@ -57,6 +57,7 @@ import type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
 import type { MuxObjBatch } from "@/types/rpc/MuxObjBatch";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import type { NoDirectLinksEvent } from "@/types/rpc/NoDirectLinksEvent";
+import type { NoticeView } from "@/types/rpc/NoticeView";
 import type { NotificationActivateEvent } from "@/types/rpc/NotificationActivateEvent";
 import type { NotificationRetractEvent } from "@/types/rpc/NotificationRetractEvent";
 import type { NotifyTrayState } from "@/types/rpc/NotifyTrayState";
@@ -109,6 +110,7 @@ export type MuxEventPayloads = {
   "agent:endpoint-notice": EndpointNoticeEvent;
   "agent:grants": GrantsEvent;
   "agent:inputhistory": InputHistoryChangedEvent;
+  "agent:notice": NoticeView;
   "agent:process-added": ProcessAddedEvent;
   "agent:process-exited": ProcessExitedEvent;
   "agent:progress": AgentProgressEvent;
@@ -235,6 +237,7 @@ export const TYPED_MUX_EVENTS = [
   "agent:endpoint-notice",
   "agent:grants",
   "agent:inputhistory",
+  "agent:notice",
   "agent:process-added",
   "agent:process-exited",
   "agent:progress",

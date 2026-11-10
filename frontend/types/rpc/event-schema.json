@@ -71,6 +71,15 @@
     "perId": true
   },
   {
+    "event": "agent:notice",
+    "payloadTs": {
+      "imports": [
+        "NoticeView"
+      ],
+      "name": "NoticeView"
+    }
+  },
+  {
     "event": "agent:process-added",
     "payloadTs": {
       "imports": [
