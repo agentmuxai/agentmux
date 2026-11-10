@@ -190,6 +190,14 @@ impl StdoutReader {
         crate::backend::model_gateway::spend::rewrite_result_total(line, &agent)
     }
 
+    /// Settles a model change waiting on its first turn with the `result` frame that ended it; whether the change was
+    /// undone, which needs the harness restarted on the old place.
+    fn settle_route_trial(&self, parsed: &serde_json::Value) -> bool {
+        let Some(mstore) = self.mstore_read.as_ref() else { return false };
+        let Some(agent) = crate::identity::resolver::block_agent_id(mstore, &self.block_id_read) else { return false };
+        crate::backend::model_gateway::trial::settle(mstore, &agent, &self.block_id_read, parsed).is_some()
+    }
+
     /// One line of the CLI's stdout.
     fn handle_line(&mut self, line: String) {
         if line.trim().is_empty() {
@@ -575,7 +583,10 @@ impl StdoutReader {
         // so it must not idle or restart that process (codex
         // P1 on #3562).
         let boundary_is_current = boundary.is_some();
-        let deferred_restart = boundary.unwrap_or(false);
+        // The first turn on a changed model route or model decides the change: refused, the agent is put back and
+        // restarted on the place it came from.
+        let undone = boundary_is_current && self.settle_route_trial(parsed);
+        let deferred_restart = boundary.unwrap_or(false) || undone;
         // The model can change under a running process (the CLI
         // falls back to another model when one is overloaded), so
         // ask again at every turn boundary. Cheap, and not for a

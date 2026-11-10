@@ -104,6 +104,8 @@ pub fn carry_for_block(mstore: &Store, block_id: &str, env_vars: &mut HashMap<St
     let choice = choice_of(mstore, &def.id);
     let validated = choice.as_ref().and_then(|c| catalog::validate(&def.provider, &c.route, &c.model).ok());
     publish_to_block(mstore, block_id, validated);
+    // The harness starts on the recorded place, a route or its own sign-in: its first turn decides a change waiting on it.
+    super::trial::arm(mstore, &def.id);
     let Some((route, model)) = validated else {
         if let Some(c) = choice {
             tracing::warn!(agent = %def.slug, route = %c.route, "model route: the agent's saved route no longer validates; launching without it");
