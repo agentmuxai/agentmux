@@ -534,7 +534,7 @@ describe("the latest versions", () => {
     });
 
     it("does not give a tool without a package a latest version", async () => {
-        h.installed.goose = { installed: true, version: "1.54.0" };
+        h.installed.goose = { installed: true, version: "1.58.0" };
         h.installed.claude = { installed: true, version: "2.1.321" };
         h.versions = { goose: "9.9.9", claude: "3.0.0" };
         await mount();
@@ -629,7 +629,7 @@ describe("installing and removing AgentMux's own copy of an agent CLI", () => {
     });
 
     it("offers Uninstall, not Install, for AgentMux's own copy", async () => {
-        h.installed.goose = { installed: true, version: "1.54.0", source: "local_install" };
+        h.installed.goose = { installed: true, version: "1.58.0", source: "local_install" };
         await mount();
         fireEvent.click(card("goose"));
         expect((await screen.findByTestId("provider-uninstall")).textContent).toBe("goose");
@@ -637,7 +637,7 @@ describe("installing and removing AgentMux's own copy of an agent CLI", () => {
     });
 
     it("offers neither for the copy the person chose to run from their PATH", async () => {
-        h.installed.goose = { installed: true, version: "1.54.0", source: "system_path" };
+        h.installed.goose = { installed: true, version: "1.58.0", source: "system_path" };
         await mount();
         fireEvent.click(card("goose"));
         await screen.findByText("Use the CLI on my PATH");
