@@ -1,8 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// The host rows line up with the panel's other labels; only a row's opened body indents.
 .lan-peer {
-    padding-left: var(--space-5);
+    padding-left: 0;
 }
 
 .lan-peer-head {
