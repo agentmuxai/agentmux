@@ -27,7 +27,7 @@ pub(crate) enum HoldReason {
     Quota,
     /// The agent is between turns and its model API is offline (`backend::agent_status::decide`).
     ApiOffline,
-    /// The agent runs on a LAN peer that is not reachable now (`server::jekt_peer_hold`): kept on the
+    /// The agent runs on a LAN peer that is not reachable now (`server::reactive::peer_hold`): kept on the
     /// sender's instance and delivered when the peer is seen again.
     PeerOffline,
 }

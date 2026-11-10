@@ -211,3 +211,16 @@ fn a_replayed_message_is_addressed_by_name_and_a_late_one_says_so() {
     let late = late_message(&row, 1_700_000_000_000 + 3 * 3600 * 1000);
     assert!(late.starts_with("(sent ") && late.ends_with("are you there?"), "{late}");
 }
+
+#[test]
+fn every_agent_gets_to_the_front_of_the_replay_in_turn() {
+    let keys: Vec<String> = (0..10).map(|i| format!("peer:a{i}")).collect();
+    let mut firsts: Vec<String> = (0..keys.len()).map(|pass| rotated(keys.clone(), pass)[0].clone()).collect();
+    firsts.sort();
+    let mut all = keys.clone();
+    all.sort();
+    assert_eq!(firsts, all, "after one lap each agent has led a pass, so a machine that stays down cannot hold the front");
+    assert_eq!(rotated(keys.clone(), keys.len() + 3)[0], "peer:a3", "past a lap it wraps");
+    assert_eq!(rotated(Vec::new(), 5), Vec::<String>::new(), "nothing held is nothing to rotate");
+    assert_eq!(rotated(keys.clone(), 4).len(), keys.len(), "none is lost");
+}

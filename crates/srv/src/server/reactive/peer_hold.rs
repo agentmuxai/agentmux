@@ -25,7 +25,9 @@ use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome};
 const PEER_KEY_PREFIX: &str = "peer:";
 /// A peer whose last answered poll is older than this is not answering (polls run every 30 s).
 const POLL_FRESH_SECS: u64 = 90;
-/// Agents whose held messages one replay pass looks at, and messages it sends to one.
+/// Agents one replay pass looks at (their machine may be down, which costs only a cached lookup),
+/// agents it sends to, and messages it sends to one.
+const LOOKUPS_PER_PASS: usize = 32;
 const AGENTS_PER_PASS: usize = 8;
 const ROWS_PER_AGENT: usize = 16;
 /// Refusals by a peer that has the agent, before a held message is dropped (as for a local agent).
@@ -193,6 +195,15 @@ async fn settle(state: &AppState, row: &HeldJekt, sent: Sent) {
     .await;
 }
 
+/// `keys` starting at the `by`-th, so each pass looks first at a different agent.
+fn rotated(mut keys: Vec<String>, by: usize) -> Vec<String> {
+    if !keys.is_empty() {
+        let n = keys.len();
+        keys.rotate_left(by % n);
+    }
+    keys
+}
+
 /// One pass over the messages held for peers' agents: each agent now on the LAN gets its messages,
 /// oldest first; one the relay has (another install runs it) goes there. Run beside the replay for
 /// local agents, whose pass also drops what expired.
@@ -203,9 +214,17 @@ pub(crate) async fn replay_pass(state: &AppState) {
         .unwrap_or_default()
         .into_iter()
         .filter(|t| t.starts_with(PEER_KEY_PREFIX))
-        .take(AGENTS_PER_PASS)
         .collect();
-    for key in keys {
+    // The list is oldest message first, so the agents of a machine that stays down would hold the front
+    // of it for good: start at a different one each pass, and count against the cap only an agent that
+    // can be sent to (the lookups of the rest are cached).
+    static ROTATION: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let keys = rotated(keys, ROTATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    let mut sent_to = 0;
+    for key in keys.into_iter().take(LOOKUPS_PER_PASS) {
+        if sent_to >= AGENTS_PER_PASS {
+            break;
+        }
         let mstore = state.mstore.clone();
         let rows_key = key.clone();
         let rows = tokio::task::spawn_blocking(move || mstore.jekt_held_for_target(&rows_key, ROWS_PER_AGENT))
@@ -220,6 +239,7 @@ pub(crate) async fn replay_pass(state: &AppState) {
         if lan.is_none() && !relay_has_it(state, Some(&first.source_agent), name).await {
             continue;
         }
+        sent_to += 1;
         for row in &rows {
             let sent = match &lan {
                 Some((url, auth_key)) => send_over_lan(state, row, url, auth_key).await,
