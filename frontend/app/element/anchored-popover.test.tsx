@@ -23,7 +23,6 @@ vi.mock("@/app/platform/pane-overlay", () => ({
 }));
 vi.mock("@/app/util/menu-position", () => ({
     computeMenuPosition: vi.fn(async () => ({ style: { position: "fixed", left: "0px", top: "0px" } })),
-    holdBottomEdge: (result: { style: unknown }) => result.style,
 }));
 
 import { computeMenuPosition } from "@/app/util/menu-position";
