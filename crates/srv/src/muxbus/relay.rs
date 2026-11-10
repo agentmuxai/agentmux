@@ -225,6 +225,55 @@ pub(crate) enum RelayOutcome {
     Failed(String),
 }
 
+/// The body the cloud route takes, as this srv sends it: the message plus the
+/// carried signature tuple, files, the declared tier, and the sender's own
+/// deadline as the route's `ttl_seconds` (issue #3894).
+fn relay_body(
+    target_agent: &str,
+    message: &str,
+    priority: &str,
+    wan: Option<&WanCarried>,
+    files: Option<&[agentmux_common::jekt_files::CloudFile]>,
+    jekt_tier: Option<&crate::backend::reactive::types::JektTier>,
+    expires_at_ms: Option<i64>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "target_agent": target_agent,
+        "message": message,
+        "priority": priority,
+    });
+    // W3-S: the carried tuple rides alongside, only when the carry gate
+    // passed. Without it the body is byte-for-byte the old shape.
+    if let (Some(wan), Some(obj)) = (wan, body.as_object_mut()) {
+        if let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(wan) {
+            obj.extend(fields);
+        }
+    }
+    // Files sent with it, uploaded already (server::jekt_cloud).
+    if let (Some(files), Some(obj)) = (files, body.as_object_mut()) {
+        obj.insert("files".to_string(), serde_json::to_value(files).unwrap_or_default());
+    }
+    // The tier the sender declared, when it declared one, so the receiver
+    // renders the same tier it would for a local jekt. The receiver's own
+    // trust rules still apply on top: a declared tier can raise a message to
+    // `sensitive`, never lower what those rules decide.
+    if let (Some(tier), Some(obj)) = (jekt_tier, body.as_object_mut()) {
+        obj.insert("jekt_tier".to_string(), serde_json::Value::String(tier.to_string()));
+    }
+    // Sent as the remaining lifetime, the unit the route takes, so the message
+    // cannot outlive its sender's window on the way and arrive stale. Clamped
+    // into the route's accepted range; a deadline already past never gets here
+    // — relay_inject drops it first.
+    if let Some(expires_at_ms) = expires_at_ms {
+        let remaining = (expires_at_ms - agentmux_common::time::now_ms()).div_euclid(1000);
+        let ttl = remaining.clamp(1, MAX_RELAY_TTL_SECONDS);
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("ttl_seconds".to_string(), serde_json::json!(ttl));
+        }
+    }
+    body
+}
+
 /// POST one injection to the cloud relay.
 ///
 /// Deliberately takes `base_url` and `token` rather than resolving them
@@ -264,42 +313,16 @@ pub(crate) async fn relay_inject(
         ));
     }
 
+    // A deadline already past: the sender said delivering it is worth less
+    // than dropping it (issue #3894), so nothing goes to the relay — it would
+    // only be stored to expire there, and the recipient would never see it.
+    if expires_at_ms.is_some_and(|expires| expires <= agentmux_common::time::now_ms()) {
+        return RelayOutcome::Failed(
+            "the sender's deadline has passed; the message was dropped, not relayed".to_string(),
+        );
+    }
     let url = format!("{}/reactive/inject", base_url.trim_end_matches('/'));
-    let mut body = serde_json::json!({
-        "target_agent": target_agent,
-        "message": message,
-        "priority": priority,
-    });
-    // W3-S: the carried tuple rides alongside, only when the carry gate
-    // passed. Without it the body is byte-for-byte the old shape.
-    if let (Some(wan), Some(obj)) = (wan, body.as_object_mut()) {
-        if let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(wan) {
-            obj.extend(fields);
-        }
-    }
-    // Files sent with it, uploaded already (server::jekt_cloud).
-    if let (Some(files), Some(obj)) = (files, body.as_object_mut()) {
-        obj.insert("files".to_string(), serde_json::to_value(files).unwrap_or_default());
-    }
-    // The tier the sender declared, when it declared one, so the receiver
-    // renders the same tier it would for a local jekt. The receiver's own
-    // trust rules still apply on top: a declared tier can raise a message to
-    // `sensitive`, never lower what those rules decide.
-    if let (Some(tier), Some(obj)) = (jekt_tier, body.as_object_mut()) {
-        obj.insert("jekt_tier".to_string(), serde_json::Value::String(tier.to_string()));
-    }
-    // The sender's own deadline, when it has one (issue #3894): sent as the
-    // remaining lifetime, the unit the route takes, so the message cannot
-    // outlive its sender's window on the way and arrive stale. Clamped into
-    // the route's accepted range; an already-past deadline becomes the
-    // minimum, so it is queued and dropped there rather than delivered late.
-    if let Some(expires_at_ms) = expires_at_ms {
-        let remaining = (expires_at_ms - agentmux_common::time::now_ms()).div_euclid(1000);
-        let ttl = remaining.clamp(1, MAX_RELAY_TTL_SECONDS);
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert("ttl_seconds".to_string(), serde_json::json!(ttl));
-        }
-    }
+    let body = relay_body(target_agent, message, priority, wan, files, jekt_tier, expires_at_ms);
     let resp = http
         .post(&url)
         .header("Authorization", format!("Bearer {token}"))
@@ -569,6 +592,28 @@ mod tests {
             .and_then(|v| v.as_i64())
             .expect("ttl_seconds reaches the route");
         assert!((590..=600).contains(&ttl), "about ten minutes, got {ttl}");
+    }
+
+    /// Issue #3894: a request whose deadline has already passed is dropped,
+    /// not submitted — the relay must not store a message the sender said was
+    /// no longer worth delivering.
+    #[tokio::test]
+    async fn a_past_deadline_is_dropped_before_the_route_sees_it() {
+        let (url, seen, _g) = stub_relay(axum::http::StatusCode::OK, r#"{"success":true}"#).await;
+        let out = relay_inject(
+            &url,
+            &reqwest::Client::new(),
+            "tok",
+            "agent2",
+            "clare",
+            "hello",
+            "normal",
+            None, None, None,
+            Some(agentmux_common::time::now_ms() - 1_000),
+        )
+        .await;
+        assert!(matches!(out, RelayOutcome::Failed(_)), "dropped, got {out:?}");
+        assert!(seen.lock().unwrap().is_none(), "nothing reached the route");
     }
 
     #[tokio::test]
