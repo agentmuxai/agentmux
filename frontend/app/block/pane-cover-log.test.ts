@@ -4,7 +4,18 @@
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PaneReadinessPhase } from "@/app/store/pane-readiness";
-import { coverLogLine, logCoverPhases, SETTLED_AFTER_MS, SLOW_COVER_MS, stillCoveredLine, unmountLine } from "./pane-cover-log";
+import {
+    agentNameOf,
+    coverLogLine,
+    logCoverPhases,
+    logShowCover,
+    logWhileShown,
+    SETTLED_AFTER_MS,
+    shownLine,
+    SLOW_COVER_MS,
+    stillCoveredLine,
+    unmountLine,
+} from "./pane-cover-log";
 
 afterEach(() => {
     vi.useRealTimers();
@@ -153,6 +164,85 @@ describe("logCoverPhases", () => {
         dispose();
         expect(coverLines(info).map((l) => l.replace(/ after=\d+ms/, " after=Nms"))).toEqual([
             'block=0123456 agent="Manoz" unmount controller=live re-cover=live after=Nms block=gone parked=false',
+        ]);
+    });
+});
+
+describe("what else can be in front of a pane", () => {
+    it("names the thing, the state and the time", () => {
+        expect(shownLine("0123456789", "suspense-fallback", "shown", 0, "Agent2")).toBe('block=0123456 agent="Agent2" suspense-fallback shown');
+        expect(shownLine("0123456789", "show-cover", "still-shown", 2000.4)).toBe("block=0123456 show-cover still-shown for=2000ms");
+        expect(shownLine("0123456789", "show-cover", "cleared", 3100)).toBe("block=0123456 show-cover cleared after=3100ms");
+    });
+
+    it("reads the agent's name from the block's meta, when it is a string", () => {
+        expect(agentNameOf({ meta: { agentName: "Agent2" } })).toBe("Agent2");
+        expect(agentNameOf({ meta: { agentName: 7 } })).toBeUndefined();
+        expect(agentNameOf(undefined)).toBeUndefined();
+    });
+
+    it("logWhileShown writes shown, a line a second, and cleared with the time when its scope ends", () => {
+        vi.useFakeTimers();
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        const dispose = createRoot((d) => {
+            logWhileShown("0123456789", "suspense-fallback", () => "Agent2");
+            return d;
+        });
+        vi.advanceTimersByTime(2500);
+        dispose();
+        expect(coverLines(info)).toEqual([
+            'block=0123456 agent="Agent2" suspense-fallback shown',
+            'block=0123456 agent="Agent2" suspense-fallback still-shown for=1000ms',
+            'block=0123456 agent="Agent2" suspense-fallback still-shown for=2000ms',
+            'block=0123456 agent="Agent2" suspense-fallback cleared after=2500ms',
+        ]);
+        info.mockClear();
+        vi.advanceTimersByTime(5000);
+        expect(coverLines(info)).toEqual([]);
+    });
+
+    it("logShowCover keeps one timing when the block it reads the agent from changes meanwhile", () => {
+        vi.useFakeTimers();
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        const [name, setName] = createSignal<string | undefined>(undefined);
+        const dispose = createRoot((d) => {
+            logShowCover("0123456789", () => true, name);
+            return d;
+        });
+        vi.advanceTimersByTime(1000);
+        setName("Agent2");
+        vi.advanceTimersByTime(1000);
+        dispose();
+        expect(coverLines(info)).toEqual([
+            "block=0123456 show-cover shown",
+            "block=0123456 show-cover still-shown for=1000ms",
+            'block=0123456 agent="Agent2" show-cover still-shown for=2000ms',
+            'block=0123456 agent="Agent2" show-cover cleared after=2000ms',
+        ]);
+    });
+
+    it("logShowCover logs each time the show-cover goes up, once, and says nothing without a block id", () => {
+        vi.useFakeTimers();
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        const [up, setUp] = createSignal(false);
+        const dispose = createRoot((d) => {
+            logShowCover("0123456789", up);
+            logShowCover(undefined, up);
+            return d;
+        });
+        expect(coverLines(info)).toEqual([]);
+        setUp(true);
+        vi.advanceTimersByTime(1000);
+        setUp(false);
+        setUp(true);
+        setUp(false);
+        dispose();
+        expect(coverLines(info)).toEqual([
+            "block=0123456 show-cover shown",
+            "block=0123456 show-cover still-shown for=1000ms",
+            "block=0123456 show-cover cleared after=1000ms",
+            "block=0123456 show-cover shown",
+            "block=0123456 show-cover cleared after=0ms",
         ]);
     });
 });
