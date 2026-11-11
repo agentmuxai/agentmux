@@ -33,11 +33,9 @@ import { acceptMuxbusDelivery, type MuxBusDeliveryStatus } from "@/store/muxbus-
 import { MuxBusSignInChoices, type MuxBusIdentityProvider } from "./muxbus-sign-in-choices";
 import { MuxBusSignOutButton } from "./muxbus-sign-out";
 
-// Production Cognito config — set after deployment.
-// Override with VITE_MUXBUS_COGNITO_DOMAIN / VITE_MUXBUS_CLIENT_ID at build time.
-const MUXBUS_COGNITO_DOMAIN =
-    (import.meta.env.VITE_MUXBUS_COGNITO_DOMAIN as string | undefined) ??
-    "https://muxbus-auth.auth.us-east-1.amazoncognito.com";
+// The build's fallback sign-in pair (.env.production), used together or not at all: a build without a client id has
+// no domain of its own either, and signs in with what AgentMux Cloud publishes.
+const MUXBUS_COGNITO_DOMAIN = (import.meta.env.VITE_MUXBUS_COGNITO_DOMAIN as string | undefined) ?? "";
 const MUXBUS_CLIENT_ID =
     (import.meta.env.VITE_MUXBUS_CLIENT_ID as string | undefined) ?? "";
 
