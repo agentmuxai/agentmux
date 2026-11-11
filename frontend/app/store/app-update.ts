@@ -83,7 +83,7 @@ function isNewer(a: string, b: string): boolean {
     return false;
 }
 
-/** What the Store itself said: `asking` until it answers; `no_answer` when it never did; `unknown` carries why it couldn't be asked. `version` is the Store package's version when `available` (empty if it gave none); `checkedMs` is when it last answered. */
+/** What the Store itself said: `asking` until it answers; `no_answer` when it never did; `unknown` carries why it couldn't be asked. `version` is the update's version when `available` and known (empty when the Store gave none, or gave this build's own); `checkedMs` is when it last answered. */
 export type StoreOffer = { state: "asking" | "available" | "none" | "no_answer" | "unknown"; version: string; message: string; checkedMs: number };
 
 const [storeOffer, setStoreOffer] = createSignal<StoreOffer | null>(null);
@@ -105,10 +105,12 @@ export function askStore(quiet = false): Promise<void> {
         } catch (e: any) {
             next = { state: "unknown", version: "", message: String(e?.message ?? e) };
         }
-        // A version that isn't newer than this one is no update, whatever the Store lists.
+        // Listed means there is an update. The version comes from the listed item's package, which Windows
+        // documents as "the package that has an update available": it can be the installed one. So a version
+        // that isn't newer than this build is not the update's version; the update is offered without one.
         const current = appUpdate()?.current;
         if (next.state === "available" && next.version && current && !isNewer(next.version, current)) {
-            next = { state: "none", version: "", message: "" };
+            next = { ...next, version: "" };
         }
         setStoreOffer({ ...next, checkedMs: Date.now() });
     })().finally(() => {
@@ -173,11 +175,12 @@ export { storeStayed, setStoreStayed };
 export const storeFallbackLine = (why?: string): string => `${why ? `${why} ` : ""}Opened the Microsoft Store page to finish the update.`;
 
 /** Said before the Store is asked to install: it closes the app to swap the package. */
-export const storeClosesLine = (version: string): string => `The Store closes AgentMux while it installs v${version}, then opens it again.`;
+export const storeClosesLine = (version: string): string =>
+    `The Store closes AgentMux while it installs ${version ? `v${version}` : "the update"}, then opens it again.`;
 
 /** Said when the app is back on the version the Store closed it on: the install did not happen. */
 export const storeStayedLine = (s: StoreCameBack): string =>
-    `The Store closed AgentMux to install v${s.target}, but this is still v${s.from}. Try Update in the Store again, or install it from the Microsoft Store app.`;
+    `The Store closed AgentMux to install ${s.target ? `v${s.target}` : "an update"}, but this is still v${s.from}. Try Update in the Store again, or install it from the Microsoft Store app.`;
 
 /** At start: say how the Store's last install ended, when one was under way. */
 export async function loadStoreCameBack(): Promise<void> {
