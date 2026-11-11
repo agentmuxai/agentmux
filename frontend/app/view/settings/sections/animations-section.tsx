@@ -15,68 +15,71 @@ import {
     SPEED_MIN,
     SPEED_STEP,
 } from "@/app/motion/animation-settings";
+import { t } from "@/app/i18n/i18n";
 import { motionTier, scaledMs } from "@/app/motion/motion";
 import { DURATION } from "@/app/motion/primitives";
 import { editAnimation, resetAnimation, setAnimationPreset } from "@/app/store/animation-config";
 import { settingsAtom } from "@/app/store/global";
 import { createSignal, Show, type JSX } from "solid-js";
 import { NumberControl, SectionHeader, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 import { AnimationsPreview } from "./animations-preview";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const ANIMATIONS_SETTINGS = {
-    preset: {
+    preset: settingEntry({
         id: "animations.preset",
-        label: "Animations",
-        description: "Turn animations off, or make them quicker, smoother or slower. Applies at once in every window.",
+        labelKey: "settings.animations.preset.label",
+        descriptionKey: "settings.animations.preset.description",
         section: "animations",
         keywords: ["motion", "animation speed", "disable animations", "turn off animations", "reduce motion", "transitions", "animation:preset"],
-    },
-    speed: {
+    }),
+    speed: settingEntry({
         id: "animations.speed",
-        label: "Animation duration (%)",
-        description: "How long animations take, as a percent of their designed timing. 0 is off; lower is quicker.",
+        labelKey: "settings.animations.speed.label",
+        descriptionKey: "settings.animations.speed.description",
         section: "animations",
-        group: "Advanced",
+        groupKey: "settings.animations.group.advanced",
         keywords: ["animation length", "speed", "slow motion", "faster animations", "animation:speed"],
-    },
-    polish: {
+    }),
+    polish: settingEntry({
         id: "animations.polish",
-        label: "Hover and fade polish (%)",
-        description: "The length of hover and focus fades and hover lifts, as a percent of their designed timing. 0 is off.",
+        labelKey: "settings.animations.polish.label",
+        descriptionKey: "settings.animations.polish.description",
         section: "animations",
-        group: "Advanced",
+        groupKey: "settings.animations.group.advanced",
         keywords: ["hover animation", "fade", "hover lift", "focus fade", "animation:polish"],
-    },
-    reduceMovement: {
+    }),
+    reduceMovement: settingEntry({
         id: "animations.reduce_movement",
-        label: "Reduce movement",
-        description: "Replace slides, zooms and bounces with fades.",
+        labelKey: "settings.animations.reduceMovement.label",
+        descriptionKey: "settings.animations.reduceMovement.description",
         section: "animations",
-        group: "Advanced",
+        groupKey: "settings.animations.group.advanced",
         keywords: ["reduced motion", "less motion", "vestibular", "no sliding", "no bounce", "animation:reducemovement"],
-    },
+    }),
 } satisfies Record<string, SettingsIndexEntry>;
 
-const HELP: Record<AnimationPreset, string> = {
-    system: "Uses your computer's setting. Windows: Settings, Accessibility, Visual effects, Animation effects. macOS: Accessibility, Display, Reduce motion.",
-    off: "Nothing moves. Changes happen instantly.",
-    quick: "Short, snappy animations.",
-    smooth: "The default.",
-    slow: "Longer, gentler animations.",
-    custom: "Your own numbers, below.",
-};
+const helpOf = (p: AnimationPreset): string =>
+    ({
+        system: t("settings.animations.help.system"),
+        off: t("settings.animations.help.off"),
+        quick: t("settings.animations.help.quick"),
+        smooth: t("settings.animations.help.smooth"),
+        slow: t("settings.animations.help.slow"),
+        custom: t("settings.animations.help.custom"),
+    })[p];
 
-const LABELS: Record<AnimationPreset, string> = {
-    system: "Follow system",
-    off: "Off",
-    quick: "Quick",
-    smooth: "Smooth",
-    slow: "Slow",
-    custom: "Custom",
-};
+const labelOf = (p: AnimationPreset): string =>
+    ({
+        system: t("settings.animations.preset.system"),
+        off: t("settings.animations.preset.off"),
+        quick: t("settings.animations.preset.quick"),
+        smooth: t("settings.animations.preset.smooth"),
+        slow: t("settings.animations.preset.slow"),
+        custom: t("settings.animations.preset.custom"),
+    })[p];
 
 /** The keys Custom reads: the button that returns to them shows when any is stored. */
 const STORED_KEYS = ["animation:speed", "animation:polish", "animation:reducemovement"] as const;
@@ -88,9 +91,19 @@ const CHOICES: AnimationPreset[] = ["system", "off", "quick", "smooth", "slow"];
 
 // One object per option for good: the control keys its buttons by them, so a new object on each settings
 // change would rebuild every button, the one the arrow key just focused included.
-const BASE_OPTIONS: SegmentedOption<AnimationPreset>[] = CHOICES.map((p) => ({ value: p, label: LABELS[p] }));
+const BASE_OPTIONS: SegmentedOption<AnimationPreset>[] = CHOICES.map((p) => ({
+    value: p,
+    get label() {
+        return labelOf(p);
+    },
+}));
 // Custom shows only while it is the choice: it is what editing a number makes, not a thing to pick.
-const OPTIONS_WITH_CUSTOM: SegmentedOption<AnimationPreset>[] = [...BASE_OPTIONS, { value: "custom", label: LABELS.custom }];
+const OPTIONS_WITH_CUSTOM: SegmentedOption<AnimationPreset>[] = [...BASE_OPTIONS, {
+    value: "custom",
+    get label() {
+        return labelOf("custom");
+    },
+}];
 
 // ── Section: Animations ───────────────────────────────────────────────────────
 
@@ -112,7 +125,7 @@ export function AnimationsSection(): JSX.Element {
     const edit = (key: "speed" | "polish", raw: number) => {
         const next = clampPercent(raw, values()[key]);
         const moved = next !== raw;
-        setSnapped(moved ? `${raw} is out of range: using ${next}. Use 0, or ${SPEED_MIN} to ${SPEED_MAX} in steps of ${SPEED_STEP}.` : null);
+        setSnapped(moved ? t("settings.animations.snapped", { raw, next, min: SPEED_MIN, max: SPEED_MAX, step: SPEED_STEP }) : null);
         if (moved) setCorrected((n) => n + 1);
         editAnimation(s(), { [key]: next });
     };
@@ -136,13 +149,13 @@ export function AnimationsSection(): JSX.Element {
                             options={options()}
                             value={preset()}
                             onChange={setAnimationPreset}
-                            ariaLabel="Animations"
+                            ariaLabel={t("settings.animations.aria.group")}
                         />
                         <p class="animations-help" data-testid="animations-help">
-                            {HELP[preset()]}
+                            {helpOf(preset())}
                         </p>
                         <p class="animations-readout" data-testid="animations-readout">
-                            {menuMs() === 0 ? "Menus open instantly" : `Menus open in ${menuMs()} ms`}
+                            {menuMs() === 0 ? t("settings.animations.readout.instant") : t("settings.animations.readout.ms", { ms: menuMs() })}
                         </p>
                     </div>
                 }
@@ -153,20 +166,20 @@ export function AnimationsSection(): JSX.Element {
                     icon="circle-info"
                     actions={
                         <Button onClick={() => setAnimationPreset("system")} data-testid="animations-follow-system">
-                            Follow system
+                            {labelOf("system")}
                         </Button>
                     }
                 >
-                    Your system asks for reduced motion. AgentMux is not following it because you chose {LABELS[preset()]}.
+                    {t("settings.animations.reducedNotice", { choice: labelOf(preset()) })}
                 </Notice>
             </Show>
 
-            <SectionHeader label="Preview" />
+            <SectionHeader label={t("settings.animations.group.preview")} />
             <AnimationsPreview />
 
-            <SectionHeader label="Advanced" />
+            <SectionHeader label={t("settings.animations.group.advanced")} />
             <Show when={readOnly()}>
-                <p class="animations-help">The numbers below are what Follow system uses now (from your system). Choose another option to set your own.</p>
+                <p class="animations-help">{t("settings.animations.advancedHelp")}</p>
             </Show>
             <SettingRow
                 id={ANIMATIONS_SETTINGS.speed.id}
@@ -176,7 +189,7 @@ export function AnimationsSection(): JSX.Element {
                     <Show when={!readOnly()} fallback={<span class="animations-fixed">{values().speed}%</span>}>
                         <div class="animations-number">
                             <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().speed} resyncKey={corrected()} onChange={(v) => edit("speed", v)} />
-                            <NumberControl id="animations-speed-number" ariaLabel="Animation duration, percent" min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().speed} resyncKey={corrected()} onChange={(v) => edit("speed", v)} />
+                            <NumberControl id="animations-speed-number" ariaLabel={t("settings.animations.aria.speed")} min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().speed} resyncKey={corrected()} onChange={(v) => edit("speed", v)} />
                         </div>
                     </Show>
                 }
@@ -189,7 +202,7 @@ export function AnimationsSection(): JSX.Element {
                     <Show when={!readOnly()} fallback={<span class="animations-fixed">{values().polish}%</span>}>
                         <div class="animations-number">
                             <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().polish} resyncKey={corrected()} onChange={(v) => edit("polish", v)} />
-                            <NumberControl id="animations-polish-number" ariaLabel="Hover and fade polish, percent" min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().polish} resyncKey={corrected()} onChange={(v) => edit("polish", v)} />
+                            <NumberControl id="animations-polish-number" ariaLabel={t("settings.animations.aria.polish")} min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().polish} resyncKey={corrected()} onChange={(v) => edit("polish", v)} />
                         </div>
                     </Show>
                 }
@@ -199,7 +212,7 @@ export function AnimationsSection(): JSX.Element {
                 label={ANIMATIONS_SETTINGS.reduceMovement.label}
                 description={ANIMATIONS_SETTINGS.reduceMovement.description}
                 control={
-                    <Show when={!readOnly()} fallback={<span class="animations-fixed">{values().reduceMovement ? "On" : "Off"}</span>}>
+                    <Show when={!readOnly()} fallback={<span class="animations-fixed">{values().reduceMovement ? t("settings.animations.on") : t("settings.animations.preset.off")}</span>}>
                         <ToggleControl checked={values().reduceMovement} onChange={(v) => editAnimation(s(), { reduceMovement: v })} />
                     </Show>
                 }
@@ -212,11 +225,11 @@ export function AnimationsSection(): JSX.Element {
             <div class="animations-actions">
                 <Show when={preset() !== "custom" && !readOnly() && STORED_KEYS.some((k) => s()[k] !== undefined)}>
                     <Button onClick={() => setAnimationPreset("custom")} data-testid="animations-use-custom">
-                        Use my custom values
+                        {t("settings.animations.useCustom")}
                     </Button>
                 </Show>
                 <Button onClick={reset} data-testid="animations-reset">
-                    Reset to default
+                    {t("settings.animations.reset")}
                 </Button>
             </div>
         </div>

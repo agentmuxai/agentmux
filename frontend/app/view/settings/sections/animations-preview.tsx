@@ -6,6 +6,7 @@
 // and a button press, and a panel that collapses. Replay runs them again.
 
 import { Button, Switch } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { DURATION } from "@/app/motion/primitives";
 import { enter } from "@/app/motion/primitives";
 import { motionScale, scaledMs } from "@/app/motion/motion";
@@ -30,19 +31,19 @@ export function AnimationsPreview(): JSX.Element {
     return (
         <div class="animations-preview" data-testid="animations-preview">
             <Show when={motionScale() === 0}>
-                <div class="animations-preview-off">No animation</div>
+                <div class="animations-preview-off">{t("settings.animations.preview.off")}</div>
             </Show>
             <div class="animations-preview-samples">
                 <div ref={card} class="animations-preview-card">
-                    A card that slides and fades in
+                    {t("settings.animations.preview.card")}
                 </div>
-                <Switch checked={on()} onChange={setOn} ariaLabel="Preview switch" />
+                <Switch checked={on()} onChange={setOn} ariaLabel={t("settings.animations.preview.switch")} />
                 <Button onClick={replay} icon="rotate-right">
-                    Replay
+                    {t("settings.animations.preview.replay")}
                 </Button>
             </div>
             <div class="animations-preview-panel" classList={{ "animations-preview-panel--open": open() }}>
-                <div class="animations-preview-panel-inner">A panel that collapses and opens</div>
+                <div class="animations-preview-panel-inner">{t("settings.animations.preview.panel")}</div>
             </div>
         </div>
     );
