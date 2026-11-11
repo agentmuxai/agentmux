@@ -21,6 +21,9 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/view/vault/vault-secrets", () => ({ VaultSecrets: () => null }));
 
+const settings: Record<string, unknown> = {};
+vi.mock("@/app/store/global", () => ({ getSettingsKeyAtom: (key: string) => () => settings[key] }));
+
 const eventHandlers = new Map<string, (data: unknown) => void>();
 vi.mock("@/app/store/mps", () => ({
     onMuxEvent: (name: string, handler: (data: unknown) => void) => {
@@ -37,12 +40,16 @@ vi.mock("@/app/util/reveal-block", () => ({ revealBlock: (...a: unknown[]) => re
 const openOrFocusHistoryTab = vi.fn();
 vi.mock("@/app/view/agent/open-history-tab", () => ({ openOrFocusHistoryTab: (...a: unknown[]) => openOrFocusHistoryTab(...a) }));
 
+import { __resetPlayedSounds, noteSound } from "@/app/notification/sound/sound-history";
 import { AuditManager } from "./audit-manager";
+import { encodeSoundRef, parseSoundRef } from "./audit-sound";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 afterEach(() => {
     cleanup();
+    __resetPlayedSounds();
+    for (const key of Object.keys(settings)) delete settings[key];
     vi.clearAllMocks();
 });
 
@@ -297,6 +304,73 @@ describe("AuditManager", () => {
         await waitFor(() => expect(screen.getByText("stable one")).toBeInTheDocument());
         expect(query.mock.calls.at(-1)![0].scope).toBe("machine");
         expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["narko · stable", "dev"]);
+    });
+
+    it("shows a speaker on a row that makes a sound, lights the row a sound just came from and names who made it", async () => {
+        const tool = entry({ id: "t", kind: "tool", summary: "Bash ls", agent_id: "korp", links: { pane: { block_id: "blk-korp" } } });
+        query.mockResolvedValue(page([tool, entry({ id: "a", kind: "action", summary: "operator setconfig" })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("Bash ls")).toBeInTheDocument());
+        expect(screen.getAllByRole("img", { name: "Plays a sound" })).toHaveLength(1);
+        expect(document.querySelector('[data-lit="true"]')).toBeNull();
+
+        noteSound({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() });
+        await waitFor(() => expect(document.querySelector('[data-lit="true"]')?.textContent).toContain("Bash ls"));
+        const last = screen.getByRole("button", { name: /^♪ korp · Bash · / });
+        fireEvent.click(last);
+        expect(revealBlock).toHaveBeenCalledWith("blk-korp", { source: "audit" });
+    });
+
+    it("opens at the row a sound came from: shows its kind, scrolls to the row and lights it", async () => {
+        const tool = entry({ id: "t", kind: "tool", summary: "Bash ls", agent_id: "korp", links: { pane: { block_id: "blk-korp" } } });
+        query.mockImplementation((req) => Promise.resolve(page(req.kinds?.includes("tool") ? [tool, entry({ id: "a", kind: "action", summary: "operator setconfig" })] : [entry({ id: "a", kind: "action", summary: "operator setconfig" })])));
+        const scrolled = vi.fn();
+        const proto = Element.prototype as { scrollIntoView?: unknown };
+        const before = proto.scrollIntoView;
+        proto.scrollIntoView = scrolled;
+        try {
+            const sound = parseSoundRef(encodeSoundRef({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() }));
+            render(() => <AuditManager paneBlockId="pane-1" sound={sound} />);
+            await waitFor(() => expect(document.querySelector('[data-lit="true"]')?.textContent).toContain("Bash ls"));
+            expect(query.mock.calls.some(([req]) => req.kinds?.includes("tool"))).toBe(true);
+            expect(screen.getByRole("button", { name: "Tool calls" })).toHaveAttribute("aria-pressed", "true");
+            expect(scrolled).toHaveBeenCalledWith({ block: "center" });
+        } finally {
+            proto.scrollIntoView = before;
+        }
+    });
+
+    it("drops an agent filter and a search that would leave the sound's row out, and resumes a paused list", async () => {
+        const tool = entry({ id: "t", kind: "tool", summary: "Bash ls", agent_id: "korp", links: { pane: { block_id: "blk-korp" } } });
+        const other = entry({ id: "a", kind: "action", summary: "operator setconfig" });
+        query.mockImplementation((req) => Promise.resolve(page(req.agent_id || req.text ? [other] : req.kinds?.includes("tool") ? [tool, other] : [other])));
+        const [sound, setSound] = createSignal<ReturnType<typeof parseSoundRef>>();
+        render(() => <AuditManager paneBlockId="pane-1" agent="loap" sound={sound()} />);
+        await waitFor(() => expect(screen.getByText("operator setconfig")).toBeInTheDocument());
+        expect(query.mock.calls.at(-1)![0].agent_id).toBe("loap");
+        fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+        setSound(parseSoundRef(encodeSoundRef({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() })));
+        await waitFor(() => expect(document.querySelector('[data-lit="true"]')?.textContent).toContain("Bash ls"));
+        expect(screen.getByRole("textbox", { name: "Only entries of this agent" })).toHaveValue("");
+        expect(query.mock.calls.at(-1)![0].agent_id).toBeUndefined();
+        expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    });
+
+    it("does not look for the row of a sound asked for long ago", async () => {
+        query.mockResolvedValue(page([entry({ id: "a", kind: "action", summary: "operator setconfig" })]));
+        const sound = parseSoundRef(encodeSoundRef({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() }, Date.now() - 60_000));
+        render(() => <AuditManager paneBlockId="pane-1" sound={sound} />);
+        await waitFor(() => expect(screen.getByText("operator setconfig")).toBeInTheDocument());
+        expect(screen.getByRole("button", { name: "Tool calls" })).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("shows no speaker for a sound the person muted", async () => {
+        settings["notify:tooltones:enabled"] = false;
+        query.mockResolvedValue(page([entry({ id: "t", kind: "tool", summary: "Bash ls", agent_id: "korp", links: { pane: { block_id: "blk-korp" } } })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("Bash ls")).toBeInTheDocument());
+        expect(screen.queryByRole("img", { name: "Plays a sound" })).toBeNull();
     });
 
     it("shows an error from the query", async () => {

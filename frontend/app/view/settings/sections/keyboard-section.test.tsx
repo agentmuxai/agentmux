@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ writes: [] as Array<[string, unknown]> }));
 
 vi.mock("@/util/platformutil", () => ({ isMacOS: () => false, isLinux: () => false }));
+vi.mock("@/app/store/keymodel", () => ({ disableGlobalKeybindings: () => {}, enableGlobalKeybindings: () => {} }));
+vi.mock("@/util/clipboard", () => ({ writeText: () => Promise.resolve() }));
 vi.mock("@/app/store/global", async () => {
     const { createSignal } = await import("solid-js");
     const [settings, setSettings] = createSignal<unknown>({});
@@ -140,7 +142,7 @@ describe("Unbind", () => {
         render(() => <KeyboardSection />);
         fireEvent.click(document.querySelector('[data-group="Go to tab 1–8"] button')!);
         const member = line("tab:goto:3");
-        fireEvent.click(member.querySelector("button")!);
+        fireEvent.click(member.querySelector('button[aria-label^="Unbind"]')!);
         // What saving does: the setting changes and every line is built again from the new view.
         useEntries(h.writes[0][1] as unknown[]);
         expect(line("tab:goto:3")).toBe(member);
@@ -244,6 +246,21 @@ describe("Help's links", () => {
         expect(scroll).toHaveBeenCalled();
         expect(document.activeElement).toBe(line("tab:new"));
         expect((screen.getByLabelText("Search shortcuts by action or key") as HTMLInputElement).value).toBe("");
+    });
+
+    it("go to the Settings pane that was shown when several are open", async () => {
+        Element.prototype.scrollIntoView = vi.fn();
+        const { container } = render(() => (
+            <>
+                <div data-blockid="first"><KeyboardSection /></div>
+                <div data-blockid="second"><KeyboardSection /></div>
+            </>
+        ));
+        requestKeyboardRow("tab:new", "second");
+        await Promise.resolve();
+        const second = container.querySelector('[data-blockid="second"]')!;
+        expect(second.contains(document.activeElement)).toBe(true);
+        expect(document.activeElement).toBe(second.querySelector('[data-command="tab:new"]'));
     });
 
     it("open the group of a command that has no line of its own until then", async () => {

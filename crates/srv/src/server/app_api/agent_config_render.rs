@@ -162,9 +162,15 @@ pub(super) fn write_config_file(
         .map_err(|e| format!("failed to write {}: {e}", file.filename))?;
         return Ok(());
     }
-    // `.mcp.json` merges into a user's own file instead of replacing it,
-    // and is written owner-only (#3680) — see the function's doc comment.
+    // `.mcp.json` never goes into a user's project (#3680): in a folder AgentMux owns it
+    // merges into the agent's own file as before; elsewhere it is written under the data
+    // directory, outside the project, and Claude is pointed at it at spawn.
     if file.filename == ".mcp.json" {
+        if let Some(path) = crate::backend::mcp_config_file::relocated_path(expanded_dir) {
+            crate::backend::mcp_config_file::write_relocated(&path, &file.content)
+                .map_err(|e| format!("failed to write the agent's MCP config: {e}"))?;
+            return Ok(());
+        }
         crate::backend::agent_config::write_mcp_json_respecting_user_servers(base_path, &file.content)
             .map_err(|e| format!("failed to write .mcp.json: {e}"))?;
         return Ok(());
@@ -185,4 +191,88 @@ pub(super) fn write_config_file(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::agent_config::AgentConfigFile;
+
+    fn files_under(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(path) = stack.pop() {
+            for entry in std::fs::read_dir(&path).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    out.push(path);
+                }
+            }
+        }
+        out
+    }
+
+    /// #3680: a launch into the user's own project must leave the project's `.mcp.json` exactly
+    /// as it was and write no signing material anywhere under the project. The agent's config
+    /// goes to AgentMux's data root, where Claude is pointed at it and the other harnesses read it.
+    #[test]
+    fn a_launch_into_a_user_project_leaves_its_mcp_json_alone_and_writes_no_keys_there() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let project_mcp = project.path().join(".mcp.json");
+        let original = "{\n  \"mcpServers\": {\n    \"postgres\": { \"command\": \"pg-mcp\" }\n  },\n  \"kept\": true\n}\n";
+        std::fs::write(&project_mcp, original).unwrap();
+        let project_str = project.path().to_string_lossy().into_owned();
+
+        let relocated = crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            let wd = crate::backend::workdir_fs::Workdir::open(project.path()).unwrap();
+            let file = AgentConfigFile {
+                filename: ".mcp.json".into(),
+                content: r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp","env":{"AGENTMUX_AGENT_ID":"aria","AGENTMUX_JEKT_KEY":"PRIVATE-JEKT","AGENTMUX_LAN_KEY":"PRIVATE-LAN"}}}}"#.into(),
+            };
+            write_config_file(&wd, project.path(), &project_str, &file).unwrap();
+            crate::backend::mcp_config_file::config_path(&project_str)
+        });
+
+        assert_eq!(
+            std::fs::read_to_string(&project_mcp).unwrap(),
+            original,
+            "the user's .mcp.json is byte-for-byte unchanged"
+        );
+        for file in files_under(project.path()) {
+            let body = std::fs::read_to_string(&file).unwrap_or_default();
+            assert!(
+                !body.contains("AGENTMUX_JEKT_KEY") && !body.contains("PRIVATE-JEKT") && !body.contains("PRIVATE-LAN"),
+                "no signing material may appear under the project: {file:?}"
+            );
+        }
+        assert!(!project.path().join(".claude").join(".agentmux-managed-mcp-servers.json").exists());
+        assert!(relocated.starts_with(data.path().join("mcp")), "{relocated:?}");
+        let written = std::fs::read_to_string(&relocated).unwrap();
+        assert!(written.contains("agentmux-mcp"), "{written}");
+        assert!(written.contains("PRIVATE-JEKT"), "the agent's own config may carry its keys: {written}");
+    }
+
+    /// A folder AgentMux owns keeps its own `.mcp.json` (the default agent home), so nothing changes
+    /// there and Claude finds it without a flag.
+    #[test]
+    fn a_launch_into_an_agentmux_folder_keeps_the_file_in_it() {
+        let data = tempfile::tempdir().unwrap();
+        let home = data.path().join("agents").join("aria");
+        std::fs::create_dir_all(&home).unwrap();
+        let home_str = home.to_string_lossy().into_owned();
+        let relocated = crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            let wd = crate::backend::workdir_fs::Workdir::open(&home).unwrap();
+            let file = AgentConfigFile {
+                filename: ".mcp.json".into(),
+                content: r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#.into(),
+            };
+            write_config_file(&wd, &home, &home_str, &file).unwrap();
+            crate::backend::mcp_config_file::relocated_path(&home_str)
+        });
+        assert!(home.join(".mcp.json").is_file());
+        assert!(relocated.is_none());
+    }
 }

@@ -110,6 +110,21 @@ describe("open-trace", () => {
         );
     });
 
+    it("a restored pane's steps before ResolveCli are on the line, in order", () => {
+        clock = 100;
+        beginAgentOpenOnMount("b3", "Restored agent");
+        clock = 130;
+        markAgentOpen("b3", "launch_start");
+        clock = 900;
+        markAgentOpen("b3", "auth_env");
+        clock = 1500;
+        markAgentOpen("b3", "cli_sent");
+        clock = 1520;
+        markAgentOpen("b3", "cli", { cli_source: "local_install" });
+        finishAgentOpen("b3", "closed");
+        expect(lines[0]).toContain("launch_start=30 auth_env=800 cli_sent=1400 cli=1420 cli_source=local_install");
+    });
+
     it("marks without a trace are no-ops, and finishing twice logs once", () => {
         markAgentOpen("nobody", "cli");
         agentOpenRevealed("nobody");

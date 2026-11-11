@@ -535,3 +535,26 @@ async fn revocation_is_re_checked_once_the_last_check_is_an_hour_old() {
     assert_eq!(v.verified, Some(true));
     assert_eq!(*s.instance_hits.lock().unwrap(), 2, "re-checked after an hour");
 }
+
+#[tokio::test]
+async fn an_install_hands_over_to_the_successor_it_named_when_it_retired_and_to_no_one_else() {
+    let w = world();
+    let budget = FetchBudget::new(100);
+    let http = reqwest::Client::new();
+
+    let retired = stub_with_status(Serve::Status(axum::http::StatusCode::NOT_FOUND), w.revoked_body()).await;
+    let dir = Directory { base_url: &retired.url, http: &http, token: "tok", budget: &budget };
+    assert_eq!(instance_handed_over_to(&dir, &w.record.instance_id).await.as_deref(), Some("successoraaaaaaaaaaaaaaaaaa"));
+    // The revocation is the one that install signed for itself: another id asked about gets nothing from it.
+    assert_eq!(instance_handed_over_to(&dir, "someoneelseaaaaaaaaaaaaaaaaa").await, None);
+
+    // An install that was never retired handed nothing over.
+    let live = stub(Serve::Status(axum::http::StatusCode::NOT_FOUND), false).await;
+    let dir = Directory { base_url: &live.url, http: &http, token: "tok", budget: &budget };
+    assert_eq!(instance_handed_over_to(&dir, &w.record.instance_id).await, None);
+
+    // A bare "revoked" with no signed revocation is not a handover either.
+    let forged = stub(Serve::Status(axum::http::StatusCode::NOT_FOUND), true).await;
+    let dir = Directory { base_url: &forged.url, http: &http, token: "tok", budget: &budget };
+    assert_eq!(instance_handed_over_to(&dir, &w.record.instance_id).await, None);
+}

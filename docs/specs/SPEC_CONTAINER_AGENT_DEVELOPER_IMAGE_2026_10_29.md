@@ -162,7 +162,7 @@ Two more things the repeat run showed: `npm install` run by `task dev` beside th
 | Frontend typecheck | 38 s |
 | Disk after: `target` volume / cargo volume / `node_modules` / `dist` | 11 GB / 619 MB / 604 MB / 3.1 GB, and no `target/` in the checkout |
 
-**Built:** everything in §9 except what it marks open. The image proof above ran with Rust 1.98.1; the pin is 1.99.1 and the image was rebuilt with it and checked (`rustc`, `cargo`, `clippy` and `rustfmt` all 1.99.1), but the full proof was not run again on it.
+**Built:** everything in §9 except what it marks open. The image proof above ran with Rust 1.98.1; the pin is 1.99.1 and the image was rebuilt with it and checked (`rustc`, `cargo`, `clippy` and `rustfmt` all 1.99.1). **Rerun on the published image with Rust 1.99.1 (2026-11-09, charlie, amd64, a fresh clone of main at `14de297`):** `scripts/smoke-developer-image.sh --stage dev` passed: the image's tools are all present, its Rust is the version `rust-toolchain.toml` pins, cold `cargo check --tests -p agentmux-srv` took 415 s on a host busy with other agents' builds, and `agent-dev` had the window up after about 880 s and still up 30 s later, with a screenshot of the rendered app (v0.60.22 DEV, no crash notices). The script and the manual workflow `developer-image-smoke.yml` make that run repeatable: `--stage check` is about 7 minutes, `--stage dev` about 16.
 
 **Left, and why**
 - **Windows and macOS hosts, and arm64**, were not run (§8).

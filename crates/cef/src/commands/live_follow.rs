@@ -20,16 +20,21 @@ pub(crate) fn follow_origin(cursor: (i32, i32), offset: (i32, i32)) -> (i32, i32
     (cursor.0 - offset.0, cursor.1 - offset.1)
 }
 
-/// Whether the picture is shown for a cursor at `cursor_y`: below the tear line (the strip's bottom edge
-/// plus the tear threshold, the same rule `decideTabRelease` uses), and not over another AgentMux window,
-/// where a release merges the tab or belongs to that window.
+/// Whether the picture is shown for a cursor at `cursor_y`. A window tab's shows below the tear line (the
+/// strip's bottom edge plus the tear threshold, the same rule `decideTabRelease` uses) and not over another
+/// AgentMux window, where a release merges the tab. A pane has no tear line: its picture is the dragged pane
+/// itself, shown from the drag's first move wherever the cursor is, over the layout making room for it as much
+/// as over the desktop, so no translucent ghost ever stands in for it (the live reflow spec's "what the user sees").
 #[cfg(any(target_os = "windows", test))]
-pub(crate) fn in_tear_zone(cursor_y: i32, tear_line_y: i32, over_other_window: bool) -> bool {
-    cursor_y > tear_line_y && !over_other_window
+pub(crate) fn picture_wanted(cursor_y: i32, tear_line_y: Option<i32>, over_other_window: bool) -> bool {
+    match tear_line_y {
+        Some(line) => cursor_y > line && !over_other_window,
+        None => true,
+    }
 }
 
 #[cfg(target_os = "windows")]
-pub use win::{begin, end, landing, on_cursor, on_escape, on_session_end};
+pub use win::{begin, end, landing, on_cursor, on_escape, on_session_end, picture_shown, resize};
 
 #[cfg(not(target_os = "windows"))]
 pub fn begin(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -41,6 +46,20 @@ pub fn end() -> Result<serde_json::Value, String> {
     Ok(serde_json::Value::Null)
 }
 
+#[cfg(not(target_os = "windows"))]
+pub fn resize(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    Ok(serde_json::Value::Null)
+}
+
+/// The picture's commands by name: `live_follow_begin`, `live_follow_resize`, and `live_follow_end` for any other.
+pub async fn route(cmd: &str, state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    match cmd {
+        "live_follow_begin" => begin_blocking(state, args).await,
+        "live_follow_resize" => resize_blocking(args).await,
+        _ => end(),
+    }
+}
+
 /// `begin` on the blocking pool: it decodes the picture and waits for the picture's thread to be ready.
 pub async fn begin_blocking(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let (state, args) = (state.clone(), args.clone());
@@ -49,8 +68,50 @@ pub async fn begin_blocking(state: &Arc<AppState>, args: &serde_json::Value) -> 
         .map_err(|e| format!("live_follow_begin join error: {}", e))?
 }
 
+/// `resize` on the blocking pool: it composes the picture at its new size, a few megabytes at most.
+pub async fn resize_blocking(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let args = args.clone();
+    tokio::task::spawn_blocking(move || resize(&args))
+        .await
+        .map_err(|e| format!("live_follow_resize join error: {}", e))?
+}
+
+/// Where the cursor holds a picture of `size`: at the grab the pane was pressed with, pulled inside the picture
+/// when that is smaller, so the cursor stays on it. Always from the original grab, never from a previous size's
+/// offset, so a wide slot after a narrow one has the original alignment back.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn offset_within(grab: (i32, i32), size: (i32, i32)) -> (i32, i32) {
+    (grab.0.min(size.0 - 1).max(0), grab.1.min(size.1 - 1).max(0))
+}
+
+/// The picture at `size`, from `source` (BGRA at `source_size`): the source's top-left at its own scale, cut at
+/// the right and bottom where `size` is smaller, and the rest filled with the source's bottom-right pixel (the
+/// pane's background, as a rule) where it is larger. Never scaled, so the pane keeps its proportions, as the
+/// tiles of the live reflow do (liveReflow.ts). A source shorter than its size paints as padding only.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn compose(source: &[u8], source_size: (i32, i32), size: (i32, i32)) -> Vec<u8> {
+    let (sw, sh) = (source_size.0.max(0) as usize, source_size.1.max(0) as usize);
+    let (w, h) = (size.0.max(0) as usize, size.1.max(0) as usize);
+    let whole = sw > 0 && sh > 0 && source.len() >= sw * sh * 4;
+    let pad: [u8; 4] = if whole {
+        let i = (sw * sh - 1) * 4;
+        [source[i], source[i + 1], source[i + 2], 255]
+    } else {
+        [0, 0, 0, 255]
+    };
+    let mut out = pad.repeat(w * h);
+    if whole {
+        let (cw, ch) = (w.min(sw), h.min(sh));
+        for y in 0..ch {
+            out[y * w * 4..y * w * 4 + cw * 4].copy_from_slice(&source[y * sw * 4..y * sw * 4 + cw * 4]);
+        }
+    }
+    out
+}
+
 #[cfg(target_os = "windows")]
 mod win {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
@@ -75,6 +136,8 @@ mod win {
     const WM_FOLLOW_END: u32 = WM_APP + 0x61;
     /// Sent to the picture's window when the drag is over: destroy it shortly, if nobody has asked sooner.
     const WM_FOLLOW_GRACE: u32 = WM_APP + 0x62;
+    /// Sent to the picture's window: paint the picture waiting in `PENDING_REPAINT`, at its size.
+    const WM_FOLLOW_RESIZE: u32 = WM_APP + 0x63;
     const TIMER_ID: usize = 1;
     /// The longest a picture lives if nothing ends it (a drag that never reports its end).
     const FAILSAFE_MS: u32 = 120_000;
@@ -87,10 +150,17 @@ mod win {
     struct Follower {
         hwnd: usize,
         size: (i32, i32),
-        /// Cursor to the window's top-left, physical pixels.
+        /// Cursor to the window's top-left, physical pixels: `grab` pulled inside the current size (`offset_within`).
         offset: (i32, i32),
-        /// Screen y below which the picture is shown.
-        tear_line_y: i32,
+        /// The grab the pane was pressed with, physical pixels, kept as is across resizes.
+        grab: (i32, i32),
+        /// DIP to the source window's physical pixels.
+        scale: f64,
+        /// The picture as first shown, BGRA at `source_size`: another size is cut or padded from it (`compose`).
+        source: Arc<Vec<u8>>,
+        source_size: (i32, i32),
+        /// Screen y below which a window tab's picture is shown; a pane has none and shows everywhere.
+        tear_line_y: Option<i32>,
         shown: bool,
         /// Where the picture was last put (clamped to the work area).
         last: (i32, i32),
@@ -99,6 +169,16 @@ mod win {
     }
 
     static FOLLOWER: Mutex<Option<Follower>> = Mutex::new(None);
+    /// Whether the picture is on screen, readable without the lock the hook thread holds on every move.
+    static PICTURE_SHOWN: AtomicBool = AtomicBool::new(false);
+    /// The picture `resize` composed, for the window's thread to paint (`WM_FOLLOW_RESIZE`); a newer one
+    /// replaces an unpainted one, and the end of the picture clears it.
+    static PENDING_REPAINT: Mutex<Option<Repaint>> = Mutex::new(None);
+
+    struct Repaint {
+        bgra: Vec<u8>,
+        size: (i32, i32),
+    }
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -129,7 +209,8 @@ mod win {
     /// Put the picture of the source window under the cursor's drag. `args`: `sourceWindowLabel`, `picture`
     /// (base64 JPEG), `windowWidth` and `windowHeight` (the window's outer size, DIP), `offsetX` and `offsetY`
     /// (cursor to the window's top-left, DIP), `tearLineY` (the strip's bottom plus the tear threshold,
-    /// viewport DIP). The picture stays hidden until the cursor passes the tear line.
+    /// viewport DIP). A window tab's picture stays hidden until the cursor passes the tear line; a pane's (no
+    /// `tearLineY`) shows at the cursor's next move.
     pub fn begin(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
         use base64::Engine;
         let label = args
@@ -154,19 +235,19 @@ mod win {
             px(num(args, "windowHeight")?).clamp(MIN_DIM, MAX_DIM),
         );
         let offset = (px(num(args, "offsetX")?), px(num(args, "offsetY")?));
-        // A pane has no tear line: it shows wherever the cursor is outside every AgentMux window.
-        let tear_line_y = match args.get("tearLineY").and_then(|v| v.as_f64()) {
-            Some(line) => client_top + px(line),
-            None => i32::MIN,
-        };
-        let bgra = decode_bgra(&jpeg, size.0 as u32, size.1 as u32)?;
+        let tear_line_y = args.get("tearLineY").and_then(|v| v.as_f64()).map(|line| client_top + px(line));
+        let bgra = Arc::new(decode_bgra(&jpeg, size.0 as u32, size.1 as u32)?);
 
         end_now();
-        let hwnd = spawn_overlay(bgra, size)?;
+        let hwnd = spawn_overlay(bgra.clone(), size)?;
         *FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())? = Some(Follower {
             hwnd,
             size,
-            offset,
+            offset: super::offset_within(offset, size),
+            grab: offset,
+            scale,
+            source: bgra,
+            source_size: size,
             tear_line_y,
             shown: false,
             last: (0, 0),
@@ -174,8 +255,8 @@ mod win {
         });
         tracing::info!(
             target: "dnd:tearoff",
-            label = %label, width = size.0, height = size.1, tear_line_y,
-            "[live-follow] picture ready, waiting for the cursor to pass the tear line"
+            label = %label, width = size.0, height = size.1, tear_line_y = ?tear_line_y,
+            "[live-follow] picture ready; it shows with the cursor's next move"
         );
         // The drag ended while the picture was being made: nothing will move it, so it goes.
         if !crate::commands::tear_off_hook::hook_session_active() {
@@ -192,9 +273,42 @@ mod win {
 
     fn end_now() {
         let taken = FOLLOWER.lock().ok().and_then(|mut g| g.take());
+        PICTURE_SHOWN.store(false, Ordering::Release);
+        if let Ok(mut pending) = PENDING_REPAINT.lock() {
+            *pending = None;
+        }
         if let Some(f) = taken {
             unsafe { PostMessageW(f.hwnd as HWND, WM_FOLLOW_END, 0, 0) };
         }
+    }
+
+    /// Give the picture another size (`windowWidth`, `windowHeight`, DIP): the rect the drop would give the
+    /// pane while one is armed, or the pane's own size again (pane-live-follow.ts). The picture is cut or
+    /// padded from the one first shown, never scaled, and keeps its grab offset, pulled inside the new size.
+    /// Composed outside the follower's lock, which the hook thread takes on every move.
+    pub fn resize(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let (hwnd, size, source, source_size) = {
+            let guard = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?;
+            let Some(f) = guard.as_ref() else { return Ok(serde_json::Value::Null) };
+            let px = |dip: f64| (dip * f.scale).round() as i32;
+            let size = (
+                px(num(args, "windowWidth")?).clamp(MIN_DIM, MAX_DIM),
+                px(num(args, "windowHeight")?).clamp(MIN_DIM, MAX_DIM),
+            );
+            if f.size == size {
+                return Ok(serde_json::Value::Null);
+            }
+            (f.hwnd, size, f.source.clone(), f.source_size)
+        };
+        let bgra = super::compose(&source, source_size, size);
+        let mut guard = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?;
+        // The picture ended, or another began, while this one was composed.
+        let Some(f) = guard.as_mut().filter(|f| f.hwnd == hwnd) else { return Ok(serde_json::Value::Null) };
+        f.size = size;
+        f.offset = super::offset_within(f.grab, size);
+        *PENDING_REPAINT.lock().map_err(|_| "repaint state poisoned".to_string())? = Some(Repaint { bgra, size });
+        unsafe { PostMessageW(hwnd as HWND, WM_FOLLOW_RESIZE, 0, 0) };
+        Ok(serde_json::Value::Null)
     }
 
     /// Hook thread, on every mouse move of a window-tab drag: show, move or hide the picture. Never
@@ -203,9 +317,10 @@ mod win {
         let Ok(mut guard) = FOLLOWER.try_lock() else { return };
         let Some(f) = guard.as_mut() else { return };
         let hwnd = f.hwnd as HWND;
-        if !super::in_tear_zone(y, f.tear_line_y, over_other_window) {
+        if !super::picture_wanted(y, f.tear_line_y, over_other_window) {
             if f.shown {
                 f.shown = false;
+                PICTURE_SHOWN.store(false, Ordering::Release);
                 unsafe {
                     SetWindowPos(
                         hwnd,
@@ -228,6 +343,7 @@ mod win {
             (HWND_TOP, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS)
         };
         f.shown = true;
+        PICTURE_SHOWN.store(true, Ordering::Release);
         unsafe { SetWindowPos(hwnd, insert_after, px, py, 0, 0, flags) };
     }
 
@@ -242,6 +358,13 @@ mod win {
             }
             None => (ox, oy),
         }
+    }
+
+    /// Whether the window picture is on screen now. Asked from the drag's own thread on every cursor move, while
+    /// the hook thread holds the follower's lock on every move too, so it reads a flag instead: a contended lock
+    /// would answer no and bring the shell's picture back for a frame.
+    pub fn picture_shown() -> bool {
+        PICTURE_SHOWN.load(Ordering::Acquire)
     }
 
     /// Where the real window should open: the picture's last place, if the picture is on screen. Handed out
@@ -271,7 +394,7 @@ mod win {
         }
     }
 
-    fn spawn_overlay(bgra: Vec<u8>, size: (i32, i32)) -> Result<usize, String> {
+    fn spawn_overlay(bgra: Arc<Vec<u8>>, size: (i32, i32)) -> Result<usize, String> {
         let (tx, rx) = std::sync::mpsc::channel::<Result<usize, String>>();
         std::thread::Builder::new()
             .name("live-follow".to_string())
@@ -293,6 +416,7 @@ mod win {
                 if let Ok(mut g) = FOLLOWER.lock() {
                     if g.as_ref().is_some_and(|f| f.hwnd == hwnd as usize) {
                         *g = None;
+                        PICTURE_SHOWN.store(false, Ordering::Release);
                     }
                 }
             })
@@ -340,7 +464,17 @@ mod win {
         if hwnd.is_null() {
             return Err(format!("CreateWindowExW failed: {}", GetLastError()));
         }
+        if let Err(e) = paint(hwnd, bgra, size) {
+            DestroyWindow(hwnd);
+            return Err(e);
+        }
+        SetTimer(hwnd, TIMER_ID, FAILSAFE_MS, None);
+        Ok(hwnd)
+    }
 
+    /// Show `bgra` (`size`) in the layered window, at the size given: the window takes that size with it.
+    unsafe fn paint(hwnd: HWND, bgra: &[u8], size: (i32, i32)) -> Result<(), String> {
+        let (w, h) = size;
         let screen = GetDC(std::ptr::null_mut());
         let mem = CreateCompatibleDC(screen);
         let mut bmi: BITMAPINFO = std::mem::zeroed();
@@ -375,12 +509,7 @@ mod win {
         }
         DeleteDC(mem);
         ReleaseDC(std::ptr::null_mut(), screen);
-        if let Err(e) = result {
-            DestroyWindow(hwnd);
-            return Err(e);
-        }
-        SetTimer(hwnd, TIMER_ID, FAILSAFE_MS, None);
-        Ok(hwnd)
+        result
     }
 
     unsafe extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -396,6 +525,15 @@ mod win {
             }
             WM_FOLLOW_GRACE => {
                 SetTimer(hwnd, TIMER_ID, GRACE_MS, None);
+                0
+            }
+            WM_FOLLOW_RESIZE => {
+                let taken = PENDING_REPAINT.lock().ok().and_then(|mut g| g.take());
+                if let Some(repaint) = taken {
+                    if let Err(e) = paint(hwnd, &repaint.bgra, repaint.size) {
+                        tracing::warn!(target: "dnd:tearoff", error = %e, "[live-follow] the picture could not be resized");
+                    }
+                }
                 0
             }
             WM_DESTROY => {
@@ -443,7 +581,43 @@ mod win {
 
 #[cfg(test)]
 mod tests {
-    use super::{follow_origin, in_tear_zone};
+    use super::{compose, follow_origin, offset_within, picture_wanted};
+
+    #[test]
+    fn the_grab_is_pulled_inside_a_smaller_picture_and_comes_back_whole_for_a_larger_one() {
+        let grab = (500, 30);
+        assert_eq!(offset_within(grab, (250, 200)), (249, 30));
+        // From the original grab, not from the narrow slot's offset.
+        assert_eq!(offset_within(grab, (1200, 800)), (500, 30));
+        assert_eq!(offset_within((-5, 10), (100, 100)), (0, 10));
+    }
+
+    /// A 3 by 2 BGRA picture whose pixel (x, y) is (x, y, 7, 255), so a cut or a pad is read back by value.
+    fn picture() -> Vec<u8> {
+        (0..2).flat_map(|y| (0..3).map(move |x| [x as u8, y as u8, 7, 255])).flatten().collect()
+    }
+
+    #[test]
+    fn a_smaller_size_cuts_the_picture_at_its_right_and_bottom_without_scaling() {
+        let out = compose(&picture(), (3, 2), (2, 1));
+        assert_eq!(out, vec![0, 0, 7, 255, 1, 0, 7, 255]);
+    }
+
+    #[test]
+    fn a_larger_size_pads_with_the_bottom_right_pixel_and_keeps_the_picture_top_left() {
+        let out = compose(&picture(), (3, 2), (4, 3));
+        assert_eq!(out.len(), 4 * 3 * 4);
+        // Row 0: the picture's first row, then the pad (2, 1, 7).
+        assert_eq!(&out[0..16], &[0, 0, 7, 255, 1, 0, 7, 255, 2, 0, 7, 255, 2, 1, 7, 255]);
+        // Row 2 is all pad.
+        assert_eq!(&out[32..48], &[2, 1, 7, 255].repeat(4)[..]);
+    }
+
+    #[test]
+    fn a_short_source_paints_as_padding_only() {
+        let out = compose(&[1, 2, 3], (3, 2), (1, 1));
+        assert_eq!(out, vec![0, 0, 0, 255]);
+    }
 
     #[test]
     fn the_picture_keeps_its_offset_from_the_cursor() {
@@ -452,21 +626,22 @@ mod tests {
     }
 
     #[test]
-    fn the_picture_shows_only_below_the_tear_line() {
-        assert!(in_tear_zone(301, 300, false));
-        assert!(!in_tear_zone(300, 300, false));
-        assert!(!in_tear_zone(120, 300, false));
+    fn a_window_tabs_picture_shows_only_below_the_tear_line() {
+        assert!(picture_wanted(301, Some(300), false));
+        assert!(!picture_wanted(300, Some(300), false));
+        assert!(!picture_wanted(120, Some(300), false));
     }
 
     #[test]
-    fn the_picture_stays_hidden_over_another_window() {
-        assert!(!in_tear_zone(900, 300, true));
+    fn a_window_tabs_picture_stays_hidden_over_another_window() {
+        assert!(!picture_wanted(900, Some(300), true));
     }
 
     #[test]
-    fn a_pane_has_no_tear_line_so_it_shows_wherever_no_window_is() {
-        assert!(in_tear_zone(0, i32::MIN, false));
-        assert!(in_tear_zone(-5_000, i32::MIN, false));
-        assert!(!in_tear_zone(0, i32::MIN, true));
+    fn a_panes_picture_shows_everywhere_from_the_first_move() {
+        assert!(picture_wanted(0, None, false));
+        assert!(picture_wanted(-5_000, None, false));
+        // Over its own window, where the layout makes room, and over another AgentMux window too.
+        assert!(picture_wanted(0, None, true));
     }
 }

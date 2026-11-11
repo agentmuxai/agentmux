@@ -3,7 +3,7 @@ store.follow
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
     <div class="setting-devices-description">
-      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in. Enter and Space lets it press those keys, each taken as the click it is (a form's default button, a button, a link, a checkbox) and checked like any click. Uploads lets it fill the file chooser a page opens with files from its own workspace, and only those."
     <div data-stand="Notice" data-tone="warning">
       <b>
         "One limit of the Terminal power"
@@ -140,13 +140,43 @@ store.follow
         "Google Cloud Shell"
       <span class="setting-devices-empty">
         "Choose an agent first."
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
+        <span class="setting-devices-empty">
+          "Choose an agent above first."
 -- no grants, no consoles
 store.follow
 -- no grants
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
     <div class="setting-devices-description">
-      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in."
+      "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick "ask me for each line" instead to be shown every line in the pane, with Run it and Don't run, before it goes in. Enter and Space lets it press those keys, each taken as the click it is (a form's default button, a button, a link, a checkbox) and checked like any click. Uploads lets it fill the file chooser a page opens with files from its own workspace, and only those."
     <div data-stand="Notice" data-tone="warning">
       <b>
         "One limit of the Terminal power"
@@ -174,3 +204,33 @@ store.follow
           "and show me each line first"
       <span data-stand="Button" data-disabled="true">
         "Allow"
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
+        <span class="setting-devices-empty">
+          "Choose an agent above first."

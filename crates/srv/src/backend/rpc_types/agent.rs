@@ -224,6 +224,13 @@ pub struct AgentListEntry {
     pub provider: String,
     pub status: String,
     pub session_id: Option<String>,
+    /// What the provider itself charged this agent since its current process
+    /// started, when it is on a model route: the real figure, not the harness's
+    /// Claude-priced estimate (#30143). `None` off a route, or before its first
+    /// priced response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub route_cost_usd: Option<f64>,
 }
 
 /// Response from agent.list.
@@ -721,6 +728,26 @@ pub struct CommandSetAgentContentData {
     pub agent_id: String,
     pub content_type: String,
     pub content: String,
+}
+
+/// Input for undoagentendpoint
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandUndoAgentEndpointData {
+    /// The notice's id, from the `agent:endpoint-notice` event.
+    pub notice_id: String,
+}
+
+/// Result of undoagentendpoint.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UndoAgentEndpointResult {
+    /// Whether the environment was put back.
+    pub restored: bool,
+    /// Why not, when it was not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason: Option<String>,
 }
 
 /// Input for getallagentcontent

@@ -31,8 +31,9 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
         "C:\Users\me\.agentmux\channels\stable\data"
     <div class="status-bar-popover-divider">
     <div class="status-bar-popover-row">
-      <span class="status-bar-popover-label">
-        "LAN discovery"
+      <span style="display:inline-flex;align-items:center;gap:var(--space-2)">
+        <span class="status-bar-popover-label">
+          "LAN discovery"
       <span class="status-bar-toggle" style="margin-left:auto" data-tip="Disable">
         <button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="true" aria-label="LAN discovery">
           <span class="ui-switch-thumb">

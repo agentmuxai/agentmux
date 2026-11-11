@@ -2,6 +2,32 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// A tile's four edges during a pane drag's live reflow (liveReflow.ts `reflowEdges`). Registered as lengths
+// so that a transition on them glides: an unregistered custom property only flips half way through.
+@property --reflow-l {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
+@property --reflow-t {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
+@property --reflow-r {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
+@property --reflow-b {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
 .tile-layout {
     position: relative;
     height: 100%;
@@ -300,6 +326,13 @@
             transition-timing-function: ease-in;
             transition-duration: var(--duration-base);
         }
+    }
+
+    // The live reflow (liveReflow.ts): the panes themselves glide to where the drop leaves them, so they are the
+    // outline and the gap is the signal. The landing zone keeps its edge and fill, and the rest of the layout is
+    // not dimmed: it is what the user is reading.
+    .placeholder-container.live-reflow .placeholder {
+        box-shadow: none;
     }
 
     // NOTE — no reduced treatment here by design. The drag-rearrange glide

@@ -10,7 +10,10 @@ import { Button, FilterInput, Kbd, Pill, Select, Switch } from "@/app/element/ui
 import { formatKey, type KeyPlatform } from "@/app/keybindings/keys";
 import type { CommandBindings, KeybindingIssue } from "@/app/keybindings/registry";
 import { SectionHeader } from "../settings-controls";
+import { KeySearch } from "./keyboard-key-search";
+import { KeyRecorder } from "./keyboard-recorder";
 import { KEYBOARD_SETTINGS } from "./keyboard-settings-index";
+import { KeyboardTransfer } from "./keyboard-transfer";
 import { removeEntry, resetCommand, unbindCommand, type CategoryBlock, type CategoryFilter, type KeyboardFilters, type ShortcutRow } from "./keyboard-section-state";
 import type { KeyCategory } from "@/app/keybindings/defaults";
 
@@ -30,6 +33,7 @@ export function KeyboardToolbar(p: {
     f: KeyboardFilters;
     categories: KeyCategory[];
     changed: number;
+    edit: KeyboardEdit;
     onResetAll: () => void;
     setSearchRef: (el: HTMLInputElement) => void;
 }): JSX.Element {
@@ -44,6 +48,7 @@ export function KeyboardToolbar(p: {
                 inputRef={p.setSearchRef}
                 testId="kb-search"
             />
+            <KeySearch f={p.f} platform={p.edit.platform} />
             <Select
                 class="setting-select"
                 ariaLabel="Category"
@@ -68,6 +73,7 @@ export function KeyboardToolbar(p: {
             >
                 {confirming() ? "Click again to reset all" : "Reset all"}
             </Button>
+            <KeyboardTransfer edit={p.edit} />
         </div>
     );
 }
@@ -99,9 +105,11 @@ function IssueList(p: { issues: KeybindingIssue[]; edit: KeyboardEdit }): JSX.El
 export function CommandLine(p: { c: () => CommandBindings; edit: KeyboardEdit; nested?: boolean }): JSX.Element {
     const { c, edit } = p;
     let rowEl: HTMLLIElement | undefined;
+    const [recording, setRecording] = createSignal(false);
     // The line stays mounted while its keys change, but the button that was pressed may go: the line keeps the focus.
     const act = (next: unknown[]) => {
         edit.save(next);
+        setRecording(false);
         rowEl?.focus();
     };
     return (
@@ -112,6 +120,12 @@ export function CommandLine(p: { c: () => CommandBindings; edit: KeyboardEdit; n
             data-kb-row
             data-command={c().command}
             tabIndex={-1}
+            onKeyDown={(e) => {
+                // Enter on the line itself starts recording; Enter on a button inside it is that button's.
+                if (e.key !== "Enter" || e.target !== e.currentTarget) return;
+                e.preventDefault();
+                setRecording(true);
+            }}
         >
             <div class="kb-row-main">
                 <span class="kb-row-label">{c().label}</span>
@@ -129,6 +143,9 @@ export function CommandLine(p: { c: () => CommandBindings; edit: KeyboardEdit; n
                 </Show>
             </div>
             <div class="kb-row-actions">
+                <Button aria-label={`${c().unbound ? "Set key for" : "Edit keys of"} ${c().label}`} aria-expanded={recording()} onClick={() => setRecording(!recording())}>
+                    {c().unbound ? "Set key" : "Edit"}
+                </Button>
                 <Show when={c().changed}>
                     <Button aria-label={`Reset ${c().label}`} onClick={() => act(resetCommand(edit.entries(), c().command, edit.platform))}>
                         Reset
@@ -140,6 +157,9 @@ export function CommandLine(p: { c: () => CommandBindings; edit: KeyboardEdit; n
                     </Button>
                 </Show>
             </div>
+            <Show when={recording()}>
+                <KeyRecorder c={c} edit={edit} onSave={act} onClose={() => { setRecording(false); rowEl?.focus(); }} />
+            </Show>
             <Show when={!p.nested}>
                 <IssueList issues={edit.issues().filter((i) => i.command === c().command)} edit={edit} />
             </Show>

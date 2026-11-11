@@ -47,11 +47,15 @@ export function synthParamsFor(category: SoundCategory): SynthParams {
         case "warning":
             return { wave: "triangle", freq: 440, peak: 0.5 };
         case "error":
-            // Two-tone falling square — "minor concern" interval (A4 → D4).
+            // Two-tone falling triangle — "minor concern" interval (A4 → D4).
+            // Not a square wave: its odd harmonics land in the 2-4 kHz band
+            // the ear is most sensitive to, so at a lower peak than every
+            // other tone it still read as the loudest and harshest. The
+            // triangle is the warning tone's wave at the warning tone's peak.
             return {
-                wave: "square",
+                wave: "triangle",
                 freq: 440,
-                peak: 0.35,
+                peak: 0.5,
                 second: { freq: 294, delayMs: 90 },
             };
     }

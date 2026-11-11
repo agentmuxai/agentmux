@@ -18,6 +18,6 @@ pub(super) async fn enqueue(state: &AppState, caller: &RemoteCaller, params: Val
     work_remote::tasks_enqueue(state, &caller.actor(), params).await.map_err(refusal)
 }
 
-pub(super) async fn list(state: &AppState, _caller: &RemoteCaller, params: Value) -> RemoteResult {
-    work_remote::tasks_list(state, params).map_err(refusal)
+pub(super) async fn list(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
+    work_remote::tasks_list_for(state, Some(&caller.actor()), params).map_err(refusal)
 }

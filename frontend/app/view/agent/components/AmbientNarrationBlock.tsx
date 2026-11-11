@@ -19,7 +19,7 @@
 import { Show, createMemo, type JSX } from "solid-js";
 
 import { useTick } from "@/app/hook/useTick";
-import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { formatPeekTime } from "@/util/format-time";
 import { useNodePeek } from "../hooks/useNodePeek";
 import type { AmbientNarrationNode } from "../../../agent-model/types";
 import { PeekOverlay } from "./PeekOverlay";
@@ -42,7 +42,7 @@ export const AmbientNarrationBlock = (props: AmbientNarrationBlockProps): JSX.El
     const peekTimeText = createMemo(() => {
         if (!peekPanelVisible()) return null;
         peekTick();
-        return `${formatExactTime(props.node.timestamp)} · ${formatTimeAgo(props.node.timestamp)}`;
+        return formatPeekTime(props.node.timestamp);
     });
 
     return (

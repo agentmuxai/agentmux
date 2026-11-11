@@ -106,12 +106,32 @@ pub(super) fn prune(nodes: &mut [Value], hidden: &HashSet<i64>) -> usize {
     cut
 }
 
-/// The backend ids of what the page hides with CSS, or none when the layout can't be read (then
-/// nothing is left out: showing everything is the safe answer).
-pub(super) async fn capture(cdp: &mut CdpSession) -> HashSet<i64> {
+/// What one `DOMSnapshot.captureSnapshot` says about the top document.
+#[derive(Default)]
+pub(super) struct Layout {
+    /// What the page hides with CSS.
+    pub hidden: HashSet<i64>,
+    /// What responds to a click (`clickable.rs`).
+    pub clickable: HashSet<i64>,
+}
+
+/// The layout, or an empty one when it can't be read (then nothing is left out and nothing is
+/// added: showing the accessibility tree as it is, is the safe answer).
+pub(super) async fn capture(cdp: &mut CdpSession) -> Layout {
     match cdp.call("DOMSnapshot.captureSnapshot", json!({ "computedStyles": STYLES, "includeDOMRects": false })).await {
-        Ok(r) => hidden_backend_ids(&r),
-        Err(_) => HashSet::new(),
+        Ok(r) => Layout { hidden: hidden_backend_ids(&r), clickable: super::clickable::clickable_backend_ids(&r) },
+        Err(_) => Layout::default(),
+    }
+}
+
+/// Mark what the page makes clickable, then cut the hidden subtrees with nothing to act on (unless
+/// `include_hidden`) out of `nodes`; how many were cut.
+pub(super) fn apply(nodes: &mut [Value], layout: &Layout, include_hidden: bool) -> usize {
+    super::clickable::mark(nodes, &layout.clickable, &layout.hidden);
+    if include_hidden {
+        0
+    } else {
+        prune(nodes, &layout.hidden)
     }
 }
 

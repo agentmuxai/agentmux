@@ -30,7 +30,16 @@
 //   download link or a file: link never commits: it fetches, it sends nothing.
 //
 // `why` says what made it commit, for the approval banner.
-function clickLabel(ariaLabel, labelledBy, text, el) {
+//
+// `axName` is the accessible name the browser computed for the element
+// (`Accessibility.getPartialAXTree`), the one a snapshot or a find shows and
+// the agent chose the element by. The element's own aria-label and text miss a
+// name that comes from a title, an image's alt, a child's aria-label or CSS
+// content, so the same rule runs on the accessible name too, and the click
+// commits if either says so. `undefined`: not looked up. `null`: the lookup
+// failed, and an element with no name of its own then commits (`unreadable`):
+// a click that can't be named is asked about, never passed as harmless.
+function clickLabel(ariaLabel, labelledBy, text, el, axName) {
   const LINK_WORDS = 6;
   const VERBS = "submit|send|pay|buy|purchase|order|checkout|check out|delete|remove|publish|post|confirm|sign up|sign|agree|accept|transfer|unsubscribe";
   const clean = (s) => String(s || "").replace(/\s+/g, " ").trim();
@@ -72,6 +81,20 @@ function clickLabel(ariaLabel, labelledBy, text, el) {
       committing = true;
       why = inName ? "its name says \"" + inName + "\"" : "its text says \"" + inRest + "\"";
     }
+  }
+  // A link with text of its own is named by it: its accessible name repeats that text with the description
+  // joined on ("Billing history Pay an invoice"), which would make a sentence's word commit.
+  if (typeof axName === "string" && axName.trim() && !(e.link && name)) {
+    const byAx = clickLabel(axName, "", "", e);
+    return {
+      name: name || byAx.name,
+      description,
+      committing: committing || byAx.committing,
+      why: committing ? why : byAx.why,
+    };
+  }
+  if (axName === null && !name) {
+    return { name, description, committing: true, why: "its name could not be read", unreadable: true };
   }
   return { name, description, committing, why };
 }

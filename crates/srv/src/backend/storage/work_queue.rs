@@ -259,22 +259,64 @@ impl Store {
         lease_ms: i64,
         min_priority: Option<i64>,
     ) -> Result<Option<WorkItem>, StoreError> {
+        self.work_queue_claim_in(filter, None, now_ms, lease_ms, min_priority)
+    }
+
+    /// [`Self::work_queue_claim_with`] on one board (by id), or on every board the claimer sees
+    /// when `None`: not an archived one, and not one whose agent list leaves the claimer out.
+    pub fn work_queue_claim_in(
+        &self,
+        filter: &ClaimFilter,
+        board_id: Option<&str>,
+        now_ms: i64,
+        lease_ms: i64,
+        min_priority: Option<i64>,
+    ) -> Result<Option<WorkItem>, StoreError> {
         let conn = self.conn().lock().unwrap();
+        super::work_boards::number_unboarded(&conn)?;
+        let sql = Self::claim_sql(filter.groups.len(), min_priority);
+        let mut stmt = conn.prepare(&sql)?;
+        // Positional binds: ?1 agent_id, ?2 lease expiry, ?3 now, ?4 kind,
+        // ?5 agent_uid (SET, and since M3 the uid-target match in WHERE),
+        // ?6.. group ids, then the board. ?1 and ?3 are each referenced twice in the SQL (SET +
+        // WHERE); numbered parameters make that reuse safe.
+        let expires = now_ms + lease_ms;
+        let kind_filter = filter.kind.clone().unwrap_or_default();
+        let mut binds: Vec<&dyn rusqlite::ToSql> = vec![
+            &filter.agent_id,
+            &expires,
+            &now_ms,
+            &kind_filter,
+            &filter.agent_uid,
+        ];
+        for g in &filter.groups {
+            binds.push(g);
+        }
+        let board = board_id.unwrap_or("");
+        binds.push(&board);
+
+        let item = stmt
+            .query_row(binds.as_slice(), row_to_item)
+            .optional()?;
+        Ok(item)
+    }
+
+    /// The claim statement: `group_count` group ids bind from `?6`, the board right after them.
+    fn claim_sql(group_count: usize, min_priority: Option<i64>) -> String {
         let quota = min_priority.map(|n| format!("AND {}", floor_exempt(n))).unwrap_or_default();
 
         // Group eligibility is an IN-list built from caller-resolved groups.
         // Built as a bound-parameter list (never string-interpolated) so a
         // group id can't inject SQL.
-        let group_placeholders: String = if filter.groups.is_empty() {
+        let group_placeholders: String = if group_count == 0 {
             String::new()
         } else {
-            let marks: Vec<String> = (0..filter.groups.len())
-                .map(|i| format!("?{}", i + 6))
-                .collect();
+            let marks: Vec<String> = (0..group_count).map(|i| format!("?{}", i + 6)).collect();
             format!(" OR target_group IN ({})", marks.join(","))
         };
+        let board_mark = format!("?{}", 6 + group_count);
 
-        let sql = format!(
+        format!(
             "UPDATE db_work_queue
                 SET state = '{claimed}',
                     claimed_by = ?1,
@@ -307,6 +349,11 @@ impl Store {
                        AND (target_group = ''{groups})
                        AND (?4 = '' OR kind = ?4)
                        {quota}
+                       -- Several boards: not an archived board, nor one whose
+                       -- agent list leaves this claimer out; and only the
+                       -- board the claim names, when it names one.
+                       AND {visible}
+                       AND ({board} = '' OR c.board_id = {board})
                        -- Kanban §6.15: not while a task it starts after
                        -- is unfinished.
                        AND NOT {waits}
@@ -316,7 +363,9 @@ impl Store {
                      -- the backlog (a card's rank, in created_at units), else
                      -- the order they were filed.
                      ORDER BY (CASE WHEN target_agent_uid <> '' OR target_agent <> '' THEN 0 ELSE 1 END),
-                              priority DESC, COALESCE(c.rank, created_at) ASC
+                              priority DESC,
+                              (CASE WHEN c.board_id = (SELECT id FROM db_boards WHERE is_default = 1 LIMIT 1) THEN 0 ELSE 1 END),
+                              COALESCE(c.rank, created_at) ASC
                      LIMIT 1
               )
               RETURNING {cols}",
@@ -324,32 +373,11 @@ impl Store {
             open = work_state::OPEN,
             groups = group_placeholders,
             quota = quota,
+            visible = super::work_boards::card_visible_to_agent("?1", "?5"),
+            board = board_mark,
             waits = super::work_deps::WAITS_ON_UNFINISHED,
             cols = COLS,
-        );
-
-        let mut stmt = conn.prepare(&sql)?;
-        // Positional binds: ?1 agent_id, ?2 lease expiry, ?3 now, ?4 kind,
-        // ?5 agent_uid (SET, and since M3 the uid-target match in WHERE),
-        // ?6.. group ids. ?1 and ?3 are each referenced twice in the SQL above
-        // (SET + WHERE); numbered parameters make that reuse safe.
-        let expires = now_ms + lease_ms;
-        let kind_filter = filter.kind.clone().unwrap_or_default();
-        let mut binds: Vec<&dyn rusqlite::ToSql> = vec![
-            &filter.agent_id,
-            &expires,
-            &now_ms,
-            &kind_filter,
-            &filter.agent_uid,
-        ];
-        for g in &filter.groups {
-            binds.push(g);
-        }
-
-        let item = stmt
-            .query_row(binds.as_slice(), row_to_item)
-            .optional()?;
-        Ok(item)
+        )
     }
 
     /// How many open tasks `filter` could claim but for the quota floor: the ones the floor holds back.

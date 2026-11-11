@@ -16,6 +16,11 @@
     z-index: var(--z-tooltip);
 }
 
+// A tooltip that only reports a status never takes the pointer (Tooltip's `passive`).
+.anchored-popover.anchored-popover--passive {
+    pointer-events: none;
+}
+
 // A menu-styled panel (`.menu` body) keeps the flyout-menu tier it had.
 .anchored-popover--menu {
     z-index: var(--z-flyout-menu);

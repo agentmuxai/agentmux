@@ -165,6 +165,131 @@ function currentWindowLabel(): string {
     return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
 }
 
+type StartupTlog = (label: string, since: number) => void;
+
+/** The client's window (made on a cold start, or when it is gone), read back from srv. */
+async function findWindow(tlog: StartupTlog): Promise<{ clientData: Client; windowData: MuxWindow }> {
+    // Get client data
+    let t = performance.now();
+    // Discovery reads retry a request that never got a response (#3868:
+    // a refused loopback connect used to fail the whole window). Writes
+    // below (CreateWindow/CloseWindow) are not retried.
+    const clientData = await withTimeout(
+        retryTransient(() => ClientService.GetClientData()),
+        RPC_TIMEOUT,
+        "GetClientData"
+    );
+    tlog("GetClientData", t);
+
+    let windowId = clientData.windowids?.[0];
+
+    // If no windows exist, create one. This is the genuine cold-start
+    // case (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13 Feature 1)
+    // — `Client.windowids` is empty, which only happens right after a
+    // graceful quit (the destroy-on-close cascade always empties it) or
+    // on a truly first-ever launch. Pass `restoreIfAvailable: true` so
+    // srv replays the last-session snapshot if one was saved on close,
+    // instead of always seeding the hardcoded default 3-pane layout.
+    if (!windowId) {
+        t = performance.now();
+        const newWindow = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel(), true), RPC_TIMEOUT, "CreateWindow");
+        tlog("CreateWindow (no windows)", t);
+        windowId = newWindow.oid;
+        // The last session's other windows come back too, once this one is up.
+        void reopenRestoredWindows();
+    }
+
+    // Verify window exists
+    t = performance.now();
+    let windowData = await withTimeout(
+        retryTransient(() => WindowService.GetWindow(windowId)),
+        RPC_TIMEOUT,
+        "GetWindow"
+    );
+    tlog("GetWindow", t);
+
+    if (!windowData) {
+        t = performance.now();
+        windowData = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel()), RPC_TIMEOUT, "CreateWindow");
+        tlog("CreateWindow (fallback)", t);
+        windowId = windowData.oid;
+    }
+    return { clientData, windowData };
+}
+
+/** The window's workspace; a window whose workspace is missing is closed and made again. */
+async function findWorkspace(tlog: StartupTlog, found: MuxWindow): Promise<{ windowData: MuxWindow; workspace: Workspace }> {
+    let windowData = found;
+    // Get workspace
+    let t = performance.now();
+    let workspace = await withTimeout(
+        retryTransient(() => WorkspaceService.GetWorkspace(windowData.workspaceid)),
+        RPC_TIMEOUT,
+        "GetWorkspace"
+    );
+    tlog("GetWorkspace", t);
+
+    if (!workspace) {
+        // Workspace missing → recreate entire window
+        t = performance.now();
+        await withTimeout(WindowService.CloseWindow(windowData.oid), RPC_TIMEOUT, "CloseWindow");
+        windowData = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel()), RPC_TIMEOUT, "CreateWindow");
+        workspace = await withTimeout(WorkspaceService.GetWorkspace(windowData.workspaceid), RPC_TIMEOUT, "GetWorkspace");
+        tlog("Recreate window+workspace", t);
+    }
+    return { windowData, workspace };
+}
+
+/** The tab the window opens on: the active one, else the first, else the first pinned. */
+function pickTabId(workspace: Workspace): string {
+    // Get active tab ID
+    const tabId = workspace.activetabid ||
+                 workspace.tabids?.[0] ||
+                 workspace.pinnedtabids?.[0] ||
+                 "";
+
+    if (!tabId) {
+        throw new Error("No tab found in workspace");
+    }
+    return tabId;
+}
+
+/** Apply dev window title — task dev TITLE="agentx: PR #1780". */
+function applyDevWindowTitle(windowId: string): void {
+    // Only runs in Vite dev mode; VITE_DEV_TITLE is empty string in prod builds.
+    const devTitle = import.meta.env.VITE_DEV_TITLE;
+    if (import.meta.env.DEV && devTitle) {
+        void ObjectService.UpdateObjectMeta(
+            MOS.makeORef("window", windowId),
+            { [DISPLAY_NAME_META_KEY]: devTitle.slice(0, DISPLAY_NAME_MAX_LEN) } as MetaType,
+        );
+    }
+}
+
+/** The notices a started window shows; none of them holds startup up. */
+function startStartupNotices(): void {
+    // Issue #2977 WS4 — show what the background service did while no
+    // window was open. Fire-and-forget: it must never delay or break
+    // startup, and it self-suppresses when there is nothing to report.
+    void (async () => {
+        const { surfaceBackgroundAudit } = await import("@/app/init/background-audit");
+        await surfaceBackgroundAudit();
+    })();
+    // What AgentMux recovered from, until the user closes it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
+    void import("@/app/init/incidents").then(({ surfaceIncidents }) => surfaceIncidents());
+    // The workspace opened from an older copy because its last save didn't
+    // load. Read again: the cold start's CreateWindow above is what knows.
+    void ClientService.GetClientData()
+        .then(surfaceWorkspaceRestoreNotice)
+        .catch(() => {});
+    // A window that came up with the default layout because there was
+    // nothing to restore offers the layout another build saved (srv decides).
+    void import("@/app/window/restore-other-build").then((m) => m.offerLayoutFromOtherBuild());
+    // Agents whose id an older build chained: one notice, until dismissed,
+    // pointing to Settings › Agents (srv decides who they are).
+    void import("@/app/view/settings/fork-slug-notice").then((m) => m.offerForkSlugUpdate());
+}
+
 async function initHostMux(): Promise<void> {
     const t0 = performance.now();
     const tlog = (label: string, since: number) => {
@@ -174,79 +299,10 @@ async function initHostMux(): Promise<void> {
     };
 
     try {
-        // Get client data
-        let t = performance.now();
-        // Discovery reads retry a request that never got a response (#3868:
-        // a refused loopback connect used to fail the whole window). Writes
-        // below (CreateWindow/CloseWindow) are not retried.
-        const clientData = await withTimeout(
-            retryTransient(() => ClientService.GetClientData()),
-            RPC_TIMEOUT,
-            "GetClientData"
-        );
-        tlog("GetClientData", t);
-
-        let windowId = clientData.windowids?.[0];
-
-        // If no windows exist, create one. This is the genuine cold-start
-        // case (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13 Feature 1)
-        // — `Client.windowids` is empty, which only happens right after a
-        // graceful quit (the destroy-on-close cascade always empties it) or
-        // on a truly first-ever launch. Pass `restoreIfAvailable: true` so
-        // srv replays the last-session snapshot if one was saved on close,
-        // instead of always seeding the hardcoded default 3-pane layout.
-        if (!windowId) {
-            t = performance.now();
-            const newWindow = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel(), true), RPC_TIMEOUT, "CreateWindow");
-            tlog("CreateWindow (no windows)", t);
-            windowId = newWindow.oid;
-            // The last session's other windows come back too, once this one is up.
-            void reopenRestoredWindows();
-        }
-
-        // Verify window exists
-        t = performance.now();
-        let windowData = await withTimeout(
-            retryTransient(() => WindowService.GetWindow(windowId)),
-            RPC_TIMEOUT,
-            "GetWindow"
-        );
-        tlog("GetWindow", t);
-
-        if (!windowData) {
-            t = performance.now();
-            windowData = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel()), RPC_TIMEOUT, "CreateWindow");
-            tlog("CreateWindow (fallback)", t);
-            windowId = windowData.oid;
-        }
-
-        // Get workspace
-        t = performance.now();
-        let workspace = await withTimeout(
-            retryTransient(() => WorkspaceService.GetWorkspace(windowData.workspaceid)),
-            RPC_TIMEOUT,
-            "GetWorkspace"
-        );
-        tlog("GetWorkspace", t);
-
-        if (!workspace) {
-            // Workspace missing → recreate entire window
-            t = performance.now();
-            await withTimeout(WindowService.CloseWindow(windowData.oid), RPC_TIMEOUT, "CloseWindow");
-            windowData = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel()), RPC_TIMEOUT, "CreateWindow");
-            workspace = await withTimeout(WorkspaceService.GetWorkspace(windowData.workspaceid), RPC_TIMEOUT, "GetWorkspace");
-            tlog("Recreate window+workspace", t);
-        }
-
-        // Get active tab ID
-        const tabId = workspace.activetabid ||
-                     workspace.tabids?.[0] ||
-                     workspace.pinnedtabids?.[0] ||
-                     "";
-
-        if (!tabId) {
-            throw new Error("No tab found in workspace");
-        }
+        const found = await findWindow(tlog);
+        const { clientData } = found;
+        const { windowData, workspace } = await findWorkspace(tlog, found.windowData);
+        const tabId = pickTabId(workspace);
 
         tlog("Phase 1 complete (discovery)", t0);
 
@@ -260,44 +316,17 @@ async function initHostMux(): Promise<void> {
         };
 
         // Initialize wave (this will render the UI)
-        t = performance.now();
+        const t = performance.now();
         await initMuxWrap(initOpts);
         tlog("initMuxWrap", t);
         tlog("TOTAL initCefMux", t0);
 
-        // Apply dev window title — task dev TITLE="agentx: PR #1780"
-        // Only runs in Vite dev mode; VITE_DEV_TITLE is empty string in prod builds.
-        const devTitle = import.meta.env.VITE_DEV_TITLE;
-        if (import.meta.env.DEV && devTitle) {
-            void ObjectService.UpdateObjectMeta(
-                MOS.makeORef("window", initOpts.windowId),
-                { [DISPLAY_NAME_META_KEY]: devTitle.slice(0, DISPLAY_NAME_MAX_LEN) } as MetaType,
-            );
-        }
+        applyDevWindowTitle(initOpts.windowId);
 
         // Initialize instance tracking (must come after initMuxWrap so global state is ready)
         await initInstanceTracking();
 
-        // Issue #2977 WS4 — show what the background service did while no
-        // window was open. Fire-and-forget: it must never delay or break
-        // startup, and it self-suppresses when there is nothing to report.
-        void (async () => {
-            const { surfaceBackgroundAudit } = await import("@/app/init/background-audit");
-            await surfaceBackgroundAudit();
-        })();
-        // What AgentMux recovered from, until the user closes it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
-        void import("@/app/init/incidents").then(({ surfaceIncidents }) => surfaceIncidents());
-        // The workspace opened from an older copy because its last save didn't
-        // load. Read again: the cold start's CreateWindow above is what knows.
-        void ClientService.GetClientData()
-            .then(surfaceWorkspaceRestoreNotice)
-            .catch(() => {});
-        // A window that came up with the default layout because there was
-        // nothing to restore offers the layout another build saved (srv decides).
-        void import("@/app/window/restore-other-build").then((m) => m.offerLayoutFromOtherBuild());
-        // Agents whose id an older build chained: one notice, until dismissed,
-        // pointing to Settings › Agents (srv decides who they are).
-        void import("@/app/view/settings/fork-slug-notice").then((m) => m.offerForkSlugUpdate());
+        startStartupNotices();
 
         benchDump(); // emit full startup timeline to log
 
@@ -669,8 +698,8 @@ async function initAppInner() {
                 // (irrelevant — app.tsx replaces this window's content
                 // entirely for credential-approval).
                 let coldMeta: Record<string, unknown> | undefined;
-                // The memory-adoption approval window is the same kind.
-                const approvalViews = ["credential-approval", "memory-adoption-approval", "ssh-approval"];
+                // The SSH approval window is the same kind.
+                const approvalViews = ["credential-approval", "ssh-approval"];
                 const seedView =
                     coldInitialView && !approvalViews.includes(coldInitialView) ? coldInitialView : undefined;
                 if (seedView) {
@@ -1138,10 +1167,11 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     void import("@/app/block/upgrade-requests").then((m) => m.startUpgradeRequests());
     // An agent's request to drive a native app opens a prompt here.
     void import("@/app/block/desktop-requests").then((m) => m.startDesktopRequests());
+    void import("@/app/view/agent/endpoint-notice-cards").then((m) => m.startEndpointNoticeCards());
+    void Promise.all([import("@/app/block/agent-notices"), import("@/app/block/pane-confirms")]).then(([n, c]) => (n.startAgentNotices(), c.startPaneConfirms()));
     // An agent's Vault requests are cards in its pane, and the Vault pane lists them all.
     void import("@/app/view/agent/components/vault-request-card/vault-request-cards").then((m) => m.startVaultRequestCards());
-    // srv's calls to action (browser, SSH consent, widget installs) join the
-    // waiting tone and notification.
+    // srv's calls to action (browser, SSH consent, widget installs) join the waiting tone and notification.
     void import("@/app/notification/waiting-for-you").then((m) => m.installWaitingForYou());
 
     // Window services that don't paint. They load alongside the render and

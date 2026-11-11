@@ -152,6 +152,54 @@ pub fn set_git_config_list(env: &mut HashMap<String, String>, process: impl Fn(&
     *env = out;
 }
 
+/// Git's own variable for config set from the environment, read next to `GIT_CONFIG_COUNT`: one
+/// `'key'='value'` pair per setting, separated by spaces.
+const PARAMETERS: &str = "GIT_CONFIG_PARAMETERS";
+
+/// `s` in single quotes the way git writes it: a `'` or `!` inside is closed, escaped and reopened.
+fn sh_quote(s: &str) -> String {
+    let mut out = String::from("'");
+    for c in s.chars() {
+        match c {
+            '\'' => out.push_str("'\\''"),
+            '!' => out.push_str("'\\!'"),
+            c => out.push(c),
+        }
+    }
+    out.push('\'');
+    out
+}
+
+/// Hand the `GIT_CONFIG_*` settings of `env` (an overlay on `process`) to the agent as
+/// `GIT_CONFIG_PARAMETERS` instead of `GIT_CONFIG_COUNT`/`_KEY_<n>`/`_VALUE_<n>`.
+///
+/// For an agent that scrubs every variable whose name holds `KEY`, `TOKEN`, `SECRET` or `PASSWORD`
+/// from the shells and tools it starts (DeepSeek Harness does, with no setting to turn it off):
+/// `GIT_CONFIG_KEY_<n>` goes while `GIT_CONFIG_COUNT` and `GIT_CONFIG_VALUE_<n>` stay, and git then
+/// stops with "missing config key GIT_CONFIG_KEY_0", which also stops `gh-agent` (it asks git for
+/// the repository's owner). The name `GIT_CONFIG_PARAMETERS` is not one of those, git reads it the
+/// same way, and no setting is lost: this is the same list, in git's other spelling. The count is
+/// set to 0 so the agent's own git ignores any slot the process env still has. Nothing is done
+/// when there are no settings.
+pub fn git_config_as_parameters(env: &mut HashMap<String, String>, process: impl Fn(&str) -> Option<String>) {
+    let (count, entries, existing) = {
+        let get = |k: &str| env.get(k).cloned().or_else(|| process(k));
+        let count = parse_count(&get);
+        let entries: Vec<(String, String)> = (0..count)
+            .filter_map(|i| Some((get(&format!("GIT_CONFIG_KEY_{i}"))?, get(&format!("GIT_CONFIG_VALUE_{i}")).unwrap_or_default())))
+            .collect();
+        (count, entries, get(PARAMETERS).filter(|p| !p.trim().is_empty()))
+    };
+    if count == 0 {
+        return;
+    }
+    let pairs = entries.iter().map(|(k, v)| format!("{}={}", sh_quote(k), sh_quote(v)));
+    let params: Vec<String> = existing.into_iter().chain(pairs).collect();
+    env.retain(|k, _| !k.starts_with("GIT_CONFIG_KEY_") && !k.starts_with("GIT_CONFIG_VALUE_"));
+    env.insert(COUNT.to_string(), "0".to_string());
+    env.insert(PARAMETERS.to_string(), params.join(" "));
+}
+
 /// `key` from `env`; on Windows, where variable names ignore case, in any casing.
 fn env_var(env: &HashMap<String, String>, key: &str, windows: bool) -> Option<String> {
     env.get(key)
@@ -214,6 +262,50 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("pre-push"), format!("#!/bin/sh\n# {MARKER}: test\n")).unwrap();
         dir
+    }
+
+    #[test]
+    fn git_config_moves_to_parameters_for_an_agent_that_scrubs_key_names() {
+        let mut e = env(&[
+            (COUNT, "2"),
+            ("GIT_CONFIG_KEY_0", "core.hooksPath"),
+            ("GIT_CONFIG_VALUE_0", "C:\\Users\\a b\\gh-agent-hooks"),
+            ("GIT_CONFIG_KEY_1", "safe.directory"),
+            ("GIT_CONFIG_VALUE_1", "*"),
+            ("PATH", "/bin"),
+        ]);
+        git_config_as_parameters(&mut e, no_process);
+        assert_eq!(e[PARAMETERS], r"'core.hooksPath'='C:\Users\a b\gh-agent-hooks' 'safe.directory'='*'");
+        assert_eq!(e[COUNT], "0");
+        assert!(!e.keys().any(|k| k.starts_with("GIT_CONFIG_KEY_") || k.starts_with("GIT_CONFIG_VALUE_")));
+        assert_eq!(e["PATH"], "/bin");
+        // Neither name that stays is one the agent's scrub removes.
+        let scrubbed = |k: &str| ["KEY", "PASSWORD", "SECRET", "TOKEN"].iter().any(|w| k.to_uppercase().contains(w));
+        assert!(!scrubbed(PARAMETERS) && !scrubbed(COUNT));
+    }
+
+    #[test]
+    fn parameters_quote_what_git_would_and_keep_what_was_there() {
+        assert_eq!(sh_quote("it's"), r"'it'\''s'");
+        assert_eq!(sh_quote("a!b"), r"'a'\!'b'");
+        let mut e = env(&[(PARAMETERS, "'user.name'='x'")]);
+        let process = |k: &str| match k {
+            COUNT => Some("1".to_string()),
+            "GIT_CONFIG_KEY_0" => Some("core.hooksPath".to_string()),
+            "GIT_CONFIG_VALUE_0" => Some("/h".to_string()),
+            _ => None,
+        };
+        git_config_as_parameters(&mut e, process);
+        // The process env's slot joins, after the parameters already set.
+        assert_eq!(e[PARAMETERS], "'user.name'='x' 'core.hooksPath'='/h'");
+        assert_eq!(e[COUNT], "0");
+    }
+
+    #[test]
+    fn no_git_config_means_nothing_changes() {
+        let mut e = env(&[("PATH", "/bin")]);
+        git_config_as_parameters(&mut e, no_process);
+        assert_eq!(e, env(&[("PATH", "/bin")]));
     }
 
     #[test]

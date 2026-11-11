@@ -18,12 +18,16 @@ pub struct UsageTap {
     body: Vec<u8>,
     counts: TokenCounts,
     model: Option<String>,
+    /// The provider's own charge for the response, when it reports one
+    /// (OpenRouter's `usage.cost`): the real figure, not a price-table
+    /// estimate (#30143).
+    cost_usd: Option<f64>,
 }
 
 impl UsageTap {
     /// `stream`: the response is `text/event-stream`.
     pub fn new(stream: bool) -> Self {
-        Self { stream, pending: Vec::new(), body: Vec::new(), counts: TokenCounts::default(), model: None }
+        Self { stream, pending: Vec::new(), body: Vec::new(), counts: TokenCounts::default(), model: None, cost_usd: None }
     }
 
     pub fn push(&mut self, chunk: &[u8]) {
@@ -79,17 +83,21 @@ impl UsageTap {
         if let Some(n) = read("cache_read_input_tokens") {
             self.counts.cache_read = n;
         }
+        if let Some(cost) = usage.get("cost").and_then(Value::as_f64).filter(|c| c.is_finite() && *c >= 0.0) {
+            self.cost_usd = Some(cost);
+        }
     }
 
-    /// The counts, and the model the upstream says answered.
-    pub fn finish(mut self) -> (TokenCounts, Option<String>) {
+    /// The counts, the model the upstream says answered, and its own charge
+    /// for the response when it reported one.
+    pub fn finish(mut self) -> (TokenCounts, Option<String>, Option<f64>) {
         if !self.stream {
             if let Ok(body) = serde_json::from_slice::<Value>(&self.body) {
                 self.model = body.get("model").and_then(Value::as_str).map(str::to_string);
                 self.usage(body.get("usage"));
             }
         }
-        (self.counts, self.model)
+        (self.counts, self.model, self.cost_usd)
     }
 }
 
@@ -103,7 +111,7 @@ mod tests {
         "event: content_block_delta\n",
         "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hi\"}}\n\n",
         "event: message_delta\n",
-        "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":57}}\n\n",
+        "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":57,\"cost\":0.00123}}\n\n",
     );
 
     #[test]
@@ -113,9 +121,10 @@ mod tests {
             for chunk in STREAM.as_bytes().chunks(size) {
                 tap.push(chunk);
             }
-            let (counts, model) = tap.finish();
+            let (counts, model, cost) = tap.finish();
             assert_eq!((counts.input, counts.output, counts.cache_read), (120, 57, 40), "chunks of {size}");
             assert_eq!(model.as_deref(), Some("deepseek/deepseek-v4.1-flash-1017"));
+            assert_eq!(cost, Some(0.00123), "the provider's own charge rides the stream");
         }
     }
 
@@ -124,8 +133,9 @@ mod tests {
         let mut tap = UsageTap::new(false);
         tap.push(br#"{"model":"m","usage":{"input_tokens":9,"output_tokens":3}"#);
         tap.push(b"}");
-        let (counts, model) = tap.finish();
+        let (counts, model, cost) = tap.finish();
         assert_eq!((counts.input, counts.output, model.as_deref()), (9, 3, Some("m")));
+        assert_eq!(cost, None, "no charge reported: the price table estimates it");
     }
 
     #[test]

@@ -196,7 +196,7 @@ impl Store {
         conn.execute_batch(super::work_claims::SCHEMA)?;
         conn.execute_batch(super::coord_posts::SCHEMA)?;
         conn.execute_batch(super::bulletins::SCHEMA)?;
-        conn.execute_batch(super::work_board::SCHEMA)?;
+        super::work_boards::apply_schema(&conn)?;
         super::job_runs::apply_schema(&conn)?;
         conn.execute_batch(super::work_deps::SCHEMA)?;
         conn.execute_batch(super::work_prs::SCHEMA)?;
@@ -269,7 +269,7 @@ impl Store {
         conn.execute_batch(super::work_claims::SCHEMA)?;
         conn.execute_batch(super::coord_posts::SCHEMA)?;
         conn.execute_batch(super::bulletins::SCHEMA)?;
-        conn.execute_batch(super::work_board::SCHEMA)?;
+        super::work_boards::apply_schema(&conn)?;
         conn.execute_batch(super::work_deps::SCHEMA)?;
         conn.execute_batch(super::work_prs::SCHEMA)?;
         conn.execute_batch(super::work_media::SCHEMA)?;

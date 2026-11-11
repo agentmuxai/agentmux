@@ -401,6 +401,17 @@ pub(crate) async fn instance_is_revoked(dir: &Directory<'_>, instance_id: &str) 
     fetch_revoked(dir, instance_id).await
 }
 
+/// The install `from` handed over to: the successor named in the revocation `from` signed with its own
+/// key, which the directory serves. `None` when `from` is not revoked, the directory holds no revocation
+/// it signed, or the directory could not be read.
+pub(crate) async fn instance_handed_over_to(dir: &Directory<'_>, from: &str) -> Option<String> {
+    let url = format!("{}/wan-instances/{}", dir.base_url.trim_end_matches('/'), from);
+    match get_json::<InstanceStatusResp>(dir, &url).await {
+        Fetched::Found(s) if s.revoked => s.revocation.filter(|r| r.old_instance_id == from && r.verify()).map(|r| r.new_instance_id),
+        _ => None,
+    }
+}
+
 /// What the pin said about the install that signed a message.
 enum PinCheck {
     /// Pinned to this install, or not pinnable yet.

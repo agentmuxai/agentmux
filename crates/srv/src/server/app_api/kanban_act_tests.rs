@@ -398,7 +398,7 @@ async fn track_follows_a_running_agents_work_as_a_task_it_holds() {
     let res = act(&state, json!({"action": "track", "block_id": block, "title": "  The thing  it does "})).await.unwrap();
     assert_eq!(res["ok"], true);
     let num = res["num"].as_i64().unwrap();
-    let board = list(&state).await.unwrap();
+    let board = list(&state, &Value::Null).await.unwrap();
     let t = board["tasks"].as_array().unwrap().iter().find(|t| t["card"]["num"] == num).cloned().expect("on the board");
     assert_eq!(t["title"], "The thing  it does", "trimmed, not collapsed");
     assert_eq!((t["state"].as_str(), t["claimed_by"].as_str(), t["target_agent"].as_str()), (Some("claimed"), Some(name.as_str()), Some(name.as_str())));
@@ -452,4 +452,27 @@ async fn release_with_a_branch_asks_before_it_takes_the_task_back_and_says_so_in
     assert_eq!(board_task(&state, &id).item.state, work_state::OPEN);
     assert_eq!(events_of(&state, &id).len(), events_before + 1);
     assert!(has_event(&state, &id, "taken_back", "operator", "operator"));
+}
+
+
+#[tokio::test]
+async fn move_and_start_refuse_an_agent_the_tasks_board_leaves_out() {
+    use crate::backend::storage::work_boards::BoardEdit;
+    let state = test_state();
+    let id = file(&state, "Team only").await;
+    let name = unique("outsider");
+    running_agent(&state, &name);
+    let edit = BoardEdit { agents: Some(vec!["agentx".into()]), ..Default::default() };
+    state.work_store.work_board_edit("main", &edit, now_ms()).unwrap();
+
+    let err = act(&state, json!({"action": "start", "id": id, "agent": name})).await.unwrap_err();
+    assert!(err.contains("isn't on board main"), "{err}");
+    let err = act(&state, json!({"action": "move", "id": id, "agent": "Loap-3"})).await.unwrap_err();
+    assert!(err.contains("isn't on board main"), "{err}");
+    let t = board_task(&state, &id);
+    assert_eq!((t.item.state.as_str(), t.item.target_agent.as_str()), (work_state::OPEN, ""), "nothing was taken or assigned");
+
+    // On the list, it goes through; "anyone" never needed a check.
+    act(&state, json!({"action": "move", "id": id, "agent": "agentx"})).await.unwrap();
+    act(&state, json!({"action": "move", "id": id, "agent": ""})).await.unwrap();
 }

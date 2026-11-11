@@ -29,6 +29,7 @@ import { paneTearOffOf, removeTornOffPane, rollBackPaneTearOff } from "./pane-te
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
+import { endLiveFollow } from "./live-follow";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
@@ -185,18 +186,11 @@ function CrossWindowDragMonitor(): JSX.Element {
                 grabOffsetY: grabOffsetSnapshot?.y,
             });
 
-            if (!payload) return;
-
-            // Escape was pressed during this drag — abort here too, same
-            // reasoning as checkAndFireFallback above (reagent PR #2310 P1).
-            // On Windows the page never sees the key, so ask the drag's end
-            // (native-cancel.ts); the effect is read before the await.
-            const dropEffect = e.dataTransfer?.dropEffect;
-            if (dragSession?.escaped || (await endedByEscape(dropEffect))) {
-                getApi().releaseDragCapture().catch(() => {});
-                Logger.info("dnd:cross", "cross-window drag aborted via Escape");
+            if (!payload) {
+                endLiveFollow(getApi());
                 return;
             }
+            if (await abandonedByEscape(dragSession, e.dataTransfer?.dropEffect)) return;
 
             // Release WebView2 mouse capture immediately — IDropSource may leave it active
             // after an out-of-window HTML5 drag, breaking subsequent mousedown delivery.
@@ -219,26 +213,42 @@ function CrossWindowDragMonitor(): JSX.Element {
     return null;
 }
 
+/**
+ * Escape was pressed during this drag: abort, as checkAndFireFallback does, so an escaped drag never tears off
+ * (#2310). On Windows the page never sees the key, so the drag's end is asked (native-cancel.ts); the effect is
+ * read before the await. The pane's picture that followed the cursor (pane-live-follow.ts) goes with the drag:
+ * only a tear-off keeps it up, under the window about to open at its place.
+ */
+async function abandonedByEscape(dragSession: ReturnType<typeof endReleasedSession>, dropEffect: string | undefined): Promise<boolean> {
+    if (!dragSession?.escaped && !(await endedByEscape(dropEffect))) return false;
+    endLiveFollow(getApi());
+    getApi().releaseDragCapture().catch(() => {});
+    Logger.info("dnd:cross", "cross-window drag aborted via Escape");
+    return true;
+}
+
 async function handleCrossWindowDragEnd(
     payload: DragItemPayload,
     sourceWindow: string | null,
     grabOffsetSnapshot: ReturnType<typeof getTabGrabOffset> = null,
 ) {
+    const api = getApi();
     let cursorPoint: { x: number; y: number };
     try {
-        cursorPoint = await getApi().windows.getCursorScreenPoint();
+        cursorPoint = await api.windows.getCursorScreenPoint();
     } catch (e) {
         Logger.error("dnd:cross", "failed to get cursor position", { error: String(e) });
+        endLiveFollow(api);
         return;
     }
 
-    const api = getApi();
     const src = sourceWindow ?? "main";
     const workspace = atoms.workspace() as Workspace | undefined;
     const activeTabId = atoms.activeTabId();
 
     if (!workspace) {
         Logger.warn("dnd:cross", "no workspace found — aborting cross-window drag");
+        endLiveFollow(api);
         return;
     }
 
@@ -257,7 +267,10 @@ async function handleCrossWindowDragEnd(
         // The whole pane goes: every tab of its stack, not only the visible
         // one (the host's drag session still only needs the visible block).
         const tearOff = paneTearOffOf(payload.node);
-        if (!tearOff) return;
+        if (!tearOff) {
+            endLiveFollow(api);
+            return;
+        }
         dragPayloadForApi = { blockId: tearOff.blockId };
         tearOffMembers = tearOff.members;
         dragType = "pane";
@@ -280,6 +293,8 @@ async function handleCrossWindowDragEnd(
         const targetWindow = dragType === "tab" || isSelfRelease(payload) ? null : hitWindow;
 
         if (targetWindow && targetWindow !== src) {
+            // The pane lands in that window: its picture goes now.
+            endLiveFollow(api);
             // Brief delay to allow native drop handlers to run first. Only a
             // drop on another window can have any; a tear-off (no window under
             // the cursor) doesn't wait. SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md
@@ -292,9 +307,12 @@ async function handleCrossWindowDragEnd(
             await api.completeCrossDrag(dragId, null, cursorPoint.x, cursorPoint.y);
             try { await api.releaseDragCapture(); } catch {}
         } else {
+            // Released over its own window: the layout's drop handler has placed the pane (or nothing happens).
+            endLiveFollow(api);
             await api.cancelCrossDrag(dragId);
         }
     } catch (e) {
+        endLiveFollow(api);
         Logger.error("dnd:cross", "cross-window drag error", { error: String(e), dragType, dragPayloadForApi });
         // CRITICAL: release the host drag session. If startCrossDrag set
         // active_drag and a later step threw (e.g. TearOffBlock "block not

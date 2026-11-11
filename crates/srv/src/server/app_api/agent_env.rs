@@ -21,6 +21,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 use crate::backend::agent_env;
+use crate::backend::endpoint_notice;
 use crate::backend::storage::store::{AgentContent, AgentDefinition};
 use crate::server::caller::Caller;
 use crate::server::state::AppState;
@@ -141,6 +142,83 @@ fn audit(state: &AppState, actor: &Actor, target: &AgentDefinition, ok: bool, er
     request_id
 }
 
+/// Why this change to `target`'s model endpoint is refused, if it is. Not for what it does (the notice and its
+/// undo window answer that) but for where it would not work: an agent on a model route keeps the route's
+/// server and keys, a container agent gets the person's account mounted in its image, which a custom
+/// server must not receive, and a key must be a Vault entry the person opened to that agent. A key is
+/// also one the acting agent could use itself: srv does not put a key in a server's hands for an agent
+/// that could not have read it. (An agent on another machine names none: it has no agent here.) The
+/// answer is the same for an entry that is missing, of another kind or closed to an agent, so it never
+/// says which entries exist.
+fn endpoint_refusal(state: &AppState, actor: &Actor, target: &AgentDefinition, current: &str, new: &str) -> Option<Refusal> {
+    let bad = |m: String| Some(refuse(StatusCode::BAD_REQUEST, m));
+    if crate::backend::model_gateway::launch::choice_of(&state.mstore, &target.id).is_some() {
+        return bad(format!(
+            "{} is on a model route, which sets its server, key and models: switch its route instead (the model panel, or Agents update)",
+            target.name
+        ));
+    }
+    if target.runtime().is_container() {
+        return bad(format!(
+            "{} is a container agent: its image is given the person's account, which a server of its own must not receive. Use a model route, or ask the operator to set the endpoint in My Agents",
+            target.name
+        ));
+    }
+    key_refusal(state, actor, target, current, new)
+}
+
+/// Why the keys the new environment holds may not go to its server. When the call moves the address, every
+/// key in the environment goes with it, so every one is checked, the ones already there as well as the
+/// ones the call writes: a `vault:` reference must be usable by the acting agent and by the target, and a
+/// key written in the clear (the operator's, from My Agents) is never handed to an address an agent chose.
+/// When only a key changes, that key is checked. A key is only written for a server of its own: with no
+/// address, or Anthropic's, the launch passes it through next to the person's login and the CLI would send
+/// that string to Anthropic as its key; so a call that takes the address away takes those keys with it.
+fn key_refusal(state: &AppState, actor: &Actor, target: &AgentDefinition, current: &str, new: &str) -> Option<Refusal> {
+    let bad = |m: String| Some(refuse(StatusCode::BAD_REQUEST, m));
+    let (before, after) = (agent_env::effective(current), agent_env::effective(new));
+    let url = |m: &BTreeMap<String, String>| m.iter().find(|(k, _)| k.eq_ignore_ascii_case("ANTHROPIC_BASE_URL")).map(|(_, v)| v.trim().to_string());
+    let moved = url(&before) != url(&after);
+    let custom = url(&after).is_some_and(|u| !agent_env::is_anthropic_url(&u));
+    for (name, value) in &after {
+        if !(name.eq_ignore_ascii_case("ANTHROPIC_AUTH_TOKEN") || name.eq_ignore_ascii_case("ANTHROPIC_API_KEY")) {
+            continue;
+        }
+        let written = before.get(name) != Some(value);
+        let value = value.trim();
+        if !custom {
+            if written {
+                return bad(format!("{name}: a key goes with the address of a server of its own; set ANTHROPIC_BASE_URL in the same call"));
+            }
+            // A placeholder or a Vault reference was for the server being left; a key the person wrote is theirs.
+            if moved && (agent_env::vault_ref(value).is_some() || agent_env::is_placeholder(value)) {
+                return bad(format!("{name}: is for the server this agent was pointed at; unset it in the same call that takes the address away"));
+            }
+            continue;
+        }
+        // With a server of its own the key goes there if it is new or the address is.
+        if !(written || moved) {
+            continue;
+        }
+        let Some(entry) = agent_env::vault_ref(value) else {
+            if !value.is_empty() && !agent_env::is_placeholder(value) {
+                return bad(format!(
+                    "{name}: holds a key written in the environment, which would go to the new address; replace it with vault:<entry id> or have the person set the address in My Agents"
+                ));
+            }
+            continue;
+        };
+        let usable = |agent_id: &str| crate::backend::vault::endpoint_key::problem(&state.identity_store, entry, agent_id).is_none();
+        if actor.uid.starts_with("remote:") || !usable(&actor.uid) || !usable(&target.id) {
+            return bad(format!(
+                "{name}: {}; the person opens a Vault to an agent in the Vault's agents setting",
+                crate::backend::vault::endpoint_key::NOT_AVAILABLE
+            ));
+        }
+    }
+    None
+}
+
 /// Held from reading an environment to writing it, so two agents changing the
 /// same definition at once don't lose one change. (A save from My Agents goes
 /// through `setagentcontent` and isn't serialized with this.)
@@ -185,6 +263,19 @@ fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value,
             if new == current {
                 return Ok(json!({ "agent": agent, "changed": change, "note": "nothing changed" }));
             }
+            let endpoint = change.touches_endpoint();
+            // Setting an endpoint name is checked in full; taking one away only for the keys it leaves behind.
+            let refusal = if change.sets_endpoint() {
+                endpoint_refusal(state, &actor, &target, &current, &new)
+            } else if endpoint {
+                key_refusal(state, &actor, &target, &current, &new)
+            } else {
+                None
+            };
+            if let Some(refusal) = refusal {
+                audit(state, &actor, &target, false, Some(&refusal.message), "refused (model endpoint)");
+                return Err(refusal);
+            }
             let content = AgentContent {
                 agent_id: target.id.clone(),
                 content_type: agent_env::CONTENT_TYPE.to_string(),
@@ -196,7 +287,7 @@ fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value,
                 audit(state, &actor, &target, false, Some(&message), "not saved");
                 return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, message));
             }
-            let summary = change.summary();
+            let summary = if endpoint { format!("{} [model endpoint]", change.summary()) } else { change.summary() };
             let audit_id = audit(state, &actor, &target, true, None, &summary);
             tracing::info!(
                 target: "identity",
@@ -207,16 +298,67 @@ fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value,
                 "agent.env.set: {summary}"
             );
             state.broker.publish_event::<crate::backend::mps_events::AgentContentChanged>(&(), vec![], 0);
+            // A card and an Undo are for a change of address: not for a model name, nor for a key or a timeout on the address it had.
+            let pointed = endpoint_notice::pointed(&current, &new);
+            let noticed = pointed.moved;
+            let notice = noticed.then(|| {
+                let event = endpoint_notice::open(
+                    (&target.id, &target.slug, &target.name),
+                    &actor.name,
+                    pointed,
+                    &current,
+                    &new,
+                    agentmux_common::time::now_ms(),
+                );
+                state.broker.publish_event::<crate::backend::mps_events::AgentEndpointNotice>(&event, vec![], 0);
+                json!({ "id": event.id, "undo_for_ms": event.window_ms })
+            });
             Ok(json!({
                 "agent": agent,
                 "changed": change,
                 "lines": agent_env::redacted(&new),
                 "audit_id": audit_id,
-                "note": "applies at the agent's next launch",
+                "note": if noticed {
+                    "applies at the agent's next launch, on a conversation of its own: its pane and My Agents say who pointed it where, with an Undo for 30 seconds"
+                } else {
+                    "applies at the agent's next launch"
+                },
+                "notice": notice,
             }))
         }
         other => Err(refuse(StatusCode::BAD_REQUEST, format!("unknown env action '{other}': get or set"))),
     }
+}
+
+/// Undo a model-server change within its window, for the person's Undo on the notice: puts the environment
+/// back as it was. `by` is who pressed it, for the record.
+pub(crate) fn undo_endpoint(state: &AppState, notice_id: &str, by: &str) -> Result<(), String> {
+    let agent_id = endpoint_notice::agent_id_of(notice_id).ok_or_else(|| endpoint_notice::Refusal::Unknown.words().to_string())?;
+    let def = state
+        .mstore
+        .agent_def_get(&agent_id)
+        .map_err(|e| format!("agent env: {e}"))?
+        .ok_or_else(|| format!("no agent '{agent_id}' on this machine"))?;
+    let actor = Actor { uid: format!("ui:{by}"), slug: by.to_string(), name: by.to_string() };
+    let _writing = ENV_WRITE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let current = current_text(state, &def.id).map_err(|r| r.message)?;
+    let (previous, event) = endpoint_notice::check_for_undo(notice_id, &current, agentmux_common::time::now_ms()).map_err(|r| r.words().to_string())?;
+    let content = AgentContent {
+        agent_id: def.id.clone(),
+        content_type: agent_env::CONTENT_TYPE.to_string(),
+        content: previous,
+        updated_at: agentmux_common::time::now_ms(),
+    };
+    if let Err(e) = state.mstore.agent_content_set(&content) {
+        let message = format!("agent env: {e}");
+        audit(state, &actor, &def, false, Some(&message), "undo of a model endpoint change: not saved");
+        return Err(message);
+    }
+    endpoint_notice::finish_undo(notice_id);
+    audit(state, &actor, &def, true, None, &format!("undid the model endpoint change {} made", event.by));
+    state.broker.publish_event::<crate::backend::mps_events::AgentContentChanged>(&(), vec![], 0);
+    state.broker.publish_event::<crate::backend::mps_events::AgentEndpointNotice>(&event, vec![], 0);
+    Ok(())
 }
 
 /// `POST /api/v1/agent/env`

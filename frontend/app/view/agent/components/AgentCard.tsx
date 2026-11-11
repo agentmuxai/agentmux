@@ -21,6 +21,7 @@
  */
 
 import { Button, TagList, type TagSpec } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { focusManager } from "@/app/store/focusManager";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { ProviderLogo } from "@/element/ProviderLogo";
@@ -126,14 +127,14 @@ function cardTags(props: AgentCardProps): TagSpec[] {
             kind: "ribbon",
             tone: "ok",
             icon: "download",
-            label: props.installing ? "Installing…" : "Click to install",
+            label: props.installing ? t("agentCard.installing") : t("agentCard.install"),
         });
     }
     const now = new Date();
     for (const tag of accessTagsFor(props.agent.provider, now)) {
         out.push({
             id: tag.label.toLowerCase(),
-            label: tag.label,
+            label: tag.label === "Free" ? t("agentPicker.filters.free") : t("agentPicker.filters.local"),
             tone: tag.tone,
             icon: tag.icon,
             group: tag.label === "Free" ? "plan" : "where",
@@ -145,11 +146,11 @@ function cardTags(props: AgentCardProps): TagSpec[] {
     if (props.installed !== false && props.drift === "behind-pin") {
         out.push({
             id: "update",
-            label: "Update available",
+            label: t("agentCard.update"),
             tone: "warn",
             icon: "circle-up",
             group: "fact",
-            title: "A newer CLI version is pinned by AgentMux — update it in the Toolchain pane",
+            title: t("agentCard.updateTitle"),
         });
     }
     return out;
@@ -272,7 +273,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             tabIndex={props.disabled ? -1 : 0}
             aria-disabled={props.disabled}
             aria-expanded={props.expanded === undefined ? undefined : props.expanded}
-            aria-label={`Launch ${title()}`}
+            aria-label={t("agentCard.launch", { name: title() })}
         >
             {/* Harness icon only — no vendor badge. This section is
                 explicitly about picking a harness (see the section hint
@@ -320,11 +321,11 @@ function NewSessionButton(p: { s: CardState }) {
                 density="compact"
                 class="agent-card-new-session-btn"
                 onClick={(e) => handleNewClick(s, e)}
-                title="Archive current session and start a new one"
-                aria-label={`Start a new session for ${title()} (archives the current one)`}
+                title={t("agentCard.newSessionTitle")}
+                aria-label={t("agentCard.newSessionLabel", { name: title() })}
                 tabIndex={props.disabled ? -1 : 0}
             >
-                {"+ New"}
+                {t("agentCard.newSession")}
             </Button>
         </Show>
     );

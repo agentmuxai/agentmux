@@ -158,6 +158,70 @@ describe("the drop preview is the drop", () => {
     }
 });
 
+/**
+ * Phase 0 of the live reflow (SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md §5, §9): the preview's layout work (a
+ * copy of the tree, the reducer, the layout pass) runs once per armed candidate, a few times a second. Its
+ * budget is 4 ms for eight panes on a developer machine; the assertion is ten times looser so a slow CI runner
+ * can't fail it, and the measured means are printed for the record.
+ */
+describe("the drop preview is cheap enough to run per armed candidate", () => {
+    beforeEach(() => rows.clear());
+
+    it("stays well under budget on two to eight panes", () => {
+        const measured: string[] = [];
+        const slow: string[] = [];
+        for (const [name, make] of Object.entries(TREES)) {
+            const model = modelOf(make());
+            const ids = leafIds(make());
+            // The last move the reducer accepts on this tree: a pane moved far from where it is.
+            const accepted = drops(make());
+            const action = accepted[accepted.length - 1]?.action;
+            expect(action).toBeTruthy();
+            // Warm up, then time the mean of many runs: one run is below the clock's resolution.
+            for (let i = 0; i < 10; i++) futureLayoutOf(model, action!);
+            const runs = 200;
+            const start = performance.now();
+            for (let i = 0; i < runs; i++) futureLayoutOf(model, action!);
+            const mean = (performance.now() - start) / runs;
+            measured.push(`${name} (${ids.length} panes): ${mean.toFixed(3)} ms`);
+            if (mean > 40) slow.push(`${name}: ${mean.toFixed(2)} ms`);
+        }
+        console.info(`[futureLayoutOf] mean per preview:\n  ${measured.join("\n  ")}`);
+        expect(slow).toEqual([]);
+    });
+});
+
+/**
+ * The live reflow matches a current pane to its future rect by blockId (SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md
+ * §6): a pane keeps its node id through the preview, but a split can rename its parent, so the block is the key.
+ */
+describe("every current pane has exactly one future rect, by block", () => {
+    beforeEach(() => rows.clear());
+
+    for (const [name, make] of Object.entries(TREES)) {
+        it(`${name}: each pane's block is in the preview once, with a rect`, () => {
+            const wrong: string[] = [];
+            for (const { name: zone, action } of drops(make())) {
+                const model = modelOf(make());
+                const future = futureLayoutOf(model, action!);
+                if (!future) {
+                    wrong.push(`${zone}: no preview`);
+                    continue;
+                }
+                const blocks = future.leafIds.map((id) => future.leafBlockIds[id]);
+                for (const leaf of model.leafs()) {
+                    const block = leaf.data?.blockId;
+                    const mine = blocks.filter((b) => b === block);
+                    if (mine.length !== 1) wrong.push(`${zone}: ${leaf.id} appears ${mine.length} times`);
+                    const id = future.leafIds.find((l) => future.leafBlockIds[l] === block);
+                    if (!id || !future.rects[id]) wrong.push(`${zone}: ${leaf.id} has no rect`);
+                }
+            }
+            expect(wrong).toEqual([]);
+        });
+    }
+});
+
 describe("a tab pill's ghost has an extent", () => {
     beforeEach(() => rows.clear());
 

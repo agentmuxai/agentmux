@@ -63,10 +63,12 @@ jobs:
   build:
     name: macOS arm64 — sign + notarize DMG
     runs-on: macos-latest   # Apple Silicon arm64 (M-series)
-    # A warm build takes 30–50 min; a cold one (no Rust cache) reached signing
-    # at 73 min in v0.59.37. Fail long before GitHub's 6-hour limit, which
-    # once held a release while codesign waited on a locked keychain.
-    timeout-minutes: 150
+    # The step took 93 min for v0.60.21, 103 for v0.60.22 and 133 for v0.60.23: the srv release
+    # build alone is 85 to 103 min (most of it the final LTO link, which prints nothing), and
+    # notarization took up to 12.5 min. The limit leaves room for that to grow and for a slow
+    # notarization queue, and still fails long before GitHub's 6-hour limit, which once held a
+    # release while codesign waited on a locked keychain.
+    timeout-minutes: 240
     env:
       OUT: ${{ github.workspace }}/artifacts
       CEF_RUNTIME_DIR_DARWIN: ${{ github.workspace }}/cef-runtime-darwin
@@ -415,6 +417,11 @@ jobs:
           # Unlocked again here, however long the steps before took: a locked
           # keychain makes codesign wait for a password nobody can type.
           security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          # The srv release build ends in a link of many minutes that prints nothing. A line every
+          # five minutes with the busiest process tells a slow link from a hang.
+          ( while sleep 300; do echo "still running, $((SECONDS / 60)) min into this step; busiest process: $(ps -Ao pcpu=,etime=,comm= -r | head -1)"; done ) &
+          HEARTBEAT=$!
+          trap 'kill "$HEARTBEAT" 2>/dev/null || true' EXIT
           REQUIRE_REMOTE_HELPERS=1 RELEASE_CHANNEL=stable bash scripts/package-macos.sh "$OUT"
 
       - name: Locate DMG

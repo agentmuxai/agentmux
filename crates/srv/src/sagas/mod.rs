@@ -66,6 +66,8 @@ pub mod redock_floating_pane;
 pub mod self_quit;
 pub mod sensitive_fallback;
 pub mod sensitive_runners;
+pub mod agent_notice;
+pub mod pane_confirm;
 pub mod sensitive_window;
 pub mod restore_torn_off_tab;
 pub mod tear_off_block;

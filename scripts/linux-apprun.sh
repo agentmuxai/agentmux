@@ -77,6 +77,10 @@ BUILD_ID="$(cat "$this_dir/usr/share/agentmux/BUILD_ID" 2>/dev/null || true)"
 CACHE_KEY="${BUILD_ID:-$VERSION}"
 EXTRACT_DIR="$HOME/.local/share/agentmux/extracted/$CACHE_KEY"
 
+# `--version` / `-V`: answer from the staged VERSION marker, before anything is extracted,
+# registered or started (the launcher answers the same flag for the deb, rpm and tarball).
+case "${1:-}" in --version|-V) echo "AgentMux $VERSION"; exit 0 ;; esac
+
 # The marker carries the dir it refers to, and is honoured only when it names
 # THIS dir. It used to be a bare "1", which the app then exported into every
 # child process — including the shells in its own terminal panes. So launching

@@ -35,8 +35,8 @@
 //!
 //! `host_spawn` and `container_spawn` are `impl SubprocessController` blocks
 //! in their own files — Rust allows multiple `impl <Type>` blocks across
-//! files/modules for the same type. `spawn_container_turn` is moved WHOLE into
-//! its file: it is one continuous, non-trivially-ordered state machine.
+//! files/modules for the same type. `spawn_container_turn` takes a request in its
+//! file and runs the accepted turn through the steps in `container_spawn_steps`.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};

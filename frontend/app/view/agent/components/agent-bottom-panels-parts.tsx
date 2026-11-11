@@ -10,7 +10,8 @@
 
 import { isStopping } from "@/app/store/agent-pane-state/types";
 import { plausibleReading } from "@/app/store/agent-pane-state/context-reading";
-import { readSwarmSummary } from "@/app/store/activitySummary";
+import { readPaneSummary } from "@/app/store/swarm-line";
+import { useTick } from "@/app/hook/useTick";
 import { clockTime } from "@/store/muxbus-delivery";
 import { Show, type JSX } from "solid-js";
 import { SensitiveBanner } from "../sensitive/SensitiveBanner";
@@ -218,6 +219,8 @@ export function ActivityDockRow(part: Part): JSX.Element {
 /** The working row, while it is visible. */
 export function WorkingRowAnchor(part: Part): JSX.Element {
     const { p, t } = part;
+    // The agent's own status line stops counting after an hour (`readPaneSummary`), with no meta update to say so.
+    const minute = useTick(60_000);
     return (
         <>
             <div class="agent-working-row-anchor">
@@ -225,7 +228,7 @@ export function WorkingRowAnchor(part: Part): JSX.Element {
                     <AgentWorkingRow
                         loading={p.workingRowLoading()}
                         stopping={isStopping(p.paneModel.state.turnPhase)}
-                        activitySummary={readSwarmSummary(p.block()?.meta)}
+                        activitySummary={(minute(), readPaneSummary(p.block()?.meta))}
                         turnTokens={p.paneModel.state.turnTokens}
                         turnLedger={p.paneModel.state.turnLedger}
                         turnCarry={p.paneModel.state.turnCarry}

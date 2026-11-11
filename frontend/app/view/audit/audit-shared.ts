@@ -15,6 +15,8 @@ export const AUDIT_PAGE = 50;
 
 /** Pane meta naming the agent the Audit is filtered to (the Swarm's "Audit for this agent" sets it). */
 export const AUDIT_AGENT_META_KEY = "audit:agent";
+/** The sound the status bar's "last sound" asks the Audit to show the row of (audit-sound.ts `encodeSoundRef`). */
+export const AUDIT_SOUND_META_KEY = "audit:sound";
 
 /** The kinds the query knows, in the order the chips show them. */
 export const KIND_CHIPS: { kind: string; label: string }[] = [

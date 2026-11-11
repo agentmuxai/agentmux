@@ -8,6 +8,7 @@
 // and the rollback when the floating window can't open.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setPlatform } from "@/util/platformutil";
 
 const { svc, invokeCommand, removeMovedBlock, api, measureMotherResize, state } = vi.hoisted(() => ({
     svc: {
@@ -24,6 +25,7 @@ const { svc, invokeCommand, removeMovedBlock, api, measureMotherResize, state } 
         completeCrossDrag: vi.fn(),
         cancelCrossDrag: vi.fn(),
         releaseDragCapture: vi.fn(),
+        liveFollowEnd: vi.fn(() => Promise.resolve()),
         // The real CEF mapping, over the IPC mock, so the wire assertions stand.
         windows: {
             openFloatingPane: (args: Record<string, unknown>) => invokeCommand("open_floating_pane_window", args),
@@ -114,6 +116,18 @@ describe("handlePaneTabDragEnd", () => {
         await handlePaneTabDragEnd(payload("b"), "main", { x: 10, y: 10 }, "win32");
         expect(api.cancelCrossDrag).toHaveBeenCalledWith("drag-1");
         expect(svc.TearOffBlock).not.toHaveBeenCalled();
+    });
+
+    it("a drop on an AgentMux window drops the picture that followed the cursor; a tear-off leaves it for the window", async () => {
+        setPlatform("win32");
+        api.updateCrossDrag.mockResolvedValue("main");
+        await handlePaneTabDragEnd(payload("b"), "main", { x: 10, y: 10 }, "win32");
+        expect(api.liveFollowEnd).toHaveBeenCalledTimes(1);
+        api.liveFollowEnd.mockClear();
+        api.updateCrossDrag.mockResolvedValue(null);
+        await handlePaneTabDragEnd(payload("b"), "main", { x: 5000, y: 10 }, "win32");
+        expect(api.liveFollowEnd).not.toHaveBeenCalled();
+        setPlatform("darwin");
     });
 
     it("a drop on no window tears off and completes the host drag session", async () => {

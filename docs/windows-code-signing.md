@@ -38,7 +38,7 @@
 | Path | Cost | Publisher shown | CI fit |
 |---|---|---|---|
 | **SignPath Foundation** (chosen) | Free | "SignPath Foundation" | Managed GitHub Action |
-| Azure Artifact Signing (ex-"Trusted Signing") | Free now (paid "soon") | Your own "AgentMux Corp." | Native (signtool + Azure dlib) |
+| Azure Artifact Signing (ex-"Trusted Signing") | Free now (paid "soon") | Your own "AgentMux Corp" | Native (signtool + Azure dlib) |
 | Commercial OV (SSL.com eSigner, Certum) | ~$220/yr | Your own | Cloud-HSM API |
 
 Sources: [MS Learn — code signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options) · [Azure Artifact Signing](https://azure.microsoft.com/en-us/products/artifact-signing) · [SignPath Foundation terms](https://signpath.org/terms.html) · [EV vs OV / SmartScreen 2024](https://sslinsights.com/ov-code-signing-vs-ev-code-signing-certificate/) · [Certum OSS](https://certum.store/open-source-code-signing-code.html)
@@ -47,7 +47,7 @@ Sources: [MS Learn — code signing options](https://learn.microsoft.com/en-us/w
 
 - The signing key lives in **SignPath's HSM** — the project never holds a cert file.
 - **CI** builds the artifact → submits it to SignPath via their GitHub Action → a human **Approver** authorizes → SignPath returns the signed binary → CI uploads it to the release.
-- Trade-off accepted: the signed **publisher shows "SignPath Foundation"**, not "AgentMux Corp."
+- Trade-off accepted: the signed **publisher shows "SignPath Foundation"**, not "AgentMux Corp"
 
 ## Activation checklist (when we circle back)
 

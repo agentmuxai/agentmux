@@ -229,7 +229,7 @@ export function Notices(props: Part): JSX.Element {
                 <div class="maintenance-row-text maintenance-row-text--error">{m.startError()}</div>
             </Show>
             <StoreUpdateNotes
-                closesFor={viaStore() && !m.storeBelowFloor() && m.storeOffers() && m.updaterStatus() === "available" ? m.updaterVersion() : null}
+                closesFor={viaStore() && !m.storeBelowFloor() && m.storeOffers() && m.updaterStatus() === "available" ? (m.updaterVersion() ?? "") : null}
                 busy={m.storeBusy()}
                 note={m.storeNote()}
             />
@@ -248,6 +248,11 @@ export function CheckRow(props: Part): JSX.Element {
         <>
             <div class="maintenance-update-row">
                 <span class="maintenance-row-text maintenance-row-text--dim">{m.standing()}</span>
+                <Show when={m.storeLagging()}>
+                    <Button density="compact" class="maintenance-btn" onClick={m.openStorePage}>
+                        Open Store page
+                    </Button>
+                </Show>
                 <Show when={appUpdate()?.state === "local-build" && appUpdate()?.url}>
                     <Button density="compact" class="maintenance-btn" onClick={() => void openLink(appUpdate()!.url!)}>
                         View

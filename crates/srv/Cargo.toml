@@ -41,7 +41,7 @@ chrono = "0.4"
 # the tree through chrono, so this adds nothing new.
 iana-time-zone = "0.1"
 tokio-util = { version = "0.7", features = ["io", "rt"] }
-rusqlite = { version = "0.39", features = ["bundled", "backup", "blob"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup", "blob"] }
 # TypeScript type generation for the RPC bindings (backend/rpc/schema.rs, and
 # the export_bindings_rpc_schema test that feeds scripts/gen-rpc-stubs.mjs).
 # serde-json-impl gives serde_json::Value a TS impl (JsonValue), which
@@ -72,7 +72,10 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # OS-native secret storage (macOS Keychain / Windows Credential Manager /
 # Linux Secret Service) for account API keys. See
 # docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
-keyring = "2"
+# keyring 4 is a wrapper that picks the stores for us and keeps the first
+# failure to open one for the life of the process; identity/secret_store.rs
+# installs the per-platform store itself (below) and retries.
+keyring-core = "1"
 # Zero plaintext secret buffers on drop.
 zeroize = { version = "1", features = ["zeroize_derive"] }
 # The Vault's `.vault` files are age files encrypted to a passphrase (SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §8.2).
@@ -163,6 +166,8 @@ hyper = { version = "1", features = ["http1", "server", "client"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# The Secret Service store behind keyring-core (identity/secret_store.rs).
+zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 # Agent process tracking (process_tracker::cgroup_linux): ask the systemd user
 # manager for srv's delegated scope. Same zbus 5 the launcher already uses.
 zbus = { version = "5", default-features = false, features = ["tokio"] }
@@ -173,11 +178,16 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 # these versions via the trash crate, so they add no new supply-chain surface.
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"] }
-# The keychain without its consent dialog, and the codes of its errors
-# (identity/secret_store.rs). Already in the tree at this version via keyring.
-security-framework = "2.11"
+# The Keychain store behind keyring-core, and the keychain without its consent
+# dialog and the codes of its errors (identity/secret_store.rs). The store
+# builds on security-framework 3, so this is the same version, which makes
+# its errors downcast to ours.
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+security-framework = "3.7"
 
 [target.'cfg(windows)'.dependencies]
+# The Credential Manager store behind keyring-core (identity/secret_store.rs).
+windows-native-keyring-store = "1"
 # Read-only COM access to Windows Defender Firewall and the network list, to
 # tell whether LAN peers can reach us (backend/lan/firewall_windows.rs,
 # SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.2). Already in the tree at this

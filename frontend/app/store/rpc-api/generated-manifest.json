@@ -144,6 +144,18 @@
             "method": "SensitiveDecideCommand"
         },
         {
+            "command": "agent.notice.decide",
+            "method": "AgentNoticeDecideCommand"
+        },
+        {
+            "command": "agent.notice.setgrant",
+            "method": "AgentNoticeSetGrantCommand"
+        },
+        {
+            "command": "agent.notice.grants",
+            "method": "AgentNoticeGrantsCommand"
+        },
+        {
             "command": "agentstop",
             "method": "AgentStopCommand"
         },
@@ -1044,12 +1056,20 @@
             "send": "null"
         },
         {
+            "command": "agent:memory:adopt",
+            "method": "NativeMemoryAdoptCommand"
+        },
+        {
             "command": "agent:memory:adoption_list",
             "method": "NativeMemoryAdoptionListCommand"
         },
         {
             "command": "agent:memory:claims",
             "method": "NativeMemoryClaimsCommand"
+        },
+        {
+            "command": "agent:memory:release",
+            "method": "NativeMemoryReleaseCommand"
         },
         {
             "command": "agent:memory:diff",
@@ -1111,6 +1131,10 @@
         {
             "command": "operator.challenge",
             "method": "OperatorChallengeCommand"
+        },
+        {
+            "command": "pane.confirm.decide",
+            "method": "PaneConfirmDecideCommand"
         },
         {
             "command": "pane.open",
@@ -1177,6 +1201,14 @@
         {
             "command": "browsergrants.revoke",
             "method": "BrowserGrantsRevokeCommand"
+        },
+        {
+            "command": "browsergrants.permissionset",
+            "method": "BrowserGrantsPermissionSetCommand"
+        },
+        {
+            "command": "browsergrants.permissionrevoke",
+            "method": "BrowserGrantsPermissionRevokeCommand"
         },
         {
             "command": "browsergrants.powers",
@@ -1587,6 +1619,10 @@
             "method": "UnwatchMediaDirCommand"
         },
         {
+            "command": "undoagentendpoint",
+            "method": "UndoAgentEndpointCommand"
+        },
+        {
             "command": "updateagent",
             "method": "UpdateAgentDefinitionCommand",
             "optionalFields": [
@@ -1728,6 +1764,20 @@
             "command": "agent.account.switch",
             "method": "AgentAccountSwitchCommand",
             "opts": "{ timeout: 120000, ...opts }"
+        },
+        {
+            "command": "agent.model.panel",
+            "method": "AgentModelPanelCommand"
+        },
+        {
+            "command": "agent.model.switch",
+            "method": "AgentModelSwitchCommand",
+            "opts": "{ timeout: 120000, ...opts }"
+        },
+        {
+            "command": "agent.peer-labels",
+            "method": "AgentPeerLabelsCommand",
+            "send": "{}"
         },
         {
             "command": "identity.account.move_agents",

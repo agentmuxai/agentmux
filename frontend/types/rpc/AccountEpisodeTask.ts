@@ -3,4 +3,8 @@
 /**
  * A Kanban task an episode's agent holds (claimed, or blocked on a question).
  */
-export type AccountEpisodeTask = { id: string, number: number, title: string, };
+export type AccountEpisodeTask = { id: string, number: number, 
+/**
+ * How the task is named: `#12` on the default board, else `work#12`.
+ */
+task_ref: string, title: string, };

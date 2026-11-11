@@ -24,6 +24,7 @@
 
 import { getApi, MOS } from "@/app/store/global";
 import { Logger } from "@/util/logger";
+import { beginPaneCapture } from "./pane-capture-gate";
 
 /** A picture older than this is stale: the pane may have changed since. */
 const MAX_AGE_MS = 10_000;
@@ -45,6 +46,8 @@ let held: {
     /** A pane's: where the pointer went down in it, and its size, both CSS px. */
     grab?: { x: number; y: number };
     size?: { width: number; height: number };
+    /** The live follow is showing this picture: it is what the user has been looking at, however long the drag. */
+    following?: boolean;
 } | null = null;
 
 export interface CssRect {
@@ -119,9 +122,10 @@ function ownWindowLabel(): string {
     return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
 }
 
-/** The window's viewport, cropped to `rect`, as a base64 JPEG. */
-async function capturePane(rect: CssRect): Promise<string | null> {
+/** The window's viewport, cropped to `rect`, as a base64 JPEG. `shot` is called once the window has been pictured. */
+async function capturePane(rect: CssRect, shot: () => void): Promise<string | null> {
     const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
+    shot();
     return track(cropToPane(jpeg_base64, rect));
 }
 
@@ -255,7 +259,9 @@ async function peekHeld(key: string, waitMs: number) {
     });
     const picture = await Promise.race([h.picture, budget]);
     clearTimeout(timer);
-    return picture && picture.length <= MAX_SNAPSHOT_CHARS ? { picture, grab: h.grab, size: h.size } : undefined;
+    if (!picture || picture.length > MAX_SNAPSHOT_CHARS) return undefined;
+    h.following = true;
+    return { picture, grab: h.grab, size: h.size };
 }
 
 /**
@@ -274,17 +280,22 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
     // The block's own view, not the DOM: a pane keeps its inactive tabs
     // mounted, so a background browser tab would match a DOM query.
     const isBrowser = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.view === "browser";
+    // The drag's own drawing waits for the capture: it is a picture of the window as drawn when it runs
+    // (pane-capture-gate.ts). The crop and the encoding after it hold nothing back.
+    const captured = beginPaneCapture();
     const capture = isBrowser
         ? getApi()
               .browserPanes.screenshot(blockId, { format: "jpeg", quality: 80 })
               .then((shot) => shot?.png_base64 || null)
-        : capturePane({ left: r.left, top: r.top, width: r.width, height: r.height });
+        : capturePane({ left: r.left, top: r.top, width: r.width, height: r.height }, captured);
     const picture = capture.then(
         (b64) => {
+            captured();
             Logger.debug("dnd:cross", "tear-off snapshot captured", { blockId, ms: Date.now() - at });
             return b64;
         },
         (e) => {
+            captured();
             Logger.debug("dnd:cross", "tear-off snapshot failed", { blockId, error: String(e) });
             return null;
         }
@@ -305,7 +316,9 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
 export async function takeTearOffSnapshot(blockId: string): Promise<string | undefined> {
     const h = held;
     held = null;
-    if (!h || h.blockId !== blockId || Date.now() - h.at > MAX_AGE_MS) return undefined;
+    // A picture the live follow has shown goes to the floater at any age: the floater opens on exactly
+    // what the user saw, and a drag held for a while must not land on the loading logo instead.
+    if (!h || h.blockId !== blockId || (!h.following && Date.now() - h.at > MAX_AGE_MS)) return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const budget = new Promise<null>((resolve) => {
         timer = setTimeout(() => resolve(null), TAKE_BUDGET_MS);

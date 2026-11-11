@@ -271,9 +271,70 @@ thread_local! {
         std::cell::RefCell::new(SaveDialogs::default());
 }
 
-/// Open the platform's Save As dialog for a download, starting at the folder it would go to.
-fn show_save_dialog(suggested: &str, cb: &BeforeDownloadCallback) {
+/// Whether the Save As dialog is ours (`rfd`) rather than CEF's. On Linux CEF's chooser answered
+/// "cancel" within milliseconds with no dialog on the packaged build (2026-11-06, D0), so Linux asks
+/// with the same dialog library the Vault export and layout dialogs use (spec §4.3).
+const OWN_SAVE_DIALOG: bool = cfg!(target_os = "linux");
+
+thread_local! {
+    /// The callbacks of downloads whose `rfd` dialog is open, by (pane, id). Not `Send`, so they stay on
+    /// the UI thread; the dialog's thread posts the answer back there.
+    static ASKING: std::cell::RefCell<HashMap<(String, u32), BeforeDownloadCallback>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+wrap_task! {
+    struct SaveAnswerTask {
+        block_id: String,
+        id: u32,
+        path: Option<PathBuf>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let cb = ASKING.with(|m| m.borrow_mut().remove(&(self.block_id.clone(), self.id)));
+            // Gone: the pane closed while the dialog was open.
+            let Some(cb) = cb else { return };
+            match &self.path {
+                // `show_dialog = false`: the person already chose, CEF just writes there.
+                Some(p) => cb.cont(Some(&CefString::from(p.to_string_lossy().as_ref())), 0),
+                // Cancelled: dropping the last reference cancels the download (CEF does that for a
+                // callback never answered). An empty path would instead save to the temp folder.
+                None => drop(cb),
+            }
+        }
+    }
+}
+
+/// Ask where to save with `rfd` on its own thread (the dialog blocks), then answer on the UI thread. A
+/// dialog can't be closed from outside, so one still open when its pane closes stays until the person
+/// answers; the answer is then dropped (`SaveAnswerTask` finds no callback).
+fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallback) {
+    ASKING.with(|m| m.borrow_mut().insert((block_id.to_string(), id), cb.clone()));
+    let block_id = block_id.to_string();
+    std::thread::spawn(move || {
+        let mut dialog = rfd::FileDialog::new().set_title("Save as");
+        if let Some(name) = path.file_name() {
+            dialog = dialog.set_file_name(name.to_string_lossy());
+        }
+        if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
+            dialog = dialog.set_directory(dir);
+        }
+        let chosen = dialog.save_file();
+        let mut task = SaveAnswerTask::new(block_id.clone(), id, chosen);
+        if post_task(ThreadId::UI, Some(&mut task)) == 0 {
+            tracing::warn!(target: "pane-download", %block_id, id, "could not post the Save As answer to the UI thread");
+        }
+    });
+}
+
+/// Open the Save As dialog for a download, starting at the folder it would go to.
+fn show_save_dialog(block_id: &str, id: u32, suggested: &str, cb: &BeforeDownloadCallback) {
     let path = default_save_path(suggested);
+    if OWN_SAVE_DIALOG {
+        ask_with_rfd(block_id, id, path, cb);
+        return;
+    }
     // show_dialog = true: CEF opens the platform's Save As dialog, starting at `path`, and cancels
     // the download if the user cancels.
     cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 1);
@@ -523,6 +584,8 @@ wrap_task! {
         fn execute(&self) {
             RUNNING.with(|m| m.borrow_mut().retain(|(p, _), _| p != &self.block_id));
             SAVE_DIALOGS.with(|d| d.borrow_mut().clear_pane(&self.block_id));
+            super::agent_downloads::forget_pane(&self.block_id);
+            ASKING.with(|m| m.borrow_mut().retain(|(p, _), _| p != &self.block_id));
         }
     }
 }
@@ -630,10 +693,20 @@ wrap_download_handler! {
             let id = item.id();
             let suggested = suggested_name.map(|s| s.to_string()).unwrap_or_default();
 
-            let Some(block_id) = browser.and_then(|b| self.state.block_id_for_browser(b)) else {
+            let mut browser = browser;
+            let Some(block_id) = browser.as_deref_mut().and_then(|b| self.state.block_id_for_browser(b)) else {
                 tracing::info!(target: "pane-download", id, "dropping download — pane is gone");
                 return 0;
             };
+            // A pane an agent owns saves into the agent's workspace with no dialog (D3b); a person's keeps asking.
+            match super::agent_downloads::before(&self.state, browser.as_deref(), &block_id, id, &suggested, item.total_bytes()) {
+                super::agent_downloads::Before::Ask => {}
+                super::agent_downloads::Before::Save(path) => {
+                    cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+                    return 1;
+                }
+                super::agent_downloads::Before::Refuse => return 0,
+            }
             // `can_download` already checked, but another download may have
             // slipped in between; the add is the check that counts.
             if !with_waiting(|w| w.add(&block_id, id)) {
@@ -651,7 +724,7 @@ wrap_download_handler! {
                         %block_id, id, ext = %extension_of(&suggested),
                         "asking where to save"
                     );
-                    show_save_dialog(&suggested, &cb);
+                    show_save_dialog(&block_id, id, &suggested, &cb);
                 }
                 None => tracing::info!(
                     target: "pane-download",
@@ -684,13 +757,14 @@ wrap_download_handler! {
             // Ids repeat across panes that use different request contexts, so
             // the pane comes from the browser, not from the id. A pane that is
             // already gone had its entries cleared when it closed.
-            let block_id = browser.and_then(|b| self.state.block_id_for_browser(b));
+            let mut browser = browser;
+            let block_id = browser.as_deref_mut().and_then(|b| self.state.block_id_for_browser(b));
             if let Some(block_id) = &block_id {
                 with_waiting(|w| w.release(block_id, id));
                 // This dialog is over: the pane's next parked download asks now.
                 if let Some((nid, (suggested, cb))) = SAVE_DIALOGS.with(|d| d.borrow_mut().finished(block_id, id)) {
                     tracing::info!(target: "pane-download", %block_id, id = nid, ext = %extension_of(&suggested), "asking where to save");
-                    show_save_dialog(&suggested, &cb);
+                    show_save_dialog(block_id, nid, &suggested, &cb);
                 }
             }
             if !path.is_empty() {
@@ -706,6 +780,7 @@ wrap_download_handler! {
                 );
             }
             let Some(block_id) = block_id else { return };
+            super::agent_downloads::updated(&self.state, browser.as_deref(), &block_id, item, callback.as_deref());
 
             // Keep the callback while it runs so Cancel can reach it; drop it
             // at the end. (This handler runs on the UI thread, where `RUNNING` lives.)

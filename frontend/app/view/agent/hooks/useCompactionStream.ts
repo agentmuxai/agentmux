@@ -77,6 +77,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
 import type { CompactionStartedNode } from "../../../agent-model/types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
+import { markTitleStale } from "@/app/store/title-stale";
 
 export interface UseCompactionStreamOptions {
     blockId: string;
@@ -169,6 +170,8 @@ export function useCompactionStream(opts: UseCompactionStreamOptions): void {
         (data) => {
             const resolved = resolveCompactionStart(data, Date.now());
             if (!resolved) return;
+            // One stretch of work has ended: the session title is judged afresh at the next message.
+            markTitleStale(opts.blockId);
             // Dispatch only — the reducer decides accept / buffer / reject.
             // The `compacting` effect below pushes the transcript node
             // uniformly, whether this ping is accepted immediately or (if

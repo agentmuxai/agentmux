@@ -116,3 +116,41 @@ describe("activity: one call reported twice (#4510)", () => {
         expect(s.activity).toMatchObject({ plan: { activeForm: "Doing it" }, planAt: 2_000 });
     });
 });
+
+describe("activity: output that only thinks still counts as the stream working", () => {
+    /** A subscribed pane in a call, whose turn the pane thinks is over (`phase`). */
+    const subscribedIn = (phase: AgentPaneState["turnPhase"]) => {
+        let s = at(initialState("a"), { type: "StreamSubscribe", at: 500 }, 500);
+        s = at(s, { type: "TokensIn", input: 1_000 }, 1_000);
+        return { ...s, turnPhase: phase };
+    };
+
+    it("streamed thinking moves a completed round back into Streaming and refreshes liveness", () => {
+        let s = subscribedIn({ kind: "Done", outcome: "completed", finishedAt: 1_100 });
+        s = at(s, { type: "OutputStreamed", chars: 40, kind: "thinking" }, 5_000);
+        expect(s.turnPhase).toMatchObject({ kind: "Streaming", lastEventMs: 5_000 });
+        expect(s.lastEventMs).toBe(5_000);
+    });
+
+    it("moves an idle pane into Streaming too", () => {
+        let s = subscribedIn({ kind: "Idle" });
+        s = at(s, { type: "OutputStreamed", chars: 40, kind: "text" }, 5_000);
+        expect(s.turnPhase.kind).toBe("Streaming");
+    });
+
+    it("does not revive a failed or stopped turn, nor an interrupt in progress", () => {
+        for (const phase of [
+            { kind: "Done", outcome: "errored", finishedAt: 1_100 },
+            { kind: "Done", outcome: "stopped", finishedAt: 1_100 },
+        ] as const) {
+            const s = at(subscribedIn(phase), { type: "OutputStreamed", chars: 40, kind: "thinking" }, 5_000);
+            expect(s.turnPhase).toEqual(phase);
+        }
+    });
+
+    it("keeps a streaming turn's tool count", () => {
+        let s = subscribedIn({ kind: "Streaming", bufferSize: 0, toolsActive: 2, lastEventMs: 1_000 });
+        s = at(s, { type: "OutputStreamed", chars: 40, kind: "thinking" }, 5_000);
+        expect(s.turnPhase).toMatchObject({ kind: "Streaming", toolsActive: 2, lastEventMs: 5_000 });
+    });
+});

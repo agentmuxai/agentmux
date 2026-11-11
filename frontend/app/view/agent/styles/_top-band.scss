@@ -1,0 +1,69 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The agent pane's top band (top-band/AgentTopBand.tsx): the row across the pane's top, above the conversation and the
+// Messages panel. Three slots, each drawn in a box of its own, so nothing is drawn over another.
+.agent-view {
+    .agent-top-band {
+        flex: 0 0 auto;
+        position: relative;
+        padding: var(--space-1) var(--space-2);
+        background: color-mix(in srgb, var(--accent-color) 6%, var(--main-bg-color));
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    // As tall as the find bar's field (its line plus its 3px padding and 1px border on both sides), so the band is
+    // the same height with the readout alone as with the find bar: the conversation does not move when the find
+    // bar opens or closes.
+    .agent-top-band-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-width: 0;
+        min-height: calc(var(--text-sm) * 1.2 + 8px);
+    }
+
+    .agent-top-band-slot {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        min-width: 0;
+        flex: 0 0 auto;
+
+        // The controls take what is left, on the right.
+        &[data-slot="controls"] {
+            flex: 1 1 auto;
+            justify-content: flex-end;
+        }
+    }
+
+    .agent-top-band-item {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+    }
+
+    .agent-top-band-slot[data-slot="controls"] > .agent-top-band-item {
+        flex: 1 1 auto;
+    }
+
+    // Hidden copies of each form of each item, for measuring: out of the flow, out of sight, never hit.
+    .agent-top-band-probes {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 0;
+        overflow: hidden;
+        visibility: hidden;
+        pointer-events: none;
+        display: flex;
+        white-space: nowrap;
+    }
+
+    .agent-top-band-probe {
+        display: inline-flex;
+        align-items: center;
+        flex: none;
+        width: max-content;
+    }
+}

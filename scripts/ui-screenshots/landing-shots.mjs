@@ -141,10 +141,11 @@ function landingTerminals() {
     };
 }
 
-/** A block opened with `pane.open` (the RPC the app's own panes use), waited for until it mounts. */
-async function openPane(session, args) {
+/** A block opened with `pane.open` (the RPC the app's own panes use), waited for until it mounts.
+ *  From a window the RPC needs to know which tab the person acted in: `tabId`. */
+async function openPane(session, tabId, args) {
     const before = new Set(await session.evaluate(BLOCK_IDS));
-    await session.evaluate(`TabRpcClient.rpcCall("pane.open", ${JSON.stringify(args)}, {})`);
+    await session.evaluate(`TabRpcClient.rpcCall("pane.open", ${JSON.stringify({ origin_tab_id: tabId, ...args })}, {})`);
     for (let t = 0; t < 40; t++) {
         const id = (await session.evaluate(BLOCK_IDS)).find((b) => !before.has(b));
         if (id) return id;
@@ -170,13 +171,16 @@ function landingWorkspace() {
         prep: async (session) => {
             const problem = demoPathProblem(DEMO);
             if (problem) throw new Error(`DEMO_DIR: ${problem}`);
-            await session.setViewport({ width: 1280, height: 800, scale: 1 });
+            // 1440 x 900: five columns at 1280 left the agent picker ~318 px, too narrow to show its agents' names.
+            await session.setViewport({ width: 1440, height: 900, scale: 1 });
+            // The terminal's CPU and memory readout would sit over the end of the typed command in a pane this narrow.
+            await session.evaluate(`RpcApi.SetConfigCommand(TabRpcClient, { "term:showstatsbadge": false })`);
             await session.pressKey("Escape");
             tab.tabId = null;
             await openNewTab(session, tab);
             // The new tab has the default layout; the Files pane and the terminal open as columns beside it.
-            files = await openPane(session, { view: "files", cwd: DEMO });
-            terminal = await openPane(session, { view: "term", cwd: DEMO });
+            files = await openPane(session, tab.tabId, { view: "files", cwd: DEMO });
+            terminal = await openPane(session, tab.tabId, { view: "term", cwd: DEMO });
             let stashed = false;
             for (let t = 0; t < 40 && !stashed; t++) {
                 stashed = await session.evaluate(stashTerminal(terminal));
@@ -218,6 +222,7 @@ function landingWorkspace() {
             tab.tabId = null;
             terminal = null;
             files = null;
+            await session.evaluate(`RpcApi.SetConfigCommand(TabRpcClient, { "term:showstatsbadge": true })`);
             await session.clearViewport();
         },
     };

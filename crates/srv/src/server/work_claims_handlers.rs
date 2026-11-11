@@ -87,6 +87,10 @@ fn nonempty(s: &Option<String>) -> Option<&str> {
 /// token: the registration found by block, then unique name (as
 /// `WhoIsWorkingOn` does), else the name it sent. `None` when there is no name
 /// at all.
+///
+/// A caller with a token whose registration is missing (the registry is rebuilt after a restart or an
+/// upgrade, and a pane that was resumed can go unregistered for hours: #2271) still has its pane: the
+/// block whose meta names its UID, which is where `Agents list` finds it too.
 pub(super) fn claimer(
     state: &AppState,
     caller: Option<&Caller>,
@@ -96,7 +100,11 @@ pub(super) fn claimer(
     let regs = state.reactive_handler.list_agents();
     let token_uid = caller.and_then(|c| c.uid().map(str::to_string));
     let block_id = match token_uid.as_deref() {
-        Some(uid) => regs.iter().find(|r| r.uid.as_deref() == Some(uid)).map(|r| r.block_id.clone()),
+        Some(uid) => regs
+            .iter()
+            .find(|r| r.uid.as_deref() == Some(uid))
+            .map(|r| r.block_id.clone())
+            .or_else(|| super::agent_runtime::pane_blocks_by_agent(&state.mstore).remove(uid)),
         None => caller_block(&regs, None, block, agent),
     };
     let reg = block_id.as_deref().and_then(|b| regs.iter().find(|r| r.block_id == b));
@@ -269,6 +277,33 @@ mod tests {
         let (status, b) = body(handle_claim_work(State(state), None, Json(anon)).await).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(b["error"].as_str().unwrap().contains("who is claiming"));
+    }
+
+    /// A pane resumed after an upgrade can be missing from the registry while its block, which names the
+    /// agent's UID, is in the store: the agent's own token still finds it, and no other agent's does.
+    #[tokio::test]
+    async fn a_token_finds_its_pane_when_the_registry_has_no_entry_for_it() {
+        let state = crate::server::tests::test_state();
+        let uid = format!("def-claimer-{}", uuid::Uuid::new_v4().simple());
+        let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": uid, "slug": "claimer-resumed", "name": "Claimer Resumed", "icon": "robot", "provider": "claude",
+            "description": "", "created_at": 1,
+        }))
+        .unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("agentId".to_string(), serde_json::json!(uid));
+        meta.insert(crate::persist_subscriber::parked::PARKED_META_KEY.to_string(), serde_json::json!(true));
+        let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        state.mstore.insert(&mut block).unwrap();
+
+        let mine = Caller::Agent { uid: uid.clone() };
+        let (name, found_uid, found_block) = claimer(&state, Some(&mine), None, None).expect("the token names an agent");
+        assert_eq!((name.as_str(), found_uid.as_str()), ("claimer-resumed", uid.as_str()));
+        assert_eq!(found_block.as_deref(), Some(block.oid.as_str()), "its pane, though nothing registered it");
+
+        let other = Caller::Agent { uid: "someone-else".into() };
+        assert!(claimer(&state, Some(&other), None, Some(&block.oid)).map_or(true, |(_, _, b)| b.is_none()), "a block it sent is not its own");
     }
 
     #[test]

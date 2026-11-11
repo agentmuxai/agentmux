@@ -299,7 +299,7 @@ fn pi_is_acp_controller() {
     );
     // Everyone else installs just the one package.
     let claude = get_provider("claude").unwrap();
-    assert_eq!(claude.npm_install_specs("2.1.288"), vec!["@anthropic-ai/claude-code@2.1.288".to_string()]);
+    assert_eq!(claude.npm_install_specs("2.1.321"), vec!["@anthropic-ai/claude-code@2.1.321".to_string()]);
     assert!(claude.companion_npm_packages().is_empty());
 }
 

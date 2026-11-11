@@ -78,20 +78,43 @@ fn repaired(content: &str, slug: &str, shape: Shape, exe: Option<&Path>) -> Resu
     serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())
 }
 
-/// Rewrite the `agentmux` entry of the `.mcp.json` in `work_dir` for `slug`, with its signing keys,
-/// under the launch's directory lock. `Ok(true)` when the file changed, `Ok(false)` when it already was
-/// so (a reconnect cannot come out differently, so the ladder moves on).
+/// Rewrite the `agentmux` entry of the `.mcp.json` in `work_dir` for `slug`, with its signing keys
+/// when `carries_keys` (never for a container agent: its file is mounted into the container),
+/// under the launch's directory lock. `Ok(true)` when the file changed, `Ok(false)` when it already
+/// was so (a reconnect cannot come out differently, so the ladder moves on).
 fn rewrite_file(
     mstore: &crate::backend::storage::store::Store,
     work_dir: &str,
     slug: &str,
     shape: Shape,
     exe: Option<&Path>,
+    carries_keys: bool,
 ) -> Result<bool, String> {
     if work_dir.trim().is_empty() {
         return Err("the pane has no working directory".to_string());
     }
     let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
+    // A user's project keeps its own `.mcp.json` (#3680): the agent's config is AgentMux's
+    // relocated file, and that is the one a repair may rewrite.
+    if let Some(path) = crate::backend::mcp_config_file::relocated_path(&expanded) {
+        let content = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(format!("cannot read the agent's MCP config: {e}")),
+        };
+        let body = repaired(&content, slug, shape, exe)?;
+        let body = if carries_keys {
+            crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(&body, mstore, slug).unwrap_or(body)
+        } else {
+            body
+        };
+        if serde_json::from_str::<Value>(&body).ok() == serde_json::from_str::<Value>(&content).ok() {
+            return Ok(false);
+        }
+        crate::backend::mcp_config_file::write_relocated(&path, &body)
+            .map_err(|e| format!("cannot write the agent's MCP config: {e}"))?;
+        return Ok(true);
+    }
     let wd = crate::backend::workdir_fs::Workdir::open(Path::new(&expanded)).map_err(|e| format!("cannot open {expanded}: {e}"))?;
     let path = wd.resolve(".mcp.json").map_err(|e| format!("cannot use .mcp.json: {e}"))?;
     let _lock = wd
@@ -106,7 +129,11 @@ fn rewrite_file(
     };
     let body = repaired(&content, slug, shape, exe)?;
     // Keys kept as the file has them if they cannot be ensured now.
-    let body = crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(&body, mstore, slug).unwrap_or(body);
+    let body = if carries_keys {
+        crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(&body, mstore, slug).unwrap_or(body)
+    } else {
+        body
+    };
     if serde_json::from_str::<Value>(&body).ok() == serde_json::from_str::<Value>(&content).ok() {
         return Ok(false);
     }
@@ -131,7 +158,7 @@ pub fn run(mstore: &crate::backend::storage::store::Store, block_id: &str, work_
     if def.slug.trim().is_empty() {
         return Err("the agent has no id".to_string());
     }
-    rewrite_file(mstore, work_dir, &def.slug, shape, shipped_exe().as_deref())
+    rewrite_file(mstore, work_dir, &def.slug, shape, shipped_exe().as_deref(), def.runtime().adapter().carries_signing_keys())
 }
 
 #[cfg(test)]
@@ -199,33 +226,38 @@ mod tests {
     #[test]
     fn a_file_already_canonical_is_unchanged_and_one_that_is_not_is_rewritten_once() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let data = tempfile::tempdir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join(".mcp.json");
         let work_dir = dir.path().to_string_lossy().into_owned();
         let broken = json!({ "mcpServers": {
             "agentmux": { "command": "/gone/agentmux-mcp", "args": [], "env": { "AGENTMUX_AGENT_ID": "manoz" } },
             "github": { "command": "gh-mcp" }
         }})
         .to_string();
-        std::fs::write(&file, &broken).unwrap();
 
-        assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::Canonical, None), Ok(true));
-        let after: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-        assert_eq!(after["mcpServers"]["agentmux"]["command"], "agentmux-mcp");
-        assert_eq!(after["mcpServers"]["github"]["command"], "gh-mcp");
-        assert!(after["mcpServers"]["agentmux"]["env"]["AGENTMUX_JEKT_KEY"].is_string(), "its keys are put back");
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            // The agent's file is AgentMux's relocated one for a user project (#3680).
+            let file = crate::backend::mcp_config_file::config_path(&work_dir);
+            crate::backend::mcp_config_file::write_relocated(&file, &broken).unwrap();
 
-        assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::Canonical, None), Ok(false), "nothing left to change");
-        let exe = dir.path().join("agentmux-mcp");
-        assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::AbsolutePath, Some(&exe)), Ok(true));
-        assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::AbsolutePath, Some(&exe)), Ok(false));
+            assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::Canonical, None, true), Ok(true));
+            let after: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+            assert_eq!(after["mcpServers"]["agentmux"]["command"], "agentmux-mcp");
+            assert_eq!(after["mcpServers"]["github"]["command"], "gh-mcp");
+            assert!(after["mcpServers"]["agentmux"]["env"]["AGENTMUX_JEKT_KEY"].is_string(), "its keys are put back");
+
+            assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::Canonical, None, true), Ok(false), "nothing left to change");
+            let exe = dir.path().join("agentmux-mcp");
+            assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::AbsolutePath, Some(&exe), true), Ok(true));
+            assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::AbsolutePath, Some(&exe), true), Ok(false));
+            assert!(!dir.path().join(".mcp.json").exists(), "the project's own file is never written");
+        });
     }
 
     #[test]
     fn a_pane_without_a_directory_or_agent_is_an_error_not_a_panic() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
-        assert!(rewrite_file(&store, "", "manoz", Shape::Canonical, None).unwrap_err().contains("no working directory"));
-        assert!(rewrite_file(&store, "/nonexistent/dir/for/rewrite", "manoz", Shape::Canonical, None).is_err());
+        assert!(rewrite_file(&store, "", "manoz", Shape::Canonical, None, true).unwrap_err().contains("no working directory"));
         assert!(run(&store, "no-such-block", "/tmp", Shape::Canonical).unwrap_err().contains("no agent runs"));
     }
 }

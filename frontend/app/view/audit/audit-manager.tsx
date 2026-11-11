@@ -5,21 +5,24 @@
 // and end, read from `audit.query` a page at a time with filters, and below it what agents did with the
 // person's secrets (vault-secrets.tsx). The list and how new entries reach it are audit-list.ts.
 
-import { createEffect, createMemo, createSignal, on, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { createMemo, createSignal, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
 import { Button, FilterInput, Select, SegmentedControl } from "@/app/element/ui";
 import { VaultSecrets } from "@/app/view/vault/vault-secrets";
 import { AuditFeed } from "./audit-feed";
 import { AuditKindChips } from "./audit-kind-chips";
+import { AuditLiveBar } from "./audit-live-bar";
 import { createAuditList } from "./audit-list";
+import { followAgentProp } from "./audit-agent-prop";
+import { createAuditSoundsAt } from "./audit-focus";
+import { revealSoundRow } from "./audit-reveal";
+import type { SoundRef } from "./audit-sound";
 import {
     emptyFilter,
-    newPillLabel,
     notRecordedNote,
     RANGES,
     SCOPES,
-    totalsLabel,
     type AuditFilter,
     type AuditRange,
     type AuditScope,
@@ -30,7 +33,7 @@ import "./audit-manager.scss";
 
 const TYPING_PAUSE_MS = 250;
 
-export const AuditManager = (props: { paneBlockId: string; visible?: boolean; agent?: string }): JSX.Element => {
+export const AuditManager = (props: { paneBlockId: string; visible?: boolean; agent?: string; sound?: SoundRef }): JSX.Element => {
     const [filter, setFilter] = createSignal<AuditFilter>(emptyFilter(props.agent ?? ""));
     // What is typed in the two text boxes shows at once; the filter (and so a query, which makes srv rescan the
     // file for totals) follows once typing pauses.
@@ -46,19 +49,12 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
         body?.scrollTo?.({ top: 0 });
     };
 
-    // The pane's `audit:agent` changing (the Swarm's "Audit for this agent") sets the filter, which starts the list over.
-    createEffect(
-        on(
-            () => props.agent,
-            (agent) => {
-                if (agent === undefined) return;
-                setAgentText(agent);
-                setFilter({ ...untrack(filter), agent });
-            },
-            { defer: true }
-        )
-    );
+    followAgentProp(() => props.agent, filter, setFilter, setAgentText);
     const set = (patch: Partial<AuditFilter>) => setFilter({ ...filter(), ...patch });
+    const sounds = createAuditSoundsAt(list.entries, now, () => props.sound, {
+        showKind: revealSoundRow(filter, setFilter, () => (setAgentText(""), setSearchText("")), list.showNewest),
+        body: () => body,
+    });
     const typed = () => {
         if (typing !== undefined) clearTimeout(typing);
         typing = setTimeout(() => {
@@ -113,23 +109,14 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                 />
             </div>
             <AuditKindChips kinds={filter().kinds} onToggle={toggleKind} />
-            <div class="audit-live-bar">
-                <Button
-                    tone="quiet"
-                    density="compact"
-                    icon={list.paused() ? "play" : "pause"}
-                    pressed={list.paused()}
-                    onClick={() => (list.paused() ? jumpToNewest() : list.setPaused(true))}
-                >
-                    {list.paused() ? "Resume" : "Pause"}
-                </Button>
-                <Show when={list.newCount() > 0}>
-                    <Button tone="accent" density="compact" icon="arrow-up" onClick={jumpToNewest}>
-                        {newPillLabel(list.newCount())}
-                    </Button>
-                </Show>
-                <Show when={list.totals()}>{(t) => <span class="audit-totals">{totalsLabel(t())}</span>}</Show>
-            </div>
+            <AuditLiveBar
+                paused={list.paused()}
+                onTogglePause={() => (list.paused() ? jumpToNewest() : list.setPaused(true))}
+                newCount={list.newCount()}
+                onJumpToNewest={jumpToNewest}
+                totals={list.totals()}
+                lastSound={sounds.last()}
+            />
             <Show when={unrecorded().length > 0}>
                 <div class="warden-manager-summary">{notRecordedNote(unrecorded())}</div>
             </Show>
@@ -140,7 +127,14 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                 when={!empty()}
                 fallback={<div class="warden-section-stub">{list.loading() ? "Loading…" : "No entries match."}</div>}
             >
-                <AuditFeed entries={list.entries()} sectioned={filter().scope === "machine"} channel={list.channel()} now={now()} paneBlockId={props.paneBlockId} />
+                <AuditFeed
+                    entries={list.entries()}
+                    sectioned={filter().scope === "machine"}
+                    channel={list.channel()}
+                    now={now()}
+                    paneBlockId={props.paneBlockId}
+                    sounds={sounds}
+                />
                 <Show when={list.cursor()}>
                     <div class="audit-more">
                         <Button tone="quiet" density="compact" icon="arrow-down" busy={list.loadingMore()} onClick={() => void list.loadMore()}>

@@ -20,6 +20,7 @@ import {
     startAppUpdateDownload,
     storeAnswer,
     storeFallbackLine,
+    storePublishedNotListed,
     storeStandingLine,
     upgradeAndRestart,
     useStoreOffer,
@@ -60,7 +61,7 @@ function createUpdateView() {
         const s = appUpdate();
         if (viaStore(s)) {
             const offer = storeAnswer(s);
-            const line = storeStandingLine(offer, offer && offer.checkedMs > 0 ? checkedAt(offer.checkedMs) : null);
+            const line = storeStandingLine(offer, offer && offer.checkedMs > 0 ? checkedAt(offer.checkedMs) : null, storePublishedNotListed(s));
             return line ?? `Checked ${checkedAt(offer!.checkedMs)}`;
         }
         const checked = s && s.checked_ms > 0 ? checkedAt(s.checked_ms) : null;
@@ -79,7 +80,10 @@ function createUpdateView() {
         if (upd === "ready") return "↑ ready";
         return null;
     };
-    return { release, download, updaterStatus, percent, updaterVersion, installFirst, storeBelowFloor, storeOffers, standing, badge };
+    // A release GitHub has that the Store has not listed for this PC yet: the panel says so and offers the Store page.
+    const storeLagging = () => storePublishedNotListed() !== null;
+    const openStorePage = () => void openLink(MS_STORE_PAGE_URL);
+    return { release, download, updaterStatus, percent, updaterVersion, installFirst, storeBelowFloor, storeOffers, storeLagging, openStorePage, standing, badge };
 }
 
 /** Check for update, and what it said when it failed. */

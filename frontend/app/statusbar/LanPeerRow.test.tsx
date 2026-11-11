@@ -55,6 +55,23 @@ describe("LanPeerList", () => {
         expect(screen.getByText(/42 sec\. ago/)).toBeTruthy();
     });
 
+    it("opens and closes each host on its own", () => {
+        const peers = [
+            inst({ instance_id: "a", hostname: "alpha", address: "198.51.100.1" }),
+            inst({ instance_id: "b", hostname: "beta", address: "198.51.100.2" }),
+        ];
+        render(() => <LanPeerList peers={peers} />);
+        fireEvent.click(screen.getByRole("button", { name: /alpha/ }));
+        expect(screen.getByText("198.51.100.1:4100")).toBeTruthy();
+        expect(screen.queryByText("198.51.100.2:4100")).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: /beta/ }));
+        expect(screen.getByText("198.51.100.1:4100")).toBeTruthy();
+        expect(screen.getByText("198.51.100.2:4100")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: /alpha/ }));
+        expect(screen.queryByText("198.51.100.1:4100")).toBeNull();
+        expect(screen.getByText("198.51.100.2:4100")).toBeTruthy();
+    });
+
     it("opens the Swarm from an open row with agents", async () => {
         render(() => <LanPeerList peers={[inst()]} />);
         fireEvent.click(screen.getByRole("button", { name: /charlie/ }));

@@ -43,8 +43,8 @@ const episode = (over: Partial<AccountAvailability> = {}): AccountAvailability =
         { block_id: "b2", agent_id: "d2", agent_name: "Loap-3" },
     ],
     tasks: [
-        { id: "t1", number: 163, title: "x" },
-        { id: "t2", number: 140, title: "y" },
+        { id: "t1", number: 163, task_ref: "#163", title: "x" },
+        { id: "t2", number: 140, task_ref: "#140", title: "y" },
     ],
     candidates: [
         { account_id: "unchecked", label: "Spare", status: "unknown" },

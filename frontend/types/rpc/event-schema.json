@@ -36,6 +36,24 @@
     }
   },
   {
+    "event": "agent:endpoint-notice",
+    "payloadTs": {
+      "imports": [
+        "EndpointNoticeEvent"
+      ],
+      "name": "EndpointNoticeEvent"
+    }
+  },
+  {
+    "event": "agent:grants",
+    "payloadTs": {
+      "imports": [
+        "GrantsEvent"
+      ],
+      "name": "GrantsEvent"
+    }
+  },
+  {
     "event": "agent:inputhistory",
     "payloadTs": {
       "imports": [
@@ -51,6 +69,15 @@
       "name": "null"
     },
     "perId": true
+  },
+  {
+    "event": "agent:notice",
+    "payloadTs": {
+      "imports": [
+        "NoticeView"
+      ],
+      "name": "NoticeView"
+    }
   },
   {
     "event": "agent:process-added",
@@ -760,6 +787,15 @@
         "PaneAgentOpenedEvent"
       ],
       "name": "PaneAgentOpenedEvent"
+    }
+  },
+  {
+    "event": "pane:confirm",
+    "payloadTs": {
+      "imports": [
+        "PaneConfirmView"
+      ],
+      "name": "PaneConfirmView"
     }
   },
   {

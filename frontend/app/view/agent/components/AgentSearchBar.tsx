@@ -4,7 +4,8 @@
 /**
  * AgentSearchBar — in-session search overlay for agent panes.
  *
- * Appears as a sticky banner at the top of the pane when Ctrl+F is pressed.
+ * Appears in the pane's top band (top-band/) when Ctrl+F is pressed, as its `controls` item
+ * (AgentFindBandItem.tsx registers it).
  * Performs case-insensitive substring search over the currently-loaded document
  * nodes (the in-memory slice, not the full persisted history — searching the
  * full history would require a backend blockfile:search RPC, which is out of
@@ -61,6 +62,8 @@ export interface AgentSearchBarProps {
     matchCount: Accessor<number>;
     /** A pass is taking long enough to say so. */
     searching?: Accessor<boolean>;
+    /** Drawn only so the band can measure it, out of sight: no focus, no live region, the field at its narrowest. */
+    measuring?: boolean;
 }
 
 export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
@@ -88,14 +91,19 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
 
     return (
         <Show when={props.visible()}>
-            <div class="agent-search-bar" role="search" aria-label="Find in conversation">
+            <div
+                class="agent-search-bar"
+                classList={{ "agent-search-bar--measuring": props.measuring }}
+                role={props.measuring ? undefined : "search"}
+                aria-label={props.measuring ? undefined : "Find in conversation"}
+            >
                 <TextInput
                     variant="plain"
                     ref={(el) => {
                         // Auto-focus when the bar appears. The setTimeout defers
                         // the focus call past the current render frame so the
                         // element is guaranteed to be mounted and visible.
-                        setTimeout(() => el?.focus(), 0);
+                        if (!props.measuring) setTimeout(() => el?.focus(), 0);
                     }}
                     class="agent-search-input"
                     type="text"
@@ -109,9 +117,11 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
                 <span class="agent-search-counter" aria-hidden="true">
                     {counterText()}
                 </span>
-                <span class="sr-only agent-search-live" role="status" aria-live="polite">
-                    {announced()}
-                </span>
+                <Show when={!props.measuring}>
+                    <span class="sr-only agent-search-live" role="status" aria-live="polite">
+                        {announced()}
+                    </span>
+                </Show>
                 <IconButton icon="caret-up" label="Previous match (Shift+Enter, Shift+F3)" density="compact" onClick={() => props.onPrev()} />
                 <IconButton icon="caret-down" label="Next match (Enter, F3)" density="compact" onClick={() => props.onNext()} />
                 <IconButton icon="xmark" label="Close search (Esc)" density="compact" onClick={() => props.onClose()} />

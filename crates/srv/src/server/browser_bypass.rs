@@ -672,6 +672,30 @@ mod tests {
     }
 
     #[test]
+    fn enter_and_space_need_their_own_power_and_a_covered_page() {
+        put("bp-keys", "naki", &["https://github.com"], 60);
+        let g = active_for("bp-keys", "naki").unwrap();
+        assert!(!g.allows(Power::EnterSpace), "clicks alone don't press keys");
+        table().grants.get_mut("bp-keys").unwrap().grant.powers.push(Power::EnterSpace);
+        let g = active_for("bp-keys", "naki").unwrap();
+        assert!(g.allows(Power::EnterSpace) && g.satisfies(Power::EnterSpace));
+        assert!(!g.allows_terminal(), "the keys are not the terminal");
+        assert!(g.covers("https://github.com/x") && !g.covers("https://evil.example/"));
+        forget("bp-keys", "test");
+    }
+
+    #[test]
+    fn a_held_file_chooser_needs_the_uploads_power_and_a_covered_page() {
+        put("bp-up", "naki", &["https://github.com"], 60);
+        assert!(!active_for("bp-up", "naki").unwrap().allows(Power::Uploads), "clicks alone don't fill a chooser");
+        table().grants.get_mut("bp-up").unwrap().grant.powers.push(Power::Uploads);
+        let g = active_for("bp-up", "naki").unwrap();
+        assert!(g.allows(Power::Uploads) && !g.allows(Power::EnterSpace));
+        assert!(g.covers("https://github.com/upload") && !g.covers("https://evil.example/"));
+        forget("bp-up", "test");
+    }
+
+    #[test]
     fn a_grant_is_for_its_agent_only() {
         put("bp-agent", "naki", &["https://github.com"], 60);
         assert!(active_for("bp-agent", "Naki").is_some());

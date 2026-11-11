@@ -6,8 +6,10 @@ import {
     ATTENTION_TOAST_ID,
     buildToast,
     createAttentionToast,
+    noticesPaused,
     RETURN_MS,
     START_GRACE_MS,
+    TOAST_LIFETIME_MS,
     TOAST_MAX_LINKS,
 } from "./attention-toast";
 
@@ -19,7 +21,8 @@ vi.mock("@/app/window/window-focus", () => ({ makeWindowFocusSignal: () => () =>
 vi.mock("@/app/block/pane-color-scheme", () => ({ paneRoleColor: () => undefined }));
 vi.mock("@/app/block/pane-identity", () => ({ isLightThemeActive: () => false }));
 vi.mock("./usenotification", () => ({ setNotificationAction: () => {} }));
-vi.mock("./attention-list", () => ({ attentionItems: () => [] }));
+vi.mock("./attention-list", () => ({ attentionItems: () => [], attentionTint: (hex?: string) => hex }));
+vi.mock("./attention-go", () => ({ goToAttention: () => {} }));
 
 const item = (blockId: string, over: Partial<AttentionItem> = {}): AttentionItem => ({
     blockId,
@@ -31,10 +34,17 @@ const item = (blockId: string, over: Partial<AttentionItem> = {}): AttentionItem
     ...over,
 });
 
-function harness(opts: { enabled?: boolean; inFront?: boolean; focused?: string | null } = {}) {
+function harness(opts: { enabled?: boolean; inFront?: boolean; focused?: string | null; paused?: boolean } = {}) {
     let items: AttentionItem[] = [];
     let t = 0;
-    const state = { enabled: opts.enabled ?? true, inFront: opts.inFront ?? true, focused: opts.focused ?? null };
+    const state = {
+        enabled: opts.enabled ?? true,
+        inFront: opts.inFront ?? true,
+        focused: opts.focused ?? null,
+        paused: opts.paused ?? false,
+    };
+    // The one expiry timer the toast has set, if it still holds.
+    let expiry: (() => void) | null = null;
     const pushed: NotificationType[] = [];
     const removed: string[] = [];
     const actions = new Map<string, () => void>();
@@ -42,6 +52,7 @@ function harness(opts: { enabled?: boolean; inFront?: boolean; focused?: string 
     const toast = createAttentionToast({
         items: () => items,
         enabled: () => state.enabled,
+        paused: () => state.paused,
         inFront: () => state.inFront,
         focusedBlock: () => state.focused,
         push: (n) => pushed.push(n),
@@ -49,8 +60,15 @@ function harness(opts: { enabled?: boolean; inFront?: boolean; focused?: string 
         setAction: (k, fn) => actions.set(k, fn),
         reveal: (b) => revealed.push(b),
         now: () => t,
+        later: (fn) => {
+            expiry = fn;
+            return () => {
+                if (expiry === fn) expiry = null;
+            };
+        },
     });
     return {
+        expiry: () => expiry,
         state,
         pushed,
         removed,
@@ -76,7 +94,8 @@ describe("the attention toast", () => {
             title: "Korp",
             titleColor: "#3b82f6",
             message: "asks to approve a Bash call",
-            persistent: true,
+            expiresWithActions: true,
+            expiration: START_GRACE_MS + TOAST_LIFETIME_MS,
             actions: [{ label: "Go to agent", actionKey: "attention:go:b1" }],
         });
         h.actions.get("attention:go:b1")!();
@@ -88,6 +107,27 @@ describe("the attention toast", () => {
         h.wait(START_GRACE_MS);
         h.set([item("b1", { local: false })]);
         expect(h.last().message).toBe("asks you a question (in another window)");
+    });
+
+    it("says pane, not agent, for a pane that is not an agent's", () => {
+        const remotes = item("r1", { name: "Connectors · Remotes", what: "asks you to confirm", color: undefined, pane: true });
+        const one = buildToast(
+            [remotes],
+            () => {},
+            () => {}
+        );
+        expect(one).toMatchObject({
+            title: "Connectors · Remotes",
+            message: "asks you to confirm",
+            actions: [{ label: "Go to pane", actionKey: "attention:go:r1" }],
+        });
+        const mixed = buildToast(
+            [remotes, item("b1")],
+            () => {},
+            () => {}
+        );
+        expect(mixed.title).toBe("2 panes need you");
+        expect(mixed.actions!.map((a) => a.label)).toEqual(["Go to Connectors · Remotes", "Go to Agent-b1"]);
     });
 
     it("groups several into one toast, rewritten in place, with a link per agent and the rest counted", () => {
@@ -234,6 +274,62 @@ describe("the attention toast", () => {
         h.set([]);
         h.set([item("b1")]);
         expect(h.pushed).toHaveLength(2);
+    });
+
+    it("goes after its lifetime, and a list that changes later does not bring back what it said", () => {
+        const h = harness();
+        h.wait(START_GRACE_MS);
+        h.set([item("b1")]);
+        expect(h.last()).not.toHaveProperty("persistent");
+        h.expiry()!();
+        h.wait(TOAST_LIFETIME_MS);
+        h.set([item("b1")]);
+        expect(h.pushed).toHaveLength(1);
+        h.set([item("b1"), item("b2")]);
+        expect(h.pushed).toHaveLength(2);
+        expect(h.last()).toMatchObject({ title: "Agent-b2" });
+    });
+
+    it("sets no expiry timer once the toast is gone, and a new one starts its own", () => {
+        const h = harness();
+        h.wait(START_GRACE_MS);
+        h.set([item("b1")]);
+        expect(h.expiry()).not.toBeNull();
+        h.set([]);
+        expect(h.expiry()).toBeNull();
+        h.wait(RETURN_MS + 1);
+        h.set([item("b2")]);
+        expect(h.expiry()).not.toBeNull();
+        expect(h.last().expiration).toBe(START_GRACE_MS + RETURN_MS + 1 + TOAST_LIFETIME_MS);
+    });
+
+    it("shows nothing while Do Not Disturb holds notices back, and does not bring those requests up when it ends", () => {
+        const h = harness({ paused: true });
+        h.wait(START_GRACE_MS);
+        h.set([item("b1")]);
+        expect(h.pushed).toEqual([]);
+        h.state.paused = false;
+        h.set([item("b1")]);
+        expect(h.pushed).toEqual([]);
+        h.set([item("b1"), item("b2")]);
+        expect(h.last()).toMatchObject({ title: "2 agents need you" });
+    });
+
+    it("takes the toast off the screen when Do Not Disturb begins", () => {
+        const h = harness();
+        h.wait(START_GRACE_MS);
+        h.set([item("b1")]);
+        h.state.paused = true;
+        h.set([item("b1")]);
+        expect(h.removed).toEqual([ATTENTION_TOAST_ID]);
+    });
+
+    it("knows Do Not Disturb as srv does: a pause that has not run out, unless attention is let through", () => {
+        expect(noticesPaused(2000, false, 1000)).toBe(true);
+        expect(noticesPaused(2000, true, 1000)).toBe(false);
+        expect(noticesPaused(1000, false, 1000)).toBe(false);
+        expect(noticesPaused(undefined, false, 1000)).toBe(false);
+        expect(noticesPaused(0, false, 1000)).toBe(false);
     });
 
     it("draws the agent's name in the colour the theme can read", () => {

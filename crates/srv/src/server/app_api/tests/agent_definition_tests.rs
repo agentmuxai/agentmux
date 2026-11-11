@@ -123,11 +123,19 @@ fn on_route(state: &AppState, who: &AgentDefinition) {
     crate::backend::model_gateway::launch::set_choice(&state.mstore, &who.id, "claude", "openrouter", "").unwrap();
 }
 
+/// The route's key, in the Vault.
+fn with_route_key(state: &AppState) {
+    crate::backend::vault::seal::use_test_key();
+    let entry: crate::backend::vault::NewEntry = serde_json::from_value(json!({ "kind": "api-key", "label": "OpenRouter API key", "parts": { "value": "sk-or-test" } })).unwrap();
+    crate::backend::vault::create(&state.identity_store, entry).unwrap();
+}
+
 #[tokio::test]
 async fn the_model_changes_on_the_route_the_agent_is_on_and_the_agent_can_leave_the_route() {
     let state = test_state();
     let (me, target) = (agent(&state, "Editor"), agent(&state, "Routed"));
     on_route(&state, &target);
+    with_route_key(&state);
     let token = crate::backend::model_gateway::token::token_for(&target.slug, &target.id, "openrouter");
 
     let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "deepseek/deepseek-v4-pro-0813" })).await;
@@ -135,6 +143,8 @@ async fn the_model_changes_on_the_route_the_agent_is_on_and_the_agent_can_leave_
     assert_eq!(body["changed"], json!(["model"]));
     let saved = crate::backend::model_gateway::launch::choice_of(&state.mstore, &target.id).unwrap();
     assert_eq!((saved.route.as_str(), saved.model.as_str()), ("openrouter", "deepseek/deepseek-v4-pro-0813"));
+    let back = crate::backend::model_gateway::switch::previous_of(&state.mstore, &target.id).unwrap();
+    assert_eq!((back.route.as_str(), back.model.as_str()), ("openrouter", "deepseek/deepseek-v4.1-flash-1017"), "the panel's Back row");
 
     let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "gpt-5" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -159,4 +169,76 @@ async fn an_update_does_not_put_an_agent_on_a_route_because_that_spends_the_pers
     assert!(crate::backend::model_gateway::launch::choice_of(&state.mstore, &target.id).is_none());
     let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "route": "" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+#[tokio::test]
+async fn an_agent_changing_its_model_is_limited_to_six_an_hour() {
+    let state = test_state();
+    let (me, target) = (agent(&state, "Editor"), agent(&state, "Thrasher"));
+    on_route(&state, &target);
+    with_route_key(&state);
+    let models = ["deepseek/deepseek-v4-pro-0813", "deepseek/deepseek-v4.1-flash-1017"];
+    for _ in 0..8 {
+        let (status, _) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "gpt-5" })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "a refused change is not one of the six");
+    }
+    for i in 0..crate::backend::model_gateway::switch::AGENT_SWITCHES_PER_HOUR {
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": models[i % 2] })).await;
+        assert_eq!(status, StatusCode::OK, "{i}: {body}");
+    }
+    let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": models[0] })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("times an hour"), "{body}");
+}
+
+#[tokio::test]
+async fn a_leader_sets_and_resets_a_workers_spend_cap_and_a_worker_may_only_lower_its_own() {
+    use crate::backend::model_gateway::cap::{self, DEFAULT_AGENT_CAP_USD};
+    let state = test_state();
+    let (leader, worker, stranger) = (agent(&state, "Lead"), agent(&state, "Work"), agent(&state, "Stranger"));
+    state
+        .mstore
+        .agent_content_set(&crate::backend::storage::content::AgentContent {
+            agent_id: worker.id.clone(),
+            content_type: crate::backend::agent_seat::WORKER_OF_CONTENT.to_string(),
+            content: json!({ "agent": leader.slug, "id": leader.id }).to_string(),
+            updated_at: 1,
+        })
+        .unwrap();
+    assert_eq!(cap::agent_cap(&state.mstore, &worker.id), Some(DEFAULT_AGENT_CAP_USD));
+
+    let (status, body) = update_call(&state, Some(&leader), json!({ "agent": worker.slug, "spend_cap_usd": 40 })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(cap::agent_cap(&state.mstore, &worker.id), Some(40.0));
+    let log = audited(&leader);
+    assert!(log.iter().any(|e| e.success && e.reason.as_deref().is_some_and(|r| r.contains("spend cap $20.00 to $40.00"))), "the audit row says from and to: {log:?}");
+
+    let (status, body) = update_call(&state, Some(&stranger), json!({ "agent": worker.slug, "spend_cap_usd": 5 })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, _) = update_call(&state, Some(&worker), json!({ "agent": worker.slug, "spend_cap_usd": 80 })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "an agent does not raise its own cap");
+    let (status, _) = update_call(&state, Some(&worker), json!({ "agent": worker.slug, "spend_cap_usd": "none" })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "nor lift it");
+    let (status, _) = update_call(&state, Some(&worker), json!({ "agent": worker.slug, "reset_spend_today": true })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "nor reset its day");
+    let (status, body) = update_call(&state, Some(&worker), json!({ "agent": worker.slug, "spend_cap_usd": 10 })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(cap::agent_cap(&state.mstore, &worker.id), Some(10.0));
+
+    let (status, body) = update_call(&state, Some(&leader), json!({ "agent": worker.slug, "reset_spend_today": true })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, _) = update_call(&state, Some(&leader), json!({ "agent": worker.slug, "spend_cap_usd": "lots" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_refused_spend_change_leaves_the_rest_of_the_request_unapplied() {
+    let state = test_state();
+    let (stranger, target) = (agent(&state, "Stranger"), agent(&state, "Target"));
+    let (status, _) = update_call(&state, Some(&stranger), json!({ "agent": target.slug, "description": "changed", "spend_cap_usd": 5 })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let after = state.mstore.agent_def_get(&target.id).unwrap().unwrap();
+    assert_eq!(after.description, target.description, "the description was not applied");
+    let (status, _) = update_call(&state, Some(&stranger), json!({ "agent": stranger.slug, "spend_cap_usd": 0.004 })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "a cap under a cent is refused, not read back as none");
 }

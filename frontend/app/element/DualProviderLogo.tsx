@@ -19,7 +19,7 @@
  */
 
 import { ProviderLogo } from "@/element/ProviderLogo";
-import type { JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import { tip } from "@/app/element/tip";
 
 export interface DualProviderLogoProps {
@@ -29,6 +29,10 @@ export interface DualProviderLogoProps {
     vendor?: string;
     /** Base pixel size of the primary harness logo (default: 24). */
     size?: number;
+    /** What to call the vendor in the tooltip when the id alone says too little (a route's model: "DeepSeek V4.1 Flash via OpenRouter"). */
+    vendorLabel?: string;
+    /** No tooltip or accessible name of its own: the parent (a header button) names it with `dualLogoTitle`. */
+    bare?: boolean;
     /** Additional CSS class names. */
     class?: string;
 }
@@ -64,23 +68,29 @@ const VENDOR_NAMES: Record<string, string> = {
     github: "GitHub",
     ollama: "Ollama (local)",
     pi: "Pi",
+    xai: "xAI",
+    meta: "Meta",
     custom: "a custom endpoint",
 };
 
+const hasBadge = (harness: string, vendor: string | undefined): boolean =>
+    !!vendor && vendor.toLowerCase() !== (harness ?? "").toLowerCase();
+
+/** What the logo says in words: the harness, and what it runs on when the badge shows. */
+export function dualLogoTitle(harness: string, vendor?: string, vendorLabel?: string): string {
+    const h = HARNESS_NAMES[(harness ?? "").toLowerCase()] ?? harness;
+    if (!hasBadge(harness, vendor)) return vendorLabel ? `${h} harness running on ${vendorLabel}` : `${h} harness`;
+    return `${h} harness running on ${vendorLabel ?? VENDOR_NAMES[vendor!.toLowerCase()] ?? vendor}`;
+}
+
 export const DualProviderLogo = (props: DualProviderLogoProps): JSX.Element => {
     const size = () => props.size ?? 24;
-    const vendorSize = () => Math.max(10, Math.round(size() * 0.45));
+    // A list row's 40 px logo carries a ringed badge; a header's 14-16 px one a smaller, thinly ringed one.
+    const small = () => size() < 20;
+    const vendorSize = () => (small() ? Math.round(size() * 0.6) : Math.max(10, Math.round(size() * 0.45)));
 
-    const harnessName = () => HARNESS_NAMES[(props.harness ?? "").toLowerCase()] ?? props.harness;
-    const vendorName = () => (props.vendor ? VENDOR_NAMES[props.vendor.toLowerCase()] ?? props.vendor : "");
-
-    const showBadge = () =>
-        !!props.vendor && props.vendor.toLowerCase() !== (props.harness ?? "").toLowerCase();
-
-    const tooltip = () => {
-        const h = harnessName();
-        return showBadge() ? `${h} harness running on ${vendorName()}` : `${h} harness`;
-    };
+    const showBadge = () => hasBadge(props.harness, props.vendor);
+    const tooltip = () => dualLogoTitle(props.harness, props.vendor, props.vendorLabel);
 
     return (
         <span
@@ -93,30 +103,35 @@ export const DualProviderLogo = (props: DualProviderLogoProps): JSX.Element => {
                 width: `${size()}px`,
                 height: `${size()}px`,
             }}
-            {...tip(tooltip())}
-            aria-label={tooltip()}
+            {...(props.bare ? {} : tip(tooltip()))}
+            aria-label={props.bare ? undefined : tooltip()}
         >
             <ProviderLogo provider={props.harness} size={size()} />
-            {showBadge() && (
-                <span
-                    class="dual-provider-logo-badge"
-                    style={{
-                        position: "absolute",
-                        bottom: "-2px",
-                        right: "-2px",
-                        display: "inline-flex",
-                        "align-items": "center",
-                        "justify-content": "center",
-                        "background-color": "var(--main-bg-color)",
-                        "border-radius": "50%",
-                        padding: "1px",
-                        border: "1px solid var(--border-color)",
-                        "box-shadow": "0 1px 3px rgba(0, 0, 0, 0.3)",
-                    }}
-                >
-                    <ProviderLogo provider={props.vendor!} size={vendorSize()} />
-                </span>
-            )}
+            {/* Keyed on the vendor: ProviderLogo picks its artwork once, so a model switched in place needs a new one. */}
+            <Show when={showBadge() ? props.vendor : undefined} keyed>
+                {(vendor) => (
+                    <span
+                        class="dual-provider-logo-badge"
+                        style={{
+                            position: "absolute",
+                            bottom: "-2px",
+                            right: "-2px",
+                            display: "inline-flex",
+                            "align-items": "center",
+                            "justify-content": "center",
+                            "background-color": "var(--main-bg-color)",
+                            "border-radius": "50%",
+                            padding: small() ? "0" : "1px",
+                            border: small() ? "none" : "1px solid var(--border-color)",
+                            // A small badge separates from the harness mark with a light ring, not the
+                            // pane's dark background: at 8 px a dark ring muddies a colourful mark.
+                            "box-shadow": small() ? "0 0 0 1px var(--border-color)" : "0 1px 3px rgba(0, 0, 0, 0.3)",
+                        }}
+                    >
+                        <ProviderLogo provider={vendor} size={vendorSize()} />
+                    </span>
+                )}
+            </Show>
         </span>
     );
 };

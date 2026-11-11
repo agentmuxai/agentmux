@@ -205,6 +205,8 @@ fn seed_global_zone(global: &FileStore, zone: &str, bytes: &[u8]) -> Result<(), 
     global
         .replace_file(zone, OUTPUT_FILE, bytes, &[TSIDX_FILE, "output.idx"])
         .map_err(|e| format!("replace_file: {e}"))?;
+    // The bytes are new, so a count of the images in the old ones does not carry over.
+    crate::backend::transcript::images::forget(zone);
     let hwm = count_nonblank_lines(bytes);
     let overlay = serde_json::json!({
         "schemaVersion": 2,

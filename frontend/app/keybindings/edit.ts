@@ -6,7 +6,7 @@
 // (docs/specs/SPEC_KEYBOARD_SHORTCUTS_SETTINGS_2026_11_06.md §3, §5).
 
 import { DEFAULT_KEYBINDINGS } from "./defaults";
-import { keyId, type KeyPlatform } from "./keys";
+import { keyId, parseKey, type KeyPlatform } from "./keys";
 import { compileRows, contextOf, defaultKeysOf, validEntries, whenDisjoint, type UserKeybinding } from "./registry";
 import { reservedFor, type Reserved } from "./reserved";
 
@@ -48,6 +48,19 @@ export interface PlannedChange {
 export interface PlanOptions {
     /** Unbind, on the other commands, the keys that block the new ones. */
     replace?: boolean;
+}
+
+/** Where the command works today (its row's `when`): a key given to it works there unless said otherwise, since
+ *  an entry with no `when` fires everywhere. */
+export const ownWhen = (command: string): string | undefined => DEFAULT_KEYBINDINGS.find((r) => r.command === command)?.when;
+
+/** What a bare printable key is saved with, so it never fires while the person types (WCAG 2.1.4). */
+export const PLAIN_KEY_GUARD = "!textInputFocus && !terminalFocus";
+
+/** A key with no Ctrl, Alt or Meta that types something: a letter, a digit, punctuation, Space or a numpad key. */
+export function isPlainKey(step: string, platform: KeyPlatform): boolean {
+    const k = parseKey(step, platform);
+    return !k.ctrl && !k.alt && !k.meta && (k.letter != null || k.code != null);
 }
 
 /** The platform an entry the view writes is pinned to: Windows and Linux share "other". */

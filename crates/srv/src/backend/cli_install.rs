@@ -151,7 +151,7 @@ pub fn installed_bin(dir: &Path, cli_command: &str) -> Option<PathBuf> {
 /// stall the install on a ~200 MB download or swap the hash-checked binary for an unchecked one.
 pub(crate) fn probe_installed(bin: &Path, provider_id: &str) -> Option<String> {
     let env = crate::backend::providers::get_provider(provider_id).map_or(&[][..], |p| p.auth_extra_env);
-    crate::backend::tool_store::probe_version_with_env(&bin.to_string_lossy(), &Some("--version".to_string()), env)
+    crate::backend::tool_store::probe_version_when_it_runs(&bin.to_string_lossy(), &Some("--version".to_string()), env)
 }
 
 /// Under the install lock, before (re)installing into `dir`: unless it holds

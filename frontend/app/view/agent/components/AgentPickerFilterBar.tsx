@@ -21,6 +21,7 @@
 
 import { type Accessor, type JSX } from "solid-js";
 import { FilterInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 
 /** "Recently used" (most recent `last_active_at`, else `started_at`, first; see
  *  agent-recency.ts) is the default —
@@ -50,21 +51,21 @@ export const AgentPickerFilterBar = (props: AgentPickerFilterBarProps): JSX.Elem
                 value={props.value()}
                 onInput={props.onInput}
                 onClear={props.onClear}
-                placeholder="Filter agents..."
+                placeholder={t("agentPicker.filterBar.placeholder")}
                 testId="agent-picker-filter"
             />
             <label class="agent-picker-sort" data-testid="agent-picker-sort">
-                <span class="agent-picker-sort-label">Sort</span>
+                <span class="agent-picker-sort-label">{t("agentPicker.filterBar.sort")}</span>
                 <select
                     class="agent-picker-sort-select"
-                    aria-label="Sort My Agents by"
+                    aria-label={t("agentPicker.filterBar.sortBy")}
                     data-testid="agent-picker-sort-select"
                     value={props.sortBy()}
                     onChange={(e) => props.onSortChange(e.currentTarget.value as AgentSortOption)}
                 >
-                    <option value="recent">Recently used</option>
-                    <option value="name">Name (A–Z)</option>
-                    <option value="type">Type</option>
+                    <option value="recent">{t("agentPicker.filterBar.recent")}</option>
+                    <option value="name">{t("agentPicker.filterBar.name")}</option>
+                    <option value="type">{t("agentPicker.filterBar.type")}</option>
                 </select>
             </label>
         </div>

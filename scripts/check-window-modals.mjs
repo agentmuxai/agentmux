@@ -8,6 +8,8 @@
 //   - `openModal(` (a window modal) from a file that is not in KEEP, or more often than KEEP says;
 //   - `<ConfirmModal` (its default scope is the window) the same way;
 //   - `scope="window"` / `scope: "window"` the same way;
+//   - `scope="tab"` / `scope: "tab"` the same way: a tab-wide modal is for a question about the whole tab, and
+//     the only such question is closing a tab (a window modal, since it is asked from the tab bar);
 //   - `window.confirm`, `window.alert`, `window.prompt`, which freeze the renderer.
 // A new dialog about one pane uses `openPaneModal(blockId, ...)`. A new window modal needs a line in KEEP,
 // with the reason it concerns the whole app.
@@ -26,15 +28,17 @@ export const PRIMITIVES = new Set([
     "frontend/app/element/modal.tsx",
     "frontend/app/element/confirm-modal.tsx",
     "frontend/app/store/modalmodel.ts",
+    "frontend/app/element/ModalLayer.tsx",
 ]);
 
 /**
  * Window modals that stay, by file: how many of each kind, and why. A kind is `openModal`, `confirmModal`
- * (`<ConfirmModal` with no `scope=`), `windowScope` (an explicit window scope).
+ * (`<ConfirmModal` with no `scope=`), `windowScope` (an explicit window scope), `tabScope` (an explicit tab scope).
  */
 export const KEEP = new Map([
     ["frontend/app/window/window-close.ts", { openModal: 2, why: "closing or removing a window: the whole window" }],
     ["frontend/app/window/workspaces.ts", { openModal: 7, why: "switch, create, rename, pick, delete and import a workspace: the whole window" }],
+    ["frontend/app/tab/tabcontent.tsx", { tabScope: 1, why: "the tab's own modal layer: it hosts nothing today (a pane's questions are the pane's); a question about the whole tab would go here" }],
     ["frontend/app/tab/tab-close-confirm-modal.tsx", { windowScope: 1, why: "closing a tab is asked from the tab bar, outside any pane's lock; it ends agents in every pane of the tab" }],
     ["frontend/app/block/upgrade-requests.tsx", { openModal: 1, confirmModal: 1, why: "an app upgrade restarts every agent" }],
     ["frontend/app/block/desktop-requests.tsx", { openModal: 1, why: "a desktop-control request that names no pane; one from an agent is a card in its pane" }],
@@ -121,6 +125,7 @@ function unscopedConfirmModals(code) {
 const KINDS = [
     ["openModal", /(?<![.\w])openModal\s*\(|\bmodalsModel\.openModal\s*\(/g],
     ["windowScope", /\bscope\s*[=:]\s*\{?\s*["']window["']/g],
+    ["tabScope", /\bscope\s*[=:]\s*\{?\s*["']tab["']/g],
 ];
 const FORBIDDEN = [/\bwindow\.(?:confirm|alert|prompt)\s*\(/g];
 
@@ -155,7 +160,7 @@ export function checkFile(path, text) {
     for (const h of hits) {
         if (h.kind === "freezes-renderer") out.push({ path, line: h.line, rule: h.kind });
     }
-    for (const kind of ["openModal", "confirmModal", "windowScope"]) {
+    for (const kind of ["openModal", "confirmModal", "windowScope", "tabScope"]) {
         const n = counts[kind] ?? 0;
         const allowed = keep[kind] ?? 0;
         if (n <= allowed) continue;
@@ -188,7 +193,7 @@ export function collect(root = REPO_ROOT) {
     const stale = [];
     for (const [path, keep] of KEEP) {
         const counts = seen.get(path) ?? {};
-        for (const kind of ["openModal", "confirmModal", "windowScope"]) {
+        for (const kind of ["openModal", "confirmModal", "windowScope", "tabScope"]) {
             if ((keep[kind] ?? 0) > (counts[kind] ?? 0)) stale.push({ path, kind, allowed: keep[kind], found: counts[kind] ?? 0 });
         }
     }
@@ -199,6 +204,7 @@ const ADVICE = {
     openModal: "a window modal: about one pane or agent, use openPaneModal(blockId, ...); about the whole app, add it to KEEP with the reason",
     confirmModal: "<ConfirmModal> defaults to the window: give it scope=\"pane\" (or open it with openPaneModal), or add it to KEEP with the reason",
     windowScope: "an explicit window scope: add it to KEEP with the reason it concerns the whole app",
+    tabScope: "an explicit tab scope: a question about one pane is the pane's (scope=\"pane\", or openPaneModal); add it to KEEP only with the reason it concerns the whole tab",
     "freezes-renderer": "window.confirm/alert/prompt freeze the renderer: use createConfirm() or a pane modal",
 };
 

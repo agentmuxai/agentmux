@@ -25,7 +25,10 @@ import type { StripAttachment } from "./AttachmentStrip";
 const BLOCK_RE = /\n*<(attached_files|attached_images)>\n([\s\S]*?)\n?<\/\1>\s*$/;
 const FOUND_RE = /^(\d+)\. (.*) — (.+)$/;
 const MISSING_RE = /^- (.*) — \(no longer available\)$/;
-// A derived file (`<sha256>.….send.png`) or a named copy (`named/<sha256>/<name>`).
+// An image is sent as its derived file (`<sha256>.….send.png`); any other file as a named copy (`named/<sha256>/<name>`).
+const IMAGE_PATH_RE = /\.send\.(?:png|jpe?g|gif|webp|bmp|tiff?)$/i;
+const IMAGE_NAME_RE = /\.(?:png|jpe?g|gif|webp|bmp|tiff?)$/i;
+// A derived file or a named copy.
 const ID_RE = /(?:^|[\\/])([0-9a-f]{64})\.[^\\/]*$|[\\/]named[\\/]([0-9a-f]{64})[\\/][^\\/]+$/;
 
 /** `name [note]` → `name`; the note is the last bracketed part. */
@@ -46,11 +49,12 @@ export function splitAttachedImages(message: string): { text: string; attachment
             const idm = ID_RE.exec(f[3].trim());
             const id = idm?.[1] ?? idm?.[2];
             const name = stripNote(f[2]);
-            found.set(Number(f[1]), id ? { id, name } : { name });
+            const image = IMAGE_PATH_RE.test(f[3].trim());
+            found.set(Number(f[1]), { ...(id ? { id } : {}), name, ...(image ? { image } : {}) });
             continue;
         }
         const x = MISSING_RE.exec(line);
-        if (x) missing.push({ name: x[1] });
+        if (x) missing.push(IMAGE_NAME_RE.test(x[1]) ? { name: x[1], image: true } : { name: x[1] });
     }
     if (found.size === 0 && missing.length === 0) return { text: message, attachments: [] };
     // Found images keep their numbers; missing ones fill the gaps in order.

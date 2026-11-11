@@ -26,6 +26,7 @@ import { effectiveStack } from "@/layout/lib/stackMembers";
 import { atoms, getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
 import { sleep } from "@/util/util";
+import { endLiveFollow } from "./live-follow";
 import { floaterSizeFromRect, measureMotherResize, measureSourcePaneSize } from "./tear-off-pool-helper";
 import { takeTearOffSnapshot } from "./tearoff-snapshot";
 
@@ -79,6 +80,7 @@ export async function handlePaneTabDragEnd(
     const workspace = atoms.workspace() as Workspace | undefined;
     if (!workspace) {
         Logger.warn("dnd:cross", "no workspace found — aborting pane-tab drag");
+        endLiveFollow(api);
         return;
     }
     const src = sourceWindow ?? "main";
@@ -92,6 +94,8 @@ export async function handlePaneTabDragEnd(
                 targetWindow,
                 sameWindow: targetWindow === src,
             });
+            // No window opens for this release: the picture that followed the cursor goes now.
+            endLiveFollow(api);
             await api.cancelCrossDrag(dragId);
             return;
         }
@@ -111,6 +115,7 @@ export async function handlePaneTabDragEnd(
             }
         }
     } catch (e) {
+        endLiveFollow(api);
         Logger.error("dnd:cross", "pane-tab drag error", { error: String(e), blockId: payload.blockId });
         // Release the host's singleton drag session, or every later tear-off
         // is rejected with "drag session already active".

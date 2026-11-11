@@ -469,14 +469,38 @@ fn unregister_pane(block_id_wait: &str, agent_id: Option<&str>) {
         crate::backend::reactive::registry::remove_shared_for_block_from_env(block_id_wait, None);
     }
 
-    // Also remove from cross-instance file registry and cloud subscriber.
+    // Also remove from cross-instance file registry and cloud subscriber, unless another live pane
+    // still answers to the name. An agent's own tool shell carries the agent's id, so its exit must
+    // not unsubscribe the agent's running pane from cloud messages.
     if let Some(agent_id) = agent_id {
-        let data_dir = crate::backend::base::get_mux_data_dir();
-        crate::backend::reactive::registry::remove(&data_dir, agent_id);
-        crate::backend::reactive::registry::remove_shared_from_env(agent_id);
-        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-            sub.remove_agent(agent_id);
+        let still_held = crate::backend::reactive::get_global_handler().has_live_name(agent_id);
+        if drop_name_state_on_exit(still_held) {
+            let data_dir = crate::backend::base::get_mux_data_dir();
+            crate::backend::reactive::registry::remove(&data_dir, agent_id);
+            crate::backend::reactive::registry::remove_shared_from_env(agent_id);
+            if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                sub.remove_agent(agent_id);
+            }
+        } else {
+            tracing::info!(block_id = %block_id_wait, agent = %agent_id, "shell pane exit: another live pane holds the agent's name — keeping its registry entry and cloud subscription");
         }
+    }
+}
+
+/// Whether an exiting pane takes down the name-keyed state (file registry entry, cloud
+/// subscription) for its agent: only when no other live pane still answers to the name.
+fn drop_name_state_on_exit(name_still_held: bool) -> bool {
+    !name_still_held
+}
+
+#[cfg(test)]
+mod name_state_tests {
+    use super::drop_name_state_on_exit;
+
+    #[test]
+    fn an_exiting_shell_leaves_the_name_alone_while_a_pane_holds_it() {
+        assert!(!drop_name_state_on_exit(true), "the agent's pane still runs: keep its subscription");
+        assert!(drop_name_state_on_exit(false), "nobody holds the name: take its state down");
     }
 }
 

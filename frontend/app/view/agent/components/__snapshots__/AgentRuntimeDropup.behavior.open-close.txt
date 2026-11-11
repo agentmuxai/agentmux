@@ -17,8 +17,8 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}
@@ -55,8 +55,8 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}
@@ -78,8 +78,8 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}
@@ -101,8 +101,8 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   [model]
   - Opus 5.5 / Highest quality {}
   - Sonnet 5.5 / Balanced speed and quality {current}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {}

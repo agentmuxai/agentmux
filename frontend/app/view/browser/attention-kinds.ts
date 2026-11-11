@@ -47,6 +47,9 @@ export function attentionLook(a: BrowserAttention): AttentionLook {
         // Why a navigation didn't load; nothing waits on it
         // (REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md §6.2).
         case "notice":
+            if (a.chooser) {
+                return { agent: false, tone: "accent", density: "compact", icon: "fa-circle-info", answer: "approve", no: "Dismiss", text: chooserNoticeText(a) };
+            }
             return {
                 agent: false,
                 tone: "accent",
@@ -95,6 +98,12 @@ export function noticeText(a: BrowserAttention): string {
     const tried = a.popup ? "open a window at" : "go to";
     const why = a.why ? ` ${a.why}` : "";
     return `Stopped: ${limited}, and the page tried to ${tried} ${where}.${why}`;
+}
+
+/** A notice about a file chooser the pane cancelled: the page asked, an agent drives the pane, and the person is told how to answer it themselves. */
+export function chooserNoticeText(a: BrowserAttention): string {
+    const ask = a.chooser === "choose a folder" ? "choose a folder" : a.chooser === "choose several files" ? "choose files" : "choose a file";
+    return `The page asked to ${ask}, but an agent drives this pane, so AgentMux cancelled it. Use Take over, then click again to ${ask} yourself.`;
 }
 
 /** A page's dialog text, as shown: the page's words, never more than this. */

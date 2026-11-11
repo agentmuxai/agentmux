@@ -264,6 +264,22 @@ pub(super) const OBJECT_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_agent_
             in_containers INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0
         );
+        -- v45: the install that vouched for a LAN name pin, and the keys a name has moved off — see
+        -- OBJECT_SCHEMA_VERSION's v45 doc comment.
+        CREATE TABLE IF NOT EXISTS db_lan_pin_installs (
+            agent_id    TEXT PRIMARY KEY,
+            public_key  TEXT NOT NULL,
+            instance_id TEXT NOT NULL,
+            host_hint   TEXT NOT NULL DEFAULT '',
+            bound_at    INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS db_lan_retired_keys (
+            agent_id   TEXT NOT NULL,
+            key_fp     TEXT NOT NULL,
+            retired_at INTEGER NOT NULL DEFAULT 0,
+            retired_by TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (agent_id, key_fp)
+        );
 
         -- v34: skill_id's FK to this store's LOCAL db_skills is gone — see
         -- OBJECT_SCHEMA_VERSION's v34 doc comment above. agent_id's FK to
@@ -895,6 +911,11 @@ pub(super) fn add_agent_columns(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_jekt_held ADD COLUMN hold_reason TEXT NOT NULL DEFAULT ''",
         // A held WAN message's verdict, kept for its replay (no bump: an older build ignores it).
         "ALTER TABLE db_jekt_held ADD COLUMN wan_json TEXT NOT NULL DEFAULT ''",
+        // The sender's own expiry for a held message, epoch ms (issue #3894): at delivery time
+        // the replay drops the row instead of delivering it stale, and the expiry sweep drops it
+        // whatever its hold reason. NULL — the sender said nothing — keeps today's behaviour
+        // (no bump: an older build ignores the column).
+        "ALTER TABLE db_jekt_held ADD COLUMN sender_expires_at_ms INTEGER",
         "ALTER TABLE db_agent_native_memory ADD COLUMN last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0", // a table made before this column
     ])?;
     Ok(())

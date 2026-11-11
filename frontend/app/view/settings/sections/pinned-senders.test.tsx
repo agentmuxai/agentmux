@@ -104,6 +104,45 @@ describe("PinnedSenders", () => {
         expect(adopt.mock.calls[0][1]).toEqual({ kind: "wan", agent_id: "lazo", channel: "stable", expect: "area54~wxyz9876" });
     });
 
+    it("offers a first key that no install vouched for to be accepted once, with nothing to forget", async () => {
+        list.mockResolvedValue({
+            lan: [{ agent_id: "newbie", key_fp: "", pinned_at: 0, uid_pins: 0, refused: { key_fp: "dddddddddd", last_seen_at: NOW - 30, count: 2 } }],
+            wan: [],
+        });
+        const { container } = render(() => <PinnedSenders />);
+        await screen.findByText(/Not pinned yet/);
+        expect(container.querySelectorAll(".setting-pin")).toHaveLength(1);
+        expect(screen.getByText(/A key, dddddddddd, was shown 2 times/)).toBeTruthy();
+        expect(screen.getByText(/arrive unproven until you accept it/)).toBeTruthy();
+        expect(screen.queryByText("Forget")).toBeNull();
+        fireEvent.click(screen.getByText("Accept this key"));
+        fireEvent.click(await screen.findByText("Press again to accept"));
+        await waitFor(() => expect(adopt).toHaveBeenCalledTimes(1));
+        expect(adopt.mock.calls[0][1]).toEqual({ kind: "lan", agent_id: "newbie", channel: undefined, expect: "dddddddddd" });
+    });
+
+    it("says which install a pin is tied to and why a different key was not taken", async () => {
+        list.mockResolvedValue({
+            lan: [
+                {
+                    agent_id: "maop",
+                    key_fp: "aaaaaaaaaa",
+                    pinned_at: NOW - 3600,
+                    uid_pins: 0,
+                    bound_to: "starpower~abcd1234",
+                    refused: { key_fp: "bbbbbbbbbb", last_seen_at: NOW - 60, count: 1, why: "this key was retired on 2026-11-01 by starpower" },
+                },
+                { agent_id: "korp", key_fp: "cccccccccc", pinned_at: NOW - 3600, uid_pins: 0 },
+            ],
+            wan: [],
+        });
+        render(() => <PinnedSenders />);
+        await screen.findByText(/Vouched for by the install on starpower~abcd1234/);
+        expect(screen.getByText(/Why it was not accepted: this key was retired on 2026-11-01 by starpower/)).toBeTruthy();
+        expect(screen.getByText(/Accepting it makes it the key for this name from now on/)).toBeTruthy();
+        expect(screen.getByText(/Not tied to an install yet/)).toBeTruthy();
+    });
+
     it("reloads the list when srv says a pin changed", async () => {
         render(() => <PinnedSenders />);
         await screen.findByText(/Key cccccccccc/);

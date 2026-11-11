@@ -20,11 +20,19 @@ pub(crate) enum Power {
     /// Run it before Enter goes in (spec §4.4). Stricter than [`Power::Terminal`]:
     /// a grant that carries both asks.
     TerminalAsk,
+    /// Press Enter and Space on the page, each taken as the click it is (spec §5):
+    /// a form's default button, a button, a link or a checkbox, through the same
+    /// check as a click. A key whose click can't be named is refused.
+    EnterSpace,
+    /// Fill the file chooser the page opened from a file in the agent's own workspace
+    /// (spec §6): `set_files` with `chooser: true`. Without it the chooser is cancelled
+    /// the moment the page opens it, as in any pane an agent drives.
+    Uploads,
 }
 
 impl Power {
     /// The order a grant lists its powers in.
-    const ALL: [Power; 3] = [Power::Clicks, Power::Terminal, Power::TerminalAsk];
+    const ALL: [Power; 5] = [Power::Clicks, Power::Terminal, Power::TerminalAsk, Power::EnterSpace, Power::Uploads];
 
     /// The name on the wire, in `powers` lists.
     pub(crate) fn name(self) -> &'static str {
@@ -32,6 +40,8 @@ impl Power {
             Power::Clicks => "clicks",
             Power::Terminal => "terminal",
             Power::TerminalAsk => "terminal_ask",
+            Power::EnterSpace => "enter_space",
+            Power::Uploads => "uploads",
         }
     }
 
@@ -102,6 +112,23 @@ mod tests {
         let p = parse(Some(&asked(&["terminal", "Clicks", "terminal"]))).unwrap();
         assert_eq!(p, vec![Power::Clicks, Power::Terminal]);
         assert_eq!(names(&p), vec!["clicks", "terminal"]);
+    }
+
+    #[test]
+    fn enter_and_space_is_its_own_power_listed_last() {
+        let p = parse(Some(&asked(&["enter_space", "terminal"]))).unwrap();
+        assert_eq!(p, vec![Power::Clicks, Power::Terminal, Power::EnterSpace]);
+        assert_eq!(names(&p), vec!["clicks", "terminal", "enter_space"]);
+        assert_eq!(asking_each_line(&p), vec![Power::Clicks, Power::TerminalAsk, Power::EnterSpace]);
+        assert!(granted_by_the_person().contains(&"enter_space".to_string()));
+    }
+
+    #[test]
+    fn uploads_is_its_own_power_listed_after_the_keys() {
+        let p = parse(Some(&asked(&["uploads", "enter_space"]))).unwrap();
+        assert_eq!(p, vec![Power::Clicks, Power::EnterSpace, Power::Uploads]);
+        assert_eq!(names(&p), vec!["clicks", "enter_space", "uploads"]);
+        assert!(granted_by_the_person().contains(&"uploads".to_string()));
     }
 
     #[test]

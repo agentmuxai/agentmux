@@ -74,7 +74,7 @@ vi.mock("./inject-resume-preflight", () => ({
     buildResumePreflightNode: (...a: unknown[]) => (h.fns.pass("buildResumePreflightNode", ...a), null),
     injectResumePreflight: (...a: unknown[]) => h.fns.pass("injectResumePreflight", ...a),
 }));
-vi.mock("./virtualization/verbosity", () => ({ deriveDisplayNodes: (...a: unknown[]) => h.fns.pass("deriveDisplayNodes", ...a) }));
+vi.mock("./virtualization/verbosity", () => ({ deriveDisplayNodes: (...a: unknown[]) => h.fns.pass("deriveDisplayNodes", ...a), isForcedRow: () => false }));
 vi.mock("./failure/failure-writer", () => ({ clearFailure: (...a: unknown[]) => h.fns.clearFailure(...a) }));
 vi.mock("./failure/resolved-auth-errors", () => ({ markResolvedAuthErrors: (...a: unknown[]) => h.fns.pass("markResolvedAuthErrors", ...a) }));
 vi.mock("./failure/useAgentAccountBinding", () => ({
@@ -142,11 +142,13 @@ vi.mock("./agent-media", h.comp("AgentPaneProviders", true));
 vi.mock("./shutdown/ShutdownOverlay", h.comp("ShutdownOverlay"));
 vi.mock("./components/AgentProgressBar", h.comp("AgentProgressBar"));
 vi.mock("./components/BtwOverlay", h.comp("BtwOverlay"));
-vi.mock("./components/AgentSearchBar", h.comp("AgentSearchBar"));
+vi.mock("./components/AgentFindBandItem", h.comp("AgentFindBandItem"));
+vi.mock("./top-band/AgentTopBand", h.comp("AgentTopBand"));
 vi.mock("./components/HistoryLoadingRow", h.comp("HistoryLoadingRow"));
 vi.mock("./components/AgentDocumentView", h.comp("AgentDocumentView"));
 vi.mock("./components/NewActivityPill", h.comp("NewActivityPill"));
 vi.mock("./components/AgentBottomPanels", h.comp("AgentBottomPanels"));
+vi.mock("./components/AgentModelUndoneCard", h.comp("AgentModelUndoneCard"));
 vi.mock("./components/AgentPreparingRow", h.comp("AgentPreparingRow"));
 vi.mock("./components/AgentComposerStrip", h.comp("AgentComposerStrip"));
 vi.mock("./components/AgentViewPopover", h.comp("AgentViewPopover"));
@@ -645,7 +647,6 @@ describe("AgentPresentationView callbacks", () => {
         hist.foreign = true;
         note("snapshotIsForeignBlock", SP.snapshotIsForeignBlock());
         same("getDocument", SP.getDocument, F.paneModel.document);
-        note("hidden", SP.hidden());
         note("definitionId", SP.definitionId);
         same("log", SP.log, F.log);
         same("decisions document", opts("useAgentDecisions").getDocument, F.paneModel.document);
@@ -690,7 +691,10 @@ describe("AgentPresentationView callbacks", () => {
         note("new activity after", seen.NewActivityPill.visible());
         seen.NewActivityPill.onJump();
         seen.AgentFooter.onTyping();
-        const SB = seen.AgentSearchBar;
+        const SB = seen.AgentFindBandItem;
+        note("top band zoom", seen.AgentTopBand.zoom());
+        note("top band pane", seen.AgentTopBand.blockId);
+        note("find band pane", SB.blockId);
         same("search visible", SB.visible, F.search.visible);
         same("search onSearch", SB.onSearch, F.search.performSearch);
         same("search onNext", SB.onNext, F.search.next);

@@ -20,4 +20,9 @@ uid_pins: number,
 /**
  * The last other key shown for the name since srv started, if any.
  */
-refused?: RefusedKeyInfo, };
+refused?: RefusedKeyInfo, 
+/**
+ * The host of the install that vouched for the pinned key, when the pin is bound to one. Only that
+ * install, or one it handed over to, moves the pin on its own.
+ */
+bound_to?: string, };

@@ -49,6 +49,13 @@ pub struct HeldJekt {
     pub files_json: String,
     pub sent_at_ms: i64,
     pub expires_at_ms: i64,
+    /// The sender's own expiry for the message, epoch ms (issue #3894): a
+    /// review notice matters for ten minutes, not for however long its
+    /// recipient was unavailable. `None` — the sender said nothing — keeps
+    /// today's behaviour exactly. Checked at delivery time (the replay drops
+    /// the row instead of delivering it) and by the expiry sweep, so expired
+    /// rows cannot sit filling the per-target and per-channel caps either.
+    pub sender_expires_at_ms: Option<i64>,
     pub attempts: i64,
     pub last_error: String,
     /// `idle` for a routine message held because the target's session went
@@ -124,6 +131,7 @@ fn row_to_held(row: &Row) -> rusqlite::Result<HeldJekt> {
         files_json: row.get("files_json")?,
         sent_at_ms: row.get("sent_at_ms")?,
         expires_at_ms: row.get("expires_at_ms")?,
+        sender_expires_at_ms: row.get("sender_expires_at_ms")?,
         attempts: row.get("attempts")?,
         last_error: row.get("last_error")?,
         hold_reason: row.get("hold_reason")?,
@@ -171,8 +179,8 @@ impl Store {
                  message, priority, jekt_tier, delivery_tier,
                  sig_verified, reagent_verified, lan_verified, channel_verified,
                  is_transcript_request, transcript_request_escalate_forced, files_json,
-                 sent_at_ms, expires_at_ms, attempts, last_error, hold_reason, wan_json)
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?20, ?14, ?15, 0, '', ?21, ?22
+                 sent_at_ms, expires_at_ms, sender_expires_at_ms, attempts, last_error, hold_reason, wan_json)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?20, ?14, ?15, ?23, 0, '', ?21, ?22
               WHERE (SELECT COUNT(*) FROM db_jekt_held WHERE target_uid = ?2) < ?16
                 AND (SELECT COUNT(*) FROM db_jekt_held) < ?17",
             params![
@@ -198,6 +206,7 @@ impl Store {
                 held.files_json,
                 held.hold_reason,
                 held.wan_json,
+                held.sender_expires_at_ms,
             ],
         )?;
         Ok(if n > 0 { HoldOutcome::Held } else { HoldOutcome::Full })
@@ -206,12 +215,17 @@ impl Store {
     /// Delete held messages past their expiry; returns how many. A message
     /// held for a cold session, or by quota mode, is not dropped at its expiry:
     /// the replay delivers it then, so a quiet agent still gets it. It is dropped a
-    /// whole TTL later, if its agent never came back to receive it.
+    /// whole TTL later, if its agent never came back to receive it. A message
+    /// whose SENDER'S expiry has passed (issue #3894) is dropped whatever its
+    /// hold reason: the sender said delivering it past that point is worth less
+    /// than dropping it. A message with no sender expiry (NULL) is unaffected.
     pub fn jekt_held_delete_expired(&self, now_ms: i64) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
         Ok(conn.execute(
             "DELETE FROM db_jekt_held
-              WHERE (hold_reason NOT IN (?2, ?4) AND expires_at_ms <= ?1) OR expires_at_ms + ?3 <= ?1",
+              WHERE (hold_reason NOT IN (?2, ?4) AND expires_at_ms <= ?1)
+                 OR expires_at_ms + ?3 <= ?1
+                 OR sender_expires_at_ms <= ?1",
             params![now_ms, crate::backend::cold_hold::REASON_IDLE, HELD_TTL_MS, crate::backend::cold_hold::REASON_QUOTA],
         )?)
     }
@@ -263,12 +277,28 @@ impl Store {
     /// again to wake the agent (`urgent`), so it isn't delivered twice.
     /// Returns how many.
     pub fn jekt_held_delete_idle_copies(&self, target_uid: &str, source_agent: &str, message: &str) -> Result<usize, StoreError> {
+        use crate::muxbus::delivery_status::notes::without_delayed_prefix;
         let conn = self.conn().lock().unwrap();
-        Ok(conn.execute(
-            "DELETE FROM db_jekt_held
-              WHERE target_uid = ?1 AND source_agent = ?2 AND message = ?3 AND hold_reason IN (?4, ?5)",
-            params![target_uid, source_agent, message, crate::backend::cold_hold::REASON_IDLE, crate::backend::cold_hold::REASON_QUOTA],
-        )?)
+        // A relayed message that came in late was held with the relay's "(sent .., delivered ..) " in front of its text,
+        // so the copies are those that end in the message and are it once that prefix is off.
+        let mut stmt = conn.prepare(
+            "SELECT request_id, message FROM db_jekt_held
+              WHERE target_uid = ?1 AND source_agent = ?2 AND hold_reason IN (?3, ?4) AND substr(message, -length(?5)) = ?5",
+        )?;
+        let copies: Vec<String> = stmt
+            .query_map(
+                params![target_uid, source_agent, crate::backend::cold_hold::REASON_IDLE, crate::backend::cold_hold::REASON_QUOTA, message],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|(_, held)| held == message || without_delayed_prefix(held) == message)
+            .map(|(id, _)| id)
+            .collect();
+        for id in &copies {
+            conn.execute("DELETE FROM db_jekt_held WHERE request_id = ?1", params![id])?;
+        }
+        Ok(copies.len())
     }
 
     /// Remove one held message (delivered, or dropped).
@@ -320,6 +350,7 @@ mod tests {
             files_json: String::new(),
             sent_at_ms,
             expires_at_ms: sent_at_ms + HELD_TTL_MS,
+            sender_expires_at_ms: None,
             attempts: 0,
             last_error: String::new(),
             hold_reason: String::new(),
@@ -480,6 +511,25 @@ mod idle_tests {
         assert_eq!(s.jekt_held_delete_expired(2 * HELD_TTL_MS).unwrap(), 1, "dropped a whole TTL later");
     }
 
+    /// Issue #3894: the sender's own expiry is honoured whatever the hold
+    /// reason — a cold or quota hold that is normally delivered at its 24 h
+    /// expiry is dropped the moment the sender's deadline passes instead of
+    /// delivered stale. A row with no sender expiry (None) is unaffected.
+    #[test]
+    fn a_senders_expiry_drops_a_cold_or_quota_hold_at_its_own_deadline() {
+        let s = Store::open_in_memory().unwrap();
+        let with_expiry = |mut row: HeldJekt| {
+            row.sender_expires_at_ms = Some(1_000);
+            row
+        };
+        s.jekt_held_insert(&with_expiry(idle("i1", "uid-y", 0))).unwrap();
+        s.jekt_held_insert(&with_expiry(quota("q1", "uid-y", 0))).unwrap();
+        s.jekt_held_insert(&with_expiry(held("a1", "uid-y", 0))).unwrap();
+        assert_eq!(s.jekt_held_delete_expired(999).unwrap(), 0, "not yet");
+        assert_eq!(s.jekt_held_delete_expired(1_000).unwrap(), 3, "whatever the hold reason");
+        assert!(s.jekt_held_for_target("uid-y", 10).unwrap().is_empty());
+    }
+
     #[test]
     fn a_resend_removes_a_quota_copy_as_well_as_a_cold_one() {
         let s = Store::open_in_memory().unwrap();
@@ -488,6 +538,19 @@ mod idle_tests {
         s.jekt_held_insert(&held("a1", "uid-y", 200)).unwrap();
         assert_eq!(s.jekt_held_delete_idle_copies("uid-y", "sender", "hello").unwrap(), 2);
         assert_eq!(s.jekt_held_for_target("uid-y", 10).unwrap()[0].request_id, "a1");
+    }
+
+    #[test]
+    fn a_resend_removes_the_copy_held_with_the_relays_lateness_prefix() {
+        let s = Store::open_in_memory().unwrap();
+        let late = |id: &str, text: &str| HeldJekt { message: text.into(), ..idle(id, "uid-y", 100) };
+        s.jekt_held_insert(&late("late", "(sent 09:01, delivered 09:14) hello")).unwrap();
+        s.jekt_held_insert(&late("other", "(sent 09:01, delivered 09:14) hello there")).unwrap();
+        s.jekt_held_insert(&late("not-ours", "(sent by hand, delivered later) hello")).unwrap();
+        assert_eq!(s.jekt_held_delete_idle_copies("uid-y", "sender", "hello").unwrap(), 1);
+        let mut left: Vec<String> = s.jekt_held_for_target("uid-y", 10).unwrap().into_iter().map(|r| r.request_id).collect();
+        left.sort();
+        assert_eq!(left, ["not-ours", "other"], "a longer message and a prefix that is not the relay's stay");
     }
 
     #[test]

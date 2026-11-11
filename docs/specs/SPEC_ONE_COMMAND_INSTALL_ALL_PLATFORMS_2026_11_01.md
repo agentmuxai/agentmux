@@ -1,6 +1,6 @@
 # Spec: install AgentMux with one copyable command on Windows, macOS and Linux
 
-**Status:** active — Phase 1 (`install.sh`, its tests and the release asset) ships in PR #6412; `install.ps1`, the landing page section, the `AgentMux.AI` winget submission, the Homebrew tap and the README/docs commands are not built. The recommendations are approved (2026-11-04). Verified 2026-11-04.
+**Status:** active — Phase 1 (`install.sh`, its tests and the release asset) ships in PR #6412 and phase 1b (`install.ps1`, its tests and the release asset) after it; the landing page section, the `AgentMux.AI` winget submission, the Homebrew tap and the README/docs commands are not built. The recommendations are approved (2026-11-04). Verified 2026-11-04.
 **Date:** 2026-11-04
 **Author:** Winny (winget)
 **Verified against:** `agentmux` `main` @ `9a21a01` and release `v0.60.14` (2026-11-03). Everything under "Today" was read from the repository or fetched from the live endpoints on 2026-11-04, from a Linux container. Nothing Windows- or macOS-specific could be run from there; those claims are marked **verify** and are the first items of the build.
@@ -125,7 +125,7 @@ Two package gaps the page doesn't hide: no declared dependencies, and Ubuntu 24.
 
 ### 5.1 What they are
 
-`install.sh` (POSIX `sh`; macOS and Linux) and `install.ps1` (Windows PowerShell 5.1 and 7), kept in `scripts/install/` in this repository and tested in CI. They are plain text, print every step, make no prompts unless `--interactive` (agentic tools run them unattended), use ASCII only, and exit non-zero with one line saying what failed. Flags (the same names in both): `--version <v>` (default the latest release; with a package repository it only applies to `--method download`), `--method <auto|package-manager|download>`, `--dry-run` (print the plan, change nothing), `--no-launch`, `--force`, `--require-signature`, `--help`.
+`install.sh` (POSIX `sh`; macOS and Linux) and `install.ps1` (Windows PowerShell 5.1 and 7), kept in `scripts/install/` in this repository and tested in CI. They are plain text, print every step, make no prompts unless `--interactive` (agentic tools run them unattended), use ASCII only, and exit non-zero with one line saying what failed. Flags (the same names in both; PowerShell spells them `-Version`, `-Method`, `-DryRun`, `-NoLaunch`, `-Force`, `-RequireSignature`, and takes them through `& ([scriptblock]::Create((irm https://agentmux.ai/install.ps1))) -DryRun`, since a pipe cannot pass any): `--version <v>` (default the latest release; with a package repository it only applies to `--method download`), `--method <auto|package-manager|download>`, `--dry-run` (print the plan, change nothing), `--no-launch`, `--force`, `--require-signature`, `--help`.
 
 Each decides in this order:
 
@@ -218,7 +218,7 @@ The submission, the tap and anything else that touches an account are recorded i
 ## 11. Phases
 
 1. **`install.sh` and its tests (PR 1, built).** `scripts/install/install.sh` and `install.test.sh` (dry runs per platform, the refusals, and the download checks against a release signed in the test with a throwaway key; the pinned key is checked against `crates/common/update-keys.json`), the `install-script-check.yml` workflow (the tests, dry runs through a pipe, and a real download of the latest release checked with `--require-signature`), and the script as a release asset in `release-core.yml`. The same PR carries this spec. Container installs from the live repository on Debian, Ubuntu, Fedora and openSUSE are phase 2's check, since the commands come from the same files the script uses.
-1b. **`install.ps1` (PR 2).** Written and tested on a Windows machine, since it cannot be run from a Linux container; its CI job runs on `windows-latest`. It joins the release assets by the same loop as `install.sh`.
+1b. **`install.ps1` (PR 2, built).** Written and tested on a Windows machine, since it cannot be run from a Linux container; its CI job (`install-script-check.yml`) runs on `windows-latest`, in PowerShell 7 and Windows PowerShell 5.1. It picks winget when there is one: `AgentMux.AI` once that package is in the catalogue (it asks winget at run time), the Store id until then; otherwise it downloads `setup.exe`, checks it against the signed manifest (the Ed25519 signature too, when `openssl` 3 is on the path, otherwise the hashes only, and it says so) and runs it silently for the user. It refuses a second kind beside an existing one. It joins the release assets by the same loop as `install.sh`.
 2. **Linux commands on the page** (§4.3, §7): live as soon as the landing site ships, since the repository is live.
 3. **Windows Store tab** (§4.1): after the **verify** on a clean Windows machine.
 4. **`AgentMux.AI` bootstrap submission,** then the release job re-enabled (§4.1); the page switches after one bump has merged.

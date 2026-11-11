@@ -12,9 +12,9 @@
 
 use super::*;
 use crate::backend::rpc_types::{
-    BrowserGrantPreset, BrowserGrantRow, BrowserGrantsResult, CommandBrowserGrantsListData, CommandBrowserGrantsPauseAllData, CommandBrowserGrantsPowersData,
+    BrowserGrantPreset, BrowserGrantRow, BrowserGrantsResult, CommandBrowserGrantsPermissionRevokeData, CommandBrowserGrantsPermissionSetData, SitePermissionRow, CommandBrowserGrantsListData, CommandBrowserGrantsPauseAllData, CommandBrowserGrantsPowersData,
     CommandBrowserGrantsPresetData, CommandBrowserGrantsRevokeData, CommandBrowserGrantsSetData, COMMAND_BROWSER_GRANTS_LIST,
-    COMMAND_BROWSER_GRANTS_PAUSE_ALL, COMMAND_BROWSER_GRANTS_POWERS, COMMAND_BROWSER_GRANTS_PRESET, COMMAND_BROWSER_GRANTS_REVOKE, COMMAND_BROWSER_GRANTS_SET,
+    COMMAND_BROWSER_GRANTS_PAUSE_ALL, COMMAND_BROWSER_GRANTS_PERMISSION_REVOKE, COMMAND_BROWSER_GRANTS_PERMISSION_SET, COMMAND_BROWSER_GRANTS_POWERS, COMMAND_BROWSER_GRANTS_PRESET, COMMAND_BROWSER_GRANTS_REVOKE, COMMAND_BROWSER_GRANTS_SET,
 };
 use crate::server::browser_standing as standing;
 
@@ -49,7 +49,27 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let state = st.clone();
         async move {
             operator(&ctx)?;
-            standing::revoke(&state, &req.id);
+            standing::revoke(&state, &req.id)?;
+            Ok(snapshot())
+        }
+    });
+
+    let st = state.clone();
+    engine.register_typed(COMMAND_BROWSER_GRANTS_PERMISSION_SET, move |req: CommandBrowserGrantsPermissionSetData, ctx| {
+        let state = st.clone();
+        async move {
+            operator(&ctx)?;
+            crate::server::browser_site_permissions::upsert(&state, &req.agent, &req.site, &req.kinds)?;
+            Ok(snapshot())
+        }
+    });
+
+    let st = state.clone();
+    engine.register_typed(COMMAND_BROWSER_GRANTS_PERMISSION_REVOKE, move |req: CommandBrowserGrantsPermissionRevokeData, ctx| {
+        let state = st.clone();
+        async move {
+            operator(&ctx)?;
+            crate::server::browser_site_permissions::revoke(&state, &req.id)?;
             Ok(snapshot())
         }
     });
@@ -112,6 +132,11 @@ fn snapshot() -> BrowserGrantsResult {
             })
             .collect(),
         powers: crate::server::browser_powers::granted_by_the_person(),
+        permission_kinds: crate::server::browser_site_permissions::KINDS.iter().map(|k| k.to_string()).collect(),
+        permissions: crate::server::browser_site_permissions::list()
+            .into_iter()
+            .map(|r| SitePermissionRow { id: r.id, agent: r.agent, site: r.site, kinds: r.kinds, granted_at_ms: r.granted_at_ms })
+            .collect(),
         pause_all: crate::server::browser_pause_all::status(),
     }
 }
@@ -145,6 +170,6 @@ mod tests {
     fn the_snapshot_offers_every_preset_and_the_powers_beyond_clicks() {
         let s = snapshot();
         assert_eq!(s.presets.len(), standing::PRESETS.len());
-        assert_eq!(s.powers, vec!["terminal", "terminal_ask"]);
+        assert_eq!(s.powers, vec!["terminal", "terminal_ask", "enter_space", "uploads"]);
     }
 }

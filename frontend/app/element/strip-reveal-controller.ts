@@ -49,159 +49,190 @@ function findTab(strip: HTMLElement, id: string): HTMLElement | null {
     return null;
 }
 
-export function createStripReveal(input: StripRevealInput): StripReveal {
-    let frame: number | undefined;
-    let settleTimer: ReturnType<typeof setTimeout> | undefined;
-    let wantSmooth = false;
-    let userScrolled = false;
-    let pointerDown = false;
-    let smoothing = false;
-    let widthAnimating = false;
-    let recheckAfterWidth = false;
+/** What a strip's reveal keeps between requests: the frame and timer it waits on, and what it has been told. */
+interface RevealCore {
+    input: StripRevealInput;
+    frame: number | undefined;
+    settleTimer: ReturnType<typeof setTimeout> | undefined;
+    wantSmooth: boolean;
+    userScrolled: boolean;
+    pointerDown: boolean;
+    smoothing: boolean;
+    widthAnimating: boolean;
+    recheckAfterWidth: boolean;
     // A resize or rename arrived while a smooth reveal travelled: look again when it ends.
-    let layoutDeferred = false;
-    let waited = false;
-    let observedTabs = new Set<Element>();
-    let tabListKey: string | undefined;
+    layoutDeferred: boolean;
+    waited: boolean;
+    observedTabs: Set<Element>;
+    tabListKey: string | undefined;
+}
 
-    const stopSmooth = () => {
-        smoothing = false;
-        if (layoutDeferred) {
-            layoutDeferred = false;
-            // Not under a held pointer (a scrollbar drag) or after the user's own scroll.
-            if (!userScrolled && !pointerDown && input.shown()) request("layout");
-        }
+function createRevealCore(input: StripRevealInput): RevealCore {
+    return {
+        input,
+        frame: undefined,
+        settleTimer: undefined,
+        wantSmooth: false,
+        userScrolled: false,
+        pointerDown: false,
+        smoothing: false,
+        widthAnimating: false,
+        recheckAfterWidth: false,
+        layoutDeferred: false,
+        waited: false,
+        observedTabs: new Set<Element>(),
+        tabListKey: undefined,
     };
-    // Any scroll write cancels a smooth scroll in flight; this one stays where it is.
-    const cancelInFlight = () => {
-        if (frame != null) cancelAnimationFrame(frame);
-        frame = undefined;
-        clearTimeout(settleTimer);
-        waited = false;
-        const strip = input.strip();
-        if (strip) cancelStripScroll(strip);
-        stopSmooth();
-    };
+}
 
-    const run = () => {
-        frame = undefined;
-        const strip = input.strip();
-        const id = input.activeId();
-        const durationMs = scaledMs(DURATION_BASE_MS);
-        const smooth = wantSmooth && !shouldReduceMotion("transition") && durationMs > 0;
-        wantSmooth = false;
-        if (!strip || id == null || !input.shown()) return;
-        // A just-landed or dragged tab is mid-animation: measure after it.
-        if (!waited && strip.querySelector(".pane-tab--landing, .pane-tab--dragging")) {
-            waited = true;
-            wantSmooth = smooth;
-            settleTimer = setTimeout(() => schedule(), scaledMs(ANIMATION_SETTLE_MS));
-            return;
-        }
-        waited = false;
-        const item = findTab(strip, id);
-        if (!item) return;
-        const ids = input.tabIds();
-        const scrolled = revealInStrip(strip, item, ids[ids.length - 1] === id, {
-            isFirst: ids[0] === id,
-            edgeClearance: STRIP_EDGE_FADE_PX,
-            behavior: smooth ? "smooth" : "instant",
-            durationMs,
-            onSettled: stopSmooth,
-        });
-        // Only a tween that started is in flight (a tab in view, or an instant write, ended any before it; a resize that waited for it is covered by this look).
-        if (!(smoothing = smooth && scrolled)) layoutDeferred = false;
-        if (widthAnimating) recheckAfterWidth = true;
-    };
-    const schedule = () => {
-        if (frame == null) frame = requestAnimationFrame(run);
-    };
+function stopSmooth(c: RevealCore): void {
+    c.smoothing = false;
+    if (c.layoutDeferred) {
+        c.layoutDeferred = false;
+        // Not under a held pointer (a scrollbar drag) or after the user's own scroll.
+        if (!c.userScrolled && !c.pointerDown && c.input.shown()) request(c, "layout");
+    }
+}
 
-    const request = (reason: StripRevealReason) => {
-        if (!input.shown()) return; // a hidden strip reveals once, when it is shown
-        if (reason === "layout") {
-            // Never over the user's scroll or a smooth reveal; during a width
-            // transition tab widths still change, so measure once when it ends.
-            if (widthAnimating) recheckAfterWidth = true;
-            if (smoothing && !userScrolled) layoutDeferred = true;
-            if (userScrolled || widthAnimating || smoothing) return;
-        } else {
-            userScrolled = false;
-            if ((reason === "interaction" || reason === "focus") && !input.overflows()) return;
-        }
-        if (SMOOTH_REASONS.includes(reason)) wantSmooth = true;
-        schedule();
+// Any scroll write cancels a smooth scroll in flight; this one stays where it is.
+function cancelInFlight(c: RevealCore): void {
+    if (c.frame != null) cancelAnimationFrame(c.frame);
+    c.frame = undefined;
+    clearTimeout(c.settleTimer);
+    c.waited = false;
+    const strip = c.input.strip();
+    if (strip) cancelStripScroll(strip);
+    stopSmooth(c);
+}
+
+function run(c: RevealCore): void {
+    c.frame = undefined;
+    const strip = c.input.strip();
+    const id = c.input.activeId();
+    const durationMs = scaledMs(DURATION_BASE_MS);
+    const smooth = c.wantSmooth && !shouldReduceMotion("transition") && durationMs > 0;
+    c.wantSmooth = false;
+    if (!strip || id == null || !c.input.shown()) return;
+    // A just-landed or dragged tab is mid-animation: measure after it.
+    if (!c.waited && strip.querySelector(".pane-tab--landing, .pane-tab--dragging")) {
+        c.waited = true;
+        c.wantSmooth = smooth;
+        c.settleTimer = setTimeout(() => schedule(c), scaledMs(ANIMATION_SETTLE_MS));
+        return;
+    }
+    c.waited = false;
+    const item = findTab(strip, id);
+    if (!item) return;
+    const ids = c.input.tabIds();
+    const scrolled = revealInStrip(strip, item, ids[ids.length - 1] === id, {
+        isFirst: ids[0] === id,
+        edgeClearance: STRIP_EDGE_FADE_PX,
+        behavior: smooth ? "smooth" : "instant",
+        durationMs,
+        onSettled: () => stopSmooth(c),
+    });
+    // Only a tween that started is in flight (a tab in view, or an instant write, ended any before it; a resize that waited for it is covered by this look).
+    if (!(c.smoothing = smooth && scrolled)) c.layoutDeferred = false;
+    if (c.widthAnimating) c.recheckAfterWidth = true;
+}
+
+function schedule(c: RevealCore): void {
+    if (c.frame == null) c.frame = requestAnimationFrame(() => run(c));
+}
+
+function request(c: RevealCore, reason: StripRevealReason): void {
+    if (!c.input.shown()) return; // a hidden strip reveals once, when it is shown
+    if (reason === "layout") {
+        // Never over the user's scroll or a smooth reveal; during a width
+        // transition tab widths still change, so measure once when it ends.
+        if (c.widthAnimating) c.recheckAfterWidth = true;
+        if (c.smoothing && !c.userScrolled) c.layoutDeferred = true;
+        if (c.userScrolled || c.widthAnimating || c.smoothing) return;
+    } else {
+        c.userScrolled = false;
+        if ((reason === "interaction" || reason === "focus") && !c.input.overflows()) return;
+    }
+    if (SMOOTH_REASONS.includes(reason)) c.wantSmooth = true;
+    schedule(c);
+}
+
+function setWidthAnimating(c: RevealCore, animating: boolean): void {
+    c.widthAnimating = animating;
+    if (!animating && c.recheckAfterWidth) {
+        c.recheckAfterWidth = false;
+        if (c.userScrolled || !c.input.shown()) return;
+        // A smooth reveal still travelling aims at the settled widths too.
+        c.wantSmooth = c.smoothing;
+        schedule(c);
+    }
+}
+
+// The strip or its selected tab resized (window resize, a sibling closed, a rename).
+function watchStrip(c: RevealCore): void {
+    const strip = c.input.strip();
+    if (!strip) return;
+    const onScroll = () => {
+        if (c.pointerDown) c.userScrolled = true;
     };
+    const onPointerUp = () => {
+        c.pointerDown = false;
+    };
+    strip.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("pointerup", onPointerUp, true);
+    window.addEventListener("pointercancel", onPointerUp, true);
+    onCleanup(() => {
+        strip.removeEventListener("scroll", onScroll);
+        window.removeEventListener("pointerup", onPointerUp, true);
+        window.removeEventListener("pointercancel", onPointerUp, true);
+    });
+    const ro = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => request(c, "layout"));
+    ro?.observe(strip);
+    // Every tab, not only the selected one: a tab before it that closes, is
+    // reordered, or is renamed to another width moves the selected tab without
+    // resizing it or the strip. A tab list that changed is a layout change too.
+    createEffect(() => {
+        const key = c.input.tabIds().join("\u0000");
+        for (const el of c.observedTabs) ro?.unobserve(el);
+        c.observedTabs = new Set(strip.querySelectorAll("[data-tab-id]"));
+        for (const el of c.observedTabs) ro?.observe(el);
+        if (c.tabListKey !== undefined && c.tabListKey !== key) request(c, "layout");
+        c.tabListKey = key;
+    });
+    onCleanup(() => ro?.disconnect());
+}
+
+function teardown(c: RevealCore): void {
+    if (c.frame != null) cancelAnimationFrame(c.frame);
+    clearTimeout(c.settleTimer);
+    const strip = c.input.strip();
+    if (strip) cancelStripScroll(strip);
+}
+
+export function createStripReveal(input: StripRevealInput): StripReveal {
+    const c = createRevealCore(input);
 
     // Mount, and a hidden pane becoming shown: an instant reveal, once.
     createEffect(
         on(input.shown, (shown) => {
-            if (shown) request("visible");
+            if (shown) request(c, "visible");
         })
     );
-    createEffect(on(input.activeId, () => request("selected"), { defer: true }));
+    createEffect(on(input.activeId, () => request(c, "selected"), { defer: true }));
 
-    // The strip or its selected tab resized (window resize, a sibling closed, a rename).
-    onMount(() => {
-        const strip = input.strip();
-        if (!strip) return;
-        const onScroll = () => {
-            if (pointerDown) userScrolled = true;
-        };
-        const onPointerUp = () => {
-            pointerDown = false;
-        };
-        strip.addEventListener("scroll", onScroll, { passive: true });
-        window.addEventListener("pointerup", onPointerUp, true);
-        window.addEventListener("pointercancel", onPointerUp, true);
-        onCleanup(() => {
-            strip.removeEventListener("scroll", onScroll);
-            window.removeEventListener("pointerup", onPointerUp, true);
-            window.removeEventListener("pointercancel", onPointerUp, true);
-        });
-        const ro = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => request("layout"));
-        ro?.observe(strip);
-        // Every tab, not only the selected one: a tab before it that closes, is
-        // reordered, or is renamed to another width moves the selected tab without
-        // resizing it or the strip. A tab list that changed is a layout change too.
-        createEffect(() => {
-            const key = input.tabIds().join("\u0000");
-            for (const el of observedTabs) ro?.unobserve(el);
-            observedTabs = new Set(strip.querySelectorAll("[data-tab-id]"));
-            for (const el of observedTabs) ro?.observe(el);
-            if (tabListKey !== undefined && tabListKey !== key) request("layout");
-            tabListKey = key;
-        });
-        onCleanup(() => ro?.disconnect());
-    });
-
-    onCleanup(() => {
-        if (frame != null) cancelAnimationFrame(frame);
-        clearTimeout(settleTimer);
-        const strip = input.strip();
-        if (strip) cancelStripScroll(strip);
-    });
+    onMount(() => watchStrip(c));
+    onCleanup(() => teardown(c));
 
     return {
-        request,
+        request: (reason) => request(c, reason),
         noteUserScroll() {
-            userScrolled = true;
-            cancelInFlight();
+            c.userScrolled = true;
+            cancelInFlight(c);
         },
         notePointerDown() {
-            pointerDown = true;
-            cancelInFlight();
+            c.pointerDown = true;
+            cancelInFlight(c);
         },
-        setWidthAnimating(animating) {
-            widthAnimating = animating;
-            if (!animating && recheckAfterWidth) {
-                recheckAfterWidth = false;
-                if (userScrolled || !input.shown()) return;
-                // A smooth reveal still travelling aims at the settled widths too.
-                wantSmooth = smoothing;
-                schedule();
-            }
-        },
+        setWidthAnimating: (animating) => setWidthAnimating(c, animating),
     };
 }
 

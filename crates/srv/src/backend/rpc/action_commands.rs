@@ -23,14 +23,14 @@ pub enum Policy {
 /// changes who may do what. Recorded whoever calls.
 pub const ALWAYS: &[&str] = &[
     "account.key.verify", "account.oauth.cancel", "app_skills.catalog.install", "account.oauth.client.clear", "account.oauth.start", "agent.account.switch",
-    "agent.define", "agent.kill-process", "agent.kill-tree", "agent.move-here", "agent.open", "agent.pane.unregister", "agent.send",
-    "agent.setSeat", "agent.start", "agent.stop", "agent.takeover", "agent:memory:revert", "agent:memory:write_file",
+    "agent.define", "agent.kill-process", "agent.kill-tree", "agent.model.switch", "agent.move-here", "agent.notice.decide", "agent.notice.setgrant", "agent.open", "agent.pane.unregister", "agent.send",
+    "agent.setSeat", "agent.start", "agent.stop", "agent.takeover", "agent:memory:adopt", "agent:memory:release", "agent:memory:revert", "agent:memory:write_file",
     "agent:session:append_output", "agent:session:archive", "agent:session:write_state", "agentanswer", "agentcancel",
     "agentdefcreatefromtemplate", "agentdefhide", "agentdefunhide", "agentinput", "agentlastruntime",
     "agents.migrateForkSlugs", "agentshutdownkeep", "agentshutdownnow", "agentstop", "app.desktop", "app.upgrade-requests",
     "appendagenthistory", "asksidequestion", "attachments.copy-to-workdir", "attachments.ingest", "auth.cancel",
     "auth.start", "auth.submitcallback", "browser.signin_fill", "browser.signin_offer_answer", "browser.signin_stop", "browser.signup_password", "browser_profiles.create", "browser_profiles.delete",
-    "browser_profiles.update", "browser_start_page.set", "browsergrants.pauseall", "browsergrants.powers", "browsergrants.preset",
+    "browser_profiles.update", "browser_start_page.set", "browsergrants.pauseall", "browsergrants.permissionrevoke", "browsergrants.permissionset", "browsergrants.powers", "browsergrants.preset",
     "browsergrants.revoke", "browsergrants.set", "bundle.delete", "bundle.import", "bundle.import.commit",
     "bundle.import_for_agent", "bundle.upsert", "connconnect", "conndisconnect", "connensure", "connsessionend",
     "copyforkhistory", "createagent", "createagentinstance", "createagentskill", "createeditordir",
@@ -56,7 +56,7 @@ pub const ALWAYS: &[&str] = &[
     "skill.catalog.unbind",
     "skill.catalog.unbind_from_bundle", "skill.catalog.upsert", "skill.catalog.upsert_for_bundle", "skill.delete",
     "skill.unbind", "skill.upsert", "subprocessspawn", "supervisor.set-mode", "toolchain.install_system_tool",
-    "toolchain.prune", "tooldecision", "tower.forget", "tower.pair", "unlinkagentidentity", "updateagent",
+    "toolchain.prune", "tooldecision", "tower.forget", "tower.pair", "undoagentendpoint", "unlinkagentidentity", "updateagent",
     "updateagentinstance", "updateagentskill", "upsertdrone", "upsertidentityaccount", "upsertmemory",
     "upsertsystemmemory", "viewer.pair-start", "viewer.revoke", "widget.api", "widgets.call",
     "widgets.catalog.install", "widgets.install", "widgets.rescan", "widgets.session", "widgets.setenabled",
@@ -73,7 +73,7 @@ pub const UNLESS_OPERATOR: &[&str] = &[
     "controllerresync", "createsubblock", "deletesubblock", "docknodestatus", "fs.reveal", "fs.unwatch", "fs.watch",
     "layout.applyIntent", "layout.open", "layout.restoreOtherBuild", "layout.save", "memorydelivery:claim_fallback",
     "notify.ack", "notify.attention", "notify.emit", "notify.focus", "notify.takeactivation", "notify.test",
-    "operator.challenge", "pane.activateTab", "pane.moveTab", "pane.moveTabs", "pane.open", "pane.removeTab",
+    "operator.challenge", "pane.activateTab", "pane.confirm.decide", "pane.moveTab", "pane.moveTabs", "pane.open", "pane.removeTab",
     "presence.publish-now", "setmeta", "unwatcheditorfile", "unwatchmediadir", "viewer.agent-hidden",
     "watcheditorfile", "watchmediadir", "widgets.endsession",
 ];
@@ -86,7 +86,7 @@ pub const LIVE_INPUT: &[&str] = &[
 /// Returns data and changes nothing.
 pub const READ_ONLY: &[&str] = &[
     "account.oauth.client.get", "account.oauth.poll", "app_skills.catalog", "agent.input-history",
-    "agent.input-history-search", "agent.list", "agent.open-panes", "agent.output", "agent.process-list",
+    "agent.input-history-search", "agent.list", "agent.model.panel", "agent.notice.grants", "agent.open-panes", "agent.output", "agent.peer-labels", "agent.process-list",
     "agent.project_instructions", "agent.status", "agent.tracked-blocks", "agent:memory:adoption_list",
     "agent:memory:claims", "agent:memory:diff", "agent:memory:history", "agent:memory:list", "agent:memory:read_file",
     "agent:session:list_archives", "agent:session:read", "agentapiretry", "agentdeflisthiddentemplates", "agentruntime.list",

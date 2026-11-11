@@ -48,7 +48,7 @@ async fn a_message_sent_to_a_live_agent_is_stored_with_where_it_came_from_and_it
     let mut record = jekt_from("agent1");
     record.notes = vec!["[AgentMux] AgentMux was upgraded".to_string()];
 
-    c.send_user_message_with_images_from("[JEKT:FROM=agent1 …]".to_string(), None, Vec::new(), record).unwrap();
+    c.send_user_message_with_images_from("[JEKT:FROM=agent1 …]".to_string(), None, Vec::new(), record, None, Vec::new()).unwrap();
 
     let records = stored_user_records(&fs, block_id);
     assert_eq!(records.len(), 1);
@@ -67,9 +67,9 @@ async fn a_message_that_waited_in_the_queue_keeps_its_own_origin() {
     let (c, _rx, fs) = controller_with_store(block_id);
     // The process can't take a write yet, so both wait; they are written in order.
     c.inner.lock().unwrap().spawning_in_progress = true;
-    c.send_user_message_with_images_from("from the human".to_string(), None, Vec::new(), RecordOrigin::new(MessageOrigin::user()))
+    c.send_user_message_with_images_from("from the human".to_string(), None, Vec::new(), RecordOrigin::new(MessageOrigin::user()), None, Vec::new())
         .unwrap();
-    c.send_user_message_with_images_from("from a schedule".to_string(), None, Vec::new(), jekt_from("cron")).unwrap();
+    c.send_user_message_with_images_from("from a schedule".to_string(), None, Vec::new(), jekt_from("cron"), None, Vec::new()).unwrap();
     assert!(stored_user_records(&fs, block_id).is_empty(), "nothing is stored before it is delivered");
 
     c.inner.lock().unwrap().spawning_in_progress = false;

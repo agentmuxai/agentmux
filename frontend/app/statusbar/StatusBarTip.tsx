@@ -88,6 +88,12 @@ export const StatusBarTip = (): JSX.Element => {
         if (related instanceof Node && el.contains(related)) return;
         setActiveEl(null);
     };
+    // A click on the item ends its tip: the popover the click opens (the agent list, the token breakdown) opens
+    // where the balloon is, and the pointer stays on the item, so no mouseout would take it away.
+    const onClick = (e: MouseEvent) => {
+        const el = findTipEl(e.target);
+        if (el && el === activeEl()) setActiveEl(null);
+    };
     // `:focus-visible` parity with the CSS this replaces — keyboard-tabbing
     // onto a status-bar control shows its tip too, not just hover.
     const onFocusIn = (e: FocusEvent) => {
@@ -101,11 +107,13 @@ export const StatusBarTip = (): JSX.Element => {
 
     document.addEventListener("mouseover", onMouseOver);
     document.addEventListener("mouseout", onMouseOut);
+    document.addEventListener("click", onClick);
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("focusout", onFocusOut);
     onCleanup(() => {
         document.removeEventListener("mouseover", onMouseOver);
         document.removeEventListener("mouseout", onMouseOut);
+        document.removeEventListener("click", onClick);
         document.removeEventListener("focusin", onFocusIn);
         document.removeEventListener("focusout", onFocusOut);
     });

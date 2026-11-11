@@ -27,6 +27,9 @@ use serde::{Deserialize, Serialize};
 use super::store::Store;
 use super::work_deps::{attach_after, AfterTask, WAITS_ON_UNFINISHED};
 use super::work_queue::{holder_update, row_to_item, work_state, ClaimFilter, HolderMatch, WorkItem, COLS};
+use super::work_boards::{
+    alloc_num, attach_boards, default_board_id, now_ms_clock, number_unboarded, parse_ref, resolve, BoardError,
+};
 use super::StoreError;
 
 /// The tables, created on every open of the identity store, with no schema
@@ -87,11 +90,31 @@ pub struct ChecklistItem {
     pub status: String,
 }
 
+impl WorkCard {
+    /// How a message names the task: `#12` on the default board, else `work#12`.
+    pub fn name(&self) -> String {
+        if self.task_ref.is_empty() { format!("#{}", self.num) } else { self.task_ref.clone() }
+    }
+
+    /// The `id` an agent passes to `Tasks`: the bare number on the default board, else `work#12`.
+    pub fn id_arg(&self) -> String {
+        self.name().trim_start_matches('#').to_string()
+    }
+}
+
 /// The board's fields of one task.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorkCard {
-    /// The task's short number, `#num`.
+    /// The task's number on its board (`#12`, or `work#12` off the default board): what people
+    /// and agents say. The store's own key for the card is not shown.
     pub num: i64,
+    /// The board it is on: its id, its slug, and how its ref is written (`#12` or `work#12`).
+    #[serde(default)]
+    pub board_id: String,
+    #[serde(default)]
+    pub board: String,
+    #[serde(default)]
+    pub task_ref: String,
     pub repo: String,
     pub branch: String,
     pub pr_url: String,
@@ -165,6 +188,8 @@ pub struct WorkEvent {
 /// What a card is created with. Everything else starts empty.
 #[derive(Debug, Clone, Default)]
 pub struct NewCard {
+    /// The id of the board it is filed on (`Store::work_board_resolve`); empty means the default.
+    pub board: String,
     pub repo: String,
     pub branch: String,
     pub review_required: bool,
@@ -186,7 +211,7 @@ pub struct CardUpdate {
     pub doc: Option<String>,
 }
 
-const CARD_COLS: &str = "c.num, c.repo, c.branch, c.pr_url, c.rank, c.review_required, c.checklist, \
+const CARD_COLS: &str = "c.board_num AS num, c.board_id, c.repo, c.branch, c.pr_url, c.rank, c.review_required, c.checklist, \
                          c.question, c.note, c.requested_by, c.requested_by_kind, c.request_text, \
                          c.filed_by, c.last_reminded_at, c.updated_at";
 
@@ -194,6 +219,9 @@ fn row_to_card(row: &Row) -> rusqlite::Result<WorkCard> {
     let checklist: String = row.get("checklist")?;
     Ok(WorkCard {
         num: row.get("num")?,
+        board_id: row.get("board_id")?,
+        board: String::new(),
+        task_ref: String::new(),
         repo: row.get("repo")?,
         branch: row.get("branch")?,
         pr_url: row.get("pr_url")?,
@@ -231,8 +259,24 @@ fn row_to_event(row: &Row) -> rusqlite::Result<WorkEvent> {
 }
 
 /// The queue's columns, qualified for a join with `db_work_cards c`.
-fn q_cols() -> String {
+pub(super) fn q_cols() -> String {
     COLS.split(',').map(|c| format!("q.{}", c.trim())).collect::<Vec<_>>().join(", ")
+}
+
+/// The card of `work_id`, made on the default board when it has none. Returns its number there.
+pub(super) fn ensure_card(conn: &rusqlite::Connection, work_id: &str, now_ms: i64) -> Result<i64, StoreError> {
+    let existing: Option<i64> =
+        conn.query_row("SELECT board_num FROM db_work_cards WHERE work_id = ?1", params![work_id], |r| r.get(0)).optional()?;
+    if let Some(n) = existing {
+        return Ok(n);
+    }
+    let board = default_board_id(conn)?;
+    let n = alloc_num(conn, &board)?;
+    conn.execute(
+        "INSERT INTO db_work_cards (work_id, updated_at, board_id, board_num) VALUES (?1, ?2, ?3, ?4)",
+        params![work_id, now_ms, board, n],
+    )?;
+    Ok(n)
 }
 
 /// A transition's result: the task's state before, and after.
@@ -247,26 +291,37 @@ impl Store {
     /// older build enqueued). Returns its number.
     pub fn work_card_ensure(&self, work_id: &str, now_ms: i64) -> Result<i64, StoreError> {
         let conn = self.conn().lock().unwrap();
-        conn.execute(
-            "INSERT OR IGNORE INTO db_work_cards (work_id, updated_at) VALUES (?1, ?2)",
-            params![work_id, now_ms],
-        )?;
-        Ok(conn.query_row("SELECT num FROM db_work_cards WHERE work_id = ?1", params![work_id], |r| r.get(0))?)
+        number_unboarded(&conn)?;
+        ensure_card(&conn, work_id, now_ms)
     }
 
     /// Create the card of a task just enqueued, or fill the empty one a claim
     /// or a list made for it meanwhile (`work_card_ensure`). Returns its number.
     pub fn work_card_create(&self, work_id: &str, card: &NewCard, now_ms: i64) -> Result<i64, StoreError> {
         let conn = self.conn().lock().unwrap();
+        number_unboarded(&conn)?;
+        let want = if card.board.is_empty() { default_board_id(&conn)? } else { card.board.clone() };
+        // A card a claim or list made first (on the default board) keeps its number only if it is
+        // on the board asked for; else it takes the next number there.
+        let existing: Option<(String, i64)> = conn
+            .query_row("SELECT board_id, board_num FROM db_work_cards WHERE work_id = ?1", params![work_id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .optional()?;
+        let board_num = match existing {
+            Some((board, n)) if board == want => n,
+            _ => alloc_num(&conn, &want)?,
+        };
         conn.execute(
             "INSERT INTO db_work_cards
                 (work_id, repo, branch, review_required, requested_by, requested_by_kind,
-                 request_text, filed_by, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 request_text, filed_by, updated_at, board_id, board_num)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT(work_id) DO UPDATE SET
                 repo = excluded.repo, branch = excluded.branch, review_required = excluded.review_required,
                 requested_by = excluded.requested_by, requested_by_kind = excluded.requested_by_kind,
-                request_text = excluded.request_text, filed_by = excluded.filed_by, updated_at = excluded.updated_at",
+                request_text = excluded.request_text, filed_by = excluded.filed_by, updated_at = excluded.updated_at,
+                board_id = excluded.board_id, board_num = excluded.board_num",
             params![
                 work_id,
                 card.repo,
@@ -276,30 +331,41 @@ impl Store {
                 card.requested_by_kind,
                 card.request_text,
                 card.filed_by,
-                now_ms
+                now_ms,
+                want,
+                board_num
             ],
         )?;
-        Ok(conn.query_row("SELECT num FROM db_work_cards WHERE work_id = ?1", params![work_id], |r| r.get(0))?)
+        Ok(board_num)
     }
 
-    /// The task with this short number, or this id.
-    pub fn work_board_get(&self, id_or_num: &str) -> Result<Option<BoardTask>, StoreError> {
-        let num: Option<i64> = id_or_num.trim().trim_start_matches('#').parse().ok();
+    /// The task with this id or ref: `#12` or `12` (on the default board), or `work#12`.
+    pub fn work_board_get(&self, id_or_ref: &str) -> Result<Option<BoardTask>, StoreError> {
+        let key = id_or_ref.trim();
         let conn = self.conn().lock().unwrap();
+        number_unboarded(&conn)?;
+        let (board_id, num) = match parse_ref(key) {
+            Some((slug, n)) => match resolve(&conn, slug.as_deref(), now_ms_clock()) {
+                Ok(b) => (b.id, n),
+                Err(BoardError::Store(e)) => return Err(e),
+                Err(BoardError::Refused(_)) => (String::new(), -1),
+            },
+            None => (String::new(), -1),
+        };
         let sql = format!(
             "SELECT {q}, {CARD_COLS} FROM db_work_queue q JOIN db_work_cards c ON c.work_id = q.id
-              WHERE q.id = ?1 OR c.num = ?2",
+              WHERE q.id = ?1 OR (c.board_id = ?2 AND c.board_num = ?3)
+              ORDER BY (q.id = ?1) DESC",
             q = q_cols()
         );
         let Some(t) = conn
-            .query_row(&sql, params![id_or_num.trim(), num.unwrap_or(-1)], |r| {
-                Ok(BoardTask { item: row_to_item(r)?, card: row_to_card(r)? })
-            })
+            .query_row(&sql, params![key, board_id, num], |r| Ok(BoardTask { item: row_to_item(r)?, card: row_to_card(r)? }))
             .optional()?
         else {
             return Ok(None);
         };
         let mut one = [t];
+        attach_boards(&conn, &mut one)?;
         attach_after(&conn, &mut one)?;
         super::work_prs::attach_prs(&conn, &mut one)?;
         super::work_media::attach_media(&conn, &mut one)?;
@@ -311,15 +377,30 @@ impl Store {
     /// ones (done, cancelled, failed) that changed since `finished_since_ms`.
     /// Gives every task a card first, so older builds' tasks get numbers.
     pub fn work_board_list(&self, finished_since_ms: i64, limit: usize, now_ms: i64) -> Result<Vec<BoardTask>, StoreError> {
+        self.work_board_list_in(None, finished_since_ms, limit, now_ms)
+    }
+
+    /// [`Self::work_board_list`] for one board (by id), or every board when `None`.
+    pub fn work_board_list_in(
+        &self,
+        board_id: Option<&str>,
+        finished_since_ms: i64,
+        limit: usize,
+        now_ms: i64,
+    ) -> Result<Vec<BoardTask>, StoreError> {
         let conn = self.conn().lock().unwrap();
-        conn.execute(
-            "INSERT OR IGNORE INTO db_work_cards (work_id, updated_at)
-             SELECT id, ?1 FROM db_work_queue WHERE id NOT IN (SELECT work_id FROM db_work_cards)",
-            params![now_ms],
-        )?;
+        number_unboarded(&conn)?;
+        let mut stmt =
+            conn.prepare("SELECT id FROM db_work_queue WHERE id NOT IN (SELECT work_id FROM db_work_cards) ORDER BY created_at")?;
+        let missing = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        for id in &missing {
+            ensure_card(&conn, id, now_ms)?;
+        }
         let sql = format!(
             "SELECT {q}, {CARD_COLS} FROM db_work_queue q JOIN db_work_cards c ON c.work_id = q.id
-              WHERE q.state NOT IN ('{done}', '{cancelled}', '{failed}') OR q.updated_at >= ?1
+              WHERE (q.state NOT IN ('{done}', '{cancelled}', '{failed}') OR q.updated_at >= ?1)
+                AND (?3 = '' OR c.board_id = ?3)
               ORDER BY q.updated_at DESC
               LIMIT ?2",
             q = q_cols(),
@@ -328,13 +409,14 @@ impl Store {
             failed = work_state::FAILED,
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![finished_since_ms, limit as i64], |r| {
+        let rows = stmt.query_map(params![finished_since_ms, limit as i64, board_id.unwrap_or("")], |r| {
             Ok(BoardTask { item: row_to_item(r)?, card: row_to_card(r)? })
         })?;
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
         }
+        attach_boards(&conn, &mut out)?;
         attach_after(&conn, &mut out)?;
         super::work_prs::attach_prs(&conn, &mut out)?;
         super::work_media::attach_media(&conn, &mut out)?;
@@ -351,7 +433,7 @@ impl Store {
     }
 
     /// The tasks waiting for this agent (open, targeted at it by UID or by
-    /// name, claimable now), in the order it will take them: the claim's
+    /// name, claimable now, on a board it sees), in the order it will take them: the claim's
     /// order (§6.5).
     pub fn work_board_waiting_for(&self, agent_id: &str, uid: &str, limit: usize, now_ms: i64) -> Result<Vec<BoardTask>, StoreError> {
         let conn = self.conn().lock().unwrap();
@@ -362,10 +444,12 @@ impl Store {
                 AND NOT {WAITS_ON_UNFINISHED}
                 AND ((q.target_agent_uid <> '' AND q.target_agent_uid = ?2)
                      OR (q.target_agent_uid = '' AND q.target_agent <> '' AND q.target_agent = ?1))
+                AND {visible}
               ORDER BY q.priority DESC, COALESCE(c.rank, q.created_at) ASC
               LIMIT ?3",
             q = q_cols(),
             open = work_state::OPEN,
+            visible = super::work_boards::card_visible_to_agent("?1", "?2"),
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![agent_id, uid, limit as i64, now_ms], |r| {
@@ -375,6 +459,7 @@ impl Store {
         for r in rows {
             out.push(r?);
         }
+        attach_boards(&conn, &mut out)?;
         Ok(out)
     }
 
@@ -821,7 +906,8 @@ impl Store {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT 1 FROM db_work_queue q JOIN db_work_cards c ON c.work_id = q.id
-              WHERE c.num = ?1 AND q.state IN ('open', 'held', 'claimed', 'blocked')
+              WHERE c.board_num = ?1 AND c.board_id = (SELECT id FROM db_boards WHERE is_default = 1 LIMIT 1)
+                AND q.state IN ('open', 'held', 'claimed', 'blocked')
                 AND (q.target_agent_uid = ?2 OR q.claimed_by_uid = ?2
                      OR (q.target_agent_uid = '' AND ?3 != '' AND q.target_agent = ?3)
                      OR (q.claimed_by_uid = '' AND ?3 != '' AND q.claimed_by = ?3))
