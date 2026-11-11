@@ -200,6 +200,7 @@ async fn run_fleet_broadcast(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Stri
     let priority = urgent_priority(arguments);
     let mut succeeded: Vec<String> = Vec::new();
     let mut held: Vec<serde_json::Value> = Vec::new();
+    let mut queued: Vec<serde_json::Value> = Vec::new();
     let mut failed: Vec<serde_json::Value> = Vec::new();
     // Delivered targets that got fewer files than were sent.
     let mut files_short: Vec<serde_json::Value> = Vec::new();
@@ -232,12 +233,13 @@ async fn run_fleet_broadcast(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Stri
                     succeeded.push(target);
                 }
                 Ok(Sent::Held(reason)) => held.push(json!({ "id": target, "held": reason })),
+                Ok(Sent::Queued(request_id)) => queued.push(json!({ "id": target, "request_id": request_id })),
                 Err(error) => failed.push(json!({ "id": target, "error": error })),
             }
         }
     }
 
-    Ok(broadcast_report(succeeded, failed, held, &sent_names, files_short))
+    Ok(broadcast_report(succeeded, failed, held, queued, &sent_names, files_short))
 }
 
 /// The targets and message a broadcast was given, refused when either is missing.
@@ -334,6 +336,12 @@ async fn post_jekt(client: &reqwest::Client, url: &str, auth_key: &str, req: &In
         .await
         .map_err(|e| format!("response parse failed: {e}"))?;
     if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
+        // Same test as `send`: srv names the receiving block only when a pane took it; the relay
+        // leaves it out because "queued is not delivered".
+        if result.get("block_id").and_then(|v| v.as_str()).is_none() {
+            let id = result.get("request_id").and_then(|v| v.as_str()).unwrap_or_default();
+            return Ok(Sent::Queued(id.to_string()));
+        }
         Ok(Sent::Delivered(result.get("files_delivered").and_then(Value::as_u64)))
     } else if let Some(reason) = crate::tool_helpers::held_until_active(&result) {
         // Kept until the agent is next active, not lost: say so apart from the failures.
@@ -348,8 +356,14 @@ async fn post_jekt(client: &reqwest::Client, url: &str, auth_key: &str, req: &In
 }
 
 /// What a broadcast tells the agent: who it reached, who held it, who failed, and the files it carried.
-fn broadcast_report(succeeded: Vec<String>, failed: Vec<Value>, held: Vec<Value>, sent_names: &[String], files_short: Vec<Value>) -> String {
+fn broadcast_report(succeeded: Vec<String>, failed: Vec<Value>, held: Vec<Value>, queued: Vec<Value>, sent_names: &[String], files_short: Vec<Value>) -> String {
     let mut result = json!({ "succeeded": succeeded, "failed": failed });
+    if !queued.is_empty() {
+        result["queued_unconfirmed"] = json!(queued);
+        result["queued_unconfirmed_note"] = json!(
+            "queued_unconfirmed: only queued at the cloud relay, NOT delivered: no pane has received it, and the relay drops it after 30 minutes; check the target is running and addressable (Agents list), or send it again later"
+        );
+    }
     if !held.is_empty() {
         result["held"] = json!(held);
         result["held_note"] = json!(
@@ -436,6 +450,8 @@ enum Sent {
     Delivered(Option<u64>),
     /// Kept until the agent is next active (`idle` or `quota`), not lost.
     Held(&'static str),
+    /// Only queued at the cloud relay: no receiver has seen it, and it is dropped after 30 minutes.
+    Queued(String),
 }
 
 #[cfg(test)]
@@ -501,8 +517,15 @@ mod broadcast_files_tests {
                     } else if line.contains("/attachments/upload") {
                         json!({ "id": "ab".repeat(32), "bytes": 5 })
                     } else {
-                        seen.lock().unwrap().push(serde_json::from_slice(&body).unwrap());
-                        json!({ "success": true, "files_delivered": delivered })
+                        let req: Value = serde_json::from_slice(&body).unwrap();
+                        let relay_only = req["target_agent"].as_str().is_some_and(|t| t.starts_with("relay-"));
+                        seen.lock().unwrap().push(req);
+                        if relay_only {
+                            // No receiving block: the relay took it, no pane has.
+                            json!({ "success": true, "request_id": "inj-7" })
+                        } else {
+                            json!({ "success": true, "block_id": "b1", "files_delivered": delivered })
+                        }
                     }
                     .to_string();
                     let _ = write!(
@@ -574,6 +597,17 @@ mod broadcast_files_tests {
         let err = broadcast(&srv, json!({ "targets": ["lan-a"], "message": "look", "files": [missing] })).await.unwrap_err().to_string();
         assert!(err.contains("nope.txt"), "{err}");
         assert!(srv.injected.lock().unwrap().is_empty());
+    }
+
+    /// A copy only the relay took is not a delivery: it is named apart, with its id, and not counted as succeeded.
+    #[tokio::test]
+    async fn a_relay_only_copy_is_not_reported_as_delivered() {
+        let srv = stub_srv(0);
+        let out = broadcast(&srv, json!({ "targets": ["lan-a", "relay-masty"], "message": "hi" })).await.unwrap();
+        assert_eq!(out["succeeded"], json!(["lan-a"]));
+        assert_eq!(out["queued_unconfirmed"], json!([{ "id": "relay-masty", "request_id": "inj-7" }]));
+        assert!(out["queued_unconfirmed_note"].as_str().unwrap().contains("NOT delivered"));
+        assert_eq!(out["failed"], json!([]));
     }
 
     /// Without files a broadcast is what it was.
