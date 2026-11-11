@@ -606,8 +606,9 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     if live.is_empty() {
         return;
     }
+    let views = crate::pane_backend::window_is_views(state, window_label);
     #[cfg(target_os = "windows")]
-    if !crate::pane_backend::views() {
+    if !views {
         apply_windows(state, window_label, &live);
         // A pane laid out at 0×0 is on a tab that isn't the visible one; the
         // input owner gives the app the keyboard if that pane had it.
@@ -624,7 +625,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     // owner gives the app the keyboard if that pane had it. macOS reports a
     // shown pane later, once its overlay window is on screen and can take key
     // status (SetPaneBoundsViewsTask, which this resize posts).
-    if crate::pane_backend::views() {
+    if views {
         for (r, _) in &live {
             let collapsed = r.width <= 0 || r.height <= 0;
             if collapsed || cfg!(not(target_os = "macos")) {
@@ -635,7 +636,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     // Linux: move every pane, then lay the window out once, not once per pane.
     // Windows Views panes need no layout: setting an overlay's bounds moves it.
     #[cfg(any(target_os = "linux", target_os = "windows"))]
-    if crate::pane_backend::views() {
+    if views {
         let mut moved = false;
         for (r, label) in &live {
             moved |= crate::browser_pane::creation_views::resize_browser_pane_view_inner(state, label, r.rect(), false)
