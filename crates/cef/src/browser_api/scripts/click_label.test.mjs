@@ -84,3 +84,40 @@ describe("clickLabel: whether a click commits, and why", () => {
         expect(clickLabel(null, "", "Submit form.pdf", { link: true, fileHref: true }).committing).toBe(false);
     });
 });
+
+describe("clickLabel: the accessible name", () => {
+    // A button whose name comes from a title, an image's alt, a child's aria-label or CSS content has no text of its own.
+    it("commits on the accessible name when the element's own text and aria-label say nothing", () => {
+        expect(clickLabel(null, "", "", button).committing).toBe(false);
+        const got = clickLabel(null, "", "", button, "Submit for certification");
+        expect(got).toMatchObject({ committing: true, name: "Submit for certification", why: 'its name says "Submit"' });
+    });
+
+    it("keeps the element's own name and reason when it commits by itself", () => {
+        const got = clickLabel(null, "", "Delete draft", button, "Trash");
+        expect(got).toMatchObject({ committing: true, name: "Delete draft", why: 'its name says "Delete"' });
+    });
+
+    it("commits when either name says so", () => {
+        expect(clickLabel(null, "", "Continue", button, "Pay now")).toMatchObject({ committing: true, name: "Continue", why: 'its name says "Pay"' });
+        expect(clickLabel(null, "", "Continue", button, "Next step").committing).toBe(false);
+    });
+
+    it("applies the link rule to a link's accessible name", () => {
+        const ack = "This acknowledgement of receipt does not confirm the accuracy or completeness of the return. Click here to download a PDF";
+        expect(clickLabel(null, "", "", link, ack).committing).toBe(false);
+        expect(clickLabel(null, "", "", link, "Confirm order").committing).toBe(true);
+    });
+
+    it("an unnamed click whose accessible name could not be read asks", () => {
+        expect(clickLabel(null, "", "", button, null)).toMatchObject({ committing: true, unreadable: true, why: "its name could not be read" });
+        // One that has a name of its own is judged by it.
+        expect(clickLabel(null, "", "Next", button, null)).toMatchObject({ committing: false });
+        expect(clickLabel(null, "", "Next", button, null).unreadable).toBeUndefined();
+    });
+
+    it("an element the browser reads as unnamed is judged as before", () => {
+        expect(clickLabel(null, "", "", button, "")).toMatchObject({ committing: false, name: "" });
+        expect(clickLabel(null, "", "", { submits: true }, "")).toMatchObject({ committing: true, why: "it submits a form" });
+    });
+});
