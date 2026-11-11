@@ -88,12 +88,14 @@ pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
     rect.clone()
 }
 
-/// The two setters `place_overlay` calls on an overlay, so the order it calls them in has a test.
+/// The two setters `place_at` calls on an overlay, so the order it calls them in has a test.
+#[cfg(any(not(target_os = "windows"), test))]
 pub(crate) trait OverlayPlace {
     fn set_origin(&self, x: i32, y: i32);
     fn set_extent(&self, width: i32, height: i32);
 }
 
+#[cfg(not(target_os = "windows"))]
 impl OverlayPlace for cef::OverlayController {
     fn set_origin(&self, x: i32, y: i32) {
         self.set_position(Some(&cef::Point { x, y }));
@@ -104,8 +106,15 @@ impl OverlayPlace for cef::OverlayController {
 }
 
 /// Put an overlay at `rect` (the page's physical pixels) in `window`.
-pub(crate) fn place_overlay(controller: &impl OverlayPlace, window: Option<&Window>, rect: &Rect) {
-    place_at(controller, &views_rect(window, rect));
+///
+/// Windows sets the whole rect in one call: CEF cuts it to the window once and moves the overlay once.
+/// Linux sets the two halves (`place_at`): `set_bounds` did nothing there when it was tried.
+pub(crate) fn place_overlay(controller: &cef::OverlayController, window: Option<&Window>, rect: &Rect) {
+    let rect = views_rect(window, rect);
+    #[cfg(target_os = "windows")]
+    controller.set_bounds(Some(&rect));
+    #[cfg(not(target_os = "windows"))]
+    place_at(controller, &rect);
 }
 
 /// The origin first, then the size. CEF keeps an overlay inside its window by cutting each new bounds to
@@ -114,6 +123,7 @@ pub(crate) fn place_overlay(controller: &impl OverlayPlace, window: Option<&Wind
 /// origin, was cut where that ran past the window's edge, and kept the cut size at its new origin: the
 /// page stayed short of its pane until the next layout change. With the origin first, the size is set
 /// where the pane ends up, so it is cut only if the rect itself is outside the window.
+#[cfg(any(not(target_os = "windows"), test))]
 fn place_at(controller: &impl OverlayPlace, rect: &Rect) {
     controller.set_origin(rect.x, rect.y);
     controller.set_extent(rect.width, rect.height);
@@ -534,6 +544,21 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     resize_browser_pane_view_inner(state, label, rect, true);
 }
 
+/// Where pane `label`'s `rect` goes in `window` as it is now. On Linux a rect the page laid out for an
+/// older window size moves with the window (`LayoutBase`): after the host has followed a resize, a
+/// late batch for the old size must not pull the pane back. Windows does not follow
+/// (`bounds::window_resized`), so there a rect is used as the page sent it.
+#[cfg(not(target_os = "macos"))]
+fn followed_rect(label: &str, window: Option<&Window>, rect: Rect) -> Rect {
+    #[cfg(target_os = "linux")]
+    if let (Some(base), Some(w)) = (crate::browser_panes::bounds::layout_base(label), window) {
+        let (width, height) = crate::browser_panes::bounds::window_client_px(w);
+        return base.predict(&rect, width, height);
+    }
+    let _ = (label, window);
+    rect
+}
+
 /// `resize_browser_pane_view`, without the Linux window layout when `layout`
 /// is false: the caller moves several panes and lays their window out once
 /// (`browser_panes::bounds::apply`). Returns the pane's window label if it
@@ -629,16 +654,7 @@ pub(crate) fn resize_browser_pane_view_inner(
     #[cfg(not(target_os = "macos"))]
     {
         let window = state.windows.lock().get(&window_label).cloned();
-        // A rect the page laid out for an older window size moves with the
-        // window (`LayoutBase`): after the host has already followed a resize,
-        // a late batch for the old size must not pull the pane back.
-        let rect = match (crate::browser_panes::bounds::layout_base(label), window.as_ref()) {
-            (Some(base), Some(w)) => {
-                let (width, height) = crate::browser_panes::bounds::window_client_px(w);
-                base.predict(&rect, width, height)
-            }
-            _ => rect,
-        };
+        let rect = followed_rect(label, window.as_ref(), rect);
         place_overlay(&controller, window.as_ref(), &rect);
         // Visibility = AND of the two independent hide reasons:
         //  - Zero-area rect (frontend placed the placeholder in `display:none`
@@ -655,7 +671,9 @@ pub(crate) fn resize_browser_pane_view_inner(
         if controller.is_visible() != shown {
             controller.set_visible(shown);
         }
-        if layout {
+        // Linux lays the window out for the move to show; on Windows setting the
+        // overlay's bounds is enough.
+        if layout && cfg!(target_os = "linux") {
             if let Some(window) = &window {
                 window.layout();
             }
