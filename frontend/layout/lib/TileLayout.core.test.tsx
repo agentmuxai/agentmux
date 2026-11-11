@@ -493,6 +493,8 @@ describe("createTileLayout: a tile", () => {
             const { el } = mountWithTile(makePlatform());
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { ...entry, leaving: true }]]));
             expect(el.style.opacity).toBe("0");
+            // It fades over the glide's length, not the quicker fade of a tile that appears.
+            expect(el.style.transition).toContain("opacity var(--duration-base)");
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
             expect(el.style.opacity).toBe("1");
         });

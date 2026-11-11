@@ -631,3 +631,44 @@ describe("the tear-off a drag shows over its own pane (tearOffPreview.ts)", () =
         expect(m.reflowFor("b")).toBeUndefined();
     });
 });
+
+describe("the tear-off's targets keep the panes that touch touching", () => {
+    /** Every pair of panes that share an edge in the layout's own rects shares one in the tear-off's. */
+    function sharedEdgesHold(m: LayoutModel, ids: string[], gone: string) {
+        const rest = ids.filter((id) => id !== gone);
+        const edges = (id: string) => {
+            const r = m.reflowFor(id)!.rect;
+            return { l: r.left, r: r.left + r.width, t: r.top, b: r.top + r.height };
+        };
+        const before = (id: string) => {
+            const r = own(m, id);
+            return { l: r.left, r: r.left + r.width, t: r.top, b: r.top + r.height };
+        };
+        const bad: string[] = [];
+        for (const a of rest) {
+            for (const b of rest) {
+                const [x, y] = [before(a), before(b)];
+                const touchesBefore = x.r === y.l && x.t < y.b && y.t < x.b;
+                if (!touchesBefore) continue;
+                const [p, q] = [edges(a), edges(b)];
+                // They may stop being neighbours (a collapsed branch), but never end apart or overlapping.
+                if (q.l < p.r && p.t < q.b && q.t < p.b) bad.push(`${a}|${b} overlap ${p.r - q.l}`);
+                if (p.r !== q.l && p.t === q.t && p.b === q.b) bad.push(`${a}|${b} apart ${q.l - p.r}`);
+            }
+        }
+        return bad;
+    }
+    const five = () =>
+        col("root", 10, row("top", 6, leaf("a"), leaf("b"), leaf("c"), leaf("d")), row("low", 4, leaf("e"), leaf("f")));
+
+    for (const gone of ["a", "b", "c", "d", "e", "f"]) {
+        it(`leaves no gap or overlap between neighbours when ${gone} is torn off a 4 over 2 layout`, () => {
+            vi.useFakeTimers();
+            const m = modelOf(five());
+            m.activeDrag._set(true);
+            restOverOwnPane(m, gone, 10, 10);
+            vi.advanceTimersByTime(TEAR_OFF_REST_MS);
+            expect(sharedEdgesHold(m, ["a", "b", "c", "d", "e", "f"], gone)).toEqual([]);
+        });
+    }
+});

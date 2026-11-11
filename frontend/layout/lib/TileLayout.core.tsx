@@ -624,9 +624,10 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
             "will-change": "transform, clip-path",
             // The dragged tile in its landing rect is the drop's own preview: not blurred as a dragged tile is.
             filter: entry.moved ? "none" : undefined,
-            // A pane being torn off has left the layout: its neighbours close over its slot.
+            // A pane being torn off has left the layout: its neighbours close over its slot. It fades over
+            // the glide's own length (under reduced motion too), so its slot is never bare while they arrive.
             ...(entry.leaving && { opacity: 0 }),
-            transition: reduce ? glide : `${glide}, ${style.transition}`,
+            transition: entry.leaving ? `${glide}, opacity ${timing}` : reduce ? glide : `${glide}, ${style.transition}`,
         };
     });
 
