@@ -6,6 +6,7 @@
 pub mod agent_create_types;
 pub mod api_types;
 pub mod browser_control_types;
+pub mod build_kind;
 pub mod build_slot;
 pub mod checkout;
 pub mod client_events;

@@ -155,6 +155,7 @@ impl LanDiscoveryController {
             channel: String::new(),
             os: String::new(),
             install: String::new(),
+            build: String::new(),
             address: host.to_string(),
             port: port.parse().unwrap(),
             auth_key: "k".into(),

@@ -20,7 +20,7 @@ import { resolveFloatingName } from "./instance-floating-name";
 import type { OpacityControlComponent } from "./InstancePanelRows";
 import type { AboutDetails, WorkspaceRename } from "./instance-panel-state";
 
-/** "About" metadata: version, channel, commit, CEF, runtime and build time, each only when the host reports it. */
+/** "About" metadata: version, the channel its data is in, commit, CEF, runtime and build time, each only when the host reports it. */
 export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Element => {
     const about = props.about;
     return (
@@ -43,11 +43,11 @@ export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Elem
             </div>
             <Show when={about().channel}>
                 <div class="instance-panel-row instance-panel-row-meta">
-                    <span class="instance-panel-label">Channel</span>
+                    <span class="instance-panel-label">Data channel</span>
                     <span class="instance-panel-value instance-panel-mono">{about().channel}</span>
                     <IconButton
                         icon="copy"
-                        label="Copy channel"
+                        label="Copy data channel"
                         density="compact"
                         class="instance-panel-copy"
                         onClick={() => clipboardWriteText(about().channel!)}

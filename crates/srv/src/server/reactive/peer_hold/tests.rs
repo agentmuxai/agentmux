@@ -16,6 +16,7 @@ fn peer(hostname: &str, last_polled_ok: u64) -> LanInstance {
         channel: String::new(),
         os: String::new(),
         install: String::new(),
+        build: String::new(),
         address: "192.0.2.10".into(),
         port: 1,
         auth_key: String::new(),

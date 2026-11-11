@@ -39,18 +39,26 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
+/// An AgentMux in words, from its `app.version` answer: "AgentMux 0.60.22 (a release, build 0.60.22,
+/// data in channel local-main-b28b7a-0000000a, linux)". What kind of build it is comes from the machine's
+/// own `build_kind`, never from the channel's name: an upgraded release keeps the channel of the build it
+/// replaced, and the channel only says where the data is. An AgentMux from before `build_kind` says nothing
+/// about its kind.
+fn describe_identity(r: &Value) -> String {
+    let kind = match s(r, "build_kind") {
+        "release" => "a release, ",
+        "local" => "a local build, ",
+        "dev" => "a dev build, ",
+        _ => "",
+    };
+    format!("AgentMux {} ({kind}build {}, data in channel {}, {})", s(r, "version"), s(r, "build"), s(r, "channel"), s(r, "os"))
+}
+
 /// `version` with a `host`: the AgentMux on that machine, from its own answer.
 async fn remote_version(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
     let answer = ask(arguments, cx, host, "app.version").await?;
     let r = &answer["result"];
-    Ok(format!(
-        "{host} runs AgentMux {} (build {}, channel {}, {}). {}",
-        s(r, "version"),
-        s(r, "build"),
-        s(r, "channel"),
-        s(r, "os"),
-        describe_status(&r["update"])
-    ))
+    Ok(format!("{host} runs {}. {}", describe_identity(r), describe_status(&r["update"])))
 }
 
 /// `health` with a `host`: what a steward checks after an upgrade, on that machine.
@@ -492,6 +500,19 @@ fn describe_outcome(o: &Value) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_machine_is_called_a_release_or_a_local_build_by_its_build_never_by_its_channel() {
+        // A release that a local build was upgraded to keeps that build's channel for its data.
+        let mut r = json!({ "version": "0.60.22", "build": "0.60.22", "build_kind": "release", "channel": "local-main-b28b7a-0000000a", "os": "linux" });
+        assert_eq!(describe_identity(&r), "AgentMux 0.60.22 (a release, build 0.60.22, data in channel local-main-b28b7a-0000000a, linux)");
+        r["build_kind"] = json!("local");
+        r["build"] = json!("0.60.22+g2a5424fe2.1");
+        assert_eq!(describe_identity(&r), "AgentMux 0.60.22 (a local build, build 0.60.22+g2a5424fe2.1, data in channel local-main-b28b7a-0000000a, linux)");
+        // An AgentMux from before it said its kind: nothing is guessed from the channel.
+        let old = json!({ "version": "0.60.20", "build": "0.60.20", "channel": "local-main-b28b7a-0000000a", "os": "linux" });
+        assert_eq!(describe_identity(&old), "AgentMux 0.60.20 (build 0.60.20, data in channel local-main-b28b7a-0000000a, linux)");
+    }
 
     #[test]
     fn version_says_what_runs_and_what_the_agent_can_do() {

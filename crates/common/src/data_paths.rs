@@ -67,6 +67,14 @@ const BUILD_CHANNEL_DEFAULT: &str =
         None => "stable",
     };
 
+/// The channel this binary was built for (`stable` for a release, a
+/// `local-…` channel of its own for a local package build). A constant of the
+/// binary; the channel an instance runs on can differ (an upgrade's recorded
+/// channel, `AGENTMUX_CHANNEL`). For `build_kind`, not for finding data.
+pub fn build_channel_default() -> &'static str {
+    BUILD_CHANNEL_DEFAULT
+}
+
 /// Channel names that would collide with sibling dirs at
 /// `~/.agentmux/` or with reserved subdir names inside a channel.
 /// Rejected by [`sanitize_channel_name`].
