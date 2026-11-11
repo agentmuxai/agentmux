@@ -60,10 +60,8 @@ pub(super) fn drop_drone_runs_fk(conn: &Connection) -> Result<bool, String> {
         rebuild_table(conn, &DRONE_RUNS)?;
         true
     };
-    let table_exists: bool = conn
-        .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_drone_runs')", [], |r| r.get(0))
-        .map_err(|e| format!("db_drone_runs: probe: {e}"))?;
-    if table_exists {
+    let has_drone_runs = crate::migrations::table_exists(conn, "db_drone_runs").map_err(|e| format!("db_drone_runs: probe: {e}"))?;
+    if has_drone_runs {
         conn.execute_batch(DRONE_RUNS_INDEXES).map_err(|e| format!("db_drone_runs: recreate indexes: {e}"))?;
     }
     Ok(rebuilt)

@@ -198,7 +198,7 @@
 102 crates/srv/src/backend/storage/bundles.rs::Store::bundle_upsert_with_version_based_unobserved
 183 crates/srv/src/backend/storage/filestore/counter.rs::FileStore::append_in_tx
 143 crates/srv/src/backend/storage/filestore/offset_ops.rs::FileStore::write_at
-125 crates/srv/src/backend/storage/migrations.rs::run_filestore_migrations
+119 crates/srv/src/backend/storage/migrations.rs::run_filestore_migrations
 310 crates/srv/src/backend/storage/muxbus.rs::Store::muxbus_load_tokens
 131 crates/srv/src/backend/subagent_watcher/mod.rs::SubagentWatcher::build_watch
 286 crates/srv/src/backend/subagent_watcher/scan.rs::SubagentWatcher::reconcile_stale_subagents_impl
@@ -230,8 +230,7 @@
 130 crates/srv/src/messaging/slack/socket.rs::run_session
 142 crates/srv/src/migrations/m0000_bootstrap.rs::M0000Bootstrap::up
 148 crates/srv/src/migrations/m0022_identity_store_links_backfill.rs::M0022IdentityStoreLinksBackfill::up
-110 crates/srv/src/migrations/m0025_agents_launch_state_backfill.rs::backfill_launch_state
-102 crates/srv/src/migrations/m0028_agent_child_tables_repoint_fk.rs::frozen_repair_def_gaps
+105 crates/srv/src/migrations/m0025_agents_launch_state_backfill.rs::backfill_launch_state
 147 crates/srv/src/migrations/m0031_carry_skills_and_mcp_servers_to_identity_store.rs::carry_mcp_servers
 198 crates/srv/src/migrations/m0031_carry_skills_and_mcp_servers_to_identity_store.rs::carry_skills
 232 crates/srv/src/muxbus/cloud_subscriber.rs::connect_and_run

@@ -254,12 +254,7 @@ fn frozen_repair_def_gaps(conn: &mut Connection) -> Result<usize, String> {
 /// skipped here, created later with default launch state, and never
 /// revisited (codex P1 on #3075).
 pub(super) fn backfill_launch_state(conn: &mut Connection) -> Result<BackfillStats, String> {
-    let has_legacy: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_agent_instances')",
-            [],
-            |row| row.get(0),
-        )
+    let has_legacy = crate::migrations::table_exists(conn, "db_agent_instances")
         .map_err(|e| format!("probe db_agent_instances: {e}"))?;
     if !has_legacy {
         return Ok(BackfillStats::default());

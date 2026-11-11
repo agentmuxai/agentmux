@@ -395,11 +395,7 @@ pub(super) fn delete_key_rows(conn: &rusqlite::Connection, name: &str) -> Result
         "db_agent_lan_keys",
         "db_agent_wan_keys",
     ] {
-        let present: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-            params![table],
-            |r| r.get(0),
-        )?;
+        let present = crate::migrations::table_exists(conn, table)?;
         if present {
             // Table names are the constants above, never caller input.
             removed += conn.execute(

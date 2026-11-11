@@ -819,11 +819,7 @@ pub(super) fn add_legacy_definition_columns(conn: &Connection) -> Result<(), Sto
     // without reintroducing an unconditional dependency on a table this
     // release otherwise no longer declares. Found in review of PR #3096
     // (Codex P1).
-    let legacy_defs_exist: bool = conn.query_row(
-        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='db_agent_definitions'",
-        [],
-        |row| row.get::<_, i64>(0),
-    )? == 1;
+    let legacy_defs_exist = crate::migrations::table_exists(conn, "db_agent_definitions")?;
     if legacy_defs_exist {
         apply_additive_columns(conn, &[
             "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
@@ -952,7 +948,7 @@ pub(super) fn create_channel_migrations(conn: &Connection) -> Result<(), StoreEr
 }
 
 /// Run each additive `ALTER`, ignoring a column that is already there.
-pub(super) fn apply_additive_columns<S: AsRef<str>>(
+pub(in crate::backend::storage) fn apply_additive_columns<S: AsRef<str>>(
     conn: &Connection,
     stmts: impl IntoIterator<Item = S>,
 ) -> Result<(), StoreError> {

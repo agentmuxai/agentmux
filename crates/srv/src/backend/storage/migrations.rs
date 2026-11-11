@@ -24,6 +24,8 @@ use super::error::StoreError;
 mod object_schema;
 mod store_schema;
 
+pub(in crate::backend::storage) use object_schema::apply_additive_columns;
+
 /// `user_version` stamped into `~/.agentmux/shared/store.db` after
 /// `run_shared_store_schema`. Versioned independently from `objects.db`.
 ///   v1 — initial: identity accounts/bundles/bindings/links, memory
@@ -598,20 +600,10 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
 /// a parent table is renamed, so the agent/identity cascades survive.
 fn adopt_legacy_table_names(conn: &Connection) -> Result<(), StoreError> {
     for (legacy, current) in LEGACY_TABLE_RENAMES {
-        let legacy_exists: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-            [legacy],
-            |row| row.get(0),
-        )?;
-        if legacy_exists == 0 {
+        if !crate::migrations::table_exists(conn, legacy)? {
             continue;
         }
-        let current_exists: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-            [current],
-            |row| row.get(0),
-        )?;
-        if current_exists == 1 {
+        if crate::migrations::table_exists(conn, current)? {
             // Both present — only reachable on a deliberate
             // downgrade-roundtrip dev DB (flat build → pre-flatten build,
             // which re-creates the legacy name → flat build again). The
@@ -886,7 +878,7 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
     // insert rows without these columns (NULL = not counted) and write
     // without maintaining them, which the counter detects. "duplicate
     // column" is expected when another instance added them first.
-    for stmt in &[
+    apply_additive_columns(conn, [
         "ALTER TABLE db_wave_file ADD COLUMN gen TEXT",
         "ALTER TABLE db_wave_file ADD COLUMN lines INTEGER",
         "ALTER TABLE db_wave_file ADD COLUMN lines_size INTEGER",
@@ -901,13 +893,7 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
         // deleted and re-created is a different incarnation even if every
         // other column (and the creation millisecond) comes out the same.
         "ALTER TABLE db_wave_file ADD COLUMN incarnation BLOB",
-    ] {
-        if let Err(e) = conn.execute_batch(stmt) {
-            if !e.to_string().contains("duplicate column") {
-                return Err(e.into());
-            }
-        }
-    }
+    ])?;
     // `rev` is maintained by triggers, not by this code's writes, because
     // triggers are part of the database: they fire for every connection,
     // including older builds that know nothing about the counter. Any write

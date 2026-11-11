@@ -61,8 +61,9 @@ fn is_empty_agent_bundle(b: &Bundle) -> bool {
     !b.is_blank && !b.is_global && !b.is_system && b.id != "blank" && !b.id.starts_with("seed-") && is_abf_name(&b.name) && holds_nothing(b)
 }
 
-pub(super) fn table_exists(conn: &Connection, table: &str) -> bool {
-    conn.query_row("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1", params![table], |_| Ok(())).is_ok()
+/// Whether `table` exists; a probe that fails reads as absent here, as it always did in this migration.
+pub(super) fn has_table(conn: &Connection, table: &str) -> bool {
+    super::table_exists(conn, table).unwrap_or(false)
 }
 
 fn column(conn: &Connection, sql: &str) -> Result<Vec<String>, String> {
@@ -76,12 +77,12 @@ fn references_in(conn: &Connection) -> Result<BTreeSet<String>, String> {
     // A file that is not a database fails here; without this every table would read as missing.
     conn.query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| r.get::<_, i64>(0)).map_err(|e| format!("not readable: {e}"))?;
     let mut ids: Vec<String> = Vec::new();
-    if table_exists(conn, "db_agents") {
+    if has_table(conn, "db_agents") {
         ids.extend(column(conn, "SELECT memory_id FROM db_agents WHERE memory_id != ''")?);
         ids.extend(column(conn, "SELECT default_memory_id FROM db_agents WHERE default_memory_id != ''")?);
     }
     for table in ["db_agent_bundles", "db_bundle_skills_ref"] {
-        if table_exists(conn, table) {
+        if has_table(conn, table) {
             ids.extend(column(conn, &format!("SELECT bundle_id FROM {table}"))?);
         }
     }
@@ -185,7 +186,7 @@ pub(super) fn remove_empty_unreferenced(ctx: &MigrationContext, honour_recorded:
     }
     let held_content = {
         let conn = bundle_store.conn().lock().unwrap();
-        if table_exists(&conn, "db_bundle_versions") {
+        if has_table(&conn, "db_bundle_versions") {
             column(&conn, "SELECT DISTINCT bundle_id FROM db_bundle_versions WHERE trim(instructions) != ''")
                 .map_err(|e| MigrationError(format!("remove_empty_agent_bundles: {e}")))?
         } else {
@@ -230,7 +231,7 @@ fn record(ctx: &MigrationContext, removed: &[Removed]) {
 /// Delete the bundles with their version and scope rows, in one transaction.
 fn delete(store: &Store, removed: &[Removed]) -> Result<(), String> {
     let mut conn = store.conn().lock().unwrap();
-    let (has_scope, has_versions) = (table_exists(&conn, "db_bundle_scope"), table_exists(&conn, "db_bundle_versions"));
+    let (has_scope, has_versions) = (has_table(&conn, "db_bundle_scope"), has_table(&conn, "db_bundle_versions"));
     let tx = conn.transaction().map_err(|e| format!("begin: {e}"))?;
     for r in removed {
         if has_versions {

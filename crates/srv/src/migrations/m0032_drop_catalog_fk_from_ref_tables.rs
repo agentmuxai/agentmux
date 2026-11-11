@@ -108,13 +108,7 @@ const TABLES: &[TableSpec] = &[
 /// base schema already declares the trimmed FK set. `Ok(true)` for a missing
 /// table too: nothing to rebuild is the same as already done.
 pub(super) fn already_dropped(conn: &Connection, spec: &TableSpec) -> Result<bool, String> {
-    let exists: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-            [spec.name],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("probe {}: {e}", spec.name))?;
+    let exists = crate::migrations::table_exists(conn, spec.name).map_err(|e| format!("probe {}: {e}", spec.name))?;
     if !exists {
         return Ok(true);
     }
