@@ -1015,12 +1015,7 @@ impl AgentMuxHandler {
         let failed_url = failed_url.map(CefString::to_string).unwrap_or_default();
         let error_code_i32 = error_code_raw as i32;
 
-        tracing::error!(
-            "Load error: url={} error={} ({})",
-            failed_url,
-            error_text,
-            error_code_i32
-        );
+        tracing::error!("Load error: url={} error={} ({})", failed_url, error_text, error_code_i32);
 
         // Layer 1, SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md:
         // a real (non-ERR_ABORTED, already filtered above) main-frame error
@@ -1045,6 +1040,9 @@ impl AgentMuxHandler {
             }
         }
 
+        if !self.is_browser_pane {
+            super::page_unreachable::on_failure(&self.state, &failed_url, !is_permanent_load_error(error_code_i32));
+        }
         show_load_error_page(frame, &failed_url, error_code_i32, &error_text, self.is_browser_pane);
     }
 }
@@ -1072,8 +1070,7 @@ pub(crate) fn is_permanent_load_error(error_code_i32: i32) -> bool {
 /// `is_browser_pane` controls two things: the heading copy (a pane failing to
 /// load an arbitrary external site must never claim "Failed to load AgentMux
 /// frontend" — that copy was previously hardcoded and wrong for panes) and
-/// whether the page auto-retries (dev frontend only, see `on_load_error`'s
-/// original comment, preserved below).
+/// the help text (the dev frontend's only). The page never reloads itself.
 pub(crate) fn render_load_error_html(
     failed_url: &str,
     error_code_i32: i32,
@@ -1110,20 +1107,10 @@ pub(crate) fn render_load_error_html(
     // interpolated JS in the Retry handler below.
     let failed_url_js = js_string_literal(failed_url);
 
-    // Auto-retry ONLY for the dev frontend (the main window), which commonly
-    // races the Vite dev server on launch. Browser panes load arbitrary user
-    // URLs through this SAME handler — auto-retrying their failures (offline
-    // site, DNS error, refused service) would be an unbounded reload loop, so
-    // panes get a manual Retry only.
-    //
-    // A permanent failure (see `is_permanent_load_error`) never auto-retries
-    // either: the retry could only repeat it, and on the main window that is a
-    // window that flashes the error page every 1.2 s forever.
-    let auto_retry = if is_browser_pane || permanent {
-        String::new()
-    } else {
-        "setTimeout(__amxRetry, 1200);".to_string()
-    };
+    // The page never reloads itself: a pane's failures (offline site, DNS error,
+    // refused service) would loop, and a window whose app page is down is
+    // watched by the host, which reloads it once the address answers
+    // (`page_unreachable`). Only the manual Retry is here.
     let dev_hint = if is_browser_pane {
         String::new()
     } else if permanent {
@@ -1132,8 +1119,7 @@ pub(crate) fn render_load_error_html(
         "<p>Restart with a different port:<br><code>AGENTMUX_VITE_PORT=5300 task dev</code><br>or <code>AGENTMUX_VITE_PORT=$(bash scripts/vite-port.sh pick) task dev</code></p>"
             .to_string()
     } else {
-        "<p>Make sure the Vite dev server is running:<br><code>task dev</code> or <code>npx vite</code></p>"
-            .to_string()
+        super::page_unreachable::hint_html()
     };
 
     format!(
@@ -1192,7 +1178,6 @@ pub(crate) fn render_load_error_html(
         // never be re-tried. Navigate to the real failed URL instead.
         var __amxTarget = {failed_url_js};
         function __amxRetry() {{ location.href = __amxTarget; }}
-        {auto_retry}
     </script>
     </div>
 </body>
@@ -1407,11 +1392,14 @@ mod load_error_page_tests {
         assert!(!html.contains("Make sure the Vite dev server is running"));
     }
 
-    /// The race this retry exists for is untouched: Vite not up yet.
+    /// Vite not up (or gone): the page waits quietly, the host reloads the window once the
+    /// address answers (`page_unreachable`), and Retry and Quit stay.
     #[test]
-    fn a_refused_connection_on_the_main_window_still_auto_retries() {
+    fn a_refused_connection_on_the_main_window_waits_instead_of_reloading() {
         let html = page(cef_errorcode_t::ERR_CONNECTION_REFUSED, "ERR_CONNECTION_REFUSED", false);
-        assert!(html.contains("setTimeout(__amxRetry, 1200)"));
+        assert!(!html.contains("setTimeout"), "no reload loop");
+        assert!(html.contains("onclick=\"__amxRetry()\""));
+        assert!(html.contains(crate::client::page_unreachable::QUIT_URL));
         assert!(html.contains("Make sure the Vite dev server is running"));
         assert!(html.contains("<h1>Failed to load AgentMux frontend</h1>"), "other errors keep the main-window heading");
     }

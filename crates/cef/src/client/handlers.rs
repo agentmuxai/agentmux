@@ -885,10 +885,28 @@ wrap_request_handler! {
             is_redirect: ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int {
             let (b, f) = (browser.as_deref().cloned(), frame.as_deref().cloned());
+            // The load-error page's Quit button (an app window's, never a browser pane's).
+            // The lock is let go before the check: it may start a quit.
+            let (state, is_pane) = {
+                let inner = self.inner.lock();
+                (inner.state.clone(), inner.is_browser_pane)
+            };
+            if !is_pane && super::page_unreachable::quit_requested(&state, f.as_ref(), request.as_deref()) {
+                return 1;
+            }
+            // An app window's main-frame address, for the boot watchdog once the navigation goes ahead.
+            let app_url = if !is_pane && f.as_ref().is_some_and(|f| f.is_main() == 1) {
+                request.as_deref().map(|r| CefString::from(&r.url()).to_string())
+            } else {
+                None
+            };
             let cancel = self.inner.lock().on_before_browse(browser, frame, request, user_gesture, is_redirect);
             if cancel == 0 {
                 // The navigation goes ahead: the page's pending pane-rects queries end with it.
                 crate::ipc_query::on_before_browse(b.as_ref(), f.as_ref());
+                if let Some(url) = app_url {
+                    super::boot_watchdog::note_navigation(&state, &url);
+                }
             }
             cancel
         }
