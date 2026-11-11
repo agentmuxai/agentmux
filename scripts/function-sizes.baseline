@@ -410,7 +410,6 @@
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
 394 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
-155 frontend/app/view/bundle/BundleProviderInstructionsSection.tsx::BundleProviderInstructionsSection
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
 285 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor

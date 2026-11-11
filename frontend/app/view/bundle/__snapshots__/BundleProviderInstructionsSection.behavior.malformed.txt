@@ -1,0 +1,35 @@
+-- invalid JSON
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instructions-malformed">
+      "This bundle's per-provider instructions are not readable as a JSON object of provider → text, so they cannot be edited here. The stored value is preserved exactly as-is and will survive saving this form — nothing is lost. Export the bundle to inspect or repair it."
+-- an array
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instructions-malformed">
+      "This bundle's per-provider instructions are not readable as a JSON object of provider → text, so they cannot be edited here. The stored value is preserved exactly as-is and will survive saving this form — nothing is lost. Export the bundle to inspect or repair it."
+-- a non-text value
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instructions-malformed">
+      "This bundle's per-provider instructions are not readable as a JSON object of provider → text, so they cannot be edited here. The stored value is preserved exactly as-is and will survive saving this form — nothing is lost. Export the bundle to inspect or repair it."
+-- null
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instructions-malformed">
+      "This bundle's per-provider instructions are not readable as a JSON object of provider → text, so they cannot be edited here. The stored value is preserved exactly as-is and will survive saving this form — nothing is lost. Export the bundle to inspect or repair it."
+-- readable again
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="claude">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="ok">
+    <datalist id="abf-known-providers">
+      <option value="alpha">
+      <option value="mid">
+      <option value="zeta">
+    <span data-stand="Button" class="bundle-view-provider-instruction-add" data-icon="plus">
+      "Add provider override"
