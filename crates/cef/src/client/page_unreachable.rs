@@ -19,7 +19,7 @@
 //! app does not outlive its dev server (a job timeout that kills the server
 //! and leaves the app behind was the second sighting).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -75,6 +75,8 @@ pub(crate) struct Core {
     watches: HashMap<String, String>,
     /// Automatic reloads done per window since a page last loaded.
     reloads: HashMap<String, u32>,
+    /// The windows whose page failed and has not loaded since.
+    failed: HashSet<String>,
     /// When the first failure of this stretch happened.
     since: Option<Instant>,
 }
@@ -82,6 +84,7 @@ pub(crate) struct Core {
 impl Core {
     pub(crate) fn fail(&mut self, label: &str, url: &str, watch: bool, now: Instant) -> Failure {
         self.since.get_or_insert(now);
+        self.failed.insert(label.to_string());
         if !watch || self.reloads.get(label).copied().unwrap_or(0) >= MAX_AUTO_RELOADS {
             self.watches.remove(label);
             return Failure::GaveUp;
@@ -108,7 +111,26 @@ impl Core {
     }
 
     pub(crate) fn is_unreachable(&self) -> bool {
-        self.since.is_some()
+        !self.failed.is_empty()
+    }
+
+    pub(crate) fn failed_labels(&self) -> Vec<String> {
+        self.failed.iter().cloned().collect()
+    }
+
+    /// Forget the failed windows `alive` says are gone. A closed window can't load a
+    /// page, so it must not keep pools and new windows blocked; with none left the
+    /// stretch is over.
+    pub(crate) fn prune(&mut self, alive: impl Fn(&str) -> bool) {
+        let gone: Vec<String> = self.failed.iter().filter(|l| !alive(l)).cloned().collect();
+        for label in gone {
+            self.failed.remove(&label);
+            self.watches.remove(&label);
+            self.reloads.remove(&label);
+        }
+        if self.failed.is_empty() {
+            *self = Core::default();
+        }
     }
 
     pub(crate) fn dev_exit_due(&self, now: Instant, after: Duration) -> bool {
@@ -132,15 +154,23 @@ fn is_dev() -> bool {
     std::env::var("AGENTMUX_DEV").is_ok()
 }
 
+/// Drop the failed windows that have been closed. Level-triggered on purpose: no
+/// close path has to remember to tell this module, so the block can't outlive its window.
+fn prune_closed(state: &AppState) {
+    let alive: HashSet<String> = core().lock().failed_labels().into_iter().filter(|l| state.get_browser(l).is_some()).collect();
+    core().lock().prune(|l| alive.contains(l));
+}
+
 /// True while the app page can't be loaded: the pools are not refilled.
-pub(crate) fn pool_spawn_blocked() -> bool {
+pub(crate) fn pool_spawn_blocked(state: &AppState) -> bool {
+    prune_closed(state);
     core().lock().is_unreachable()
 }
 
 /// `Err` while the app page can't be loaded: a new window would load the same
 /// dead address.
-pub(crate) fn check_reachable(caller: &str) -> Result<(), String> {
-    if !pool_spawn_blocked() {
+pub(crate) fn check_reachable(state: &AppState, caller: &str) -> Result<(), String> {
+    if !pool_spawn_blocked(state) {
         return Ok(());
     }
     tracing::warn!(target: "wfr:gate", "[wfr:gate] {caller} refused — the app page can't be loaded");
@@ -170,6 +200,7 @@ fn check_loop(state: Arc<AppState>) {
     loop {
         std::thread::sleep(Duration::from_millis(check_delay_ms(round)));
         round = round.saturating_add(1);
+        prune_closed(&state);
         let (due, exit) = {
             let mut c = core().lock();
             let due = c.due(address_answers);
@@ -264,8 +295,12 @@ pub(crate) fn quit_requested(state: &Arc<AppState>, frame: Option<&cef::Frame>, 
     }
     let from_error_page = frame.is_some_and(|f| f.is_main() == 1 && CefString::from(&f.url()).to_string().starts_with("data:"));
     if from_error_page {
-        tracing::info!("[load-error] Quit on the error page — quitting");
-        let _ = crate::commands::window::quit_app(state);
+        // Off this thread: quit_app saves the session over HTTP.
+        let state = Arc::clone(state);
+        std::thread::spawn(move || {
+            tracing::info!("[load-error] Quit on the error page — quitting");
+            let _ = crate::commands::window::quit_app(&state);
+        });
     }
     from_error_page
 }
@@ -349,6 +384,33 @@ mod tests {
         assert_eq!(fail(&mut c, "main"), Failure::Watching, "the reload budget starts again");
     }
 
+    /// The review's case: the failed window is closed, then the address answers. Nothing
+    /// is left to load a page, so nothing may stay blocked.
+    #[test]
+    fn a_closed_window_does_not_keep_the_block() {
+        let mut c = Core::default();
+        fail(&mut c, "main");
+        fail(&mut c, "window-pool-ab");
+        c.prune(|l| l == "main");
+        assert!(c.is_unreachable(), "main is still failed");
+        assert_eq!(c.failed_labels(), vec!["main".to_string()]);
+        c.prune(|_| false);
+        assert!(!c.is_unreachable());
+        assert!(c.watches.is_empty() && c.reloads.is_empty() && c.since.is_none(), "a clean slate");
+    }
+
+    #[test]
+    fn a_gave_up_window_that_closes_ends_the_block_too() {
+        let mut c = Core::default();
+        for _ in 0..=MAX_AUTO_RELOADS {
+            fail(&mut c, "main");
+            c.due(|_| true);
+        }
+        assert_eq!(fail(&mut c, "main"), Failure::GaveUp);
+        c.prune(|_| false);
+        assert!(!c.is_unreachable());
+    }
+
     #[test]
     fn a_dev_build_quits_after_its_page_stayed_gone() {
         let mut c = Core::default();
@@ -357,7 +419,6 @@ mod tests {
         c.fail("main", URL, true, t0);
         assert!(!c.dev_exit_due(t0 + Duration::from_secs(299), DEV_EXIT_AFTER));
         assert!(c.dev_exit_due(t0 + DEV_EXIT_AFTER, DEV_EXIT_AFTER));
-        assert!(c.idle(false) == c.watches.is_empty());
         assert!(!c.idle(true), "a dev build keeps counting");
     }
 

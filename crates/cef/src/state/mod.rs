@@ -1381,7 +1381,7 @@ impl AppState {
             );
             return Err("the app is shutting down".to_string());
         }
-        crate::client::page_unreachable::check_reachable(caller)
+        crate::client::page_unreachable::check_reachable(self, caller)
     }
 
     /// Phase B.5e — authoritative instance-number lookup. Reads

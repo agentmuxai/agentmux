@@ -886,11 +886,12 @@ wrap_request_handler! {
         ) -> ::std::os::raw::c_int {
             let (b, f) = (browser.as_deref().cloned(), frame.as_deref().cloned());
             // The load-error page's Quit button (an app window's, never a browser pane's).
-            let quit = {
+            // The lock is let go before the check: it may start a quit.
+            let (state, is_pane) = {
                 let inner = self.inner.lock();
-                !inner.is_browser_pane && super::page_unreachable::quit_requested(&inner.state, f.as_ref(), request.as_deref())
+                (inner.state.clone(), inner.is_browser_pane)
             };
-            if quit {
+            if !is_pane && super::page_unreachable::quit_requested(&state, f.as_ref(), request.as_deref()) {
                 return 1;
             }
             let cancel = self.inner.lock().on_before_browse(browser, frame, request, user_gesture, is_redirect);

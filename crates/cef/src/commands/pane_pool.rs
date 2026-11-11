@@ -310,7 +310,7 @@ pub fn spawn_pane_pool_window(state: &Arc<AppState>) {
     // instead of None. The early-return guard that blocked spawning on Windows
     // was not removed in that PR; removing it here enables the pool on Windows.
     // Also while the app page can't be loaded: a pool window would load the same dead address.
-    if state.is_quitting() || crate::client::page_unreachable::pool_spawn_blocked() {
+    if state.is_quitting() || crate::client::page_unreachable::pool_spawn_blocked(state) {
         return;
     }
     // Commit-pressure guard — see the matching comment in spawn_pool_window.
