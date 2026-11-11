@@ -1136,7 +1136,7 @@ pub(super) async fn handle_reactive_register(
                 None
             })
     };
-    if let Some(refusal) = super::pane_binding::register_refusal(&state, caller.as_deref(), uid.as_deref(), &sent_name, &req.agent_id).await {
+    if let Some(refusal) = super::pane_binding::register_refusal(&state, caller.as_deref(), &req.block_id, uid.as_deref(), &sent_name, &req.agent_id).await {
         return refusal;
     }
     // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24

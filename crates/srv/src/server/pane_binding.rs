@@ -50,10 +50,11 @@ pub(super) async fn handle_takeover(
 
 /// Why a `register` request is refused, if it is: `pane_uid` is the agent the pane belongs to (`None`
 /// for a pane with no agent, which any name may register), `sent` the name as sent and `routed` after
-/// sanitising.
+/// sanitising. A pane for an agent another live pane of this AgentMux already holds is refused too.
 pub(super) async fn register_refusal(
     state: &AppState,
     caller: Option<&Caller>,
+    block_id: &str,
     pane_uid: Option<&str>,
     sent: &str,
     routed: &str,
@@ -68,7 +69,35 @@ pub(super) async fn register_refusal(
     if !own {
         return Some(forbidden("FORBIDDEN: this pane belongs to another agent than the name sent"));
     }
-    actor::own_agent_only(caller, Some(uid)).err().map(|e| forbidden(&e))
+    if let Some(refusal) = actor::own_agent_only(caller, Some(uid)).err() {
+        return Some(forbidden(&refusal));
+    }
+    let store = crate::backend::agent_admission::lease_store_for(state.mstore.shared_agent_registry());
+    let uid_owned = uid.to_string();
+    let leased = tokio::task::spawn_blocking(move || store?.live_holder_block(&uid_owned).ok().flatten()).await.ok().flatten();
+    let holder = live_holder_elsewhere(&state.reactive_handler, leased, uid, block_id, |b| crate::backend::blockcontroller::get_controller(b).is_some())?;
+    tracing::warn!(uid, block_id, holder_block = %holder, "reactive register refused: the agent is already open in another pane of this AgentMux");
+    let error = crate::backend::blockcontroller::persistent::held_elsewhere_error(&holder, false);
+    Some((StatusCode::CONFLICT, Json(serde_json::json!({ "success": false, "error": error }))).into_response())
+}
+
+/// The pane that holds `uid` right now, when it is not `block_id` and still runs. Registering a second
+/// pane for the agent would move the agent's name, UID and relay entry to a pane that is refused its
+/// turns (identity eviction treats the newcomer as a respawn), and every message to the agent would
+/// then be refused at the pane it was routed to. The pane that holds the agent's lease is the holder;
+/// the registry's own entry stands in until one has claimed it.
+fn live_holder_elsewhere(
+    registry: &crate::backend::reactive::handler::ReactiveHandler,
+    leased: Option<String>,
+    uid: &str,
+    block_id: &str,
+    is_live: impl Fn(&str) -> bool,
+) -> Option<String> {
+    let holder = match leased {
+        Some(block) => block,
+        None => registry.get_agent(uid)?.block_id,
+    };
+    (holder != block_id && is_live(&holder)).then_some(holder)
 }
 
 /// Why an `unregister` request is refused, if it is: a caller with a token may unregister its own panes only.
@@ -141,6 +170,32 @@ mod tests {
         let (status, v) = post(&state, Some(&token), register, json!({ "agent_id": "pb-alpha", "block_id": "pb-block-a" })).await;
         assert_ne!(status, StatusCode::FORBIDDEN, "an agent registers its own pane: {v}");
         let _ = state.reactive_handler.unregister_block("pb-block-a");
+    }
+
+    #[test]
+    fn a_second_pane_does_not_displace_the_live_pane_that_holds_the_agent() {
+        let registry = crate::backend::reactive::handler::ReactiveHandler::new();
+        registry.register_agent_full("Masty", "holder-block", None, 1, Some("masty"), Some("uid-masty"), "test").unwrap();
+        let holder = |block: &str, live: bool| super::live_holder_elsewhere(&registry, None, "uid-masty", block, |_| live);
+        assert_eq!(holder("second-block", true).as_deref(), Some("holder-block"), "the second pane is refused");
+        assert_eq!(holder("holder-block", true), None, "the holder re-registers itself");
+        assert_eq!(holder("second-block", false), None, "a holder whose pane is gone is replaced");
+        assert_eq!(super::live_holder_elsewhere(&registry, None, "uid-other", "second-block", |_| true), None, "another agent");
+    }
+
+    /// An old pane of the agent that registered first, with a controller that was never admitted, must not
+    /// shut the pane that holds the lease out of the registry.
+    #[test]
+    fn the_pane_that_holds_the_lease_registers_over_an_older_pane_that_does_not() {
+        let registry = crate::backend::reactive::handler::ReactiveHandler::new();
+        registry.register_agent_full("Masty", "stale-block", None, 0, Some("masty"), Some("uid-masty"), "test").unwrap();
+        let leased = || Some("holder-block".to_string());
+        assert_eq!(super::live_holder_elsewhere(&registry, leased(), "uid-masty", "holder-block", |_| true), None);
+        assert_eq!(
+            super::live_holder_elsewhere(&registry, leased(), "uid-masty", "stale-block", |_| true).as_deref(),
+            Some("holder-block"),
+            "the older pane is the one refused"
+        );
     }
 
     #[tokio::test]

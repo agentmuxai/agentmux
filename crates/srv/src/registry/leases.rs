@@ -499,6 +499,21 @@ impl LeaseStore {
     }
 }
 
+impl LeaseStore {
+    /// The pane that holds `instance_id`'s lease right now, whichever AgentMux process it belongs to: none
+    /// when nobody holds it, or the lease is expired, dead or has no block recorded. Read-only.
+    pub fn live_holder_block(&self, instance_id: &str) -> std::io::Result<Option<String>> {
+        let _cs = CriticalSection::enter(&self.lock_path(instance_id))?;
+        Ok(match Self::read(&self.content_path(instance_id))? {
+            OnDisk::Valid(f) => {
+                let age_ms = (now_ms() - f.renewed_at_ms).max(0) as u64;
+                (age_ms <= self.ttl_ms && !holder_is_dead(&f) && !f.block_id.is_empty()).then_some(f.block_id)
+            }
+            OnDisk::Missing | OnDisk::Unreadable { .. } => None,
+        })
+    }
+}
+
 /// Does `file` belong to `block_id`? A lease written before block ids were
 /// compared (empty) matches any block of its owner.
 fn same_block(file: &LeaseFile, block_id: &str) -> bool {
