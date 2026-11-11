@@ -1,0 +1,164 @@
+-- nothing selected
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-empty">
+    "Select a file to preview it."
+-- select folder
+-- folder
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-folder files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "src"
+    <div class="files-preview-facts">
+      "T1700000000000"
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open folder"
+-- select image
+fetchMediaBlob /home/me/shot.png {"maxBytes":26214400,"blockId":"blk-1"}
+createObjectURL blob:img-1
+-- image
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-media">
+    <img src="blob:img-1" alt="shot.png">
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+-- select svg image
+abort /home/me/shot.png
+fetchMediaBlob /home/me/logo.svg {"maxBytes":26214400,"blockId":"blk-1","type":"image/svg+xml"}
+createObjectURL blob:img-2
+revokeObjectURL blob:img-1
+-- svg image
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-media">
+    <img src="blob:img-2" alt="logo.svg">
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+-- select code
+abort /home/me/logo.svg
+fetchMediaRange /home/me/main.rs 0-262143 {"blockId":"blk-1"}
+revokeObjectURL blob:img-2
+-- code
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="rust" class="files-preview-code">
+      "hello"
+-- select code, language from the first line
+abort /home/me/main.rs
+fetchMediaRange /home/me/script 0-262143 {"blockId":"blk-1"}
+-- code, language from the first line
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="python" class="files-preview-code">
+      "#!/usr/bin/env python print(1)"
+-- select markdown
+abort /home/me/script
+fetchMediaRange /home/me/notes.md 0-262143 {"blockId":"blk-1"}
+-- markdown
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <div class="files-preview-md">
+      <div data-markdown="" data-scrollable="false">
+        "# Title body"
+-- select empty file
+abort /home/me/notes.md
+-- empty file
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="text" class="files-preview-code">
+-- select empty markdown file
+-- empty markdown file
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <div class="files-preview-md">
+      <div data-markdown="" data-scrollable="false">
+-- select video
+-- video
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-film files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "clip.mp4"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Play in a Media pane"
+-- select audio
+-- audio
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-film files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "song.mp3"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Play in a Media pane"
+-- select binary
+fetchMediaRange /home/me/tool.dat 0-262143 {"blockId":"blk-1"}
+-- binary
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-file files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "tool.dat"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <div class="files-preview-facts">
+      "No preview: not a text file."
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open with default app"
+-- select error entry
+abort /home/me/tool.dat
+-- error entry
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-file files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "locked.txt"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <div class="files-preview-facts">
+      "Permission denied"
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open with default app"
+-- select image too large
+-- image too large
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-file files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "huge.png"
+    <div class="files-preview-facts">
+      "30.0 MB · T1700000000000"
+    <div class="files-preview-facts">
+      "Too large to preview."
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open with default app"
+-- select range ignored
+fetchMediaRange /home/me/ignored.bin 0-262143 {"blockId":"blk-1"}
+-- range ignored
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-file files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "ignored.bin"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <div class="files-preview-facts">
+      "No preview."
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open with default app"
+-- select no size or time
+abort /home/me/ignored.bin
+fetchMediaRange /home/me/bare.txt 0-262143 {"blockId":"blk-1"}
+-- no size or time
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="text" class="files-preview-code">
+      "hello"
+-- select nothing selected again
+abort /home/me/bare.txt
+-- nothing selected again
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-empty">
+    "Select a file to preview it."
