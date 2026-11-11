@@ -53,7 +53,13 @@ import { setKeyUtilPlatform } from "@/util/keyutil";
 import { render } from "solid-js/web";
 import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { forgetWindowId, previousWindowId, reattachableWindow, rememberWindowId } from "@/app/init/reload-window-id";
+import {
+    forgetWindowId,
+    previousWindowId,
+    reattachableWindow,
+    rememberWindowId,
+    replacedWindow,
+} from "@/app/init/reload-window-id";
 import { isHostApp } from "@/app/init/host-detect";
 import { failStartup, showStartupError, StartupFailureHandled } from "@/app/init/error-display";
 import { describeError, formatDescribedError } from "@/app/errors/error-report";
@@ -342,6 +348,12 @@ async function initHostMux(): Promise<void> {
     }
 }
 
+/** Row reads for a starting window. They retry a request that never got a response (#3868). */
+const windowRow = (id: string) =>
+    withTimeout(retryTransient(() => WindowService.GetWindow(id)), RPC_TIMEOUT, "GetWindow");
+const workspaceRow = (id: string) =>
+    withTimeout(retryTransient(() => WorkspaceService.GetWorkspace(id)), RPC_TIMEOUT, "GetWorkspace");
+
 /**
  * Initialize a new (non-main) host window by creating new backend objects.
  * Unlike initHostMux() which reuses existing Window/Workspace/Tab,
@@ -370,22 +382,21 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
         );
         tlog("GetClientData", t);
 
-        // If this window was opened for a tear-off, the workspace ID is in the URL.
-        // Pass it to CreateWindow so the backend reuses the existing workspace+tab
-        // instead of creating a blank one.
-        const tearOffWsId = new URLSearchParams(window.location.search).get("workspaceId") ?? "";
-        if (tearOffWsId) {
-            getApi().sendLog(`[initCefNewWindow] tear-off workspaceId=${tearOffWsId}`);
-        }
-
         // A reload of this window re-attaches to its own row (reload-window-id.ts).
         t = performance.now();
-        const reattached = await reattachableWindow(
-            clientData.windowids,
-            currentWindowLabel(),
-            (id) => withTimeout(retryTransient(() => WindowService.GetWindow(id)), RPC_TIMEOUT, "GetWindow"),
-            (id) => withTimeout(retryTransient(() => WorkspaceService.GetWorkspace(id)), RPC_TIMEOUT, "GetWorkspace")
-        );
+        const reattached = await reattachableWindow(clientData.windowids, currentWindowLabel(), windowRow, workspaceRow);
+        // If this window was opened for a tear-off, the workspace ID is in the URL;
+        // one recreated after a crash takes the workspace of the window it replaces.
+        // Pass it to CreateWindow so the backend reuses the existing workspace+tab
+        // instead of creating a blank one.
+        const replaced = reattached ? undefined : await replacedWindow(clientData.windowids, windowRow, workspaceRow);
+        const tearOffWsId =
+            new URLSearchParams(window.location.search).get("workspaceId") || replaced?.workspaceid || "";
+        if (tearOffWsId) {
+            getApi().sendLog(
+                `[initCefNewWindow] ${replaced ? `recreated in place of window ${replaced.oid}` : "tear-off"} workspaceId=${tearOffWsId}`
+            );
+        }
         if (reattached) getApi().sendLog(`[initCefNewWindow] reload: re-attached to window ${reattached.oid}`);
         // No window is open (AgentMux stayed in the tray after its last
         // window closed): bring that window back, not the default panes.
@@ -416,8 +427,9 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
                 restoreLast,
                 seedView ?? undefined,
                 seedMeta ?? undefined,
-                // A reload keeps this window's own theme and opacity.
-                previousWindowId(),
+                // A reload keeps this window's own theme and opacity; a recreated
+                // window takes those of the one it replaces.
+                previousWindowId() ?? replaced?.oid,
                 anotherWindowOpening
             ),
             // A restore can wait for the last close and its agents' teardown.
