@@ -1,0 +1,36 @@
+-- select truncated text
+fetchMediaRange /home/me/big.log 0-262143 {"blockId":"blk-1"}
+-- truncated text
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="text" class="files-preview-code">
+      "line one line two"
+    <div class="files-preview-more">
+      "Showing the first"
+      "256 KB"
+      "."
+      <button type="button" class="ui-button ui-tone-accent ui-button--link">
+        "Open the whole file"
+-- select whole file in range
+abort /home/me/big.log
+fetchMediaRange /home/me/exact.log 0-262143 {"blockId":"blk-1"}
+-- whole file in range
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="text" class="files-preview-code">
+      "abc"
+-- select truncated markdown
+abort /home/me/exact.log
+fetchMediaRange /home/me/big.md 0-262143 {"blockId":"blk-1"}
+-- truncated markdown
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <div class="files-preview-md">
+      <div data-markdown="" data-scrollable="false">
+        "# Big"
+    <div class="files-preview-more">
+      "Showing the first"
+      "256 KB"
+      "."
+      <button type="button" class="ui-button ui-tone-accent ui-button--link">
+        "Open the whole file"
