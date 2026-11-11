@@ -14,6 +14,7 @@
 import * as MOS from "@/app/store/mos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { createSignal, onCleanup, type Accessor } from "solid-js";
 
 export const SPEND_TODAY_META_KEY = "agent:spend_today";
 export const SPEND_WARNING_META_KEY = "agent:spend_warning";
@@ -55,17 +56,53 @@ function readCard(raw: unknown): SpendCard | null {
     return { at: num(r.at) ?? 0, scope: r.scope === "route" ? "route" : "agent", cap, spent, route: str(r.route), place: str(r.place) };
 }
 
-/** The pane's stop card, or null (absent, not the shape srv writes, or dismissed for this stop). */
-export function readSpendStopped(meta: Record<string, unknown> | null | undefined): SpendCard | null {
+/** Whether a card was written on an earlier UTC day than `now`'s: the gateway's day has turned since, so it no longer holds. */
+const fromEarlierDay = (card: SpendCard, now: number): boolean => card.at > 0 && Math.floor(card.at / DAY_MS) < Math.floor(now / DAY_MS);
+
+/** The pane's stop card, or null (absent, not the shape srv writes, from an earlier UTC day, or dismissed for this stop). */
+export function readSpendStopped(meta: Record<string, unknown> | null | undefined, now: number = Date.now()): SpendCard | null {
     const card = readCard(meta?.[SPEND_STOPPED_META_KEY]);
-    if (!card) return null;
+    if (!card || fromEarlierDay(card, now)) return null;
     return num(meta?.[SPEND_DISMISSED_META_KEY]) === card.at ? null : card;
 }
 
-/** The 80% warning, or null; it goes when the stop shows. */
-export function readSpendWarning(meta: Record<string, unknown> | null | undefined): SpendCard | null {
-    if (meta?.[SPEND_STOPPED_META_KEY] != null) return null;
-    return readCard(meta?.[SPEND_WARNING_META_KEY]);
+/** The 80% warning, or null (absent, from an earlier UTC day, or the stop shows instead). */
+export function readSpendWarning(meta: Record<string, unknown> | null | undefined, now: number = Date.now()): SpendCard | null {
+    const stop = readCard(meta?.[SPEND_STOPPED_META_KEY]);
+    if (stop && !fromEarlierDay(stop, now)) return null;
+    const card = readCard(meta?.[SPEND_WARNING_META_KEY]);
+    return card && !fromEarlierDay(card, now) ? card : null;
+}
+
+/** The UTC day number, read again just after each UTC midnight, so a card read against it expires without another event. */
+export function createUtcDay(): Accessor<number> {
+    const today = () => Math.floor(Date.now() / DAY_MS);
+    const [day, setDay] = createSignal(today());
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+        timer = setTimeout(() => {
+            setDay(today());
+            arm();
+        }, DAY_MS - (Date.now() % DAY_MS) + 1000);
+    };
+    arm();
+    onCleanup(() => clearTimeout(timer));
+    return day;
+}
+
+/** The pane's stop card and warning, each gone once its UTC day is over without waiting for another event from srv. */
+export function createSpendCards(meta: Accessor<Record<string, unknown> | null | undefined>) {
+    const day = createUtcDay();
+    return {
+        stopped: () => {
+            day();
+            return readSpendStopped(meta());
+        },
+        warning: () => {
+            day();
+            return readSpendWarning(meta());
+        },
+    };
 }
 
 /** Today's figure for the chips, or null when none was written or it is from an earlier UTC day. */

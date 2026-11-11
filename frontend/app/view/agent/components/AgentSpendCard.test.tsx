@@ -10,7 +10,7 @@ import { SpendChip } from "./SpendChip";
 afterEach(cleanup);
 
 const card = (over: Record<string, unknown> = {}): SpendCard =>
-    readSpendStopped({ [SPEND_STOPPED_META_KEY]: { at: 1, scope: "agent", cap: 20, spent: 20.1, route: "openrouter", place: "OpenRouter", ...over } })!;
+    readSpendStopped({ [SPEND_STOPPED_META_KEY]: { at: Date.now(), scope: "agent", cap: 20, spent: 20.1, route: "openrouter", place: "OpenRouter", ...over } })!;
 const button = (c: HTMLElement, text: string) => [...c.querySelectorAll("button")].find((b) => b.textContent?.includes(text)) as HTMLButtonElement;
 const none = () => null;
 
@@ -34,7 +34,7 @@ describe("AgentSpendCard", () => {
         fireEvent.click(button(container, "Reset today"));
         await waitFor(() => expect(onReset).toHaveBeenCalled());
         fireEvent.click(button(container, "Dismiss"));
-        expect(onDismiss).toHaveBeenCalledWith(expect.objectContaining({ at: 1 }));
+        expect(onDismiss).toHaveBeenCalledWith(expect.objectContaining({ at: expect.any(Number) }));
     });
 
     it("shows the reason when srv refuses", async () => {

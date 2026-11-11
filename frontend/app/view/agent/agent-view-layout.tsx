@@ -41,7 +41,7 @@ import { createMessagesPanelControls, MessagesPanelContext } from "./messages/me
 import { MessagesPanel } from "./messages/MessagesPanel";
 import { compactThenSwitch } from "./compact-then-switch";
 import { dismissModelUndone, readModelUndone, type ModelUndone } from "./model-undone";
-import { dismissSpendStopped, readSpendStopped, readSpendWarning, resetSpendToday, setSpendCap } from "./spend-stopped";
+import { createSpendCards, dismissSpendStopped, resetSpendToday, setSpendCap } from "./spend-stopped";
 import { openOrFocusHistoryTab } from "./open-history-tab";
 import { countImages } from "./components/runtime-dropup-routes";
 import { AgentTopBand } from "./top-band/AgentTopBand";
@@ -262,6 +262,7 @@ function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
     const { commands, paneBusy } = sending;
     const { account } = failure;
     const compactThenSwitchTo = compactThenSwitchFor(model.blockId, commands, paneModel);
+    const spendCards = createSpendCards(() => block()?.meta);
     return (
         <>
             {/* Login, decisions, questions, queue, recovery banners, activity dock,
@@ -300,8 +301,8 @@ function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
             />
             {/* An agent on a model route near or at its daily spend cap (spend-stopped.ts). */}
             <AgentSpendCard
-                stopped={() => readSpendStopped(block()?.meta)}
-                warning={() => readSpendWarning(block()?.meta)}
+                stopped={spendCards.stopped}
+                warning={spendCards.warning}
                 onRaise={(cap) => setSpendCap(model.blockId, cap)}
                 onReset={() => resetSpendToday(model.blockId)}
                 onDismiss={(card) => void dismissSpendStopped(model.blockId, card)}
