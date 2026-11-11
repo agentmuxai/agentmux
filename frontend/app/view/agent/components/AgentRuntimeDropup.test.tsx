@@ -33,6 +33,11 @@ vi.mock("../process-runtime", async (importOriginal) => ({
 }));
 
 const patchRuntime = vi.fn();
+// An srv with no routes for the harness: the panel is the harness's own models, and has no "couldn't be read" note.
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: { AgentModelPanelCommand: async () => ({ harness: "claude", current: null, previous: null, routes: [] }) },
+}));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("../runtime-apply", () => ({
     applyRuntimeChange: vi.fn().mockResolvedValue(undefined),
     patchRuntime: (...args: unknown[]) => patchRuntime(...args),
