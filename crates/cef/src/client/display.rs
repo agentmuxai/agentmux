@@ -256,7 +256,7 @@ impl AgentMuxHandler {
             // A Views pane's page names its pane (the event below), never a window: its browser
             // reports the app window as its own, so the page's title became the window's (seen
             // on Linux, and on Windows with Views panes).
-            None if pane_block.is_some() && crate::pane_backend::views() => {}
+            None if pane_block.as_deref().is_some_and(|b| crate::pane_backend::pane_is_views(&self.state, b)) => {}
             None => set_window_title(&mut browser, had_title.then_some(display_title_str.as_str())),
         }
 

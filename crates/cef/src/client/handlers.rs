@@ -190,7 +190,7 @@ wrap_focus_handler! {
         fn on_got_focus(&self, browser: Option<&mut Browser>) {
             if let Some(browser) = browser {
                 if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
-                    if crate::pane_backend::views() {
+                    if crate::pane_backend::pane_is_views(&self.state, &block) {
                         crate::input_owner::views::pane_focus_gained(&self.state, &block);
                     } else {
                         #[cfg(target_os = "windows")]
@@ -217,8 +217,9 @@ wrap_focus_handler! {
             // pane, not the page taking focus by itself (`pane_chosen` leaves
             // out a pane being created and focus the input owner gave itself).
             #[cfg(not(target_os = "macos"))]
-            if source == FocusSource::SYSTEM && crate::pane_backend::views() {
-                if let Some(block) = browser.and_then(|b| crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)) {
+            if source == FocusSource::SYSTEM {
+                let block = browser.and_then(|b| crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b));
+                if let Some(block) = block.filter(|b| crate::pane_backend::pane_is_views(&self.state, b)) {
                     crate::input_owner::views::pane_chosen(&self.state, &block);
                 }
             }

@@ -548,6 +548,24 @@ fn should_send_resize_tick(shift_held: bool, shift_held_last_tick: bool) -> bool
     shift_held || shift_held_last_tick
 }
 
+/// The window `hwnd` has its new size (CEF has handled its `WM_SIZE`): move its
+/// shown child-window browser panes now, in this UI-thread turn, instead of when
+/// the page has laid out and sent their rects. A busy page takes frames to do
+/// that, and the panes trail the chrome around them (`bounds::follow_window_resize`).
+/// Not for a window with Views panes, which wait for the page's rects.
+fn follow_window_size(hwnd: *mut std::ffi::c_void) {
+    let install_label = WINDOW_EDGE_RESIZE_WNDPROCS
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&(hwnd as usize)).map(|e| e.install_label.clone()));
+    let state = window_edge_resize_app_state().get();
+    let Some(label) = state.and_then(|state| state.label_for_hwnd(hwnd)).or(install_label) else { return };
+    let views = state.map_or_else(crate::pane_backend::views, |state| crate::pane_backend::window_is_views(state, &label));
+    if !views {
+        crate::browser_panes::bounds::follow_window_resize(&label);
+    }
+}
+
 /// Window-edge-resize hook body — observes the native size loop and
 /// forwards it to the renderer so Shift+window-edge resize can feed the
 /// entire delta to the edge pane(s):
@@ -756,24 +774,10 @@ unsafe extern "system" fn window_edge_resize_wndproc(
         }
     }
 
-    // The window has its new size (CEF handled WM_SIZE above): move its shown
-    // browser panes now, in this UI-thread turn, instead of when the page has
-    // laid out and sent their rects. A busy page takes frames to do that, and
-    // the panes trail the chrome around them (`bounds::follow_window_resize`).
-    // Not for a minimize (no size to follow), nor for Views panes, which wait for the page's rects.
+    // Not for a minimize, which has no size to follow.
     const SIZE_MINIMIZED: usize = 1;
-    if msg == WM_SIZE && wparam != SIZE_MINIMIZED && !crate::pane_backend::views() {
-        let install_label = WINDOW_EDGE_RESIZE_WNDPROCS
-            .lock()
-            .ok()
-            .and_then(|m| m.get(&(hwnd as usize)).map(|e| e.install_label.clone()));
-        let label = window_edge_resize_app_state()
-            .get()
-            .and_then(|state| state.label_for_hwnd(hwnd))
-            .or(install_label);
-        if let Some(label) = label {
-            crate::browser_panes::bounds::follow_window_resize(&label);
-        }
+    if msg == WM_SIZE && wparam != SIZE_MINIMIZED {
+        follow_window_size(hwnd);
     }
 
     // Prune AFTER passthrough so the original proc still receives

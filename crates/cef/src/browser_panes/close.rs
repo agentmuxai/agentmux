@@ -97,8 +97,9 @@ impl BrowserPaneManager {
         crate::client::downloads::forget_pane(block_id);
         // The page is going: its references (and a Vault fill's, which rides on them) end with it.
         state.browser_api.ref_tables.forget(block_id);
+        let views = crate::pane_backend::label_is_views(&label);
         #[cfg(target_os = "windows")]
-        if !crate::pane_backend::views() {
+        if !views {
             crate::input_owner::windows::pane_closing(state, block_id);
             let ops = AppStateCloseOps(state);
             Self::close_with(&label, &ops);
@@ -113,15 +114,13 @@ impl BrowserPaneManager {
         // CompleteBrowserPaneClose has removed it, so it can't report the pane
         // gone; a stale entry would leave the old window owning a pane that a
         // redock recreates elsewhere.
-        if crate::pane_backend::views() {
+        if views {
             crate::input_owner::views::pane_closing(state, block_id);
             crate::input_owner::views::pane_gone(state, block_id);
-        }
-        // Linux/macOS — Views path. Marshal the BrowserView detach onto the
-        // CEF UI thread (remove_child_view is UI-thread-only); the underlying
-        // Browser's on_before_close fires asynchronously and clears
-        // state.browsers via the existing callback (callbacks::on_before_close_browser_pane).
-        if crate::pane_backend::views() {
+            // Marshal the BrowserView detach onto the CEF UI thread
+            // (remove_child_view is UI-thread-only); the underlying Browser's
+            // on_before_close fires asynchronously and clears state.browsers via
+            // the existing callback (callbacks::on_before_close_browser_pane).
             let mut task = DetachBrowserPaneViewTask::new(state.clone(), label.clone());
             cef::post_task(cef::ThreadId::UI, Some(&mut task));
         }
@@ -219,13 +218,14 @@ impl BrowserPaneManager {
             crate::client::downloads::forget_pane(&block_id);
             state.browser_api.ref_tables.forget(&block_id);
             // As in close(): the async on_before_close drain also destroys the pane HWND.
-            #[cfg(target_os = "windows")]
-            if !crate::pane_backend::views() {
+            if crate::pane_backend::label_is_views(label) {
+                crate::input_owner::views::pane_gone(state, &block_id);
+            } else {
+                #[cfg(target_os = "windows")]
                 crate::input_owner::windows::pane_gone(state, &block_id);
             }
-            if crate::pane_backend::views() {
-                crate::input_owner::views::pane_gone(state, &block_id);
-            }
+            // The last place that asks which kind this pane was.
+            crate::pane_backend::forget_pane(label);
             // PR #6 H.7 kick — see `close()` for rationale. The
             // on_before_close path is the async drain; pool refill that
             // was deferred while the pane was Closing should now resume.

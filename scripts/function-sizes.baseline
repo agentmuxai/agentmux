@@ -40,7 +40,7 @@
 113 crates/cef/src/client/navigation.rs::render_load_error_html
 190 crates/cef/src/client/wndproc.rs::install_top_level_focus_restore_hook
 150 crates/cef/src/client/wndproc.rs::install_top_level_focus_restore_hook::wndproc_hook
-199 crates/cef/src/client/wndproc.rs::window_edge_resize_wndproc
+185 crates/cef/src/client/wndproc.rs::window_edge_resize_wndproc
 148 crates/cef/src/commands/cli_login.rs::open_login_terminal
 253 crates/cef/src/commands/cli_login.rs::run_cli_login
 300 crates/cef/src/commands/cli_login.rs::run_cli_login_pty

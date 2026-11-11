@@ -22,12 +22,12 @@ use crate::state::AppState;
 /// returns true to CEF); false to let the close go on as before.
 #[cfg(target_os = "windows")]
 pub(crate) fn held_back(state: &AppState, browser: &mut Browser) -> bool {
-    if crate::pane_backend::views() {
-        return false;
-    }
     let Some(block_id) = state.block_id_for_browser(browser) else {
         return false;
     };
+    if crate::pane_backend::pane_is_views(state, &block_id) {
+        return false;
+    }
     // Routed to the pane's own window (a torn-off pane has its own JS
     // context), like `browser-pane-clicked`.
     match state.browser_pane_window_label(&block_id) {

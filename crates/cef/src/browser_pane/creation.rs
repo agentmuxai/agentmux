@@ -84,7 +84,7 @@ wrap_task! {
                 post_delayed_task(ThreadId::UI, Some(&mut again), 100);
             };
 
-            if crate::pane_backend::views() {
+            if crate::pane_backend::note_pane_created(&self.state, &self.label, &self.window_label) {
                 let jar = match identity::pane_jar_step(&self.block_id, &self.label, cache_root.as_deref(), still_wanted) {
                     PaneJarStep::Create(jar) => jar,
                     PaneJarStep::Retry => return retry_later(),

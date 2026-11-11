@@ -383,7 +383,7 @@ impl BrowserPaneManager {
         window_label: &str,
         overlay_rects: &[(i32, i32, i32, i32)],
     ) {
-        if crate::pane_backend::views() {
+        if crate::pane_backend::window_is_views(state, window_label) {
             self.set_pane_overlay_clip_views(state, window_label, overlay_rects);
         } else {
             #[cfg(target_os = "windows")]
@@ -428,14 +428,15 @@ impl BrowserPaneManager {
     pub fn focus(&self, block_id: &str, state: &Arc<AppState>) {
         // Windows: a selection for the window's input owner, which moves the
         // keyboard (`give_keyboard`) on the UI thread if and when it should.
+        let views = crate::pane_backend::pane_is_views(state, block_id);
         #[cfg(target_os = "windows")]
-        if !crate::pane_backend::views() {
+        if !views {
             crate::input_owner::windows::select_pane(state, block_id);
         }
         // macOS and Linux: the same, through the Views adapter (macOS: the page
         // only gets keystrokes while its overlay NSWindow is the key window).
         // A pane that can't take focus yet keeps the selection until it can.
-        if crate::pane_backend::views() {
+        if views {
             crate::input_owner::views::select_pane(state, block_id);
         }
     }
