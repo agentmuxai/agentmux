@@ -203,6 +203,8 @@ const grants = (rows: unknown[] = [row()], over: Record<string, unknown> = {}) =
     rows,
     presets: [PRESET],
     powers: ["terminal", "terminal_ask"],
+    permission_kinds: ["camera", "microphone", "location", "notifications"],
+    permissions: [],
     ...over,
 });
 const loaded = (rows?: unknown[], over?: Record<string, unknown>) =>

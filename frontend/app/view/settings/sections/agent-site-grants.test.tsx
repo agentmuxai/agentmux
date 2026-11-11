@@ -47,6 +47,8 @@ const result = (rows = [row()]) => ({
     rows,
     presets: [{ id: "google-cloud-shell", label: "Google Cloud Shell", sites: ["https://shell.cloud.google.com"], note: "Not yet checked." }],
     powers: ["terminal"],
+    permission_kinds: ["camera", "microphone", "location", "notifications"],
+    permissions: [],
 });
 
 describe("AgentSiteGrants", () => {

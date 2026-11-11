@@ -59,6 +59,36 @@ store.follow
         "Google Cloud Shell"
       <span class="setting-devices-empty">
         "Choose an agent first."
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
+        <span class="setting-devices-empty">
+          "Choose an agent above first."
 -- an agent and a site
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
@@ -117,6 +147,34 @@ store.follow
         "Consoles, with the terminal:"
       <span data-stand="Button" data-disabled="false" data-title="https://shell.cloud.google.com. Not yet checked.">
         "Google Cloud Shell"
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
 -- terminal on
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
@@ -175,6 +233,34 @@ store.follow
         "Consoles, with the terminal:"
       <span data-stand="Button" data-disabled="false" data-title="https://shell.cloud.google.com. Not yet checked.">
         "Google Cloud Shell"
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
 -- terminal, ask first
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
@@ -233,6 +319,34 @@ store.follow
         "Consoles, with the terminal:"
       <span data-stand="Button" data-disabled="false" data-title="https://shell.cloud.google.com. Not yet checked.">
         "Google Cloud Shell"
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
 -- terminal off again
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
@@ -291,9 +405,37 @@ store.follow
         "Consoles, with the terminal:"
       <span data-stand="Button" data-disabled="false" data-title="https://shell.cloud.google.com. Not yet checked.">
         "Google Cloud Shell"
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
 Button "Allow" click
 BrowserGrantsSetCommand {"agent":"naki-2","site":"shell.example.com","powers":[]}
-store.set {"grants":{"rows":[{"id":"r2","agent":"naki-2","origins":["https://shell.cloud.google.com","https://ssh.cloud.google.com"],"powers":["terminal"],"granted_at_ms":1799989200000}],"presets":[{"id":"google-cloud-shell","label":"Google Cloud Shell","sites":["https://shell.cloud.google.com"],"note":"Not yet checked."}],"powers":["terminal","terminal_ask"]},"agents":[{"id":"id-naki-2","slug":"naki-2","name":"Naki-2","updated_at":10},{"id":"id-agent1","slug":"agent1","name":"Agent1","last_active_at":900},{"id":"id-nameless","slug":"nameless","name":"","updated_at":5}]}
+store.set {"grants":{"rows":[{"id":"r2","agent":"naki-2","origins":["https://shell.cloud.google.com","https://ssh.cloud.google.com"],"powers":["terminal"],"granted_at_ms":1799989200000}],"presets":[{"id":"google-cloud-shell","label":"Google Cloud Shell","sites":["https://shell.cloud.google.com"],"note":"Not yet checked."}],"powers":["terminal","terminal_ask"],"permission_kinds":["camera","microphone","location","notifications"],"permissions":[]},"agents":[{"id":"id-naki-2","slug":"naki-2","name":"Naki-2","updated_at":10},{"id":"id-agent1","slug":"agent1","name":"Agent1","last_active_at":900},{"id":"id-nameless","slug":"nameless","name":"","updated_at":5}]}
 -- added with no powers
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
@@ -352,8 +494,36 @@ store.set {"grants":{"rows":[{"id":"r2","agent":"naki-2","origins":["https://she
         "Consoles, with the terminal:"
       <span data-stand="Button" data-disabled="false" data-title="https://shell.cloud.google.com. Not yet checked.">
         "Google Cloud Shell"
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
 BrowserGrantsSetCommand {"agent":"agent1","site":"a.example.com","powers":["terminal_ask"]}
-store.set {"grants":{"rows":[{"id":"r2","agent":"naki-2","origins":["https://shell.cloud.google.com","https://ssh.cloud.google.com"],"powers":["terminal"],"granted_at_ms":1799989200000}],"presets":[{"id":"google-cloud-shell","label":"Google Cloud Shell","sites":["https://shell.cloud.google.com"],"note":"Not yet checked."}],"powers":["terminal","terminal_ask"]},"agents":[{"id":"id-naki-2","slug":"naki-2","name":"Naki-2","updated_at":10},{"id":"id-agent1","slug":"agent1","name":"Agent1","last_active_at":900},{"id":"id-nameless","slug":"nameless","name":"","updated_at":5}]}
+store.set {"grants":{"rows":[{"id":"r2","agent":"naki-2","origins":["https://shell.cloud.google.com","https://ssh.cloud.google.com"],"powers":["terminal"],"granted_at_ms":1799989200000}],"presets":[{"id":"google-cloud-shell","label":"Google Cloud Shell","sites":["https://shell.cloud.google.com"],"note":"Not yet checked."}],"powers":["terminal","terminal_ask"],"permission_kinds":["camera","microphone","location","notifications"],"permissions":[]},"agents":[{"id":"id-naki-2","slug":"naki-2","name":"Naki-2","updated_at":10},{"id":"id-agent1","slug":"agent1","name":"Agent1","last_active_at":900},{"id":"id-nameless","slug":"nameless","name":"","updated_at":5}]}
 -- added with Enter, ask first
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
@@ -412,6 +582,34 @@ store.set {"grants":{"rows":[{"id":"r2","agent":"naki-2","origins":["https://she
         "Consoles, with the terminal:"
       <span data-stand="Button" data-disabled="false" data-title="https://shell.cloud.google.com. Not yet checked.">
         "Google Cloud Shell"
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
 Button "Allow" click
 BrowserGrantsSetCommand {"agent":"agent1","site":"bad.example.com","powers":["terminal_ask"]}
 -- the add failed, the site kept
@@ -474,6 +672,34 @@ BrowserGrantsSetCommand {"agent":"agent1","site":"bad.example.com","powers":["te
         "Consoles, with the terminal:"
       <span data-stand="Button" data-disabled="false" data-title="https://shell.cloud.google.com. Not yet checked.">
         "Google Cloud Shell"
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
 -- Enter with no agent adds nothing
 <div>
   <div class="setting-row agent-site-grants" id="setting-browser.agent_sites">
@@ -536,3 +762,33 @@ BrowserGrantsSetCommand {"agent":"agent1","site":"bad.example.com","powers":["te
         "Google Cloud Shell"
       <span class="setting-devices-empty">
         "Choose an agent first."
+    <div class="agent-site-permissions">
+      <h4 class="agent-site-permissions-title">
+        "Page permissions"
+      <div class="setting-devices-description">
+        "Sites where a page may use the camera, the microphone, the location or notifications in a pane an agent drives, without a countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto."
+      <div class="setting-devices-empty">
+        "No site has a standing page permission. Each request is asked in the pane."
+      <div class="agent-site-grants-add">
+        <input data-stand="TextInput" data-detached="true" aria-label="Site for page permissions" placeholder="meet.example.com" data-value="">
+        <div class="agent-site-grant-powers" role="group" aria-label="the new site">
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Camera: the new site" checked=false>
+            <span>
+              "Camera"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Microphone: the new site" checked=false>
+            <span>
+              "Microphone"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Location: the new site" checked=false>
+            <span>
+              "Location"
+          <label class="agent-site-grant-power">
+            <input type="checkbox" aria-label="Notifications: the new site" checked=false>
+            <span>
+              "Notifications"
+        <span data-stand="Button" data-disabled="true">
+          "Allow on this site"
+        <span class="setting-devices-empty">
+          "Choose an agent above first."

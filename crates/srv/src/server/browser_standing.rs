@@ -91,7 +91,7 @@ impl Store {
 
 /// Write `bytes` to `path` so a reader never sees half a file: a temp file in
 /// the same folder, flushed, then renamed over it.
-fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let parent = path.parent().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "no folder to write in"))?;
     std::fs::create_dir_all(parent)?;
