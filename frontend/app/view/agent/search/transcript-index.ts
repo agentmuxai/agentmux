@@ -10,6 +10,7 @@
  * more than a slice; the next query or the bar closing cancels it.
  */
 
+import { sessionOutcomeDetail, sessionOutcomeLabel } from "../../../agent-model/session-outcome-text";
 import type { DocumentNode } from "../../../agent-model/types";
 
 /** The most characters of one row that are folded and searched. */
@@ -34,7 +35,14 @@ export function searchableText(node: DocumentNode): string {
         case "jekt_message":
             return node.from + " " + node.to + " " + node.message;
         case "system_note":
+        case "ambient_narration":
             return node.text;
+        case "agent_error":
+            return node.message;
+        case "day_divider":
+            return node.dayLabel ?? "";
+        case "session_outcome":
+            return sessionOutcomeLabel(node) + " " + (sessionOutcomeDetail(node) ?? "");
         default:
             return "";
     }

@@ -18,6 +18,7 @@ import { getApi } from "@/app/store/global";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatPeekTime } from "@/util/format-time";
 import { historyLinkLabel } from "../../../agent-model/live-feed";
+import { sessionOutcomeDetail, sessionOutcomeLabel } from "../../../agent-model/session-outcome-text";
 import type { DocumentNode, HistoryLinkNode } from "../../../agent-model/types";
 import { cliNoticeText } from "../cli-notice";
 import { compactionCardTokens } from "../compact-boundary";
@@ -482,20 +483,10 @@ export function SessionOutcomeRow(props: SessionOutcomeRowProps): JSX.Element {
                         onMouseLeave={handlePeekLeave}
                     >
                         <div class="agent-session-outcome-rule">
-                            <span class="agent-session-outcome-label">
-                                {resumed
-                                    ? "Session continued"
-                                    : n.continued
-                                      ? "Session continued · reconstructed context"
-                                      : "New session started"}
-                            </span>
+                            <span class="agent-session-outcome-label">{sessionOutcomeLabel(n)}</span>
                         </div>
                         <Show when={!resumed}>
-                            <div class="agent-session-outcome-detail">
-                                {n.continued
-                                    ? "The provider couldn't resume the previous session, so this new one was given AgentMux's record of the conversation: a running summary and the recent exchange"
-                                    : "The agent doesn't have the conversation above this line"}
-                            </div>
+                            <div class="agent-session-outcome-detail">{sessionOutcomeDetail(n)}</div>
                         </Show>
                         <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
                             <Show when={timeText()}>
