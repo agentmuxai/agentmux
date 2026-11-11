@@ -8,6 +8,7 @@ import { createEffect, onCleanup } from "solid-js";
 import type { PeekBridge } from "./peek-overlay-bridge";
 import type { PeekPlacement } from "./peek-overlay-placement";
 import type { PeekState } from "./peek-overlay-state";
+import { attachScrollHandoff } from "./scroll-handoff";
 
 /** Creates two effects: the mouse tracking, then the placement when shown. Returns the panel's ref callback. */
 export function usePeekTracking(s: PeekState, p: PeekPlacement, b: PeekBridge) {
@@ -53,6 +54,10 @@ export function usePeekTracking(s: PeekState, p: PeekPlacement, b: PeekBridge) {
     // mounts, so there's no toggle-without-matching-cleanup gap left.
     const registerFloating = (el: HTMLElement) => {
         s.floatingEl = el;
+        // The panel is rendered at the document body, so a wheel over it never chains to the transcript it sits over.
+        // It hands the wheel on as a capped preview box does: every notch when it has nothing to scroll, and at its
+        // edge (after the skid) when it does.
+        onCleanup(attachScrollHandoff(el, { pane: () => s.props.rowEl()?.closest<HTMLElement>(".agent-document") }));
         const rafId = requestAnimationFrame(() => {
             const row = s.props.rowEl();
             if (!row || !s.floatingEl) return;

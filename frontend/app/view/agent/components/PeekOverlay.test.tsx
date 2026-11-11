@@ -21,6 +21,7 @@ import { createSignal, Show } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { PeekOverlay } from "./PeekOverlay";
 import { useNodePeek, type NodePeek } from "../hooks/useNodePeek";
+import { createFollowScroll, type FollowScrollHost } from "@/app/scroll/follow-scroll";
 
 vi.mock("@floating-ui/dom", () => ({
     autoUpdate: vi.fn(() => vi.fn()),
@@ -847,5 +848,71 @@ describe("PeekOverlay reads show without leaking", () => {
         const leaks = warn.mock.calls.filter((c) => String(c[0]).includes("createRoot"));
         warn.mockRestore();
         expect(leaks).toEqual([]);
+    });
+});
+
+describe("PeekOverlay: the wheel over the panel", () => {
+    /** A transcript (`.agent-document`) with a row in it, and the panel's row. */
+    function makeTranscript(): { pane: HTMLElement; row: HTMLElement } {
+        const pane = document.createElement("div");
+        pane.className = "agent-document";
+        const row = document.createElement("div");
+        pane.appendChild(row);
+        document.body.appendChild(pane);
+        return { pane, row };
+    }
+
+    it("a one-line panel scrolls the transcript it sits over, though it is rendered at the document body", () => {
+        const { pane, row } = makeTranscript();
+        render(() => (
+            <PeekOverlay show={true} rowEl={() => row}>
+                <span>0:01 · ~120 tokens</span>
+            </PeekOverlay>
+        ));
+        const panel = screen.getByText("0:01 · ~120 tokens").closest(".agent-node-peek-overlay")!;
+        expect(pane.contains(panel)).toBe(false);
+        const before = pane.scrollTop;
+        const wheel = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+        panel.dispatchEvent(wheel);
+        expect(wheel.defaultPrevented).toBe(true);
+        expect(pane.scrollTop).toBe(before + 120);
+    });
+
+    it("a wheel-up over the panel releases a following transcript, as a wheel-up over the transcript does", () => {
+        const { pane, row } = makeTranscript();
+        const host: FollowScrollHost = {
+            pin: vi.fn(),
+            loadOlder: vi.fn(),
+            transition: vi.fn(),
+            hasOlderHistory: () => false,
+            loadingOlder: () => false,
+            now: () => 0,
+        };
+        const follow = createFollowScroll(pane, host);
+        follow.noteGeometry({ scrollTop: 600, scrollHeight: 1000, clientHeight: 400 });
+        expect(follow.following()).toBe(true);
+        render(() => (
+            <PeekOverlay show={true} rowEl={() => row}>
+                <span>peek content</span>
+            </PeekOverlay>
+        ));
+        const panel = screen.getByText("peek content").closest(".agent-node-peek-overlay")!;
+        panel.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }));
+        expect(follow.following()).toBe(false);
+        follow.dispose();
+    });
+
+    it("stops handing the wheel on once the panel has closed", () => {
+        const { pane, row } = makeTranscript();
+        const [show, setShow] = createSignal(true);
+        render(() => (
+            <PeekOverlay show={show()} rowEl={() => row}>
+                <span>peek content</span>
+            </PeekOverlay>
+        ));
+        const panel = screen.getByText("peek content").closest(".agent-node-peek-overlay")!;
+        setShow(false);
+        panel.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true }));
+        expect(pane.scrollTop).toBe(0);
     });
 });
