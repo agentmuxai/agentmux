@@ -1184,9 +1184,9 @@ dependencies = [
 
 [[package]]
 name = "cef"
-version = "154.2.0+154.0.28"
+version = "156.4.0+156.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5b58469710177fffc21edb0b24ffa035c862f82d275bd90fc7b4ed3c81f74d5"
+checksum = "f48d6e78916f115e21933b44c39bd20de0bd25c753fb86b61fb4e2b84b001877"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -1204,8 +1204,8 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "154.2.0+154.0.28"
-source = "git+https://github.com/agentmuxai/cef-rs?rev=c296f3e96cf8f56b277c2957a40e153ff4947853#c296f3e96cf8f56b277c2957a40e153ff4947853"
+version = "156.4.0+156.0.26"
+source = "git+https://github.com/agentmuxai/cef-rs?rev=0ff6f16215f5ceb16d2cf3bc75b9a4d1cc57c2a9#0ff6f16215f5ceb16d2cf3bc75b9a4d1cc57c2a9"
 dependencies = [
  "anyhow",
  "cc",
@@ -1898,7 +1898,7 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 [[package]]
 name = "download-cef"
 version = "3.0.0"
-source = "git+https://github.com/agentmuxai/cef-rs?rev=c296f3e96cf8f56b277c2957a40e153ff4947853#c296f3e96cf8f56b277c2957a40e153ff4947853"
+source = "git+https://github.com/agentmuxai/cef-rs?rev=0ff6f16215f5ceb16d2cf3bc75b9a4d1cc57c2a9#0ff6f16215f5ceb16d2cf3bc75b9a4d1cc57c2a9"
 dependencies = [
  "bzip2",
  "clap",
