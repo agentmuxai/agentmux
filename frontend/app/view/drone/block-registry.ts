@@ -67,7 +67,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         emoji: "✉️",
         label: "Message",
         description: "Send an agent a note. Every {{...}} value is put in as quoted data.",
-        color: "#06b6d4",
+        color: "#06b6d4", // colour: fixed (the block's identity colour)
         defaultData: {
             to: "",
             body: "",
@@ -80,7 +80,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         emoji: "📋",
         label: "Task",
         description: "File a Kanban task. Every {{...}} value is put in as quoted data.",
-        color: "#f59e0b",
+        color: "#f59e0b", // colour: fixed (the block's identity colour)
         defaultData: {
             title: "",
             body: "",
