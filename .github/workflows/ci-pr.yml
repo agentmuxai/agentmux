@@ -387,6 +387,16 @@ jobs:
         # weaken the gate: everything installed here comes from the Ubuntu
         # archive, and `apt-get install` below still fails loudly if a package
         # cannot be found.
+        # A hung apt call must cost this step, not the job's 35 minutes; scripts/ci-apt.sh bounds each attempt, this bounds the step.
+        # In the queue the script gets a smaller budget, resolver wait and per-attempt limits: one timed-out install (90 s
+        # plus the kill) and the 45 s pause still fit the 150 s budget, so a hang costs a retry; the worst case, every call
+        # hanging, is about 10 minutes and fits the step's 12.
+        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 12 || 20 }}
+        env:
+          CI_APT_BUDGET: ${{ needs.changes.outputs.queue == 'true' && 150 || 600 }}
+          CI_APT_DNS_WAIT: ${{ needs.changes.outputs.queue == 'true' && 60 || 180 }}
+          CI_APT_UPDATE_LIMIT: ${{ needs.changes.outputs.queue == 'true' && 60 || 120 }}
+          CI_APT_INSTALL_LIMIT: ${{ needs.changes.outputs.queue == 'true' && 90 || 240 }}
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
           # scripts/ci-apt.sh retries both apt calls, and waits for the Ubuntu mirrors to resolve first: on

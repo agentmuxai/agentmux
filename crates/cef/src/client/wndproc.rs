@@ -760,9 +760,9 @@ unsafe extern "system" fn window_edge_resize_wndproc(
     // browser panes now, in this UI-thread turn, instead of when the page has
     // laid out and sent their rects. A busy page takes frames to do that, and
     // the panes trail the chrome around them (`bounds::follow_window_resize`).
-    // Not for a minimize, which has no size to follow.
+    // Not for a minimize (no size to follow), nor for Views panes, which wait for the page's rects.
     const SIZE_MINIMIZED: usize = 1;
-    if msg == WM_SIZE && wparam != SIZE_MINIMIZED {
+    if msg == WM_SIZE && wparam != SIZE_MINIMIZED && !crate::pane_backend::views() {
         let install_label = WINDOW_EDGE_RESIZE_WNDPROCS
             .lock()
             .ok()

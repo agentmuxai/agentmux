@@ -26,11 +26,15 @@ EOF
 # timeout runs the command, or reports 124 for the first N calls to anything but getent.
 cat > "$BIN/timeout" <<'EOF'
 #!/usr/bin/env bash
+if [ "$1" = -k ]; then shift 2; fi
 shift
 if [ "$1" = getent ]; then exec "$@"; fi
 n=$(cat "$STUB_DIR/timeout-calls" 2>/dev/null || echo 0)
 echo $((n + 1)) > "$STUB_DIR/timeout-calls"
-if [ "$n" -lt "${STUB_TIMEOUTS:-0}" ]; then exit 124; fi
+if [ "$n" -lt "${STUB_TIMEOUTS:-0}" ]; then
+    echo $(( $(cat "$STUB_DIR/clock" 2>/dev/null || echo 1000) + ${STUB_TIMEOUT_COST:-0} )) > "$STUB_DIR/clock"
+    exit "${STUB_TIMEOUT_CODE:-124}"
+fi
 exec "$@"
 EOF
 # apt-get consumes one outcome per call from APT_UPDATE_SEQ / APT_INSTALL_SEQ (the last one repeats).
@@ -111,6 +115,9 @@ check "a broken third-party index alone is not a failure (one update, exit 0)" "
 run STUB_TIMEOUTS=1 APT_UPDATE_SEQ="ok" -- update --strict
 check "an update killed by its time limit (124) is retried" "$([ $got = 0 ] && echo "$out" | grep -q 'ran past'; echo $?)" "exit $got: $out"
 
+run STUB_TIMEOUTS=1 STUB_TIMEOUT_CODE=137 APT_UPDATE_SEQ="ok" -- update --strict
+check "an update that needed the hard kill (137) is retried too" "$([ $got = 0 ] && echo "$out" | grep -q 'ran past'; echo $?)" "exit $got: $out"
+
 echo "ci-apt.sh install"
 run APT_INSTALL_SEQ="fail fail ok" -- install -y libfoo-dev
 check "two failures then success: three installs, two list refreshes between, exit 0" "$([ $got = 0 ] && [ "$(calls install)" = 3 ] && [ "$(calls update)" = 2 ]; echo $?)" "exit $got, installs $(calls install), updates $(calls update): $out"
@@ -128,6 +135,13 @@ run -- install
 check "install with nothing to install is a usage error (2)" "$([ $got = 2 ]; echo $?)" "exit $got: $out"
 
 echo "budget"
+# The merge queue's settings (ci-pr.yml): a 90 s limit plus the 45 s pause fits the 150 s budget, so a hung install is retried.
+run CI_APT_BUDGET=150 CI_APT_PAUSE=45 CI_APT_INSTALL_LIMIT=90 STUB_TIMEOUTS=1 STUB_TIMEOUT_COST=100 APT_INSTALL_SEQ="ok" -- install -y libfoo-dev
+check "queue limits: an install that hung for its 90 s is retried and succeeds" "$([ $got = 0 ] && echo "$out" | grep -q 'attempt 1 failed; waiting 45s before attempt 2'; echo $?)" "exit $got: $out"
+
+run CI_APT_BUDGET=150 CI_APT_PAUSE=45 CI_APT_INSTALL_LIMIT=240 STUB_TIMEOUTS=1 STUB_TIMEOUT_COST=250 APT_INSTALL_SEQ="ok" -- install -y libfoo-dev
+check "with the 240 s default in a 150 s budget the same hang is not retried (why the queue sets 90)" "$([ $got = 1 ] && echo "$out" | grep -q budget; echo $?)" "exit $got: $out"
+
 run CI_APT_BUDGET=1 APT_UPDATE_SEQ="bad" -- update --strict
 check "a spent budget stops the retries of an update" "$([ $got = 1 ] && [ "$(calls update)" = 1 ] && echo "$out" | grep -q 'budget'; echo $?)" "exit $got, updates $(calls update): $out"
 

@@ -28,6 +28,10 @@ const STREAM_READ_EVERY: usize = 200;
 /// At most this many different words in the tail, of at least [`MIN_WORDS`], is a loop.
 const MAX_DISTINCT: usize = 4;
 
+/// The block indices an ACP agent's thought and message text are read under (a Claude stream numbers its own).
+const ACP_THOUGHT: u64 = 1_000;
+const ACP_MESSAGE: u64 = 1_001;
+
 /// What the agent is stuck doing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stuck {
@@ -60,6 +64,8 @@ pub struct LoopGuard {
     failing: HashMap<String, (String, u32)>,
     /// The end of each thought being streamed, by content block index, with the characters added since it was last read.
     streaming: HashMap<u64, (String, usize)>,
+    /// ACP calls that have ended in this turn, so a repeated terminal update counts once.
+    ended: std::collections::HashSet<String>,
 }
 
 impl LoopGuard {
@@ -68,6 +74,7 @@ impl LoopGuard {
         self.pending.clear();
         self.failing.clear();
         self.streaming.clear();
+        self.ended.clear();
     }
 
     /// One frame of the harness's stdout. `Some` when this frame is the one that crossed a threshold.
@@ -116,21 +123,82 @@ impl LoopGuard {
             "content_block_delta" => {
                 let delta = event.get("delta")?;
                 let piece = delta.get("thinking").or_else(|| delta.get("text")).and_then(Value::as_str)?;
-                let (tail, added) = self.streaming.entry(index).or_default();
-                tail.push_str(piece);
-                *added += piece.len();
-                if tail.len() > STREAM_KEEP {
-                    let cut = (tail.len() - STREAM_KEEP..).find(|&i| tail.is_char_boundary(i)).unwrap_or(tail.len());
-                    tail.drain(..cut);
-                }
-                if *added < STREAM_READ_EVERY {
-                    return None;
-                }
-                *added = 0;
-                repeats_itself(tail)
+                self.stream(index, piece)
             }
             _ => None,
         }
+    }
+
+    /// `piece` more of the thought being streamed as block `index`.
+    fn stream(&mut self, index: u64, piece: &str) -> Option<Stuck> {
+        let (tail, added) = self.streaming.entry(index).or_default();
+        tail.push_str(piece);
+        *added += piece.len();
+        if tail.len() > STREAM_KEEP {
+            let cut = (tail.len() - STREAM_KEEP..).find(|&i| tail.is_char_boundary(i)).unwrap_or(tail.len());
+            tail.drain(..cut);
+        }
+        if *added < STREAM_READ_EVERY {
+            return None;
+        }
+        *added = 0;
+        repeats_itself(tail)
+    }
+
+    /// One line of an ACP agent's stdout (`blockcontroller/acp.rs`): a `session/update` notification, or the answer to a
+    /// `session/prompt`, which ends the turn. Reads the same two loops as [`Self::observe`]: `tool_call` and
+    /// `tool_call_update` (`status` `failed` or `completed`) for the calls, `agent_thought_chunk` and
+    /// `agent_message_chunk` for the text.
+    pub fn observe_acp(&mut self, line: &Value) -> Option<Stuck> {
+        if line.get("id").is_some() && (line.pointer("/result/stopReason").is_some() || line.get("error").is_some()) {
+            self.new_turn();
+            return None;
+        }
+        if line.get("method").and_then(Value::as_str) != Some("session/update") {
+            return None;
+        }
+        let update = line.pointer("/params/update")?;
+        match update.get("sessionUpdate").and_then(Value::as_str)? {
+            "agent_thought_chunk" => self.stream(ACP_THOUGHT, update.pointer("/content/text").and_then(Value::as_str)?),
+            "agent_message_chunk" => self.stream(ACP_MESSAGE, update.pointer("/content/text").and_then(Value::as_str)?),
+            "tool_call" => {
+                // A call is the end of the text before it.
+                self.streaming.remove(&ACP_THOUGHT);
+                self.streaming.remove(&ACP_MESSAGE);
+                self.acp_call(update)
+            }
+            "tool_call_update" => self.acp_call(update),
+            _ => None,
+        }
+    }
+
+    /// A call, or an update of one, in ACP's shape: `toolCallId`, `title`, `rawInput`, `status`.
+    fn acp_call(&mut self, update: &Value) -> Option<Stuck> {
+        let id = update.get("toolCallId").and_then(Value::as_str)?;
+        let known = self.pending.get(id).cloned();
+        // The call may name itself or fill in its input in a later update: the latest of each is the call's.
+        let title = update.get("title").and_then(Value::as_str).filter(|t| !t.is_empty()).map(str::to_string);
+        let name = title.or_else(|| known.as_ref().map(|k| k.1.clone())).or_else(|| update.get("kind").and_then(Value::as_str).map(str::to_string))?;
+        let input = update.get("rawInput").filter(|i| !i.is_null() && i.as_object().map_or(true, |o| !o.is_empty())).map(Value::to_string);
+        let input = input.or_else(|| known.as_ref().and_then(|k| k.0.split_once('\u{1f}')).map(|(_, i)| i.to_string())).unwrap_or_default();
+        let key = format!("{name}\u{1f}{input}");
+        let status = update.get("status").and_then(Value::as_str);
+        if !matches!(status, Some("failed" | "completed")) {
+            self.pending.insert(id.to_string(), (key, name));
+            return None;
+        }
+        self.pending.remove(id);
+        // A repeated terminal update of a call already ended says nothing new.
+        if !self.ended.insert(id.to_string()) {
+            return None;
+        }
+        if status == Some("completed") {
+            self.failing.remove(&key);
+            return None;
+        }
+        let entry = self.failing.entry(key).or_insert((name, 0));
+        entry.1 += 1;
+        (entry.1 >= FAILING_CALLS).then(|| Stuck::FailingCall { tool: entry.0.clone(), count: entry.1 })
     }
 
     fn tool_results(&mut self, frame: &Value) -> Option<Stuck> {
