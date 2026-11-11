@@ -14,6 +14,7 @@ import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { For, Show, createEffect, createMemo, type Accessor, type JSX } from "solid-js";
 import { phaseToDisplayStatus } from "./swarm-display-status";
+import { closedSecondPanes, paneIdentity } from "./swarm-duplicate-panes";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { lastActiveMs } from "./swarm-last-active";
 import { collectClearableRows, type AgentTreeNode, type SwarmViewModel } from "./swarm-model";
@@ -55,6 +56,16 @@ export interface SwarmAgents {
     filter: SwarmFilterState;
 }
 
+/** The tree without an agent's closed second pane (swarm-duplicate-panes.ts). */
+function oneRowPerAgent(rows: AgentTreeNode[]): AgentTreeNode[] {
+    const hidden = closedSecondPanes(
+        rows.flatMap((n) =>
+            n.blockId ? [paneIdentity(n.blockId, MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", n.blockId))()?.meta)] : []
+        )
+    );
+    return hidden.size === 0 ? rows : rows.filter((n) => !n.blockId || !hidden.has(n.blockId));
+}
+
 export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): SwarmAgents {
     // A Swarm pane nobody can see (another window tab, or a pane tab behind its
     // siblings) keeps its last list and rebuilds once when it is shown: every
@@ -62,7 +73,7 @@ export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): 
     // (150 to 380 rebuilds a minute across four panes in one busy window).
     const tree = createMemo<AgentTreeNode[]>((prev) => {
         if (ctx.visibility() !== "active") return prev ?? [];
-        const rows = model.buildTree();
+        const rows = oneRowPerAgent(model.buildTree());
         selectTrace.rebuilt();
         return rows;
     });
