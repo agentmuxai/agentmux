@@ -255,6 +255,4 @@ describe("the right-click menus", () => {
         fireEvent.contextMenu(w.list());
         expect(document.querySelector(".ctx-menu")?.textContent).toContain("Paste (move 2)");
     });
-
-
 });
