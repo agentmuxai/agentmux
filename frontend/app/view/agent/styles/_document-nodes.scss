@@ -628,8 +628,16 @@ $tool-name-colors: (
             opacity: 1;
         }
 
-        // One line of output (ToolPlaceholder wears the preview's own line classes): no padding of its own, so a
-        // running tool and its first line of output are the same height.
+        // A running tool's placeholder and its streamed lines sit in the box a finished Bash result does (.agent-bash
+        // and .agent-bash-output): the same indent and vertical padding, so the placeholder, the first line of output
+        // and the finished result are the same height and the text does not move. ToolPlaceholder wears the
+        // preview's own line classes, so the line itself is one output line too.
+        .agent-tool-loading,
+        .agent-tool-log-feed {
+            border-left: 2px solid transparent;
+            padding: 3px var(--space-1-5);
+        }
+
         .agent-tool-loading {
             color: var(--secondary-text-color);
 
