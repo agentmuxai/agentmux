@@ -64,8 +64,9 @@ pub fn pane_pointer_down(state: &Arc<AppState>, block: &str) {
     }
 }
 
-/// The user gave pane `block`'s page focus where no click hook sees it (Linux, and
-/// Windows with Views panes: CEF's `on_set_focus` with a user source): the same as a click in it, posted.
+/// The user gave pane `block`'s page focus where no click hook sees it: the same
+/// as a click in it, posted. That is Linux, and Windows with Views panes, by
+/// CEF's `on_set_focus` with a user source.
 /// Not while this adapter is focusing the pane itself, nor before the pane is
 /// live: Views focuses a new pane's browser as it is added, and CEF may report
 /// a focus set from code with the same source.
