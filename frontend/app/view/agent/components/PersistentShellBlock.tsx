@@ -16,7 +16,7 @@ import { IconButton } from "@/app/element/ui/Button";
 import { Show, createMemo, createSignal, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
-import { formatElapsedClock, formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { formatElapsedClock, formatPeekTime } from "@/util/format-time";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { createBodyMount } from "./body-mount";
 import { ChunkPreview } from "./ChunkPreview";
@@ -87,7 +87,7 @@ function useShellPeek(props: PersistentShellBlockProps) {
     const peekTimeText = createMemo(() => {
         if (!peekPanelVisible()) return null;
         peekTick();
-        return `${formatExactTime(props.node.spawnedAt)} · ${formatTimeAgo(props.node.spawnedAt)}`;
+        return formatPeekTime(props.node.spawnedAt);
     });
     const peekEstimateText = createMemo(() => {
         const count = estimateTokenCount(props.node.cmd);

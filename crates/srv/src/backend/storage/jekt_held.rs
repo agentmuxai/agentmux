@@ -277,12 +277,28 @@ impl Store {
     /// again to wake the agent (`urgent`), so it isn't delivered twice.
     /// Returns how many.
     pub fn jekt_held_delete_idle_copies(&self, target_uid: &str, source_agent: &str, message: &str) -> Result<usize, StoreError> {
+        use crate::muxbus::delivery_status::notes::without_delayed_prefix;
         let conn = self.conn().lock().unwrap();
-        Ok(conn.execute(
-            "DELETE FROM db_jekt_held
-              WHERE target_uid = ?1 AND source_agent = ?2 AND message = ?3 AND hold_reason IN (?4, ?5)",
-            params![target_uid, source_agent, message, crate::backend::cold_hold::REASON_IDLE, crate::backend::cold_hold::REASON_QUOTA],
-        )?)
+        // A relayed message that came in late was held with the relay's "(sent .., delivered ..) " in front of its text,
+        // so the copies are those that end in the message and are it once that prefix is off.
+        let mut stmt = conn.prepare(
+            "SELECT request_id, message FROM db_jekt_held
+              WHERE target_uid = ?1 AND source_agent = ?2 AND hold_reason IN (?3, ?4) AND substr(message, -length(?5)) = ?5",
+        )?;
+        let copies: Vec<String> = stmt
+            .query_map(
+                params![target_uid, source_agent, crate::backend::cold_hold::REASON_IDLE, crate::backend::cold_hold::REASON_QUOTA, message],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|(_, held)| held == message || without_delayed_prefix(held) == message)
+            .map(|(id, _)| id)
+            .collect();
+        for id in &copies {
+            conn.execute("DELETE FROM db_jekt_held WHERE request_id = ?1", params![id])?;
+        }
+        Ok(copies.len())
     }
 
     /// Remove one held message (delivered, or dropped).
@@ -522,6 +538,19 @@ mod idle_tests {
         s.jekt_held_insert(&held("a1", "uid-y", 200)).unwrap();
         assert_eq!(s.jekt_held_delete_idle_copies("uid-y", "sender", "hello").unwrap(), 2);
         assert_eq!(s.jekt_held_for_target("uid-y", 10).unwrap()[0].request_id, "a1");
+    }
+
+    #[test]
+    fn a_resend_removes_the_copy_held_with_the_relays_lateness_prefix() {
+        let s = Store::open_in_memory().unwrap();
+        let late = |id: &str, text: &str| HeldJekt { message: text.into(), ..idle(id, "uid-y", 100) };
+        s.jekt_held_insert(&late("late", "(sent 09:01, delivered 09:14) hello")).unwrap();
+        s.jekt_held_insert(&late("other", "(sent 09:01, delivered 09:14) hello there")).unwrap();
+        s.jekt_held_insert(&late("not-ours", "(sent by hand, delivered later) hello")).unwrap();
+        assert_eq!(s.jekt_held_delete_idle_copies("uid-y", "sender", "hello").unwrap(), 1);
+        let mut left: Vec<String> = s.jekt_held_for_target("uid-y", 10).unwrap().into_iter().map(|r| r.request_id).collect();
+        left.sort();
+        assert_eq!(left, ["not-ours", "other"], "a longer message and a prefix that is not the relay's stay");
     }
 
     #[test]

@@ -130,6 +130,24 @@ export function formatExactTime(ms: number): string {
     return `${h}:${m}:${s} ${h24 < 12 ? "AM" : "PM"}`;
 }
 
+/**
+ * The exact time with its date when it isn't today: "3:46:12 PM" for today, "Nov 8, 3:46:12 PM" for an earlier day
+ * this year, "Nov 8, 2025, 3:46:12 PM" for an earlier year. Looking back through history, the time of day alone
+ * doesn't say which day.
+ */
+export function formatExactTimeWithDate(ms: number, now: number = Date.now()): string {
+    const d = new Date(ms);
+    const today = new Date(now);
+    if (d.toDateString() === today.toDateString()) return formatExactTime(ms);
+    const year = d.getFullYear() === today.getFullYear() ? "" : `, ${d.getFullYear()}`;
+    return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}${year}, ${formatExactTime(ms)}`;
+}
+
+/** The hover peek's time line: the exact time (dated when not today), then how long ago: "Nov 8, 3:46:12 PM · 2d ago". */
+export function formatPeekTime(ms: number, now: number = Date.now()): string {
+    return `${formatExactTimeWithDate(ms, now)} · ${formatTimeAgo(ms, now)}`;
+}
+
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /**
