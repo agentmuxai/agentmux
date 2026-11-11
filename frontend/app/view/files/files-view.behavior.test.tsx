@@ -117,11 +117,6 @@ vi.mock("@/app/keybindings", async (orig) => ({
         return () => life("pane command runner disposed");
     },
 }));
-vi.mock("./files-agent-mention", async (orig) => ({
-    ...(await orig<typeof import("./files-agent-mention")>()),
-    trackAgentFocus: () => life("trackAgentFocus()"),
-    mentionInAgent: (_m: unknown, list: unknown) => log(`mentionInAgent(${fmt(list)})`),
-}));
 vi.mock("./files-open", async (orig) => ({
     ...(await orig<typeof import("./files-open")>()),
     openTargetOf: () => h.state.target,
@@ -468,7 +463,6 @@ describe("FilesView commands", () => {
         run("files:copy");
         await flush();
         log(`clipboard writes: ${fmt(writes)}`);
-        run("files:mention");
         run("files:editPath");
         await flush();
         log(`path box open: ${!!v.q(".files-path-input")} focused=${document.activeElement === v.q(".files-path-input")}`);

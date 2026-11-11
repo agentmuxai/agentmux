@@ -10,6 +10,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
+import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 
 const h = vi.hoisted(() => ({
     files: new Map<string, string>(),
@@ -120,7 +121,7 @@ describe("the file tree's right-click menu", () => {
     it("on a file: opens it three ways, copies its path, renames, deletes", async () => {
         await mountView();
         fireEvent.contextMenu(item("a.ts"));
-        expect(menuLabels()).toEqual(["Open", "Open to the Side", "Open in New Tab", "-", "Copy Path", "Copy Relative Path", "-", "Reveal in Explorer", "-", "Rename…", "Delete"]);
+        expect(menuLabels()).toEqual(["Open", "Open to the Side", "Open in New Tab", "-", "Copy Path", "Copy Relative Path", "-", revealInFileManagerLabel(), "-", "Rename…", "Delete"]);
         expect([...document.querySelectorAll(".ctx-menu-shortcut")].map((n) => n.textContent)).toEqual(["F2"]);
         expect(document.querySelector(".ctx-menu-item--danger .ctx-menu-label")!.textContent).toBe("Delete");
     });
@@ -167,10 +168,10 @@ describe("the file tree's right-click menu", () => {
     it("on a folder: new entries, terminal, reveal, collapse, rename and delete; on the root no rename or delete", async () => {
         await mountView();
         fireEvent.contextMenu(item("src"));
-        expect(menuLabels()).toEqual(["New File…", "New Folder…", "-", "Open in Terminal", "Reveal in Explorer", "Collapse Folder", "-", "Rename…", "Delete"]);
+        expect(menuLabels()).toEqual(["New File…", "New Folder…", "-", "Open in Terminal", revealInFileManagerLabel(), "Collapse Folder", "-", "Rename…", "Delete"]);
         fireEvent.keyDown(document, { key: "Escape" });
         fireEvent.contextMenu(item("u"));
-        expect(menuLabels()).toEqual(["New File…", "New Folder…", "-", "Open in Terminal", "Reveal in Explorer", "Collapse Folder"]);
+        expect(menuLabels()).toEqual(["New File…", "New Folder…", "-", "Open in Terminal", revealInFileManagerLabel(), "Collapse Folder"]);
     });
 
     it("on the tree's background: new entries in the home folder and a refresh", async () => {

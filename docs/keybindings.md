@@ -117,7 +117,6 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | Cut | ⌘X | Ctrl+X |
 | Paste | ⌘V | Ctrl+V |
 | Undo | ⌘Z | Ctrl+Z |
-| Mention in agent | ⌥K | Alt+K |
 
 ## Mouse and gestures
 

@@ -140,8 +140,8 @@ import { openTargetOf } from "./files-open";
 import { clipboard, setClipboard } from "./files-ops";
 import { resetThumbnailsForTests } from "./files-thumbs";
 import { noteToolCall, noteToolResult, resetTouchedForTests } from "@/app/store/touched-files";
-import { beginPathDrag, endPathDrag, installFileDropController, PATHS_MIME, registerFileDropTarget } from "@/app/drag/file-drop";
-import { errorMessage, FilesView, formatModified, mentionToken } from "./files-view";
+import { beginPathDrag, endPathDrag, installFileDropController, PATHS_MIME } from "@/app/drag/file-drop";
+import { errorMessage, FilesView, formatModified } from "./files-view";
 import { filesPaneTab, filesTitle } from "./files";
 
 const f = (name: string, over: Partial<FsEntry> = {}): FsEntry => ({
@@ -564,13 +564,9 @@ describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
             { kind: "copy", sources: [`${HOME}\\b.txt`], dest_dir: HOST_HOME, block_id: "b1", connection: "user@box" },
             { timeout: 180_000 }
         );
-        // No preview (it reads through this computer's media stream), and no
-        // mention in a local agent by keyboard either.
+        // No preview (it reads through this computer's media stream).
         void v.ctx.setMeta({ "files:preview": true });
         expect(v.model.showPreview()).toBe(false);
-        fireEvent.click(v.row("notes.md"));
-        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
-        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("Mentioning files in an agent isn't available"));
         // Nothing is dragged out.
         const drag = new Event("dragstart", { bubbles: true, cancelable: true });
         Object.defineProperty(drag, "dataTransfer", { value: { setData: vi.fn(), effectAllowed: "" } });
@@ -976,29 +972,6 @@ describe("the Files pane: dragging files (§8.2)", () => {
         uninstall();
     });
 
-    it("Attach to <agent> hands the selection to that agent pane's drop hook", async () => {
-        const agentPane = document.createElement("div");
-        agentPane.setAttribute("data-role", "pane");
-        agentPane.setAttribute("data-blockid", "agent-1");
-        agentPane.getClientRects = () => [{}] as unknown as DOMRectList;
-        document.body.appendChild(agentPane);
-        blocks.set("agent-1", { meta: { view: "agent", agentName: "Korp" } });
-        const drop = vi.fn();
-        const dispose = registerFileDropTarget("agent-1", { accept: () => ({ ok: true, message: "attach" }), drop });
-        const v = mount();
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.click(v.row("a2.md"));
-        fireEvent.click(v.row("b.txt"), { ctrlKey: true });
-        fireEvent.contextMenu(v.row("b.txt"));
-        // The menu acts on pointerdown (context-menu.tsx).
-        fireEvent.pointerDown(await waitFor(() => screen.getByText("Attach to Korp")));
-        await waitFor(() => expect(drop).toHaveBeenCalledWith({ paths: [`${HOME}\\a2.md`, `${HOME}\\b.txt`], files: [] }));
-        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("Attached 2 items to Korp"));
-        dispose();
-        agentPane.remove();
-        blocks.clear();
-    });
-
     it("a row dropped on a folder row moves into that folder, even within the same pane", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
@@ -1175,71 +1148,6 @@ describe("the Files pane: grid view (§5.2)", () => {
         const src = [...v.container.querySelectorAll(".files-tile")].find((t) => t.textContent?.includes("src"))!;
         fireEvent.dblClick(src);
         await waitFor(() => expect(tiles(v)).toEqual(["main.rs"]));
-    });
-});
-
-describe("the Files pane: Alt+K mentions (§8.2, route 3)", () => {
-    it("writes @path relative to the agent's folder, quoted when it has a space", () => {
-        expect(mentionToken("C:\\work\\src\\a.ts", "C:\\work")).toBe("@src\\a.ts");
-        expect(mentionToken("C:\\other\\a.ts", "C:\\work")).toBe("@C:\\other\\a.ts");
-        expect(mentionToken("/home/a/my notes.md", "/home/a")).toBe('@"my notes.md"');
-        expect(mentionToken("/x/y.md", undefined)).toBe("@/x/y.md");
-    });
-
-    it("puts the selection's mentions in the last agent's message box", async () => {
-        const agentPane = document.createElement("div");
-        agentPane.setAttribute("data-role", "pane");
-        agentPane.setAttribute("data-blockid", "agent-1");
-        agentPane.getClientRects = () => [{}] as unknown as DOMRectList;
-        const ta = document.createElement("textarea");
-        ta.className = "agent-input";
-        ta.value = "look at";
-        agentPane.appendChild(ta);
-        document.body.appendChild(agentPane);
-        blocks.set("agent-1", { meta: { view: "agent", agentName: "Korp", "cmd:cwd": HOME } });
-        const dispose = registerFileDropTarget("agent-1", { accept: () => ({ ok: true, message: "" }), drop: () => {} });
-        const v = mount();
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        // The user was last typing to Korp.
-        ta.focus();
-        ta.setSelectionRange(7, 7);
-        fireEvent.click(v.row("a2.md"));
-        fireEvent.click(v.row("src"), { ctrlKey: true });
-        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
-        expect(ta.value).toBe("look at @src @a2.md ");
-        dispose();
-        agentPane.remove();
-        blocks.clear();
-    });
-
-    it("won't give a container agent a host path it can't see", async () => {
-        const agentPane = document.createElement("div");
-        agentPane.setAttribute("data-role", "pane");
-        agentPane.setAttribute("data-blockid", "agent-c");
-        agentPane.getClientRects = () => [{}] as unknown as DOMRectList;
-        const ta = document.createElement("textarea");
-        ta.className = "agent-input";
-        agentPane.appendChild(ta);
-        document.body.appendChild(agentPane);
-        blocks.set("agent-c", { meta: { view: "agent", agentName: "Boxy", agentMode: "container", "cmd:cwd": `${HOME}\\src` } });
-        const dispose = registerFileDropTarget("agent-c", { accept: () => ({ ok: true, message: "" }), drop: () => {} });
-        const v = mount();
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.click(v.row("b.txt"));
-        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
-        expect(ta.value).toBe("");
-        expect(v.container.querySelector(".files-status")?.textContent).toContain("Boxy runs in a container and sees only its working folder");
-        dispose();
-        agentPane.remove();
-        blocks.clear();
-    });
-
-    it("says so when there's no agent to mention in", async () => {
-        const v = mount();
-        await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.click(v.row("b.txt"));
-        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
-        expect(v.container.querySelector(".files-status")?.textContent).toBe("No agent pane is open to mention these in.");
     });
 });
 

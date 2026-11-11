@@ -8,6 +8,7 @@
  * docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.7.
  */
 
+import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { formatBytes } from "@/util/format-bytes";
 import { Button } from "@/app/element/ui";
 import { ConfirmModal } from "@/app/element/confirm-modal";
@@ -106,7 +107,7 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
                     </Show>
                     <Show when={props.onReveal}>
                         <Button icon="folder-open" onClick={() => props.onReveal!()}>
-                            Reveal in folder
+                            {revealInFileManagerLabel()}
                         </Button>
                     </Show>
                     <Show when={props.onCopyPath}>

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ContextMenuItem } from "@/app/components/context-menu";
+import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import type { EditorViewModel } from "./editor-model";
 
@@ -54,7 +55,7 @@ export function buildTreeContextMenuItems(
             { type: "action", label: "New Folder…", icon: MENU_ICON.newFolder, onSelect: () => { void model.treeModel.expandFolder(path); actions.startNewEntry(path, "dir"); } },
             { type: "separator" },
             { type: "action", label: "Open in Terminal", icon: MENU_ICON.openTerminal, onSelect: () => void model.openInTerminal(path) },
-            { type: "action", label: "Reveal in Explorer", icon: MENU_ICON.reveal, onSelect: () => void model.revealInExplorer(path) },
+            { type: "action", label: revealInFileManagerLabel(), icon: MENU_ICON.reveal, onSelect: () => void model.revealInExplorer(path) },
             { type: "action", label: "Collapse Folder", onSelect: () => model.treeModel.collapseFolder(path) },
         ];
         if (!isRoot) {
@@ -88,7 +89,7 @@ export function buildTreeContextMenuItems(
             void actions.copy(rel);
         }},
         { type: "separator" },
-        { type: "action", label: "Reveal in Explorer", icon: MENU_ICON.reveal, onSelect: () => void model.revealInExplorer(path) },
+        { type: "action", label: revealInFileManagerLabel(), icon: MENU_ICON.reveal, onSelect: () => void model.revealInExplorer(path) },
         { type: "separator" },
         { type: "action", label: "Rename…", icon: MENU_ICON.rename, shortcut: "F2", onSelect: () => actions.startRename(path) },
         {

@@ -58,8 +58,6 @@ export const MENU_ICON = {
     // Agents and connections
     history: "clock-rotate-left",
     fork: "code-branch",
-    mention: "at",
-    attach: "paperclip",
     bind: "link",
     sessions: "list",
     connect: "plug",

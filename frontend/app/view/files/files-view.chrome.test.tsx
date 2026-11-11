@@ -256,11 +256,5 @@ describe("the right-click menus", () => {
         expect(document.querySelector(".ctx-menu")?.textContent).toContain("Paste (move 2)");
     });
 
-    it("Alt+K with no agent pane open says so", async () => {
-        const v = mount();
-        await settled(v);
-        fireEvent.click(rowOf(v, "b.txt"));
-        fireEvent.keyDown(v.list(), { key: "k", altKey: true });
-        await waitFor(() => expect(v.view().querySelector(".files-status")?.textContent).toBe("No agent pane is open to mention these in."));
-    });
+
 });

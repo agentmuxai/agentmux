@@ -335,25 +335,6 @@ export function installFileDropController(win: Window = window): () => void {
     };
 }
 
-/**
- * Hand `paths` to `blockId`'s drop hook as if they had been dropped on it:
- * the Files pane's "Attach to <agent>" (spec §8.2, route 2), so a menu item
- * and a drag end in exactly the same place. False when the pane has no hook
- * or refuses them.
- */
-export async function dropPathsOnto(blockId: string, paths: string[]): Promise<boolean> {
-    const hook = hooks.get(blockId);
-    if (!hook || paths.length === 0) return false;
-    if (!hook.accept(dragFilesFromPaths(paths)).ok) return false;
-    await hook.drop({ paths, files: [] });
-    return true;
-}
-
-/** Block ids with a drop hook whose pane is on screen now. */
-export function visibleDropTargets(): string[] {
-    return visiblePanes();
-}
-
 /** Test hook: forget every registration and session. */
 export function resetFileDropForTests(): void {
     hooks.clear();

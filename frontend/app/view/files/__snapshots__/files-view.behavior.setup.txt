@@ -1,6 +1,5 @@
 trackPaneContent(b1)
 holdPaneContent(b1)
-trackAgentFocus()
 registerPaneCommandRunner(b1)
 registerFileDropTarget(b1)
 model.start()
