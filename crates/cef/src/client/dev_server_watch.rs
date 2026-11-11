@@ -46,8 +46,12 @@ pub(crate) struct Served {
 }
 
 impl Served {
+    /// A page starts loading in `label`. From here its load decides: a page that loads marks the window
+    /// loaded, one that fails is watched by `page_unreachable`. Either way a report made before it is stale.
     pub(crate) fn navigated(&mut self, label: &str, url: &str) {
         self.urls.insert(label.to_string(), url.to_string());
+        self.misses.remove(label);
+        self.reported.remove(label);
     }
 
     pub(crate) fn labels(&self) -> Vec<String> {
@@ -194,6 +198,17 @@ mod tests {
             assert_eq!(s.round(&answers(false), |l| l == "main"), Round::default());
         }
         assert_eq!(rounds(&mut s, 1, true), Round::default());
+    }
+
+    /// Review's case: the window was reloaded while the server was down and that load failed. The failed
+    /// load is watched and reloaded by `page_unreachable`; the server coming back must not clear it here.
+    #[test]
+    fn a_window_that_loads_again_meanwhile_is_not_cleared_by_a_stale_report() {
+        let mut s = served_main();
+        rounds(&mut s, DOWN_AFTER_ROUNDS, false);
+        s.navigated("main", URL);
+        assert_eq!(rounds(&mut s, 1, true), Round::default(), "nothing to clear: the new load owns it");
+        assert_eq!(rounds(&mut s, DOWN_AFTER_ROUNDS - 1, false), Round::default(), "and the count starts again");
     }
 
     #[test]
