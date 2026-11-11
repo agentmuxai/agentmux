@@ -171,6 +171,7 @@ jobs:
         run: npm install
 
       - name: Install system dependencies
+        timeout-minutes: 12
         run: |
           # The runner image ships a google-chrome apt source we install nothing
           # from; a corrupt index there exits apt 100 and takes the whole Linux
@@ -268,6 +269,7 @@ jobs:
         run: sudo gem install --no-document fpm
 
       - name: Install rpmbuild
+        timeout-minutes: 12
         run: bash .ci-helper/scripts/ci-apt.sh install -y --no-install-recommends rpm
 
       # ── Remote helpers ─────────────────────────────────────────────────────
@@ -281,6 +283,7 @@ jobs:
 
       - name: Install the Linux arm64 emulator (runs the other-architecture remote helper)
         shell: bash
+        timeout-minutes: 12
         run: |
           # qemu runs the arm64 helper in check-remote-helpers.sh.
           bash .ci-helper/scripts/ci-apt.sh install -y --no-install-recommends qemu-user-static
