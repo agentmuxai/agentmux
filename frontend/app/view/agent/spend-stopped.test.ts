@@ -18,7 +18,7 @@ import {
 
 const NOW = 1_700_000_000_000;
 const DAY = Math.floor(NOW / 86_400_000);
-const stopped = { at: 5, scope: "agent", cap: 20, spent: 20.4, route: "openrouter", place: "OpenRouter (DeepSeek V4.1 Flash)" };
+const stopped = { at: Date.now(), scope: "agent", cap: 20, spent: 20.4, route: "openrouter", place: "OpenRouter (DeepSeek V4.1 Flash)" };
 
 describe("readSpendStopped", () => {
     it("reads what srv writes", () => {
@@ -36,8 +36,14 @@ describe("readSpendStopped", () => {
     });
 
     it("goes when it was dismissed for this stop, and comes back for a later one", () => {
-        expect(readSpendStopped({ [SPEND_STOPPED_META_KEY]: stopped, [SPEND_DISMISSED_META_KEY]: 5 })).toBeNull();
-        expect(readSpendStopped({ [SPEND_STOPPED_META_KEY]: { ...stopped, at: 9 }, [SPEND_DISMISSED_META_KEY]: 5 })).not.toBeNull();
+        expect(readSpendStopped({ [SPEND_STOPPED_META_KEY]: stopped, [SPEND_DISMISSED_META_KEY]: stopped.at })).toBeNull();
+        expect(readSpendStopped({ [SPEND_STOPPED_META_KEY]: { ...stopped, at: stopped.at + 9 }, [SPEND_DISMISSED_META_KEY]: stopped.at })).not.toBeNull();
+    });
+
+    it("goes at the next UTC midnight, with no new event from srv", () => {
+        const meta = { [SPEND_STOPPED_META_KEY]: { ...stopped, at: NOW } };
+        expect(readSpendStopped(meta, NOW + 1000)).not.toBeNull();
+        expect(readSpendStopped(meta, (DAY + 1) * 86_400_000)).toBeNull();
     });
 
     it("names the route when its cap was the one reached", () => {
@@ -51,6 +57,15 @@ describe("readSpendWarning", () => {
         const warning = { ...stopped, spent: 16.5 };
         expect(readSpendWarning({ [SPEND_WARNING_META_KEY]: warning })?.spent).toBe(16.5);
         expect(readSpendWarning({ [SPEND_WARNING_META_KEY]: warning, [SPEND_STOPPED_META_KEY]: stopped })).toBeNull();
+    });
+
+    it("goes at the next UTC midnight, and is not hidden by a stop from the day before", () => {
+        const warning = { ...stopped, at: NOW, spent: 16.5 };
+        const tomorrow = (DAY + 1) * 86_400_000 + 5;
+        expect(readSpendWarning({ [SPEND_WARNING_META_KEY]: warning }, NOW)).not.toBeNull();
+        expect(readSpendWarning({ [SPEND_WARNING_META_KEY]: warning }, tomorrow)).toBeNull();
+        const newWarning = { ...warning, at: tomorrow };
+        expect(readSpendWarning({ [SPEND_WARNING_META_KEY]: newWarning, [SPEND_STOPPED_META_KEY]: { ...stopped, at: NOW } }, tomorrow)?.at).toBe(tomorrow);
     });
 });
 

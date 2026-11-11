@@ -86,14 +86,44 @@ pub(crate) fn start(state: AppState) {
     });
 }
 
-/// Writes today's figure to the open panes of every agent that has spent anything today.
+const DAY_MS: i64 = 86_400_000;
+
+/// Brings every agent's panes up to date once a minute: the figure of an agent on a route that has spent today, and the
+/// removal of what no longer holds (see [`stale_keys`]).
 fn refresh_chips(state: &AppState) {
     let now = agentmux_common::time::now_ms();
     let Ok(defs) = state.mstore.agent_def_list() else { return };
-    for agent in spend::agents_today(now) {
-        let Some(def) = defs.iter().find(|d| d.slug == agent) else { continue };
-        let spent = spend::today(&agent, now).cost_usd;
-        publish_today(state, &def.id, &agent, cap::agent_cap(&state.mstore, &def.id), spent, now, true);
+    let spending = spend::agents_today(now);
+    for def in &defs {
+        let on_route = launch::choice_of(&state.mstore, &def.id).is_some();
+        drop_stale(state, &def.id, on_route, now);
+        if on_route && spending.contains(&def.slug) {
+            let spent = spend::today(&def.slug, now).cost_usd;
+            publish_today(state, &def.id, &def.slug, cap::agent_cap(&state.mstore, &def.id), spent, now, true);
+        }
+    }
+}
+
+/// The spend keys on a pane's `meta` that no longer hold. An agent that is not on a model route has no cap and no day of
+/// spend to show, so it carries none of them; on a route, a stop or warning written on an earlier UTC day belongs to a
+/// day the gateway has since reset, and nothing else would take it off an agent that stays idle through midnight.
+fn stale_keys(meta: &obj::MetaMapType, on_route: bool, now: i64) -> Vec<&'static str> {
+    let earlier_day = |card: &Value| card.get("at").and_then(Value::as_i64).is_some_and(|at| at.div_euclid(DAY_MS) < now.div_euclid(DAY_MS));
+    [TODAY_META_KEY, STOPPED_META_KEY, WARNING_META_KEY]
+        .into_iter()
+        .filter(|key| match meta.get(*key) {
+            None | Some(Value::Null) => false,
+            Some(card) => !on_route || (*key != TODAY_META_KEY && earlier_day(card)),
+        })
+        .collect()
+}
+
+fn drop_stale(state: &AppState, def_id: &str, on_route: bool, now: i64) {
+    for block_id in worker_notes::live_panes_of(&state.mstore, def_id) {
+        let Some(block) = state.mstore.get::<obj::Block>(&block_id).ok().flatten() else { continue };
+        for key in stale_keys(&block.meta, on_route, now) {
+            set_meta(state, &block_id, key, Value::Null);
+        }
     }
 }
 
@@ -291,6 +321,37 @@ mod tests {
     use super::*;
     use crate::agents::types::TokenCounts;
     use crate::backend::storage::store::Store;
+
+    fn meta_of(entries: &[(&str, Value)]) -> obj::MetaMapType {
+        entries.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+
+    #[test]
+    fn an_agent_off_its_route_carries_no_spend_keys() {
+        let now = 20_000 * DAY_MS + 5_000;
+        let meta = meta_of(&[
+            (TODAY_META_KEY, json!({ "day": 20_000, "spent": 4.2, "cap": 20.0 })),
+            (STOPPED_META_KEY, json!({ "at": now - 1, "cap": 20.0, "spent": 20.0 })),
+            (WARNING_META_KEY, Value::Null),
+            ("agent:other", json!(1)),
+        ]);
+        assert_eq!(stale_keys(&meta, false, now), vec![TODAY_META_KEY, STOPPED_META_KEY], "a null key is already gone");
+        assert!(stale_keys(&meta_of(&[]), false, now).is_empty());
+    }
+
+    #[test]
+    fn on_a_route_only_a_stop_or_warning_from_an_earlier_utc_day_goes() {
+        let now = 20_000 * DAY_MS + 5_000;
+        let yesterday = 20_000 * DAY_MS - 1;
+        let meta = meta_of(&[
+            (TODAY_META_KEY, json!({ "day": 19_999, "spent": 20.0, "cap": 20.0 })),
+            (STOPPED_META_KEY, json!({ "at": yesterday, "cap": 20.0, "spent": 20.0 })),
+            (WARNING_META_KEY, json!({ "at": yesterday, "cap": 20.0, "spent": 16.0 })),
+        ]);
+        assert_eq!(stale_keys(&meta, true, now), vec![STOPPED_META_KEY, WARNING_META_KEY], "the chip's figure is day-gated by its reader");
+        let today = meta_of(&[(STOPPED_META_KEY, json!({ "at": 20_000 * DAY_MS, "cap": 20.0, "spent": 20.0 })), (WARNING_META_KEY, json!({ "cap": 20.0 }))]);
+        assert!(stale_keys(&today, true, now).is_empty(), "this UTC day's stop stays, and a card with no time is left alone");
+    }
 
     #[test]
     fn agents_list_shows_spend_for_an_agent_on_a_route_and_nothing_for_any_other() {
