@@ -25,6 +25,7 @@
 // initLogPipe() so any errors during the rest of bootstrap are caught.
 
 import { invokeCommand } from "@/app/platform/ipc";
+import { describeEvent, isEvent } from "@/util/describe-rejection";
 import { resolveStack, resolveStackSync, type ResolveStatus } from "./source-map-resolver";
 
 let initialized = false;
@@ -157,7 +158,7 @@ function forward(tag: string, payload: ForwardedErrorPayload): void {
     }
 }
 
-function extractErrorFields(err: unknown): {
+export function extractErrorFields(err: unknown): {
     name: string | null;
     message: string;
     stack: string | null;
@@ -169,6 +170,8 @@ function extractErrorFields(err: unknown): {
             stack: err.stack ?? null,
         };
     }
+    // An element's `error` event used as a rejection reason stringifies to `{"isTrusted":true}`.
+    if (isEvent(err)) return { name: "Event", message: describeEvent(err), stack: null };
     return {
         name: null,
         message: safeStringify(err),
