@@ -94,3 +94,48 @@ describe("AgentSearchBar: for assistive technology", () => {
         expect(live()).toBe("1 of 5");
     });
 });
+
+describe("AgentSearchBar dim switch", () => {
+    function withDim(initial: boolean) {
+        const [dim, setDim] = createSignal(initial);
+        const onDimChange = vi.fn((next: boolean) => setDim(next));
+        const view = render(() => (
+            <AgentSearchBar
+                visible={() => true}
+                matchIndex={() => 0}
+                matchCount={() => 3}
+                onSearch={vi.fn()}
+                onNext={vi.fn()}
+                onPrev={vi.fn()}
+                onClose={vi.fn()}
+                dim={dim}
+                onDimChange={onDimChange}
+            />
+        ));
+        const toggle = () => view.container.querySelector('button[aria-label="Dim rows that do not match"]') as HTMLButtonElement;
+        return { view, toggle, onDimChange };
+    }
+
+    it("shows the state as pressed and flips it on a click", () => {
+        const { toggle, onDimChange } = withDim(true);
+        expect(toggle().getAttribute("aria-pressed")).toBe("true");
+        toggle().click();
+        expect(onDimChange).toHaveBeenCalledWith(false);
+        expect(toggle().getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("sits between the step buttons and close, in the focus order", () => {
+        const { view } = withDim(true);
+        const labels = [...view.container.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"));
+        const at = (text: string) => labels.findIndex((l) => l?.startsWith(text));
+        expect(at("Next match")).toBeLessThan(at("Dim rows"));
+        expect(at("Dim rows")).toBeLessThan(at("Close search"));
+    });
+
+    it("is absent where the pane gives no dim state", () => {
+        const view = render(() => (
+            <AgentSearchBar visible={() => true} matchIndex={() => 0} matchCount={() => 1} onSearch={vi.fn()} onNext={vi.fn()} onPrev={vi.fn()} onClose={vi.fn()} />
+        ));
+        expect(view.container.querySelector('button[aria-label="Dim rows that do not match"]')).toBeNull();
+    });
+});

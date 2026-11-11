@@ -78,7 +78,7 @@ import { Portal } from "solid-js/web";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 
 import { nudgeDismissControl } from "./modal-dismiss-nudge";
-import { createModalCaret } from "./modal-caret";
+import { createBackdropDismiss, createModalCaret } from "./modal-caret";
 import { firstFocusable, lastFocusable } from "./modal-focus-trap";
 import { ModalTitleIdContext } from "./modal-parts";
 import { acquireRegionLock, releaseRegionLock } from "./modal-region-lock";
@@ -349,19 +349,17 @@ export const Modal: Component<ModalProps> = (props) => {
 
     // Backdrop handling. Only acts when this modal is the reachable
     // topmost. When `closeOnBackdropClick` is false the click does not
-    // dismiss — it nudges the panel's `[data-modal-dismiss]` control.
-    const handleBackdropClick = (ev: MouseEvent): void => {
+    // dismiss — it nudges the panel's `[data-modal-dismiss]` control. The
+    // press that takes the person to a waiting modal's pane does neither.
+    const backdrop = createBackdropDismiss(caret.waiting, (ev) => {
         if (!stackEntry || !isReachable(stackEntry)) return;
         // Only the backdrop itself, not a click bubbling up from the
         // panel. The panel is a sibling of the backdrop, so the simplest
         // correct test is `target === currentTarget`.
         if (ev.target !== ev.currentTarget) return;
-        if (props.closeOnBackdropClick === false) {
-            nudgeDismissControl(panelRef);
-            return;
-        }
+        if (props.closeOnBackdropClick === false) return nudgeDismissControl(panelRef);
         props.onClose();
-    };
+    });
 
     // Sentinel focus trap. Focusing a sentinel bounces focus to the
     // opposite end of the panel so Tab and Shift+Tab both wrap inside
@@ -412,7 +410,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             onKeyDown={handleKeyDown}
                         >
                             <ModalPaneOverlayClip getEl={() => rootRef} />
-                            <div class="modal-backdrop" onClick={handleBackdropClick} />
+                            <div class="modal-backdrop" onPointerDown={backdrop.press} onClick={backdrop.click} />
                             <span
                                 class="modal-focus-sentinel"
                                 tabindex="0"

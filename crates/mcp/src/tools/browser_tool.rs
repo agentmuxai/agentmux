@@ -26,6 +26,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "back", tool: "BrowserBack", rename: &[] },
     Act { action: "forward", tool: "BrowserForward", rename: &[] },
     Act { action: "reload", tool: "BrowserReload", rename: &[] },
+    Act { action: "zoom", tool: "BrowserZoom", rename: &[] },
     Act { action: "key", tool: "BrowserDispatchKey", rename: &[] },
     Act { action: "terminal", tool: "BrowserTerminal", rename: &[] },
     Act { action: "focus", tool: "BrowserFocusElement", rename: &[] },

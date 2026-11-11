@@ -693,29 +693,61 @@ cef::wrap_task! {
                 cef::quit_message_loop();
                 return;
             }
-            // Trusting the OS signal alone (the pre-Step-B behavior). The
-            // state logged here is a live bug report: registered > 0 means
-            // some close path failed to dispatch UnregisterBrowser (and the
-            // lag-retry budget above is now exhausted); !draining means a
-            // request_drain consumption site was missed (Phase 2's sites, or
-            // a new close path) — find it.
-            unsafe { diag_dump_app_windows("quit fire") };
-            tracing::warn!(
-                target: "wrr",
-                "[wrr] quit watchdog fired: 0 visible for {}ms (retries={}) but reducer disagrees (registered={} draining={}) — quitting on OS signal alone (reducer desync, investigate)",
-                QUIT_WATCHDOG_GRACE.as_millis(),
-                retries_used,
-                registered,
-                draining
-            );
-            // Kept for the next start's notice (the user sees no window now),
-            // when this is a window gone without being closed, not a quit.
-            if crate::commands::incidents::is_unexpected_quit(registered, draining) {
-                crate::commands::incidents::quit_no_window();
-            }
-            cef::quit_message_loop();
+            quit_from_watchdog(registered, draining, retries_used);
         }
     }
+}
+
+/// The watchdog's last step: nothing is visible and no re-arm applies, so the message loop is closed.
+///
+/// With a drain under way and no window registered, the reducer agrees: this is the Stage-2 quit
+/// ([`should_quit_on_last_window`]), run from here only because no window event re-ran the gate
+/// after the last close. It is said as that, with no dump and no "desync".
+///
+/// Any other state is trusting the OS signal alone (the pre-Step-B behavior), and what is logged
+/// is a live bug report: `registered > 0` means some close path failed to dispatch
+/// UnregisterBrowser (and the lag-retry budget is spent); `!draining` means a request_drain
+/// consumption site was missed (Phase 2's sites, or a new close path). Find it.
+fn quit_from_watchdog(registered: usize, draining: bool, retries_used: u32) {
+    if should_quit_on_last_window(true, draining, 0, registered) {
+        tracing::warn!(
+            target: "wrr",
+            "[wrr] quit watchdog: registered=0, 0 visible for {}ms, draining — quitting message loop (Stage-2 executor; no window event re-ran the gate after the last close)",
+            QUIT_WATCHDOG_GRACE.as_millis()
+        );
+    } else {
+        unsafe { diag_dump_app_windows("quit fire") };
+        tracing::warn!(
+            target: "wrr",
+            "[wrr] quit watchdog fired: 0 visible for {}ms (retries={}) but reducer disagrees (registered={} draining={}) — quitting on OS signal alone (reducer desync, investigate)",
+            QUIT_WATCHDOG_GRACE.as_millis(),
+            retries_used,
+            registered,
+            draining
+        );
+        // Kept for the next start's notice (the user sees no window now),
+        // when this is a window gone without being closed, not a quit.
+        if crate::commands::incidents::is_unexpected_quit(registered, draining) {
+            crate::commands::incidents::quit_no_window();
+        }
+    }
+    cef::quit_message_loop();
+}
+
+/// A parking close just told the reducer its window is gone (`ui_tasks::unregister_after_parking_close`).
+///
+/// Run the quit gate now, with the count this close corrected. The close's own HIDE fires while the
+/// window still counts as live, so the gate that event ran saw one registered window; and when the
+/// drain began earlier (an explicit quit: the drain first, the windows after), the unregistration
+/// carries no drain verdict, so `consume_request_drain` does not re-run it either. Without this the
+/// quit rested on some later window event happening to arrive, and otherwise waited out the watchdog.
+///
+/// The watchdog is still armed after it: a Views park is a move, not a hide or destroy, so a window
+/// that is still shown at this instant may produce no further event. Its re-check is idempotent and
+/// stands down if any window is still visible, so arming it while other windows remain open is harmless.
+pub(crate) fn after_parking_close(registered: usize) {
+    reevaluate_last_window_quit();
+    arm_quit_watchdog(registered);
 }
 
 /// Safe re-entry point for non-WINEVENT callers (Pillar 2 Phase 3): the
@@ -795,6 +827,17 @@ mod should_quit_tests {
     #[test]
     fn not_armed_never_quits() {
         assert!(!should_quit_on_last_window(false, true, 0, 0));
+    }
+
+    #[test]
+    fn the_watchdog_quitting_a_drained_app_with_no_window_is_the_agreed_quit_not_a_desync() {
+        // What `quit_from_watchdog` asks, with nothing visible: registered=0 and draining is the
+        // reducer agreeing (seen logged as "reducer disagrees (registered=0 draining=true)").
+        assert!(should_quit_on_last_window(true, true, 0, 0));
+        // A window still registered, or no drain decision: those are the desyncs to report.
+        assert!(!should_quit_on_last_window(true, true, 0, 1));
+        assert!(!should_quit_on_last_window(true, false, 0, 0));
+        assert!(!should_quit_on_last_window(true, false, 0, 1));
     }
 
     #[test]

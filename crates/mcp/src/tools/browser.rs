@@ -22,6 +22,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "BrowserLog" => run_log(arguments, cx).await,
         "BrowserNavigate" => run_navigate(arguments, cx).await,
         "BrowserBack" | "BrowserForward" | "BrowserReload" => run_history(name, arguments, cx).await,
+        "BrowserZoom" => super::browser_zoom::run_zoom(arguments, cx).await,
         "BrowserEval" => run_eval(arguments, cx).await,
         "BrowserDispatchKey" => run_dispatch_key(arguments, cx).await,
         "BrowserTerminal" => run_terminal(arguments, cx).await,
@@ -836,7 +837,8 @@ pub(super) async fn dialogs_note(cx: &ToolCtx<'_>) -> String {
         return String::new();
     }
     let body: Value = resp.json().await.unwrap_or(Value::Null);
-    dialogs_text(body.pointer("/data/dialogs"))
+    // A pane the agent zoomed ends every answer with that fact (`Browser` zoom).
+    format!("{}{}", dialogs_text(body.pointer("/data/dialogs")), super::browser_zoom::zooms_text(body.pointer("/data/zooms")))
 }
 
 /// The dialogs as text. The page wrote their words, so they're quoted and

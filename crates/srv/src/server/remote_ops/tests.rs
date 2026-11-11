@@ -244,6 +244,15 @@ fn a_peer_is_described_by_how_it_is_installed_and_whether_it_runs_agents() {
     let mut unasked = install_peer("charlie", "", "k3", 29705, &[]);
     unasked.last_polled_ok = 0;
     assert_eq!(describe_peer(&unasked), "charlie/stable");
+    // What kind of build a peer is comes from what it says about its binary, not from its channel:
+    // a release that a local build upgraded to keeps that build's channel.
+    let mut upgraded = unasked.clone();
+    upgraded.channel = "local-main-b28b7a-0000000a".into();
+    upgraded.build = "release".into();
+    upgraded.install = "linux-appimage".into();
+    assert_eq!(describe_peer(&upgraded), "charlie/local-main-b28b7a-0000000a (release, AppImage)");
+    upgraded.build = "local".into();
+    assert_eq!(describe_peer(&upgraded), "charlie/local-main-b28b7a-0000000a (local build, AppImage)");
     // The "no machine" error lists them so.
     let none = resolve_peer(&[store], "lazo").unwrap_err();
     assert!(none.contains("Area54/stable (Microsoft Store, no agents)"), "{none}");

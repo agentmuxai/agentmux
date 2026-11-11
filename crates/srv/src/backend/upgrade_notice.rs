@@ -421,7 +421,9 @@ pub fn on_registered(block_id: &str) {
         .await;
         match delivered {
             Ok(()) => {
-                tracing::info!(block_id = %block_id, cut_off, "upgrade notice: delivered");
+                // A cut-off turn was continued now; anyone else's note is held, and goes with its next message.
+                let what = if cut_off { "upgrade notice: the agent was told to carry on" } else { "upgrade notice: held for the agent's next message" };
+                tracing::info!(block_id = %block_id, cut_off, "{}", what);
                 if state.upgraded.is_some() {
                     record_notified(&state.dir, &block_id);
                 }

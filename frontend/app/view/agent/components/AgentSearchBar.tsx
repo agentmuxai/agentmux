@@ -15,6 +15,7 @@
  *   Enter        → next match
  *   Shift+Enter  → previous match
  *   Escape       → close
+ * The dim switch sits between the step buttons and close, the focus order of SPEC_AGENT_PANE_SEARCH_AND_DIM_MODE §4.6.
  * F3 and Shift+F3 step too: the pane's keyboard hook handles them (hooks/useAgentKeyboard.ts), with the field
  * focused or not. The count is announced through a polite live region that changes at most every
  * LIVE_COUNT_MS, so typing does not read out every count (SPEC_AGENT_PANE_SEARCH_AND_DIM_MODE_2026_11_06 §4.6).
@@ -62,6 +63,9 @@ export interface AgentSearchBarProps {
     matchCount: Accessor<number>;
     /** A pass is taking long enough to say so. */
     searching?: Accessor<boolean>;
+    /** Dim mode: rows that do not match are shown at reduced strength while a query is showing. */
+    dim?: Accessor<boolean>;
+    onDimChange?: (dim: boolean) => void;
     /** Drawn only so the band can measure it, out of sight: no focus, no live region, the field at its narrowest. */
     measuring?: boolean;
 }
@@ -124,6 +128,15 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
                 </Show>
                 <IconButton icon="caret-up" label="Previous match (Shift+Enter, Shift+F3)" density="compact" onClick={() => props.onPrev()} />
                 <IconButton icon="caret-down" label="Next match (Enter, F3)" density="compact" onClick={() => props.onNext()} />
+                <Show when={props.dim && props.onDimChange}>
+                    <IconButton
+                        icon="circle-half-stroke"
+                        label="Dim rows that do not match"
+                        density="compact"
+                        pressed={props.dim!()}
+                        onClick={() => props.onDimChange!(!props.dim!())}
+                    />
+                </Show>
                 <IconButton icon="xmark" label="Close search (Esc)" density="compact" onClick={() => props.onClose()} />
             </div>
         </Show>

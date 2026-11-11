@@ -11,19 +11,18 @@ import { SHIPPED_LOCALES, t } from "@/app/i18n/i18n";
 import { nativeName, PSEUDO_LOCALE, SOURCE_LOCALE, SYSTEM_LOCALE } from "@/app/i18n/locale";
 import { Show, type JSX } from "solid-js";
 import { set, SettingRow } from "../settings-controls";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
 export const LANGUAGE_SETTINGS = {
-    language: {
+    language: settingEntry({
         id: "appearance.language",
-        label: "Language",
-        description:
-            "The language of AgentMux's own screens. It does not change what agents reply in, and text from a hosted agent's terminal or tools stays in its own language. A language marked Beta shows English for what is not translated yet.",
+        labelKey: "settings.language.label",
+        descriptionKey: "settings.language.description",
         section: "appearance",
         // Until a language ships, only the pseudo-locale exists, and that is for developers.
         devOnly: SHIPPED_LOCALES.length === 0,
         keywords: ["language", "locale", "translation", "idioma", "langue", "sprache", "言語", "语言", "언어", "idioma", "app:locale"],
-    },
+    }),
 } satisfies Record<string, SettingsIndexEntry>;
 
 /** The values the picker offers, in order: the system, English, each shipped language, then the pseudo-locale in dev mode. */

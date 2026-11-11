@@ -88,11 +88,35 @@ pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
     rect.clone()
 }
 
+/// The two setters `place_overlay` calls on an overlay, so the order it calls them in has a test.
+pub(crate) trait OverlayPlace {
+    fn set_origin(&self, x: i32, y: i32);
+    fn set_extent(&self, width: i32, height: i32);
+}
+
+impl OverlayPlace for cef::OverlayController {
+    fn set_origin(&self, x: i32, y: i32) {
+        self.set_position(Some(&cef::Point { x, y }));
+    }
+    fn set_extent(&self, width: i32, height: i32) {
+        self.set_size(Some(&cef::Size { width, height }));
+    }
+}
+
 /// Put an overlay at `rect` (the page's physical pixels) in `window`.
-pub(crate) fn place_overlay(controller: &cef::OverlayController, window: Option<&Window>, rect: &Rect) {
-    let dip = views_rect(window, rect);
-    controller.set_size(Some(&cef::Size { width: dip.width, height: dip.height }));
-    controller.set_position(Some(&cef::Point { x: dip.x, y: dip.y }));
+pub(crate) fn place_overlay(controller: &impl OverlayPlace, window: Option<&Window>, rect: &Rect) {
+    place_at(controller, &views_rect(window, rect));
+}
+
+/// The origin first, then the size. CEF keeps an overlay inside its window by cutting each new bounds to
+/// the window's, and each setter keeps the other half of the bounds as they were cut. Size first, a pane
+/// that moves and grows in one step (a pane dropped elsewhere in the layout) took its new size at its old
+/// origin, was cut where that ran past the window's edge, and kept the cut size at its new origin: the
+/// page stayed short of its pane until the next layout change. With the origin first, the size is set
+/// where the pane ends up, so it is cut only if the rect itself is outside the window.
+fn place_at(controller: &impl OverlayPlace, rect: &Rect) {
+    controller.set_origin(rect.x, rect.y);
+    controller.set_extent(rect.width, rect.height);
 }
 
 /// Create a Views-based browser pane on the CEF UI thread, in `jar` (a named
@@ -723,3 +747,66 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     }
 }
 
+#[cfg(test)]
+mod place_tests {
+    use super::{place_at, OverlayPlace, Rect};
+    use std::cell::Cell;
+
+    /// An overlay as CEF keeps one: every new bounds is cut to the window's.
+    struct Overlay {
+        window: (i32, i32),
+        bounds: Cell<(i32, i32, i32, i32)>,
+    }
+
+    impl Overlay {
+        fn at(window: (i32, i32), bounds: (i32, i32, i32, i32)) -> Self {
+            Self { window, bounds: Cell::new(bounds) }
+        }
+        fn cut(&self, (x, y, w, h): (i32, i32, i32, i32)) {
+            let (right, bottom) = ((x + w).min(self.window.0), (y + h).min(self.window.1));
+            self.bounds.set((x, y, (right - x).max(0), (bottom - y).max(0)));
+        }
+    }
+
+    impl OverlayPlace for Overlay {
+        fn set_origin(&self, x: i32, y: i32) {
+            let (_, _, w, h) = self.bounds.get();
+            self.cut((x, y, w, h));
+        }
+        fn set_extent(&self, width: i32, height: i32) {
+            let (x, y, _, _) = self.bounds.get();
+            self.cut((x, y, width, height));
+        }
+    }
+
+    fn rect(x: i32, y: i32, width: i32, height: i32) -> Rect {
+        Rect { x, y, width, height }
+    }
+
+    /// The case from the report: a pane at the bottom right of a 2689 x 1470 window is dropped at the top,
+    /// narrower and taller. Size first, its height was cut to the window's bottom less its old top (769).
+    #[test]
+    fn a_pane_that_moves_and_grows_in_one_step_takes_its_whole_rect() {
+        let overlay = Overlay::at((2689, 1470), (1349, 701, 1334, 470));
+        place_at(&overlay, &rect(1349, 134, 661, 859));
+        assert_eq!(overlay.bounds.get(), (1349, 134, 661, 859));
+
+        let overlay = Overlay::at((2689, 1470), (1838, 134, 846, 1303));
+        place_at(&overlay, &rect(1349, 274, 1334, 603));
+        assert_eq!(overlay.bounds.get(), (1349, 274, 1334, 603), "wider, from an origin further right");
+    }
+
+    #[test]
+    fn a_pane_that_moves_and_shrinks_takes_its_whole_rect() {
+        let overlay = Overlay::at((2689, 1470), (0, 0, 1334, 1470));
+        place_at(&overlay, &rect(2000, 1000, 689, 470));
+        assert_eq!(overlay.bounds.get(), (2000, 1000, 689, 470));
+    }
+
+    #[test]
+    fn a_rect_past_the_window_is_cut_to_it() {
+        let overlay = Overlay::at((1000, 800), (0, 0, 500, 400));
+        place_at(&overlay, &rect(600, 500, 500, 400));
+        assert_eq!(overlay.bounds.get(), (600, 500, 400, 300));
+    }
+}

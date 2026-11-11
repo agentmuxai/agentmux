@@ -389,7 +389,10 @@ jobs:
         # cannot be found.
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
-          sudo apt-get update || echo "apt-get update reported errors; continuing (install is the real gate)"
+          # scripts/ci-apt.sh retries both apt calls, and waits for the Ubuntu mirrors to resolve first: on
+          # 2026-11-11 a resolver outage failed the same step on four runs (one of them in the merge queue)
+          # after 11 minutes of apt's own timeouts. A refresh that never works only warns here; the install fails.
+          bash scripts/ci-apt.sh update
           # libwayland-dev/libxkbcommon-dev: agentmux-launcher's Linux splash
           # (smithay-client-toolkit). libdbus-1-dev/pkg-config/libxcb1-dev:
           # agentmux-mcp's xcap (screen capture) needs dbus-1.pc AND -lxcb on
@@ -398,7 +401,7 @@ jobs:
           # of installing libgtk-3-dev (a CEF-only need, dropped with this
           # split; GTK pulls in the X11/xcb stack transitively), not because
           # anything here actually needs GTK itself.
-          sudo apt-get install -y libwayland-dev libxkbcommon-dev libdbus-1-dev pkg-config libxcb1-dev
+          bash scripts/ci-apt.sh install -y libwayland-dev libxkbcommon-dev libdbus-1-dev pkg-config libxcb1-dev
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -1029,6 +1032,11 @@ jobs:
       # docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md
       - name: Anonymous-pull check self-test
         run: bash scripts/check-anonymous-pull.test.sh
+
+      # The apt retry script every workflow that installs system packages calls; its own tests replace
+      # sudo, apt-get, getent and sleep, so no package is installed and no wait is real.
+      - name: apt retry script self-test
+        run: bash scripts/ci-apt.test.sh
 
       - name: Input-handler layout-read gate
         run: bash tools/lint/check-input-handler-layout-reads.sh

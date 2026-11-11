@@ -65,4 +65,6 @@ pub(crate) async fn push(state: &AppState) {
     if let Err(e) = crate::server::ui_handlers::proxy_to_host_timeout(state, &host, "owned_panes", body, Some(std::time::Duration::from_secs(5))).await {
         tracing::debug!(error = %e, "[browser-popup] couldn't send the owned panes to the host");
     }
+    // A zoom of a pane that is no longer the zoomer's: the host drops the unowned ones itself, this the rest.
+    crate::server::browser_zoom::reconcile(state, &host, &handed).await;
 }

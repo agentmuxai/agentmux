@@ -875,20 +875,14 @@ pub fn demote_srv_cleanup(state: &Arc<AppState>, label: &str) {
                         ));
                         crate::client::backend_close_window(&web_endpoint, &auth_key, window_id);
                     }
-                    Some(ids) => {
-                        let warn = format!(
-                            "demote_srv_cleanup({}): no backend window ID after retries, crumb lookup returned {} match(es) — srv state may orphan",
-                            lbl,
-                            ids.len()
-                        );
-                        crate::client::dlog(&warn);
-                        tracing::warn!("{}", warn);
+                    // No srv row carries the label: the window never had one (a pool window closed
+                    // before it was ever promoted, as every quit closes them) or it is closed already.
+                    Some(ids) if ids.is_empty() => {
+                        crate::client::dlog(&format!("demote_srv_cleanup({lbl}): no backend window for this label — nothing to clean up"));
                     }
-                    None => {
-                        let warn = format!(
-                            "demote_srv_cleanup({}): no backend window ID after retries, crumb lookup unavailable — srv state may orphan",
-                            lbl
-                        );
+                    found => {
+                        let crumb = found.map_or("unavailable".to_string(), |ids| format!("returned {} match(es)", ids.len()));
+                        let warn = format!("demote_srv_cleanup({lbl}): no backend window ID after retries, crumb lookup {crumb} — srv state may orphan");
                         crate::client::dlog(&warn);
                         tracing::warn!("{}", warn);
                     }
@@ -1331,7 +1325,7 @@ fn arm_promote_liveness(state: &Arc<AppState>, label: &str, fallback: PromoteFal
                     right: fallback.pos_x + fallback.width,
                     bottom: fallback.pos_y + fallback.height,
                 }),
-                false,
+                None,
             );
             if let Ok(v) = &out {
                 if let Some(label) = v.as_str() {
@@ -1352,7 +1346,7 @@ fn arm_promote_liveness(state: &Arc<AppState>, label: &str, fallback: PromoteFal
                 fallback.initial_view.as_deref(),
                 fallback.initial_meta.as_deref(),
                 None,
-                false,
+                None,
             )
         } else {
             // Tear-off promote: the tab has ALREADY been moved into

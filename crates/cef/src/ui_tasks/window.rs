@@ -468,12 +468,10 @@ wrap_task! {
 /// turns `CloseWindowTask` into a silent no-op — the window simply stays open
 /// (caught live 2026-07-09, first verification pass of this fix).
 ///
-/// Also arms the WRR quit watchdog: a Views park is a *move*, not a
-/// hide/destroy, so it can produce ZERO further win-events — with nothing to
-/// re-run the quit gate, even a fully-correct registered count would sit
-/// unread forever. The watchdog re-check is idempotent and stands down if any
-/// window is still visible, so arming it while other windows remain open is
-/// harmless.
+/// Last, it re-runs the quit gate with the corrected count and arms the WRR
+/// quit watchdog (`win_event::after_parking_close`): a Views park is a *move*,
+/// not a hide/destroy, so it can produce ZERO further win-events, and nothing
+/// else would read the count again.
 ///
 /// Launcher/srv cleanup is NOT duplicated here: the `close_window` RPC
 /// already sent `report_window_closed`, and `demote_srv_cleanup` already ran
@@ -521,7 +519,7 @@ pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str)
         // process is quitting and WRR still resolves it for logging.
         state.evict_window_hwnd(label);
     }
-    crate::wrr::win_event::arm_quit_watchdog(state.count_live_user_windows());
+    crate::wrr::win_event::after_parking_close(state.count_live_user_windows());
 }
 
 /// Pillar 2 Phase 2 (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §2.4) — uniform

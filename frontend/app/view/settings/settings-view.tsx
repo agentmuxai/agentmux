@@ -6,6 +6,7 @@ import { Dynamic } from "solid-js/web";
 
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 
+import { t } from "@/app/i18n/i18n";
 import { fullConfigAtom } from "@/app/store/global";
 import { openConfigFileOrTell, type ConfigFile } from "@/app/util/open-config-file";
 import { SETTINGS_SECTION_LABELS, SETTINGS_SECTIONS, type SettingsIndexEntry, type SettingsSection, type SettingsViewModel } from "./settings-model";
@@ -47,7 +48,7 @@ export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }
                     )}
                 </For>
                 <Button tone="danger" class="settings-config-error-fix" onClick={() => void openRaw()}>
-                    Fix in editor
+                    {t("settings.errors.fix")}
                 </Button>
             </div>
         </Show>
@@ -129,7 +130,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
         >
             {/* One tablist along the top: icons only when narrow, labels when
                 there's room (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
-            <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Settings section">
+            <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel={t("settings.rail.label")}>
                 <div class="settings-body">
                     <SettingsSearchBar
                         query={props.model.query}
@@ -140,10 +141,10 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                     <Dynamic component={SECTION_VIEWS[section()]} />
                     <footer class="settings-footer">
                         <Button icon="file-code" onClick={() => void openRaw()}>
-                            Open raw settings.json
+                            {t("settings.footer.openRaw", { file: "settings.json" })}
                         </Button>
                         <Button icon="file-code" onClick={() => void openFile("widgets.json")}>
-                            Open raw widgets.json
+                            {t("settings.footer.openRaw", { file: "widgets.json" })}
                         </Button>
                     </footer>
                 </div>

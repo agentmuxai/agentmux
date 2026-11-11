@@ -9,6 +9,7 @@
 // See docs/specs/SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md.
 
 [data-theme="gruvbox-light"] {
+    --search-dim-opacity: 0.7;
     // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
     --main-bg-color: rgba(251, 241, 199, var(--window-opacity));
     --panel-bg-color: rgba(60, 56, 54, 0.05);

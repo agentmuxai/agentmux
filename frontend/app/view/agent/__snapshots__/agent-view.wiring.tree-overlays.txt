@@ -7,7 +7,7 @@
       <div.agent-view-zoomed style="zoom: 1;">
         <AgentProgressBar {"active":"false","mount":"<fn>","stopping":"false"}>
         <BtwOverlay {"askId":"\"a1\"","blockId":"\"blk-12345678\"","error":"undefined","onClose":"<fn>","question":"\"why?\"","requestId":"\"r1\""}>
-        <AgentFindBandItem {"blockId":"\"blk-12345678\"","matchCount":"<fn>","matchIndex":"<fn>","onClose":"<fn>","onNext":"<fn>","onPrev":"<fn>","onSearch":"<fn>","searching":"<fn>","visible":"<fn>"}>
+        <AgentFindBandItem {"blockId":"\"blk-12345678\"","dim":"undefined","matchCount":"<fn>","matchIndex":"<fn>","onClose":"<fn>","onDimChange":"undefined","onNext":"<fn>","onPrev":"<fn>","onSearch":"<fn>","searching":"<fn>","visible":"<fn>"}>
         <div.agent-document-scroll-region>
           <HistoryLoadingRow {"readiness":"<object>"}>
           <AgentDocumentView {"blockId":"\"blk-12345678\"","documentNodes":"<fn>","documentStateAtom":"<object>","followingRef":"<fn>","hasOlderHistory":"<fn>","highlightNodeId":"<fn>","layoutView":"<fn>","loadingOlder":"<fn>","newActivityRef":"<fn>","onAgentErrorLogin":"<fn>","onLoadOlder":"<fn>","onOpenHistory":"<fn>","registerHistoryReadyCallback":"<fn>","scrollCommand":"<fn>","scrollToBottomRef":"<fn>","zoomFactor":"<fn>"}>

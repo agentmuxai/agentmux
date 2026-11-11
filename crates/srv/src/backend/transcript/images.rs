@@ -9,8 +9,8 @@
 //! a found one as `N. name — <path>.send.<image extension>`, a missing one as `- name.png — (no longer available)`.
 //! Only user lines are read, so an agent's own text that quotes such a list counts for nothing.
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::Value;
 
@@ -40,6 +40,30 @@ fn cache() -> &'static Mutex<HashMap<String, Counted>> {
 /// time and may not be shorter, so nothing else tells the next count that its bytes are not the ones it read.
 pub fn forget(zone: &str) {
     cache().lock().unwrap_or_else(|e| e.into_inner()).remove(zone);
+}
+
+/// What the last finished count of `zone` found: a floor for the transcript as it is now, and `None` before the first
+/// count. It reads nothing, so a caller with a deadline can ask it where [`count_in_zone`] would first read the whole file
+/// (a big agent's transcript is gigabytes).
+pub fn counted(zone: &str) -> Option<u32> {
+    cache().lock().unwrap_or_else(|e| e.into_inner()).get(zone).map(|c| c.images)
+}
+
+/// Counts `zone` in the background, so [`counted`] has an answer once it finishes and the next count reads only what was
+/// added since. Nothing starts while a count of the zone is already running.
+pub fn warm(gfs: &Arc<FileStore>, zone: &str) {
+    static RUNNING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let running = RUNNING.get_or_init(Default::default);
+    if !running.lock().unwrap_or_else(|e| e.into_inner()).insert(zone.to_string()) {
+        return;
+    }
+    let (gfs, zone) = (gfs.clone(), zone.to_string());
+    std::thread::spawn(move || {
+        if let Err(e) = count_in_zone(&gfs, &zone) {
+            tracing::warn!(zone = %zone, error = %e, "the images in the conversation were not counted");
+        }
+        running.lock().unwrap_or_else(|e| e.into_inner()).remove(&zone);
+    });
 }
 
 /// The images in the user messages of `zone`'s transcript; 0 when there is none.

@@ -232,6 +232,8 @@ pub struct LanInstance {
     pub os: String,
     /// How the peer is installed (`InstallKind::label`, e.g. `windows-store`); empty when it predates advertising it.
     #[serde(default)] pub install: String,
+    /// The kind of build the peer says its binary is (`BuildKind::label`), never read off its channel; empty when it predates advertising it.
+    #[serde(default)] pub build: String,
     pub address: String,
     pub port: u16,
     /// The peer's `lan_key`; never serialized, as no reader of the JSON needs it.
@@ -517,7 +519,7 @@ impl LanDiscovery {
             ("hostname", hostname.as_str()),
             ("instance_id", instance_id.as_str()),
             ("channel", channel.as_str()),
-            ("os", os.as_str()), ("install", crate::backend::update::check::install_kind().label()),
+            ("os", os.as_str()), ("install", crate::backend::update::check::install_kind().label()), ("build", agentmux_common::build_kind::build_kind().label()),
             ("auth_key", auth_key.as_str()),
         ];
         if let Some(id) = install_id.as_deref() {
@@ -876,7 +878,7 @@ impl LanDiscovery {
         // this instance over UDP can tell two channels on one host apart. An
         // extra field: older parsers (mobile included) ignore it.
         response["channel"] = json!(crate::backend::reactive::registry::local_channel_id());
-        response["os"] = json!(crate::backend::host_os::local_os()); response["install"] = json!(crate::backend::update::check::install_kind().label());
+        response["os"] = json!(crate::backend::host_os::local_os()); response["install"] = json!(crate::backend::update::check::install_kind().label()); response["build"] = json!(agentmux_common::build_kind::build_kind().label());
         // What a phone merges this install with its cloud record by, and how
         // many channels this machine runs, shared on the LAN or not
         // (agentmux-mobile's SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06
@@ -1182,12 +1184,9 @@ impl LanDiscovery {
                     .get_property_val_str("auth_key")
                     .unwrap_or_default()
                     .to_string();
-                let channel = info
-                    .get_property_val_str("channel")
-                    .unwrap_or_default()
-                    .to_string();
+                let channel = info.get_property_val_str("channel").unwrap_or_default().to_string();
                 // Self-reported by the peer, so only a plain token is kept.
-                let (os, install) = crate::backend::lan::peer_words::os_and_install(&info);
+                let (os, install, build) = crate::backend::lan::peer_words::advertised(&info);
                 let other_ttl_secs = info.get_other_ttl();
 
                 let mut instances = self.instances.write();
@@ -1200,7 +1199,7 @@ impl LanDiscovery {
                     hostname: hostname.clone(),
                     version: version.clone(),
                     channel: channel.clone(),
-                    os: os.clone(), install: install.clone(),
+                    os: os.clone(), install: install.clone(), build: build.clone(),
                     address: address.clone(),
                     port: info.get_port(),
                     auth_key: auth_key.clone(),
@@ -1234,7 +1233,7 @@ impl LanDiscovery {
                 if !peer_id.is_empty() {
                     entry.instance_id = peer_id.clone();
                 }
-                crate::backend::lan::peer_words::keep_known(&mut entry.install, install);
+                crate::backend::lan::peer_words::keep_known(&mut entry.install, install); crate::backend::lan::peer_words::keep_known(&mut entry.build, build);
                 if !hostname.is_empty() {
                     entry.hostname = hostname;
                 }

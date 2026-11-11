@@ -18,6 +18,7 @@ import type { AgentRuntimeDropupProps, OptionRow } from "./runtime-dropup-option
 
 /** The pane meta key srv writes at every launch with the model that really answers; absent off a route. */
 export const ROUTE_MODEL_META_KEY = "agent:route_model";
+const SWITCH_TIMEOUT_MS = 120_000;
 
 const ATTACHMENT_NODES: ReadonlySet<string> = new Set(["user_message", "jekt_message", "system_note"]);
 
@@ -157,7 +158,8 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
 
     /** Moves the agent to `route`/`model` (an empty route is the harness's own sign-in). The agent restarts after its turn. */
     const moveTo = async (route: string, model: string, restart: boolean): Promise<AgentModelSwitchResult> => {
-        const result = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: props.blockId, route, model, restart });
+        // srv counts the conversation's images before it moves, which reads a big transcript whole the first time: more than the default 5 s.
+        const result = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: props.blockId, route, model, restart }, { timeout: SWITCH_TIMEOUT_MS });
         await refresh();
         return result;
     };

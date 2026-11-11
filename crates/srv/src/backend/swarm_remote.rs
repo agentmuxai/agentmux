@@ -673,6 +673,7 @@ mod tests {
             channel: channel.to_string(),
             os: String::new(),
             install: String::new(),
+            build: String::new(),
             address: addr.to_string(),
             port,
             auth_key: "lan-secret".to_string(),

@@ -51,10 +51,21 @@ export function installLabel(install: string | undefined): string {
     return (install && INSTALL_LABELS[install]) || "";
 }
 
-/** "Windows · stable · Microsoft Store": the peer's OS, channel and install, leaving out what it did not advertise. */
-export function osAndChannel(peer: Pick<LanInstance, "os" | "channel"> & { install?: string }): string {
+const BUILD_LABELS: Record<string, string> = { release: "release", local: "local build", dev: "dev build" };
+
+/**
+ * What kind of build a peer says it is ("release", "local build", "dev build"); empty when it did not say.
+ * The peer reads it off its own binary. It is never worked out from the channel's name: a release that a
+ * local build was upgraded to keeps that build's channel.
+ */
+export function buildLabel(build: string | undefined): string {
+    return (build && BUILD_LABELS[build]) || "";
+}
+
+/** "Windows · release · Microsoft Store": the peer's OS, kind of build and install, leaving out what it did not advertise. */
+export function peerRuns(peer: Pick<LanInstance, "os"> & { build?: string; install?: string }): string {
     const os = OS_LABELS[peer.os] ?? peer.os;
-    return [os, peer.channel, installLabel(peer.install)].filter((p) => p).join(" · ");
+    return [os, buildLabel(peer.build), installLabel(peer.install)].filter((p) => p).join(" · ");
 }
 
 /** Whether a peer that has been asked who it runs says it runs nobody (an install with no agents). */

@@ -137,38 +137,9 @@ pub(super) async fn page_now(cdp: &mut CdpSession, before: &str) -> Option<Value
 
 // ── Functions run on the element (`this`) in the isolated world ────────────
 
-/// Scroll into view and report the centre, in viewport coordinates.
-const CLICK_POINT: &str = r#"function () {
-  // A checkbox or radio the page hides (display: none) behind a label drawn
-  // as the box has no box of its own: click its label, at a point where the
-  // label itself is hit, not a link or button inside it.
-  const choice = this.tagName === "INPUT" && /^(checkbox|radio)$/i.test(this.type);
-  if (choice && this.getClientRects().length === 0) {
-    const label = Array.from(this.labels || []).find(l => l.getClientRects().length > 0);
-    if (!label) return { error: "the element is not visible" };
-    label.scrollIntoView({ block: "center", inline: "center" });
-    const doc = label.ownerDocument;
-    const clear = (x, y) => {
-      const at = doc.elementFromPoint(x, y);
-      if (!at || !label.contains(at)) return false;
-      for (let n = at; n && n !== label; n = n.parentElement) {
-        if (n.matches("a[href], button, select, textarea, input, [role=button], [role=link]")) return false;
-      }
-      return true;
-    };
-    for (const el of [label, ...label.querySelectorAll("*")]) {
-      const r = el.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) continue;
-      const x = r.left + r.width / 2, y = r.top + r.height / 2;
-      if (clear(x, y)) return { x, y };
-    }
-    return { error: "the label of this checkbox is covered by something else; ask the user to tick it" };
-  }
-  this.scrollIntoView({ block: "center", inline: "center" });
-  const r = this.getBoundingClientRect();
-  if (r.width === 0 && r.height === 0) return { error: "the element is not visible" };
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-}"#;
+/// Scroll into view and report where to click, in viewport coordinates, or why a click can't land
+/// (`scripts/click_point.js`).
+const CLICK_POINT: &str = include_str!("scripts/click_point.js");
 
 /// Focus and select the current contents, so inserted text replaces them.
 pub(super) const PREPARE_FILL: &str = r#"function () {
@@ -513,6 +484,7 @@ pub(super) async fn page_url(cdp: &mut CdpSession) -> String {
 }
 
 async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
+    let (x, y) = super::zoom::scale_point(cdp.label(), x, y);
     for event_type in ["mouseMoved", "mousePressed", "mouseReleased"] {
         let (button, buttons) = if event_type == "mouseMoved" { ("none", 0) } else { ("left", 1) };
         call(
@@ -644,8 +616,32 @@ async fn explain_unclickable(cdp: &mut CdpSession, object_id: &str, error: Strin
     if attached == Some(false) {
         "the page changed since the snapshot (the element is gone); take a new snapshot".to_string()
     } else {
-        error
+        tidy_click_error(&error)
     }
+}
+
+/// The page's words in a click's answer (`scripts/click_point.js` sends them whole between U+0001 and U+0002):
+/// a secret the page shows once masked first, then shortened, so no piece of one gets through.
+pub(super) fn tidy_click_error(error: &str) -> String {
+    const KEPT: usize = 80;
+    let mut out = String::with_capacity(error.len().min(512));
+    let mut rest = error;
+    while let Some(start) = rest.find('\u{1}') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let (text, tail) = after.find('\u{2}').map_or((after, ""), |end| (&after[..end], &after[end + 1..]));
+        let masked = agentmux_common::shown_once::mask(text);
+        match masked.char_indices().nth(KEPT) {
+            Some((cut, _)) => {
+                out.push_str(&masked[..cut]);
+                out.push('…');
+            }
+            None => out.push_str(&masked),
+        }
+        rest = tail;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The secret-field guard for typing into whatever has focus (spec §5.1),
@@ -1241,6 +1237,26 @@ mod tests {
         assert_eq!(date_type(&facts("input", &[("type", "text")])), None);
         assert_eq!(date_type(&facts("input", &[])), None);
         assert_eq!(date_type(&facts("div", &[("type", "date")])), None);
+    }
+
+    #[test]
+    fn a_click_error_shows_the_pages_words_masked_then_shortened() {
+        let secret = "Xy8Q~abcDEF1234ghijKLmnoPQRstu.vwxYZ0123";
+        let e = format!("not clicked: <button \"\u{1}Copy\u{2}\"> is covered by <div \"\u{1}{secret} (copy it now)\u{2}\"> (try Browser zoom)");
+        let got = tidy_click_error(&e);
+        assert!(!got.contains(secret), "{got}");
+        assert!(!got.contains("Xy8Q"), "no piece of it either: {got}");
+        assert!(got.contains("<button \"Copy\">"), "{got}");
+        assert!(got.contains("[secret: shown once"), "{got}");
+        assert!(got.ends_with("(try Browser zoom)"), "{got}");
+        assert!(!got.contains('\u{1}') && !got.contains('\u{2}'));
+        // A long ordinary text is shortened, on a character boundary.
+        let long = format!("not clicked: <div \"\u{1}{}\u{2}\">", "é".repeat(300));
+        let got = tidy_click_error(&long);
+        assert!(got.contains(&"é".repeat(80)) && !got.contains(&"é".repeat(81)), "{got}");
+        // An answer with no markers is as it was, and an unclosed marker does not lose the rest.
+        assert_eq!(tidy_click_error("the element is not visible"), "the element is not visible");
+        assert_eq!(tidy_click_error("a \u{1}b"), "a b");
     }
 
     #[test]

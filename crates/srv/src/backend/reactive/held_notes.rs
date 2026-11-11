@@ -292,6 +292,10 @@ impl Attached {
 
     /// The message carrying the notes went to the agent.
     pub fn delivered(mut self) {
+        if !self.notes.is_empty() {
+            let keys = self.notes.iter().map(|(key, _)| key.as_str()).collect::<Vec<_>>().join(", ");
+            tracing::info!(block_id = %self.block_id, notes = %keys, "held notes: went to the agent with a message");
+        }
         self.notes.clear();
         if let Some(suffix) = self.suffix.take() {
             ATTACHED.lock().unwrap_or_else(|e| e.into_inner()).record(&suffix);

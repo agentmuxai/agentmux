@@ -614,6 +614,14 @@
     --accent-line-strong:  color-mix(in srgb, var(--accent-color) 40%, transparent);
     --accent-line-heavy:   color-mix(in srgb, var(--accent-color) 50%, transparent);
     --accent-line-vivid:   color-mix(in srgb, var(--accent-color) 60%, transparent);
+    // Search in an agent pane (view/agent/search/search-dim-contrast.test.ts, every theme). A row the query does
+    // not match is drawn at `--search-dim-opacity`: the lowest step, not below 0.5, at which the theme's main
+    // text still reads at 4.5:1 on its surface, so a theme that cannot reach it at 0.5 sets its own. The words
+    // the query finds are washed with `--search-mark-bg`, and the current row's with the stronger one; the
+    // text keeps its colour on both, so each wash has to leave 4.5:1.
+    --search-dim-opacity: 0.5;
+    --search-mark-bg: color-mix(in srgb, var(--accent-color) 20%, transparent);
+    --search-mark-current-bg: color-mix(in srgb, var(--accent-color) 28%, transparent);
     --success-bg-subtle:   color-mix(in srgb, var(--success-color) 6%, transparent);
     --success-bg-strong:   color-mix(in srgb, var(--success-color) 16%, transparent);
     --success-bg-heavy:    color-mix(in srgb, var(--success-color) 23%, transparent);

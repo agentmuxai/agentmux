@@ -20,6 +20,9 @@
  *   - currentIndex     — 0-based index into matches; -1 when none
  *   - matchCount       — derived: matches().length
  *   - highlightId      — derived: matches[currentIndex] or null
+ *   - matchSet         — the matches as a Set, for a row to ask "am I one?" (search/search-paint.ts)
+ *   - searched         — the query (lower case) whose matches are showing; "" when there is none
+ *   - dim, setDim      — whether non-matching rows are dimmed while a query is showing (on by default)
  *   - searching        — a pass is taking long enough to say so
  *   - performSearch    — run a fresh query (after a short pause in typing)
  *   - next             — cycle to next match
@@ -71,6 +74,10 @@ export interface UseInSessionSearch {
     currentIndex: Accessor<number>;
     matchCount: Accessor<number>;
     highlightId: Accessor<string | null>;
+    matchSet: Accessor<ReadonlySet<string>>;
+    searched: Accessor<string>;
+    dim: Accessor<boolean>;
+    setDim: Setter<boolean>;
     searching: Accessor<boolean>;
     performSearch: (query: string) => void;
     next: () => void;
@@ -85,6 +92,7 @@ interface SearchView {
     setMatches: Setter<string[]>;
     setCurrentIndex: Setter<number>;
     setSearching: Setter<boolean>;
+    setSearched: Setter<string>;
 }
 
 /** Take a pass's matches in: keep the current one by id while it still matches, else pick a start; move the view only for a typed query. */
@@ -129,7 +137,7 @@ function applyFound(
 
 /** The debounced, sliced, cancellable passes over the transcript, and the refresh while it grows. */
 function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
-    const { visible, highlightId, setMatches, setCurrentIndex, setSearching } = view;
+    const { visible, highlightId, setMatches, setCurrentIndex, setSearching, setSearched } = view;
     const index = createTranscriptIndex(opts.clock);
     /** The query as searched (lower case); empty when there is none. */
     let query = "";
@@ -148,6 +156,7 @@ function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
         if (!query) {
             setSearching(false);
             typedPending = false;
+            setSearched("");
             applyFound(opts, view, [], true, []);
             return;
         }
@@ -161,6 +170,7 @@ function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
         setSearching(false);
         const owed = typedPending;
         typedPending = false;
+        setSearched(query);
         applyFound(opts, view, found, owed, nodes);
     };
 
@@ -210,6 +220,7 @@ function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
         clearTimeout(slow);
         debounce = refresh = undefined;
         setSearching(false);
+        setSearched("");
     };
 
     return { performSearch, flushTyping, stop, clearIndex: index.clear };
@@ -221,6 +232,8 @@ export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessio
     const [matches, setMatches] = createSignal<string[]>([]);
     const [currentIndex, setCurrentIndex] = createSignal(-1);
     const [searching, setSearching] = createSignal(false);
+    const [searched, setSearched] = createSignal("");
+    const [dim, setDim] = createSignal(true);
 
     const matchCount = createMemo(() => matches().length);
 
@@ -230,12 +243,15 @@ export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessio
         return idx >= 0 && idx < m.length ? m[idx] : null;
     });
 
+    const matchSet = createMemo<ReadonlySet<string>>(() => new Set(matches()));
+
     const { performSearch, flushTyping, stop, clearIndex } = createSearchPasses(opts, {
         visible,
         highlightId,
         setMatches,
         setCurrentIndex,
         setSearching,
+        setSearched,
     });
     onCleanup(stop);
 
@@ -273,6 +289,10 @@ export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessio
         currentIndex,
         matchCount,
         highlightId,
+        matchSet,
+        searched,
+        dim,
+        setDim,
         searching,
         performSearch,
         next,

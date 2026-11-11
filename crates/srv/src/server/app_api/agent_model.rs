@@ -249,11 +249,21 @@ fn images_in_conversation(def: &AgentDefinition) -> u32 {
     })
 }
 
+/// The images in the conversation as far as they are known without reading the transcript, and the count started in the
+/// background for the next time. The first count of a big agent's transcript takes longer than the panel's request has,
+/// and a panel that times out shows the harness's own models alone. 0 when it is not known.
+fn images_known(def: &AgentDefinition) -> u32 {
+    let Some(gfs) = crate::backend::agent_session::global_transcript_store() else { return 0 };
+    let zone = crate::backend::agent_session::agent_current_zone(&def.id);
+    crate::backend::transcript::images::warm(gfs, &zone);
+    crate::backend::transcript::images::counted(&zone).unwrap_or(0)
+}
+
 fn panel(state: &AppState, req: &AgentModelPanelReq) -> Result<AgentModelPanel, String> {
     let def = agent_of_block(state, &req.blockid)?;
     let harness = state.id_store.resolve_effective_provider_id(&def);
-    // The pane's count is a hint: the larger of the two is the one to go by.
-    let req = &AgentModelPanelReq { images: Some(req.images.unwrap_or(0).max(images_in_conversation(&def))), ..req.clone() };
+    // The pane's count is a hint: the larger of the two is the one to go by. The switch counts exactly before it moves.
+    let req = &AgentModelPanelReq { images: Some(req.images.unwrap_or(0).max(images_known(&def))), ..req.clone() };
     let current = launch::choice_of(&state.mstore, &def.id);
     let routes = catalog::ROUTES
         .iter()
