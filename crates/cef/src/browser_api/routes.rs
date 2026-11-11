@@ -585,10 +585,8 @@ pub async fn click_element(
         )));
     }
 
-    // The page's CSS pixels; a zoomed pane reads the mouse in its scaled view (`zoom.rs`).
-    let scale = super::zoom::input_scale(cdp.label());
-    let x = cent.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale;
-    let y = cent.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale;
+    let at = |k: &str| cent.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let (x, y) = super::zoom::scale_point(cdp.label(), at("x"), at("y"));
 
     // Dispatch mousePressed + mouseReleased. `buttons: 1` = left
     // primary; `button: "left"` is the CDP enum.

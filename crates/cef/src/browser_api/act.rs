@@ -484,9 +484,7 @@ pub(super) async fn page_url(cdp: &mut CdpSession) -> String {
 }
 
 async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
-    // The point is in the page's CSS pixels; a zoomed pane reads the mouse in its scaled view (`zoom.rs`).
-    let scale = super::zoom::input_scale(cdp.label());
-    let (x, y) = (x * scale, y * scale);
+    let (x, y) = super::zoom::scale_point(cdp.label(), x, y);
     for event_type in ["mouseMoved", "mousePressed", "mouseReleased"] {
         let (button, buttons) = if event_type == "mouseMoved" { ("none", 0) } else { ("left", 1) };
         call(

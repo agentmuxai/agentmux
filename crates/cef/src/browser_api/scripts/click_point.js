@@ -29,11 +29,16 @@ function () {
     return { error: "the label of this checkbox is covered by something else; ask the user to tick it" };
   }
   this.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-  const r = this.getBoundingClientRect();
-  if (r.width === 0 && r.height === 0) return { error: "the element is not visible" };
+  const rect = this.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return { error: "the element is not visible" };
   const vw = win.innerWidth, vh = win.innerHeight;
   // No viewport to measure against (a frame with no size yet): the centre, as before.
-  if (!(vw > 0 && vh > 0)) return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  if (!(vw > 0 && vh > 0)) return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  // A line or a sub-pixel box is a target one pixel wide or tall, so being inside the view is what counts.
+  const grow = (lo, hi) => (hi - lo >= 1 ? [lo, hi] : [(lo + hi) / 2 - 0.5, (lo + hi) / 2 + 0.5]);
+  const [left, right] = grow(rect.left, rect.right);
+  const [top, bottom] = grow(rect.top, rect.bottom);
+  const r = { left, right, top, bottom };
 
   // The part a click can reach: inside the viewport and inside every ancestor that clips it.
   const cut = (box, c, byX, byY) => ({
@@ -42,12 +47,20 @@ function () {
     top: byY ? Math.max(box.top, c.top) : box.top,
     bottom: byY ? Math.min(box.bottom, c.bottom) : box.bottom,
   });
-  const empty = b => b.right - b.left < 1 || b.bottom - b.top < 1;
+  const empty = b => b.right <= b.left || b.bottom <= b.top;
   const inView = cut(r, { left: 0, top: 0, right: vw, bottom: vh }, true, true);
   let box = inView;
   let clipper = null;
-  for (let p = this.parentElement; p && !empty(box); p = p.parentElement) {
+  // What clips an element depends on how it is placed: a fixed one is clipped by no ancestor (unless one
+  // transforms), an absolute one only by its containing block and what is outside it. The page's own root
+  // and body are the viewport, which is already applied.
+  let placed = win.getComputedStyle(this).position;
+  for (let p = this.parentElement; p && p !== doc.body && p !== doc.documentElement && !empty(box); p = p.parentElement) {
     const s = win.getComputedStyle(p);
+    const makesBlock = s.transform !== "none" || s.perspective !== "none" || s.filter !== "none";
+    if (placed === "fixed" && !makesBlock) continue;
+    if (placed === "absolute" && s.position === "static" && !makesBlock) continue;
+    placed = s.position;
     const byX = s.overflowX !== "visible", byY = s.overflowY !== "visible";
     if (!byX && !byY) continue;
     const next = cut(box, p.getBoundingClientRect(), byX, byY);

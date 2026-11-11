@@ -15,6 +15,7 @@
 //! cleared when the pane is no longer the agent's.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -125,8 +126,13 @@ struct Entry {
     block_id: String,
     ask: Ask,
     plan: Plan,
-    /// Bumped by every change, so a resize that waited out `RESIZE_SETTLE` can tell it was overtaken.
+    /// From `next_generation`, so a resize that waited out `RESIZE_SETTLE` can tell it was overtaken.
     generation: u64,
+}
+
+fn next_generation() -> u64 {
+    static N: AtomicU64 = AtomicU64::new(0);
+    N.fetch_add(1, Ordering::Relaxed) + 1
 }
 
 /// Zoomed panes by browser label (what a `CdpSession` addresses).
@@ -135,6 +141,13 @@ static ZOOMED: LazyLock<Mutex<HashMap<String, Entry>>> = LazyLock::new(Default::
 /// What the mouse events of a click on this browser are multiplied by: DevTools reads them in the scaled view.
 pub fn input_scale(label: &str) -> f64 {
     ZOOMED.lock().get(label).map_or(1.0, |e| e.plan.scale)
+}
+
+/// A point in the page's CSS pixels as the mouse is sent it on this browser: DevTools reads mouse events in the
+/// scaled view.
+pub fn scale_point(label: &str, x: f64, y: f64) -> (f64, f64) {
+    let scale = input_scale(label);
+    (x * scale, y * scale)
 }
 
 // ── Applying it ─────────────────────────────────────────────────────────────
@@ -147,6 +160,8 @@ async fn apply(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<
     // emulation is still in force and its size is not the pane's.
     let prior = ZOOMED.lock().get(&label).map(|e| (e.plan.width, e.plan.height));
     cdp.call("Emulation.clearDeviceMetricsOverride", json!({})).await.map_err(|e| e.to_string())?;
+    // The view is no longer scaled: a click now must not be (the wait below can take a while).
+    ZOOMED.lock().remove(&label);
     let mut waited = 0;
     let size = loop {
         let size = cdp
@@ -171,7 +186,6 @@ async fn apply(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<
     let (pane_w, pane_h) = (read(0).ok_or("couldn't read the pane's size")?, read(1).ok_or("couldn't read the pane's size")?);
     let plan = plan(pane_w, pane_h, ask, read(2).unwrap_or(pane_w))?;
     if (plan.scale - 1.0).abs() < 1e-9 {
-        ZOOMED.lock().remove(&label);
         return Ok(None);
     }
     cdp.call(
@@ -187,9 +201,7 @@ async fn apply(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<
     )
     .await
     .map_err(|e| e.to_string())?;
-    let mut zoomed = ZOOMED.lock();
-    let generation = zoomed.get(&label).map_or(0, |e| e.generation) + 1;
-    zoomed.insert(label, Entry { block_id: block_id.to_string(), ask, plan, generation });
+    ZOOMED.lock().insert(label, Entry { block_id: block_id.to_string(), ask, plan, generation: next_generation() });
     Ok(Some(plan))
 }
 
@@ -285,10 +297,8 @@ pub fn on_pane_resized(state: &Arc<AppState>, block_id: &str) {
         return;
     }
     let Some(label) = state.live_browser_pane_label(block_id) else { return };
-    let Some(generation) = ZOOMED.lock().get_mut(&label).map(|e| {
-        e.generation += 1;
-        e.generation
-    }) else {
+    let generation = next_generation();
+    let Some(()) = ZOOMED.lock().get_mut(&label).map(|e| e.generation = generation) else {
         return;
     };
     let Some(rt) = crate::browser_pane::auth::runtime() else { return };
@@ -417,6 +427,24 @@ mod tests {
         assert_eq!(req(None, None, false, true).ask(), Ok(None));
         assert!(req(None, None, false, false).ask().is_err());
         assert!(req(Some(0.5), None, true, false).ask().is_err());
+    }
+
+    #[test]
+    fn a_point_is_moved_into_the_scaled_view_only_where_a_zoom_is_held() {
+        let plan = p(640.0, 400.0, Ask::Factor(0.5), 0.0);
+        ZOOMED.lock().insert(
+            "pane-zoom-point-test".to_string(),
+            Entry { block_id: "b".into(), ask: Ask::Factor(0.5), plan, generation: next_generation() },
+        );
+        assert_eq!(scale_point("pane-zoom-point-test", 200.0, 100.0), (100.0, 50.0));
+        assert_eq!(scale_point("another-pane", 200.0, 100.0), (200.0, 100.0));
+        ZOOMED.lock().remove("pane-zoom-point-test");
+    }
+
+    #[test]
+    fn a_later_change_has_a_later_generation() {
+        let (a, b) = (next_generation(), next_generation());
+        assert!(b > a);
     }
 
     #[test]

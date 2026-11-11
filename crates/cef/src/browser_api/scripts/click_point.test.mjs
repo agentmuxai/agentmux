@@ -23,10 +23,19 @@ function page({ vw = 800, vh = 600, topmost } = {}) {
     const win = {
         innerWidth: vw,
         innerHeight: vh,
-        getComputedStyle: e => ({ overflowX: e.overflow || "visible", overflowY: e.overflow || "visible" }),
+        getComputedStyle: e => ({
+            overflowX: e.overflow || "visible",
+            overflowY: e.overflow || "visible",
+            position: e.position || "static",
+            transform: "none",
+            perspective: "none",
+            filter: "none",
+        }),
     };
     const doc = {
         defaultView: win,
+        body: {},
+        documentElement: {},
         elementFromPoint: (x, y) => {
             if (topmost) return topmost(x, y, els);
             const holds = els.filter(e => {
@@ -37,12 +46,14 @@ function page({ vw = 800, vh = 600, topmost } = {}) {
         },
     };
     const el = (tag, r, opts = {}) => {
+        if (tag === "body") doc.body = undefined;
         const e = {
             tagName: tag.toUpperCase(),
             ownerDocument: doc,
             parentElement: opts.parent || null,
             parentNode: opts.parent || null,
             overflow: opts.overflow,
+            position: opts.position,
             innerText: opts.text || "",
             labels: opts.labels || [],
             getAttribute: () => null,
@@ -50,6 +61,7 @@ function page({ vw = 800, vh = 600, topmost } = {}) {
             getBoundingClientRect: () => r,
             scrollIntoView: () => {},
         };
+        if (tag === "body") doc.body = e;
         els.push(e);
         return e;
     };
@@ -141,5 +153,51 @@ describe("click_point: a click that can't land says why", () => {
         const { el } = page();
         const b = el("button", rect(0, 0, 0, 0));
         expect(clickPoint.call(b)).toEqual({ error: "the element is not visible" });
+    });
+});
+
+describe("click_point: what can clip an element", () => {
+    it("does not clip a fixed element by an ancestor that is smaller than it", () => {
+        const { el } = page();
+        const wrapper = el("div", rect(0, 0, 100, 50), { overflow: "hidden" });
+        const modalButton = el("button", rect(300, 200, 400, 240), { parent: wrapper, position: "fixed" });
+        expect(clickPoint.call(modalButton)).toEqual({ x: 350, y: 220 });
+    });
+
+    it("does not clip by the body's own overflow, which is the viewport", () => {
+        const { el } = page();
+        const body = el("body", rect(0, 0, 800, 100), { overflow: "hidden" });
+        const b = el("button", rect(100, 300, 200, 340), { parent: body });
+        expect(clickPoint.call(b)).toEqual({ x: 150, y: 320 });
+    });
+
+    it("clips an absolute element only at its containing block, not at a static ancestor between", () => {
+        const { el } = page();
+        const block = el("div", rect(0, 0, 800, 600), { position: "relative" });
+        const staticBox = el("div", rect(0, 0, 100, 50), { parent: block, overflow: "hidden" });
+        const popup = el("button", rect(300, 200, 400, 240), { parent: staticBox, position: "absolute" });
+        expect(clickPoint.call(popup)).toEqual({ x: 350, y: 220 });
+    });
+
+    it("clips an absolute element at a positioned ancestor that cuts it", () => {
+        const { el } = page();
+        const block = el("div", rect(0, 0, 400, 100), { position: "relative", overflow: "hidden", text: "Panel" });
+        const popup = el("button", rect(100, 300, 200, 340), { parent: block, position: "absolute" });
+        expect(clickPoint.call(popup).error).toContain('is cut off by <div "Panel">');
+    });
+
+    it("clicks a sub-pixel wide element that is in view at its centre", () => {
+        const { el } = page();
+        const line = el("button", rect(100, 100, 100.6, 130));
+        const got = clickPoint.call(line);
+        expect(got.x).toBeCloseTo(100.3, 5);
+        expect(got.y).toBe(115);
+    });
+
+    it("does not call an in-view element with no width outside the visible area", () => {
+        const { el } = page();
+        const line = el("button", rect(100, 100, 100, 130));
+        const got = clickPoint.call(line);
+        expect(got.error).not.toContain("outside the visible area");
     });
 });
