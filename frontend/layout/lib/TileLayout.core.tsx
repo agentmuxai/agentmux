@@ -34,6 +34,7 @@ import { onWindowDrag } from "@/app/drag/window-drag-events";
 import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
 import { Key } from "@/util/keyed";
 import { debounce } from "throttle-debounce";
+import { describeRejection } from "@/util/describe-rejection";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
@@ -324,6 +325,16 @@ function useLeafGeometryNotify(platform: TileLayoutPlatform, layoutModel: Layout
     }
 }
 
+/**
+ * How a pane's drag picture is rasterised. An image in the pane that can't be inlined (a browser pane's
+ * favicon from another origin, an avatar that is gone) is left blank; without this the rasteriser rejects
+ * with that image's `error` event and there is no picture at all.
+ */
+const PREVIEW_RASTER = {
+    imagePlaceholder: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",
+    onImageErrorHandler: () => {},
+};
+
 function useDragPreview(
     getTileNode: () => HTMLDivElement | undefined,
     getPreviewRef: () => HTMLDivElement | undefined
@@ -379,15 +390,19 @@ function useDragPreview(
             setPreviewImageGeneration(prevElGen);
             const seq = ++previewRequestSeq;
             // Loaded with the first drag preview, not at startup.
-            import("html-to-image").then(({ toPng }) => toPng(getPreviewRef())).then((url) => {
-                // A newer rasterisation was requested while this one was in
-                // flight — it measured the pane more recently, so drop this
-                // result rather than clobbering it.
-                if (seq !== previewRequestSeq) return;
-                const newImg = new Image();
-                newImg.src = url;
-                setPreviewImage({ img: newImg, size: measured });
-            });
+            import("html-to-image")
+                .then(({ toPng }) => toPng(getPreviewRef(), PREVIEW_RASTER))
+                .then((url) => {
+                    // A newer rasterisation was requested while this one was in
+                    // flight — it measured the pane more recently, so drop this
+                    // result rather than clobbering it.
+                    if (seq !== previewRequestSeq) return;
+                    const newImg = new Image();
+                    newImg.src = url;
+                    setPreviewImage({ img: newImg, size: measured });
+                })
+                // The drag then shows the picture it had, or the browser's own: nothing waits on this one.
+                .catch((e) => console.warn(`[drag-preview] no picture of the pane: ${describeRejection(e)}`));
         }
     };
 

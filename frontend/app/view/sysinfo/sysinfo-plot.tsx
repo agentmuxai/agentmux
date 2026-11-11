@@ -294,6 +294,9 @@ function seriesOptions(c: ChartState): uPlot.Series[] {
     ];
 }
 
+/** uPlot binds no listener for a cursor event whose factory returns null. */
+const noBind = (): null => null;
+
 function chartOptions(c: ChartState, width: number, height: number): uPlot.Options {
     const { props, bare } = c;
     const style = axisStyle(c);
@@ -310,6 +313,9 @@ function chartOptions(c: ChartState, width: number, height: number): uPlot.Optio
             // default uPlot would also draw the hovered chart's y value on the others.
             sync: props.syncKey ? { key: props.syncKey, scales: ["x", null] } : undefined,
             drag: { x: false, y: false },
+            // A press does nothing here (no drag, no lock). uPlot still binds a mouseup on the document at every
+            // mousedown, and its handler reads the plot's rect: a forced layout of whatever the click dirtied.
+            bind: { mousedown: noBind, mouseup: noBind, click: noBind, dblclick: noBind },
             points: { size: 6 },
         },
         scales: {

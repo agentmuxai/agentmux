@@ -25,71 +25,19 @@
  * our own last write (switching bundles, a fresh load).
  */
 
-import { createEffect, createMemo, createSignal, For, Index, Show, type JSX } from "solid-js";
-import { showTextInputContextMenu } from "@/app/store/contextmenu";
-import { PROVIDERS } from "@/app/view/agent/providers/catalog";
-import {
-    duplicateProviderKeys,
-    parseInstructionsByProvider,
-    providerKeyProblem,
-    serializeInstructionsByProvider,
-    type ProviderInstruction,
-} from "./bundle-model";
-import { Button, TextArea, TextInput } from "@/app/element/ui";
-import { focusWhenRendered } from "@/util/focusutil";
-
-interface BundleProviderInstructionsSectionProps {
-    /** The draft's raw `instructions_by_provider` JSON string. */
-    value: string;
-    onChange: (nextRaw: string) => void;
-}
+import { Index, Show, type JSX } from "solid-js";
+import { AddOverrideButton, InstructionRow, KnownProviders } from "./bundle-provider-instructions-parts";
+import { createProviderInstructions, type BundleProviderInstructionsSectionProps } from "./bundle-provider-instructions-state";
 
 export const BundleProviderInstructionsSection = (
     props: BundleProviderInstructionsSectionProps,
 ): JSX.Element => {
-    const parsed = createMemo(() => parseInstructionsByProvider(props.value));
-
-    const [rows, setRows] = createSignal<ProviderInstruction[]>(parsed().entries);
-    // What we last wrote out, so the re-seed effect can tell an external change
-    // (bundle switch) apart from the echo of our own edit.
-    let lastEmitted = props.value;
-
-    createEffect(() => {
-        const incoming = props.value;
-        if (incoming === lastEmitted) return;
-        lastEmitted = incoming;
-        setRows(parseInstructionsByProvider(incoming).entries);
-    });
-
-    const emit = (next: ProviderInstruction[]) => {
-        setRows(next);
-        const raw = serializeInstructionsByProvider(next);
-        lastEmitted = raw;
-        props.onChange(raw);
-    };
-
-    const updateRow = (index: number, patch: Partial<ProviderInstruction>) => {
-        emit(rows().map((r, i) => (i === index ? { ...r, ...patch } : r)));
-    };
-
-    const removeRow = (index: number) => {
-        emit(rows().filter((_, i) => i !== index));
-    };
-
-    const addRow = () => {
-        // Blank key by design: the user names it. It is flagged immediately and
-        // simply does not serialize until named, so an unnamed row can never
-        // reach storage or export.
-        emit([...rows(), { provider: "", content: "" }]);
-    };
-
-    const dupes = createMemo(() => new Set(duplicateProviderKeys(rows())));
-    const knownProviders = createMemo(() => Object.keys(PROVIDERS).sort());
+    const s = createProviderInstructions(props);
 
     return (
         <div class="bundle-view-provider-instructions">
             <Show
-                when={!parsed().malformed}
+                when={!s.parsed().malformed}
                 fallback={
                     // Refusing to edit is the correct behavior, not a cop-out:
                     // rendering an empty editor here would serialize `{}` over
@@ -112,89 +60,13 @@ export const BundleProviderInstructionsSection = (
                     the field unusable for normal typing (codex P1, #3063).
                     <Index> keys by position and hands the item in as an
                     accessor, so the input element survives edits. */}
-                <Index each={rows()}>
-                    {(row, index) => {
-                        const problem = () => providerKeyProblem(row().provider);
-                        const duped = () => dupes().has(row().provider.trim());  // keyed on the raw trimmed key, which is what duplicateProviderKeys reports
-                        return (
-                            <div class="bundle-view-provider-instruction-row">
-                                <div class="bundle-view-provider-instruction-head">
-                                    <TextInput variant="plain"
-                                        class="bundle-view-input"
-                                        list="abf-known-providers"
-                                        placeholder="Provider (e.g. claude)"
-                                        value={row().provider}
-                                        onInput={(e) =>
-                                            updateRow(index, { provider: e.currentTarget.value })
-                                        }
-                                        onContextMenu={showTextInputContextMenu}
-                                    />
-                                    <Button
-                                        class="bundle-view-provider-instruction-remove"
-                                        onClick={() => removeRow(index)}
-                                        title="Remove this provider override"
-                                    >
-                                        Remove
-                                    </Button>
-                                </div>
-                                <Show when={problem()}>
-                                    {/* The consequence differs by case and the
-                                        warning has to match, or it is just a
-                                        different wrong message (reagent P1,
-                                        #3063 said "It will not be saved" for
-                                        every problem, which was false for most
-                                        of them):
-                                        - blank key: genuinely not saved,
-                                          serializeInstructionsByProvider drops
-                                          it;
-                                        - any other rejected key: saved fine,
-                                          but bundle_export.rs skips it with a
-                                          warning, so it vanishes from the .abf. */}
-                                    <div class="bundle-view-provider-instruction-warn">
-                                        {problem()}{" "}
-                                        {row().provider.trim().length === 0
-                                            ? "This row will not be saved until you name it."
-                                            : "It will still be saved, but skipped when this bundle is exported."}
-                                    </div>
-                                </Show>
-                                <Show when={!problem() && duped()}>
-                                    <div class="bundle-view-provider-instruction-warn">
-                                        Two keys resolve to the same export path — only one of
-                                        them survives export.
-                                    </div>
-                                </Show>
-                                <TextArea variant="plain"
-                                    class="bundle-view-textarea"
-                                    rows={5}
-                                    value={row().content}
-                                    onInput={(e) =>
-                                        updateRow(index, { content: e.currentTarget.value })
-                                    }
-                                    onContextMenu={showTextInputContextMenu}
-                                    placeholder="Instructions used only when this bundle runs on this provider."
-                                />
-                            </div>
-                        );
-                    }}
+                <Index each={s.rows()}>
+                    {(row, index) => <InstructionRow s={s} row={row} index={index} />}
                 </Index>
 
-                <datalist id="abf-known-providers">
-                    <For each={knownProviders()}>{(p) => <option value={p} />}</For>
-                </datalist>
+                <KnownProviders s={s} />
 
-                <Button
-                    icon="plus"
-                    class="bundle-view-provider-instruction-add"
-                    onClick={(e) => {
-                        const section = e.currentTarget.parentElement;
-                        addRow();
-                        focusWhenRendered(() =>
-                            section?.querySelector<HTMLInputElement>(".bundle-view-provider-instruction-row:last-of-type input")
-                        );
-                    }}
-                >
-                    Add provider override
-                </Button>
+                <AddOverrideButton s={s} />
             </Show>
         </div>
     );

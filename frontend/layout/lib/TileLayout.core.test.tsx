@@ -758,6 +758,30 @@ describe("createTileLayout: a tile", () => {
             await vi.waitFor(() => expect(h.toPng).toHaveBeenCalledTimes(1));
         });
 
+        it("leaves an image it can't inline blank, and a failed picture is a warning, not an unhandled rejection", async () => {
+            const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+            const unhandled = vi.fn();
+            process.on("unhandledRejection", unhandled);
+            const img = document.createElement("img");
+            img.src = "https://example.com/favicon.ico";
+            const failed = new Event("error");
+            Object.defineProperty(failed, "target", { value: img });
+            h.toPng = vi.fn(async () => Promise.reject(failed));
+            const { el } = mountWithTile(makePlatform());
+            el.querySelector(".gap")!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+            await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+            await new Promise((r) => setTimeout(r, 0));
+            const options = h.toPng.mock.calls[0][1] as { imagePlaceholder: string; onImageErrorHandler: () => void };
+            expect(options.imagePlaceholder).toMatch(/^data:image\/gif;base64,/);
+            expect(options.onImageErrorHandler).toBeTypeOf("function");
+            expect(warn.mock.calls[0][0]).toBe(
+                "[drag-preview] no picture of the pane: error event on img https://example.com/favicon.ico"
+            );
+            expect(unhandled).not.toHaveBeenCalled();
+            process.off("unhandledRejection", unhandled);
+            warn.mockRestore();
+        });
+
         it("is reused until the pane's size changes", async () => {
             const { el } = mountWithTile(makePlatform());
             const press = () => el.querySelector(".gap")!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));

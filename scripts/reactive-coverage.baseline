@@ -2,7 +2,6 @@
 # (scripts/check-reactive-coverage.mjs). A file here may only leave: give it a live source
 # (a domain store, an srv event, a poll) and run `node scripts/check-reactive-coverage.mjs --update`.
 # Adding a file is a hand edit that the PR has to justify.
-frontend/app/view/agent/attachments/attachment-lightbox-state.ts
 frontend/app/view/agent/components/AgentBundlesTab.tsx
 frontend/app/view/agent/components/AgentContainerCaches.tsx
 frontend/app/view/agent/components/AgentCreateForm.tsx

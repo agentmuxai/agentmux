@@ -337,7 +337,7 @@
 160 frontend/app/element/install/install-session.ts::createInstallSession
 118 frontend/app/element/markdown-incremental.ts::findSafeSplitPoint
 113 frontend/app/element/markdown-util.ts::transformBlocks
-257 frontend/app/element/modal.tsx::Modal
+235 frontend/app/element/modal.tsx::Modal
 159 frontend/app/element/tooltip.tsx::TooltipInner
 113 frontend/app/element/ui/CardGrid.tsx::CardGrid
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
@@ -410,7 +410,6 @@
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
 394 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
-155 frontend/app/view/bundle/BundleProviderInstructionsSection.tsx::BundleProviderInstructionsSection
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
 285 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
@@ -420,7 +419,6 @@
 122 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
 150 frontend/app/view/native-memory/NativeMemoryFileView.tsx::NativeMemoryFileView
-154 frontend/app/view/remotes/remotes-view.tsx::Detail
 128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
 102 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders

@@ -30,3 +30,17 @@ export function lastFocusable(root: HTMLElement): HTMLElement | null {
 export function initialFocusTarget(root: HTMLElement): HTMLElement | null {
     return root.querySelector<HTMLElement>("[data-modal-initial-focus]:not([disabled])") ?? firstFocusable(root);
 }
+
+/**
+ * The pane a modal over `region` must wait for before it takes the caret: the pane it covers, when the person
+ * has another pane selected (`selected`). A question that comes up in a pane they are not in (srv's, an
+ * agent's, a page's) must not take the keyboard from the terminal or composer they are typing in: a Space
+ * or Enter meant for it would answer the question. None when the modal is in the selected pane, when no pane
+ * is selected, or when `region` is in no pane (a tab's or the window's modal).
+ */
+export function paneToWaitFor(region: HTMLElement, selected: () => string | null): string | null {
+    const blockId = region.closest<HTMLElement>("[data-blockid]")?.dataset.blockid;
+    if (!blockId) return null;
+    const now = selected();
+    return now != null && now !== blockId ? blockId : null;
+}
