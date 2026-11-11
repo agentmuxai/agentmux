@@ -707,13 +707,34 @@ fn heal_loaded_layout_migrates_legacy_minimize_fields_even_with_nothing_to_prune
         ..Default::default()
     });
 
-    let events = crate::reducer::heal_loaded_layout(&mut state, &tab_id);
+    let events = crate::reducer::heal_loaded_layout(&mut state, &tab_id, true);
     assert!(matches!(&events[..], [Event::LayoutTreeReplaced { .. }]), "the migrated tree is stored");
     let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
     let migrated = root.children.iter().find(|c| c.id == "b").unwrap();
     assert!(migrated.minimized && migrated.extra.get("minimizedSize").is_none());
 
-    assert!(crate::reducer::heal_loaded_layout(&mut state, &tab_id).is_empty(), "a current tree is left as loaded");
+    assert!(crate::reducer::heal_loaded_layout(&mut state, &tab_id, true).is_empty(), "a current tree is left as loaded");
+}
+
+/// When the blocks could not be read the tabs' block ids are not to be trusted: the minimize
+/// fields are still migrated, but no leaf is pruned.
+#[test]
+fn heal_loaded_layout_without_the_block_list_migrates_but_prunes_nothing() {
+    let (mut state, tab_id) = fresh_tab();
+    let mut squeezed = leaf_node("b", "gone");
+    squeezed.size = 2.0;
+    squeezed.extra.insert("minimizedSize".into(), 25.into());
+    state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(agentmux_common::LayoutNode {
+        id: "root".into(),
+        children: vec![leaf_node("a", "ba"), squeezed],
+        ..Default::default()
+    });
+
+    let events = crate::reducer::heal_loaded_layout(&mut state, &tab_id, false);
+    assert!(matches!(&events[..], [Event::LayoutTreeReplaced { .. }]));
+    assert!(tree_has(&state, &tab_id, "a") && tree_has(&state, &tab_id, "b"), "no leaf is pruned");
+    let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+    assert!(root.children.iter().find(|c| c.id == "b").unwrap().minimized);
 }
 
 fn tree_with_dangling_leaf() -> agentmux_common::LayoutNode {

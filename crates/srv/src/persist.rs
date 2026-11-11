@@ -51,6 +51,24 @@ fn report_block_in_no_tab(block: &Block, stored: &[Block]) {
     );
 }
 
+/// A row written by an earlier build can hold a leaf for a block the tab no longer owns, or the
+/// pre-display-mode minimize fields; heal it before any window loads it, and store the healed row
+/// through the same write an intent's events take. Without the block list nothing is pruned (the
+/// tabs' block ids are incomplete), but the minimize fields are still converted: that needs no blocks.
+fn heal_loaded_layouts(state: &mut State, mstore: &Store, blocks_loaded: bool) {
+    if !blocks_loaded {
+        tracing::warn!(target: "srv-persist", "[srv-persist] bootstrap: blocks could not be read; healing the layouts without pruning");
+    }
+    let tab_ids: Vec<String> = state.tabs.keys().cloned().collect();
+    for tab_id in tab_ids {
+        for ev in crate::reducer::heal_loaded_layout(state, &tab_id, blocks_loaded) {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(&ev, mstore) {
+                tracing::warn!(target: "srv-persist", tab_id = %tab_id, "[srv-persist] bootstrap: storing the healed layout failed: {}", e);
+            }
+        }
+    }
+}
+
 /// Phase E.2 / E.2b — load workspaces and their tabs from SQLite
 /// into the reducer state. Called once at srv startup before the
 /// IPC server starts accepting commands. Async because we're inside
@@ -195,22 +213,7 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
             },
         );
     }
-    // A row written by an earlier build can hold a leaf for a block the tab
-    // no longer owns; heal it now, before any window loads it, and store the
-    // healed row through the same write an intent's events take.
-    let tab_ids: Vec<String> = if blocks_loaded {
-        state.tabs.keys().cloned().collect()
-    } else {
-        tracing::warn!(target: "srv-persist", "[srv-persist] bootstrap: blocks could not be read; skipping the layout heal");
-        Vec::new()
-    };
-    for tab_id in tab_ids {
-        for ev in crate::reducer::heal_loaded_layout(&mut state, &tab_id) {
-            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(&ev, mstore) {
-                tracing::warn!(target: "srv-persist", tab_id = %tab_id, "[srv-persist] bootstrap: storing the healed layout failed: {}", e);
-            }
-        }
-    }
+    heal_loaded_layouts(&mut state, mstore, blocks_loaded);
     for block in &blocks {
         // Phase E.3 — recover each block's parent tab via reverse
         // lookup against `state.tabs` (NOT raw `tabs` from SQLite):

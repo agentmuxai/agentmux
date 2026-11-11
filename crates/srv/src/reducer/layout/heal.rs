@@ -19,13 +19,16 @@ use crate::state::State;
 /// exactly as loaded. The window no longer migrates a tree itself: every tree
 /// it is given has been through here or through an intent.
 ///
+/// `prune` is false when the tab's block ids could not be trusted (the blocks
+/// could not be read): the minimize fields are still migrated, no leaf is removed.
+///
 /// Returns the events that persist the change (empty when nothing changed),
 /// with versions taken the way an intent's are.
-pub(crate) fn heal_loaded_layout(state: &mut State, tab_id: &str) -> Vec<Event> {
+pub(crate) fn heal_loaded_layout(state: &mut State, tab_id: &str, prune: bool) -> Vec<Event> {
     let Some(tab) = state.tabs.get_mut(tab_id) else { return Vec::new() };
     let owned: std::collections::HashSet<String> = tab.block_ids.iter().cloned().collect();
     let migrated = tab.rootnode.as_mut().map_or(0, migrate_legacy_minimize);
-    let pruned = crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &owned);
+    let pruned = if prune { crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &owned) } else { 0 };
     if migrated == 0 && pruned == 0 {
         return Vec::new();
     }
