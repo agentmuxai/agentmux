@@ -49,7 +49,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let state = st.clone();
         async move {
             operator(&ctx)?;
-            standing::revoke(&state, &req.id);
+            standing::revoke(&state, &req.id)?;
             Ok(snapshot())
         }
     });
@@ -69,7 +69,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let state = st.clone();
         async move {
             operator(&ctx)?;
-            crate::server::browser_site_permissions::revoke(&state, &req.id);
+            crate::server::browser_site_permissions::revoke(&state, &req.id)?;
             Ok(snapshot())
         }
     });

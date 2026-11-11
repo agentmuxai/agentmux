@@ -61,16 +61,12 @@ impl Store {
         Store { path: Some(path), rows }
     }
 
-    fn save(&self) {
-        let Some(path) = &self.path else { return };
-        match serde_json::to_vec_pretty(&self.rows) {
-            Ok(bytes) => {
-                if let Err(e) = crate::server::browser_standing::write_atomic(path, &bytes) {
-                    tracing::warn!(error = %e, "[browser-site-permissions] couldn't save the rows");
-                }
-            }
-            Err(e) => tracing::warn!(error = %e, "[browser-site-permissions] couldn't encode the rows"),
-        }
+    /// Make `rows` the rows: written to the file first, and kept in memory only once that worked, so a
+    /// failed write leaves the person's view and the file the same.
+    fn commit(&mut self, rows: Vec<Row>) -> Result<(), String> {
+        crate::server::browser_standing::write_rows(self.path.as_deref(), &rows)?;
+        self.rows = rows;
+        Ok(())
     }
 }
 
@@ -141,8 +137,9 @@ pub(crate) fn list() -> Vec<Row> {
 pub(crate) fn upsert(state: &AppState, agent: &str, site: &str, kinds: &[String]) -> Result<Row, String> {
     let row = {
         let mut s = store();
-        let row = upsert_in(&mut s.rows, agent, site, kinds, chrono::Utc::now().timestamp_millis())?;
-        s.save();
+        let mut next = s.rows.clone();
+        let row = upsert_in(&mut next, agent, site, kinds, chrono::Utc::now().timestamp_millis())?;
+        s.commit(next)?;
         row
     };
     tracing::info!(agent = %row.agent, site = %row.site, kinds = ?row.kinds, "[browser-site-permissions] a site permission was set");
@@ -150,15 +147,16 @@ pub(crate) fn upsert(state: &AppState, agent: &str, site: &str, kinds: &[String]
     Ok(row)
 }
 
-/// Remove row `id`. Returns whether it was there. The next request from the page asks again.
-pub(crate) fn revoke(state: &AppState, id: &str) -> bool {
+/// Remove row `id`. Returns whether it was there; an error when the file could not be written, in which
+/// case the row stays (it would be back after a restart anyway). The next request from the page asks again.
+pub(crate) fn revoke(state: &AppState, id: &str) -> Result<bool, String> {
     let removed = {
         let mut s = store();
-        let before = s.rows.len();
-        s.rows.retain(|r| r.id != id);
-        let gone = s.rows.len() != before;
+        let mut next = s.rows.clone();
+        next.retain(|r| r.id != id);
+        let gone = next.len() != s.rows.len();
         if gone {
-            s.save();
+            s.commit(next)?;
         }
         gone
     };
@@ -166,7 +164,7 @@ pub(crate) fn revoke(state: &AppState, id: &str) -> bool {
         state.broker.publish_event::<crate::backend::mps_events::BrowserGrantsChanged>(&(), vec![], 0);
         tracing::info!(row = %id, "[browser-site-permissions] a site permission was revoked");
     }
-    removed
+    Ok(removed)
 }
 
 /// Whether the person has allowed `agent` all of `kinds` on `site` for good.
@@ -241,11 +239,27 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(FILE_NAME);
         let mut s = Store { path: Some(path.clone()), rows: Vec::new() };
-        upsert_in(&mut s.rows, "posa", "https://meet.example.com", &kinds(&["camera"]), 1).unwrap();
-        s.save();
+        let mut next = Vec::new();
+        upsert_in(&mut next, "posa", "https://meet.example.com", &kinds(&["camera"]), 1).unwrap();
+        s.commit(next).unwrap();
         assert_eq!(Store::open(path.clone()).rows, s.rows);
         std::fs::write(&path, b"{ not json").unwrap();
         assert!(Store::open(path).rows.is_empty());
+    }
+
+    #[test]
+    fn a_change_the_file_could_not_record_does_not_happen_in_memory_either() {
+        let dir = tempfile::tempdir().unwrap();
+        // A folder that cannot be made: its parent is a file.
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let mut s = Store { path: Some(blocker.join(FILE_NAME)), rows: Vec::new() };
+        let mut one = Vec::new();
+        upsert_in(&mut one, "posa", "https://meet.example.com", &kinds(&["camera"]), 1).unwrap();
+        s.rows = one.clone();
+        let err = s.commit(Vec::new()).unwrap_err();
+        assert!(err.contains("couldn't save") && err.contains("nothing was changed"), "{err}");
+        assert_eq!(s.rows, one, "a revoke that could not be written leaves the row, as the file has it");
     }
 
     #[test]
