@@ -117,7 +117,7 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        explicit per-agent opt-in to the CLI's global (ambient) login when
 ///        no oauth-class account resolves at spawn (layer 3 of
 ///        SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3). Defaults
-///        to 0 (fail-by-default); the m0017 data migration grandfathers
+///        to 0 (fail-by-default); a data migration (since retired) grandfathered
 ///        pre-existing linkless agents to 1.
 ///   v13 — db_agent_credentials: per-agent M2M muxbus credential, mirroring
 ///        db_muxbus_credentials' presence in both schemas — id_store falls
@@ -546,7 +546,7 @@ const LEGACY_INDEX_DROPS: &[&str] = &[
 /// forward in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md —
 /// `db_agent_identity_links`/`db_accounts` is the sole credential-
 /// resolution path (`identity/resolver/inject.rs::resolve_bindings_for_instance`),
-/// confirmed via the already-applied `m0013`/`m0014` backfill migrations
+/// confirmed by the direct-link backfill migrations, since retired
 /// (see SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md §6/§8a).
 const DEAD_TABLE_DROPS: &[&str] = &[
     "db_workflow_definitions",

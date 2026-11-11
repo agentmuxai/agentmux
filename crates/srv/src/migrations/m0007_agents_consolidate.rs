@@ -46,10 +46,9 @@ impl Migration for M0007AgentsConsolidate {
     ///
     /// The decision is NOT re-derived here: it is Phase 0b's
     /// `consolidate_looks_incomplete` (`backend/storage/agents_consolidate.rs`),
-    /// the same rule the marker gate and `m0000_bootstrap` already use — one
-    /// definition of "incomplete", so the three cannot drift (reagent P2 on
-    /// #3058). This only adds the counts as evidence, through a read-only
-    /// connection.
+    /// the same rule the marker gate already uses — one definition of
+    /// "incomplete", so the two cannot drift (#3058). This only adds the
+    /// counts as evidence, through a read-only connection.
     fn verify(&self, ctx: &MigrationContext) -> VerifyOutcome {
         let conn = match super::runner::open_readonly(&ctx.channel_store_path) {
             Ok(Some(c)) => c,

@@ -549,10 +549,8 @@
     }
 
     // Exercises agent_identity_list_all() across multiple agents and
-    // providers, not just the empty/single-agent cases the migration tests
-    // (m0013's `is_empty()` assertion) happen to cover. Backed the since-removed
-    // "Identities" read-only rail (issue #1624 PR-C), the first live RPC
-    // consumer of this method beyond the startup-backfill migrations.
+    // providers, not just the empty/single-agent cases. Backed the
+    // since-removed "Identities" read-only rail (issue #1624 PR-C).
     #[test]
     fn test_agent_identity_list_all_spans_every_agent_and_provider() {
         let store = v6_test_store();

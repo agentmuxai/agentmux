@@ -355,15 +355,6 @@ impl Store {
         Ok(())
     }
 
-    /// True when `db_agent_definitions`/`db_agent_instances` have rows but
-    /// `db_agents` doesn't — i.e. the consolidation backfill's marker/stamp
-    /// can't be trusted as proof it actually ran. See
-    /// `agents_consolidate::consolidate_looks_incomplete`.
-    pub fn agents_consolidate_looks_incomplete(&self) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        super::agents_consolidate::consolidate_looks_incomplete(&conn)
-    }
-
     fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(
             // `foreign_keys=ON` is per-connection and defaults to OFF in

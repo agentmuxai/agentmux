@@ -1058,36 +1058,6 @@ impl Store {
         }
     }
 
-    /// One-shot grandfather pass for the layer-3 ambient-login opt-in
-    /// (m0017, spec §2.4 of SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md).
-    ///
-    /// Agents WITHOUT any `db_agent_identity_links` row at migration time
-    /// were de-facto ambient users → `use_ambient_login = 1`; agents WITH
-    /// links opted into managed accounts → `0` (honest failure is the new
-    /// behavior for them). `linked_agent_ids` comes from the SHARED store
-    /// (the live links table); this method writes `db_agents` — the
-    /// definition flip's only remaining caller of this is `m0017` on an
-    /// install upgrading through the whole migration chain for the first
-    /// time, where `db_agents` is already the sole live source. Returns
-    /// (rows set to 1, rows set to 0).
-    pub fn agents_grandfather_ambient_login(
-        &self,
-        linked_agent_ids: &std::collections::HashSet<String>,
-    ) -> Result<(usize, usize), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        // Set everyone ambient first, then flip the linked set back to the
-        // fail-by-default 0 — two passes instead of a dynamic IN() list.
-        let ambient_defs = conn.execute("UPDATE db_agents SET use_ambient_login = 1", [])?;
-        let mut linked_rows = 0usize;
-        for id in linked_agent_ids {
-            linked_rows += conn.execute(
-                "UPDATE db_agents SET use_ambient_login = 0 WHERE id = ?1",
-                params![id],
-            )?;
-        }
-        Ok((ambient_defs.saturating_sub(linked_rows), linked_rows))
-    }
-
     // AgentContent / AgentSkill / AgentHistory CRUD live in
     // `super::content` / `super::skills` / `super::history` —
     // each adds an `impl Store {}` block to this type.

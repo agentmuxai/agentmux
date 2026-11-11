@@ -52,7 +52,6 @@ export const SEED_FILES = [
 
 /** Shipped text that lives in code. */
 export const USER_FACING_FILES = [
-    "crates/srv/src/migrations/m0015_seed_starter_skills.rs",
     "crates/srv/src/backend/bundle_import_skill_text.rs",
     "crates/srv/src/backend/builtin_skills/disk-cleanup.md",
 ];
