@@ -323,10 +323,13 @@ function authSlot(props: AgentComposerStripProps): Slot {
             // srv holds a switch asked for in a turn until it ends (agent.account.switch).
             const busy = () => !!props.loading || props.compacting != null;
             const canSwitch = () => hasOthers();
-            const label = () => {
-                const base = accountKnown(props) ? (props.authEmail ? shortenEmail(props.authEmail) : "Account") : !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
-                return props.pendingAccountLabel ? `${base} → ${shortenEmail(props.pendingAccountLabel)}` : base;
+            // `cut` shortens an address: the full form cuts it to 22 characters, the budgeted form starts from the
+            // whole address, so an address is cut once, not twice.
+            const labelWith = (cut: (email: string) => string) => {
+                const base = accountKnown(props) ? (props.authEmail ? cut(props.authEmail) : "Account") : !authed() ? "Not logged in" : props.authEmail ? cut(props.authEmail) : "Logged in";
+                return props.pendingAccountLabel ? `${base} → ${cut(props.pendingAccountLabel)}` : base;
             };
+            const label = () => labelWith(shortenEmail);
             // Tight: the dot and one letter, the whole label in the tooltip and the accessible name. Signed out
             // keeps a mark of its own, as "N" for "Not logged in" would read as a name.
             // With room to spare it shows the address cut in the middle instead ("taylo…@mail.dev"), by the budget
@@ -335,7 +338,7 @@ function authSlot(props: AgentComposerStripProps): Slot {
                 if (!compact()) return label();
                 if (props.authStatus === "unauthenticated") return "!";
                 const room = props.pendingAccountLabel ? undefined : budget?.();
-                return room === undefined ? accountInitial(label()) : middleTruncate(label(), room);
+                return room === undefined ? accountInitial(label()) : middleTruncate(labelWith((email) => email), room);
             };
             const title = () => {
                 if (!authed() && !accountKnown(props)) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";

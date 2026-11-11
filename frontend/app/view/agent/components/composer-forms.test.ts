@@ -123,6 +123,12 @@ describe("middleTruncate", () => {
         expect(middleTruncate("taylor.morgan@mail.dev", 7)).toBe("taylor…");
     });
 
+    it("cuts a long address once, from the whole address: one ellipsis, as many characters as the budget allows", () => {
+        const cut = middleTruncate("jonathan.ross@anthropic.com", 9);
+        expect(cut).toBe("jonathan…");
+        expect(cut.match(/…/g)).toHaveLength(1);
+    });
+
     it("cuts a label with no address to its start", () => {
         expect(middleTruncate("Not logged in", 9)).toBe("Not logg…");
     });
