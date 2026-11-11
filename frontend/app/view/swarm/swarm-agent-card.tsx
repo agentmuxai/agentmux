@@ -121,7 +121,6 @@ export function AgentCardHead(props: AgentCardHeadProps): JSX.Element {
             <LongToolNote rows={longRunningRows} live={() => node().agentStatus === "running"} now={rowNow} />
             <BuildSlotNote blockId={node().blockId} now={rowNow} />
             <RowStateNotes meta={blockMeta()} />
-            <SpendChip meta={blockMeta()} now={rowNow} />
             <RegistrationBadge flag={props.registrationFlag} />
             <Show
                 when={props.unavailable()}
@@ -153,6 +152,7 @@ export type AgentCardLinesProps = {
     model: SwarmViewModel;
     unavailable: Accessor<AgentUnavailable | null>;
     summaryFlash: Accessor<boolean>;
+    blockMeta: Accessor<Block["meta"] | undefined>;
     rowNow: () => number;
 };
 
@@ -181,6 +181,8 @@ export function AgentCardLines(props: AgentCardLinesProps): JSX.Element {
             </div>
             {/* The Kanban task this agent is on, which opens it on the Kanban pane (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14). */}
             <Show when={node().blockId}>{(blockId) => <HeldTaskChip blockId={blockId()} />}</Show>
+            {/* What an agent on a model route has used today against its cap: on a line of its own, since the header has no room for it. */}
+            <SpendChip meta={props.blockMeta()} now={rowNow} />
             {/* The literal call in flight, next to the Haiku paraphrase
                 above it. Deliberately OUTSIDE the collapsed() guard: it is
                 one line, it is the most perishable thing on the card, and

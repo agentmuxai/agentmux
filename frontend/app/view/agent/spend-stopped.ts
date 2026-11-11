@@ -78,7 +78,7 @@ export function readSpendToday(meta: Record<string, unknown> | null | undefined,
     return { spent, cap: num(r.cap) };
 }
 
-const usd = (n: number): string => (n >= 100 || Number.isInteger(n) ? `$${n.toFixed(0)}` : `$${n.toFixed(2)}`);
+const usd = (n: number): string => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
 
 /** "$4.20 of $20 today", or "$4.20 today" for an agent with no cap. */
 export function spendChipText(today: SpendToday): string {

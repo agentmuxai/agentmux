@@ -14,9 +14,11 @@ export function SpendChip(props: { meta: Record<string, any> | undefined | null;
     return (
         <Show when={today()}>
             {(t) => (
-                <Tag tone={spendChipTone(t())} title={spendChipTitle(t())}>
-                    <span data-testid="spend-chip">{spendChipText(t())}</span>
-                </Tag>
+                <div class="spend-chip-line">
+                    <Tag tone={spendChipTone(t())} title={spendChipTitle(t())}>
+                        <span data-testid="spend-chip">{spendChipText(t())}</span>
+                    </Tag>
+                </div>
             )}
         </Show>
     );

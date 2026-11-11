@@ -242,9 +242,15 @@ pub(crate) struct CapChange {
     pub to: Option<f64>,
 }
 
+/// A cap, and a day of spend, belong to an agent on a model route: a login agent has plan limits instead.
+pub(crate) fn on_a_route(state: &AppState, def_id: &str) -> Result<(), String> {
+    launch::choice_of(&state.mstore, def_id).map(|_| ()).ok_or_else(|| "the agent is not on a model route, so it has no spend cap".to_string())
+}
+
 /// Sets the agent's daily cap (`None`: no cap). The alert level goes back to where the day now stands, and a stop the
 /// new cap no longer reaches is taken off the agent's panes. The caller has checked who may do this and records it.
 pub(crate) fn change_cap(state: &AppState, def_id: &str, to: Option<f64>) -> Result<CapChange, String> {
+    on_a_route(state, def_id)?;
     let from = cap::agent_cap(&state.mstore, def_id);
     cap::set_agent_cap(&state.mstore, def_id, to)?;
     let Some(def) = state.mstore.agent_def_get(def_id).map_err(|e| e.to_string())?.filter(|d| !d.slug.is_empty()) else {
@@ -270,6 +276,7 @@ pub(crate) fn change_cap(state: &AppState, def_id: &str, to: Option<f64>) -> Res
 
 /// Zeroes the agent's spend for today and takes its stop and warning off. Returns the dollars that were counted.
 pub(crate) fn reset_today(state: &AppState, def_id: &str) -> Result<f64, String> {
+    on_a_route(state, def_id)?;
     let def = state.mstore.agent_def_get(def_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no agent {def_id}"))?;
     let now = agentmux_common::time::now_ms();
     let removed = spend::reset_today(&def.slug, now);

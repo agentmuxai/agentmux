@@ -42,7 +42,7 @@ describe("readSpendStopped", () => {
 
     it("names the route when its cap was the one reached", () => {
         const card = readSpendStopped({ [SPEND_STOPPED_META_KEY]: { ...stopped, scope: "route", cap: 100, spent: 100.2 } });
-        expect(spendStoppedText(card!)).toContain("OpenRouter (DeepSeek V4.1 Flash) is used today ($100 of $100)");
+        expect(spendStoppedText(card!)).toContain("OpenRouter (DeepSeek V4.1 Flash) is used today ($100.20 of $100)");
     });
 });
 
@@ -67,7 +67,7 @@ describe("the chip", () => {
         expect(spendChipText({ spent: 4.2, cap: 20 })).toBe("$4.20 of $20 today");
         expect(spendChipText({ spent: 0, cap: 20 })).toBe("$0 of $20 today");
         expect(spendChipText({ spent: 3.5, cap: null })).toBe("$3.50 today");
-        expect(spendChipText({ spent: 120.4, cap: 200 })).toBe("$120 of $200 today");
+        expect(spendChipText({ spent: 120.4, cap: 200 })).toBe("$120.40 of $200 today");
     });
 
     it("warns from 80% and is an error at the cap", () => {
