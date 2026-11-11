@@ -66,6 +66,7 @@ import { useListZoomAnchor } from "./zoom-anchor-adapter";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import { blockAgentName } from "@/app/block/block-agent-name";
 import { logShowCover } from "@/app/block/pane-cover-log";
+import { useSearchPaint } from "../search/search-paint";
 import {
     initialStickyFrontierId,
     locateFrontierRow,
@@ -1422,6 +1423,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     useScrolledOffHolds(props, s);
     const handleScroll = useScrollHandling(props, s);
     const rows = useRowRendering(props, s);
+    const searchPaint = useSearchPaint();
 
     // Render: scroll container holds the virtualized head and the streaming buffer. Nothing renders
     // above the rows: the "Loading older messages" banner that used to sit here pushed the rows down
@@ -1434,6 +1436,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             onScroll={handleScroll}
             data-follow-state={props.viewState.stickToBottom() ? "following" : "detached"}
             data-show-cover={rows.showCovered() || undefined}
+            data-search-dim={searchPaint?.dim() || undefined}
         >
             <Show when={s.fillStalled() && props.viewState.stickToBottom()}>
                 <div class="agent-load-earlier">

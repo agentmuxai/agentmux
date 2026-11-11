@@ -82,4 +82,39 @@
             background: var(--accent-bg);
         }
     }
+
+    // === Dim mode (SPEC_AGENT_PANE_SEARCH_AND_DIM_MODE_2026_11_06 §4.4) ===
+    // While the bar has a query and dim is on, the transcript scroller carries `data-search-dim` and each row says
+    // whether it matches. A row that does not is drawn at the theme's `--search-dim-opacity` (theme.scss; every
+    // theme keeps 4.5:1 at it, search-dim-contrast.test.ts). Opacity only: nothing here moves a row or changes
+    // what is mounted. The composer, working row and header sit outside the scroller, so they are never dimmed.
+    // The streaming buffer's rows have an enter rule of their own (_document.scss), so they are named too.
+    .agent-document-row {
+        transition: opacity var(--duration-base) var(--ease-out);
+    }
+
+    .agent-document[data-search-dim] .agent-document-row[data-search-match="false"],
+    .agent-document[data-search-dim] .agent-document-streaming-buffer .agent-document-row[data-search-match="false"] {
+        opacity: var(--search-dim-opacity);
+    }
+}
+
+// === Text highlights ===
+// The words the query finds, in the rows that are mounted (view/agent/search/search-highlights.ts registers the
+// ranges). The text keeps its colour; the wash is measured per theme (search-dim-contrast.test.ts). The current
+// row's row treatment (above) still says where it is where `CSS.highlights` is missing.
+::highlight(agent-search) {
+    background-color: var(--search-mark-bg);
+}
+
+::highlight(agent-search-current) {
+    background-color: var(--search-mark-current-bg);
+}
+
+@media (forced-colors: active) {
+    ::highlight(agent-search),
+    ::highlight(agent-search-current) {
+        background-color: Highlight;
+        color: HighlightText;
+    }
 }
