@@ -32,6 +32,11 @@ fn is_parked(block: &Block) -> bool {
     crate::backend::obj::meta_get_bool(&block.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)
 }
 
+/// Whether `block` is a child of a block that is in the store (`parentoref` is `block:<id>`).
+fn is_sub_block_of_a_stored_block(block: &Block, stored: &std::collections::HashSet<&str>) -> bool {
+    block.parentoref.strip_prefix("block:").is_some_and(|parent| stored.contains(parent))
+}
+
 /// Phase E.2 / E.2b — load workspaces and their tabs from SQLite
 /// into the reducer state. Called once at srv startup before the
 /// IPC server starts accepting commands. Async because we're inside
@@ -192,6 +197,7 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
             }
         }
     }
+    let stored: std::collections::HashSet<&str> = blocks.iter().map(|b| b.oid.as_str()).collect();
     for block in &blocks {
         // Phase E.3 — recover each block's parent tab via reverse
         // lookup against `state.tabs` (NOT raw `tabs` from SQLite):
@@ -205,11 +211,15 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
             .map(|t| t.tab_id.clone())
             .or_else(|| is_parked(block).then(String::new))
         else {
-            tracing::warn!(
-                target: "srv-persist",
-                "[srv-persist] bootstrap: block {} has no parent tab in reducer state — skipping",
-                block.oid
-            );
+            // A block's own child (an agent pane's shell) is in no tab by design and lives with its
+            // parent, which may be parked. It is no orphan, and the reducer never tracked it.
+            if !is_sub_block_of_a_stored_block(block, &stored) {
+                tracing::warn!(
+                    target: "srv-persist",
+                    "[srv-persist] bootstrap: block {} has no parent tab in reducer state — skipping",
+                    block.oid
+                );
+            }
             continue;
         };
         state.blocks.insert(
@@ -300,5 +310,17 @@ mod tests {
         assert_eq!(s.blocks.get(&parked).map(|b| b.tab_id.as_str()), Some(""));
         assert!(!s.blocks.contains_key(&orphan));
         assert_eq!(s.tabs["t1"].block_ids, vec![shown]);
+    }
+
+    /// An agent pane's shell is a child of the agent's block, in no tab. With its parent in the store
+    /// (parked, here) it is not an orphan; with its parent gone it is.
+    #[test]
+    fn a_child_of_a_stored_block_is_not_an_orphan() {
+        let child = |parent: &str| Block { oid: "shell".into(), parentoref: parent.to_string(), ..Default::default() };
+        let stored: std::collections::HashSet<&str> = ["agent"].into_iter().collect();
+        assert!(is_sub_block_of_a_stored_block(&child("block:agent"), &stored));
+        assert!(!is_sub_block_of_a_stored_block(&child("block:gone"), &stored));
+        assert!(!is_sub_block_of_a_stored_block(&child("tab:agent"), &stored));
+        assert!(!is_sub_block_of_a_stored_block(&child(""), &stored));
     }
 }
