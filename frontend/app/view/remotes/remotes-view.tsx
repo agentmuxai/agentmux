@@ -19,7 +19,6 @@ import {
     isPinned,
     platformLabel,
     plural,
-    REMOTE_COLORS,
     remoteColor,
     statusLabel,
     type RemoteGroup,
@@ -36,7 +35,6 @@ import {
     PaneBody,
     PaneScroll,
     SectionHeader,
-    Select,
     TextInput,
     type StatusTone,
 } from "@/app/element/ui";
