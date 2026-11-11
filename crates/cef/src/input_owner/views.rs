@@ -1,13 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The macOS and Linux adapter for the input owner: turns CEF Views window
-//! activation, pane lifecycle, the selection IPCs and (macOS) clicks into
-//! machine events, and runs the machine's effects through three per-platform
-//! functions (`platform`). docs/specs/SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md §3.7.
-//!
-//! Compiled on Windows too, with stub platform functions, so the shared part is
-//! built and checked there; only the macOS and Linux builds call it.
+//! The Views adapter for the input owner (macOS, Linux, and Windows in Views
+//! pane mode, `pane_backend`): turns CEF Views window activation, pane
+//! lifecycle, the selection IPCs and clicks into machine events, and runs the
+//! machine's effects through three per-platform functions (`platform`).
+//! docs/specs/SPEC_BROWSER_PANE_INPUT_OWNER_2026_10_15.md §3.7.
 
 use std::sync::Arc;
 
@@ -66,8 +64,8 @@ pub fn pane_pointer_down(state: &Arc<AppState>, block: &str) {
     }
 }
 
-/// The user gave pane `block`'s page focus where no click hook sees it (Linux:
-/// CEF's `on_set_focus` with a user source): the same as a click in it, posted.
+/// The user gave pane `block`'s page focus where no click hook sees it (Linux, and
+/// Windows with Views panes: CEF's `on_set_focus` with a user source): the same as a click in it, posted.
 /// Not while this adapter is focusing the pane itself, nor before the pane is
 /// live: Views focuses a new pane's browser as it is added, and CEF may report
 /// a focus set from code with the same source.
