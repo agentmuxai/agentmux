@@ -1325,7 +1325,7 @@ fn arm_promote_liveness(state: &Arc<AppState>, label: &str, fallback: PromoteFal
                     right: fallback.pos_x + fallback.width,
                     bottom: fallback.pos_y + fallback.height,
                 }),
-                false,
+                None,
             );
             if let Ok(v) = &out {
                 if let Some(label) = v.as_str() {
@@ -1346,7 +1346,7 @@ fn arm_promote_liveness(state: &Arc<AppState>, label: &str, fallback: PromoteFal
                 fallback.initial_view.as_deref(),
                 fallback.initial_meta.as_deref(),
                 None,
-                false,
+                None,
             )
         } else {
             // Tear-off promote: the tab has ALREADY been moved into

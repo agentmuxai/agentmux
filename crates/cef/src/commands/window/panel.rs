@@ -144,7 +144,7 @@ pub fn open_panel(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
             right: x + w,
             bottom: y + h,
         }),
-        false,
+        None,
     )?;
     if let Some(label) = out.as_str() {
         crate::ui_tasks::post_set_always_on_top(state, label);
