@@ -688,6 +688,34 @@ fn layout_set_tree_self_heals_a_dangling_block_ref_in_the_pushed_tree() {
     }
 }
 
+/// A tree loaded from disk with a pre-display-mode minimize field and nothing
+/// to prune is migrated and stored at bootstrap, so the window never sees the
+/// legacy field; a current tree is left as loaded.
+#[test]
+fn heal_loaded_layout_migrates_legacy_minimize_fields_even_with_nothing_to_prune() {
+    let (mut state, tab_id) = fresh_tab();
+    seed_block(&mut state, &tab_id, "ba");
+    seed_block(&mut state, &tab_id, "bb");
+    let mut squeezed = leaf_node("b", "bb");
+    squeezed.size = 2.0;
+    squeezed.extra.insert("minimizedSize".into(), 25.into());
+    let tab = state.tabs.get_mut(&tab_id).unwrap();
+    tab.block_ids = vec!["ba".into(), "bb".into()];
+    tab.rootnode = Some(agentmux_common::LayoutNode {
+        id: "root".into(),
+        children: vec![leaf_node("a", "ba"), squeezed],
+        ..Default::default()
+    });
+
+    let events = crate::reducer::heal_loaded_layout(&mut state, &tab_id);
+    assert!(matches!(&events[..], [Event::LayoutTreeReplaced { .. }]), "the migrated tree is stored");
+    let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+    let migrated = root.children.iter().find(|c| c.id == "b").unwrap();
+    assert!(migrated.minimized && migrated.extra.get("minimizedSize").is_none());
+
+    assert!(crate::reducer::heal_loaded_layout(&mut state, &tab_id).is_empty(), "a current tree is left as loaded");
+}
+
 fn tree_with_dangling_leaf() -> agentmux_common::LayoutNode {
     agentmux_common::LayoutNode {
         id: "root".into(),

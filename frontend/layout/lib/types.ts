@@ -222,15 +222,14 @@ export interface LayoutNode {
     /**
      * LEGACY (pre display-mode model) — original size before minimization;
      * presence indicated the node was minimized via size-squeezing. Migrated to
-     * the `minimized` flag by `rebuildMinimizedSet` at load; no new writes.
+     * the `minimized` flag by srv when it loads the tree; no new writes.
      */
     minimizedSize?: number;
     /**
      * LEGACY (pre display-mode model) — the flex-unit size a node was locked to
      * while minimized under the size-squeeze model. No new writes, and nothing
-     * sizes by it any more: srv's `migrate_legacy_minimize` and the frontend's
-     * `rebuildMinimizedSet` drop it on load, and only the invariant checks
-     * (I6/I7) still look for it in an unmigrated tree.
+     * sizes by it any more: srv's `migrate_legacy_minimize` drops it when it
+     * loads the tree, and only the invariant checks (I6/I7) still look for it.
      */
     minimizedLockedSize?: number;
     /**

@@ -661,11 +661,13 @@ fn expanded_leaves(node: &LayoutNode) -> usize {
     node.children.iter().map(expanded_leaves).sum()
 }
 
-// ── Legacy minimize fields (`rebuildMinimizedSet`, layoutMinimize.ts) ───────
+// ── Legacy minimize fields ───────────────────────────────────────────────────
 
-/// Migrate the pre-display-mode minimize fields to the `minimized` flag, as the
-/// frontend does when it loads a tree, so srv computes on the tree the
-/// frontend sees. Returns how many fields it migrated (0 for a current tree).
+/// Migrate the pre-display-mode minimize fields to the `minimized` flag. This is
+/// the only place it happens: srv runs it on every tree it loads at bootstrap
+/// (`heal_loaded_layout`) and before every intent, so the window is never given
+/// a tree that carries them. Returns how many fields it migrated (0 for a
+/// current tree).
 pub fn migrate_legacy_minimize(root: &mut LayoutNode) -> usize {
     migrate_node(root, DEFAULT_NODE_SIZE)
 }

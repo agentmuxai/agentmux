@@ -4,7 +4,7 @@
 import { findNode, walkNodes } from "./layoutNode";
 import { isNodeLocked, isEffectivelyMinimized, reportLayoutViolations } from "./layoutInvariants";
 import type { LayoutModel } from "./layoutModel";
-import { DefaultNodeSize, LayoutTreeActionType, type LayoutNode, type LayoutTreeMinimizeNodeAction } from "./types";
+import { LayoutTreeActionType, type LayoutNode, type LayoutTreeMinimizeNodeAction } from "./types";
 
 /** Height of the block header in CSS pixels (matches --header-height in theme.scss). */
 export const HeaderHeightPx = 33;
@@ -59,8 +59,9 @@ export { isNodeLocked, isEffectivelyMinimized };
  * was minimized from (`layoutRestore.ts`; srv does the same in `restore_node`).
  *
  * Legacy trees (with `minimizedSize`/`slipMinimize`/`columnDissolve`/
- * `minimizedLockedSize`/`_slipAnchor`) are migrated in place by
- * `rebuildMinimizedSet` at load.
+ * `minimizedLockedSize`/`_slipAnchor`) are migrated by srv when it loads them
+ * (`migrate_legacy_minimize`, crates/srv/src/backend/layout/intent.rs); the
+ * window never sees those fields.
  */
 
 /**
@@ -180,94 +181,17 @@ function commitToggle(model: LayoutModel, type: LayoutTreeActionType.Minimize | 
 }
 
 /**
- * Scan the loaded tree, migrate any legacy minimize state to the display-mode
- * flag, and seed the in-memory `minimizedNodeIds` set for the initial paint
- * (the first `updateTree()` pass — see `layoutGeometry.ts::updateTree` —
- * rebuilds it authoritatively moments later regardless; this just avoids a
- * flash of wrong button state before that first pass runs). Called once
- * during `initializeFromMuxObject`.
- *
- * Migration rules (one-way, in place):
- * - `minimizedSize` (leaf was size-squeezed): restore `size` to the recorded
- *   original, set `minimized`, drop the marker. (Siblings that received the
- *   freed units keep them — a one-time proportional drift, acceptable.)
- * - `slipMinimize` (header slipped into a neighbor column): set `minimized`,
- *   drop the marker. The pane stays where the slip left it — restorable in
- *   place; the original Row-slot context is intentionally not reconstructed.
- * - `columnDissolve` (branch nested into a neighbor): drop the marker. The
- *   structure it built is a valid tree; its children migrate individually.
- * - `minimizedLockedSize` / `_slipAnchor`: dropped (lock layer and balance
- *   carve-out bookkeeping of the legacy model).
+ * Seed the in-memory `minimizedNodeIds` set from the loaded tree for the
+ * initial paint (the first `updateTree()` pass — see
+ * `layoutGeometry.ts::updateTree` — rebuilds it authoritatively moments later
+ * regardless; this just avoids a flash of wrong button state before that
+ * first pass runs). Called once during `initializeFromMuxObject`.
  */
 export function rebuildMinimizedSet(model: LayoutModel) {
     const root = model.treeState.rootNode;
-    const migrated = migrateLegacyMinimize(root);
-    if (migrated > 0) {
-        console.warn(`[layoutMinimize] migrated ${migrated} legacy minimize field(s) to the display-mode flag`);
-    }
     const ids = new Set<string>();
     walkNodes(root, (node) => {
         if (node.minimized && !node.children?.length) ids.add(node.id);
     });
     model.minimizedNodeIds._set(ids);
-}
-
-/** The migration half of `rebuildMinimizedSet`, on a bare tree. Returns how
- *  many legacy fields it migrated. srv runs the same migration
- *  (`migrate_legacy_minimize`, crates/srv/src/backend/layout/intent.rs). */
-export function migrateLegacyMinimize(root: LayoutNode | undefined): number {
-    let migrated = 0;
-    // Flex sizes are relative WITHIN a parent. A slipped/dissolved node lives
-    // nested in its slip/dissolve TARGET — a different unit space from where
-    // its `originalRowSize` was recorded — so restoring that raw number would
-    // give it a wildly wrong proportion among its current siblings. Instead,
-    // heal its size to a sane share of the parent it actually sits in: the
-    // mean of its positive-sized siblings, falling back to DefaultNodeSize.
-    const saneShare = (node: LayoutNode, parent: LayoutNode | undefined): number => {
-        const sibs = parent?.children?.filter((c) => c !== node && c.size > 0) ?? [];
-        if (!sibs.length) return DefaultNodeSize;
-        return sibs.reduce((s, c) => s + c.size, 0) / sibs.length;
-    };
-    function walk(node: LayoutNode, parent: LayoutNode | undefined) {
-        if (!node) return;
-        const isLeaf = !node.children?.length;
-        if (node.minimizedSize !== undefined) {
-            // Same parent, same unit space — the recorded original is exact.
-            if (isLeaf) {
-                node.size = node.minimizedSize;
-                node.minimized = true;
-            }
-            node.minimizedSize = undefined;
-            migrated++;
-        }
-        if (node.slipMinimize !== undefined) {
-            // Slip squeezed the leaf to header units inside its TARGET column;
-            // heal to a sane share of the column it now sits in.
-            node.size = saneShare(node, parent);
-            if (isLeaf) node.minimized = true;
-            node.slipMinimize = undefined;
-            migrated++;
-        }
-        if (node.columnDissolve !== undefined) {
-            // Dissolve set the branch's size to the stolen header total —
-            // possibly tiny or even negative (the cascade bug this redesign
-            // kills). The size becomes load-bearing again the moment any
-            // child leaf restores; heal it to a sane share of its CURRENT
-            // (nested) parent.
-            node.size = saneShare(node, parent);
-            node.columnDissolve = undefined;
-            migrated++;
-        }
-        if (node.minimizedLockedSize !== undefined) {
-            node.minimizedLockedSize = undefined;
-            migrated++;
-        }
-        if (node._slipAnchor) {
-            node._slipAnchor = undefined;
-            migrated++;
-        }
-        node.children?.forEach((c) => walk(c, node));
-    }
-    if (root) walk(root, undefined);
-    return migrated;
 }
