@@ -47,6 +47,7 @@ import { countImages } from "./components/runtime-dropup-routes";
 import { AgentTopBand } from "./top-band/AgentTopBand";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { isForcedRow } from "./virtualization/verbosity";
+import { createSearchPaint, SearchPaintContext } from "./search/search-paint";
 
 /** The hook groups AgentPresentationView built, handed to the parts that draw them. */
 export interface AgentViewParts {
@@ -177,6 +178,8 @@ function AgentViewOverlays({ v }: { v: AgentViewParts }): JSX.Element {
                 matchIndex={input.search.currentIndex}
                 matchCount={input.search.matchCount}
                 searching={input.search.searching}
+                dim={input.search.dim}
+                onDimChange={input.search.setDim}
             />
         </>
     );
@@ -191,37 +194,40 @@ function AgentViewTranscript({ v }: { v: AgentViewParts }): JSX.Element {
     const { status } = v.turn;
     // The list's "content grew while the reader is scrolled up" state, for the New activity pill.
     const [newActivitySource, setNewActivitySource] = createSignal<Accessor<boolean>>(() => false);
+    const searchPaint = createSearchPaint(input.search);
     return (
-        <AgentTranscriptRegion
-            readiness={feed.readiness}
-            documentNodes={shown.shownDocument}
-            documentStateAtom={found.agentAtoms().documentStateAtom}
-            onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
-            onAgentErrorLogin={() => {
-                // The button says "Login Again", so it forces a fresh OAuth for every provider, like the failure
-                // row's. Seeding from the personal credential here would reuse a possibly equally stale token
-                // (retro-agent-auth-relogin-noop-2026-07-01).
-                found.shell.log("auth", "Login Again (inline error node) — forcing a fresh provider login");
-                void status.relogin();
-            }}
-            onLoadOlder={history.loadOlder}
-            loadingOlder={history.loadingOlder}
-            // The one paging gate: the list pages only while this is true.
-            hasOlderHistory={() => liveFeed.canPageOlder() && history.historyOffset() > 0}
-            followingRef={(f) => liveFeed.setFollowingBottom(f)}
-            newActivityRef={(a) => setNewActivitySource(() => a)}
-            scrollCommand={input.scroll.command}
-            scrollToBottomRef={(fn) => {
-                late.scrollToBottom = fn;
-            }}
-            highlightNodeId={input.search.highlightId}
-            registerHistoryReadyCallback={feed.registerHistoryReady}
-            zoomFactor={input.zoomFactor}
-            blockId={model.blockId}
-            layoutView={found.layoutView}
-            newActivityVisible={() => newActivitySource()()}
-            onJumpToNewActivity={() => late.scrollToBottom?.("new-activity-pill")}
-        />
+        <SearchPaintContext.Provider value={searchPaint}>
+            <AgentTranscriptRegion
+                readiness={feed.readiness}
+                documentNodes={shown.shownDocument}
+                documentStateAtom={found.agentAtoms().documentStateAtom}
+                onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
+                onAgentErrorLogin={() => {
+                    // The button says "Login Again", so it forces a fresh OAuth for every provider, like the failure
+                    // row's. Seeding from the personal credential here would reuse a possibly equally stale token
+                    // (retro-agent-auth-relogin-noop-2026-07-01).
+                    found.shell.log("auth", "Login Again (inline error node) — forcing a fresh provider login");
+                    void status.relogin();
+                }}
+                onLoadOlder={history.loadOlder}
+                loadingOlder={history.loadingOlder}
+                // The one paging gate: the list pages only while this is true.
+                hasOlderHistory={() => liveFeed.canPageOlder() && history.historyOffset() > 0}
+                followingRef={(f) => liveFeed.setFollowingBottom(f)}
+                newActivityRef={(a) => setNewActivitySource(() => a)}
+                scrollCommand={input.scroll.command}
+                scrollToBottomRef={(fn) => {
+                    late.scrollToBottom = fn;
+                }}
+                highlightNodeId={input.search.highlightId}
+                registerHistoryReadyCallback={feed.registerHistoryReady}
+                zoomFactor={input.zoomFactor}
+                blockId={model.blockId}
+                layoutView={found.layoutView}
+                newActivityVisible={() => newActivitySource()()}
+                onJumpToNewActivity={() => late.scrollToBottom?.("new-activity-pill")}
+            />
+        </SearchPaintContext.Provider>
     );
 }
 
