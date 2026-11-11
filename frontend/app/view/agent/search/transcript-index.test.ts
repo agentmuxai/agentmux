@@ -44,8 +44,22 @@ describe("searchableText", () => {
         expect(text({ type: "system_note", id: "a", text: "compacted" })).toBe("compacted");
     });
 
+    it("reads the words a divider or notice row draws, the same words the row shows", () => {
+        const text = (n: object) => searchableText(n as DocumentNode);
+        expect(text({ type: "ambient_narration", id: "a", kind: "k", text: "watching the build" })).toBe("watching the build");
+        expect(text({ type: "agent_error", id: "a", code: 429, message: "rate limited, retry later" })).toBe("rate limited, retry later");
+        expect(text({ type: "day_divider", id: "a", dayLabel: "Today" })).toBe("Today");
+        const continued = text({ type: "session_outcome", id: "a", outcome: "fresh", continued: true });
+        expect(continued).toContain("Session continued · reconstructed context");
+        expect(continued).toContain("a running summary and the recent exchange");
+        expect(text({ type: "session_outcome", id: "a", outcome: "fresh" })).toBe(
+            "New session started The agent doesn't have the conversation above this line"
+        );
+        expect(text({ type: "session_outcome", id: "a", outcome: "resumed" }).trim()).toBe("Session continued");
+    });
+
     it("reads nothing from a row of any other kind", () => {
-        expect(searchableText({ type: "day_divider", id: "d" } as unknown as DocumentNode)).toBe("");
+        expect(searchableText({ type: "history_link", id: "d" } as unknown as DocumentNode)).toBe("");
         expect(
             searchableText({
                 type: "hidden_run",
