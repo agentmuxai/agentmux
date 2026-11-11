@@ -3,7 +3,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import { COMPACT_ORDER, accountInitial, chooseCompactKeys, shortContextText } from "./composer-forms";
+import {
+    ACCOUNT_BUDGETS,
+    COMPACT_ORDER,
+    accountInitial,
+    chooseCompactKeys,
+    chooseMiddleBudget,
+    middleTruncate,
+    shortContextText,
+} from "./composer-forms";
 
 // The strip at about 420 px: the runtime trigger, the account, the context reading with Compact, and Shell.
 const FULL = { runtime: 168, auth: 152, ctx: 256, hostShell: 72 };
@@ -96,5 +104,50 @@ describe("accountInitial", () => {
     it("has a mark when there is no letter", () => {
         expect(accountInitial("…")).toBe("?");
         expect(accountInitial("")).toBe("?");
+    });
+});
+
+
+describe("middleTruncate", () => {
+    it("leaves a label that fits as it is", () => {
+        expect(middleTruncate("ada@mail.dev", 15)).toBe("ada@mail.dev");
+    });
+
+    it("keeps the start of the local part and the whole domain when the domain fits", () => {
+        expect(middleTruncate("taylor.morgan@mail.dev", 15)).toBe("taylo…@mail.dev");
+        expect(middleTruncate("taylor.morgan@mail.dev", 12)).toBe("ta…@mail.dev");
+    });
+
+    it("keeps the start of the address when the domain doesn't fit", () => {
+        expect(middleTruncate("taylor.morgan@mail.dev", 9)).toBe("taylor.m…");
+        expect(middleTruncate("taylor.morgan@mail.dev", 7)).toBe("taylor…");
+    });
+
+    it("cuts a label with no address to its start", () => {
+        expect(middleTruncate("Not logged in", 9)).toBe("Not logg…");
+    });
+
+    it("never returns more than the budget", () => {
+        for (const budget of ACCOUNT_BUDGETS) {
+            expect(middleTruncate("someone.long.name@example.org", budget).length).toBeLessThanOrEqual(budget);
+        }
+    });
+});
+
+describe("chooseMiddleBudget", () => {
+    // The account's width at a budget: 8 px a character and a 30 px dot.
+    const widthAt = (budget: number) => 30 + budget * 8;
+
+    it("takes the widest budget that keeps the rows", () => {
+        expect(chooseMiddleBudget(ACCOUNT_BUDGETS, widthAt, (w) => w <= 140)).toBe(12);
+        expect(chooseMiddleBudget(ACCOUNT_BUDGETS, widthAt, (w) => w <= 200)).toBe(15);
+    });
+
+    it("takes none when even the narrowest doesn't fit, so the account shows its letter", () => {
+        expect(chooseMiddleBudget(ACCOUNT_BUDGETS, widthAt, (w) => w <= 70)).toBeUndefined();
+    });
+
+    it("skips a budget that was not measured", () => {
+        expect(chooseMiddleBudget(ACCOUNT_BUDGETS, (b) => (b === 9 ? 100 : undefined), () => true)).toBe(9);
     });
 });
