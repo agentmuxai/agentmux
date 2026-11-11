@@ -414,7 +414,6 @@
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
 285 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
-152 frontend/app/view/files/files-preview.tsx::FilesPreview
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 122 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
