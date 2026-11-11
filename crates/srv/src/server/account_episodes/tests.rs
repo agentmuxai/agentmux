@@ -304,6 +304,26 @@ async fn a_sign_in_leaves_a_usage_limit_alone() {
     cleanup(&[&block]);
 }
 
+/// The panes a sign-in answers are the ones whose last turn failed on the login, named with when it failed,
+/// so each is told once (task #2458): a pane that did not fail, a usage limit and another account's pane are not.
+#[tokio::test]
+async fn a_sign_in_names_only_the_panes_whose_turn_failed_on_the_login() {
+    let state = test_state();
+    let tab = new_tab(&state).await;
+    let mut failed = failure("auth", None, None);
+    failed["atMs"] = json!(1_700_000_000_000u64);
+    let signed_out = pane(&state, &tab, "r1", "Signed-out", "acct-a", Some(failed), false).await;
+    let fine = pane(&state, &tab, "r2", "Fine", "acct-a", None, false).await;
+    let limited = pane(&state, &tab, "r3", "Limited", "acct-a", Some(failure("usage_limit", Some(agentmux_common::time::now_ms_u64() + 60_000), Some("five_hour"))), false).await;
+    let elsewhere = pane(&state, &tab, "r4", "Elsewhere", "acct-b", Some(failure("auth", None, None)), false).await;
+
+    let told = clear_signed_out_panes(&state.mstore, &state.identity_store, &state.event_bus, "acct-a");
+    assert_eq!(told, vec![Failed { block_id: signed_out.clone(), failed_at_ms: Some(1_700_000_000_000) }]);
+    assert!(clear_signed_out_panes(&state.mstore, &state.identity_store, &state.event_bus, "acct-a").is_empty(), "the failure is cleared: a second report of the sign-in names no one");
+    assert!(stored_failure(&state, &limited).is_some() && stored_failure(&state, &elsewhere).is_some());
+    cleanup(&[&signed_out, &fine, &limited, &elsewhere]);
+}
+
 /// A sign-in to one account says nothing about another.
 #[tokio::test]
 async fn a_sign_in_leaves_another_accounts_panes_alone() {
