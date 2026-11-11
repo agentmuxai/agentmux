@@ -31,13 +31,21 @@ export function createModalCaret(panel: () => HTMLElement | undefined, initialFo
     let tookFocus = false;
     const [awaitedPane, setAwaitedPane] = createSignal<string | null>(null);
 
-    // Next frame, so the Portal has rendered. `late`: the modal was already on screen, and a control of it the
-    // person clicked keeps the caret.
-    const take = (late = false): void => {
+    // Next frame, so the Portal has rendered. `latePane`: the modal was already on screen when its pane was
+    // selected. A control of it the person clicked keeps the caret, and if they went on to another pane before
+    // this frame the modal waits for them again.
+    const take = (latePane?: string): void => {
         tookFocus = true;
         requestAnimationFrame(() => {
             const el = panel();
-            if (!el || (late && el.contains(document.activeElement))) return;
+            if (!el || !el.isConnected) return;
+            if (latePane != null) {
+                if (focusManager.blockFocusAtom() !== latePane) {
+                    tookFocus = false;
+                    return void setAwaitedPane(latePane);
+                }
+                if (el.contains(document.activeElement)) return;
+            }
             const chosen = initialFocus();
             const target = (typeof chosen === "function" ? chosen() : chosen) ?? initialFocusTarget(el);
             (target ?? el).focus();
@@ -48,7 +56,7 @@ export function createModalCaret(panel: () => HTMLElement | undefined, initialFo
         const pane = awaitedPane();
         if (pane == null || focusManager.blockFocusAtom() !== pane) return;
         setAwaitedPane(null);
-        take(true);
+        take(pane);
     });
 
     return {

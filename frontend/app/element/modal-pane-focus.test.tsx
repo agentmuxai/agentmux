@@ -107,6 +107,22 @@ describe("a pane's modal and the caret", () => {
         expect(document.activeElement).toBe(install);
     });
 
+    it("goes on waiting when the person selects its pane and moves on within the same frame", async () => {
+        const { getByTestId } = render(() => <Window />);
+        setSelected("term");
+        getByTestId("terminal").focus();
+        setAsking(true);
+        await nextFrame();
+        setSelected("remotes");
+        setSelected("term");
+        await nextFrame();
+        expect(document.activeElement).toBe(getByTestId("terminal"));
+        // It still takes the caret the next time they come.
+        setSelected("remotes");
+        await nextFrame();
+        expect(document.activeElement).toBe(cancel());
+    });
+
     it("gives no caret back when it closes without ever having had it", async () => {
         const { getByTestId } = render(() => <Window />);
         setSelected("term");
