@@ -53,6 +53,7 @@ pub(crate) mod creation_labels;
 pub(crate) mod app_navigation;
 pub(crate) mod allowed_origins;
 pub(crate) mod boot_watchdog;
+pub(crate) mod dev_server_watch;
 pub(crate) mod page_unreachable;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 mod startup_paint;

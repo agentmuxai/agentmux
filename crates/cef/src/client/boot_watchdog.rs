@@ -57,12 +57,13 @@ impl Windows {
             .collect()
     }
 
-    /// The window is being reloaded: count it and restart its clock.
-    pub(crate) fn reloaded(&mut self, label: &str, now: Instant) {
-        if let Some(w) = self.0.get_mut(label) {
-            w.reloads += 1;
-            w.since = now;
-        }
+    /// The window is being reloaded: count it and restart its clock. False when it is not waiting any
+    /// more (it booted while the address was being checked): then there is nothing to reload.
+    pub(crate) fn reloaded(&mut self, label: &str, now: Instant) -> bool {
+        let Some(w) = self.0.get_mut(label) else { return false };
+        w.reloads += 1;
+        w.since = now;
+        true
     }
 }
 
@@ -80,6 +81,7 @@ pub(crate) fn note_navigation(state: &Arc<AppState>, url: &str) {
         return;
     }
     windows().lock().navigated(&label_of(url), url, Instant::now());
+    super::dev_server_watch::note_navigation(state, url);
     if !STARTED.swap(true, Ordering::SeqCst) {
         let state = Arc::clone(state);
         std::thread::spawn(move || watch(state));
@@ -104,8 +106,11 @@ fn watch(state: Arc<AppState>) {
             if !address_answers(&url) {
                 continue;
             }
+            // Checked again after the connect: the window may have booted meanwhile, and a reload would undo that.
+            if !windows().lock().reloaded(&label, Instant::now()) {
+                continue;
+            }
             tracing::warn!(label = %label, "[boot-watchdog] the page loaded but the app has not booted — reloading the window");
-            windows().lock().reloaded(&label, Instant::now());
             let mut task = ReloadTask::new(Arc::clone(&state), label, url);
             cef::post_task(cef::ThreadId::UI, Some(&mut task));
         }
@@ -151,6 +156,19 @@ mod tests {
         }
         now += BOOT_DEADLINE * 10;
         assert!(w.overdue(now, BOOT_DEADLINE).is_empty(), "no more than {MAX_AUTO_RELOADS} reloads");
+    }
+
+    /// The check of the address takes a while; a window that booted in that time is not reloaded.
+    #[test]
+    fn a_window_that_booted_while_its_address_was_checked_is_not_reloaded() {
+        let mut w = Windows::default();
+        let t0 = Instant::now();
+        w.navigated("main", URL, t0);
+        assert_eq!(w.overdue(t0 + BOOT_DEADLINE, BOOT_DEADLINE).len(), 1);
+        w.booted("main");
+        assert!(!w.reloaded("main", t0 + BOOT_DEADLINE), "no reload, no count");
+        w.navigated("main", URL, t0);
+        assert!(w.reloaded("main", t0));
     }
 
     #[test]
