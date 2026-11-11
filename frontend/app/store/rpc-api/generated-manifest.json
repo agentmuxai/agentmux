@@ -1203,6 +1203,14 @@
             "method": "BrowserGrantsRevokeCommand"
         },
         {
+            "command": "browsergrants.permissionset",
+            "method": "BrowserGrantsPermissionSetCommand"
+        },
+        {
+            "command": "browsergrants.permissionrevoke",
+            "method": "BrowserGrantsPermissionRevokeCommand"
+        },
+        {
             "command": "browsergrants.powers",
             "method": "BrowserGrantsPowersCommand"
         },

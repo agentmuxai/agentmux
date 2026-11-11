@@ -134,6 +134,8 @@ import type { CommandBookmarksListData } from "@/types/rpc/CommandBookmarksListD
 import type { CommandBookmarksSetData } from "@/types/rpc/CommandBookmarksSetData";
 import type { CommandBrowserGrantsListData } from "@/types/rpc/CommandBrowserGrantsListData";
 import type { CommandBrowserGrantsPauseAllData } from "@/types/rpc/CommandBrowserGrantsPauseAllData";
+import type { CommandBrowserGrantsPermissionRevokeData } from "@/types/rpc/CommandBrowserGrantsPermissionRevokeData";
+import type { CommandBrowserGrantsPermissionSetData } from "@/types/rpc/CommandBrowserGrantsPermissionSetData";
 import type { CommandBrowserGrantsPowersData } from "@/types/rpc/CommandBrowserGrantsPowersData";
 import type { CommandBrowserGrantsPresetData } from "@/types/rpc/CommandBrowserGrantsPresetData";
 import type { CommandBrowserGrantsRevokeData } from "@/types/rpc/CommandBrowserGrantsRevokeData";
@@ -2296,6 +2298,22 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<BrowserGrantsResult> {
     return client.rpcCall("browsergrants.revoke", data, opts);
+  },
+  // command "browsergrants.permissionset"
+  BrowserGrantsPermissionSetCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsPermissionSetData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.permissionset", data, opts);
+  },
+  // command "browsergrants.permissionrevoke"
+  BrowserGrantsPermissionRevokeCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsPermissionRevokeData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.permissionrevoke", data, opts);
   },
   // command "browsergrants.powers"
   BrowserGrantsPowersCommand(

@@ -119,6 +119,10 @@ pub const COMMAND_BROWSER_GRANTS_SET: &str = "browsergrants.set";
 pub const COMMAND_BROWSER_GRANTS_PRESET: &str = "browsergrants.preset";
 /// Revoke a standing grant: calls in flight end and the strip comes down (the user only).
 pub const COMMAND_BROWSER_GRANTS_REVOKE: &str = "browsergrants.revoke";
+/// Let an agent use a page's camera, microphone, location or notifications on one site, until revoked (the user only).
+pub const COMMAND_BROWSER_GRANTS_PERMISSION_SET: &str = "browsergrants.permissionset";
+/// Revoke one site permission (the user only).
+pub const COMMAND_BROWSER_GRANTS_PERMISSION_REVOKE: &str = "browsergrants.permissionrevoke";
 /// Change the powers a standing grant carries (the user only).
 pub const COMMAND_BROWSER_GRANTS_POWERS: &str = "browsergrants.powers";
 /// Turn "Pause all agent browsing" on or off: every driven pane refuses agent calls. Anyone may

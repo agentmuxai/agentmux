@@ -218,6 +218,13 @@ pub(crate) async fn handle_host_browser_permission(
     if agent.is_empty() || site.is_empty() {
         return answered("deny");
     }
+    if super::browser_site_permissions::allowed(&agent, &site, &kinds) {
+        record(&agent, &target, "permission", &message, "allowed", "you allowed it on this site in Settings");
+        if super::browser_site_permissions::first_use(&agent, &target, &site, &kinds) {
+            audit_standing_allow(&state, &agent, &site, &kinds, &message);
+        }
+        return answered("allow");
+    }
     if is_granted(&agent, &target, &site, &kinds, now_ms()) {
         record(&agent, &target, "permission", &message, "allowed", "the person's countdown for this site ended without a veto");
         if first_use_of_grant(&agent, &target, &site, &kinds, now_ms()) {
