@@ -13,8 +13,9 @@
 #      check). A short outage costs a pause, not three timed-out attempts; a longer one fails the step right there
 #      with the resolver state printed, instead of 11 minutes later;
 #   3. the whole command again, up to CI_APT_ATTEMPTS (3) times with a growing pause, each attempt bounded by
-#      `timeout` (CI_APT_UPDATE_LIMIT 180 s, CI_APT_INSTALL_LIMIT 300 s), and no new attempt once the call has
-#      used CI_APT_BUDGET (600 s).
+#      `timeout` (CI_APT_UPDATE_LIMIT 120 s, CI_APT_INSTALL_LIMIT 240 s; killed outright 10 s after the signal),
+#      so a HUNG apt call costs one attempt, and no new attempt once the call has used CI_APT_BUDGET (600 s).
+#      The workflow steps add a timeout-minutes of their own as the last bound.
 #
 # `update` succeeds when no Ubuntu archive host failed in its log; a broken THIRD-PARTY index and apt's exit code
 # alone do not count (a release must never build from stale Ubuntu lists, but a corrupt Google index must not stop it).
@@ -26,8 +27,9 @@ set -uo pipefail
 ATTEMPTS=${CI_APT_ATTEMPTS:-3}
 PAUSE=${CI_APT_PAUSE:-45}
 DNS_WAIT=${CI_APT_DNS_WAIT:-180}
-UPDATE_LIMIT=${CI_APT_UPDATE_LIMIT:-180}
-INSTALL_LIMIT=${CI_APT_INSTALL_LIMIT:-300}
+UPDATE_LIMIT=${CI_APT_UPDATE_LIMIT:-120}
+INSTALL_LIMIT=${CI_APT_INSTALL_LIMIT:-240}
+KILL_AFTER=10
 BUDGET=${CI_APT_BUDGET:-600}
 HOSTS="archive.ubuntu.com security.ubuntu.com"
 # The error form and the warning form: `-qq` turns an `Err:<n> <url>` record into `W: Failed to fetch ...`.
@@ -83,9 +85,9 @@ pause_before() {
 update_once() {
     local out=$1
     # No -qq: it hides the `Err:` records the check below reads.
-    sudo timeout "$UPDATE_LIMIT" apt-get update 2>&1 | tee "$out"
+    sudo timeout -k "$KILL_AFTER" "$UPDATE_LIMIT" apt-get update 2>&1 | tee "$out"
     local status=${PIPESTATUS[0]}
-    [ "$status" -ne 124 ] || { log "apt-get update ran past ${UPDATE_LIMIT}s"; return 1; }
+    [ "$status" -ne 124 ] && [ "$status" -ne 137 ] || { log "apt-get update ran past ${UPDATE_LIMIT}s"; return 1; }
     ! grep -qE "$UBUNTU_FAILED" "$out"
 }
 
@@ -117,12 +119,12 @@ cmd_install() {
     local started n=1
     started=$(now)
     while :; do
-        sudo timeout "$INSTALL_LIMIT" apt-get install "$@" && return 0
+        sudo timeout -k "$KILL_AFTER" "$INSTALL_LIMIT" apt-get install "$@" && return 0
         n=$((n + 1))
         may_try "$n" "$started" || break
         pause_before "$n"
         # Lists that were stale or half fetched are the other way an install fails twice.
-        sudo timeout "$UPDATE_LIMIT" apt-get update >/dev/null 2>&1 || true
+        sudo timeout -k "$KILL_AFTER" "$UPDATE_LIMIT" apt-get update >/dev/null 2>&1 || true
     done
     echo "::error::apt-get install $* failed after $((n - 1)) attempt(s)"
     return 1
