@@ -118,9 +118,10 @@ impl Core {
         self.take_answered(&answered)
     }
 
-    /// A page loaded: the stretch is over.
-    pub(crate) fn loaded(&mut self) {
-        *self = Core::default();
+    /// `label`'s page loaded: that window is done. Other failed windows keep their
+    /// watches and budgets; with none left the stretch is over.
+    pub(crate) fn loaded(&mut self, label: &str) {
+        self.prune(&[label.to_string()]);
     }
 
     pub(crate) fn is_unreachable(&self) -> bool {
@@ -191,9 +192,9 @@ pub(crate) fn check_reachable(state: &AppState, caller: &str) -> Result<(), Stri
     Err("the app page can't be loaded".to_string())
 }
 
-/// A frontend script ran in some window, so the app page loads again.
-pub(crate) fn note_loaded() {
-    core().lock().loaded();
+/// A frontend script ran in `label`, so its page loads again.
+pub(crate) fn note_loaded(label: &str) {
+    core().lock().loaded(label);
 }
 
 /// An app window failed to load its page (`watch`: false for a failure no
@@ -397,9 +398,22 @@ mod tests {
         let mut c = Core::default();
         fail(&mut c, "main");
         c.due(|_| true);
-        c.loaded();
+        c.loaded("main");
         assert!(!c.is_unreachable());
         assert_eq!(fail(&mut c, "main"), Failure::Watching, "the reload budget starts again");
+    }
+
+    /// One window booting must not take another failing window's watch with it.
+    #[test]
+    fn a_page_that_loads_leaves_the_other_failed_windows_alone() {
+        let mut c = Core::default();
+        fail(&mut c, "main");
+        fail(&mut c, "window-1");
+        c.loaded("main");
+        assert!(c.is_unreachable(), "window-1 is still down");
+        assert_eq!(c.watches.len(), 1, "and still watched");
+        c.loaded("window-1");
+        assert!(!c.is_unreachable());
     }
 
     /// The review's case: the failed window is closed, then the address answers. Nothing

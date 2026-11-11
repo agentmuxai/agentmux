@@ -188,7 +188,7 @@ pub fn set_window_init_status(state: &Arc<AppState>, args: &serde_json::Value) -
         .to_string();
     tracing::debug!("set_window_init_status status={} label={}", status, label);
     // A frontend script ran, so the app page loads again.
-    crate::client::page_unreachable::note_loaded();
+    crate::client::page_unreachable::note_loaded(&label);
     crate::client::boot_watchdog::note_booted(&label);
     // A promoted pool window's content revealed (its splash started fading).
     // Not an init status: it only releases the deferred pane-pool refill.
