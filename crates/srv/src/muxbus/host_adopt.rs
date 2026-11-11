@@ -29,17 +29,26 @@ pub fn host_to_adopt(discovered: Option<&CloudSettings>, current: &MuxBusCredent
     (same_client && !host.is_empty() && !host.eq_ignore_ascii_case(stored)).then(|| host.to_string())
 }
 
+/// How long the discovered host has to answer before the stored one is tried. The client the subscriber refreshes with
+/// has no request timeout, so a host that accepts the connection and never answers would otherwise hold the refresh.
+const DISCOVERED_HOST_PATIENCE: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Refreshes `current`: against the discovered host when [`host_to_adopt`] names one (the result then carries that host),
-/// else, or when that fails for any reason, against the stored host.
+/// else, or when that fails for any reason (an error answer, no answer, or no answer in time), against the stored host.
 pub async fn refresh(current: &MuxBusCredentials, discovered: Option<&CloudSettings>, http: &reqwest::Client) -> Result<MuxBusCredentials, RefreshTokenError> {
+    refresh_within(current, discovered, http, DISCOVERED_HOST_PATIENCE).await
+}
+
+async fn refresh_within(current: &MuxBusCredentials, discovered: Option<&CloudSettings>, http: &reqwest::Client, patience: std::time::Duration) -> Result<MuxBusCredentials, RefreshTokenError> {
     if let Some(host) = host_to_adopt(discovered, current) {
         let moved = MuxBusCredentials { cognito_domain: host.clone(), ..current.clone() };
-        match refresh_token(&moved, http).await {
-            Ok(refreshed) => {
+        match tokio::time::timeout(patience, refresh_token(&moved, http)).await {
+            Ok(Ok(refreshed)) => {
                 tracing::info!(from = %current.cognito_domain, to = %host, "cloud sign-in: refreshed on the host discovery names; it is the stored host now");
                 return Ok(refreshed);
             }
-            Err(e) => tracing::info!(discovered = %host, stored = %current.cognito_domain, error = %e, "cloud sign-in: the discovered host did not refresh; staying on the stored one"),
+            Ok(Err(e)) => tracing::info!(discovered = %host, stored = %current.cognito_domain, error = %e, "cloud sign-in: the discovered host did not refresh; staying on the stored one"),
+            Err(_) => tracing::info!(discovered = %host, stored = %current.cognito_domain, "cloud sign-in: the discovered host did not answer in time; staying on the stored one"),
         }
     }
     refresh_token(current, http).await
@@ -134,6 +143,23 @@ mod tests {
         let (old, _) = host("200 OK").await;
         let refreshed = refresh(&creds(&old), Some(&published("http://127.0.0.1:1", "client-a")), &reqwest::Client::new()).await.unwrap();
         assert_eq!(refreshed.cognito_domain, old);
+    }
+
+    #[tokio::test]
+    async fn a_discovered_host_that_never_answers_does_not_hold_the_refresh() {
+        // It accepts the connection and then says nothing.
+        let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let silent_url = format!("http://{}", silent.local_addr().unwrap());
+        let _held = tokio::spawn(async move {
+            let mut open = Vec::new();
+            while let Ok((stream, _)) = silent.accept().await {
+                open.push(stream);
+            }
+        });
+        let (old, old_hits) = host("200 OK").await;
+        let refreshed = refresh_within(&creds(&old), Some(&published(&silent_url, "client-a")), &reqwest::Client::new(), std::time::Duration::from_millis(300)).await.unwrap();
+        assert_eq!(refreshed.cognito_domain, old, "the stored host answered once the discovered one ran out of time");
+        assert_eq!(old_hits.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
