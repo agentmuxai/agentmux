@@ -30,7 +30,7 @@ vi.mock("./window-close", () => ({
     },
 }));
 
-import { installOsCloseRequests, onOsCloseRequest, OS_CLOSE_EVENT } from "./os-close";
+import { installOsCloseRequests, onOsCloseRequest, OS_CLOSE_REQUEST } from "./os-close";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -56,7 +56,7 @@ describe("an OS close the host held back", () => {
 
     it("arrives as the host's event", async () => {
         installOsCloseRequests();
-        h.listeners.get(OS_CLOSE_EVENT)?.({ seq: 3 });
+        h.listeners.get(OS_CLOSE_REQUEST)?.({ seq: 3 });
         await tick();
         await tick();
         expect(h.calls).toEqual(["seen:3", "requestCloseWindow"]);

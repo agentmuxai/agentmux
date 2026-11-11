@@ -9,7 +9,7 @@
 import { getApi } from "@/store/global";
 
 /** What the host sends for an OS close it held back. */
-export const OS_CLOSE_EVENT = "window-close-requested";
+export const OS_CLOSE_REQUEST = "window-close-requested";
 
 /** Answer one held-back OS close: say it arrived, then close as the close
  *  button does. If that can't run, close anyway: the user asked to. */
@@ -28,7 +28,7 @@ export async function onOsCloseRequest(seq: number): Promise<void> {
 
 /** Listen for the host's held-back OS closes. Once per page. */
 export function installOsCloseRequests(): void {
-    void getApi().listen<{ seq?: number }>(OS_CLOSE_EVENT, (payload) => {
+    void getApi().listen<{ seq?: number }>(OS_CLOSE_REQUEST, (payload) => {
         void onOsCloseRequest(payload?.seq ?? 0);
     });
 }
