@@ -1,0 +1,59 @@
+-- mount a
+-- hover a
+releaseOpen tip1
+-- primary button down: hover ignored
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+-- the button is released, the pointer is not over the anchor
+matches :hover -> false
+-- released elsewhere: still closed
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+-- the button is released over the anchor
+matches :hover -> true
+claimOpen tip1 register=true
+isWarm tip1 -> true
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- released over it: opens
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- the popover is placed
+-- leave a
+popover removed
+releaseOpen tip1
+-- a leave mid-drag still closes it
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+-- mount b
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- the button is released while held open
+-- held open: release does nothing
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "b"
+        "content"
