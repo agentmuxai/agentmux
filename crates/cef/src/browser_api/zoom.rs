@@ -156,7 +156,7 @@ pub fn scale_point(label: &str, x: f64, y: f64) -> (f64, f64) {
 
 /// Measure the pane at its own size, then emulate `ask`. A factor of 1 leaves no emulation. Returns the plan,
 /// and `None` when nothing is emulated.
-async fn apply(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<Plan>, String> {
+async fn apply_once(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<Plan>, String> {
     check(ask)?;
     let label = cdp.label().to_string();
     // What the browser showed under the zoom being replaced: until it shows something else, the old
@@ -206,6 +206,39 @@ async fn apply(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<
     .map_err(|e| e.to_string())?;
     ZOOMED.lock().insert(label, Entry { block_id: block_id.to_string(), ask, plan, generation: next_generation() });
     Ok(Some(plan))
+}
+
+/// Panes being fitted now; the value says the pane was resized meanwhile, so the fit is done again.
+static APPLYING: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(Default::default);
+/// The last size (in DIP) each pane was given: a move that keeps it needs no new fit.
+static LAST_SIZE: LazyLock<Mutex<HashMap<String, (i32, i32)>>> = LazyLock::new(Default::default);
+/// Panes whose size is kept before the map starts over.
+const SIZES_KEPT: usize = 512;
+/// Passes at most over one pane when it is resized while being fitted.
+const FIT_PASSES: u32 = 3;
+
+/// Measure the pane and emulate `ask` on it; once more if the pane was resized meanwhile. A factor of 1
+/// leaves no emulation. Returns the plan, and `None` when nothing is emulated.
+async fn apply(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<Plan>, String> {
+    let label = cdp.label().to_string();
+    let mut result = Ok(None);
+    for _ in 0..FIT_PASSES {
+        APPLYING.lock().insert(label.clone(), false);
+        result = apply_once(cdp, block_id, ask).await;
+        if result.is_err() || !APPLYING.lock().get(&label).copied().unwrap_or(false) {
+            break;
+        }
+    }
+    APPLYING.lock().remove(&label);
+    result
+}
+
+/// Is `size` a new size for `block_id`? Remembers it.
+fn size_changed(sizes: &mut HashMap<String, (i32, i32)>, block_id: &str, size: (i32, i32)) -> bool {
+    if sizes.len() >= SIZES_KEPT && !sizes.contains_key(block_id) {
+        sizes.clear();
+    }
+    sizes.insert(block_id.to_string(), size) != Some(size)
 }
 
 /// Take the emulation off a browser.
@@ -333,12 +366,21 @@ pub async fn zoom_route(
 
 // ── When the pane changes under the zoom ────────────────────────────────────
 
-/// The pane was resized: fit the zoom to its new size once it has held still.
-pub fn on_pane_resized(state: &Arc<AppState>, block_id: &str) {
-    if ZOOMED.lock().is_empty() {
+/// The pane was given a rect of `size` DIP: if that is a new size, fit the zoom to it once it has held still.
+pub fn on_pane_resized(state: &Arc<AppState>, block_id: &str, size: (i32, i32)) {
+    // A move that keeps the size is not a resize, and a refit would reflow the page under the agent.
+    if !size_changed(&mut LAST_SIZE.lock(), block_id, size) {
+        return;
+    }
+    if ZOOMED.lock().is_empty() && APPLYING.lock().is_empty() {
         return;
     }
     let Some(label) = state.live_browser_pane_label(block_id) else { return };
+    // Being fitted right now: that pass looks again when it is done.
+    if let Some(resized) = APPLYING.lock().get_mut(&label) {
+        *resized = true;
+        return;
+    }
     let generation = next_generation();
     let Some(()) = ZOOMED.lock().get_mut(&label).map(|e| e.generation = generation) else {
         return;
@@ -508,6 +550,24 @@ mod tests {
         assert_eq!(scale_point("pane-zoom-point-test", 200.0, 100.0), (100.0, 50.0));
         assert_eq!(scale_point("another-pane", 200.0, 100.0), (200.0, 100.0));
         ZOOMED.lock().remove("pane-zoom-point-test");
+    }
+
+    #[test]
+    fn only_a_new_size_is_a_resize() {
+        let mut sizes = HashMap::new();
+        assert!(size_changed(&mut sizes, "b", (700, 500)), "the first size is new");
+        assert!(!size_changed(&mut sizes, "b", (700, 500)), "a move that keeps it is not");
+        assert!(size_changed(&mut sizes, "b", (700, 400)));
+        assert!(size_changed(&mut sizes, "other", (700, 400)), "sizes are per pane");
+    }
+
+    #[test]
+    fn the_sizes_kept_are_bounded() {
+        let mut sizes = HashMap::new();
+        for i in 0..(SIZES_KEPT + 10) {
+            size_changed(&mut sizes, &format!("b{i}"), (1, 1));
+        }
+        assert!(sizes.len() <= SIZES_KEPT);
     }
 
     #[test]
