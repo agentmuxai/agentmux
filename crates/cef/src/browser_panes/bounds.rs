@@ -27,9 +27,11 @@
 //!   thread anyway, so a cap would gain it nothing.
 //! - A pane is moved only while it is live and still in the window that sent
 //!   the batch: a rect from a window a pane was torn off from is dropped.
-//! - On every platform the host also moves shown panes itself when their window
-//!   resizes, ahead of the page (`LayoutBase`): Windows `follow_window_resize`
-//!   (from the window's `WM_SIZE`), macOS `follow_window_resize`, Linux `window_resized`.
+//! - The host also moves shown panes itself when their window resizes, ahead
+//!   of the page (`LayoutBase`): Windows child-window panes `follow_window_resize`
+//!   (from the window's `WM_SIZE`), macOS `follow_window_resize`, Linux
+//!   `window_resized`. Not Windows Views panes: they wait for the page's rects
+//!   (`window_resized` says why).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
@@ -188,11 +190,19 @@ pub(crate) fn follow_window_resize(state: &Arc<AppState>, window_label: &str) {
     }
 }
 
-/// The window's size changed (Linux, and Windows in Views pane mode): move its shown panes to where the page
+/// The window's size changed (Linux): move its shown panes to where the page
 /// will put them, without waiting for it, and lay the window out once. The
 /// page's own rects for the new size replace the guess (`apply`). UI thread
 /// only.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+///
+/// Windows Views panes are not moved this way. There the window's page can be
+/// several frames behind the window in a fast resize (90 to 110 ms a frame
+/// when it was measured), longer than the window's compositor waits for it
+/// (`pane_backend::append_surface_deadline`). A pane placed for the new size
+/// then showed outside the border the page was still drawing at the old one.
+/// Moved only by the page's own rects, a pane and its border come from the
+/// same layout.
+#[cfg(target_os = "linux")]
 pub(crate) fn window_resized(state: &Arc<AppState>, window_label: &str, window: &Window) {
     let started = std::time::Instant::now();
     let (width, height) = window_client_px(window);
@@ -235,18 +245,18 @@ pub(crate) fn window_resized(state: &Arc<AppState>, window_label: &str, window: 
 }
 
 /// Each window's client size when `window_resized` last saw it, by label.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "linux")]
 static CLIENT_SIZES: LazyLock<Mutex<HashMap<String, (i32, i32)>>> = LazyLock::new(Default::default);
 
 /// The window `window_label` is gone: forget its size.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub(crate) fn forget_window(window_label: &str) {
     CLIENT_SIZES.lock().remove(window_label);
 }
 
 /// `window`'s client area in physical pixels: what the page's viewport
 /// measures (`innerWidth * devicePixelRatio`).
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub(crate) fn window_client_px(window: &Window) -> (i32, i32) {
     let scale = window.display().map(|d| d.device_scale_factor()).filter(|s| *s > 0.0).unwrap_or(1.0) as f64;
     let client = window.client_area_bounds_in_screen();
@@ -623,6 +633,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
         }
     }
     // Linux: move every pane, then lay the window out once, not once per pane.
+    // Windows Views panes need no layout: setting an overlay's bounds moves it.
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if crate::pane_backend::views() {
         let mut moved = false;
@@ -630,7 +641,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
             moved |= crate::browser_pane::creation_views::resize_browser_pane_view_inner(state, label, r.rect(), false)
                 .is_some();
         }
-        if moved {
+        if moved && cfg!(target_os = "linux") {
             if let Some(window) = state.windows.lock().get(window_label).cloned() {
                 window.layout();
             }
