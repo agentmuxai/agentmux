@@ -1,6 +1,6 @@
 # Spec: an agent can zoom a browser pane it drives
 
-**Status:** draft for approval, 2026-11-10. Owner: Korp. Task #47393 (this spec), #47394 (the build).
+**Status:** active — approved 2026-11-10; the zoom action, the scaled mouse and the click reasons (§4) ship in PR #6999. Not built yet: the pane-header badge, `fit` with a `ref`, and the screenshot scale line (§5). Verified 2026-11-11. Owner: Korp. Task #47393 (this spec), #47394 (the build).
 **Operator:** "agents need to be able to zoom on the browser pane, there are times their clicks cant make it through bc things are off sccreen".
 **Checked against:** `origin/main` @ `d2e371838`.
 

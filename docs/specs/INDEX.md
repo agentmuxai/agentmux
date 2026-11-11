@@ -664,6 +664,7 @@ partial list.
 | [`SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03`](SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03.md) | Spec: background updates, one "Restart to update" click |
 | [`SPEC_BASHWRAP_PER_AGENT_CWD_2026_10_18`](SPEC_BASHWRAP_PER_AGENT_CWD_2026_10_18.md) | SPEC: each agent's Bash calls keep their own working directory |
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
+| [`SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10`](SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10.md) | Spec: an agent can zoom a browser pane it drives |
 | [`SPEC_BROWSER_PANE_BYPASS_2026_10_16`](SPEC_BROWSER_PANE_BYPASS_2026_10_16.md) | SPEC: Bypass: the person lets the agent act without asking in one browser pane |
 | [`SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14`](SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14.md) | SPEC: Downloads in a browser pane open the system "Save as" dialog |
 | [`SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16`](SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16.md) | SPEC: agents fill forms inside iframes, with a visual fallback for what the snapshot can't see |
@@ -1128,7 +1129,6 @@ partial list.
 | [`SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13`](SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md) | SPEC — Armory Phase 5: drop Identities, rename/reorder tabs, seed a starter Skill catalog |
 | [`SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05`](SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05.md) | SPEC: Global Memory is the only concept — remove shared provider config, materialize into the provider's file |
 | [`SPEC_BACKEND_LIFECYCLE`](SPEC_BACKEND_LIFECYCLE.md) | Backend Process Lifecycle — Analysis & Fix Spec |
-| [`SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10`](SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10.md) | Spec: an agent can zoom a browser pane it drives |
 | [`SPEC_BROWSER_PANE_CLICK_DISMISSES_MENUS_2026_08_15`](SPEC_BROWSER_PANE_CLICK_DISMISSES_MENUS_2026_08_15.md) | SPEC — Browser pane: clicking inside it should dismiss open menus/popovers |
 | [`SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21`](SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md) | Spec: Browser pane default URL + in-pane popup redirect |
 | [`SPEC_BROWSER_PANE_FOCUS_LOCK`](SPEC_BROWSER_PANE_FOCUS_LOCK.md) | SPEC: Browser Pane Focus Lock |
