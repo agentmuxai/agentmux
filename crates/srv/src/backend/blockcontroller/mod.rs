@@ -477,6 +477,8 @@ pub fn register_controller(block_id: &str, controller: Arc<dyn Controller>) {
     registry.insert(block_id.to_string(), controller);
     drop(registry);
     notify_tracked_blocks_changed();
+    // What was held for this agent while its pane had no controller can go now.
+    crate::backend::reactive::controller_wait::controller_registered();
 }
 
 /// Announce a `CONTROLLER_REGISTRY` membership change to the Process Broker,

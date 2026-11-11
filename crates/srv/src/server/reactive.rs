@@ -673,15 +673,9 @@ pub(crate) async fn deliver(
         return super::jekt_files::with_count(serde_json::to_value(&resp).unwrap_or_default(), &req);
     }
 
-    // The target is here but its spawn gate refused (not signed in). That is
-    // recoverable, so hold it for sign-in instead of failing it
-    // (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md Phase 0 item 4).
-    // No other tier can run it either: the agent lives on this instance.
-    if resp.error.as_deref().is_some_and(super::jekt_held::is_spawn_gate_refusal) {
-        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin, &mut replay).await {
-            return held;
-        }
-        return super::jekt_hold::needs_login_refusal(serde_json::to_value(&resp).unwrap_or_default());
+    // The target is here but not signed in, or its pane has no controller yet: held, not failed.
+    if let Some(answer) = super::jekt_hold::hold_for_refusal_here(state, auth_via, &req, &resp, &mut replay).await {
+        return answer;
     }
 
     // 2. On "agent not found", check cross-instance file registry and forward.

@@ -17,6 +17,8 @@ pub fn install_state_hooks(state: &AppState) {
     // muxcode/antigravity on the host) can actually receive inter-agent
     // messages instead of having them dropped on a PTY fallback they reject.
     install_agent_turn_delivery(state);
+    // What is held for an agent waits while its pane has no controller yet (every resumed pane, at start).
+    crate::backend::reactive::controller_wait::set_has_controller(std::sync::Arc::new(|block_id: &str| crate::backend::blockcontroller::get_controller(block_id).is_some()));
 
     // Cron fires through the same in-process inject path (identity M4c-3);
     // before `cron_scheduler.start()` below, so no fire takes the HTTP

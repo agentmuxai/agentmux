@@ -24,6 +24,30 @@ use super::AppState;
 /// ([`HoldReason::NeedsLogin`]); the replay then waits for sign-in
 /// (`jekt_held::still_needs_login`). Delivered by UID or held, a message
 /// keeps its one-delivery `replay` reservation.
+/// A message an agent of this instance could not take for a reason that passes on its own: its spawn
+/// gate refused (not signed in: recoverable, so it is held for sign-in instead of failed,
+/// SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md Phase 0 item 4), or its pane is open and its
+/// controller is not there yet (AgentMux is starting: held until the controller registers). No other
+/// tier can run it either: the agent lives on this instance. `None` for any other error, and for a
+/// starting agent's message the hold doesn't apply to, which keeps its error.
+pub(in crate::server) async fn hold_for_refusal_here(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+    resp: &crate::backend::reactive::types::InjectionResponse,
+    replay: &mut replay::Reservation,
+) -> Option<serde_json::Value> {
+    let error = resp.error.as_deref().unwrap_or_default();
+    if super::jekt_held::is_spawn_gate_refusal(error) {
+        let held = hold_for_absent_target(state, auth_via, req, resp, HoldReason::NeedsLogin, replay).await;
+        return Some(held.unwrap_or_else(|| needs_login_refusal(serde_json::to_value(resp).unwrap_or_default())));
+    }
+    if crate::backend::reactive::controller_wait::is_no_controller(error) {
+        return hold_for_absent_target(state, auth_via, req, resp, HoldReason::Starting, replay).await;
+    }
+    None
+}
+
 pub(in crate::server) async fn hold_for_absent_target(
     state: &AppState,
     auth_via: super::ReactiveAuthVia,
@@ -234,7 +258,7 @@ async fn hold_with_reason(
     use crate::backend::storage::jekt_held::HoldOutcome;
     // A verified message from another machine waits for an agent that can't work, as a local one does;
     // an absent agent is still left to the routing tiers (`route_for_absent`).
-    let peer_waits = matches!(reason, HoldReason::NeedsLogin | HoldReason::Limited) && hold_applies_to_peer(req, resp);
+    let peer_waits = matches!(reason, HoldReason::NeedsLogin | HoldReason::Limited | HoldReason::Starting) && hold_applies_to_peer(req, resp);
     if !hold_applies(auth_via, req, resp) && !peer_waits {
         return None;
     }
@@ -278,9 +302,9 @@ async fn hold_with_reason(
         Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
             replay.delivered();
             crate::backend::agent_resolve::record_uid_fallback("jekt.held");
-            let start = if reason == HoldReason::NotRunning { super::jekt_start::start_for_held(state, req, &target_uid) } else { super::jekt_start::HeldStart::No };
+            let start = match reason { HoldReason::NotRunning => super::jekt_start::start_for_held(state, req, &target_uid), HoldReason::Starting => super::jekt_start::HeldStart::Starting, _ => super::jekt_start::HeldStart::No };
             let error = match reason {
-                HoldReason::NotRunning => start.not_running_text(target),
+                HoldReason::NotRunning | HoldReason::Starting => start.not_running_text(target),
                 HoldReason::NeedsLogin => {
                     if resp.error.as_deref().is_some_and(super::jekt_held::is_spawn_gate_refusal) {
                         super::jekt_held::mark_needs_login(&target_uid);

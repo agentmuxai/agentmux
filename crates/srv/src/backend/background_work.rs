@@ -406,7 +406,8 @@ pub fn on_registered(block_id: &str) {
         .await;
         match delivered {
             Ok(()) => {
-                tracing::info!(agent = %key, "background work: told the agent what the quit stopped");
+                // Held, not sent: a note never starts a turn, it goes with the agent's next message.
+                tracing::info!(agent = %key, items = items.len(), "background work: the note on what the quit stopped is held for the agent's next message");
                 let mut record = state.record.lock().unwrap_or_else(|e| e.into_inner());
                 record.items.retain(|w| w.key != key);
                 write(&state.dir, &record);
