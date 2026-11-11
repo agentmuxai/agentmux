@@ -49,6 +49,9 @@ fn identity(state: &AppState) -> Value {
         "os": std::env::consts::OS,
         "version": state.version,
         "build": build,
+        // What the binary is (`release`, `local`, `dev`), never read off the channel: a release that a
+        // local build upgraded to keeps that build's channel, which only says where its data is.
+        "build_kind": agentmux_common::build_kind::build_kind().label(),
         "channel": crate::backend::reactive::registry::local_channel_id(),
         "update": update_summary(),
     })

@@ -208,7 +208,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
             "hostname": state.hostname.clone(),
             // So a QR- or manually-paired client can name this channel
             // (SPEC_LAN_FLEET_FEED_2026_10_03.md §5).
-            "channel": crate::backend::reactive::registry::local_channel_id(),
+            "channel": crate::backend::reactive::registry::local_channel_id(), "build_kind": agentmux_common::build_kind::build_kind().label(),
             "local_url": local_url,
             "addressable": reachable,
             "agents": agents,

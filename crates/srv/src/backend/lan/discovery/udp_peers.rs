@@ -82,6 +82,8 @@ pub(super) struct UdpPeer {
     pub os: String,
     /// How the peer is installed, as for `LanInstance::install`; empty when it predates advertising it.
     pub install: String,
+    /// The kind of build the peer says it is (`release`, `local`, `dev`); empty for anything else.
+    pub build: String,
     pub address: IpAddr,
     pub port: u16,
     pub auth_key: String,
@@ -133,6 +135,7 @@ pub(super) fn parse_peer_reply(bytes: &[u8], src: &std::net::SocketAddr) -> Opti
         channel,
         os,
         install,
+        build: crate::backend::lan::peer_words::build_token(value.get("build").and_then(|v| v.as_str())),
         address: src.ip(),
         port,
         auth_key,
@@ -200,6 +203,9 @@ pub(super) fn merge_udp_peer(
             if !peer.install.is_empty() {
                 existing.install = peer.install.clone();
             }
+            if !peer.build.is_empty() {
+                existing.build = peer.build.clone();
+            }
             existing.auth_key = peer.auth_key.clone();
         } else {
             if existing.auth_key.is_empty() {
@@ -213,6 +219,9 @@ pub(super) fn merge_udp_peer(
             }
             if existing.install.is_empty() {
                 existing.install = peer.install.clone();
+            }
+            if existing.build.is_empty() {
+                existing.build = peer.build.clone();
             }
         }
         return Merge::Refreshed;
@@ -235,6 +244,7 @@ pub(super) fn merge_udp_peer(
             channel: peer.channel.clone(),
             os: peer.os.clone(),
             install: peer.install.clone(),
+            build: peer.build.clone(),
             address,
             port: peer.port,
             auth_key: peer.auth_key.clone(),
@@ -464,6 +474,7 @@ mod tests {
             channel: "stable".into(),
             os: String::new(),
             install: String::new(),
+            build: String::new(),
             address: addr.parse().unwrap(),
             port,
             auth_key: "k".into(),
@@ -478,6 +489,7 @@ mod tests {
             channel: String::new(),
             os: String::new(),
             install: String::new(),
+            build: String::new(),
             address: addr.into(),
             port,
             auth_key: "mdns-key".into(),

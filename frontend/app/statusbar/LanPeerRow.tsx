@@ -21,7 +21,7 @@ import {
     installLabel,
     lastSeenText,
     middleTruncate,
-    osAndChannel,
+    peerRuns,
     peerKeyRefusals,
     showsChannel,
 } from "./lan-peer";
@@ -36,7 +36,7 @@ const openPinnedSenders = () =>
 
 const openSwarm = () => void openOrFocusPaneByView("swarm");
 
-/** Longest channel shown on the line; a longer one (a local build's) is cut in the middle. */
+/** Longest channel shown on the line; a longer one (the channel a local build made for its data) is cut in the middle. */
 const CHANNEL_MAX_CHARS = 18;
 
 /** Which peer a row is, across the fresh objects each `laninstances` event brings. */
@@ -79,7 +79,7 @@ export function LanPeerRow(props: {
     const nowSecs = createMemo(() => (tick(), Math.floor(Date.now() / 1000)));
     const refusals = createMemo(() => peerKeyRefusals(props.peer, props.pins));
     const name = () => props.peer.hostname || props.peer.instance_id || "resolving…";
-    const platform = () => osAndChannel(props.peer);
+    const platform = () => peerRuns(props.peer);
     const agentCount = () => props.peer.agents.length;
     return (
         <div class="lan-peer" data-testid="lan-peer">
@@ -116,6 +116,12 @@ export function LanPeerRow(props: {
                         <div class="status-bar-popover-row">
                             <span class="status-bar-popover-label">Runs</span>
                             <span>{platform()}</span>
+                        </div>
+                    </Show>
+                    <Show when={props.peer.channel}>
+                        <div class="status-bar-popover-row" data-testid="lan-peer-data-channel">
+                            <span class="status-bar-popover-label">Data in</span>
+                            <span class="status-bar-popover-mono lan-peer-data-channel">{props.peer.channel}</span>
                         </div>
                     </Show>
                     <div class="status-bar-popover-row">
