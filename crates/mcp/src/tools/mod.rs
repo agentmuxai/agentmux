@@ -13,6 +13,7 @@ mod agents_tool;
 mod app_tool;
 mod browser;
 mod browser_tool;
+mod browser_zoom;
 mod cron;
 mod desktop;
 mod family;

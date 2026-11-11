@@ -493,6 +493,11 @@ impl CdpSession {
         }
     }
 
+    /// The host-state label of the browser this session addresses.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
     /// The same browser, with every call addressed to `session` (an attached
     /// frame's session id), or to the page's own when `None`.
     pub fn in_session(&self, session: Option<&str>) -> Self {

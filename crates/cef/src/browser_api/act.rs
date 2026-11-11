@@ -137,38 +137,9 @@ pub(super) async fn page_now(cdp: &mut CdpSession, before: &str) -> Option<Value
 
 // ── Functions run on the element (`this`) in the isolated world ────────────
 
-/// Scroll into view and report the centre, in viewport coordinates.
-const CLICK_POINT: &str = r#"function () {
-  // A checkbox or radio the page hides (display: none) behind a label drawn
-  // as the box has no box of its own: click its label, at a point where the
-  // label itself is hit, not a link or button inside it.
-  const choice = this.tagName === "INPUT" && /^(checkbox|radio)$/i.test(this.type);
-  if (choice && this.getClientRects().length === 0) {
-    const label = Array.from(this.labels || []).find(l => l.getClientRects().length > 0);
-    if (!label) return { error: "the element is not visible" };
-    label.scrollIntoView({ block: "center", inline: "center" });
-    const doc = label.ownerDocument;
-    const clear = (x, y) => {
-      const at = doc.elementFromPoint(x, y);
-      if (!at || !label.contains(at)) return false;
-      for (let n = at; n && n !== label; n = n.parentElement) {
-        if (n.matches("a[href], button, select, textarea, input, [role=button], [role=link]")) return false;
-      }
-      return true;
-    };
-    for (const el of [label, ...label.querySelectorAll("*")]) {
-      const r = el.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) continue;
-      const x = r.left + r.width / 2, y = r.top + r.height / 2;
-      if (clear(x, y)) return { x, y };
-    }
-    return { error: "the label of this checkbox is covered by something else; ask the user to tick it" };
-  }
-  this.scrollIntoView({ block: "center", inline: "center" });
-  const r = this.getBoundingClientRect();
-  if (r.width === 0 && r.height === 0) return { error: "the element is not visible" };
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-}"#;
+/// Scroll into view and report where to click, in viewport coordinates, or why a click can't land
+/// (`scripts/click_point.js`).
+const CLICK_POINT: &str = include_str!("scripts/click_point.js");
 
 /// Focus and select the current contents, so inserted text replaces them.
 pub(super) const PREPARE_FILL: &str = r#"function () {
@@ -513,6 +484,9 @@ pub(super) async fn page_url(cdp: &mut CdpSession) -> String {
 }
 
 async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
+    // The point is in the page's CSS pixels; a zoomed pane reads the mouse in its scaled view (`zoom.rs`).
+    let scale = super::zoom::input_scale(cdp.label());
+    let (x, y) = (x * scale, y * scale);
     for event_type in ["mouseMoved", "mousePressed", "mouseReleased"] {
         let (button, buttons) = if event_type == "mouseMoved" { ("none", 0) } else { ("left", 1) };
         call(

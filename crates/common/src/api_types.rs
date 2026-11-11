@@ -861,6 +861,28 @@ pub struct UiBrowserHistoryRequest {
     pub ignore_cache: Option<bool>,
 }
 
+/// `POST /api/v1/ui/browser/zoom` — zoom a browser pane the agent drives, or put it back
+/// (docs/specs/SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10.md). Exactly one of `factor`, `width`, `fit` and
+/// `reset`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserZoomRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Target a browser pane this agent opened or took control of; absent = the caller's own pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// 0.25 to 2.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub factor: Option<f64>,
+    /// A desktop viewport this many CSS pixels wide, scaled to fit the pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset: Option<bool>,
+}
+
 /// `POST /api/v1/ui/browser/eval`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiBrowserEvalRequest {

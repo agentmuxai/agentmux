@@ -25,6 +25,8 @@ impl BrowserPaneManager {
     }
 
     pub fn resize(&self, block_id: &str, rect: Rect, state: &Arc<AppState>) {
+        // An agent's zoom follows the pane's size (it fits the viewport to the pane).
+        crate::browser_api::zoom::on_pane_resized(state, block_id);
         // Windows: resize the wrapper (its own WM_SIZE handler cascades to
         // CEF's child automatically — see browser_pane::wrapper) instead of
         // SetWindowPos-ing CEF's HWND directly. Still need the live Browser

@@ -429,7 +429,7 @@ pub(crate) async fn handle_ui_browser_dialogs(
     if let Err(e) = verified_block_id(&state, caller.as_deref(), &req.auth) {
         return err_response(StatusCode::UNAUTHORIZED, e);
     }
-    (StatusCode::OK, Json(json!({ "ok": true, "data": { "dialogs": drain(&req.auth.agent_id) } }))).into_response()
+    (StatusCode::OK, Json(json!({ "ok": true, "data": { "dialogs": drain(&req.auth.agent_id), "zooms": crate::server::browser_zoom::notes_for(&req.auth.agent_id) } }))).into_response()
 }
 
 #[cfg(test)]
