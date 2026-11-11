@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     createSlowInteractionLogger,
     describeInteraction,
     describePane,
     describeTarget,
     isStableName,
+    SETTLE_MS,
     type SlowInteraction,
 } from "./slow-interactions";
 
@@ -94,42 +95,76 @@ describe("describeInteraction", () => {
 });
 
 describe("createSlowInteractionLogger", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
     const make = (now: () => number) => {
         const lines: string[] = [];
         return { lines, log: createSlowInteractionLogger({ ...ctx, log: (l) => lines.push(l), now }) };
     };
+    const settle = () => vi.advanceTimersByTime(SETTLE_MS);
 
     it("logs a slow interaction and ignores a fast one or one with no interaction id", () => {
         const { lines, log } = make(() => 0);
         log(entry({ duration: 40, interactionId: 1 }));
         log(entry({ interactionId: 0 }));
         log(entry({ interactionId: undefined }));
+        settle();
         expect(lines).toEqual([]);
         log(entry({ duration: 48, interactionId: 2 }));
+        expect(lines).toEqual([]);
+        settle();
         expect(lines).toHaveLength(1);
         expect(lines[0].startsWith("[perf] slow-interaction click 48ms")).toBe(true);
     });
 
-    it("logs one line per interaction, not one per event of it", () => {
+    it("logs one line per interaction, the slowest of its events", () => {
         const { lines, log } = make(() => 0);
-        log(entry({ name: "pointerdown", interactionId: 7 }));
-        log(entry({ name: "pointerup", interactionId: 7 }));
-        log(entry({ name: "click", interactionId: 7 }));
+        log(entry({ name: "pointerdown", duration: 48, interactionId: 7 }));
+        log(entry({ name: "pointerup", duration: 56, interactionId: 7 }));
+        log(entry({ name: "click", duration: 504, interactionId: 7 }));
         log(entry({ name: "keydown", interactionId: 8 }));
-        expect(lines.map((l) => l.split(" ")[2])).toEqual(["pointerdown", "keydown"]);
+        settle();
+        expect(lines.map((l) => l.split(" ").slice(2, 4).join(" "))).toEqual(["click 504ms", "keydown 112ms"]);
+    });
+
+    it("keeps the first of two equally slow events, and does not let a faster later one replace it", () => {
+        const { lines, log } = make(() => 0);
+        log(entry({ name: "pointerdown", duration: 200, interactionId: 9 }));
+        log(entry({ name: "click", duration: 60, interactionId: 9 }));
+        settle();
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain("pointerdown 200ms");
+    });
+
+    it("waits for a later event of the same interaction, and not for one that comes after the line", () => {
+        const { lines, log } = make(() => 0);
+        log(entry({ name: "pointerdown", duration: 48, interactionId: 4 }));
+        vi.advanceTimersByTime(SETTLE_MS - 1);
+        log(entry({ name: "click", duration: 300, interactionId: 4 }));
+        vi.advanceTimersByTime(SETTLE_MS - 1);
+        expect(lines).toEqual([]);
+        vi.advanceTimersByTime(1);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain("click 300ms");
+        log(entry({ name: "keyup", duration: 900, interactionId: 4 }));
+        settle();
+        expect(lines).toHaveLength(1);
     });
 
     it("writes at most 20 lines a minute and counts the rest into the next line", () => {
         let t = 0;
         const { lines, log } = make(() => t);
         for (let i = 1; i <= 27; i++) log(entry({ interactionId: i }));
+        settle();
         expect(lines).toHaveLength(20);
         t = 60_000;
         log(entry({ interactionId: 100 }));
+        settle();
         expect(lines).toHaveLength(21);
         expect(lines[20]).toContain("(+7 slow interactions not logged)");
         t = 60_500;
         log(entry({ interactionId: 101 }));
+        settle();
         expect(lines[21]).not.toContain("not logged");
     });
 
@@ -137,13 +172,16 @@ describe("createSlowInteractionLogger", () => {
         let t = 0;
         const { lines, log } = make(() => t);
         log(entry({ interactionId: 1 }));
+        settle();
         for (let i = 2; i <= 70; i++) {
             t += 60_000;
             log(entry({ interactionId: i }));
+            settle();
         }
         const before = lines.length;
         t += 60_000;
         log(entry({ interactionId: 1 }));
+        settle();
         expect(lines.length).toBe(before + 1);
     });
 });

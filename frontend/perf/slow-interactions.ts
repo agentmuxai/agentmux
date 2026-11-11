@@ -14,8 +14,8 @@
  * a marker from a short list of stable attributes (`data-strip-button`, `data-role`...). Never text, a title, a
  * path or an href. A marker value that looks like an id or a name someone typed is left out.
  *
- * Lines are rate limited like the long-frame lines: one per interaction id, at most `MAX_LINES` a minute, and the
- * ones over that are counted into the next line.
+ * Lines are rate limited like the long-frame lines: one per interaction id (the slowest of its events), at most
+ * `MAX_LINES` a minute, and the ones over that are counted into the next line.
  */
 
 const PERF_LOG_PREFIX = "[perf]";
@@ -24,6 +24,8 @@ export const SLOW_INTERACTION_MS = 48;
 /** At most this many interactions are described in each `WINDOW_MS`. */
 const MAX_LINES = 20;
 const WINDOW_MS = 60_000;
+/** How long the slowest event of an interaction waits for a slower one with the same id. */
+export const SETTLE_MS = 300;
 /** How many interaction ids are remembered, so the other events of one interaction are not logged again. */
 const SEEN_IDS = 64;
 /** Ancestors searched for a marker, from the element hit. */
@@ -104,16 +106,14 @@ export function createSlowInteractionLogger(opts: {
     now?: () => number;
 }): (entry: SlowInteraction) => void {
     const now = opts.now ?? (() => performance.now());
-    const seen = new Set<number>();
+    // The events of one interaction (pointerdown, pointerup, click) arrive over some tenths of a second, and the
+    // slow one is not always the first. The slowest so far waits `SETTLE_MS` after the last event of its id.
+    const waiting = new Map<number, { entry: SlowInteraction; timer: ReturnType<typeof setTimeout> }>();
+    const done = new Set<number>();
     let windowStart = -Infinity;
     let inWindow = 0;
     let skipped = 0;
-    return (entry) => {
-        // An entry with no interaction id is not input (scroll start, a hover repaint).
-        if (!entry.interactionId || entry.duration < SLOW_INTERACTION_MS) return;
-        if (seen.has(entry.interactionId)) return;
-        seen.add(entry.interactionId);
-        if (seen.size > SEEN_IDS) seen.delete(seen.values().next().value as number);
+    const emit = (entry: SlowInteraction): void => {
         const t = now();
         if (t - windowStart >= WINDOW_MS) {
             windowStart = t;
@@ -127,5 +127,24 @@ export function createSlowInteractionLogger(opts: {
         const dropped = skipped ? ` (+${skipped} slow interactions not logged)` : "";
         skipped = 0;
         opts.log(`${PERF_LOG_PREFIX} ${describeInteraction(entry, opts)}${dropped}`);
+    };
+    const settle = (id: number): void => {
+        const held = waiting.get(id);
+        if (!held) return;
+        waiting.delete(id);
+        done.add(id);
+        if (done.size > SEEN_IDS) done.delete(done.values().next().value as number);
+        emit(held.entry);
+    };
+    return (entry) => {
+        // An entry with no interaction id is not input (scroll start, a hover repaint).
+        const id = entry.interactionId;
+        if (!id || entry.duration < SLOW_INTERACTION_MS || done.has(id)) return;
+        const held = waiting.get(id);
+        if (held) clearTimeout(held.timer);
+        waiting.set(id, {
+            entry: held && held.entry.duration >= entry.duration ? held.entry : entry,
+            timer: setTimeout(() => settle(id), SETTLE_MS),
+        });
     };
 }
