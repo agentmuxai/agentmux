@@ -148,6 +148,73 @@ describe("a pane's modal and the caret", () => {
         await nextFrame();
         expect(ensureSelectionFocused).toHaveBeenCalledWith("modal-closed");
     });
+
+    it("gives the caret to the selection when what had it cannot take it back", async () => {
+        const { getByTestId } = render(() => <Window />);
+        setSelected("remotes");
+        // The form's button dropped the caret before the question opened: nothing has it.
+        (document.activeElement as HTMLElement | null)?.blur();
+        setAsking(true);
+        await nextFrame();
+        setAsking(false);
+        await nextFrame();
+        expect(ensureSelectionFocused).toHaveBeenCalledTimes(1);
+
+        // The button had it, and is disabled by the time the question closes.
+        const add = getByTestId("add-remote") as HTMLButtonElement;
+        add.focus();
+        setAsking(true);
+        await nextFrame();
+        add.disabled = true;
+        setAsking(false);
+        await nextFrame();
+        expect(ensureSelectionFocused).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("a pane's modal and a click on its backdrop", () => {
+    const backdrop = () => document.querySelector<HTMLElement>(".modal-backdrop")!;
+    const clickBackdrop = (between: () => void = () => {}) => {
+        fireEvent.pointerDown(backdrop());
+        between();
+        fireEvent.click(backdrop());
+    };
+
+    it("only selects the pane when the click is what brings the person to it; the next click cancels", async () => {
+        const { getByTestId } = render(() => <Window />);
+        setSelected("term");
+        getByTestId("terminal").focus();
+        setAsking(true);
+        await nextFrame();
+        // The press selects the pane (the pane's own handlers do that; here by hand) before the click arrives.
+        clickBackdrop(() => setSelected("remotes"));
+        expect(onCancel).not.toHaveBeenCalled();
+        await nextFrame();
+        expect(document.activeElement).toBe(cancel());
+
+        clickBackdrop();
+        expect(onCancel).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not answer either when the pane is selected only after the click", async () => {
+        const { getByTestId } = render(() => <Window />);
+        setSelected("term");
+        getByTestId("terminal").focus();
+        setAsking(true);
+        await nextFrame();
+        clickBackdrop();
+        setSelected("remotes");
+        expect(onCancel).not.toHaveBeenCalled();
+    });
+
+    it("cancels a question that opened in the selected pane", async () => {
+        render(() => <Window />);
+        setSelected("remotes");
+        setAsking(true);
+        await nextFrame();
+        clickBackdrop();
+        expect(onCancel).toHaveBeenCalledTimes(1);
+    });
 });
 
 describe("paneToWaitFor", () => {
