@@ -43,7 +43,7 @@ export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Elem
             </div>
             <Show when={about().channel}>
                 <div class="instance-panel-row instance-panel-row-meta">
-                    <span class="instance-panel-label">Data channel</span>
+                    <span class="instance-panel-label">Data in</span>
                     <span class="instance-panel-value instance-panel-mono">{about().channel}</span>
                     <IconButton
                         icon="copy"

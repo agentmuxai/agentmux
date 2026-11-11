@@ -18,7 +18,7 @@ PlaceWindowSlots ["w1","w2"]
 </div>
 </div>
 <div class="instance-panel-row instance-panel-row-meta">
-<span class="instance-panel-label">Data channel</span>
+<span class="instance-panel-label">Data in</span>
 <span class="instance-panel-value instance-panel-mono">stable</span>
 <div class="ui-tooltip-anchor">
 <button aria-label="Copy data channel" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button instance-panel-copy">
