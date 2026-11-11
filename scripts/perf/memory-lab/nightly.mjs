@@ -20,7 +20,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { mergesOf, pickBuilds, planMarkdown } from "./lib/nightlyplan.mjs";
+import { pinnedClaudeVersion } from "../../ui-screenshots/install-fake-claude.mjs";
+import { mergesOf, notComparedMarkdown, pickBuilds, planMarkdown } from "./lib/nightlyplan.mjs";
 import { appendHistory, driftOnset, historyLine, isStandardWorkload, parseHistory, trendMarkdown } from "./lib/perfhistory.mjs";
 import { flaggedMeasures, PERF_LABEL, reportIssue, reportRunFailure } from "./lib/perfissue.mjs";
 
@@ -33,6 +34,23 @@ const gh = (args) => JSON.parse(execFileSync(process.env.GH_BIN || "gh", args, {
 function flag(argv, name) {
     const i = argv.indexOf(name);
     return i >= 0 ? argv[i + 1] : null;
+}
+
+const CLAUDE_PROVIDER = "crates/srv/src/backend/providers/claude.rs";
+
+/**
+ * The Claude Code version the srv of a build pins, read from the build's own source: the lab's stand-in Claude must be
+ * installed where that srv looks for it, and a build made before a pin was moved looks at the old one. Null when the file
+ * cannot be read or has no pin, and the lab then uses this checkout's pin.
+ */
+function claudePinAt(repo, sha) {
+    try {
+        const source = execFileSync(process.env.GH_BIN || "gh", ["api", "--method", "GET", `repos/${repo}/contents/${CLAUDE_PROVIDER}`, "-F", `ref=${sha}`, "-H", "Accept: application/vnd.github.raw"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, shell: Boolean(process.env.GH_BIN) });
+        return pinnedClaudeVersion(source);
+    } catch (e) {
+        console.error(`Couldn't read Claude's pin at ${sha.slice(0, 9)} (${String(e.message ?? e).split("\n")[0]}): the lab will use this checkout's pin for that side`);
+        return null;
+    }
 }
 
 /** The last runs of the nightly artifacts workflow, each with whether its windows portable can still be downloaded. */
@@ -55,8 +73,10 @@ function plan(argv) {
     const picked = pickBuilds(fetchRuns(repo), { bRunId: flag(argv, "--b-run") });
     if (!picked.b) throw new Error(picked.reason);
     const merges = picked.a ? mergesOf(gh(["api", "--method", "GET", `repos/${repo}/compare/${picked.a.sha}...${picked.b.sha}`])) : null;
-    writeFileSync(out, JSON.stringify({ ...picked, merges }, null, 1));
-    const lines = [`b-run=${picked.b.id}`, `b-sha=${picked.b.sha}`, `a-run=${picked.a?.id ?? ""}`, `a-sha=${picked.a?.sha ?? ""}`];
+    const aClaude = picked.a ? claudePinAt(repo, picked.a.sha) : null;
+    const bClaude = claudePinAt(repo, picked.b.sha);
+    writeFileSync(out, JSON.stringify({ ...picked, merges, claude: { a: aClaude, b: bClaude } }, null, 1));
+    const lines = [`b-run=${picked.b.id}`, `b-sha=${picked.b.sha}`, `a-run=${picked.a?.id ?? ""}`, `a-sha=${picked.a?.sha ?? ""}`, `a-claude=${aClaude ?? ""}`, `b-claude=${bClaude ?? ""}`];
     console.log(lines.join("\n"));
     if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, lines.join("\n") + "\n");
 }
@@ -173,6 +193,9 @@ function report(argv) {
         const path = flag(argv, name);
         if (path) parts.push(`### ${title}`, readFileSync(path, "utf8").trim());
     }
+    // A side that could not run is said in words, with the lab's own reason, not left as a missing comparison.
+    const notCompared = notComparedMarkdown(readFlag(argv, "--ab"), plan);
+    if (notCompared) parts.push(notCompared);
     console.log(parts.join("\n\n"));
 }
 
