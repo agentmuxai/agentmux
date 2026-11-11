@@ -686,6 +686,8 @@ pub const COMMAND_AGENT_PEER_LABELS: &str = "agent.peer-labels";
 /// A person's pick in the model panel: moves the agent to a model on a route, or back to the harness's own sign-in.
 /// The operator's window only: the click is the approval of the spend.
 pub const COMMAND_AGENT_MODEL_SWITCH: &str = "agent.model.switch";
+/// The pane card's Raise and Reset buttons for an agent that reached its daily spend cap. The operator's window only.
+pub const COMMAND_AGENT_SPEND: &str = "agent.spend";
 /// A sign-in the window ran for an account completed: its agents' "signed
 /// out" ends (#2237). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_SIGNED_IN: &str = "identity.account.signed_in";

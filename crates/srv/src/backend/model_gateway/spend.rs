@@ -243,6 +243,15 @@ pub fn today(agent: &str, now_ms: i64) -> Spend {
     sum
 }
 
+/// The agents that have a day of spend today.
+pub fn agents_today(now_ms: i64) -> Vec<String> {
+    let d = day(now_ms);
+    let mut agents: Vec<String> = table().lock().unwrap().keys().filter(|(_, _, day)| *day == d).map(|(a, _, _)| a.clone()).collect();
+    agents.sort();
+    agents.dedup();
+    agents
+}
+
 /// What every agent has spent on `route` so far today.
 pub fn route_today_usd(route: &str, now_ms: i64) -> f64 {
     let d = day(now_ms);
@@ -280,7 +289,10 @@ pub fn set_alerted(agent: &str, level: u8, now_ms: i64) {
 pub fn reset_today(agent: &str, now_ms: i64) -> f64 {
     let d = day(now_ms);
     let mut removed = 0.0;
-    table().lock().unwrap().retain(|(a, _, day), one| {
+    // The clear is queued before the lock is let go, so a response settling at the same time cannot queue its row ahead of
+    // it: the writer would then delete spend that is still counted here.
+    let mut table = table().lock().unwrap();
+    table.retain(|(a, _, day), one| {
         let gone = a == agent && *day == d;
         if gone {
             removed += one.spend.cost_usd;
@@ -288,6 +300,7 @@ pub fn reset_today(agent: &str, now_ms: i64) -> f64 {
         !gone
     });
     queue(Write::Clear(agent.to_string(), d));
+    drop(table);
     removed
 }
 
@@ -373,6 +386,7 @@ mod tests {
         assert_eq!(alerted("spend-sum-a", now), 0);
         set_alerted("spend-sum-a", 50, now);
         assert_eq!(alerted("spend-sum-a", now), 50);
+        assert!(agents_today(now).contains(&"spend-sum-a".to_string()));
         set_alerted("spend-sum-none", 100, now);
         assert_eq!(alerted("spend-sum-none", now), 100, "kept for an agent with no spend of its own");
         assert_eq!(today("spend-sum-none", now), Spend::default());

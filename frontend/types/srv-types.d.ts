@@ -897,6 +897,14 @@ declare global {
         "agent:launch_blocked_at_ms"?: number;
         /** A model change srv undid because the new place refused the conversation on its first turn (model-undone.ts). Cleared (null) by the pane's Dismiss. */
         "agent:model_switch_undone"?: { at: number; tried: { route: string; model: string; label: string }; back_on: { route: string; model: string; label: string }; status: number; reason: string } | null;
+        /** What an agent on a model route has used today and its daily cap, for the chips (spend-stopped.ts). `day` is days since the epoch, UTC. */
+        "agent:spend_today"?: { day: number; spent: number; cap: number | null } | null;
+        /** From 80% of the daily spend cap: a line above the composer. Cleared (null) when the stop shows or the cap is raised. */
+        "agent:spend_warning"?: { at: number; scope: "agent" | "route"; cap: number; spent: number; route: string; place: string } | null;
+        /** The daily spend cap is used and the gateway refuses the agent's requests: the stop card. Cleared (null) by a raise, a reset or a new UTC day. */
+        "agent:spend_stopped"?: { at: number; scope: "agent" | "route"; cap: number; spent: number; route: string; place: string } | null;
+        /** The `at` of the stop whose card the person dismissed (the stop itself stays). */
+        "agent:spend_stopped_dismissed"?: number | null;
         /** A switch of the agent's account asked for mid-turn, applied by srv when no pane of the agent is in a
          *  turn (agent.account.switch, `after_turn`): the account id, and who asked. */
         "agent:pending_account"?: string;

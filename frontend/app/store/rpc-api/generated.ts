@@ -52,6 +52,8 @@ import type { AgentSetSeatResult } from "@/types/rpc/AgentSetSeatResult";
 import type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
 import type { AgentShutdownNowResult } from "@/types/rpc/AgentShutdownNowResult";
 import type { AgentSkill } from "@/types/rpc/AgentSkill";
+import type { AgentSpendReq } from "@/types/rpc/AgentSpendReq";
+import type { AgentSpendResult } from "@/types/rpc/AgentSpendResult";
 import type { AgentStartResult } from "@/types/rpc/AgentStartResult";
 import type { AgentTakeoverResult } from "@/types/rpc/AgentTakeoverResult";
 import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
@@ -3140,6 +3142,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentModelSwitchResult> {
     return client.rpcCall("agent.model.switch", data, { timeout: 120000, ...opts });
+  },
+  // command "agent.spend"
+  AgentSpendCommand(client: RpcClient, data: AgentSpendReq, opts?: RpcOpts): Promise<AgentSpendResult> {
+    return client.rpcCall("agent.spend", data, opts);
   },
   // command "agent.peer-labels"
   AgentPeerLabelsCommand(client: RpcClient, opts?: RpcOpts): Promise<AgentPeerLabels> {

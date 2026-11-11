@@ -430,6 +430,7 @@ export function AgentRow({
                     model={model}
                     unavailable={s.unavailable}
                     summaryFlash={s.summaryFlash}
+                    blockMeta={s.blockMeta}
                     rowNow={s.rowNow}
                 />
             </div>

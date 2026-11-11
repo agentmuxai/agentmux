@@ -196,6 +196,7 @@ async fn a_leader_sets_and_resets_a_workers_spend_cap_and_a_worker_may_only_lowe
     use crate::backend::model_gateway::cap::{self, DEFAULT_AGENT_CAP_USD};
     let state = test_state();
     let (leader, worker, stranger) = (agent(&state, "Lead"), agent(&state, "Work"), agent(&state, "Stranger"));
+    crate::backend::model_gateway::launch::set_choice(&state.mstore, &worker.id, "claude", "openrouter", "").unwrap();
     state
         .mstore
         .agent_content_set(&crate::backend::storage::content::AgentContent {
@@ -229,6 +230,28 @@ async fn a_leader_sets_and_resets_a_workers_spend_cap_and_a_worker_may_only_lowe
     assert_eq!(status, StatusCode::OK, "{body}");
     let (status, _) = update_call(&state, Some(&leader), json!({ "agent": worker.slug, "spend_cap_usd": "lots" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn an_agent_on_its_own_login_has_no_spend_cap_to_set_or_reset() {
+    let state = test_state();
+    let (leader, worker) = (agent(&state, "Lead"), agent(&state, "Login"));
+    state
+        .mstore
+        .agent_content_set(&crate::backend::storage::content::AgentContent {
+            agent_id: worker.id.clone(),
+            content_type: crate::backend::agent_seat::WORKER_OF_CONTENT.to_string(),
+            content: json!({ "agent": leader.slug, "id": leader.id }).to_string(),
+            updated_at: 1,
+        })
+        .unwrap();
+    for body in [json!({ "spend_cap_usd": 40 }), json!({ "reset_spend_today": true })] {
+        let mut req = body;
+        req["agent"] = json!(worker.slug);
+        let (status, answer) = update_call(&state, Some(&leader), req).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{answer}");
+        assert!(answer["error"].as_str().unwrap().contains("not on a model route"), "{answer}");
+    }
 }
 
 #[tokio::test]

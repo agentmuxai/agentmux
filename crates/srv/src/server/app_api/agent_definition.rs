@@ -172,6 +172,9 @@ fn spend_plan(state: &AppState, actor_uid: &str, target_uid: &str, req: &UpdateR
         }
         plan.reset = true;
     }
+    if (plan.cap.is_some() || plan.reset) && crate::server::spend_watch::on_a_route(state, target_uid).is_err() {
+        return Err(bad("the agent is not on a model route, so it has no spend cap (an agent on its own login has plan limits instead)"));
+    }
     Ok(plan)
 }
 

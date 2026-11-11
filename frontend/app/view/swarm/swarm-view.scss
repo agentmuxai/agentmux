@@ -425,6 +425,14 @@
     min-width: 0;
 }
 
+// The spend chip's line under the card's summary: it wraps with the card, whatever the width.
+.spend-chip-line {
+    display: flex;
+    flex-wrap: wrap;
+    padding: 0 6px 2px 22px;
+    min-width: 0;
+}
+
 .swarm-current-tool-icon {
     font-size: var(--glyph-mark);
     color: var(--accent-color);
