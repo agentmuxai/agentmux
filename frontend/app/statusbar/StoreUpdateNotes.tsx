@@ -4,12 +4,12 @@
 import { storeClosesLine, storeStayedLine, storeStayed } from "@/store/app-update";
 import { Show, type JSX } from "solid-js";
 
-/** The lines under the Maintenance update row about "Update in the Store": what it does first, what it is doing, how the last try ended. */
+/** The lines under the Maintenance update row about "Update in the Store": what it does first, what it is doing, how the last try ended. `closesFor`: the version on offer ("" when the Store named none), or null when nothing is offered. */
 export function StoreUpdateNotes(props: { closesFor: string | null; busy: boolean; note: string | null }): JSX.Element {
     const dim = "maintenance-row-text maintenance-row-text--dim";
     return (
         <>
-            <Show when={props.closesFor}>
+            <Show when={props.closesFor !== null}>
                 <div class={dim}>{storeClosesLine(props.closesFor!)}</div>
             </Show>
             <Show when={storeStayed()}>

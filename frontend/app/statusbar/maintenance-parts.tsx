@@ -229,7 +229,7 @@ export function Notices(props: Part): JSX.Element {
                 <div class="maintenance-row-text maintenance-row-text--error">{m.startError()}</div>
             </Show>
             <StoreUpdateNotes
-                closesFor={viaStore() && !m.storeBelowFloor() && m.storeOffers() && m.updaterStatus() === "available" ? m.updaterVersion() : null}
+                closesFor={viaStore() && !m.storeBelowFloor() && m.storeOffers() && m.updaterStatus() === "available" ? (m.updaterVersion() ?? "") : null}
                 busy={m.storeBusy()}
                 note={m.storeNote()}
             />

@@ -89,8 +89,10 @@ pub struct StoreCheck {
     pub state: &'static str,
     /// Why, when the state is `unknown`; empty otherwise.
     pub message: String,
-    /// When `available`: the version of the Store's package update (`0.60.17`), the version the
-    /// page offers; empty when the Store listed an update without a readable version.
+    /// When `available`: the version the listed item's package carries (`0.60.17`); empty when it had
+    /// none readable. Windows documents that package as "the package that has an update available", so
+    /// it can be the installed version and not the update's: the page names a version only when it is
+    /// newer than this build, and offers the update either way.
     pub version: String,
 }
 
@@ -196,7 +198,8 @@ fn list_error(e: String) -> String {
     if e == NO_ANSWER { e } else { format!("couldn't list updates: {e}") }
 }
 
-/// The version of one listed update's package, when the Store gives one.
+/// The version one listed update's package carries, when the Store gives one (see `StoreCheck::version`:
+/// it can be the installed package's).
 #[cfg(target_os = "windows")]
 fn update_version(update: &windows::Services::Store::StorePackageUpdate) -> Option<(u16, u16, u16)> {
     let v = update.Package().ok()?.Id().ok()?.Version().ok()?;
