@@ -129,13 +129,30 @@ function ToolOverlayResult(props: {
         <Show
             when={node().status !== "running"}
             fallback={
-                <div class="agent-tool-loading">
-                    <span class="agent-tool-spinner">⏳</span> Thinking...
-                </div>
+                <ToolPlaceholder />
             }
         >
             {renderToolResultBody(node(), { dispatchMatch: props.dispatchMatch })}
         </Show>
+    );
+}
+
+/**
+ * A running tool's placeholder, drawn as one line of the output that replaces it: the same classes as a preview's
+ * line (PreviewLines.tsx), so it has the same type, line box and height and the swap to a one-line result moves
+ * nothing. The icon is sized in em with the line's own metrics, never a glyph with metrics of its own.
+ */
+function ToolPlaceholder(): JSX.Element {
+    return (
+        <div class="agent-tool-loading agent-preview">
+            <div class="agent-preview-lines">
+                <div class="agent-preview-line">
+                    <span class="agent-preview-text">
+                        <i class="fa fa-solid fa-hourglass-half agent-tool-spinner" aria-hidden="true" /> Thinking...
+                    </span>
+                </div>
+            </div>
+        </div>
     );
 }
 
