@@ -51,7 +51,7 @@ import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
 import { shortenEmail } from "@/app/view/identity/identity-model";
 import { compactionCountdownText, contextTitle, ctxBand } from "./context-bandwidth";
-import { computeComposerRows, computeStatsInline, orderKeysForEdgePriority, type ComposerRow } from "./composer-row-layout";
+import { computeComposerRows, computeStatsInline, orderKeysForEdgePriority, rowsCost, type ComposerRow } from "./composer-row-layout";
 import { useBlockStats } from "@/app/hook/useBlockStats";
 import { BlockStatsBadge } from "@/element/blockstats";
 import { ACCOUNT_BUDGETS, accountInitial, middleTruncate, shortContextText } from "./composer-forms";
@@ -809,9 +809,9 @@ function buildRows(visible: Slot[], widths: Record<string, number>, width: numbe
     return rows.map((r) => ({ left: expand(r.left), right: expand(r.right) }));
 }
 
-/** How many rows these slots make at these widths (what the forms are chosen by). */
+/** What these slots' layout costs at these widths: its rows, and a half more for each that overflows (what the forms are chosen by). */
 function rowCountFor(list: Slot[], widths: Record<string, number>, width: number, gapPx: number): number {
-    return buildRows(visibleSlots(list, widths), widths, width, gapPx).length;
+    return rowsCost(buildRows(visibleSlots(list, widths), widths, width, gapPx), widths, gapPx, width);
 }
 
 function measuredLayout(

@@ -10,6 +10,7 @@ import {
     computeComposerRows,
     computeStatsInline,
     orderKeysForEdgePriority,
+    rowsCost,
     type ComposerRow,
 } from "./composer-row-layout";
 
@@ -752,5 +753,32 @@ describe("computeStatsInline", () => {
     it("boundary: exactly-fitting stats stay inline", () => {
         expect(computeStatsInline(1, 70, 25, 5, 100)).toBe(true);
         expect(computeStatsInline(1, 70, 26, 5, 100)).toBe(false);
+    });
+});
+
+describe("rowsCost", () => {
+    const widths = { ctx: 100, stats: 60, hostShell: 40 };
+
+    it("is the row count when every row fits", () => {
+        const rows: ComposerRow[] = [{ left: ["ctx"], right: ["hostShell"] }];
+        expect(rowsCost(rows, widths, 8, 200)).toBe(1);
+        expect(rowsCost(rows, widths, 8, 148)).toBe(1);
+    });
+
+    it("adds a fraction of a row for a row wider than the strip, by how far it overruns", () => {
+        const rows: ComposerRow[] = [{ left: ["stats", "ctx"], right: [] }];
+        // 60 + 8 + 100 = 168 in 150: 18 over.
+        expect(rowsCost(rows, widths, 8, 150)).toBeCloseTo(1 + 18 / 150 / 2);
+        // Compact slots overrun less, so the layout costs less.
+        expect(rowsCost(rows, { ...widths, ctx: 70 }, 8, 150)).toBeLessThan(rowsCost(rows, widths, 8, 150));
+    });
+
+    it("counts at most half a row for each overflowing row", () => {
+        const rows: ComposerRow[] = [{ left: ["ctx"], right: [] }, { left: ["stats"], right: [] }];
+        expect(rowsCost(rows, widths, 8, 10)).toBe(3);
+    });
+
+    it("is the row count when the strip has no width yet", () => {
+        expect(rowsCost([{ left: ["ctx"], right: [] }], widths, 8, 0)).toBe(1);
     });
 });

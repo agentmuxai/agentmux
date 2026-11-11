@@ -81,6 +81,29 @@ describe("chooseCompactKeys", () => {
     });
 });
 
+describe("chooseCompactKeys with a row that overflows", () => {
+    // The readout beside the context reading is one unit that is never split, so the strip stays one row at every
+    // choice; what changes is how far that row overruns the strip (the cost the strip passes as `rowCount`).
+    const full = { ctx: 110, stats: 64 };
+    const compact = { ctx: 76, stats: 56 };
+    const costAt = (width: number) => (widths: Record<string, number>) => {
+        const total = (widths.ctx ?? 0) + (widths.stats ?? 0) + 8;
+        return 1 + Math.min(1, Math.max(0, total - width) / width) / 2;
+    };
+
+    it("collapses what brings the row nearer the strip, though the row count never changes", () => {
+        expect([...chooseCompactKeys(["ctx", "stats"], full, compact, costAt(117))].sort()).toEqual(["ctx", "stats"]);
+    });
+
+    it("collapses only the readout when that alone brings the row inside", () => {
+        expect([...chooseCompactKeys(["ctx", "stats"], full, { ctx: 110, stats: 56 }, costAt(175))]).toEqual(["stats"]);
+    });
+
+    it("keeps both full when the row fits", () => {
+        expect(chooseCompactKeys(["ctx", "stats"], full, compact, costAt(400)).size).toBe(0);
+    });
+});
+
 describe("shortContextText", () => {
     it("is the reading without its spaces and its .0", () => {
         expect(shortContextText("392k / 1.0m")).toBe("392k/1m");
