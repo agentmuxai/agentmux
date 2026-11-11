@@ -5,8 +5,10 @@
  * The Swarm lists an agent once. A second pane of the agent, closed at startup because the agent is open in
  * another pane, got a row of its own: the same name twice, the second with an old status (#47409).
  */
+import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { describe, expect, it } from "vitest";
 import { closedSecondPanes, paneIdentity } from "./swarm-duplicate-panes";
+import { agentsWithoutRow } from "./swarm-runtime";
 
 const closedFor = (holder: string) => ({ "agent:last_failure": { code: "open_in_other_pane", holderBlockId: holder } });
 const hidden = (blocks: Record<string, Record<string, unknown> | undefined>) =>
@@ -72,5 +74,19 @@ describe("closedSecondPanes", () => {
                 bare2: { ...closedFor("nowhere") },
             })
         ).toEqual([]);
+    });
+});
+
+// srv's record of a running agent follows its newest pane and stays on it after srv closes that pane for the
+// older one. With the closed pane's row gone, the agent was listed a second time under "Running with no pane".
+describe("an agent whose record names its closed second pane", () => {
+    it("has a row, so it is not also listed as running with no pane", () => {
+        const closed = closedSecondPanes([
+            paneIdentity("live", { agentId: "a" }),
+            paneIdentity("old", { agentId: "a", ...closedFor("live") }),
+        ]);
+        const record: AgentRuntime = { agent_id: "a", state: "idle", desired: "running", name: "A", provider: "claude", icon: "", block_id: "old" };
+        expect(agentsWithoutRow([record], new Set(["live", ...closed]))).toEqual([]);
+        expect(agentsWithoutRow([record], new Set(["live"]))).toEqual([record]);
     });
 });
