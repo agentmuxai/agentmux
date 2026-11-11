@@ -121,6 +121,8 @@ describe("SingleLinePlot on uPlot", () => {
         expect(opts.cursor.sync.key).toBe("sysinfo-b");
         // Only the time is shared between the pane's charts, never a y value.
         expect(opts.cursor.sync.scales).toEqual(["x", null]);
+        // A press on the plot is not bound: uPlot's own document mouseup read the rect and forced a layout.
+        for (const ev of ["mousedown", "mouseup", "click", "dblclick"]) expect(opts.cursor.bind[ev]()).toBeNull();
         expect([opts.width, opts.height]).toEqual([600, 200]);
         // Against the pane's edges: no gutter on either side, the y labels sit over the plot.
         expect(opts.padding).toEqual([7, 0, null, 0]);
