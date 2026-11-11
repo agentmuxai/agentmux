@@ -77,8 +77,8 @@ initialFocus -> agent-attachment-lightbox__dialog
         <span class="agent-attachment-lightbox__actions">
           <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
 -- no details yet
-AttachmentsInfoCommand {"ids":["z1"]}
 Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+AttachmentsInfoCommand {"ids":["z1"]}
 useAttachmentUrl send id=undefined
 useAttachmentText thumb id=undefined
 initialFocus -> agent-attachment-lightbox__dialog
