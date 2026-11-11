@@ -102,12 +102,7 @@ pub fn consolidate_looks_incomplete(conn: &Connection) -> Result<bool, StoreErro
 /// all — distinct from a genuinely empty table, which also counts as `0`
 /// here on purpose (both mean "no source rows to backfill").
 fn table_row_count_if_exists(conn: &Connection, table: &str) -> Result<i64, StoreError> {
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-        [table],
-        |row| row.get(0),
-    )?;
-    if !exists {
+    if !crate::migrations::table_exists(conn, table)? {
         return Ok(0);
     }
     Ok(conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?)

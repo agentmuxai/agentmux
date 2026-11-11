@@ -27,18 +27,9 @@ use rusqlite::Connection;
 
 use crate::backend::storage::store::Store;
 
-use super::{Migration, MigrationContext, MigrationError, MigrationScope, VerifyOutcome};
+use super::{table_exists, Migration, MigrationContext, MigrationError, MigrationScope, VerifyOutcome};
 
 pub struct M0029DropLegacyAgentTables;
-
-fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-        [table],
-        |row| row.get(0),
-    )
-    .map_err(|e| format!("probe {table}: {e}"))
-}
 
 pub(super) fn drop_legacy_tables(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
@@ -86,7 +77,7 @@ impl Migration for M0029DropLegacyAgentTables {
             match table_exists(&conn, table) {
                 Ok(false) => {}
                 Ok(true) => return VerifyOutcome::Mismatch(format!("{table} still exists")),
-                Err(e) => return VerifyOutcome::Error(e),
+                Err(e) => return VerifyOutcome::Error(format!("probe {table}: {e}")),
             }
         }
         VerifyOutcome::Ok("both legacy agent tables are gone".into())

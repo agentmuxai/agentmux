@@ -100,8 +100,11 @@ mod backup;
 mod gate;
 mod prepare;
 mod runner;
+mod schema_probe;
 #[cfg(test)]
 mod phase5_tests;
+
+pub(crate) use schema_probe::table_exists;
 
 pub use gate::data_needs_preparing;
 pub use gate::refuse_if_real_home_would_move;

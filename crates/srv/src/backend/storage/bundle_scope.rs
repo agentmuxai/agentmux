@@ -17,6 +17,8 @@
 
 use rusqlite::{params, OptionalExtension};
 
+use crate::migrations::table_exists;
+
 use super::error::StoreError;
 use super::store::Store;
 
@@ -27,13 +29,6 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS db_bundle_scope (
         bundle_id TEXT PRIMARY KEY,
         scope TEXT NOT NULL
     );";
-
-fn table_exists(conn: &rusqlite::Connection, name: &str) -> Result<bool, StoreError> {
-    Ok(conn
-        .query_row("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1", params![name], |_| Ok(()))
-        .optional()?
-        .is_some())
-}
 
 /// Create the table if it is missing, marking the entries that already exist as
 /// `machine`. A no-op once the table is there.

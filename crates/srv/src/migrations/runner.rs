@@ -540,15 +540,7 @@ pub fn try_count_pending_migrations(data_dir: &Path) -> Result<usize, PendingCou
             error: e.to_string(),
         }
     })?;
-    let pending_in = |channel: Option<&Store>| {
-        REGISTRY
-            .iter()
-            .filter(|m| {
-                let tracking = tracking_store(m.scope(), &shared_store, channel);
-                tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
-            })
-            .count()
-    };
+    let pending_in = |channel: Option<&Store>| pending_of(REGISTRY, &shared_store, channel).len();
     let channel_store_path = data_dir.join("db").join("objects.db");
     let channel_store = Store::open(&channel_store_path).map_err(|e| {
         PendingCountError::ChannelStoreUnreadable {

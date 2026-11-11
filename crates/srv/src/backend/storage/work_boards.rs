@@ -62,13 +62,7 @@ const CARD_COLUMNS: [&str; 2] = [
 pub(crate) fn apply_schema(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(super::work_board::SCHEMA)?;
     conn.execute_batch(SCHEMA)?;
-    for stmt in CARD_COLUMNS {
-        if let Err(e) = conn.execute_batch(stmt) {
-            if !e.to_string().contains("duplicate column") {
-                return Err(e.into());
-            }
-        }
-    }
+    super::migrations::apply_additive_columns(conn, CARD_COLUMNS)?;
     conn.execute_batch(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_work_cards_board_num
              ON db_work_cards(board_id, board_num) WHERE board_id <> '';
