@@ -153,7 +153,7 @@ struct IdentityBinding {
 /// Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md later dropped
 /// `db_identity_bundles`/`db_identity_bindings` entirely — every write path
 /// (launch flow, per-agent Accounts tab, OAuth Connect/Reconnect) writes a
-/// direct link, and the m0013/m0014 migrations (#1927/#1952) backfilled
+/// direct link, and migrations (#1927/#1952, since retired) backfilled
 /// direct links for every pre-existing bundle binding before the drop.
 ///
 /// `parent_template_id`: the launch's eligible TEMPLATE parent's own id —
@@ -1576,7 +1576,7 @@ mod tests {
         // NO binding at all (never bound, or the link was cascaded away by
         // an account delete) is blocked without the opt-in — implicit
         // ambient is how the delete-doesn't-deauthenticate gap happened.
-        // (The m0017 migration grandfathers pre-existing linkless agents
+        // (A retired migration grandfathered pre-existing linkless agents
         // to flag=1; `inject_no_direct_links_injects_nothing` covers that
         // side.)
         //

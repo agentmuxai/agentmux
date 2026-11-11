@@ -21,10 +21,10 @@ pub(super) fn attach_agent_registry(mstore_raw: &Store) {
         }) {
             Ok(reg) => {
                 tracing::info!(root = %root.display(), "registry: shared agent registry attached");
-                // Best-effort catch-up pass, run every startup (not just the
-                // one-shot m0010 migration): fills session_id for any agent
-                // record that still lacks one, e.g. one named after m0010
-                // already ran. Idempotent — skips records that already carry
+                // Best-effort catch-up pass, run every startup: fills
+                // session_id for any agent record that still lacks one, e.g.
+                // one named after the one-shot migration that once did this
+                // ran. Idempotent — skips records that already carry
                 // a non-empty session_id. Without this, an agent created
                 // after the migration ran would never get a resumable
                 // session_id in the registry, so a cross-tab/cross-restart

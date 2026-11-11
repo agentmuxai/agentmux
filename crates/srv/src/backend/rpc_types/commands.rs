@@ -281,8 +281,7 @@ pub const COMMAND_LIST_AGENT_IDENTITIES: &str = "listagentidentities";
 /// Every (agent_id, account_id, provider) row across every agent — powers
 /// the since-removed "Identities" read-only rail (issue #1624 PR-C), which needs
 /// all agents' bindings up front rather than one `listagentidentities` call
-/// per row. Wraps `Store::agent_identity_list_all`, previously only used by
-/// the m0013/m0014 backfill migrations.
+/// per row. Wraps `Store::agent_identity_list_all`.
 pub const COMMAND_LIST_ALL_AGENT_IDENTITIES: &str = "listallagentidentities";
 
 // Bundles (v7 — agent personality / capability stack)

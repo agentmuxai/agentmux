@@ -300,8 +300,8 @@ fn open_stores_for_preview(shared_store_path: &Path, data_dir: &Path) -> Result<
     }
     // Channel store (objects.db) tracks channel-scoped migrations independently
     // per channel — MigrationScope::Channel migrations record here, not in shared.
-    // Always open/create it so that seed migrations (e.g. m0008_default_bundle)
-    // run on fresh install. Skipping it on a fresh install once left the
+    // Always open/create it so that seed migrations (e.g.
+    // m0016_seed_starter_mcp_servers) run on fresh install. Skipping it on a fresh install once left the
     // Channel-scoped migrations (0002/0003/0007) out of the pending list, so
     // they were never marked applied; when mstore then created objects.db,
     // count_pending_migrations at ESTART reported them pending and fired the
