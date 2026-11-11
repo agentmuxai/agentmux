@@ -24,6 +24,7 @@
 
 import { getApi, MOS } from "@/app/store/global";
 import { Logger } from "@/util/logger";
+import { beginPaneCapture } from "./pane-capture-gate";
 
 /** A picture older than this is stale: the pane may have changed since. */
 const MAX_AGE_MS = 10_000;
@@ -121,9 +122,10 @@ function ownWindowLabel(): string {
     return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
 }
 
-/** The window's viewport, cropped to `rect`, as a base64 JPEG. */
-async function capturePane(rect: CssRect): Promise<string | null> {
+/** The window's viewport, cropped to `rect`, as a base64 JPEG. `shot` is called once the window has been pictured. */
+async function capturePane(rect: CssRect, shot: () => void): Promise<string | null> {
     const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
+    shot();
     return track(cropToPane(jpeg_base64, rect));
 }
 
@@ -278,17 +280,22 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
     // The block's own view, not the DOM: a pane keeps its inactive tabs
     // mounted, so a background browser tab would match a DOM query.
     const isBrowser = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.view === "browser";
+    // The drag's own drawing waits for the capture: it is a picture of the window as drawn when it runs
+    // (pane-capture-gate.ts). The crop and the encoding after it hold nothing back.
+    const captured = beginPaneCapture();
     const capture = isBrowser
         ? getApi()
               .browserPanes.screenshot(blockId, { format: "jpeg", quality: 80 })
               .then((shot) => shot?.png_base64 || null)
-        : capturePane({ left: r.left, top: r.top, width: r.width, height: r.height });
+        : capturePane({ left: r.left, top: r.top, width: r.width, height: r.height }, captured);
     const picture = capture.then(
         (b64) => {
+            captured();
             Logger.debug("dnd:cross", "tear-off snapshot captured", { blockId, ms: Date.now() - at });
             return b64;
         },
         (e) => {
+            captured();
             Logger.debug("dnd:cross", "tear-off snapshot failed", { blockId, error: String(e) });
             return null;
         }

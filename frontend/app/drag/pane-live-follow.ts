@@ -9,10 +9,13 @@
  * under it, and outside every AgentMux window, where the drop tears the pane off and the floating window
  * opens where the picture was last seen. No translucent ghost ever stands in for the pane.
  *
- * While a drop is armed, the picture takes the size of the rect the drop would give the pane (the live
- * reflow's landing rect, liveReflow.ts), cut or padded, never scaled, so the pane in hand is the pane as it
- * will land (the operator, 2026-11-10: "the floater should change size with the size of the landing site");
- * with no drop armed it is the pane's own size again.
+ * While a drop is armed, the picture is cut to the rect the drop would give the pane (the live reflow's
+ * landing rect, liveReflow.ts) on each axis where that is smaller, so the pane in hand is never larger than
+ * the place it is going (the operator, 2026-11-10: "the floater should change size with the size of the
+ * landing site"). It is never scaled, and never made larger than the pane's own picture: a picture padded out
+ * to a larger landing rect was a long blank band beside the pane ("long extended blank parts extending to the
+ * far right"), and the pane at its landing size is on screen anyway, in the landing rect itself. With no drop
+ * armed it is the pane's own size again.
  */
 
 import { createEffect, createRoot } from "solid-js";
@@ -46,7 +49,7 @@ export async function followPaneDrag(blockId: string, windowLabel: string, landi
     if (landing) followLanding(landing, shot.size);
 }
 
-/** Size the picture to the landing while it changes, from `own` (its size now), until the drag ends. */
+/** Cut the picture to the landing while it changes, from `own` (its size, and the most it shows), until the drag ends. */
 function followLanding(landing: LandingSource, own: { width: number; height: number }): void {
     createRoot((dispose) => {
         let shown = { width: Math.round(own.width), height: Math.round(own.height) };
@@ -56,8 +59,10 @@ function followLanding(landing: LandingSource, own: { width: number; height: num
                 dispose();
                 return;
             }
-            const want = rect ?? own;
-            const next = { width: Math.round(want.width), height: Math.round(want.height) };
+            const next = {
+                width: Math.round(Math.min(own.width, rect?.width ?? own.width)),
+                height: Math.round(Math.min(own.height, rect?.height ?? own.height)),
+            };
             if (next.width === shown.width && next.height === shown.height) return;
             shown = next;
             void resizeLiveFollow(getApi(), next);
