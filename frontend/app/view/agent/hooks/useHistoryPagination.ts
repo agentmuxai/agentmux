@@ -44,6 +44,7 @@ import { historyPin, type TranscriptSettleLatch } from "../transcript-cursor";
 import type { DocumentState, FilterState, LogFn } from "../../../agent-model/types";
 import { endHistoryLoad } from "@/app/store/agent-document-store";
 import { logAgentOpenRest, markAgentOpen } from "../open-trace";
+import { hiddenFill } from "./hidden-fill";
 import { linesBytes, planFill, runHistoryFill } from "./history-fill";
 import { OPEN_TAIL_BYTES, readOpenTail, startsAtTurn, type OpenTailResult } from "./open-tail";
 
@@ -122,13 +123,16 @@ export interface UseHistoryPaginationOptions {
      */
     restoreBytes?: () => number | undefined;
     /**
-     * The background history fill waits while this is true: the pane can't be
-     * seen (a hidden tab or pane-stack member), or the reader has scrolled off
-     * the bottom. At the bottom a prepend above the rows changes nothing on
-     * screen; scrolled up it would move them, and the view's anchoring covers
-     * only a prepend it starts itself (a scroll-up's `loadOlder`).
+     * The background history fill waits while this is true: the pane's window
+     * can't be seen, a hidden tab's pane is not allowed to fill now
+     * (hidden-fill.ts), or the reader has scrolled off the bottom. At the
+     * bottom a prepend above the rows changes nothing on screen; scrolled up it
+     * would move them, and the view's anchoring covers only a prepend it starts
+     * itself (a scroll-up's `loadOlder`).
      */
     fillPaused?: () => boolean;
+    /** The pane's tab is hidden now: its fill pages run one at a time with the other hidden panes' (hidden-fill.ts). */
+    fillHidden?: () => boolean;
 }
 
 export interface UseHistoryPagination {
@@ -645,7 +649,8 @@ async function fillRest(opts: UseHistoryPaginationOptions, s: HistoryState, gen:
         page: async (maxLines) => {
             try {
                 const budget = Number.isFinite(plan.budgetBytes) ? Math.max(1, plan.budgetBytes - fillBytes) : undefined;
-                const page = await exclusive(s, () => fetchOlderPage(opts, s, maxLines, { expectGen: gen, tailBytes: budget, alignFloor: plan.floorLine }));
+                const read = () => exclusive(s, () => fetchOlderPage(opts, s, maxLines, { expectGen: gen, tailBytes: budget, alignFloor: plan.floorLine }));
+                const page = await (opts.fillHidden?.() ? hiddenFill.run(read) : read());
                 if (!page) return null;
                 fillBytes += page.bytes;
                 return { lines: page.lines, bytes: page.bytes, last: page.trimmed };

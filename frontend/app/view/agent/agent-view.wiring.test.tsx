@@ -61,7 +61,7 @@ vi.mock("./btw", () => ({ askSideQuestion: (...a: unknown[]) => h.fns.askSide(..
 vi.mock("./quick-fork", () => ({ quickForkAgent: (...a: unknown[]) => h.fns.quickFork(...a) }));
 vi.mock("./open-history-tab", () => ({ openOrFocusHistoryTab: (...a: unknown[]) => h.fns.openHistory(...a) }));
 vi.mock("./providers", () => ({ getProvider: (key: string) => (key === "unknown" ? undefined : { id: "claude", displayName: "Claude", authCheckCommand: ["auth", "status"] }) }));
-vi.mock("./render-dormant", () => ({ useRenderDormant: h.hook("useRenderDormant", () => () => false) }));
+vi.mock("./render-dormant", () => ({ useRenderDormant: h.hook("useRenderDormant", () => () => false), useWindowHidden: () => () => false }));
 vi.mock("./sign-in-notice", () => ({ createSignInNotice: h.hook("createSignInNotice", () => ({ answered: () => {}, needed: () => {}, bound: () => {} })) }));
 vi.mock("./system-notification", () => ({ createSystemNotifier: h.hook("createSystemNotifier", () => () => {}) }));
 vi.mock("./startup/startupOnReady", () => ({ startupOnReady: h.hook("startupOnReady", () => h.fns.startup) }));
