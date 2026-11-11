@@ -62,3 +62,12 @@ pub(crate) fn get_window_on_ui(state: &Arc<AppState>, label: &str) -> Option<Win
     let browser_view = browser_view_get_for_browser(Some(&mut browser))?;
     browser_view.window()
 }
+
+/// Every close the host decided on comes through here, so the window is marked as decided: what
+/// its close runs into on the way (`can_close`, a WM_CLOSE) is not asked about again
+/// (`commands::window::close_ask`).
+pub fn post_close_window(state: &Arc<AppState>, label: &str) {
+    crate::commands::window::close_ask::approve(label);
+    let mut task = CloseWindowTask::new(state.clone(), label.to_string());
+    post_task(ThreadId::UI, Some(&mut task));
+}

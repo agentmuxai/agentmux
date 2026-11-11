@@ -15,7 +15,9 @@
 mod lifecycle;
 mod panel;
 // Cross-platform command handlers dispatched by ipc.rs.
-pub use lifecycle::{close_window, close_window_by_label, quit_app};
+pub use lifecycle::{close_command, close_window, close_window_by_label, quit_app};
+// A close that comes from the OS asks the window's own page first.
+pub(crate) mod close_ask;
 pub use panel::open_panel;
 // Windows-only helpers other modules resolve as `commands::window::<name>`
 // (browser_pane / client / backend call sites are all `#[cfg(windows)]`).
