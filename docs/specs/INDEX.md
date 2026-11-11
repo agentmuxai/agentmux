@@ -1128,6 +1128,7 @@ partial list.
 | [`SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13`](SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md) | SPEC — Armory Phase 5: drop Identities, rename/reorder tabs, seed a starter Skill catalog |
 | [`SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05`](SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05.md) | SPEC: Global Memory is the only concept — remove shared provider config, materialize into the provider's file |
 | [`SPEC_BACKEND_LIFECYCLE`](SPEC_BACKEND_LIFECYCLE.md) | Backend Process Lifecycle — Analysis & Fix Spec |
+| [`SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10`](SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10.md) | Spec: an agent can zoom a browser pane it drives |
 | [`SPEC_BROWSER_PANE_CLICK_DISMISSES_MENUS_2026_08_15`](SPEC_BROWSER_PANE_CLICK_DISMISSES_MENUS_2026_08_15.md) | SPEC — Browser pane: clicking inside it should dismiss open menus/popovers |
 | [`SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21`](SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md) | Spec: Browser pane default URL + in-pane popup redirect |
 | [`SPEC_BROWSER_PANE_FOCUS_LOCK`](SPEC_BROWSER_PANE_FOCUS_LOCK.md) | SPEC: Browser Pane Focus Lock |
