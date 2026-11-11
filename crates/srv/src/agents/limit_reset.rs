@@ -30,7 +30,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveTime, TimeZone};
 use serde_json::Value;
 
-use super::failure::{AgentFailure, FailureClass};
+use super::failure::{AgentFailure, FailureClass, ROUTE_CREDITS_RETRY_MS};
 
 /// The longest a reset may lie ahead: a weekly limit plus a day.
 const MAX_AHEAD_MS: u64 = 8 * 24 * 60 * 60 * 1000;
@@ -98,6 +98,11 @@ pub fn fill_reset(
         return out;
     }
     let now_ms = u64::try_from(now.timestamp_millis()).unwrap_or(0);
+    // A route with no credits has no reset to read: hold for a while, then let a turn probe it.
+    if failure.is_route_credits() {
+        out.resets_at_ms = Some(now_ms.saturating_add(ROUTE_CREDITS_RETRY_MS));
+        return out;
+    }
     let in_range = |ms: u64| ms > now_ms && ms <= now_ms.saturating_add(MAX_AHEAD_MS);
     if let Some(info) = latest.filter(|i| i.status == "rejected") {
         if let Some(ms) = info.resets_at_s.map(|s| s.saturating_mul(1000)).filter(|ms| in_range(*ms)) {
@@ -413,6 +418,17 @@ mod tests {
         assert_eq!(fill_reset(&auth, Some(&reset), now, Some(ZONE)), auth);
         let known = AgentFailure { resets_at_ms: Some(42), ..weekly() };
         assert_eq!(fill_reset(&known, Some(&reset), now, Some(ZONE)).resets_at_ms, Some(42));
+    }
+
+    #[test]
+    fn a_route_out_of_credits_is_held_for_ten_minutes_whatever_else_is_known() {
+        let now = at(2026, 10, 23, 9, 0);
+        let f = classify(Some(1), None, "API Error: 402 This request would exceed your available credits", None);
+        assert!(f.is_route_credits());
+        let held = Some(ms(now) + ROUTE_CREDITS_RETRY_MS);
+        assert_eq!(fill_reset(&f, None, now, Some(ZONE)).resets_at_ms, held);
+        let stale = rejected(at(2026, 10, 25, 9, 0), "seven_day");
+        assert_eq!(fill_reset(&f, Some(&stale), now, Some(ZONE)).resets_at_ms, held, "a plan window from an earlier request is not its reset");
     }
 
     #[test]

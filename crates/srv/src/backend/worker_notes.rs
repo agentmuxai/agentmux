@@ -213,6 +213,10 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
     {
         return None;
     }
+    // A route out of credits stops every agent on it: its leads are told once for the route (`route_credits`).
+    if matches!(ev, WorkerEvent::Failed { title, .. } if title == crate::agents::failure::ROUTE_CREDITS_TITLE) {
+        return None;
+    }
     let worker = worker_of_block(mstore, block_id)?;
     let leader_panes = live_panes_of(mstore, &worker.leader_def_id);
     let leader_block = leader_panes.first()?.clone();

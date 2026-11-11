@@ -206,3 +206,24 @@ async fn a_workers_unreported_turn_notes_its_open_leader() {
     let failed = WorkerEvent::Failed { block_id: worker_pane, title: "Usage limit reached".into() };
     assert_eq!(note_for(&state.mstore, &state.filestore, &failed), None, "held: within a minute of the last note");
 }
+
+
+/// A route out of credits stops every agent on it: the route's own note tells the lead once, so no worker's
+/// failure adds its own (#47449).
+#[tokio::test]
+async fn a_workers_credits_failure_adds_no_note_of_its_own() {
+    let state = crate::server::tests::test_state();
+    let tab = tab(&state).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let (lead_id, worker_id) = (format!("lead-{id}"), format!("worker-{id}"));
+    let mut lead = test_agent_def(&lead_id, &format!("Lead {}", &id[..8]), "claude", "host", 1, "");
+    let mut worker = test_agent_def(&worker_id, &format!("Helper {}", &id[..8]), "claude", "host", 1, "");
+    state.mstore.agent_def_insert(&mut lead).unwrap();
+    state.mstore.agent_def_insert(&mut worker).unwrap();
+    mark_worker(&state, &worker_id, &lead);
+    pane(&state, &tab, &lead_id).await;
+    let worker_pane = pane(&state, &tab, &worker_id).await;
+    let failed = |title: &str| WorkerEvent::Failed { block_id: worker_pane.clone(), title: title.into() };
+    assert!(note_for(&state.mstore, &state.filestore, &failed("Not authenticated")).is_some(), "another failure is noted");
+    assert_eq!(note_for(&state.mstore, &state.filestore, &failed(crate::agents::failure::ROUTE_CREDITS_TITLE)), None);
+}

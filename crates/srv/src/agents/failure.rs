@@ -100,7 +100,18 @@ pub struct AgentFailure {
     pub holder_block_id: Option<String>,
 }
 
+/// The title of a `UsageLimit` failure whose cause is a model route with no credits left (HTTP 402).
+pub(crate) const ROUTE_CREDITS_TITLE: &str = "The model route is out of credits";
+
+/// How long a route that answered 402 is held before a message may probe it again.
+pub(crate) const ROUTE_CREDITS_RETRY_MS: u64 = 10 * 60 * 1000;
+
 impl AgentFailure {
+    /// Whether this is the route-out-of-credits failure: the route's key has no balance, whoever asks.
+    pub(crate) fn is_route_credits(&self) -> bool {
+        self.code == FailureClass::UsageLimit && self.title == ROUTE_CREDITS_TITLE
+    }
+
     /// Render the single-string explanation that becomes a run's
     /// terminal error (drone `error` column, sidecar log, future agent
     /// pane banner). Title + detail + exit evidence + retryable hint,
@@ -165,6 +176,18 @@ fn names_plan_limit(hay: &str) -> bool {
         || hay.contains("hit your session limit")
         || hay.contains("spend limit")
         || hay.contains("out of credits")
+}
+
+/// Whether `hay` (lower-cased) is a provider saying the key's balance is empty: HTTP 402 with a credit or balance
+/// word, or the phrases routes use for it ("This request would exceed your available credits", DeepSeek's
+/// "Insufficient Balance"). A plan limit that tells the person to buy credits ("purchase more credits") is not it.
+fn names_route_credits(hay: &str) -> bool {
+    (mentions_http_status(hay, "402") && ["credit", "balance", "payment", "fund"].iter().any(|w| hay.contains(w)))
+        || hay.contains("payment required")
+        || hay.contains("exceed your available credits")
+        || hay.contains("requires more credits")
+        || hay.contains("insufficient credits")
+        || hay.contains("insufficient balance")
 }
 
 #[allow(clippy::too_many_arguments)]

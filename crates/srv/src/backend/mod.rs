@@ -230,6 +230,7 @@ pub mod cold_hold;
 /// Google connectors: Calendar, Drive and Gmail for agents, called by srv.
 pub mod google;
 /// A leader hears when its workers end a turn without reporting, fail or stop.
+pub mod route_credits;
 pub mod worker_notes;
 
 pub use oref::ORef;
