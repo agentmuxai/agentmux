@@ -318,6 +318,88 @@ describe("attachScrollHandoff", () => {
     });
 });
 
+/** The hover panel's case: a box rendered at the document body, handing its wheel to the transcript it sits over. */
+describe("attachScrollHandoff for a box outside the transcript (the hover panel)", () => {
+    const fits: Geo = { scrollTop: 0, clientHeight: 40, scrollHeight: 40 };
+
+    function setupPanel(g: Geo) {
+        const pane = document.createElement("div");
+        pane.className = "agent-document";
+        let paneTop = 1000;
+        Object.defineProperty(pane, "scrollTop", { configurable: true, get: () => paneTop, set: (v) => (paneTop = v) });
+        document.body.appendChild(pane);
+        const panel = makeBox(g);
+        document.body.appendChild(panel);
+        const detach = attachScrollHandoff(panel, { pane: () => pane });
+        let clock = 0;
+        const wheel = (deltaY: number, o: { notch?: boolean } = {}): boolean => {
+            const e = new WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true });
+            if (o.notch !== false) Object.defineProperty(e, "wheelDeltaY", { value: -Math.sign(deltaY) * 120 });
+            clock += 16;
+            Object.defineProperty(e, "timeStamp", { value: clock });
+            panel.dispatchEvent(e);
+            return e.defaultPrevented;
+        };
+        return { pane: () => paneTop, panel, wheel, detach };
+    }
+
+    it("a one-line panel hands every notch to the transcript", () => {
+        const s = setupPanel(fits);
+        expect(s.wheel(120)).toBe(true);
+        expect(s.pane()).toBe(1120);
+        expect(s.wheel(-120)).toBe(true);
+        expect(s.pane()).toBe(1000);
+    });
+
+    it("a one-line panel hands on a trackpad's continuous input too", () => {
+        const s = setupPanel(fits);
+        expect(s.wheel(30, { notch: false })).toBe(true);
+        expect(s.wheel(18, { notch: false })).toBe(true);
+        expect(s.pane()).toBe(1048);
+    });
+
+    it("a tall panel scrolls itself while it has room", () => {
+        const s = setupPanel(midway);
+        expect(s.wheel(120)).toBe(false);
+        expect(s.wheel(-120)).toBe(false);
+        expect(s.pane()).toBe(1000);
+    });
+
+    it("a tall panel at its bottom skids, then hands the wheel on, as a preview box does", () => {
+        const s = setupPanel(atBottom);
+        expect(s.wheel(120)).toBe(false);
+        expect(s.wheel(120)).toBe(false);
+        expect(s.pane()).toBe(1000);
+        expect(s.wheel(120)).toBe(true);
+        expect(s.pane()).toBe(1120);
+    });
+
+    it("a tall panel at its top skids upward, then hands the wheel on", () => {
+        const s = setupPanel(atTop);
+        expect(s.wheel(-120)).toBe(false);
+        expect(s.wheel(-120)).toBe(false);
+        expect(s.wheel(-120)).toBe(true);
+        expect(s.pane()).toBe(880);
+    });
+
+    it("leaves a wheel alone when the panel has no transcript to hand it to", () => {
+        const panel = makeBox(fits);
+        document.body.appendChild(panel);
+        attachScrollHandoff(panel, { pane: () => null });
+        const e = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+        panel.dispatchEvent(e);
+        expect(e.defaultPrevented).toBe(false);
+    });
+
+    it("never touches Ctrl+wheel (zoom)", () => {
+        const s = setupPanel(fits);
+        const e = new WheelEvent("wheel", { deltaY: 120, ctrlKey: true, bubbles: true, cancelable: true });
+        s.panel.dispatchEvent(e);
+        expect(e.defaultPrevented).toBe(false);
+        expect(s.pane()).toBe(1000);
+    });
+});
+
 describe("nextSkid", () => {
     const box = {};
     const other = {};

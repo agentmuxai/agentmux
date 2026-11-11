@@ -849,3 +849,45 @@ describe("PeekOverlay reads show without leaking", () => {
         expect(leaks).toEqual([]);
     });
 });
+
+describe("PeekOverlay: the wheel over the panel", () => {
+    /** A transcript (`.agent-document`) with a row in it, and the panel's row. */
+    function makeTranscript(): { pane: HTMLElement; row: HTMLElement } {
+        const pane = document.createElement("div");
+        pane.className = "agent-document";
+        const row = document.createElement("div");
+        pane.appendChild(row);
+        document.body.appendChild(pane);
+        return { pane, row };
+    }
+
+    it("a one-line panel scrolls the transcript it sits over, though it is rendered at the document body", () => {
+        const { pane, row } = makeTranscript();
+        render(() => (
+            <PeekOverlay show={true} rowEl={() => row}>
+                <span>0:01 · ~120 tokens</span>
+            </PeekOverlay>
+        ));
+        const panel = screen.getByText("0:01 · ~120 tokens").closest(".agent-node-peek-overlay")!;
+        expect(pane.contains(panel)).toBe(false);
+        const before = pane.scrollTop;
+        const wheel = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+        panel.dispatchEvent(wheel);
+        expect(wheel.defaultPrevented).toBe(true);
+        expect(pane.scrollTop).toBe(before + 120);
+    });
+
+    it("stops handing the wheel on once the panel has closed", () => {
+        const { pane, row } = makeTranscript();
+        const [show, setShow] = createSignal(true);
+        render(() => (
+            <PeekOverlay show={show()} rowEl={() => row}>
+                <span>peek content</span>
+            </PeekOverlay>
+        ));
+        const panel = screen.getByText("peek content").closest(".agent-node-peek-overlay")!;
+        setShow(false);
+        panel.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true }));
+        expect(pane.scrollTop).toBe(0);
+    });
+});

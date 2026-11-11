@@ -154,6 +154,9 @@ export interface ScrollHandoffOptions {
     /** Skid even when the content fits, so the box has no scrollbar. A box that
      *  fits is at both edges at once, so every arrival over it skids. */
     skidWhenFits?: boolean;
+    /** The transcript the box hands scroll to, for a box that is not inside it: the hover panel is rendered at the
+     *  document body, so its wheel never chains to the pane it sits over. Absent: the box's own `.agent-document`. */
+    pane?: () => HTMLElement | null | undefined;
 }
 
 /**
@@ -174,7 +177,8 @@ export function previewBox(opts: ScrollHandoffOptions = {}): (el: HTMLElement) =
 export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions = {}): () => void {
     boxes.add(el);
     el.classList.add("scroll-handoff-box");
-    const initialPane = el.closest<HTMLElement>(".agent-document");
+    const paneOf = (): HTMLElement | null | undefined => opts.pane?.() ?? el.closest<HTMLElement>(".agent-document");
+    const initialPane = paneOf();
     if (initialPane) watchPane(initialPane);
 
     let flashTimer: ReturnType<typeof setTimeout> | undefined;
@@ -189,7 +193,7 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
         // Ctrl/⌘+wheel is a ZOOM gesture (the pane zoom in app.tsx, which
         // takes either), never a scroll; deltaY 0 is a horizontal scroll inside the box.
         if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
-        const pane = el.closest<HTMLElement>(".agent-document");
+        const pane = paneOf();
         if (!pane) return;
         watchPane(pane);
         const dir = e.deltaY < 0 ? -1 : 1;
