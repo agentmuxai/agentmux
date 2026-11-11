@@ -242,6 +242,36 @@ describe("the model panel's routes", () => {
         expect(groups()).toEqual([]);
         expect(screen.getAllByRole("option").length).toBeGreaterThan(5);
     });
+
+    it("says why the other models are missing when the routes could not be read, and not when they could", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        panelCommand.mockRejectedValue(new Error("FORBIDDEN: only the AgentMux window reads the model panel (this connection isn't the AgentMux window)"));
+        mount(plain);
+        await openPanel();
+        expect(document.body.textContent).toContain("Other models: couldn't be read: only the AgentMux window reads the model panel");
+        expect(warn).toHaveBeenCalled();
+        cleanup();
+        panelCommand.mockResolvedValue(panelOf());
+        mount(plain);
+        await openPanel();
+        expect(document.body.textContent).not.toContain("couldn't be read");
+        warn.mockRestore();
+    });
+
+    it("clears the note once a later open reads the routes", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        panelCommand.mockRejectedValueOnce(new Error("timeout waiting for response"));
+        mount(plain);
+        await openPanel();
+        expect(document.body.textContent).toContain("couldn't be read: timeout waiting for response");
+        panelCommand.mockResolvedValue(panelOf());
+        fireEvent.click(trigger());
+        await flush();
+        await openPanel();
+        expect(document.body.textContent).not.toContain("couldn't be read");
+        expect(groups().some((g) => g?.startsWith("OpenRouter"))).toBe(true);
+        warn.mockRestore();
+    });
 });
 
 describe("the route rows' words", () => {

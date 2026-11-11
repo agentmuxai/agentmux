@@ -34,6 +34,11 @@ vi.mock("../providers/codex-models-refresh", () => ({
     refreshCodexModels: () => log("refreshCodexModels()"),
 }));
 
+// An srv with no routes for the harness: the panel is the harness's own models, and has no "couldn't be read" note.
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: { AgentModelPanelCommand: async () => ({ harness: "claude", current: null, previous: null, routes: [] }) },
+}));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 const SNAP = (name: string) => `./__snapshots__/AgentRuntimeDropup.behavior.${name}.txt`;
 const flush = async () => {
     for (let i = 0; i < 4; i++) await Promise.resolve();

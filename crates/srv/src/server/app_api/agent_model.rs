@@ -313,6 +313,21 @@ pub(crate) fn restart_panes(state: &AppState, def_id: &str) -> (u32, Vec<String>
     (restarted, failed)
 }
 
+/// A request slower than this is worth a line in the log: the panel is waiting for it with its harness models showing.
+const SLOW_REQUEST_MS: u128 = 2_000;
+
+/// What became of a request from the window. Nothing else records it: a refused or failed one reaches only the pane, and
+/// the pane had nothing to say about a panel it could not read.
+fn logged<T>(command: &str, block: &str, started: std::time::Instant, result: Result<T, String>) -> Result<T, String> {
+    let ms = started.elapsed().as_millis();
+    match &result {
+        Err(error) => tracing::warn!(command, block, ms = ms as u64, %error, "model panel: the request failed"),
+        Ok(_) if ms >= SLOW_REQUEST_MS => tracing::warn!(command, block, ms = ms as u64, "model panel: the request was slow"),
+        Ok(_) => {}
+    }
+    result
+}
+
 /// Both commands are the window's: an agent may change its own model through `Agents update`, which stays on its
 /// route and is counted against its hourly limit.
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -320,8 +335,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_AGENT_MODEL_PANEL, move |req: AgentModelPanelReq, ctx| {
         let s = s.clone();
         async move {
-            ctx.operator_only("only the AgentMux window reads the model panel")?;
-            tokio::task::spawn_blocking(move || panel(&s, &req)).await.map_err(|e| e.to_string())?
+            let (block, started) = (req.blockid.clone(), std::time::Instant::now());
+            let result = match ctx.operator_only("only the AgentMux window reads the model panel") {
+                Ok(()) => tokio::task::spawn_blocking(move || panel(&s, &req)).await.map_err(|e| format!("the panel request panicked: {e}")).and_then(|r| r),
+                Err(refused) => Err(refused),
+            };
+            logged(COMMAND_AGENT_MODEL_PANEL, &block, started, result)
         }
     });
     let s = state.clone();
@@ -334,8 +353,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_AGENT_MODEL_SWITCH, move |req: AgentModelSwitchReq, ctx| {
         let s = s.clone();
         async move {
-            ctx.operator_only("only a person moves an agent to a model route, because it spends their key")?;
-            tokio::task::spawn_blocking(move || switch_model(&s, &req)).await.map_err(|e| e.to_string())?
+            let (block, started) = (req.blockid.clone(), std::time::Instant::now());
+            let result = match ctx.operator_only("only a person moves an agent to a model route, because it spends their key") {
+                Ok(()) => tokio::task::spawn_blocking(move || switch_model(&s, &req)).await.map_err(|e| format!("the switch request panicked: {e}")).and_then(|r| r),
+                Err(refused) => Err(refused),
+            };
+            logged(COMMAND_AGENT_MODEL_SWITCH, &block, started, result)
         }
     });
 }
@@ -346,6 +369,13 @@ mod tests {
 
     fn req(tokens: Option<u32>, images: Option<u32>) -> AgentModelPanelReq {
         AgentModelPanelReq { blockid: "b".into(), conversation_tokens: tokens, images }
+    }
+
+    #[test]
+    fn a_logged_request_answers_as_it_did() {
+        let now = std::time::Instant::now();
+        assert_eq!(logged("c", "b", now, Ok::<_, String>(3)), Ok(3));
+        assert_eq!(logged::<u8>("c", "b", now, Err("no agent runs in block b".into())), Err("no agent runs in block b".to_string()));
     }
 
     #[test]
