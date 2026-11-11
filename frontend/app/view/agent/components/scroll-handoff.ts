@@ -127,6 +127,21 @@ function wheelNotches(e: WheelEvent): number | null {
     return null;
 }
 
+/** The wheel events this file made to tell a pane about a gesture it relayed: the pane's own skid reset ignores them. */
+const relayed = new WeakSet<Event>();
+
+/**
+ * A box outside the transcript (the hover panel, rendered at the document body) moves the transcript itself, so
+ * the wheel never passed through it: the follow-scroll listens for wheels on the transcript, and without this a
+ * wheel-up over the panel would move a following transcript with no gesture noted and the follower would pin it
+ * back to the bottom. A box inside the transcript needs nothing: its wheel bubbles through the pane.
+ */
+function relayGesture(pane: HTMLElement, e: WheelEvent, deltaY: number): void {
+    const event = new WheelEvent("wheel", { deltaY, deltaMode: e.deltaMode, bubbles: true });
+    relayed.add(event);
+    pane.dispatchEvent(event);
+}
+
 // One skid state per pane (there's one pointer), and the boxes taking part.
 const skids = new WeakMap<HTMLElement, WheelSkid>();
 const boxes = new WeakSet<Element>();
@@ -140,7 +155,7 @@ function watchPane(pane: HTMLElement): void {
     pane.addEventListener(
         "wheel",
         (e: WheelEvent) => {
-            if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
+            if (e.ctrlKey || e.metaKey || e.deltaY === 0 || relayed.has(e)) return;
             for (let n = e.target as Element | null; n && n !== pane; n = n.parentElement) {
                 if (boxes.has(n)) return;
             }
@@ -223,6 +238,7 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
         } else if (action.kind === "forward") {
             if (action.absorbed) flash(dir);
             e.preventDefault();
+            if (!pane.contains(el)) relayGesture(pane, e, action.deltaY);
             scrollTranscriptBy(pane, action.deltaY);
         }
     };

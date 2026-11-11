@@ -21,6 +21,7 @@ import { createSignal, Show } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { PeekOverlay } from "./PeekOverlay";
 import { useNodePeek, type NodePeek } from "../hooks/useNodePeek";
+import { createFollowScroll, type FollowScrollHost } from "@/app/scroll/follow-scroll";
 
 vi.mock("@floating-ui/dom", () => ({
     autoUpdate: vi.fn(() => vi.fn()),
@@ -875,6 +876,30 @@ describe("PeekOverlay: the wheel over the panel", () => {
         panel.dispatchEvent(wheel);
         expect(wheel.defaultPrevented).toBe(true);
         expect(pane.scrollTop).toBe(before + 120);
+    });
+
+    it("a wheel-up over the panel releases a following transcript, as a wheel-up over the transcript does", () => {
+        const { pane, row } = makeTranscript();
+        const host: FollowScrollHost = {
+            pin: vi.fn(),
+            loadOlder: vi.fn(),
+            transition: vi.fn(),
+            hasOlderHistory: () => false,
+            loadingOlder: () => false,
+            now: () => 0,
+        };
+        const follow = createFollowScroll(pane, host);
+        follow.noteGeometry({ scrollTop: 600, scrollHeight: 1000, clientHeight: 400 });
+        expect(follow.following()).toBe(true);
+        render(() => (
+            <PeekOverlay show={true} rowEl={() => row}>
+                <span>peek content</span>
+            </PeekOverlay>
+        ));
+        const panel = screen.getByText("peek content").closest(".agent-node-peek-overlay")!;
+        panel.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }));
+        expect(follow.following()).toBe(false);
+        follow.dispose();
     });
 
     it("stops handing the wheel on once the panel has closed", () => {

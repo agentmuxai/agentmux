@@ -382,6 +382,32 @@ describe("attachScrollHandoff for a box outside the transcript (the hover panel)
         expect(s.pane()).toBe(880);
     });
 
+    it("tells the transcript about the gesture it relays, so a following transcript sees a wheel-up", () => {
+        const s = setupPanel(fits);
+        const seen: number[] = [];
+        document.querySelector(".agent-document")!.addEventListener("wheel", (e) => seen.push((e as WheelEvent).deltaY), { capture: true });
+        s.wheel(-120);
+        s.wheel(120);
+        expect(seen).toEqual([-120, 120]);
+    });
+
+    it("says nothing to the transcript for a notch the panel absorbs or scrolls itself", () => {
+        const s = setupPanel(atBottom);
+        const seen: number[] = [];
+        document.querySelector(".agent-document")!.addEventListener("wheel", (e) => seen.push((e as WheelEvent).deltaY), { capture: true });
+        s.wheel(120);
+        s.wheel(120);
+        expect(seen).toEqual([]);
+        s.wheel(120);
+        expect(seen).toEqual([120]);
+    });
+
+    it("keeps forwarding once the skid is spent (the relayed wheel does not reset it)", () => {
+        const s = setupPanel(atBottom);
+        for (let i = 0; i < 6; i++) s.wheel(120);
+        expect(s.pane()).toBe(1000 + 4 * 120);
+    });
+
     it("leaves a wheel alone when the panel has no transcript to hand it to", () => {
         const panel = makeBox(fits);
         document.body.appendChild(panel);
