@@ -184,8 +184,10 @@ export function applyLayoutAction(state: LayoutTreeState, action: LayoutTreeActi
 
 // ── Comparing with srv's tree ──────────────────────────────────────────────
 
-/** A node as plain JSON, sizes to 6 significant digits (srv stores f32), with
- *  absent and empty optional fields dropped. */
+/** A node as plain JSON, with absent and empty optional fields dropped. A size is taken as srv
+ *  stores it (single precision) and then to 6 significant digits: rounding the local double
+ *  straight to 6 digits disagreed with srv's copy of the same number for about 1 size in 80, so
+ *  a resize of several panes was now and then taken for a layout srv had changed. */
 function canonical(node: LayoutNode | undefined): unknown {
     if (!node) return null;
     const out: Record<string, unknown> = {};
@@ -195,7 +197,7 @@ function canonical(node: LayoutNode | undefined): unknown {
         if (key === "children") {
             if ((value as LayoutNode[]).length) out.children = (value as LayoutNode[]).map(canonical);
         } else if (key === "size") {
-            out.size = Number((value as number).toPrecision(6));
+            out.size = Number(Math.fround(value as number).toPrecision(6));
         } else if (key === "data") {
             const data: Record<string, unknown> = {};
             for (const k of Object.keys(value as object).sort()) {

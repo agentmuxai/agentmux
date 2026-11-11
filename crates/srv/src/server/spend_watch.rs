@@ -256,9 +256,12 @@ fn stop(state: &AppState, grant: &Grant, hit: &Hit, now: i64) {
     worker_notes::tell_leader(&state.mstore, &grant.def_id, &note);
 }
 
-/// What `Agents list` shows for an agent on a model route: what it has used today and its cap. `None` for an agent that is
-/// not on one.
+/// What `Agents list` shows for an agent on a model route: what it has used today and its cap. For an agent on the
+/// DeepSeek Harness, which uses its own key and reports no spend, that nothing is measured. `None` for any other.
 pub(crate) fn view(mstore: &crate::backend::storage::store::Store, defs: &[crate::backend::storage::AgentDefinition], def_id: &str) -> Option<Value> {
+    if defs.iter().any(|d| d.id == def_id && d.provider == "dsh") {
+        return Some(json!({ "measured": false, "why": "this harness bills the vendor account directly and reports no cost or tokens per call, so AgentMux counts nothing and a daily cap cannot apply; its ceiling is the account's balance" }));
+    }
     launch::choice_of(mstore, def_id)?;
     let slug = &defs.iter().find(|d| d.id == def_id)?.slug;
     let spent = spend::today(slug, agentmux_common::time::now_ms()).cost_usd;
@@ -321,6 +324,18 @@ mod tests {
     use super::*;
     use crate::agents::types::TokenCounts;
     use crate::backend::storage::store::Store;
+
+    #[test]
+    fn an_agent_on_the_deepseek_harness_is_listed_as_not_measured() {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("dsh-def", "dsh-agent", "dsh", "host", 1, "");
+        def.slug = "dsh-agent".to_string();
+        store.agent_def_insert(&mut def).unwrap();
+        let defs = store.agent_def_list().unwrap();
+        let shown = view(&store, &defs, "dsh-def").expect("a line saying so");
+        assert_eq!(shown["measured"], json!(false));
+        assert!(shown.get("spent_usd").is_none() && shown.get("cap_usd").is_none(), "no figure is made up");
+    }
 
     fn meta_of(entries: &[(&str, Value)]) -> obj::MetaMapType {
         entries.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()

@@ -89,7 +89,23 @@ fn compact_request(provider: &str, container: bool, focus: Option<&str>) -> Resu
         // container's turn would take "/compact" as a prompt.
         ("codex", true) => Err("unsupported: a Codex agent in a container can't compact yet"),
         ("codex", false) => Ok("/compact".to_string()),
+        _ if speaks_acp(provider) => Err("unsupported: this harness has no compaction AgentMux can start; call Agents fresh with a handoff to start a new session instead"),
         _ => Err("unsupported: only Claude and Codex agents can compact"),
+    }
+}
+
+/// Whether `provider` is an Agent Client Protocol harness (dsh, Gemini, Copilot, ...): every one can open a new session.
+fn speaks_acp(provider: &str) -> bool {
+    crate::backend::providers::get_provider(provider).is_some_and(|p| p.controller_type_str() == "acp")
+}
+
+/// Whether an agent of `provider` can start a fresh session, and why not.
+fn fresh_supported(provider: &str, container: bool) -> Result<(), &'static str> {
+    match (provider, container) {
+        (_, true) => Err("unsupported in containers"),
+        ("claude" | "codex", false) => Ok(()),
+        _ if speaks_acp(provider) => Ok(()),
+        _ => Err("unsupported: only Claude, Codex and ACP agents can start fresh"),
     }
 }
 
@@ -148,10 +164,8 @@ pub(crate) async fn handle_fresh_self(
     let Some((provider, container)) = provider_of(&state, &block_id) else {
         return refused("the pane can't be read");
     };
-    match (provider.as_str(), container) {
-        (_, true) => return refused("unsupported in containers"),
-        ("claude" | "codex", false) => {}
-        _ => return refused("unsupported: only Claude and Codex agents can start fresh"),
+    if let Err(why) = fresh_supported(&provider, container) {
+        return refused(why);
     }
     if let Err(why) = context_reading::schedule_compact(&block_id, agentmux_common::time::now_ms_u64()) {
         return refused(why);
@@ -182,9 +196,14 @@ const STOP_PENDING: &str = "the agent's process is already stopping or restartin
 
 /// End `block_id`'s provider session, so the next message starts a new one.
 fn end_session(block_id: &str) -> Result<(), &'static str> {
+    use crate::backend::blockcontroller::acp::AcpController;
     use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
     use crate::backend::blockcontroller::subprocess::SubprocessController;
     let ctrl = crate::backend::blockcontroller::get_controller(block_id).ok_or("no controller for the pane")?;
+    // An ACP pane: the process ends and its saved session id is forgotten, so the handoff opens a new session.
+    if let Some(acp) = ctrl.as_any().downcast_ref::<AcpController>() {
+        return acp.start_fresh_session().map(|_| ());
+    }
     // A Codex pane: one `exec` per turn, so ending the thread is forgetting its id.
     if let Some(codex) = ctrl.as_any().downcast_ref::<SubprocessController>() {
         return codex.start_fresh_session().map(|_| ());
@@ -314,7 +333,18 @@ mod tests {
         assert_eq!(compact_request("claude", true, Some("keep: PR #1")), compact_request("claude", false, Some("keep: PR #1")));
         assert_eq!(compact_request("codex", false, None), Ok("/compact".to_string()));
         assert!(compact_request("codex", true, None).is_err_and(|why| why.contains("container")));
-        assert!(compact_request("gemini", false, None).is_err());
+        assert!(compact_request("copilot", false, None).is_err_and(|why| why.contains("Agents fresh")), "an ACP harness is told what to do instead");
+        assert!(compact_request("dsh", false, None).is_err_and(|why| why.contains("no compaction AgentMux can start")));
+        assert!(compact_request("nonesuch", false, None).is_err_and(|why| why.contains("only Claude and Codex")));
+    }
+
+    #[test]
+    fn fresh_is_offered_to_claude_codex_and_every_acp_harness_but_not_in_a_container() {
+        for provider in ["claude", "codex", "dsh", "copilot"] {
+            assert_eq!(fresh_supported(provider, false), Ok(()), "{provider}");
+            assert_eq!(fresh_supported(provider, true), Err("unsupported in containers"), "{provider}");
+        }
+        assert!(fresh_supported("nonesuch", false).is_err_and(|why| why.contains("ACP")));
     }
 
     #[test]

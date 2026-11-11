@@ -123,7 +123,8 @@ vi.mock("@/app/store/focusManager", () => ({
     },
 }));
 
-function createLayoutModel(): LayoutModel {
+/** `measureContainer`: keep the model's own `getBoundingRect`, which measures the container given here. */
+function createLayoutModel(measureContainer?: () => { top: number; left: number; width: number; height: number }): LayoutModel {
     const [getTab] = createSignal<Tab>({
         otype: "tab",
         oid: "tab-1",
@@ -134,6 +135,10 @@ function createLayoutModel(): LayoutModel {
         blockids: [],
     });
     const model = new LayoutModel(getTab);
+    if (measureContainer) {
+        model.displayContainerRef.current = { getBoundingClientRect: measureContainer } as any;
+        return model;
+    }
     model.getBoundingRect = () => ({
         top: 0,
         left: 0,
@@ -948,6 +953,36 @@ describe("resize through collapsed panes", () => {
             expect(results[0]).not.toBe("[]");
             expect(results[1]).toBe(results[0]);
         }
+    });
+
+    it("a splitter drag measures the container once, not on every move", () => {
+        const measured = { count: 0 };
+        const box = { width: 800, height: 600 };
+        const model = createLayoutModel(() => {
+            measured.count++;
+            return { top: 0, left: 0, ...box };
+        });
+        const A = leaf("A"), B = leaf("B");
+        const root = newLayoutNode(FlexDirection.Column, 10, [A, B]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+        const [h] = handlesOf(model, root.id);
+
+        measured.count = 0;
+        for (const dy of [10, 20, 30, 40]) model.onResizeMove(h, 100, h.centerPx + dy);
+        expect(measured.count).toBe(1); // when the drag began
+
+        // The container changes size mid-drag: the drag takes the new measure, and the layout uses it.
+        box.height = 500;
+        model.onContainerResize(undefined, { borderBoxSize: [{ inlineSize: 800, blockSize: 500 }] } as any);
+        measured.count = 0;
+        model.onResizeMove(h, 100, h.centerPx + 50);
+        expect(measured.count).toBe(0);
+        const rects = Object.values(model.additionalProps()).map((p) => p.rect).filter(Boolean);
+        expect(Math.max(...rects.map((r) => r!.top + r!.height))).toBeLessThanOrEqual(500);
+
+        model.onResizeEnd();
+        expect(measured.count).toBeGreaterThan(0); // after the drag the container is read as before
     });
 
     it("a chip's grab zones stop a third of the way in, so its middle stays clickable", () => {

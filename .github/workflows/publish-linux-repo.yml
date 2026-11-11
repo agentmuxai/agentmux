@@ -122,6 +122,7 @@ jobs:
 
       - name: Tools
         shell: bash
+        timeout-minutes: 20
         run: |
           bash scripts/ci-apt.sh update --strict
           bash scripts/ci-apt.sh install -y -qq --no-install-recommends gnupg apt-utils xz-utils createrepo-c rpm

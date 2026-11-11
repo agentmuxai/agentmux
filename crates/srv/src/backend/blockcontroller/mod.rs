@@ -22,6 +22,7 @@ pub mod core;
 pub mod durable_mode;
 pub mod durable_ssh;
 pub mod health;
+mod loop_stop;
 pub mod msp;
 mod msp_protocol;
 mod msp_session;

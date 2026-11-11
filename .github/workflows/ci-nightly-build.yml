@@ -214,6 +214,7 @@ jobs:
         run: choco install ninja -y
       - name: Install build deps (Linux — CEF + launcher Wayland/GTK)
         if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 20
         run: |
           # The runner image ships a google-chrome apt source we install nothing
           # from; a corrupt index there exits apt 100 and takes the whole Linux

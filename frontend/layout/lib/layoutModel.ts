@@ -748,8 +748,18 @@ export class LayoutModel {
     private observedContainerSize: Dimensions | undefined = undefined;
 
     getBoundingRect: () => Dimensions = () => {
-        return this.observedContainerSize ?? getBoundingRectImpl(this);
+        return this.observedContainerSize ?? this.splitterDragContainerSize() ?? getBoundingRectImpl(this);
     };
+
+    /**
+     * The container's size as measured when the splitter drag in progress began. A drag does not
+     * change the container, and measuring it again after each move's layout writes laid the whole
+     * page out on every pointer move (about 25 ms a move in a window of many panes).
+     */
+    private splitterDragContainerSize(): Dimensions | undefined {
+        const rect = this.resizeContext?.displayContainerRect;
+        return rect ? { top: 0, left: 0, width: rect.width, height: rect.height } : undefined;
+    }
 
     /**
      * The id of the focused node in the layout.
@@ -987,6 +997,10 @@ export class LayoutModel {
     onContainerResize = (_rect?: DOMRectReadOnly, entry?: ResizeObserverEntry) => {
         const box = entry?.borderBoxSize?.[0];
         this.observedContainerSize = box ? { top: 0, left: 0, width: box.inlineSize, height: box.blockSize } : undefined;
+        // The container changed size in the middle of a splitter drag: the drag goes on from the new measure.
+        if (this.resizeContext && this.displayContainerRef.current) {
+            this.resizeContext.displayContainerRect = this.displayContainerRef.current.getBoundingClientRect();
+        }
         try {
             onContainerResizeImpl(this);
         } finally {

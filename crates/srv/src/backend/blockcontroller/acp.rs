@@ -364,6 +364,23 @@ impl AcpController {
         inner.stdin_tx.is_some()
     }
 
+    /// Ends the agent's session so the next message opens a new one (`Agents fresh`): the process is stopped and the
+    /// pane's saved session id forgotten, so the launch that follows sends `session/new` and not `session/resume`.
+    /// Only between turns. Returns the old session id.
+    pub(crate) fn start_fresh_session(&self) -> Result<Option<String>, &'static str> {
+        let old = {
+            let mut inner = self.inner.lock().unwrap();
+            if self.health_monitor.is_active_turn() {
+                return Err("a turn is running");
+            }
+            inner.resume_session_id = None;
+            inner.session_id.take()
+        };
+        core::persist_session_id(&self.block_id, "", &self.mstore, &self.event_bus);
+        self.stop(true, STATUS_DONE).map_err(|_| "the agent's process could not be stopped")?;
+        Ok(old)
+    }
+
     /// Build a JSON-RPC 2.0 request.
     fn make_request(&self, method: &str, params: serde_json::Value) -> String {
         let id = self.next_id();
