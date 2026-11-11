@@ -400,51 +400,9 @@ describe("minimized panes are untargetable by tree mutations", () => {
 
 // ── Legacy migration ─────────────────────────────────────────────────────────
 
-describe("legacy state migration (rebuildMinimizedSet)", () => {
-    it("migrates a size-squeezed legacy pane: size restored, flag set, markers cleared", () => {
-        const { root, paneA1, paneA2 } = buildTwoColumnLayout();
-        paneA1.minimizedSize = PANE_SIZE; // legacy: original size recorded...
-        paneA1.size = HeaderHeightPx; // ...while size was squeezed
-        paneA1.minimizedLockedSize = HeaderHeightPx;
-        const model = makeMockModel(root);
-
-        rebuildMinimizedSet(model as any);
-
-        expect(paneA1.minimized).toBe(true);
-        expect(paneA1.size).toBe(PANE_SIZE);
-        expect(paneA1.minimizedSize).toBeUndefined();
-        expect(paneA1.minimizedLockedSize).toBeUndefined();
-        expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
-        expect(model.getMinimizedSet().has(paneA2.id)).toBe(false);
-    });
-
-    it("migrates slip/dissolve bookkeeping: sizes healed to a sane share of the CURRENT parent", () => {
-        // Flex sizes are relative within a parent. A slipped/dissolved node
-        // lives nested in its slip/dissolve TARGET — restoring the recorded
-        // originalRowSize (a weight from a DIFFERENT unit space) would give it
-        // a wildly wrong proportion; the migration heals to the mean of its
-        // current siblings instead (reagent P1, round 3).
-        const { root, colA, paneA1, paneA2, colB } = buildTwoColumnLayout();
-        paneA1.slipMinimize = { targetColumnId: colA.id, originalRowSize: 9999, originalRowIndex: 0, targetWasLeaf: true };
-        paneA1.size = 2.2; // slip-era squeezed size
-        paneA2.size = 300; // paneA1's current sibling in colA
-        colA.columnDissolve = { targetColumnId: "x", originalRowSize: 9999, originalRowIndex: 0, targetWasLeaf: false };
-        colA.size = -0.0039; // the cascade-bug corruption: stolen-total gone negative
-        root._slipAnchor = true;
-        const model = makeMockModel(root);
-
-        rebuildMinimizedSet(model as any);
-
-        expect(paneA1.minimized).toBe(true);
-        expect(paneA1.slipMinimize).toBeUndefined();
-        expect(paneA1.size).toBe(300); // mean of current siblings, NOT the alien 9999
-        expect(colA.columnDissolve).toBeUndefined();
-        expect(colA.size).toBe(colB.size); // sane share among root siblings — heals the negative
-        expect(colA.minimized).toBeUndefined(); // branch never gets the flag
-        expect(root._slipAnchor).toBeUndefined();
-        expect(model.getMinimizedSet().has(paneA1.id)).toBe(true);
-    });
-
+// The conversion of the legacy minimize fields is srv's (`migrate_legacy_minimize`, tested in
+// crates/srv/src/backend/layout/intent/tests.rs); the window only seeds its set from the flags.
+describe("rebuildMinimizedSet", () => {
     it("rebuilds the set from existing flags without touching anything", () => {
         const { root, paneA2 } = buildTwoColumnLayout();
         paneA2.minimized = true;

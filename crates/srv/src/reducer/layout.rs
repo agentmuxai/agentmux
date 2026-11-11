@@ -12,6 +12,14 @@ pub(super) use intent::handle_layout_apply_intent;
 #[allow(unused_imports)]
 pub(crate) use intent::RECENT_INTENTS;
 
+/// A tree srv seeds wholesale (a restored session's saved layout) can carry the pre-display-mode
+/// minimize fields; the window converts nothing, so they are converted here.
+fn migrate_seeded_tree(root: &mut Option<agentmux_common::LayoutNode>) {
+    if let Some(root) = root.as_mut() {
+        crate::backend::layout::intent::migrate_legacy_minimize(root);
+    }
+}
+
 /// Phase E.4 (Option A) — set the focused layout-node id on a tab.
 /// Errors (non-fatal) if the tab is unknown to the reducer; no-op
 /// short-circuit when the value is already current. Empty `node_id`
@@ -111,6 +119,7 @@ pub(super) fn handle_layout_set_tree(
     // what gets persisted matches what the reducer actually holds — a
     // pruned `tab.rootnode` with a stale `new_tree` in the emitted event
     // would just move the divergence downstream instead of closing it.
+    migrate_seeded_tree(&mut tab.rootnode);
     let pruned = crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &live_blocks);
     if pruned > 0 {
         clear_dangling_focus_magnify(tab);

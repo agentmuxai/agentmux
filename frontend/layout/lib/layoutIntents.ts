@@ -19,7 +19,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { LayoutIntent } from "@/types/rpc/LayoutIntent";
 import { healDuplicateBlocks } from "./layoutDuplicates";
 import { balanceNode, findNode, findNodeByBlockId } from "./layoutNode";
-import { migrateLegacyMinimize, rebuildMinimizedSet } from "./layoutMinimize";
+import { rebuildMinimizedSet } from "./layoutMinimize";
 import { copyLayoutNode, sameLayoutTree } from "./layoutIntentActions";
 import type { LayoutNode } from "./types";
 import type { LayoutModel } from "./layoutModel";
@@ -148,7 +148,6 @@ export function reconcileWithStoredLayout(model: LayoutModel): void {
     // not be), so only a real difference counts.
     let stored = row.rootnode ? copyLayoutNode(row.rootnode as LayoutNode) : undefined;
     try {
-        migrateLegacyMinimize(stored);
         // A row that holds one block twice shows its first holder only.
         const healed = healDuplicateBlocks(stored);
         if (healed.length) console.warn("[layout] srv's stored layout held a block twice; showing it once", healed);
