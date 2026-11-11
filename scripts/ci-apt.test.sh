@@ -23,10 +23,11 @@ cat > "$BIN/sudo" <<'EOF'
 if [ "$1" = tee ]; then exec tee "$STUB_DIR/aptconf"; fi
 exec "$@"
 EOF
-# timeout runs the command, or reports 124 for the first N calls.
+# timeout runs the command, or reports 124 for the first N calls to anything but getent.
 cat > "$BIN/timeout" <<'EOF'
 #!/usr/bin/env bash
 shift
+if [ "$1" = getent ]; then exec "$@"; fi
 n=$(cat "$STUB_DIR/timeout-calls" 2>/dev/null || echo 0)
 echo $((n + 1)) > "$STUB_DIR/timeout-calls"
 if [ "$n" -lt "${STUB_TIMEOUTS:-0}" ]; then exit 124; fi
@@ -55,12 +56,20 @@ cat > "$BIN/getent" <<'EOF'
 #!/usr/bin/env bash
 n=$(cat "$STUB_DIR/getent-calls" 2>/dev/null || echo 0)
 echo $((n + 1)) > "$STUB_DIR/getent-calls"
+# A dead resolver holds each lookup for a while (STUB_GETENT_COST seconds on the clock).
+echo $(( $(cat "$STUB_DIR/clock" 2>/dev/null || echo 1000) + ${STUB_GETENT_COST:-0} )) > "$STUB_DIR/clock"
 if [ "$n" -lt "${STUB_DNS_DOWN:-0}" ]; then exit 2; fi
 echo "203.0.113.7 $2"
 EOF
+# A clock that only sleep moves, so waits and budgets are measured without waiting.
 cat > "$BIN/sleep" <<'EOF'
 #!/usr/bin/env bash
 echo "$1" >> "$STUB_DIR/sleeps"
+echo $(( $(cat "$STUB_DIR/clock" 2>/dev/null || echo 1000) + $1 )) > "$STUB_DIR/clock"
+EOF
+cat > "$BIN/date" <<'EOF'
+#!/usr/bin/env bash
+cat "$STUB_DIR/clock" 2>/dev/null || echo 1000
 EOF
 chmod +x "$BIN"/*
 
@@ -134,6 +143,9 @@ check "update: no resolution after CI_APT_DNS_WAIT fails at once, without callin
 
 run STUB_DNS_DOWN=999 APT_INSTALL_SEQ="ok" -- install -y libfoo-dev
 check "install: the same, and no install is tried" "$([ $got = 1 ] && [ "$(calls install)" = 0 ]; echo $?)" "exit $got, installs $(calls install): $out"
+
+run STUB_DNS_DOWN=999 STUB_GETENT_COST=20 CI_APT_DNS_WAIT=60 APT_UPDATE_SEQ="ok" -- update
+check "the wait counts real time, not polls: slow lookups use it up sooner" "$([ $got = 1 ] && [ "$(wc -l < "$dir/sleeps")" = 2 ]; echo $?)" "exit $got, sleeps: $(paste -sd, "$dir/sleeps")"
 
 run STUB_DNS_DOWN=999 CI_APT_DNS_WAIT=0 APT_UPDATE_SEQ="ok" -- update
 check "CI_APT_DNS_WAIT=0 skips the resolution check" "$([ $got = 0 ] && [ "$(calls update)" = 1 ]; echo $?)" "exit $got: $out"

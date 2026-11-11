@@ -9,7 +9,7 @@
 #
 # Three layers, because one apt run with its defaults spent 11 minutes on a dead resolver and then failed:
 #   1. apt's own retries and a short per-file timeout (/etc/apt/apt.conf.d/80-ci-retries);
-#   2. a wait for the Ubuntu archive hosts to resolve before anything else (CI_APT_DNS_WAIT, 300 s; 0 skips the
+#   2. a wait for the Ubuntu archive hosts to resolve before anything else (CI_APT_DNS_WAIT, 180 s; 0 skips the
 #      check). A short outage costs a pause, not three timed-out attempts; a longer one fails the step right there
 #      with the resolver state printed, instead of 11 minutes later;
 #   3. the whole command again, up to CI_APT_ATTEMPTS (3) times with a growing pause, each attempt bounded by
@@ -25,7 +25,7 @@ set -uo pipefail
 
 ATTEMPTS=${CI_APT_ATTEMPTS:-3}
 PAUSE=${CI_APT_PAUSE:-45}
-DNS_WAIT=${CI_APT_DNS_WAIT:-300}
+DNS_WAIT=${CI_APT_DNS_WAIT:-180}
 UPDATE_LIMIT=${CI_APT_UPDATE_LIMIT:-180}
 INSTALL_LIMIT=${CI_APT_INSTALL_LIMIT:-300}
 BUDGET=${CI_APT_BUDGET:-600}
@@ -34,6 +34,7 @@ HOSTS="archive.ubuntu.com security.ubuntu.com"
 UBUNTU_FAILED='^(E|Err):.*(archive\.ubuntu\.com|security\.ubuntu\.com)|^W: Failed to fetch.*(archive\.ubuntu\.com|security\.ubuntu\.com)'
 
 log() { echo "ci-apt: $*"; }
+now() { date +%s; }
 
 configure() {
     printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' \
@@ -42,22 +43,24 @@ configure() {
 
 resolves() {
     local h
-    for h in $HOSTS; do getent hosts "$h" >/dev/null 2>&1 || return 1; done
+    # A dead resolver holds getent for about 20 s; bound it, so the wait below measures real time.
+    for h in $HOSTS; do timeout 5 getent hosts "$h" >/dev/null 2>&1 || return 1; done
 }
 
 # 0 when the Ubuntu archive hosts resolve (waiting up to DNS_WAIT for them to), 1 when they never did.
 wait_for_dns() {
     [ "$DNS_WAIT" -gt 0 ] || return 0
-    local waited=0 h
+    local started waited=0 h
+    started=$(now)
     while ! resolves; do
+        waited=$(($(now) - started))
         if [ "$waited" -ge "$DNS_WAIT" ]; then
             echo "::error::the Ubuntu archive hosts still do not resolve after ${waited}s: this runner has no name resolution for apt"
-            { grep -v '^#' /etc/resolv.conf 2>/dev/null | head -5; for h in $HOSTS; do getent hosts "$h" || echo "no answer for $h"; done; } | sed 's/^/ci-apt:   /'
+            { grep -v '^#' /etc/resolv.conf 2>/dev/null | head -5; for h in $HOSTS; do timeout 5 getent hosts "$h" || echo "no answer for $h"; done; } | sed 's/^/ci-apt:   /'
             return 1
         fi
         log "the Ubuntu archive hosts do not resolve yet; waiting (${waited}s of ${DNS_WAIT}s)"
         sleep 15
-        waited=$((waited + 15))
     done
 }
 
@@ -65,7 +68,7 @@ wait_for_dns() {
 may_try() {
     local next=$1 started=$2
     [ "$next" -le "$ATTEMPTS" ] || return 1
-    if [ $((SECONDS - started + PAUSE * (next - 1))) -ge "$BUDGET" ]; then
+    if [ $(($(now) - started + PAUSE * (next - 1))) -ge "$BUDGET" ]; then
         log "not trying again: the ${BUDGET}s budget for this call is used up"
         return 1
     fi
@@ -91,7 +94,8 @@ cmd_update() {
     [ "${1:-}" != "--strict" ] || strict=1
     configure
     wait_for_dns || return 1
-    local out started=$SECONDS n=1
+    local out started n=1
+    started=$(now)
     out=$(mktemp)
     while :; do
         if update_once "$out"; then return 0; fi
@@ -110,7 +114,8 @@ cmd_install() {
     [ "$#" -gt 0 ] || { echo "usage: ci-apt.sh install <apt-get install arguments...>" >&2; return 2; }
     configure
     wait_for_dns || return 1
-    local started=$SECONDS n=1
+    local started n=1
+    started=$(now)
     while :; do
         sudo timeout "$INSTALL_LIMIT" apt-get install "$@" && return 0
         n=$((n + 1))
