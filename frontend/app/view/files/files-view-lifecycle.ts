@@ -8,13 +8,11 @@
  */
 
 import { createEffect, on, onCleanup, onMount } from "solid-js";
-import { trackAgentFocus } from "./files-agent-mention";
 import type { FilesLocal } from "./files-view-state";
 
 export function useFilesLifecycle(fv: FilesLocal): void {
     const { model, ctx, refs, setViewHeight, setViewWidth, setScrollTop } = fv;
 
-    trackAgentFocus();
     model.focusList = () => refs.list?.focus();
     onCleanup(() => (model.focusList = null));
 

@@ -162,7 +162,6 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "files:cut", label: "Cut", category: "Files", pane: "files", mac: ["meta+x"], other: ["ctrl+x"] },
     { command: "files:paste", label: "Paste", category: "Files", pane: "files", mac: ["meta+v"], other: ["ctrl+v"] },
     { command: "files:undo", label: "Undo", category: "Files", pane: "files", mac: ["meta+z"], other: ["ctrl+z"] },
-    { command: "files:mention", label: "Mention in agent", category: "Files", pane: "files", mac: ["alt+k"], other: ["alt+k"] },
 
     // ── Dev builds ──
     { command: "dev:perfHud", label: "Performance HUD", category: "General", mac: ["meta+alt+shift+p"], other: ["ctrl+alt+shift+p"], skipShell: true, devOnly: true },

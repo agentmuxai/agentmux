@@ -55,6 +55,7 @@ let platform: "win" | "mac" | "linux" = "win";
 vi.mock("@/util/platformutil", () => ({
     isMacOS: () => platform === "mac",
     isLinux: () => platform === "linux",
+    isWindows: () => platform === "win",
 }));
 
 import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
@@ -179,9 +180,9 @@ describe("HostPopoverPanel — Instance row and Data-path link", () => {
     });
 
     it.each([
-        ["win", "Show in File Explorer"],
+        ["win", "Reveal in File Explorer"],
         ["mac", "Reveal in Finder"],
-        ["linux", "Open in file manager"],
+        ["linux", "Reveal in file manager"],
     ] as const)("tooltip on %s names the action (the path itself is shown in full)", (os, label) => {
         platform = os;
         renderPanel();

@@ -2,7 +2,7 @@ tiles: ["src","a.md","b.txt","pic.png","run.exe"] grid=true rows=false
 selection={"names":["a.md"],"focus":"a.md","anchor":"a.md"}
 openInEditor(/home/a/a.md)
 buildRowMenu(pic.png, openEntry,openInNewTab,copyPaths,askDeletePermanently)
-contextmenu notPrevented=false menu=["Open","Open in Editor","Open with default app","Reveal in file manager","Mention in agent","Cut","Copy","Copy path","Rename","Move to Trash","Delete permanently…"]
+contextmenu notPrevented=false menu=["Open","Open in Editor","Open with default app","Reveal in file manager","Cut","Copy","Copy path","Rename","Move to Trash","Delete permanently…"]
 beginPathDrag(["/home/a/pic.png"], b1)
 dragstart notPrevented=true
 drop target: 1

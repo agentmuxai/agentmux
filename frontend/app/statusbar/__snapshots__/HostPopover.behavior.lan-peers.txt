@@ -24,7 +24,7 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
     <div class="status-bar-popover-row">
       <span class="status-bar-popover-label">
         "Data"
-      <button style="font-size: 0.85em;" data-tip="Show in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
+      <button style="font-size: 0.85em;" data-tip="Reveal in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
         "C:\Users\me\.agentmux\channels\stable\data"
     <div class="status-bar-popover-divider">
     <div class="status-bar-popover-row">
@@ -90,7 +90,7 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
     <div class="status-bar-popover-row">
       <span class="status-bar-popover-label">
         "Data"
-      <button style="font-size: 0.85em;" data-tip="Show in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
+      <button style="font-size: 0.85em;" data-tip="Reveal in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
         "C:\Users\me\.agentmux\channels\stable\data"
     <div class="status-bar-popover-divider">
     <div class="status-bar-popover-row">
@@ -160,7 +160,7 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
     <div class="status-bar-popover-row">
       <span class="status-bar-popover-label">
         "Data"
-      <button style="font-size: 0.85em;" data-tip="Show in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
+      <button style="font-size: 0.85em;" data-tip="Reveal in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
         "C:\Users\me\.agentmux\channels\stable\data"
     <div class="status-bar-popover-divider">
     <div class="status-bar-popover-row">
@@ -231,7 +231,7 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
     <div class="status-bar-popover-row">
       <span class="status-bar-popover-label">
         "Data"
-      <button style="font-size: 0.85em;" data-tip="Show in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
+      <button style="font-size: 0.85em;" data-tip="Reveal in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
         "C:\Users\me\.agentmux\channels\stable\data"
     <div class="status-bar-popover-divider">
     <div class="status-bar-popover-row">
@@ -294,7 +294,7 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
     <div class="status-bar-popover-row">
       <span class="status-bar-popover-label">
         "Data"
-      <button style="font-size: 0.85em;" data-tip="Show in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
+      <button style="font-size: 0.85em;" data-tip="Reveal in File Explorer" type="button" class="ui-button ui-tone-quiet ui-button--link status-bar-popover-mono status-bar-popover-link">
         "C:\Users\me\.agentmux\channels\stable\data"
     <div class="status-bar-popover-divider">
     <div class="status-bar-popover-row">
