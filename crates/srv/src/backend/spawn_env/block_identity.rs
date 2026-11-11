@@ -92,14 +92,23 @@ pub(crate) fn carry_agent_workdir_env(
     block_meta: &crate::backend::obj::MetaMapType,
 ) {
     const KEY: &str = "AGENTMUX_AGENT_WORKDIR";
+    // The MCP config to diagnose, resolved here where srv knows the data root and the cwd. A
+    // pane strips the instance variables the doctor would otherwise need (#47385).
+    const CONFIG_KEY: &str = "AGENTMUX_MCP_CONFIG";
     let agent_mode = crate::backend::obj::meta_get_string(block_meta, "agentMode", "host");
     let work_dir = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
     if crate::backend::operator_config_seed::agent_kind(&agent_mode) == "host" && !work_dir.trim().is_empty() {
         let expanded = crate::backend::blockcontroller::core::expand_home_dir(&work_dir);
         let absolute = std::path::absolute(&expanded).map_or(expanded, |p| p.to_string_lossy().into_owned());
+        env_vars.insert(
+            CONFIG_KEY.to_string(),
+            crate::backend::mcp_config_file::config_path(&absolute).to_string_lossy().into_owned(),
+        );
         env_vars.insert(KEY.to_string(), absolute);
     } else {
         env_vars.remove(KEY);
+        // A container's doctor uses the bind-mounted path (`container_config_path`), not a host path.
+        env_vars.remove(CONFIG_KEY);
     }
 }
 

@@ -62,9 +62,22 @@ fn owned_roots() -> Vec<PathBuf> {
     roots
 }
 
+/// `path` made absolute against the process's current directory, exactly as srv resolves a
+/// relative `cmd:cwd` (and ACP/MSP's `session_cwd` does). A relative working directory must hash
+/// the same on the write and the read path (#47392).
+fn absolutize(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// Whether `work_dir` is AgentMux's own folder, where the config belongs in it.
 pub fn is_agent_owned_workdir(work_dir: &Path) -> bool {
-    owned_roots().iter().any(|root| is_within(work_dir, root))
+    let work_dir = absolutize(work_dir);
+    owned_roots().iter().any(|root| is_within(&work_dir, root))
 }
 
 /// Expand a leading `~` against the real home. srv has its own expander (it also honours the
@@ -92,13 +105,15 @@ pub fn workdir_key(expanded: &Path) -> String {
 }
 
 /// The folder holding `expanded`'s relocated config, or `None` when the folder is AgentMux's
-/// own (the file belongs in the working directory itself).
+/// own (the file belongs in the working directory itself). A relative path is resolved first, so
+/// both the writer and ACP/MSP's `session_cwd` key the same folder.
 pub fn relocated_dir_for(expanded: &Path) -> Option<PathBuf> {
-    if is_agent_owned_workdir(expanded) {
+    let expanded = absolutize(expanded);
+    if is_agent_owned_workdir(&expanded) {
         return None;
     }
     let root = crate::data_paths::agentmux_root().ok()?;
-    Some(root.join("mcp").join(workdir_key(expanded)))
+    Some(root.join("mcp").join(workdir_key(&expanded)))
 }
 
 /// The relocated config for an expanded working directory, or `None` when the file belongs in
@@ -110,7 +125,8 @@ pub fn relocated_path_for(expanded: &Path) -> Option<PathBuf> {
 /// Where this agent's MCP config is: in its working directory when AgentMux owns the folder,
 /// else under the data root.
 pub fn config_path_for(expanded: &Path) -> PathBuf {
-    relocated_path_for(expanded).unwrap_or_else(|| expanded.join(MCP_JSON))
+    let expanded = absolutize(expanded);
+    relocated_path_for(&expanded).unwrap_or_else(|| expanded.join(MCP_JSON))
 }
 
 /// The config's path inside a container, where its folder is mounted.
@@ -163,5 +179,18 @@ mod tests {
         let home = dirs::home_dir().unwrap();
         assert_eq!(expand_home(Path::new("~/work")), home.join("work"));
         assert_eq!(expand_home(Path::new("/already/absolute")), Path::new("/already/absolute"));
+    }
+
+    /// #47392: the writer gets `cmd:cwd` as written; ACP/MSP resolve a relative one against the
+    /// server's cwd before asking. Both must key the same folder.
+    #[test]
+    fn a_relative_workdir_resolves_like_the_absolute_one() {
+        let cwd = std::env::current_dir().unwrap();
+        let relative = Path::new("agentmux-relative-test-project");
+        let absolute = cwd.join(relative);
+        assert_eq!(relocated_dir_for(relative), relocated_dir_for(&absolute));
+        assert_eq!(relocated_path_for(relative), relocated_path_for(&absolute));
+        assert_eq!(config_path_for(relative), config_path_for(&absolute));
+        assert_eq!(is_agent_owned_workdir(relative), is_agent_owned_workdir(&absolute));
     }
 }
