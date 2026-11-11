@@ -18,7 +18,7 @@
  * Nothing here touches the tree or the layout's own rects: they stay the drag's hit-test snapshot
  * (placementPreview.ts), and the commit on drop stays the one tree write. Terminals hold their grid until the
  * drag ends (pane-size-hold.ts). A browser pane is a native window that neither a transform nor a clip
- * moves, so it is left where it is for now. Behind the `layout:livereflow` setting.
+ * moves, so it is left where it is for now. On unless the `layout:livereflow` setting is false.
  * docs/specs/SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md §4, §5, §6;
  * docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md.
  */
@@ -53,6 +53,8 @@ export interface ReflowEntry {
     box: BoxSize;
     /** The dragged pane, in its landing rect: the drop's own preview, so not blurred as a dragged tile otherwise is. */
     moved: boolean;
+    /** The dragged pane while a tear-off is shown (tearOffPreview.ts): it has left the layout, so it is not shown. */
+    leaving: boolean;
 }
 
 /** With more panes than this the layout does not reflow: nothing moves until the drop (§5). */
@@ -151,8 +153,8 @@ export function landingRectOf(model: Pick<LayoutModel, "futureLayout">): Dimensi
 
 interface Targets {
     /** Per tile: the rect it shows (`shownPx`), the size it is laid out at for it (`wholePx`), whether it is the dragged one. */
-    byId: Map<string, { rect: Dimensions; size: BoxSize; moved: boolean }>;
-    /** Whether a drop is armed: the tiles show it, not their own layout. */
+    byId: Map<string, { rect: Dimensions; size: BoxSize; moved: boolean; leaving: boolean }>;
+    /** Whether a drop is armed, or a tear-off shown: the tiles show it, not their own layout. */
     showing: boolean;
 }
 
@@ -167,7 +169,7 @@ function sameTargets(a: Targets | undefined, b: Targets | undefined): boolean {
     if (a.showing !== b.showing || a.byId.size !== b.byId.size) return false;
     for (const [id, x] of a.byId) {
         const y = b.byId.get(id);
-        if (!y || x.moved !== y.moved) return false;
+        if (!y || x.moved !== y.moved || x.leaving !== y.leaving) return false;
         const [p, q] = [x.rect, y.rect];
         if (p.left !== q.left || p.top !== q.top || p.width !== q.width || p.height !== q.height) return false;
         if (x.size.width !== y.size.width || x.size.height !== y.size.height) return false;
@@ -187,7 +189,8 @@ function onNextFrame(fn: () => void): () => void {
 
 /** The reflow entries for a drag of `model`, kept in the model's reactive owner. */
 export function createLiveReflow(model: LayoutModel): LiveReflow {
-    const enabled = getSettingsKeyAtom("layout:livereflow");
+    const setting = getSettingsKeyAtom("layout:livereflow");
+    const enabled = () => setting() !== false;
 
     // Where each tile goes. While a drag is live every pane the reflow can move has a target, even when no
     // candidate is armed (then it is its own layout rect), so a tile's transition stays on from the drag's
@@ -195,11 +198,15 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
     // shown while the dragged pane's picture is still being taken (a capture of the window, which must show
     // the pane as it stood, pane-capture-gate.ts), but each tile has its entry at rest by then: the first
     // candidate's clip glides from the resting one, where from no clip at all it would jump.
+    // A tear-off is shown through the release, until the tree lets the pane go, so the drag being over does
+    // not end it (tearOffPreview.ts).
     const targets = createMemo((): Targets | undefined => {
-        if (!enabled() || !model.activeDrag()) return undefined;
+        if (!enabled()) return undefined;
+        const tearOff = model.tearOffLayout();
+        if (!model.activeDrag() && !tearOff) return undefined;
         const leafs = model.leafs();
         if (leafs.length > REFLOW_MAX_PANES) return undefined;
-        const future = paneCaptureInFlight() ? undefined : model.futureLayout();
+        const future = paneCaptureInFlight() ? undefined : (model.futureLayout() ?? tearOff);
         const current = model.additionalProps();
         const futureRectOfBlock = new Map<string, Dimensions>();
         for (const id of future?.leafIds ?? []) {
@@ -215,7 +222,8 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
             const moved = !!future && leaf.id === future.movedId;
             const to = moved ? future!.rects[leaf.id] : leaf.data?.blockId ? futureRectOfBlock.get(leaf.data.blockId) : undefined;
             const { width, height } = wholePx(to ?? from);
-            byId.set(leaf.id, { rect: shownPx(to ?? from), size: { width, height }, moved: moved && !!to });
+            const leaving = moved && !!future!.leaves;
+            byId.set(leaf.id, { rect: shownPx(to ?? from), size: { width, height }, moved: moved && !!to, leaving });
         }
         return { byId, showing: !!future && byId.size > 0 };
     }, undefined, { equals: sameTargets });
@@ -258,7 +266,7 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
             // What the tile is laid out at now: its box from the previous target, or its own layout size.
             const laidOut = before.get(id)?.box ?? wholePx(current[id].rect);
             const box = done ? target.size : envelope(laidOut, target.size);
-            out.set(id, { rect: target.rect, box, moved: target.moved });
+            out.set(id, { rect: target.rect, box, moved: target.moved, leaving: target.leaving });
         }
         return out;
     }, new Map());

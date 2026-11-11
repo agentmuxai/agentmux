@@ -14,18 +14,22 @@ import { applyLayoutAction, copyLayoutNode } from "./layoutIntentActions";
 import { computeNodeRects } from "./layoutGeometry";
 import { withDerivedNodeIds } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
+import { createTearOffPreview } from "./tearOffPreview";
 import {
     LayoutTreeActionType,
     type LayoutNode,
     type LayoutTreeAction,
+    type LayoutTreeDeleteNodeAction,
     type LayoutTreeMoveNodeAction,
     type LayoutTreeSwapNodeAction,
 } from "./types";
 
 /** The layout a pending move leaves: every pane's rect, and which one is the moved pane. */
 export interface FutureLayout {
-    /** The id of the moved pane in the resulting tree. */
+    /** The id of the moved pane in the resulting tree, or of the pane that left it (`leaves`). */
     movedId: string;
+    /** Set when the pane leaves the layout (a tear-off): it has no rect in the result. */
+    leaves?: true;
     /** The rect of every node of the resulting tree, by node id. */
     rects: Record<string, Dimensions>;
     /** The ids of the resulting tree's panes (its leaves). */
@@ -61,26 +65,46 @@ export function futureLayoutOf(model: LayoutModel, action: LayoutTreeAction | un
     const root = model.treeState.rootNode;
     if (!action || !movedId || !root) return undefined;
     try {
-        const copy = copyLayoutNode(root);
-        const state = { ...model.treeState, rootNode: copy };
-        // Names the branches the move creates, as a drop does (they do not change any rect).
         // A moved node that is not in the tree (a tab pill's stand-in) is inserted as a copy.
         const run: LayoutTreeAction =
             action.type === LayoutTreeActionType.Move
                 ? { ...action, node: copyLayoutNode((action as LayoutTreeMoveNodeAction).node) } as LayoutTreeMoveNodeAction
                 : action;
-        withDerivedNodeIds("preview", () => applyLayoutAction(state, run));
-        const rects = computeNodeRects(model, state.rootNode);
-        if (!rects[movedId]) return undefined;
-        const leaves = leavesOf(state.rootNode);
-        return {
-            movedId,
-            rects,
-            leafIds: leaves.map((n) => n.id),
-            leafBlockIds: Object.fromEntries(leaves.map((n) => [n.id, n.data?.blockId])),
-        };
+        const after = laidOutAfter(model, root, run);
+        return after?.rects[movedId] ? { movedId, ...after } : undefined;
     } catch (e) {
         console.warn("[layout] the drop preview could not be computed; falling back to the static ghost", e);
+        return undefined;
+    }
+}
+
+/** `action` run on a copy of the tree, and the copy laid out; none when it leaves no pane. */
+function laidOutAfter(model: LayoutModel, root: LayoutNode, action: LayoutTreeAction): Omit<FutureLayout, "movedId"> | undefined {
+    const state = { ...model.treeState, rootNode: copyLayoutNode(root) };
+    // Names the branches the action creates, as a drop does (they do not change any rect).
+    withDerivedNodeIds("preview", () => applyLayoutAction(state, action));
+    if (!state.rootNode) return undefined;
+    const leaves = leavesOf(state.rootNode);
+    return {
+        rects: computeNodeRects(model, state.rootNode),
+        leafIds: leaves.map((n) => n.id),
+        leafBlockIds: Object.fromEntries(leaves.map((n) => [n.id, n.data?.blockId])),
+    };
+}
+
+/**
+ * The layout that is left when the pane `nodeId` leaves it (a tear-off): every other pane's rect. None when
+ * the pane is not in the tree or is its only pane. The model's own tree is not touched.
+ */
+export function layoutWithoutOf(model: LayoutModel, nodeId: string | undefined): FutureLayout | undefined {
+    const root = model.treeState.rootNode;
+    if (!nodeId || !root || !leavesOf(root).some((n) => n.id === nodeId)) return undefined;
+    try {
+        const gone = { type: LayoutTreeActionType.DeleteNode, nodeId } as LayoutTreeDeleteNodeAction;
+        const after = laidOutAfter(model, root, gone);
+        return after && { movedId: nodeId, leaves: true, ...after };
+    } catch (e) {
+        console.warn("[layout] the tear-off preview could not be computed", e);
         return undefined;
     }
 }
@@ -141,5 +165,12 @@ export function createPlacementPreview(model: LayoutModel) {
             .filter((id) => id !== future.movedId && future.rects[id])
             .map((id) => ({ id, style: setTransform(future.rects[id]) }));
     });
-    return { futureLayout, placementWireframe };
+    // The layout a tear-off leaves, while the drag shows one (tearOffPreview.ts).
+    const tearingOff = createTearOffPreview(model);
+    const tearOffLayout = createMemo(() => {
+        const nodeId = tearingOff();
+        // Read again when the layout changes under it.
+        return nodeId && shape() !== undefined ? layoutWithoutOf(model, nodeId) : undefined;
+    });
+    return { futureLayout, placementWireframe, tearOffLayout };
 }
