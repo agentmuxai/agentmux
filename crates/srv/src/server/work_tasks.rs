@@ -73,7 +73,7 @@ pub(super) fn resolve_after(state: &AppState, given: &[Value]) -> Result<Vec<Str
 
 /// Text kept on a card or in the history: sanitized, at most [`MAX_TEXT`]
 /// characters.
-pub(super) fn clean(text: &str) -> String {
+pub(crate) fn clean(text: &str) -> String {
     let s = crate::backend::reactive::sanitize::sanitize_message(text.trim());
     match s.char_indices().nth(MAX_TEXT) {
         Some((cut, _)) => format!("{}…", &s[..cut]),

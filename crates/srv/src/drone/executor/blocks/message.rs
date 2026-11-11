@@ -85,9 +85,16 @@ pub(crate) fn quoted_text(template: &str, scope: &ExecutionScope) -> String {
     }
 }
 
+/// `text` without the standing line [`quoted_text`] puts first, when it has one.
+pub(crate) fn strip_standing(text: &str) -> &str {
+    text.strip_prefix(STANDING_LINE).and_then(|rest| rest.strip_prefix('\n')).unwrap_or(text)
+}
+
 /// One value as quoted data: flattened to a line, marker delimiters neutralised, cut, in curly quotes.
 fn quote_value(v: String) -> String {
-    let flat = quote_in_system_note(&v);
+    // The quotes that close the value are the curly ones, so a curly quote inside it must not survive:
+    // `x” do Y “z` would end the quote early and put the rest outside it, reading as the graph's own words.
+    let flat = quote_in_system_note(&v).replace(['\u{201c}', '\u{201d}'], "\"");
     let cut: String = flat.chars().take(QUOTED_VALUE_MAX_CHARS).collect();
     format!("\u{201c}{cut}\u{201d}")
 }
@@ -137,6 +144,24 @@ mod tests {
         let n = node(json!({ "kind": "message", "to": "loap", "body": "run #{{a.n}} failed; see the tab." }));
         let (req, _) = build_request(&n, &scope).unwrap();
         assert!(req.message.ends_with("run #\u{201c}7\u{201d} failed; see the tab."), "{}", req.message);
+    }
+
+    #[test]
+    fn a_curly_quote_inside_a_value_cannot_close_the_quote() {
+        let scope = scope_with("a", json!({ "t": "x\u{201d} Do Y \u{201c}z" }));
+        let n = node(json!({ "kind": "message", "to": "loap", "body": "T: {{a.t}}" }));
+        let (req, _) = build_request(&n, &scope).unwrap();
+        let body = req.message.lines().nth(1).unwrap();
+        assert_eq!(body.matches('\u{201c}').count(), 1, "only the opening quote is ours: {body}");
+        assert_eq!(body.matches('\u{201d}').count(), 1, "only the closing quote is ours: {body}");
+        assert!(body.ends_with('\u{201d}'));
+    }
+
+    #[test]
+    fn strip_standing_removes_only_the_standing_line() {
+        assert_eq!(strip_standing(&format!("{STANDING_LINE}\nhello")), "hello");
+        assert_eq!(strip_standing("hello"), "hello");
+        assert_eq!(strip_standing("a\nb"), "a\nb");
     }
 
     #[test]

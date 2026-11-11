@@ -611,6 +611,23 @@ impl Store {
         Ok(out)
     }
 
+    /// The newest task of `kind` that is still open (not done, failed or
+    /// cancelled) whose text starts with `prefix`. Looks at every such task, not a
+    /// window of the latest ones.
+    pub fn work_queue_find_open_with_prefix(&self, kind: &str, prefix: &str) -> Result<Option<WorkItem>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM db_work_queue
+              WHERE kind = ?1
+                AND state IN ('open', 'claimed', 'held', 'blocked', 'review')
+                AND substr(payload, 1, length(?2)) = ?2
+              ORDER BY created_at DESC
+              LIMIT 1"
+        ))?;
+        let mut rows = stmt.query_map(params![kind, prefix], row_to_item)?;
+        rows.next().transpose().map_err(Into::into)
+    }
+
     pub fn work_queue_list(&self, state: &str, limit: usize) -> Result<Vec<WorkItem>, StoreError> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(&format!(

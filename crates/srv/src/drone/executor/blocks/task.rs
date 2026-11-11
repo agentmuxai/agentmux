@@ -11,7 +11,8 @@
 //!               `{{reference}}`: a value from outside must not pick who gets the work (§6.2).
 //!   * `dedupe`  optional, "one task per incident": a second run with the same key adds a line to
 //!               the open task instead of filing another. The key may be built from a reference
-//!               (it only finds a task; it names no one).
+//!               (it only finds a task; it names no one). It is kept per node and target: another
+//!               node, or the same node with another target, with the same text has its own task.
 //!
 //! Output: `{ "filed": bool, "task": <number>, "work_id": "<id>" }`; `filed` is false when the
 //! run added a line to an open task with the same key.
@@ -22,7 +23,7 @@ use sha2::{Digest, Sha256};
 use crate::backend::storage::work_board::WorkEvent;
 use crate::backend::storage::work_queue::{work_state, WorkItem};
 use crate::drone::data_flow::ExecutionScope;
-use crate::drone::executor::blocks::message::quoted_text;
+use crate::drone::executor::blocks::message::{quoted_text, strip_standing};
 use crate::drone::types::FlowNode;
 
 /// Who the task's history says filed it.
@@ -33,8 +34,9 @@ const TASK_KIND: &str = "drone";
 const KEY_PREFIX: &str = "Drone key: ";
 /// The states in which a task is still open for the dedupe: it is not done, failed or cancelled.
 const OPEN_STATES: [&str; 5] = [work_state::OPEN, work_state::CLAIMED, work_state::HELD, work_state::BLOCKED, work_state::REVIEW];
-/// How many tasks of one state the dedupe reads.
-const DEDUPE_SCAN_LIMIT: usize = 500;
+/// Held from looking for an open task with the key to filing one, so two runs with the same key at
+/// once can't both find none. Never held across an await.
+static DEDUPE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// What the block files.
 #[derive(Debug, PartialEq)]
@@ -49,18 +51,27 @@ pub(crate) struct TaskSpec {
 pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
     let spec = compose(node, scope)?;
     let state = crate::drone::host::state()?;
+    file_or_repeat(state, &spec)
+}
+
+/// File the task, or add a line to the open one with the same key. Synchronous end to end, so the
+/// lock covers the lookup and the insert and is never held across an await.
+fn file_or_repeat(state: &crate::server::AppState, spec: &TaskSpec) -> Result<Value, String> {
     let store = crate::server::cron::work_store(state);
+    let _one_at_a_time = DEDUPE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
     if let Some(key) = &spec.key {
-        if let Some(open) = find_open(&open_tasks(&store)?, key) {
-            let num = store.work_card_ensure(&open.id, agentmux_common::time::now_ms()).map_err(|e| format!("task block: {e}"))?;
+        let found = store.work_queue_find_open_with_prefix(TASK_KIND, &format!("{KEY_PREFIX}{key}")).map_err(|e| format!("task block: {e}"))?;
+        if let Some(open) = found.as_ref().and_then(|t| find_open(std::slice::from_ref(t), key)) {
+            let now = agentmux_common::time::now_ms();
+            let num = store.work_card_ensure(&open.id, now).map_err(|e| format!("task block: {e}"))?;
             let line = WorkEvent {
                 work_id: open.id.clone(),
-                at: agentmux_common::time::now_ms(),
+                at: now,
                 actor: FILED_BY.to_string(),
                 actor_kind: "system".to_string(),
                 kind: "updated".to_string(),
-                body: line_for_repeat(&spec),
+                body: crate::server::work_tasks::clean(&line_for_repeat(spec)),
                 ..Default::default()
             };
             store.work_event_add(&line).map_err(|e| format!("task block: {e}"))?;
@@ -91,8 +102,7 @@ pub(crate) fn compose(node: &FlowNode, scope: &ExecutionScope) -> Result<TaskSpe
     let body_t = node.data.get("body").and_then(|v| v.as_str()).unwrap_or("");
     // The title is one line: the standing line belongs to the body, so a title with a value in it gets the value quoted and nothing else.
     let title = if title_t.contains("{{") {
-        let quoted = quoted_text(title_t, scope);
-        quoted.lines().last().unwrap_or("").to_string()
+        strip_standing(&quoted_text(title_t, scope)).to_string()
     } else {
         title_t.to_string()
     };
@@ -104,14 +114,19 @@ pub(crate) fn compose(node: &FlowNode, scope: &ExecutionScope) -> Result<TaskSpe
         .map(|t| scope.resolve(t))
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty())
-        .map(|k| hash_key(&k));
+        .map(|k| hash_key(&node.id, target, &k));
     Ok(TaskSpec { title, body, target: target.to_string(), key })
 }
 
-/// A short stable hash of the key, so the stored line carries no text from outside.
-fn hash_key(key: &str) -> String {
-    let digest = Sha256::digest(key.as_bytes());
-    hex::encode(&digest[..8])
+/// A short stable hash of the key with the node and the target, so the stored line carries no text
+/// from outside and another node, or another target, doesn't share the task.
+fn hash_key(node_id: &str, target: &str, key: &str) -> String {
+    let mut h = Sha256::new();
+    for part in [node_id, target, key] {
+        h.update((part.len() as u64).to_le_bytes());
+        h.update(part.as_bytes());
+    }
+    hex::encode(&h.finalize()[..8])
 }
 
 /// The open task that carries `key`, if there is one.
@@ -127,15 +142,6 @@ fn line_for_repeat(spec: &TaskSpec) -> String {
     } else {
         format!("Again: {}\n{}", spec.title, spec.body)
     }
-}
-
-/// Every task of the drone kind that is still open.
-fn open_tasks(store: &crate::backend::storage::store::Store) -> Result<Vec<WorkItem>, String> {
-    let mut out = Vec::new();
-    for state in OPEN_STATES {
-        out.extend(store.work_queue_list(state, DEDUPE_SCAN_LIMIT).map_err(|e| format!("task block: {e}"))?);
-    }
-    Ok(out)
 }
 
 #[cfg(test)]
@@ -219,6 +225,51 @@ mod tests {
         assert!(!a.contains("nightly"));
         let other = scope_with("a", json!({ "wf": "nightly", "step": "lint" }));
         assert_ne!(a, compose(&n, &other).unwrap().key.unwrap());
+    }
+
+    #[test]
+    fn the_key_is_per_node_and_per_target() {
+        let scope = scope_with("a", json!({ "wf": "nightly" }));
+        let key = |id: &str, target: &str| {
+            let mut n = node(json!({ "title": "x", "target": target, "dedupe": "{{a.wf}}" }));
+            n.id = id.to_string();
+            compose(&n, &scope).unwrap().key.unwrap()
+        };
+        assert_eq!(key("t1", "agenty"), key("t1", "agenty"));
+        assert_ne!(key("t1", "agenty"), key("t2", "agenty"), "another node has its own task");
+        assert_ne!(key("t1", "agenty"), key("t1", "loap"), "another target has its own task");
+    }
+
+    #[test]
+    fn a_title_with_a_value_keeps_its_own_lines() {
+        let scope = scope_with("a", json!({ "step": "build" }));
+        let n = node(json!({ "title": "Nightly red\nat {{a.step}}" }));
+        let spec = compose(&n, &scope).unwrap();
+        assert_eq!(spec.title, "Nightly red\nat \u{201c}build\u{201d}");
+    }
+
+    #[test]
+    fn the_store_finds_the_open_task_with_the_key_however_many_others_there_are() {
+        use crate::backend::storage::store::Store;
+        // The work queue lives in the identity store, as the jobs tests use it.
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap();
+        let mine = |key: &str| format!("{KEY_PREFIX}{key}\nbody");
+        let file = |kind: &str, text: &str| {
+            crate::server::job_actions::file_task_as(&store, "drone", kind, "t", text, (String::new(), String::new()), "test").unwrap()
+        };
+        let (first_id, _) = file(TASK_KIND, &mine("aaaa"));
+        // Far more newer tasks than any scan window, of other keys and other kinds.
+        for i in 0..600 {
+            file(TASK_KIND, &mine(&format!("other{i}")));
+            file("job", &mine("aaaa"));
+        }
+        let found = store.work_queue_find_open_with_prefix(TASK_KIND, &format!("{KEY_PREFIX}aaaa")).unwrap().expect("found");
+        assert_eq!(found.id, first_id);
+        assert!(store.work_queue_find_open_with_prefix(TASK_KIND, &format!("{KEY_PREFIX}zzzz")).unwrap().is_none());
+
+        store.work_queue_cancel(&first_id, "done with it", 1).unwrap();
+        assert!(store.work_queue_find_open_with_prefix(TASK_KIND, &format!("{KEY_PREFIX}aaaa")).unwrap().is_none(), "a cancelled task is not reopened");
     }
 
     #[test]
