@@ -118,3 +118,28 @@ describe("layout intent vectors (srv's results, replayed by the frontend's reduc
         });
     }
 });
+
+describe("sameLayoutTree and srv's single-precision sizes", () => {
+    const tree = (sizes: number[]): LayoutNode =>
+        ({ id: "root", flexDirection: "row", size: 1, children: sizes.map((size, i) => ({ id: `n${i}`, flexDirection: "column", size, data: { blockId: `b${i}` } })) }) as LayoutNode;
+    /** A size as it comes back from srv: stored in single precision, written in its shortest form. */
+    const stored = (size: number): number => {
+        const f = Math.fround(size);
+        for (let digits = 1; digits <= 9; digits++) {
+            const short = Number(f.toPrecision(digits));
+            if (Math.fround(short) === f) return short;
+        }
+        return f;
+    };
+
+    it("takes a size and srv's copy of it for the same size", () => {
+        // Sizes whose sixth digit rounds one way as a double and the other way in single precision.
+        const local = [42.120149726965636, 52.30454864766864, 3.107094950374689];
+        expect(local.map((v) => Number(v.toPrecision(6)))).not.toEqual(local.map((v) => Number(stored(v).toPrecision(6))));
+        expect(sameLayoutTree(tree(local), tree(local.map(stored)))).toBe(true);
+    });
+
+    it("still tells different sizes apart", () => {
+        expect(sameLayoutTree(tree([40, 60]), tree([40.001, 59.999]))).toBe(false);
+    });
+});
