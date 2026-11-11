@@ -667,6 +667,27 @@ pub fn ed25519_sign_b64(private_key: &[u8], material: &str) -> Option<String> {
     Some(BASE64.encode(signature.to_bytes()))
 }
 
+/// Domain separator for an agent's statement of which install hosts it. Distinct from every other
+/// signed material, so none of their signatures can stand in for one.
+const LAN_INSTALL_BINDING_DOMAIN: &str = "amx-lan-install-binding-v1";
+
+fn lan_install_binding_material(agent_id: &str, instance_id: &str, issued_at: i64) -> String {
+    format!("{LAN_INSTALL_BINDING_DOMAIN}{FIELD_SEP}{}{FIELD_SEP}{instance_id}{FIELD_SEP}{issued_at}", agent_id.to_ascii_lowercase())
+}
+
+/// The agent's own statement, signed with its LAN key, that the install `instance_id` hosts it as of
+/// `issued_at` (the time of the install's certificate for the key). Only the host that holds the agent's
+/// private key can make it, so another install that wraps the agent's public key in a certificate of its
+/// own cannot. `None` for a malformed private key.
+pub fn sign_lan_install_binding(private_key: &[u8], agent_id: &str, instance_id: &str, issued_at: i64) -> Option<String> {
+    ed25519_sign_b64(private_key, &lan_install_binding_material(agent_id, instance_id, issued_at))
+}
+
+/// Whether `sig_b64` is the agent's statement (see [`sign_lan_install_binding`]) under its public key.
+pub fn verify_lan_install_binding(public_key: &[u8; 32], agent_id: &str, instance_id: &str, issued_at: i64, sig_b64: &str) -> bool {
+    ed25519_verify_b64(public_key, &lan_install_binding_material(agent_id, instance_id, issued_at), sig_b64)
+}
+
 pub fn ed25519_verify_b64(public_key: &[u8; 32], material: &str, sig_b64: &str) -> bool {
     let Ok(verifying_key) = VerifyingKey::from_bytes(public_key) else { return false };
     let Ok(sig_bytes) = BASE64.decode(sig_b64) else { return false };

@@ -95,6 +95,13 @@ pub(super) async fn on_first_contact(state: &AppState, claimed: &str, observed_k
 /// Put this install's certificate for `public_key_b64` into a lookup answer as `lan_cert`.
 pub(super) fn add_cert(state: &AppState, agent: &str, public_key_b64: &str, answer: &mut serde_json::Map<String, serde_json::Value>) {
     if let Some(cert) = issue_cert(state, agent, public_key_b64) {
+        // The agent's own word that this install hosts it: another install can wrap the public key in a
+        // certificate of its own, but cannot sign for the agent.
+        let pair = state.mstore.agent_lan_key_ensure(agent).ok().filter(|p| p.public_key == public_key_b64);
+        let private = pair.and_then(|p| BASE64.decode(p.private_key).ok());
+        if let Some(sig) = private.and_then(|k| agentmux_common::jekt_sign::sign_lan_install_binding(&k, agent, &cert.instance_id, cert.issued_at)) {
+            answer.insert("lan_install_sig".to_string(), json!(sig));
+        }
         answer.insert("lan_cert".to_string(), json!(cert));
     }
 }
@@ -294,10 +301,22 @@ fn pin_first(state: &AppState, agent: &str, observed_b64: &str, cert: &WanKeyRec
 /// Record that the install behind `cert` vouched for the key `agent` is pinned to. Best effort: a pin left
 /// unbound is bound by the next message that verifies under it ([`bind_after_verified`]) and moves by hand until then.
 fn bind_to(state: &AppState, agent: &str, key_b64: &str, cert: &WanKeyRecord) {
+    if !agent_says_hosted_by(state, agent, key_b64, cert) {
+        return;
+    }
     let install = PinInstall { instance_id: cert.instance_id.clone(), host_hint: cert.host_hint.clone() };
     if let Err(e) = state.mstore.lan_pin_bind(agent, key_b64, &install, agentmux_common::time::now_secs()) {
         tracing::warn!(agent_id = %agent, error = %e, "LAN pin could not be bound to its install");
     }
+}
+
+/// Whether the agent itself, under the key `key_b64`, says the install behind `cert` hosts it: the statement
+/// the host adds to its lookup answer. A certificate alone proves only that some trusted install wrapped the
+/// key in one, which any of the account's installs can do for a public key it merely saw.
+fn agent_says_hosted_by(state: &AppState, agent: &str, key_b64: &str, cert: &WanKeyRecord) -> bool {
+    let (Some(sig), Ok(key)) = (state.lan_discovery.cached_lan_install_sig(agent), BASE64.decode(key_b64)) else { return false };
+    let Ok(key) = <[u8; 32]>::try_from(key.as_slice()) else { return false };
+    agentmux_common::jekt_sign::verify_lan_install_binding(&key, agent, &cert.instance_id, cert.issued_at, &sig)
 }
 
 /// Remember that `agent` moved off `old_b64`, so a message signed with it later is refused as retired.
@@ -327,6 +346,9 @@ pub(crate) async fn bind_after_verified(state: &AppState, agent: &str, key: &[u8
         return;
     }
     let Some(cert) = state.lan_discovery.cached_lan_cert(agent) else { return };
+    if !agent_says_hosted_by(state, agent, &key_b64, &cert) {
+        return;
+    }
     let now = agentmux_common::time::now_secs();
     // Not asked again for a minute after an install that is not trusted, as for an unvouched key.
     let marker = (agent.to_lowercase(), format!("bind:{}", cert.instance_id));

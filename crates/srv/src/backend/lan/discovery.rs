@@ -1477,6 +1477,8 @@ struct LanPubkeyCacheEntry {
     /// The hosting install's certificate for the name key (`lan_cert`), when
     /// its answer had one (docs/specs/SPEC_LAN_KEY_CONTINUITY_2026_10_29.md).
     cert: Option<agentmux_common::jekt_sign::WanKeyRecord>,
+    /// The agent's own signature that the certifying install hosts it (`lan_install_sig`), when the answer had one.
+    install_sig: Option<String>,
     expires: std::time::Instant,
 }
 
@@ -1754,6 +1756,7 @@ impl LanDiscoveryController {
                 let uid = body.get("uid").and_then(|v| v.as_str()).filter(|u| !u.is_empty());
                 let uid_key = body.get("uid_public_key").and_then(|v| v.as_str()).and_then(|k| BASE64.decode(k).ok());
                 let cert = body.get("lan_cert").and_then(|v| serde_json::from_value(v.clone()).ok());
+                let install_sig = body.get("lan_install_sig").and_then(|v| v.as_str()).map(str::to_string);
                 if let Ok(mut cache) = self.pubkey_cache.write() {
                     cache.insert(
                         agent_id.to_string(),
@@ -1761,6 +1764,7 @@ impl LanDiscoveryController {
                             public_key: Some(pubkey_bytes.clone()),
                             uid_key: uid.zip(uid_key).map(|(u, k)| (u.to_string(), k)),
                             cert,
+                            install_sig,
                             expires: std::time::Instant::now()
                                 + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
                         },
@@ -1783,6 +1787,7 @@ impl LanDiscoveryController {
                     public_key: None,
                     uid_key: None,
                     cert: None,
+                    install_sig: None,
                     expires: std::time::Instant::now()
                         + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
                 },
@@ -1809,6 +1814,7 @@ impl LanDiscoveryController {
                 public_key: Some(public_key),
                 uid_key,
                 cert: None,
+                install_sig: None,
                 expires: std::time::Instant::now() + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
             },
         );

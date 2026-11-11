@@ -44,6 +44,18 @@ fn pin(state: &AppState, agent: &str, public: &[u8; 32]) {
     assert_eq!(state.mstore.lan_peer_pubkey_pin_get_or_set(agent, &BASE64.encode(public)).unwrap(), BASE64.encode(public));
 }
 
+/// What the agent's own host adds beside the certificate: the agent's statement, signed with its key, that the install
+/// behind `cert` hosts it.
+fn proof(private: &[u8; 32], cert: &WanKeyRecord) -> String {
+    agentmux_common::jekt_sign::sign_lan_install_binding(private, &cert.agent_id, &cert.instance_id, cert.issued_at).unwrap()
+}
+
+/// The LAN peers show `agent`'s `public` key with `cert` and the agent's statement that the cert's install hosts it.
+fn show(state: &AppState, agent: &str, public: &[u8; 32], private: &[u8; 32], cert: &WanKeyRecord) {
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test(agent, public.to_vec(), Some(cert.clone()));
+    state.lan_discovery.seed_lan_install_sig_for_test(agent, proof(private, cert));
+}
+
 /// The pin of `agent` was vouched for by `host`'s install (as a first pin or a verified message would record).
 fn bind(state: &AppState, agent: &str, public: &[u8; 32], host: &WanIdentityStore) {
     let instance = host.instance_ensure("starpower").unwrap();
@@ -134,13 +146,14 @@ async fn a_rotation_vouched_by_a_pinned_install_moves_the_pin_and_writes_the_aud
     let (_rdir, receiver) = host("narko");
     trust(&state, &receiver, &sender);
     let (old, _) = generate_lan_keypair([1u8; 32]);
-    let (new, _) = generate_lan_keypair([2u8; 32]);
+    let (new, new_private) = generate_lan_keypair([2u8; 32]);
     pin(&state, "maop-v", &old);
     bind(&state, "maop-v", &old, &sender);
     state.mstore.lan_peer_uid_pin_get_or_set("maop-v", "uid-m", "old-uid-key").unwrap();
     lan_refusals::pin_mismatch("maop-v", &BASE64.encode(new));
 
     let vouch = cert(&sender, "maop-v", &new, now() + 5);
+    show(&state, "maop-v", &new, &new_private, &vouch);
     let path = move_if_vouched(&state, "maop-v", &new, Some(&vouch), "automatic", false).await.unwrap();
 
     assert_eq!(path, Path::PinnedInstance);
@@ -443,7 +456,7 @@ async fn a_first_pin_is_bound_to_the_install_that_vouched_and_kept_from_the_cert
     // The host's clock is 100 s ahead: the pin is kept from the certificate's time, so the same host's
     // certificate for an earlier key (inside the freshness window too) cannot move it back.
     let vouch = cert(&sender, "maop-g1", &public, now() + 101);
-    state.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-g1", public.to_vec(), Some(vouch.clone()));
+    show(&state, "maop-g1", &public, &private, &vouch);
     assert_eq!(verified(&state, "maop-g1", &private).await.lan_verified, Some(true));
     let bound = state.mstore.lan_pin_installed("maop-g1").unwrap().expect("bound at the first pin");
     assert_eq!(bound.instance_id, vouch.instance_id);
@@ -497,7 +510,7 @@ async fn a_pin_bound_to_no_install_does_not_move_on_its_own_until_a_verified_mes
 
     // The agent's next message verifies under the pinned key while the peer shows a certificate for it.
     let current = cert(&sender, "maop-h2", &old, now());
-    state.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-h2", old.to_vec(), Some(current.clone()));
+    show(&state, "maop-h2", &old, &old_private, &current);
     assert_eq!(verified(&state, "maop-h2", &old_private).await.lan_verified, Some(true));
     assert_eq!(state.mstore.lan_pin_installed("maop-h2").unwrap().unwrap().instance_id, current.instance_id);
     move_if_vouched(&state, "maop-h2", &new, Some(&by_install), "automatic", true).await.unwrap();
@@ -544,4 +557,53 @@ async fn a_message_signed_with_a_retired_key_is_refused_as_retired_with_the_reas
     let err = move_if_vouched(&state, "maop-r1", &old, Some(&cert(&sender, "maop-r1", &old, now() + 11)), "AgentX", true).await.unwrap_err();
     assert!(err.contains("was retired on"), "{err}");
     assert_eq!(pinned(&state, "maop-r1"), BASE64.encode(new));
+}
+
+#[tokio::test]
+async fn another_trusted_install_that_wraps_the_pinned_key_in_its_own_certificate_binds_nothing() {
+    let state = test_state();
+    let (_adir, first) = host("starpower");
+    let (_bdir, second) = host("charlie");
+    let (_rdir, receiver) = host("narko");
+    trust(&state, &receiver, &first);
+    let other = second.instance_ensure("charlie").unwrap();
+    receiver.agent_instance_pin_get_or_set("lark", "stable", &other.instance_id, &other.host_hint, now()).unwrap();
+    let (key, private) = generate_lan_keypair([1u8; 32]);
+    let (_, impostor_private) = generate_lan_keypair([9u8; 32]);
+    pin(&state, "maop-w1", &key);
+
+    // The second install wins the lookup: it shows the agent's real public key with its own certificate. It cannot sign for the agent.
+    let wrapped = WanKeyRecord::certify(&other.private_key, "maop-w1", CERT_CHANNEL, &key, &other.host_hint, now()).unwrap();
+    show(&state, "maop-w1", &key, &impostor_private, &wrapped);
+    assert_eq!(verified(&state, "maop-w1", &private).await.lan_verified, Some(true), "the pin is kept as it was");
+    assert!(state.mstore.lan_pin_installed("maop-w1").unwrap().is_none(), "no statement from the agent, no binding");
+
+    // Without any statement at all, nothing binds either.
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-w1", key.to_vec(), Some(wrapped));
+    assert_eq!(verified(&state, "maop-w1", &private).await.lan_verified, Some(true));
+    assert!(state.mstore.lan_pin_installed("maop-w1").unwrap().is_none());
+
+    // The install that hosts the agent shows the agent's own statement: that one binds.
+    let real = cert(&first, "maop-w1", &key, now());
+    show(&state, "maop-w1", &key, &private, &real);
+    assert_eq!(verified(&state, "maop-w1", &private).await.lan_verified, Some(true));
+    assert_eq!(state.mstore.lan_pin_installed("maop-w1").unwrap().unwrap().instance_id, real.instance_id);
+}
+
+#[tokio::test]
+async fn a_host_signs_for_its_agent_that_its_install_hosts_it() {
+    let state = test_state();
+    let (_dir, wan) = host("starpower");
+    state.mstore.set_wan_identity(wan);
+    let pair = state.mstore.agent_lan_key_ensure("maop-sg").unwrap();
+    let mut answer = serde_json::Map::new();
+    add_cert(&state, "maop-sg", &pair.public_key, &mut answer);
+    let cert: WanKeyRecord = serde_json::from_value(answer["lan_cert"].clone()).unwrap();
+    let sig = answer["lan_install_sig"].as_str().expect("the answer carries the agent's statement");
+    let public: [u8; 32] = BASE64.decode(&pair.public_key).unwrap().try_into().unwrap();
+    assert!(agentmux_common::jekt_sign::verify_lan_install_binding(&public, "maop-sg", &cert.instance_id, cert.issued_at, sig));
+    // Another install, another time or another agent is not what it said.
+    assert!(!agentmux_common::jekt_sign::verify_lan_install_binding(&public, "maop-sg", "someotherinstall", cert.issued_at, sig));
+    assert!(!agentmux_common::jekt_sign::verify_lan_install_binding(&public, "lark", &cert.instance_id, cert.issued_at, sig));
+    assert!(!agentmux_common::jekt_sign::verify_lan_install_binding(&public, "maop-sg", &cert.instance_id, cert.issued_at + 1, sig));
 }
