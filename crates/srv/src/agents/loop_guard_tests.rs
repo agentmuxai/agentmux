@@ -152,3 +152,80 @@ fn a_streamed_thought_that_does_not_repeat_is_left_alone() {
         assert_eq!(g.observe(&delta(0, "thinking_delta", &format!("Step {n}: read file number {n} and compare it with the next one. "))), None);
     }
 }
+
+fn acp_update(update: Value) -> Value {
+    json!({ "jsonrpc": "2.0", "method": "session/update", "params": { "sessionId": "s", "update": update } })
+}
+
+fn acp_call(id: &str, title: &str, input: Value) -> Value {
+    acp_update(json!({ "sessionUpdate": "tool_call", "toolCallId": id, "title": title, "kind": "other", "status": "in_progress", "rawInput": input }))
+}
+
+fn acp_ended(id: &str, status: &str) -> Value {
+    acp_update(json!({ "sessionUpdate": "tool_call_update", "toolCallId": id, "status": status, "content": [] }))
+}
+
+fn acp_round(g: &mut LoopGuard, n: usize, title: &str, input: Value, status: &str) -> Option<Stuck> {
+    let id = format!("call_{n}");
+    assert_eq!(g.observe_acp(&acp_call(&id, title, input)), None);
+    g.observe_acp(&acp_ended(&id, status))
+}
+
+#[test]
+fn an_acp_call_failing_five_times_in_a_turn_is_a_loop() {
+    let mut g = LoopGuard::default();
+    for n in 1..FAILING_CALLS as usize {
+        assert_eq!(acp_round(&mut g, n, "web_fetch", json!({ "url": "https://x.test" }), "failed"), None, "failure {n}");
+    }
+    let stuck = acp_round(&mut g, 5, "web_fetch", json!({ "url": "https://x.test" }), "failed");
+    assert_eq!(stuck, Some(Stuck::FailingCall { tool: "web_fetch".into(), count: 5 }));
+}
+
+#[test]
+fn acp_calls_with_other_arguments_a_success_between_or_a_new_turn_are_not_the_same_loop() {
+    let mut g = LoopGuard::default();
+    for n in 1..=8 {
+        assert_eq!(acp_round(&mut g, n, "web_fetch", json!({ "url": format!("https://x.test/{n}") }), "failed"), None, "every call differs");
+    }
+    for n in 10..=13 {
+        assert_eq!(acp_round(&mut g, n, "bash", json!({ "command": "make" }), "failed"), None);
+    }
+    assert_eq!(acp_round(&mut g, 14, "bash", json!({ "command": "make" }), "completed"), None, "it worked: the run is over");
+    assert_eq!(acp_round(&mut g, 15, "bash", json!({ "command": "make" }), "failed"), None);
+    for n in 20..=23 {
+        assert_eq!(acp_round(&mut g, n, "grep", json!({ "q": "a" }), "failed"), None);
+    }
+    g.observe_acp(&json!({ "jsonrpc": "2.0", "id": 7, "result": { "stopReason": "end_turn" } }));
+    assert_eq!(acp_round(&mut g, 24, "grep", json!({ "q": "a" }), "failed"), None, "the turn ended: the run starts again from one");
+}
+
+#[test]
+fn a_repeated_terminal_update_counts_a_call_once_and_a_late_input_is_the_calls() {
+    let mut g = LoopGuard::default();
+    for n in 1..=4 {
+        let id = format!("call_{n}");
+        // The call names itself first and fills in its input in the update that ends it.
+        assert_eq!(g.observe_acp(&acp_update(json!({ "sessionUpdate": "tool_call", "toolCallId": id, "title": "web_fetch", "status": "pending" }))), None);
+        let ended = acp_update(json!({ "sessionUpdate": "tool_call_update", "toolCallId": id, "status": "failed", "rawInput": { "url": "https://x.test" } }));
+        assert_eq!(g.observe_acp(&ended), None);
+        assert_eq!(g.observe_acp(&ended), None, "the same ending again is not another failure");
+    }
+    let fifth = acp_update(json!({ "sessionUpdate": "tool_call", "toolCallId": "call_5", "title": "web_fetch", "status": "failed", "rawInput": { "url": "https://x.test" } }));
+    assert_eq!(g.observe_acp(&fifth), Some(Stuck::FailingCall { tool: "web_fetch".into(), count: 5 }), "a call that arrives already failed counts too");
+}
+
+#[test]
+fn an_acp_thought_that_repeats_itself_is_a_loop_and_a_call_ends_the_text_before_it() {
+    let mut g = LoopGuard::default();
+    let chunk = |text: &str| acp_update(json!({ "sessionUpdate": "agent_thought_chunk", "content": { "type": "text", "text": text } }));
+    let mut stuck = None;
+    for _ in 0..40 {
+        stuck = stuck.or_else(|| g.observe_acp(&chunk("Hmm.\n")));
+    }
+    assert_eq!(stuck, Some(Stuck::SameThought));
+    let mut g = LoopGuard::default();
+    for n in 0..30 {
+        assert_eq!(g.observe_acp(&chunk(&format!("a different thought about step {n}, which says something new\n"))), None);
+    }
+    assert_eq!(g.observe_acp(&json!({ "jsonrpc": "2.0", "method": "session/update", "params": { "update": { "sessionUpdate": "usage_update", "used": 5, "size": 10 } } })), None);
+}
