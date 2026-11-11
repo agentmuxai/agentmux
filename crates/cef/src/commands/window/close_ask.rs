@@ -36,8 +36,9 @@ pub(crate) const EVENT: &str = "window-close-requested";
 const ANSWER_WAIT_MS: i64 = 1500;
 
 /// How long a close the host decided on stays decided. The close's own steps run within a few
-/// seconds; a host label can be used again later (a pool window promoted again, `main` reopened
-/// from the tray), and that window's close is a new question.
+/// seconds. A host label can be used again (a pool window promoted again, `main` reopened from
+/// the tray), and that window's close is a new question: [`page_registered`] ends the decision
+/// when the new window's page comes up, and this is the limit for one that never does.
 const APPROVAL: Duration = Duration::from_secs(30);
 
 /// What to do with a close the OS asked for.
@@ -112,6 +113,22 @@ pub(crate) fn approve(label: &str) {
 /// The window is gone: its label starts again.
 pub(crate) fn forget(label: &str) {
     ASKS.lock().forget(label);
+}
+
+/// The page of `label` registered srv window `window_id` (`register_backend_window`). A window id
+/// the label did not have is a new window under it: a pool window closed and promoted again keeps
+/// its label and its native window, so nothing else says the one before is gone. What was decided
+/// for that one says nothing about this one. A page registering the id it has (it does so twice
+/// while it loads, and again after a reload) changes nothing.
+pub(crate) fn page_registered(state: &AppState, label: &str, window_id: &str) {
+    tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
+    if is_new_window(state.backend_window_id(label).as_deref(), window_id) {
+        forget(label);
+    }
+}
+
+fn is_new_window(had: Option<&str>, registers: &str) -> bool {
+    had != Some(registers)
 }
 
 /// For a close of `label` that came from the OS, on the UI thread. On `Ask` the caller holds the
@@ -195,6 +212,20 @@ mod tests {
         asks.approve("window-a", t0);
         asks.forget("window-a");
         assert!(!asks.is_approved("window-a", t0));
+    }
+
+    #[test]
+    fn a_label_used_again_for_another_window_starts_undecided() {
+        // A pool window closed and promoted again within the limit: same label, a new srv window.
+        assert!(is_new_window(Some("w1"), "w2"));
+        assert!(is_new_window(None, "w1"));
+        // The page's second registration while it loads, or after a reload onto its own row.
+        assert!(!is_new_window(Some("w1"), "w1"));
+        let mut asks = Asks::default();
+        let t0 = Instant::now();
+        asks.approve("window-pool-1", t0);
+        asks.forget("window-pool-1");
+        assert!(!asks.is_approved("window-pool-1", t0 + Duration::from_secs(1)));
     }
 
     #[test]
