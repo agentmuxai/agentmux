@@ -99,7 +99,7 @@ pub(super) fn add_cert(state: &AppState, agent: &str, public_key_b64: &str, answ
         // certificate of its own, but cannot sign for the agent.
         let pair = state.mstore.agent_lan_key_ensure(agent).ok().filter(|p| p.public_key == public_key_b64);
         let private = pair.and_then(|p| BASE64.decode(p.private_key).ok());
-        if let Some(sig) = private.and_then(|k| agentmux_common::jekt_sign::sign_lan_install_binding(&k, agent, &cert.instance_id, cert.issued_at)) {
+        if let Some(sig) = private.and_then(|k| agentmux_common::lan_install_binding::sign_lan_install_binding(&k, agent, &cert.instance_id, cert.issued_at)) {
             answer.insert("lan_install_sig".to_string(), json!(sig));
         }
         answer.insert("lan_cert".to_string(), json!(cert));
@@ -316,7 +316,7 @@ fn bind_to(state: &AppState, agent: &str, key_b64: &str, cert: &WanKeyRecord) {
 fn agent_says_hosted_by(state: &AppState, agent: &str, key_b64: &str, cert: &WanKeyRecord) -> bool {
     let (Some(sig), Ok(key)) = (state.lan_discovery.cached_lan_install_sig(agent), BASE64.decode(key_b64)) else { return false };
     let Ok(key) = <[u8; 32]>::try_from(key.as_slice()) else { return false };
-    agentmux_common::jekt_sign::verify_lan_install_binding(&key, agent, &cert.instance_id, cert.issued_at, &sig)
+    agentmux_common::lan_install_binding::verify_lan_install_binding(&key, agent, &cert.instance_id, cert.issued_at, &sig)
 }
 
 /// Remember that `agent` moved off `old_b64`, so a message signed with it later is refused as retired.

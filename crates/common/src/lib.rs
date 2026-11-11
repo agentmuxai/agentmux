@@ -21,6 +21,7 @@ pub mod event_log;
 pub mod ipc;
 pub mod jekt_files;
 pub mod jekt_sign;
+pub mod lan_install_binding;
 pub mod layout_intent;
 pub mod layout_types;
 pub mod log_retention;

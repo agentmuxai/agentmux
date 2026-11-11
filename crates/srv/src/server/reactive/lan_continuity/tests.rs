@@ -47,7 +47,7 @@ fn pin(state: &AppState, agent: &str, public: &[u8; 32]) {
 /// What the agent's own host adds beside the certificate: the agent's statement, signed with its key, that the install
 /// behind `cert` hosts it.
 fn proof(private: &[u8; 32], cert: &WanKeyRecord) -> String {
-    agentmux_common::jekt_sign::sign_lan_install_binding(private, &cert.agent_id, &cert.instance_id, cert.issued_at).unwrap()
+    agentmux_common::lan_install_binding::sign_lan_install_binding(private, &cert.agent_id, &cert.instance_id, cert.issued_at).unwrap()
 }
 
 /// The LAN peers show `agent`'s `public` key with `cert` and the agent's statement that the cert's install hosts it.
@@ -601,9 +601,9 @@ async fn a_host_signs_for_its_agent_that_its_install_hosts_it() {
     let cert: WanKeyRecord = serde_json::from_value(answer["lan_cert"].clone()).unwrap();
     let sig = answer["lan_install_sig"].as_str().expect("the answer carries the agent's statement");
     let public: [u8; 32] = BASE64.decode(&pair.public_key).unwrap().try_into().unwrap();
-    assert!(agentmux_common::jekt_sign::verify_lan_install_binding(&public, "maop-sg", &cert.instance_id, cert.issued_at, sig));
+    assert!(agentmux_common::lan_install_binding::verify_lan_install_binding(&public, "maop-sg", &cert.instance_id, cert.issued_at, sig));
     // Another install, another time or another agent is not what it said.
-    assert!(!agentmux_common::jekt_sign::verify_lan_install_binding(&public, "maop-sg", "someotherinstall", cert.issued_at, sig));
-    assert!(!agentmux_common::jekt_sign::verify_lan_install_binding(&public, "lark", &cert.instance_id, cert.issued_at, sig));
-    assert!(!agentmux_common::jekt_sign::verify_lan_install_binding(&public, "maop-sg", &cert.instance_id, cert.issued_at + 1, sig));
+    assert!(!agentmux_common::lan_install_binding::verify_lan_install_binding(&public, "maop-sg", "someotherinstall", cert.issued_at, sig));
+    assert!(!agentmux_common::lan_install_binding::verify_lan_install_binding(&public, "lark", &cert.instance_id, cert.issued_at, sig));
+    assert!(!agentmux_common::lan_install_binding::verify_lan_install_binding(&public, "maop-sg", &cert.instance_id, cert.issued_at + 1, sig));
 }
