@@ -21,6 +21,7 @@
 
 .editor-viewer-bar-group {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-1);
 }
@@ -28,6 +29,7 @@
 .editor-viewer-bar-facts {
     display: flex;
     gap: var(--space-3);
+    flex-wrap: wrap;
     margin-left: auto;
     color: var(--secondary-text-color);
     font-size: 0.9em;

@@ -225,7 +225,9 @@
 
 .editor-main-column {
     flex: 1;
-    min-width: 0;
+    // The document keeps room in a narrow pane (the tree column gives way, see editor-view.tsx): its tab strip, viewer
+    // bar and body used to be pushed out past the pane's edge by a tree that kept its whole width.
+    min-width: min(160px, 60%);
     display: flex;
     flex-direction: column;
     overflow: hidden;
