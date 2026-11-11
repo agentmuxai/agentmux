@@ -123,9 +123,18 @@ export function backRow(panel: AgentModelPanel): OptionRow | null {
     };
 }
 
+/** What the Model section says when srv's routes could not be read, so the harness's own models alone are not taken for "no routes". */
+export const readFailureNote = (reason: string) => `Other models: couldn't be read: ${reason}`;
+
+function reasonOf(e: unknown): string {
+    const text = (e instanceof Error ? e.message : String(e)).replace(/^FORBIDDEN:\s*/, "").trim();
+    return text.length > 140 ? `${text.slice(0, 139)}\u2026` : text || "no reason given";
+}
+
 /** The panel's answer for the pane's agent, fetched when the panel opens, and the pick that moves the agent. */
 export function createRoutePanel(props: AgentRuntimeDropupProps) {
     const [panel, setPanel] = createSignal<AgentModelPanel | null>(null);
+    const [failure, setFailure] = createSignal<string | null>(null);
 
     const refresh = async () => {
         if (props.providerId !== "claude" || !props.blockId) return;
@@ -137,9 +146,12 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
                     images: props.conversationImages?.() ?? null,
                 })
             );
-        } catch {
-            // An srv without the command, or an agent that is not running: the panel shows the harness's own models only.
+            setFailure(null);
+        } catch (e) {
+            // The panel shows the harness's own models only, and says why the others are missing.
+            console.warn("model panel: the routes could not be read", e);
             setPanel(null);
+            setFailure(reasonOf(e));
         }
     };
 
@@ -153,5 +165,5 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
     /** Whether srv has the agent on a route: the saved choice, which a running pane only adopts at its next launch. */
     const onSavedRoute = () => panel()?.routes.some((r) => r.models.some((m) => m.current)) ?? false;
 
-    return { panel, refresh, moveTo, onSavedRoute };
+    return { panel, failure, refresh, moveTo, onSavedRoute };
 }

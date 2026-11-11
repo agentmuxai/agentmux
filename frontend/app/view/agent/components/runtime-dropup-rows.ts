@@ -18,7 +18,7 @@ import {
 } from "../runtime-capabilities";
 import type { EffortLevel, PermissionMode } from "../../../agent-model/types";
 import type { DropupAgreement } from "./runtime-dropup-agreement";
-import { backRow, BACK_VALUE, parseCompactValue, parseRouteValue, routeRows } from "./runtime-dropup-routes";
+import { backRow, BACK_VALUE, parseCompactValue, parseRouteValue, readFailureNote, routeRows } from "./runtime-dropup-routes";
 import {
     EFFORT_OPTIONS,
     MODE_OPTIONS,
@@ -84,7 +84,11 @@ function addModelSection(s: DropupState, rows: Row[], options: OptionRow[], sele
     for (const o of s.modelOptions()) {
         add({ section: "model", value: o.value, label: o.label, description: o.description, current: !onRoute && selected === o.value });
     }
-    if (!panel) return;
+    if (!panel) {
+        const why = s.routes.failure();
+        if (why) rows.push({ kind: "note", section: "model", text: readFailureNote(why) });
+        return;
+    }
     for (const { route, rows: routeModels } of routeRows(panel, s.props.contextTokens)) {
         rows.push({ kind: "group", section: "model", text: route.label, note: route.key_present ? "billed to your key in the Vault" : "key missing" });
         routeModels.forEach(add);
