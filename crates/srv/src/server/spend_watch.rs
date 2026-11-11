@@ -33,6 +33,8 @@ pub const WARNING_META_KEY: &str = "agent:spend_warning";
 pub const TODAY_META_KEY: &str = "agent:spend_today";
 /// The least time between two writes of [`TODAY_META_KEY`] for an agent, unless its level or cap changed.
 const TODAY_EVERY_MS: i64 = 15_000;
+/// How often every active agent's figure is written again, so a skipped one and a new pane catch up.
+const REFRESH_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
 enum Event {
     Settled(Grant),
@@ -65,12 +67,34 @@ pub(crate) fn start(state: AppState) {
         return;
     }
     tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
+        let mut refresh = tokio::time::interval(REFRESH_EVERY);
+        refresh.tick().await;
+        loop {
             let state = state.clone();
-            // Store reads, block-meta writes and a note to the leader: not on the async worker.
-            let _ = tokio::task::spawn_blocking(move || handle(&state, event)).await;
+            tokio::select! {
+                event = rx.recv() => {
+                    let Some(event) = event else { break };
+                    // Store reads, block-meta writes and a note to the leader: not on the async worker.
+                    let _ = tokio::task::spawn_blocking(move || handle(&state, event)).await;
+                }
+                // The chips catch up: a figure skipped inside the throttle window, and a pane opened since the last write.
+                _ = refresh.tick() => {
+                    let _ = tokio::task::spawn_blocking(move || refresh_chips(&state)).await;
+                }
+            }
         }
     });
+}
+
+/// Writes today's figure to the open panes of every agent that has spent anything today.
+fn refresh_chips(state: &AppState) {
+    let now = agentmux_common::time::now_ms();
+    let Ok(defs) = state.mstore.agent_def_list() else { return };
+    for agent in spend::agents_today(now) {
+        let Some(def) = defs.iter().find(|d| d.slug == agent) else { continue };
+        let spent = spend::today(&agent, now).cost_usd;
+        publish_today(state, &def.id, &agent, cap::agent_cap(&state.mstore, &def.id), spent, now, true);
+    }
 }
 
 fn handle(state: &AppState, event: Event) {
@@ -98,7 +122,10 @@ fn publish_today(state: &AppState, def_id: &str, agent: &str, cap: Option<f64>, 
     }
     let value = json!({ "day": now.div_euclid(86_400_000), "spent": spent, "cap": cap });
     for block_id in worker_notes::live_panes_of(&state.mstore, def_id) {
-        set_meta(state, &block_id, TODAY_META_KEY, value.clone());
+        let same = state.mstore.get::<obj::Block>(&block_id).ok().flatten().is_some_and(|b| b.meta.get(TODAY_META_KEY) == Some(&value));
+        if !same {
+            set_meta(state, &block_id, TODAY_META_KEY, value.clone());
+        }
     }
 }
 

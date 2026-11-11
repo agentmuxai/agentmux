@@ -243,6 +243,15 @@ pub fn today(agent: &str, now_ms: i64) -> Spend {
     sum
 }
 
+/// The agents that have a day of spend today.
+pub fn agents_today(now_ms: i64) -> Vec<String> {
+    let d = day(now_ms);
+    let mut agents: Vec<String> = table().lock().unwrap().keys().filter(|(_, _, day)| *day == d).map(|(a, _, _)| a.clone()).collect();
+    agents.sort();
+    agents.dedup();
+    agents
+}
+
 /// What every agent has spent on `route` so far today.
 pub fn route_today_usd(route: &str, now_ms: i64) -> f64 {
     let d = day(now_ms);
@@ -377,6 +386,7 @@ mod tests {
         assert_eq!(alerted("spend-sum-a", now), 0);
         set_alerted("spend-sum-a", 50, now);
         assert_eq!(alerted("spend-sum-a", now), 50);
+        assert!(agents_today(now).contains(&"spend-sum-a".to_string()));
         set_alerted("spend-sum-none", 100, now);
         assert_eq!(alerted("spend-sum-none", now), 100, "kept for an agent with no spend of its own");
         assert_eq!(today("spend-sum-none", now), Spend::default());
