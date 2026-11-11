@@ -1,0 +1,174 @@
+-- mount a
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- forced open at mount
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- the popover is placed
+-- forced open, placed
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 1; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- hover a
+-- leave a
+-- pointer came and went while held
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 1; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- a: set {"forceOpen":false}
+-- hold ended, pointer away: lingers
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- 100 ms pass
+popover removed
+releaseOpen tip1
+-- closed
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+-- mount b
+-- hover b
+claimOpen tip2 register=true
+isWarm tip2 -> true
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- the popover is placed
+-- open
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 1; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "b"
+        "content"
+-- b: set {"disable":true}
+releaseOpen tip2
+popover removed
+-- disabled while open: closed at once
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+-- b: set {"disable":false}
+claimOpen tip2 register=true
+isWarm tip2 -> true
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- enabled with the pointer still there: opens
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "b"
+        "content"
+-- the popover is placed
+-- b: set {"forceOpen":true,"disable":true}
+releaseOpen tip2
+popover removed
+-- disabled and forced: disable wins
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+-- b: set {"disable":false}
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- held open again
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "b"
+        "content"
+-- b: set {"forceOpen":false}
+claimOpen tip2 register=true
+isWarm tip2 -> true
+-- hold ended with the pointer still over it
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "b"
+        "content"
+-- leave b
+popover removed
+releaseOpen tip2
+-- mount c
+releaseOpen tip3
+-- hover c
+-- disabled from the start: never opens
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+  <div>
+    <div>
+      <span>
+        "c"
+-- leave c

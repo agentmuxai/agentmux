@@ -1,0 +1,154 @@
+-- mount a
+-- hover a
+claimOpen tip1 register=true
+popover mounted placement=bottom gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.anchor-class
+-- 199 ms pass
+-- delay 200: 199 ms
+<body>
+  <div>
+    <div class="anchor-class" style="color: red;">
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- 1 ms pass
+-- delay 200: 200 ms
+<body>
+  <div>
+    <div class="anchor-class" style="color: red;">
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- the popover is placed
+click on a
+-- leave a
+-- 199 ms pass
+-- delay 200: 199 ms after leaving
+<body>
+  <div>
+    <div class="anchor-class" style="color: red;">
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- 1 ms pass
+popover removed
+releaseOpen tip1
+-- delay 200: closed
+<body>
+  <div>
+    <div class="anchor-class" style="color: red;">
+      <span>
+        "a"
+-- mount b
+forgetOpen tip2
+-- hover b
+claimOpen tip2 register=false
+popover mounted placement=left gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- immediate: open and visible, not placed
+<body>
+  <div>
+    <div class="anchor-class" style="color: red;">
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: none;">
+      <span>
+        "b"
+        "content"
+-- the popover is placed
+-- immediate: placed
+<body>
+  <div>
+    <div class="anchor-class" style="color: red;">
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 1; transition: none;">
+      <span>
+        "b"
+        "content"
+-- leave b
+forgetOpen tip2
+popover removed
+-- immediate: gone at once
+<body>
+  <div>
+    <div class="anchor-class" style="color: red;">
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+-- mount c
+-- hover c
+claimOpen tip3 register=true
+isWarm tip3 -> true
+popover mounted placement=right gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip anchored-popover--passive" anchor=div.
+-- the popover is placed
+-- passive
+<body>
+  <div>
+    <div class="anchor-class" style="color: red;">
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+  <div>
+    <div>
+      <span>
+        "c"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 1; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "c"
+        "content"
+-- leave c
+popover removed
+releaseOpen tip3
+-- mount d
+forgetOpen tip4
+-- hover d
+claimOpen tip4 register=false
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- the popover is placed
+-- immediate overrides the delay
+<body>
+  <div>
+    <div class="anchor-class" style="color: red;">
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+  <div>
+    <div>
+      <span>
+        "c"
+  <div>
+    <div>
+      <span>
+        "d"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 1; transition: none;">
+      <span>
+        "d"
+        "content"
+-- leave d
+forgetOpen tip4
+popover removed

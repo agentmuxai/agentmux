@@ -1,0 +1,126 @@
+-- mount a
+-- mount b
+-- hover a
+claimOpen tip1 register=true
+isWarm tip1 -> false
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- the popover is placed
+-- a open
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 1; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+  <div>
+    <div>
+      <span>
+        "b"
+-- leave a
+-- hover b
+claimOpen tip2 register=true
+releaseOpen tip1
+isWarm tip2 -> true
+popover removed
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- b hovered while a lingers: a closed, b at once
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "b"
+        "content"
+-- the popover is placed
+-- leave b
+popover removed
+releaseOpen tip2
+-- 500 ms pass
+-- mount c
+forgetOpen tip3
+-- hover c
+claimOpen tip3 register=false
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- the popover is placed
+-- an immediate one open
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+  <div>
+    <div>
+      <span>
+        "c"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 1; transition: none;">
+      <span>
+        "c"
+        "content"
+-- hover a
+claimOpen tip1 register=true
+releaseOpen tip3
+isWarm tip1 -> true
+popover removed
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- a opens: the immediate one closes
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+  <div>
+    <div>
+      <span>
+        "b"
+  <div>
+    <div>
+      <span>
+        "c"
+-- the popover is placed
+-- leave a
+popover removed
+releaseOpen tip1
+-- leave c
+forgetOpen tip3
+-- mount d
+-- hover d
+claimOpen tip4 register=true
+isWarm tip4 -> true
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- the popover is placed
+-- unmount d
+popover removed
+forgetOpen tip4
+-- removed while open
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+  <div>
+    <div>
+      <span>
+        "b"
+  <div>
+    <div>
+      <span>
+        "c"
+  <div>
+-- 500 ms pass
