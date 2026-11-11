@@ -118,6 +118,20 @@ const styleOf = (shell: Element | null): string =>
 describe("Tooltip layer", () => {
     afterEach(cleanup);
 
+    it("takes no pointer events when it is a passive status, so it can't end the hover that opened it", async () => {
+        render(() => (
+            <Tooltip passive content={<span>status</span>}>
+                <span>anchor</span>
+            </Tooltip>
+        ));
+        fireEvent.mouseEnter(screen.getByText("anchor").parentElement!);
+        await tick();
+        expect(screen.getByText("status").closest(".anchored-popover")!.className).toContain("anchored-popover--passive");
+        expect(readFileSync(join(process.cwd(), "frontend/app/element/anchored-popover.scss"), "utf8")).toMatch(
+            /anchored-popover--passive [{][^}]*pointer-events: none/,
+        );
+    });
+
     it("stacks on the tooltip layer, over dialogs and menus", async () => {
         render(() => (
             <Tooltip content={<span>tip content</span>}>
