@@ -93,16 +93,29 @@ impl Core {
         Failure::Watching
     }
 
-    /// The watches whose address answers now: each is removed and counted as a reload.
-    pub(crate) fn due(&mut self, answers: impl Fn(&str) -> bool) -> Vec<(String, String)> {
-        let ready: Vec<String> = self.watches.iter().filter(|(_, url)| answers(url)).map(|(l, _)| l.clone()).collect();
-        ready
-            .into_iter()
+    /// The watched windows and the address each failed on.
+    pub(crate) fn watched(&self) -> Vec<(String, String)> {
+        self.watches.iter().map(|(l, u)| (l.clone(), u.clone())).collect()
+    }
+
+    /// The watches of `answered` windows that are still there: each is removed and
+    /// counted as a reload. The check itself runs without the lock (`check_loop`).
+    pub(crate) fn take_answered(&mut self, answered: &HashSet<String>) -> Vec<(String, String)> {
+        answered
+            .iter()
             .filter_map(|label| {
+                let url = self.watches.remove(label)?;
                 *self.reloads.entry(label.clone()).or_insert(0) += 1;
-                self.watches.remove(&label).map(|url| (label, url))
+                Some((label.clone(), url))
             })
             .collect()
+    }
+
+    /// The watches whose address answers now (both steps at once, for the tests).
+    #[cfg(test)]
+    pub(crate) fn due(&mut self, answers: impl Fn(&str) -> bool) -> Vec<(String, String)> {
+        let answered = self.watched().into_iter().filter(|(_, u)| answers(u)).map(|(l, _)| l).collect();
+        self.take_answered(&answered)
     }
 
     /// A page loaded: the stretch is over.
@@ -150,7 +163,7 @@ fn core() -> &'static Mutex<Core> {
 
 static CHECKING: AtomicBool = AtomicBool::new(false);
 
-fn is_dev() -> bool {
+pub(crate) fn is_dev() -> bool {
     std::env::var("AGENTMUX_DEV").is_ok()
 }
 
@@ -186,6 +199,7 @@ pub(crate) fn note_loaded() {
 /// retry can clear). Starts the checking thread when there is something to do.
 pub(crate) fn on_failure(state: &Arc<AppState>, failed_url: &str, watch: bool) {
     let label = label_of(failed_url);
+    super::boot_watchdog::note_booted(&label); // a failed load is handled here, not by the boot watchdog
     let outcome = core().lock().fail(&label, failed_url, watch, Instant::now());
     tracing::warn!(target: "wfr:gate", label = %label, outcome = ?outcome, "[load-error] the app page can't be loaded — no windows opened or pools refilled until it answers");
     if (watch || is_dev()) && !CHECKING.swap(true, Ordering::SeqCst) {
@@ -201,9 +215,12 @@ fn check_loop(state: Arc<AppState>) {
         std::thread::sleep(Duration::from_millis(check_delay_ms(round)));
         round = round.saturating_add(1);
         prune_closed(&state);
+        // The connects can take a while: not under the lock the gates and `note_loaded` take.
+        let watched = core().lock().watched();
+        let answered: HashSet<String> = watched.into_iter().filter(|(_, url)| address_answers(url)).map(|(l, _)| l).collect();
         let (due, exit) = {
             let mut c = core().lock();
-            let due = c.due(address_answers);
+            let due = c.take_answered(&answered);
             let exit = dev && c.dev_exit_due(Instant::now(), DEV_EXIT_AFTER);
             if due.is_empty() && !exit && c.idle(dev) {
                 CHECKING.store(false, Ordering::SeqCst);
@@ -226,7 +243,7 @@ fn check_loop(state: Arc<AppState>) {
 }
 
 cef::wrap_task! {
-    struct ReloadTask {
+    pub(crate) struct ReloadTask {
         state: Arc<AppState>,
         label: String,
         url: String,

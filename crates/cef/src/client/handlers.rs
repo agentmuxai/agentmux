@@ -894,6 +894,11 @@ wrap_request_handler! {
             if !is_pane && super::page_unreachable::quit_requested(&state, f.as_ref(), request.as_deref()) {
                 return 1;
             }
+            if !is_pane && f.as_ref().is_some_and(|f| f.is_main() == 1) {
+                if let Some(url) = request.as_deref().map(|r| CefString::from(&r.url()).to_string()) {
+                    super::boot_watchdog::note_navigation(&state, &url);
+                }
+            }
             let cancel = self.inner.lock().on_before_browse(browser, frame, request, user_gesture, is_redirect);
             if cancel == 0 {
                 // The navigation goes ahead: the page's pending pane-rects queries end with it.
