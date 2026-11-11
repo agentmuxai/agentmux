@@ -4,8 +4,9 @@
 import { TextInput } from "@/app/element/ui";
 import type { JSX } from "solid-js";
 
+import { t } from "@/app/i18n/i18n";
 import { settingsAtom } from "@/app/store/global";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 import { SectionHeader, set, SettingRow } from "../settings-controls";
 import { MagnifyRows, PaneGapRow, ThemeRows, TransparencyRows } from "./appearance-section-parts";
 import { LANGUAGE_SETTINGS } from "./language-row";
@@ -17,95 +18,95 @@ import { WidgetColorsSettings } from "./widget-colors";
 // source of truth the JSX reads from — see each row's `label={...}` below. ──
 
 export const APPEARANCE_SETTINGS = {
-    theme: {
+    theme: settingEntry({
         id: "appearance.theme",
-        label: "Theme",
-        description: "Default UI color theme, for windows without one of their own (the ☰ menu sets one window's)",
+        labelKey: "settings.appearance.theme.label",
+        descriptionKey: "settings.appearance.theme.description",
         section: "appearance",
         keywords: ["dark mode", "light mode", "color scheme", "appearance mode", "window:theme"],
-    },
-    splash: {
+    }),
+    splash: settingEntry({
         id: "appearance.splash",
-        label: "Startup splash screen",
-        description: "Show the AgentMux splash while the app starts. Applies at the next launch — the launcher reads this before the app itself is running.",
+        labelKey: "settings.appearance.splash.label",
+        descriptionKey: "settings.appearance.splash.description",
         section: "appearance",
         keywords: ["splash screen", "boot screen", "loading screen", "disable splash", "splash:disabled"],
-    },
-    transparency: {
+    }),
+    transparency: settingEntry({
         id: "appearance.transparency",
-        label: "Window transparency",
-        description: "Enable background transparency and blur",
+        labelKey: "settings.appearance.transparency.label",
+        descriptionKey: "settings.appearance.transparency.description",
         section: "appearance",
         keywords: ["transparent window", "glass effect", "translucent", "window:transparent"],
-    },
-    opacity: {
+    }),
+    opacity: settingEntry({
         id: "appearance.opacity",
-        label: "Opacity",
-        description: "Default window opacity (35–100%), for windows without one of their own (the ☰ menu sets one window's)",
+        labelKey: "settings.appearance.opacity.label",
+        descriptionKey: "settings.appearance.opacity.description",
         section: "appearance",
         keywords: ["window opacity", "transparency level", "glass opacity", "window:opacity"],
-    },
-    blur: {
+    }),
+    blur: settingEntry({
         id: "appearance.blur",
-        label: "Background blur",
-        description: "Blur the content behind the window",
+        labelKey: "settings.appearance.blur.label",
+        descriptionKey: "settings.appearance.blur.description",
         section: "appearance",
         keywords: ["blur effect", "frosted glass", "backdrop blur", "window:blur"],
-    },
-    paneGap: {
+    }),
+    paneGap: settingEntry({
         id: "appearance.pane_gap",
-        label: "Pane gap size",
-        description: "Pixels between tiled panes (0–20)",
+        labelKey: "settings.appearance.paneGap.label",
+        descriptionKey: "settings.appearance.paneGap.description",
         section: "appearance",
         keywords: ["pane spacing", "tile gap", "split gap", "pane margin", "window:tilegapsize"],
-    },
-    bgColor: {
+    }),
+    bgColor: settingEntry({
         id: "appearance.bg_color",
-        label: "Background color",
-        description: "Custom background color override (hex). Leave blank to use the theme default.",
+        labelKey: "settings.appearance.bgColor.label",
+        descriptionKey: "settings.appearance.bgColor.description",
         section: "appearance",
         keywords: ["custom background", "hex color", "window color", "window:bgcolor"],
-    },
-    magnifiedOpacity: {
+    }),
+    magnifiedOpacity: settingEntry({
         id: "appearance.magnified_opacity",
-        label: "Magnified opacity",
-        description: "Background opacity of a pane while magnified (0–1)",
+        labelKey: "settings.appearance.magnifiedOpacity.label",
+        descriptionKey: "settings.appearance.magnifiedOpacity.description",
         section: "appearance",
-        group: "Pane hover-magnify",
+        groupKey: "settings.appearance.group.paneHoverMagnify",
         keywords: ["zoom opacity", "focus mode opacity", "pane zoom", "window:magnifiedblockopacity"],
-    },
-    magnifiedSize: {
+    }),
+    magnifiedSize: settingEntry({
         id: "appearance.magnified_size",
-        label: "Magnified size",
-        description: "Scale factor applied to a pane while magnified",
+        labelKey: "settings.appearance.magnifiedSize.label",
+        descriptionKey: "settings.appearance.magnifiedSize.description",
         section: "appearance",
-        group: "Pane hover-magnify",
+        groupKey: "settings.appearance.group.paneHoverMagnify",
         keywords: ["zoom scale", "pane zoom factor", "magnify scale", "window:magnifiedblocksize"],
-    },
-    magnifiedBlurPrimary: {
+    }),
+    magnifiedBlurPrimary: settingEntry({
         id: "appearance.magnified_blur_primary",
-        label: "Magnified blur (primary)",
-        description: "Backdrop blur, in pixels, applied to the magnified pane itself",
+        labelKey: "settings.appearance.magnifiedBlurPrimary.label",
+        descriptionKey: "settings.appearance.magnifiedBlurPrimary.description",
         section: "appearance",
-        group: "Pane hover-magnify",
+        groupKey: "settings.appearance.group.paneHoverMagnify",
         keywords: ["focused pane blur", "zoom blur", "window:magnifiedblockblurprimarypx"],
-    },
-    magnifiedBlurSecondary: {
+    }),
+    magnifiedBlurSecondary: settingEntry({
         id: "appearance.magnified_blur_secondary",
-        label: "Magnified blur (secondary)",
-        description: "Backdrop blur, in pixels, applied to the other panes behind it",
+        labelKey: "settings.appearance.magnifiedBlurSecondary.label",
+        descriptionKey: "settings.appearance.magnifiedBlurSecondary.description",
         section: "appearance",
-        group: "Pane hover-magnify",
+        groupKey: "settings.appearance.group.paneHoverMagnify",
         keywords: ["background pane blur", "other panes blur", "window:magnifiedblockblursecondarypx"],
-    },
-    widgetColors: {
+    }),
+    widgetColors: settingEntry({
         id: "appearance.widget_colors",
-        label: "Widget colors",
-        description: "The color of every pane of each widget type: its border, tabs and header. A pane's own Pane Color and an agent's color still win.",
+        labelKey: "settings.appearance.widgetColors.label",
+        descriptionKey: "settings.appearance.widgetColors.description",
         section: "appearance",
-        group: "Widget colors",
+        groupKey: "settings.appearance.group.widgetColors",
         keywords: ["color", "colour", "widget", "pane", "tab", "border", "pane:colors"],
-    },
+    }),
     ...LANGUAGE_SETTINGS,
 } satisfies Record<string, SettingsIndexEntry>;
 
@@ -129,14 +130,14 @@ export function AppearanceSection(): JSX.Element {
                         class="setting-text"
                         type="text"
                         value={(s()["window:bgcolor"] as string) ?? ""}
-                        placeholder="#1a1a1a"
+                        placeholder={"#1a1a1a"}
                         onBlur={(e) => set("window:bgcolor", e.currentTarget.value || null)}
                     />
                 }
             />
-            <SectionHeader label="Pane hover-magnify" />
+            <SectionHeader label={t("settings.appearance.group.paneHoverMagnify")} />
             <MagnifyRows s={s} rows={rows} />
-            <SectionHeader label="Widget colors" />
+            <SectionHeader label={t("settings.appearance.group.widgetColors")} />
             <WidgetColorsSettings
                 id={rows.widgetColors.id}
                 label={rows.widgetColors.label}

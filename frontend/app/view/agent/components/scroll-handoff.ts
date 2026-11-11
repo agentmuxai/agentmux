@@ -127,6 +127,21 @@ function wheelNotches(e: WheelEvent): number | null {
     return null;
 }
 
+/** The wheel events this file made to tell a pane about a gesture it relayed: the pane's own skid reset ignores them. */
+const relayed = new WeakSet<Event>();
+
+/**
+ * A box outside the transcript (the hover panel, rendered at the document body) moves the transcript itself, so
+ * the wheel never passed through it: the follow-scroll listens for wheels on the transcript, and without this a
+ * wheel-up over the panel would move a following transcript with no gesture noted and the follower would pin it
+ * back to the bottom. A box inside the transcript needs nothing: its wheel bubbles through the pane.
+ */
+function relayGesture(pane: HTMLElement, e: WheelEvent, deltaY: number): void {
+    const event = new WheelEvent("wheel", { deltaY, deltaMode: e.deltaMode, bubbles: true });
+    relayed.add(event);
+    pane.dispatchEvent(event);
+}
+
 // One skid state per pane (there's one pointer), and the boxes taking part.
 const skids = new WeakMap<HTMLElement, WheelSkid>();
 const boxes = new WeakSet<Element>();
@@ -140,7 +155,7 @@ function watchPane(pane: HTMLElement): void {
     pane.addEventListener(
         "wheel",
         (e: WheelEvent) => {
-            if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
+            if (e.ctrlKey || e.metaKey || e.deltaY === 0 || relayed.has(e)) return;
             for (let n = e.target as Element | null; n && n !== pane; n = n.parentElement) {
                 if (boxes.has(n)) return;
             }
@@ -154,6 +169,9 @@ export interface ScrollHandoffOptions {
     /** Skid even when the content fits, so the box has no scrollbar. A box that
      *  fits is at both edges at once, so every arrival over it skids. */
     skidWhenFits?: boolean;
+    /** The transcript the box hands scroll to, for a box that is not inside it: the hover panel is rendered at the
+     *  document body, so its wheel never chains to the pane it sits over. Absent: the box's own `.agent-document`. */
+    pane?: () => HTMLElement | null | undefined;
 }
 
 /**
@@ -174,7 +192,8 @@ export function previewBox(opts: ScrollHandoffOptions = {}): (el: HTMLElement) =
 export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions = {}): () => void {
     boxes.add(el);
     el.classList.add("scroll-handoff-box");
-    const initialPane = el.closest<HTMLElement>(".agent-document");
+    const paneOf = (): HTMLElement | null | undefined => opts.pane?.() ?? el.closest<HTMLElement>(".agent-document");
+    const initialPane = paneOf();
     if (initialPane) watchPane(initialPane);
 
     let flashTimer: ReturnType<typeof setTimeout> | undefined;
@@ -189,7 +208,7 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
         // Ctrl/⌘+wheel is a ZOOM gesture (the pane zoom in app.tsx, which
         // takes either), never a scroll; deltaY 0 is a horizontal scroll inside the box.
         if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
-        const pane = el.closest<HTMLElement>(".agent-document");
+        const pane = paneOf();
         if (!pane) return;
         watchPane(pane);
         const dir = e.deltaY < 0 ? -1 : 1;
@@ -219,6 +238,7 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
         } else if (action.kind === "forward") {
             if (action.absorbed) flash(dir);
             e.preventDefault();
+            if (!pane.contains(el)) relayGesture(pane, e, action.deltaY);
             scrollTranscriptBy(pane, action.deltaY);
         }
     };

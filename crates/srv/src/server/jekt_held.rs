@@ -214,6 +214,12 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
         if !state.reactive_handler.has_uid_registration(&uid) {
             continue;
         }
+        // Its pane registered it, but its controller is not there yet (every resumed pane, for
+        // seconds, when AgentMux starts): as absent as an unregistered one, so nothing is tried or
+        // counted. The controller registering wakes this loop (`controller_wait`).
+        if state.reactive_handler.block_for_uid(&uid).is_some_and(|b| crate::backend::reactive::controller_wait::awaits_controller(&b)) {
+            continue;
+        }
         if still_needs_login(state, &uid).await {
             continue;
         }
@@ -353,8 +359,9 @@ async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
         return ReplayOutcome::Delivered;
     }
     let error = resp.error.unwrap_or_default();
-    // Transient: still absent, rate-limited, its queue full, or the agent
-    // starting, restarting or stopping ("… try again shortly").
+    // Transient: still absent, rate-limited, its queue full, the agent
+    // starting, restarting or stopping ("… try again shortly"), or its
+    // controller gone between the look above and the delivery.
     if crate::backend::reactive::is_transient_delivery_error(&error) {
         return ReplayOutcome::Deferred;
     }
@@ -495,3 +502,7 @@ mod tests {
         assert_eq!(request_from_held(&row).marker_target, None, "nothing to add when the name is the UID");
     }
 }
+
+#[cfg(test)]
+#[path = "jekt_held_starting_tests.rs"]
+mod starting_tests;

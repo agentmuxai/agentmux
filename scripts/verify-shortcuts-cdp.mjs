@@ -15,7 +15,6 @@ export const MANUAL = {
     "files:closeTab": "closes a tab",
     "open:agent": "opens an agent",
     "pane:voice": "asks for the microphone",
-    "files:mention": "puts paths in an agent's message box",
     "files:openInNewTab": "opens the selected files in their apps",
     // A line break in the clipboard (files:copy puts one between paths) would
     // run each line in the shell.

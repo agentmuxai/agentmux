@@ -154,9 +154,7 @@
         "agent"
     <section class="agent-free-guide" data-testid="agent-free-guide" aria-label="Use Antigravity for free">
       <h4 class="agent-free-guide-title">
-        "Use"
-        "Antigravity"
-        "for free"
+        "Use Antigravity for free"
       <p class="agent-free-guide-lead">
         "Free with a Google sign-in"
         "."

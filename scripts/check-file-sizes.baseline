@@ -3,12 +3,12 @@
 # `node scripts/check-file-sizes.mjs --update` after shrinking one. Adding a
 # file or raising a number is a hand edit that the PR has to justify.
 3234 crates/bashwrap/src/bash_wrap.rs
-1974 crates/cef/src/client/lifecycle.rs
+1972 crates/cef/src/client/lifecycle.rs
 1519 crates/cef/src/commands/cli_login.rs
-2216 crates/cef/src/commands/window_pool.rs
-1518 crates/cef/src/lib.rs
+2210 crates/cef/src/commands/window_pool.rs
+1517 crates/cef/src/lib.rs
 1602 crates/cef/src/state/mod.rs
-2076 crates/cef/src/ui_tasks/window.rs
+2074 crates/cef/src/ui_tasks/window.rs
 1848 crates/common/src/jekt_sign.rs
 1867 crates/launcher/src/saga/mod.rs
 3188 crates/srv/src/backend/agent_config.rs
@@ -19,13 +19,13 @@
 1774 crates/srv/src/backend/fs_ops/host_jobs.rs
 2217 crates/srv/src/backend/history/index.rs
 1903 crates/srv/src/backend/history/mod.rs
-3205 crates/srv/src/backend/lan/discovery.rs
+3201 crates/srv/src/backend/lan/discovery.rs
 1511 crates/srv/src/backend/reactive/handler.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
-2887 crates/srv/src/identity/resolver/inject.rs
+2886 crates/srv/src/identity/resolver/inject.rs
 2185 crates/srv/src/muxbus/cloud_subscriber.rs
 2120 crates/srv/src/persist_subscriber.rs
 1509 crates/srv/src/registry/migrate.rs
 2107 crates/srv/src/server/muxspect_handlers.rs
-2050 crates/srv/src/server/reactive.rs
+2044 crates/srv/src/server/reactive.rs
 2071 frontend/app/view/swarm/swarm-model.ts

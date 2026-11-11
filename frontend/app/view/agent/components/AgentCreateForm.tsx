@@ -17,6 +17,8 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, untrack, type Accessor, type JSX, type Setter } from "solid-js";
 
 import { Button, Select, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { BundleListEditor } from "./BundleListEditor";
 import { useRuntimeChoice, type RuntimeChoice } from "./use-runtime-choice";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -120,7 +122,7 @@ interface AgentCreateFormProps {
  */
 export function friendlySubmitError(message: string, typedName: string): string {
     if (/an agent named .* already exists/.test(message)) {
-        return `You already have an agent named ${typedName}. Choose another name.`;
+        return t("agentCreate.duplicateName", { name: typedName });
     }
     return message;
 }
@@ -320,11 +322,11 @@ function useSubmit(s: SubmitState) {
 
 const NameField = (props: FieldProps & { onKeyDown: (e: KeyboardEvent) => void }): JSX.Element => (
     <label class="agent-create-form-field">
-        <span class="agent-create-form-label">Name</span>
+        <span class="agent-create-form-label">{t("agentCreate.name.label")}</span>
         <TextInput
             class="agent-create-form-input"
             autofocus
-            placeholder="Choose a name"
+            placeholder={t("agentCreate.name.placeholder")}
             value={props.draft.name()}
             onInput={(e) => props.draft.setName(e.currentTarget.value)}
             onKeyDown={props.onKeyDown}
@@ -333,7 +335,7 @@ const NameField = (props: FieldProps & { onKeyDown: (e: KeyboardEvent) => void }
             data-testid="create-from-template-name-input"
         />
         <span class="agent-create-form-note">
-            Name it for its job, like Reviewer or Docs writer, so you can tell your agents apart.
+            {t("agentCreate.name.note")}
         </span>
     </label>
 );
@@ -342,7 +344,7 @@ const RuntimeField = (props: FieldProps & { template: AgentDefinition; runtime: 
     const { containerSupported, canPickContainer, imageAccess, pickRuntime } = props.runtime;
     return (
         <label class="agent-create-form-field">
-            <span class="agent-create-form-label">Runtime</span>
+            <span class="agent-create-form-label">{t("agentCreate.runtime.label")}</span>
             <Select
                 class="agent-create-form-input"
                 value={props.draft.runtime()}
@@ -350,14 +352,13 @@ const RuntimeField = (props: FieldProps & { template: AgentDefinition; runtime: 
                 disabled={props.submitting()}
                 data-testid="create-from-template-runtime-select"
             >
-                <option value="host">Native (runs on this computer)</option>
+                <option value="host">{t("agentCreate.runtime.native")}</option>
                 <option value="container" disabled={!canPickContainer()}>
-                    Container (runs in Docker)
-                    {canPickContainer() ? "" : " — Docker not detected"}
+                    {canPickContainer() ? t("agentCreate.runtime.container") : t("agentCreate.runtime.containerNoDocker")}
                 </option>
             </Select>
             <span class="agent-create-form-note" data-testid="create-from-template-runtime-note">
-                Container: runs in Docker, sandboxed. Native: runs on this computer with your files and tools.
+                {t("agentCreate.runtime.note")}
             </span>
             <Show when={containerSupported() && containerImageNote(imageAccess())}>
                 {(note) => (
@@ -367,7 +368,7 @@ const RuntimeField = (props: FieldProps & { template: AgentDefinition; runtime: 
                 )}
             </Show>
             <Show when={!containerSupported()}>
-                <span class="agent-create-form-note">{props.template.name} can only run as a Native agent.</span>
+                <span class="agent-create-form-note">{t("agentCreate.runtime.nativeOnly", { name: props.template.name })}</span>
             </Show>
         </label>
     );
@@ -375,7 +376,7 @@ const RuntimeField = (props: FieldProps & { template: AgentDefinition; runtime: 
 
 const ContainerImageField = (props: FieldProps & { developerAccess: Accessor<ContainerImageState> }): JSX.Element => (
     <label class="agent-create-form-field">
-        <span class="agent-create-form-label">Container image</span>
+        <span class="agent-create-form-label">{t("agentCreate.image.label")}</span>
         <Select
             class="agent-create-form-input"
             value={props.draft.containerImage()}
@@ -383,13 +384,13 @@ const ContainerImageField = (props: FieldProps & { developerAccess: Accessor<Con
             disabled={props.submitting()}
             data-testid="create-from-template-image-select"
         >
-            <option value="standard">Standard (the agent and its tools)</option>
-            <option value="developer">Developer (also builds software)</option>
+            <option value="standard">{t("agentCreate.image.standard")}</option>
+            <option value="developer">{t("agentCreate.image.developer")}</option>
         </Select>
         <span class="agent-create-form-note" data-testid="create-from-template-image-choice-note">
             {props.draft.containerImage() === "developer"
-                ? "Adds Rust, a C toolchain, go-task and a headless display, so the agent can build and run projects (about 660 MB to download, on top of the standard image)."
-                : "The smallest image: the agent, git, GitHub CLI and Python."}
+                ? t("agentCreate.image.developerNote")
+                : t("agentCreate.image.standardNote")}
         </span>
         <Show when={props.draft.containerImage() === "developer" && developerImageNote(props.developerAccess())}>
             {(note) => (
@@ -405,7 +406,7 @@ const ModelField = (
     props: FieldProps & { template: AgentDefinition; modelOptions: Accessor<{ value: string; label: string }[]>; pickModel: (v: string) => void },
 ): JSX.Element => (
     <label class="agent-create-form-field">
-        <span class="agent-create-form-label">Model</span>
+        <span class="agent-create-form-label">{t("agentCreate.model.label")}</span>
         <Select
             class="agent-create-form-input"
             value={props.draft.model()}
@@ -416,18 +417,17 @@ const ModelField = (
             <For each={props.modelOptions()}>{(m) => <option value={m.value}>{m.label}</option>}</For>
         </Select>
         <span class="agent-create-form-note">
-            Which model {props.template.name} runs with. Changeable later from the agent pane's runtime
-            picker.
+            {t("agentCreate.model.note", { name: props.template.name })}
         </span>
     </label>
 );
 
 const VendorField = (props: FieldProps & { providerId: Accessor<string>; onKeyDown: (e: KeyboardEvent) => void }): JSX.Element => (
     <label class="agent-create-form-field">
-        <span class="agent-create-form-label">Model Vendor / Custom Endpoint</span>
+        <span class="agent-create-form-label">{t("agentCreate.vendor.label")}</span>
         <TextInput
             class="agent-create-form-input"
-            placeholder={`Default (${PROVIDERS[props.providerId()]?.baseUrlEnvVar})`}
+            placeholder={t("agentCreate.vendor.placeholder", { name: PROVIDERS[props.providerId()]?.baseUrlEnvVar ?? "" })}
             value={props.draft.modelVendorBaseUrl()}
             onInput={(e) => props.draft.setModelVendorBaseUrl(e.currentTarget.value)}
             onKeyDown={props.onKeyDown}
@@ -435,8 +435,7 @@ const VendorField = (props: FieldProps & { providerId: Accessor<string>; onKeyDo
             data-testid="create-from-template-vendor-base-url-input"
         />
         <span class="agent-create-form-note">
-            Redirect this agent's harness at a custom API endpoint (e.g. a proxy or alternate model
-            backend) instead of the default vendor. Leave blank to use the default.
+            {t("agentCreate.vendor.note")}
         </span>
     </label>
 );
@@ -446,7 +445,7 @@ const BundlesField = (props: FieldProps & { bundles: Accessor<Bundle[]> }): JSX.
     // agent gets Global Memory and its own bundle.
     <div class="agent-create-form-field" role="group" aria-labelledby="create-from-template-bundles-label">
         <span class="agent-create-form-label" id="create-from-template-bundles-label">
-            Bundles
+            {t("agentCreate.bundles.label")}
         </span>
         <BundleListEditor
             bundles={props.bundles()}
@@ -456,7 +455,7 @@ const BundlesField = (props: FieldProps & { bundles: Accessor<Bundle[]> }): JSX.
             testId="create-from-template-bundles"
         />
         <span class="agent-create-form-note">
-            In order: when two bundles name the same skill, the first wins.
+            {t("agentCreate.bundles.note")}
         </span>
     </div>
 );
@@ -476,7 +475,7 @@ const FormActions = (props: {
         </Show>
         <div class="agent-create-actions">
             <Button tone="neutral" onClick={() => props.onCancel()} disabled={props.submitting()}>
-                Cancel
+                {t("agentCreate.cancel")}
             </Button>
             <Button
                 tone="accent"
@@ -485,7 +484,7 @@ const FormActions = (props: {
                 disabled={!props.canSubmit()}
                 data-testid="create-from-template-submit"
             >
-                {props.submitting() ? "Creating…" : "Create and start"}
+                {props.submitting() ? t("agentCreate.creating") : t("agentCreate.createAndStart")}
             </Button>
         </div>
     </>
@@ -524,8 +523,7 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
         <div class="agent-create-form" data-testid="agent-create-form">
             <Show when={provider.modelOptions().length > 0}>
                 <p class="agent-create-form-hint">
-                    {props.template.name} is the <strong>harness</strong>, the CLI tool that runs this agent. Pick which{" "}
-                    <strong>model</strong> it uses below; the harness stays the same either way.
+                    <Rich k="agentCreate.hint" params={{ name: props.template.name }} />
                 </p>
             </Show>
             <NameField draft={draft} submitting={submitting} onKeyDown={onKeyDown} />

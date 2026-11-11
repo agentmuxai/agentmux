@@ -300,8 +300,8 @@ fn open_stores_for_preview(shared_store_path: &Path, data_dir: &Path) -> Result<
     }
     // Channel store (objects.db) tracks channel-scoped migrations independently
     // per channel — MigrationScope::Channel migrations record here, not in shared.
-    // Always open/create it so that seed migrations (e.g. m0008_default_bundle)
-    // run on fresh install. Skipping it on a fresh install once left the
+    // Always open/create it so that seed migrations (e.g.
+    // m0016_seed_starter_mcp_servers) run on fresh install. Skipping it on a fresh install once left the
     // Channel-scoped migrations (0002/0003/0007) out of the pending list, so
     // they were never marked applied; when mstore then created objects.db,
     // count_pending_migrations at ESTART reported them pending and fired the
@@ -540,15 +540,7 @@ pub fn try_count_pending_migrations(data_dir: &Path) -> Result<usize, PendingCou
             error: e.to_string(),
         }
     })?;
-    let pending_in = |channel: Option<&Store>| {
-        REGISTRY
-            .iter()
-            .filter(|m| {
-                let tracking = tracking_store(m.scope(), &shared_store, channel);
-                tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
-            })
-            .count()
-    };
+    let pending_in = |channel: Option<&Store>| pending_of(REGISTRY, &shared_store, channel).len();
     let channel_store_path = data_dir.join("db").join("objects.db");
     let channel_store = Store::open(&channel_store_path).map_err(|e| {
         PendingCountError::ChannelStoreUnreadable {

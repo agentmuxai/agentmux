@@ -131,13 +131,7 @@ const TABLES: &[TableSpec] = &[
 /// whose base schema already declares the new target. `Ok(true)` for a
 /// missing table too: nothing to repoint is the same as already done.
 fn already_targets_db_agents(conn: &Connection, table: &str) -> Result<bool, String> {
-    let exists: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-            [table],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("probe {table}: {e}"))?;
+    let exists = crate::migrations::table_exists(conn, table).map_err(|e| format!("probe {table}: {e}"))?;
     if !exists {
         return Ok(true);
     }
@@ -238,12 +232,7 @@ fn rebuild_table(conn: &Connection, spec: &TableSpec) -> Result<usize, String> {
 /// dropped entirely as of v32 (`OBJECT_SCHEMA_VERSION`'s v32 doc comment);
 /// nothing to repair a gap in when there's no source table left to have one.
 fn frozen_repair_def_gaps(conn: &mut Connection) -> Result<usize, String> {
-    let defs_exist: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_agent_definitions')",
-            [],
-            |row| row.get(0),
-        )
+    let defs_exist = crate::migrations::table_exists(conn, "db_agent_definitions")
         .map_err(|e| format!("gap-repair: probe db_agent_definitions: {e}"))?;
     if !defs_exist {
         return Ok(0);

@@ -12,8 +12,9 @@
 
 import { createMemo, createSignal, Show, type Component, type JSX } from "solid-js";
 
+import { focusManager } from "@/app/store/focusManager";
 import { Modal, PaneModalScope, TabModalScope } from "@/element/modal";
-import { initialFocusTarget } from "./modal-focus-trap";
+import { initialFocusTarget, paneToWaitFor } from "./modal-focus-trap";
 import { ModalLayerContext, type ModalLayerApi, type ModalLayerRequest } from "./modal-layer";
 import { renderRequest, requestLabel } from "./modal-dispatch";
 import "./modal-layer.scss";
@@ -62,7 +63,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
 
     // Set by `replace` so the next content mount also moves focus —
     // `<Modal>` only resolves initial focus when it opens, and a replace
-    // keeps it open.
+    // keeps it open. Not while it still waits for its pane (modal-caret.ts).
     let replacing = false;
 
     // Every content mount starts at the top of the panel. `.modal-panel`
@@ -78,7 +79,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
             const panel = el.closest<HTMLElement>(".modal-panel");
             if (!panel) return;
             panel.scrollTop = 0;
-            if (moveFocus) initialFocusTarget(panel)?.focus();
+            if (moveFocus && paneToWaitFor(panel, focusManager.blockFocusAtom) == null) initialFocusTarget(panel)?.focus();
         });
     };
 

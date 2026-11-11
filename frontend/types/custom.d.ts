@@ -135,10 +135,9 @@ declare global {
         floatingAlwaysOnTop: boolean;
     };
 
-    /** Host-mediated approvals and memory adoption (the approval windows and panels). */
+    /** Host-mediated approvals (the approval windows) and the Vault's file steps. */
     type ApprovalHostApi = {
         decideCredential(approvalId: string, approve: boolean): Promise<void>;
-        decideMemoryAdoption(approvalId: string, approve: boolean): Promise<void>;
         /** Answer an SSH approval: consent, or ssh's own prompt (`text` for a secret one). */
         decideSsh(approvalId: string, approve: boolean, text: string, checkbox: boolean): Promise<void>;
         /** Answer a browser pane's banner: a hand-off (`done`) or an approval
@@ -216,10 +215,6 @@ declare global {
         vaultImport?(args: { pick_id?: string; passphrase?: string; mapping?: unknown; choose_key_file?: boolean; clear_key_file?: boolean }): Promise<unknown>;
         /** Delete the file picked for an import, after the person pressed Delete the file. */
         vaultImportDelete?(args: { pick_id: string }): Promise<unknown>;
-        /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
-        requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
-        /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */
-        requestMemoryRelease(args: Record<string, unknown>): Promise<void>;
     };
 
     /** A rectangle in CSS pixels. */

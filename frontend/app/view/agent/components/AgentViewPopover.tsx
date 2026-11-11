@@ -10,38 +10,11 @@
 
 import { For, Show, type JSX } from "solid-js";
 import { AnchoredPopover } from "@/app/element/anchored-popover";
-import { Button, SegmentedControl, type SegmentedOption } from "@/app/element/ui";
+import { Button, SegmentedControl } from "@/app/element/ui";
 import type { AgentViewControls } from "../agent-view-controls";
-import {
-    PRESET_LABEL,
-    PRESET_NAMES,
-    presetOf,
-    SWITCH_KEYS,
-    SWITCH_LABEL,
-    SWITCH_VALUES,
-    type AgentView,
-    type PresetName,
-    type SwitchKey,
-} from "../virtualization/verbosity";
+import { presetOf, SWITCH_KEYS, SWITCH_LABEL, type AgentView } from "../virtualization/verbosity";
+import { PRESET_OPTIONS, switchOptions } from "../virtualization/view-options";
 import "./AgentViewPopover.scss";
-
-const FOLD_LABEL: Record<string, string> = {
-    auto: "Auto",
-    expanded: "Expanded",
-    collapsed: "Collapsed",
-    hidden: "Hidden",
-    shown: "Shown",
-};
-
-const PRESET_OPTIONS: SegmentedOption<PresetName | "custom">[] = [
-    ...PRESET_NAMES.map((name) => ({ value: name, label: PRESET_LABEL[name] })),
-    // Lit when the switches match no preset; not a choice, so it cannot be picked.
-    { value: "custom", label: PRESET_LABEL.custom, disabled: true },
-];
-
-function switchOptions(key: SwitchKey): SegmentedOption<string>[] {
-    return SWITCH_VALUES[key].map((value) => ({ value, label: FOLD_LABEL[value] }));
-}
 
 export interface AgentViewPopoverProps {
     controls: AgentViewControls;

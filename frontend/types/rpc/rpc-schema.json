@@ -646,6 +646,25 @@
     }
   },
   {
+    "command": "agent.spend",
+    "request": "agentmux_srv::server::app_api::agent_spend::AgentSpendReq",
+    "requestName": "AgentSpendReq",
+    "requestTs": {
+      "imports": [
+        "AgentSpendReq"
+      ],
+      "name": "AgentSpendReq"
+    },
+    "response": "agentmux_srv::server::app_api::agent_spend::AgentSpendResult",
+    "responseName": "AgentSpendResult",
+    "responseTs": {
+      "imports": [
+        "AgentSpendResult"
+      ],
+      "name": "AgentSpendResult"
+    }
+  },
+  {
     "command": "agent.start",
     "request": "agentmux_srv::server::agent_runtime::CommandAgentStartData",
     "requestName": "CommandAgentStartData",
@@ -738,6 +757,25 @@
         "AgentTrackedBlocksResult"
       ],
       "name": "AgentTrackedBlocksResult"
+    }
+  },
+  {
+    "command": "agent:memory:adopt",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryAdoptData",
+    "requestName": "CommandNativeMemoryAdoptData",
+    "requestTs": {
+      "imports": [
+        "CommandNativeMemoryAdoptData"
+      ],
+      "name": "CommandNativeMemoryAdoptData"
+    },
+    "response": "agentmux_srv::backend::memory::adopt::AdoptReport",
+    "responseName": "AdoptReport",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryAdoptReport"
+      ],
+      "name": "NativeMemoryAdoptReport"
     }
   },
   {
@@ -852,6 +890,25 @@
         "NativeMemoryReadFileResult"
       ],
       "name": "NativeMemoryReadFileResult"
+    }
+  },
+  {
+    "command": "agent:memory:release",
+    "request": "agentmux_srv::backend::rpc_types::native_memory::CommandNativeMemoryReleaseData",
+    "requestName": "CommandNativeMemoryReleaseData",
+    "requestTs": {
+      "imports": [
+        "CommandNativeMemoryReleaseData"
+      ],
+      "name": "CommandNativeMemoryReleaseData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::native_memory::NativeMemoryReleaseResult",
+    "responseName": "NativeMemoryReleaseResult",
+    "responseTs": {
+      "imports": [
+        "NativeMemoryReleaseResult"
+      ],
+      "name": "NativeMemoryReleaseResult"
     }
   },
   {
@@ -2025,6 +2082,44 @@
         "BrowserPauseAll"
       ],
       "name": "BrowserPauseAll"
+    }
+  },
+  {
+    "command": "browsergrants.permissionrevoke",
+    "request": "agentmux_srv::backend::rpc_types::browser_grants::CommandBrowserGrantsPermissionRevokeData",
+    "requestName": "CommandBrowserGrantsPermissionRevokeData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserGrantsPermissionRevokeData"
+      ],
+      "name": "CommandBrowserGrantsPermissionRevokeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::browser_grants::BrowserGrantsResult",
+    "responseName": "BrowserGrantsResult",
+    "responseTs": {
+      "imports": [
+        "BrowserGrantsResult"
+      ],
+      "name": "BrowserGrantsResult"
+    }
+  },
+  {
+    "command": "browsergrants.permissionset",
+    "request": "agentmux_srv::backend::rpc_types::browser_grants::CommandBrowserGrantsPermissionSetData",
+    "requestName": "CommandBrowserGrantsPermissionSetData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserGrantsPermissionSetData"
+      ],
+      "name": "CommandBrowserGrantsPermissionSetData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::browser_grants::BrowserGrantsResult",
+    "responseName": "BrowserGrantsResult",
+    "responseTs": {
+      "imports": [
+        "BrowserGrantsResult"
+      ],
+      "name": "BrowserGrantsResult"
     }
   },
   {
@@ -5955,6 +6050,25 @@
     }
   },
   {
+    "command": "pane.confirm.decide",
+    "request": "agentmux_srv::sagas::pane_confirm::CommandPaneConfirmDecideData",
+    "requestName": "CommandPaneConfirmDecideData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneConfirmDecideData"
+      ],
+      "name": "CommandPaneConfirmDecideData"
+    },
+    "response": "agentmux_srv::sagas::pane_confirm::PaneConfirmDecideResult",
+    "responseName": "PaneConfirmDecideResult",
+    "responseTs": {
+      "imports": [
+        "PaneConfirmDecideResult"
+      ],
+      "name": "PaneConfirmDecideResult"
+    }
+  },
+  {
     "command": "pane.moveTab",
     "request": "agentmux_srv::backend::rpc_types::block::CommandPaneMoveTabData",
     "requestName": "CommandPaneMoveTabData",
@@ -7397,13 +7511,13 @@
   },
   {
     "command": "toolchain.install_system_tool",
-    "request": "agentmux_srv::server::system_install_handlers::ToolIdReq",
-    "requestName": "ToolIdReq",
+    "request": "agentmux_srv::server::system_install_handlers::InstallSystemToolReq",
+    "requestName": "InstallSystemToolReq",
     "requestTs": {
       "imports": [
-        "ToolIdReq"
+        "InstallSystemToolReq"
       ],
-      "name": "ToolIdReq"
+      "name": "InstallSystemToolReq"
     },
     "response": "agentmux_srv::server::system_install_handlers::InstallSystemToolResult",
     "responseName": "InstallSystemToolResult",

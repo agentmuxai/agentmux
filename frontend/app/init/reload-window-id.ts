@@ -73,3 +73,31 @@ export async function reattachableWindow(
         return undefined;
     }
 }
+
+/**
+ * The row of the window this one replaces, when the host recreated it after
+ * a crash: the host names the old row in the address (`reprojectOf`), and
+ * closes it only once this window has registered. The new window opens onto
+ * that row's workspace and takes its theme and opacity, so the user gets the
+ * window they had and not an empty one beside a "closed window" entry.
+ *
+ * Undefined for any other window, and when the old row is no longer open or
+ * its workspace is gone: the caller then creates a workspace as before. A
+ * failed lookup counts as "can't".
+ */
+export async function replacedWindow(
+    openWindowIds: string[] | undefined,
+    getWindow: (id: string) => Promise<MuxWindow | null | undefined>,
+    getWorkspace: (id: string) => Promise<unknown>,
+    search: string = window.location.search
+): Promise<MuxWindow | undefined> {
+    const old = new URLSearchParams(search).get("reprojectOf");
+    if (!old || !openWindowIds?.includes(old)) return undefined;
+    try {
+        const win = await getWindow(old);
+        if (!win?.workspaceid) return undefined;
+        return (await getWorkspace(win.workspaceid)) ? win : undefined;
+    } catch {
+        return undefined;
+    }
+}

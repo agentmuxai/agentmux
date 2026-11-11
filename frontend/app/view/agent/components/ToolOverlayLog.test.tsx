@@ -476,6 +476,33 @@ describe("ToolOverlayLog — hides bashwrap's internal starting-chunk (2026-09-0
         expect(container.textContent).toContain("Thinking...");
     });
 
+    // The operator's kickback: the placeholder was taller than a line of output, so the pane moved when the first
+    // line replaced it. It is made of the output line's own classes, so the two cannot drift apart again.
+    it("the placeholder is built as one line of output (the preview line's own classes), with no height of its own", () => {
+        const running: ToolNode = { ...streamingNode, log: undefined };
+        const { container } = render(() => <ToolOverlayLog node={running} />);
+        const placeholder = container.querySelector(".agent-tool-loading")!;
+        expect(placeholder.classList.contains("agent-preview")).toBe(true);
+        const lines = placeholder.querySelectorAll(".agent-preview-lines > .agent-preview-line");
+        expect(lines).toHaveLength(1);
+        expect(lines[0].querySelector(".agent-preview-text")?.textContent).toContain("Thinking...");
+        // An icon the line's own metrics size, not an emoji with metrics of its own.
+        expect(placeholder.textContent).not.toContain("⏳");
+        expect(placeholder.querySelector("i.agent-tool-spinner")).not.toBeNull();
+    });
+
+    it("a streamed first line of output has the same wrapper and line classes as the placeholder", () => {
+        const running: ToolNode = { ...streamingNode, log: undefined };
+        const placeholder = render(() => <ToolOverlayLog node={running} />).container;
+        const placeholderLine = placeholder.querySelector(".agent-tool-loading .agent-preview-line")!;
+        cleanup();
+        const { container } = render(() => <ToolOverlayLog node={streamingNode} />);
+        const outputLine = container.querySelector(".agent-preview .agent-preview-line")!;
+        expect(outputLine).not.toBeNull();
+        expect(placeholderLine.className).toBe(outputLine.className);
+        expect(placeholderLine.parentElement!.className).toBe(outputLine.parentElement!.className);
+    });
+
     it("still shows real output once the tool completes, with no trace of the system chunk", () => {
         const node: ToolNode = {
             ...terminalNode,

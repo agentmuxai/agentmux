@@ -110,6 +110,14 @@ const flush = async () => {
 const logged = (m: { log: ReturnType<typeof vi.fn> }, text: string | RegExp) =>
     m.log.mock.calls.some((c) => (typeof text === "string" ? c[1] === text : text.test(String(c[1]))));
 
+/**
+ * Waits for THIS mount's fill to write its closing line. Not for `hub.endLoad`: the hub is one mock for the whole file, and
+ * a fill an earlier test left behind (paused, then stopped by that test's unmount) calls it up to a few hundred ms later,
+ * in the middle of the next test.
+ */
+const fillEnded = (m: { log: ReturnType<typeof vi.fn> }) =>
+    vi.waitFor(() => expect(logged(m, /^background fill \w+: /)).toBe(true), { timeout: 6000 });
+
 const count = (n: number, over: Record<string, unknown> = {}) =>
     vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: n, ...over } as never);
 /** Serve a range of `user` lines for whatever offset and limit is asked. */
@@ -972,7 +980,7 @@ describe("the background fill's account of itself", () => {
     it("logs and records the pages it loaded, then lets go of the tool chunks it held", async () => {
         range({ offset: undefined });
         const m = fill();
-        await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
+        await fillEnded(m);
         expect(logged(m, /^background fill done: \d+ pages, \d+ lines, \d+ bytes in \d+ ms$/)).toBe(true);
         expect(hub.rest).toHaveBeenCalledWith("blk-1", "done", {
             pages: expect.any(Number),
@@ -989,7 +997,7 @@ describe("the background fill's account of itself", () => {
     it("hands its pages over unloaded, and a scroll-up's page loaded", async () => {
         range({ offset: undefined });
         const m = fill();
-        await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
+        await fillEnded(m);
         const pages = m.docEvents.filter((e) => e.type === "HistoryLoaded");
         expect(pages.length).toBeGreaterThan(1);
         for (const p of pages.slice(1)) expect(p.unloadResults).toBe(true);
@@ -998,7 +1006,7 @@ describe("the background fill's account of itself", () => {
     it("logs a page it could not read, and ends", async () => {
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockRejectedValue(new Error("read broke"));
         const m = fill();
-        await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
+        await fillEnded(m);
         const failure = m.log.mock.calls.find((c) => String(c[1]).startsWith("background history load failed"));
         expect(failure?.[1]).toBe("background history load failed: read broke");
         expect(failure?.[2]).toBe("warn");
@@ -1013,8 +1021,8 @@ describe("the background fill's account of itself", () => {
             return 1;
         });
         range({ offset: undefined });
-        fill();
-        await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
+        const m = fill();
+        await fillEnded(m);
         expect(seen[0]).toEqual({ timeout: 500 });
     });
 
@@ -1068,7 +1076,7 @@ describe("the background fill's account of itself", () => {
                 ? { lines: Array.from({ length: req.limit }, (_, i) => delta(i)), stream: "b:blk-1", gen: "g1" }
                 : { lines: [], gen_mismatch: true }) as never);
         const m = fill();
-        await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
+        await fillEnded(m);
         expect(m.hook.historyOffset()).toBe(5_000);
         expect(m.docEvents.filter((e) => e.type === "HistoryLoaded")).toHaveLength(1);
     });

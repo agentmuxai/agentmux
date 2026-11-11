@@ -13,6 +13,7 @@ import type { BrowserGrantsResult } from "@/types/rpc/BrowserGrantsResult";
 import { ago } from "./pinned-senders";
 import { POWER_LABELS, powerChecklist, sitesLabel } from "./agent-site-grants-model";
 import type { AgentSiteGrantsState, TerminalChoice } from "./agent-site-grants-state";
+import { PermissionsBody } from "./agent-site-permissions-parts";
 
 type Grants = Accessor<BrowserGrantsResult>;
 
@@ -163,6 +164,7 @@ export function GrantsBody(props: { s: AgentSiteGrantsState; d: Grants }): JSX.E
             <GrantList s={props.s} d={props.d} />
             <AddForm s={props.s} />
             <Presets s={props.s} d={props.d} />
+            <PermissionsBody s={props.s} d={props.d} />
         </>
     );
 }

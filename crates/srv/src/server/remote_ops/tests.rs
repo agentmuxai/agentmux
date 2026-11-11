@@ -38,10 +38,18 @@ fn request(slug: &str, nonce: &str, op: &str, audience: &str, ts: i64, private: 
     .unwrap()
 }
 
+/// The LAN peers show `name` with `public` (and a UID key), and this machine has pinned that key already, as
+/// it has every name of the fleet: a name is no longer pinned by the first answer alone (lan first-pin rule).
+fn seed_pinned(state: &crate::server::AppState, name: &str, public: Vec<u8>, uid: Option<(String, Vec<u8>)>) {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    state.mstore.lan_peer_pubkey_pin_get_or_set(name, &BASE64.encode(&public)).unwrap();
+    state.lan_discovery.seed_lan_pubkey_for_test(name, public, uid);
+}
+
 /// A state whose LAN peers show `slug` with the key `public`, and the audience that names it.
 fn state_with_peer(slug: &str, public: &[u8; 32]) -> (AppState, String) {
     let state = test_state();
-    state.lan_discovery.seed_lan_pubkey_for_test(slug, public.to_vec(), None);
+    seed_pinned(&state, slug, public.to_vec(), None);
     let audience = lan_audience(&state.lan_key);
     (state, audience)
 }
@@ -84,7 +92,7 @@ async fn a_repeated_nonce_gets_the_first_answer_and_runs_nothing_again() {
     assert_eq!(first, again);
     // The same nonce from another agent is its own request.
     let (other_public, other_private) = keys(4);
-    state.lan_discovery.seed_lan_pubkey_for_test("rop-r2", other_public.to_vec(), None);
+    seed_pinned(&state, "rop-r2", other_public.to_vec(), None);
     let other = run(&state, PEER, request("rop-r2", "n-r", "app.version", &audience, NOW, &other_private)).await;
     assert_eq!(other.status, OpStatus::Done);
 }
@@ -236,6 +244,15 @@ fn a_peer_is_described_by_how_it_is_installed_and_whether_it_runs_agents() {
     let mut unasked = install_peer("charlie", "", "k3", 29705, &[]);
     unasked.last_polled_ok = 0;
     assert_eq!(describe_peer(&unasked), "charlie/stable");
+    // What kind of build a peer is comes from what it says about its binary, not from its channel:
+    // a release that a local build upgraded to keeps that build's channel.
+    let mut upgraded = unasked.clone();
+    upgraded.channel = "local-main-b28b7a-0000000a".into();
+    upgraded.build = "release".into();
+    upgraded.install = "linux-appimage".into();
+    assert_eq!(describe_peer(&upgraded), "charlie/local-main-b28b7a-0000000a (release, AppImage)");
+    upgraded.build = "local".into();
+    assert_eq!(describe_peer(&upgraded), "charlie/local-main-b28b7a-0000000a (local build, AppImage)");
     // The "no machine" error lists them so.
     let none = resolve_peer(&[store], "lazo").unwrap_err();
     assert!(none.contains("Area54/stable (Microsoft Store, no agents)"), "{none}");

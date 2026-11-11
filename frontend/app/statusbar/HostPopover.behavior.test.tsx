@@ -44,6 +44,7 @@ vi.mock("@/app/view/accounts/AgentMuxConnectPanel", () => ({ useMuxBusStatus: ()
 vi.mock("@/util/platformutil", () => ({
     isMacOS: () => h.platform === "mac",
     isLinux: () => h.platform === "linux",
+    isWindows: () => h.platform === "win",
 }));
 vi.mock("@/app/element/anchored-popover", () => ({
     AnchoredPopover: (props: any) => {

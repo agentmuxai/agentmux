@@ -14,7 +14,7 @@
 
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
-import { selfReleasePayload } from "@/app/drag/pane-self-release";
+import { pointerOverOwnPane, selfReleasePayload } from "@/app/drag/pane-self-release";
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
@@ -32,7 +32,9 @@ import {
     LayoutTreeActionType,
     LayoutTreeComputeMoveNodeAction,
 } from "./types";
+import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { clearPlacement, previewPlacement } from "./placementPreview";
+import { commitTearOff, leaveOwnPane, restOverOwnPane } from "./tearOffPreview";
 import {
     clampCrossTabDirection,
     noteCrossTabDrop,
@@ -251,14 +253,10 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         // below, which marks the drag for tear-off instead of clearing the
         // payload (app/drag/pane-self-release.ts).
         const originRect = props.layoutModel.getNodeRectById(dragNodeId);
-        if (
-            originRect &&
-            offset.x >= originRect.left &&
-            offset.x <= originRect.left + originRect.width &&
-            offset.y >= originRect.top &&
-            offset.y <= originRect.top + originRect.height
-        ) {
+        if (pointerOverOwnPane(originRect, offset.x, offset.y)) {
             clearPlacement(props.layoutModel, true);
+            // A release here tears the pane off: once the pointer rests, the layout shows it (tearOffPreview.ts).
+            if (!isCrossTabDrag(props.layoutModel)) restOverOwnPane(props.layoutModel, dragNodeId, offset.x, offset.y);
             return;
         }
 
@@ -338,6 +336,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         if (!marked) return false;
         clearPlacement(props.layoutModel, true);
         setCurrentDragPayload(marked);
+        commitTearOff(props.layoutModel, nodeId);
         return true;
     };
 
@@ -358,6 +357,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
                 // a transition INTO an inner overlay-node should not
                 // clear (the inner's onDrag will set a fresh action).
                 clearPlacement(props.layoutModel);
+                leaveOwnPane(props.layoutModel);
             },
             onDrop: ({ source, location }) => {
                 // Released over the dragged pane itself (the only place with no ghost): the pane tears off
@@ -525,7 +525,8 @@ export const Placeholder = (props: PlaceholderProps) => {
     let exitTimer: ReturnType<typeof setTimeout> | null = null;
 
     createEffect(() => {
-        const xf = placeholderTransform();
+        // Not while the dragged pane's picture is still being taken: the zone's tint would be in it.
+        const xf = paneCaptureInFlight() ? undefined : placeholderTransform();
         if (xf) {
             setLastTransform(xf as JSX.CSSProperties);
             if (exitTimer) { clearTimeout(exitTimer); exitTimer = null; }

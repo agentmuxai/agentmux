@@ -61,8 +61,7 @@ vi.mock("@/app/hook/useTick", () => ({
 vi.mock("../agent-dormancy", () => ({ useAgentDormant: () => () => h.dormant[0]() }));
 vi.mock("../agent-media", () => ({ useAgentMedia: () => () => h.media[0]() }));
 vi.mock("@/util/format-time", () => ({
-    formatExactTime: (ts: number) => `exact(${ts})`,
-    formatTimeAgo: (ts: number) => `ago(${ts})`,
+    formatPeekTime: (ts: number) => `exact(${ts}) · ago(${ts})`,
 }));
 
 import { MarkdownBlock } from "./MarkdownBlock";

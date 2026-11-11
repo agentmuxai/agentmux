@@ -1,0 +1,91 @@
+-- blurred unchanged
+RemoteSetConfigCommand {"connection":"db1","values":{"display:name":"staging"}}
+RemoteSetConfigCommand {"connection":"db1","values":{"display:name":null}}
+-- Enter blurs: 1
+-- another key blurs: 1
+-- press Red
+RemoteSetConfigCommand {"connection":"db1","values":{"display:color":"#e5484d"}}
+-- press None
+RemoteSetConfigCommand {"connection":"db1","values":{"display:color":null}}
+-- choose on
+RemoteSetConfigCommand {"connection":"db1","values":{"term:durable":true}}
+-- choose off
+RemoteSetConfigCommand {"connection":"db1","values":{"term:durable":false}}
+-- choose default
+RemoteSetConfigCommand {"connection":"db1","values":{"term:durable":null}}
+-- choose always
+RemoteSetConfigCommand {"connection":"db1","values":{"conn:helper":"always"}}
+-- choose never
+RemoteSetConfigCommand {"connection":"db1","values":{"conn:helper":"never"}}
+-- choose ask
+RemoteSetConfigCommand {"connection":"db1","values":{"conn:helper":null}}
+-- press Revoke korp on db1
+RemoteAgentRevokeCommand {"connection":"db1","agent":"korp"}
+RemotesListCommand
+-- settled
+<div class="remotes-detail">
+  <div class="remotes-detail-actions">
+    <button type="button" class="ui-button ui-tone-neutral">
+      "Connect"
+    <button type="button" class="ui-button ui-tone-neutral">
+      "Sessions…"
+    <button type="button" class="ui-button ui-tone-neutral">
+      "Pin"
+    <button type="button" class="ui-button ui-tone-neutral">
+      "Hide"
+    <button type="button" class="ui-button ui-tone-neutral">
+      "Test connection"
+    <button type="button" class="ui-button ui-tone-neutral">
+      "Edit in ssh config"
+  <div class="remotes-settings">
+    <label class="remotes-setting">
+      <span>
+        "Nickname"
+      <input placeholder="db1" type="text" class="ui-input" value="via enter">
+    <div class="remotes-setting">
+      <span>
+        "Colour"
+      <div class="remotes-colors" role="radiogroup" aria-label="Colour">
+        <button role="radio" aria-checked="true" title="None" aria-label="None" type="button" class="ui-button ui-tone-neutral remotes-color">
+          <i aria-hidden="true" class="fa-solid fa-ban">
+        <button role="radio" aria-checked="false" title="Red" aria-label="Red" type="button" class="ui-button ui-tone-neutral remotes-color">
+          <span class="remotes-color-chip" style="background: rgb(229, 72, 77);">
+        <button role="radio" aria-checked="false" title="Orange" aria-label="Orange" type="button" class="ui-button ui-tone-neutral remotes-color">
+          <span class="remotes-color-chip" style="background: rgb(247, 107, 21);">
+        <button role="radio" aria-checked="false" title="Yellow" aria-label="Yellow" type="button" class="ui-button ui-tone-neutral remotes-color">
+          <span class="remotes-color-chip" style="background: rgb(255, 197, 61);">
+        <button role="radio" aria-checked="false" title="Green" aria-label="Green" type="button" class="ui-button ui-tone-neutral remotes-color">
+          <span class="remotes-color-chip" style="background: rgb(70, 167, 88);">
+        <button role="radio" aria-checked="false" title="Blue" aria-label="Blue" type="button" class="ui-button ui-tone-neutral remotes-color">
+          <span class="remotes-color-chip" style="background: rgb(0, 144, 255);">
+        <button role="radio" aria-checked="false" title="Purple" aria-label="Purple" type="button" class="ui-button ui-tone-neutral remotes-color">
+          <span class="remotes-color-chip" style="background: rgb(142, 78, 198);">
+    <label class="remotes-setting">
+      <span>
+        "Keep sessions alive"
+      <select class="ui-input" value="default">
+        <option>
+          "As in Settings"
+        <option>
+          "On"
+        <option>
+          "Off"
+    <label class="remotes-setting">
+      <span>
+        "Install the helper"
+      <select class="ui-input" value="ask">
+        <option>
+          "As in Settings"
+        <option>
+          "Always"
+        <option>
+          "Never"
+  <div class="remotes-agents">
+    <span>
+      "Agents always allowed here (as you, with your SSH keys):"
+    <ul>
+      <li>
+        <span class="remotes-agent-name">
+          "korp"
+        <button aria-label="Revoke korp on db1" type="button" class="ui-button ui-tone-quiet">
+          "Revoke"

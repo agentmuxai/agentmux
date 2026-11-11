@@ -25,16 +25,13 @@ export interface FreezeFrame {
 // verified empirically) and display it in the placeholder until the overlay
 // clears. The frame is static — acceptable for menu-open-scale durations.
 //
-// Windows is excluded, except in Views pane mode (`paneBackend` "views",
-// AGENTMUX_PANE_BACKEND=views): its child-window panes get a precise
-// SetWindowRgn hole and never hide, so there is nothing to freeze over, but a
-// Views pane is hidden whole like on Linux.
-// Linux, and Windows in Views pane mode. Windows child-window panes get a
-// SetWindowRgn hole (pane never hides — nothing to freeze over), and macOS
-// punches a CALayer hole mask (ui_tasks/pane_hole_mask.rs) — the pane stays
-// LIVE there, so freezing is actively harmful there (forces a compositor
-// frame, visible as a jerk, and defers the clip IPC). Linux and Windows
-// Views panes still whole-pane-hide and need the freeze-frame compensation.
+// Linux, and Windows in Views pane mode (`paneBackend` "views",
+// AGENTMUX_PANE_BACKEND=views): those panes are hidden whole. Windows
+// child-window panes get a SetWindowRgn hole (the pane never hides, so there is
+// nothing to freeze over), and macOS punches a CALayer hole mask
+// (ui_tasks/pane_hole_mask.rs): the pane stays live there, so freezing would
+// be harmful (it forces a compositor frame, visible as a jerk, and defers the
+// clip IPC).
 function hidesWholePane(): boolean {
     const ua = navigator.userAgent;
     return (ua.includes("Linux") && !ua.includes("Windows")) || isViewsPanesOnWindows();

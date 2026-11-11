@@ -87,7 +87,7 @@ impl LanDiscoveryController {
         // does not confirm this name key with a UID key must leave the cache as
         // it was, or a miss would stand in for the key that just verified.
         let before = self.pubkey_cache.read().ok().and_then(|cache| {
-            cache.get(agent_id).map(|e| LanPubkeyCacheEntry { public_key: e.public_key.clone(), uid_key: e.uid_key.clone(), cert: e.cert.clone(), expires: e.expires })
+            cache.get(agent_id).map(|e| LanPubkeyCacheEntry { public_key: e.public_key.clone(), uid_key: e.uid_key.clone(), cert: e.cert.clone(), install_sig: e.install_sig.clone(), expires: e.expires })
         });
         let shown = match self.pubkey_from_peers(peers, agent_id, http).await {
             LanPubkeyLookup::Found(key) if key == name_key => self.cached_lan_uid_key(agent_id),
@@ -118,6 +118,29 @@ impl LanDiscoveryController {
         let cache = self.pubkey_cache.read().ok()?;
         cache.get(agent_id).filter(|e| e.expires > std::time::Instant::now())?.cert.clone()
     }
+
+    /// The UID and UID key the peer that answered [`Self::find_agent_lan_pubkey`]
+    /// for `agent_id` gave beside its name key, while that answer is cached
+    /// (identity M4d-6).
+    pub fn cached_lan_uid_key(&self, agent_id: &str) -> Option<(String, Vec<u8>)> {
+        let cache = self.pubkey_cache.read().ok()?;
+        let e = cache.get(agent_id).filter(|e| e.expires > std::time::Instant::now())?;
+        e.uid_key.clone()
+    }
+
+    /// The agent's own signature, from the same answer, that the install behind the certificate hosts it.
+    pub fn cached_lan_install_sig(&self, agent_id: &str) -> Option<String> {
+        let cache = self.pubkey_cache.read().ok()?;
+        cache.get(agent_id).filter(|e| e.expires > std::time::Instant::now())?.install_sig.clone()
+    }
+
+    /// Give the cached answer for `agent_id` the agent's statement of which install hosts it.
+    #[cfg(test)]
+    pub fn seed_lan_install_sig_for_test(&self, agent_id: &str, sig: String) {
+        if let Some(entry) = self.pubkey_cache.write().unwrap().get_mut(agent_id) {
+            entry.install_sig = Some(sig);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -132,6 +155,7 @@ impl LanDiscoveryController {
             channel: String::new(),
             os: String::new(),
             install: String::new(),
+            build: String::new(),
             address: host.to_string(),
             port: port.parse().unwrap(),
             auth_key: "k".into(),
@@ -156,7 +180,7 @@ impl LanDiscoveryController {
         let left = life.saturating_sub(std::time::Duration::from_secs(age_secs));
         self.pubkey_cache.write().unwrap().insert(
             agent_id.to_string(),
-            LanPubkeyCacheEntry { public_key: None, uid_key: None, cert: None, expires: std::time::Instant::now() + left },
+            LanPubkeyCacheEntry { public_key: None, uid_key: None, cert: None, install_sig: None, expires: std::time::Instant::now() + left },
         );
     }
 
@@ -169,6 +193,7 @@ impl LanDiscoveryController {
                 public_key: Some(public_key),
                 uid_key: None,
                 cert,
+                install_sig: None,
                 expires: std::time::Instant::now() + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
             },
         );

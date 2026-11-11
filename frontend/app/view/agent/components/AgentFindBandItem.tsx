@@ -26,6 +26,8 @@ export function AgentFindBandItem(props: AgentSearchBarProps & { blockId: string
                     matchIndex={props.matchIndex}
                     matchCount={props.matchCount}
                     searching={props.searching}
+                    dim={props.dim}
+                    onDimChange={props.onDimChange}
                     measuring={ctx.measuring}
                 />
             ),

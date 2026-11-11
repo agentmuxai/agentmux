@@ -128,8 +128,12 @@ fn first_use_of_grant(agent: &str, target: &str, site: &str, kinds: &[&str], now
 /// A remembered grant covered this ask, with no fresh countdown: one Audit row for it, flagged
 /// `standing` (§4.6) so it reads the same as a fresh countdown's row rather than vanishing into
 /// the per-pane notice log alone — a site allowed many times unattended should still show up.
-fn audit_standing_allow(state: &AppState, agent: &str, site: &str, kinds: &[&str], message: &str) {
-    let facts = facts_for(agent, site, kinds);
+/// `lasting` says a row the person made in Settings allowed it, which has no 30 minutes to put in the answer.
+fn audit_standing_allow(state: &AppState, agent: &str, site: &str, kinds: &[&str], message: &str, lasting: bool) {
+    let mut facts = facts_for(agent, site, kinds);
+    if lasting {
+        facts.insert("answer".to_string(), format!("allow {} for {site} (a standing permission from Settings)", what_of(kinds)));
+    }
     state.reactive_handler.log_sensitive_op_audit(
         Some(agent),
         agent,
@@ -218,10 +222,17 @@ pub(crate) async fn handle_host_browser_permission(
     if agent.is_empty() || site.is_empty() {
         return answered("deny");
     }
+    if super::browser_site_permissions::allowed(&agent, &site, &kinds) {
+        record(&agent, &target, "permission", &message, "allowed", "you allowed it on this site in Settings");
+        if super::browser_site_permissions::first_use(&agent, &target, &site, &kinds) {
+            audit_standing_allow(&state, &agent, &site, &kinds, &message, true);
+        }
+        return answered("allow");
+    }
     if is_granted(&agent, &target, &site, &kinds, now_ms()) {
         record(&agent, &target, "permission", &message, "allowed", "the person's countdown for this site ended without a veto");
         if first_use_of_grant(&agent, &target, &site, &kinds, now_ms()) {
-            audit_standing_allow(&state, &agent, &site, &kinds, &message);
+            audit_standing_allow(&state, &agent, &site, &kinds, &message, false);
         }
         return answered("allow");
     }
@@ -352,7 +363,7 @@ mod tests {
         // Counted by this test's own agent, not by the log's length: the log keeps only its newest rows,
         // so after earlier tests in one process (the nightly's `--test-threads=1`) its length no longer grows.
         let agent = format!("bp-agent-{}", uuid::Uuid::new_v4().simple());
-        audit_standing_allow(&state, &agent, "https://standing.example", &["camera", "microphone"], "https://standing.example asked to use the camera and the microphone");
+        audit_standing_allow(&state, &agent, "https://standing.example", &["camera", "microphone"], "https://standing.example asked to use the camera and the microphone", false);
         let mine: Vec<_> = state.reactive_handler.get_audit_log(200).into_iter().filter(|r| r.target_agent == agent).collect();
         assert_eq!(mine.len(), 1, "exactly one row");
         let row = &mine[0];
@@ -360,6 +371,19 @@ mod tests {
         assert!(row.prompt.as_deref().unwrap().contains("standing.example"));
         assert!(row.answer.as_deref().unwrap().contains("camera") && row.answer.as_deref().unwrap().contains("microphone"));
         assert_eq!(row.level.as_deref(), Some("medium"));
+        assert!(row.answer.as_deref().unwrap().ends_with("for 30 minutes"));
+    }
+
+    #[tokio::test]
+    async fn a_settings_row_is_audited_without_a_30_minute_duration() {
+        let state = crate::server::tests::test_state();
+        let agent = format!("bp-agent-{}", uuid::Uuid::new_v4().simple());
+        audit_standing_allow(&state, &agent, "https://lasting.example", &["camera"], "https://lasting.example asked to use the camera", true);
+        let mine: Vec<_> = state.reactive_handler.get_audit_log(200).into_iter().filter(|r| r.target_agent == agent).collect();
+        assert_eq!(mine.len(), 1);
+        let answer = mine[0].answer.as_deref().unwrap();
+        assert!(answer.contains("a standing permission from Settings") && !answer.contains("30 minutes"), "{answer}");
+        assert_eq!(mine[0].standing, Some(true));
     }
 
     #[test]

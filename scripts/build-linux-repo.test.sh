@@ -28,6 +28,7 @@ trap cleanup EXIT
 echo "== build the repository (Ubuntu 24.04) =="
 docker run --rm -v "$MOUNT:/w" ubuntu:24.04 bash -euc '
 export DEBIAN_FRONTEND=noninteractive
+printf "Acquire::Retries \"5\";\nAcquire::http::Timeout \"20\";\n" > /etc/apt/apt.conf.d/80-retries
 apt-get update -qq >/dev/null
 apt-get install -y -qq --no-install-recommends gnupg apt-utils xz-utils createrepo-c rpm ca-certificates >/dev/null
 
@@ -73,6 +74,7 @@ echo "$KEY" >/w/key.fpr
 echo "== apt (Ubuntu 24.04): install 1.0.0, upgrade to 1.1.0, refuse a tampered index =="
 docker run --rm -v "$MOUNT:/w:ro" ubuntu:24.04 bash -euc '
 export DEBIAN_FRONTEND=noninteractive
+printf "Acquire::Retries \"5\";\nAcquire::http::Timeout \"20\";\n" > /etc/apt/apt.conf.d/80-retries
 apt-get update -qq >/dev/null; apt-get install -y -qq --no-install-recommends ca-certificates >/dev/null
 rm -rf /srv/repo; mkdir -p /srv; cp -r /w/repo /srv/repo
 install -m 644 /srv/repo/agentmux-archive-keyring.gpg /usr/share/keyrings/agentmux-archive-keyring.gpg

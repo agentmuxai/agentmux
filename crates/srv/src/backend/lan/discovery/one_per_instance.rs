@@ -120,6 +120,7 @@ mod tests {
             channel: "local-main-aaaaaa-00000000".into(),
             os: "linux".into(),
             install: String::new(),
+            build: String::new(),
             address: address.into(),
             port: 29700,
             auth_key: "charlie-key".into(),

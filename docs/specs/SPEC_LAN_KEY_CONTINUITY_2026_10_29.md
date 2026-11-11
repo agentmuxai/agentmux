@@ -1,6 +1,6 @@
 # SPEC: LAN key continuity, with no person in the loop
 
-**Status:** active — approved by the operator (2026-10-29, relayed by AgentY); built in PR #5815 (0.60.7). Remains: the pin screen note and reason, retire notices, directory publishing (§6). Author: Lazo@Area54.
+**Status:** active — approved by the operator (2026-10-29, relayed by AgentY); built in PR #5815 (0.60.7). Built since: the pin is bound to the install that vouched for it, retired keys are refused as retired, and the pin screen says why (§2, §4). Remains: directory publishing (§6). Author: Lazo@Area54.
 **Builds on:** `SPEC_LAN_AGENT_KEY_REPLACEMENT_2026_10_27.md` (option A, the install certifies the key), `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` §2.2 (the name pin), `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` (the install key, the directory and the presence list).
 
 ## 1. The problem
@@ -21,7 +21,11 @@ A different key for a pinned name is **accepted automatically, and the pin moved
 
 **The pin keeps the certificate's time.** A moved pin is kept from the later of the receiver's time and the certificate's own issue time, so with the hosting install's clock ahead of ours (the freshness window allows it), an older certificate of the same install is older than the pin too and cannot move it back. **The move is conditional.** The check reads the pin, then may wait on the account's directory; the write happens only if the pin is still exactly the one that was checked (same key, same time, one transaction). If it changed meanwhile (a newer move, or the user's own change), nothing is written, unless it already holds this very key.
 
-The `(name, UID)` pins go with the old key: moving the name pin clears them, and the first message that verifies under the vouched name key pins the UID key again, beside the name pin as always. No separate UID certificate is needed, since a UID signature is only checked after the name signature verified.
+**Bound to the install.** A pin records the install that vouched for its key: the install behind the first certificate, or, for a pin that predates this, the install behind the certificate the peer shows with the first message that verifies under the pinned key, when this machine trusts that install. A different key moves the pin on its own only on a certificate from that same install, or from one it handed over to (an install that retired itself with a signed revocation naming the new install as its successor, which the account's directory serves). A certificate from any other trusted install does not move it: the key is refused with that reason and the person decides. A pin not yet bound moves only by hand until it is.
+
+**The binding needs the agent's own word.** A certificate shows only that some trusted install wrapped the key in one, which any install of the account can do for a public key it has seen. So a pin is bound to an install only when the lookup answer also carries `lan_install_sig`: the agent's statement, signed with its own LAN key, that this install hosts it (agent, install and the certificate's time). The host adds it beside `lan_cert`; another install cannot. An answer without it (an older host) leaves the pin unbound, and the key moves by hand as before.
+
+The `(name, UID)` pins go with the old key, because a rotation can change the UID key with the name key. A UID key is pinned only once a v2 message verifies under it, so a key a peer merely shows, after a move or for a UID not seen before, pins nothing.
 
 ## 3. What stops an impostor
 
@@ -32,7 +36,7 @@ The `(name, UID)` pins go with the old key: moving the name pin clears them, and
 
 ## 4. Audit and alert
 
-Every automatic move writes one line to `logs/pin-changes.log` (who accepted what and why): the agent, old and new fingerprint, the issuing instance (id and host hint), which trust path vouched, and the certificate time. The same event is a warning in the srv log: a line for leaders, not a modal. A refusal without a vouch is kept in memory with its reason ("not vouched: <why>") beside the refused key, and the agent route returns that reason. (Showing the note and the reason on the Pinned senders screen needs new wire fields, so it is a follow-up.)
+Every automatic move writes one line to `logs/pin-changes.log` (who accepted what and why): the agent, old and new fingerprint, the issuing instance (id and host hint), which trust path vouched, and the certificate time. The same event is a warning in the srv log: a line for leaders, not a modal. A refusal without a vouch is kept in memory with its reason ("not vouched: <why>") beside the refused key, and the agent route returns that reason. The Pinned senders screen shows the reason beside a refused key and the install a pin is bound to. When a pin moves, the key it left is recorded as retired (when, and by which install, or by the person or agent who accepted the move); a message signed with a retired key is refused as retired, with that date and install in the reason. A machine with no trusted install moves nothing on its own, and the screen says why.
 
 ## 5. The agent route
 
@@ -40,10 +44,10 @@ Every automatic move writes one line to `logs/pin-changes.log` (who accepted wha
 
 ## 6. Out of scope
 
-Retire notices for keys the install retired (a refused key can be told apart from a retired one later); publishing certificates to the directory so a peer that was offline learns without a lookup; the install approval list. Hosts that do not send certificates (before this release) behave as today: refused until accepted by hand.
+Retire notices signed by the install and carried in the lookup answer (a retirement is recorded here from the moves this machine made); publishing certificates to the directory so a peer that was offline learns without a lookup; the install approval list. Hosts that do not send certificates (before this release) behave as today: refused until accepted by hand.
 
 ## 7. Tests
 
-An impostor key with no certificate is refused and the pin stays; a certificate by an untrusted instance is refused; a vouched rotation moves the name pin and the UID pin; the audit line is written with the path and the fingerprints; a stale certificate, a certificate older than the pin (also with the host's clock ahead), a pin that changed while the install was being checked is not written over, a certificate for another agent or another key, a certificate whose chain is broken, and a certificate by an install known as revoked (while still pinned) are each refused; the agent route accepts a vouched key and refuses an unvouched one; a host that sends no certificate is unchanged.
+An impostor key with no certificate is refused and the pin stays; a certificate by an untrusted instance is refused; a vouched rotation moves the name pin and the UID pin; the audit line is written with the path and the fingerprints; a stale certificate, a certificate older than the pin (also with the host's clock ahead), a pin that changed while the install was being checked is not written over, a certificate for another agent or another key, a certificate whose chain is broken, and a certificate by an install known as revoked (while still pinned) are each refused; the agent route accepts a vouched key and refuses an unvouched one; a host that sends no certificate is unchanged; a second trusted install cannot move a pin another install vouched for; a handover is read from the directory only when the retired install signed it; a pin not yet bound does not move, and binds on a verified message only to a trusted install that the agent itself says hosts it (another install's certificate for the same key binds nothing); a retired key is refused with its reason; a UID key is pinned only when the message verifies under it.
 
 Agent: Lazo@Area54

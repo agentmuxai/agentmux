@@ -7,9 +7,13 @@
  * shared by every tile showing it (the Media pane's pattern). URLs are
  * reference-counted and revoked a little after the last user lets go, so a
  * virtualized transcript scrolling a row out and back doesn't refetch.
+ *
+ * Everything here is a signal, never a resource: a resource read while it loads suspends the pane's whole view
+ * (the block's Suspense takes it out of the document), which blanks the pane, drops its scroll position and reports
+ * every box inside as zero size (#47406).
  */
 
-import { createEffect, createResource, createSignal, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
 
@@ -21,19 +25,38 @@ interface Entry {
     /** undefined while loading, null when the file is gone. */
     url: Accessor<string | null | undefined>;
     setUrl: (u: string | null | undefined) => void;
+    /** The file itself, null when it is gone. */
+    blob: Promise<Blob | null>;
+    /** Its text, read once on first use: undefined while loading, null when it can't be read. */
+    text?: Accessor<string | null | undefined>;
     revokeTimer?: ReturnType<typeof setTimeout>;
 }
 
 const REVOKE_AFTER_MS = 30_000;
 const entries = new Map<string, Entry>();
 
-function load(id: string, kind: AttachmentFileKind, entry: Entry): void {
-    fetch(`${getWebServerEndpoint()}/api/v1/attachments/${id}/${kind}`, {
+function load(id: string, kind: AttachmentFileKind, setUrl: Entry["setUrl"]): Promise<Blob | null> {
+    return fetch(`${getWebServerEndpoint()}/api/v1/attachments/${id}/${kind}`, {
         headers: authHeaders(),
     })
         .then((r) => (r.ok ? r.blob() : null))
-        .then((blob) => entry.setUrl(blob ? URL.createObjectURL(blob) : null))
-        .catch(() => entry.setUrl(null));
+        .catch(() => null)
+        .then((blob) => {
+            setUrl(blob ? URL.createObjectURL(blob) : null);
+            return blob;
+        });
+}
+
+/** The entry's text, shared by everything that shows it and read from the file once. */
+function textOf(entry: Entry): Accessor<string | null | undefined> {
+    if (!entry.text) {
+        const [text, setText] = createSignal<string | null | undefined>(undefined);
+        entry.text = text;
+        entry.blob
+            .then((blob) => (blob ? blob.text() : null))
+            .then(setText, () => setText(null));
+    }
+    return entry.text;
 }
 
 function acquire(id: string, kind: AttachmentFileKind): Entry {
@@ -41,9 +64,8 @@ function acquire(id: string, kind: AttachmentFileKind): Entry {
     let entry = entries.get(key);
     if (!entry) {
         const [url, setUrl] = createSignal<string | null | undefined>(undefined);
-        entry = { refs: 0, url, setUrl };
+        entry = { refs: 0, url, setUrl, blob: load(id, kind, setUrl) };
         entries.set(key, entry);
-        load(id, kind, entry);
     }
     if (entry.revokeTimer) {
         clearTimeout(entry.revokeTimer);
@@ -75,6 +97,12 @@ export function useAttachmentUrl(
     id: Accessor<string | undefined>,
     kind: AttachmentFileKind,
 ): Accessor<string | null | undefined> {
+    const entry = useEntry(id, kind);
+    return () => entry()?.url();
+}
+
+/** The shared entry for attachment `id`, held while this owner lives. */
+function useEntry(id: Accessor<string | undefined>, kind: AttachmentFileKind): Accessor<Entry | null> {
     const [current, setCurrent] = createSignal<Entry | null>(null);
     createEffect(() => {
         const value = id();
@@ -86,28 +114,23 @@ export function useAttachmentUrl(
         setCurrent(entry);
         onCleanup(() => release(value, kind));
     });
-    return () => current()?.url();
+    return current;
 }
 
 /**
  * The text of a stored text file (a text preview, or a document's text
  * version): undefined while loading, null when it's gone. Read from the
- * shared object URL, so the tile and the preview fetch it once.
+ * shared file, so the tile and the preview fetch it once, and a tile that
+ * is mounted again has its text at once.
  */
 export function useAttachmentText(
     id: Accessor<string | undefined>,
     kind: AttachmentFileKind,
 ): Accessor<string | null | undefined> {
-    const url = useAttachmentUrl(id, kind);
-    const [text] = createResource(
-        () => url() ?? undefined,
-        async (u) => {
-            try {
-                return await (await fetch(u)).text();
-            } catch {
-                return null;
-            }
-        },
-    );
-    return () => (url() === null ? null : text());
+    const entry = useEntry(id, kind);
+    return () => {
+        const e = entry();
+        if (!e) return undefined;
+        return e.url() === null ? null : textOf(e)();
+    };
 }

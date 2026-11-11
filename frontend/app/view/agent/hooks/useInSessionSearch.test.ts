@@ -233,4 +233,44 @@ describe("useInSessionSearch: the pass", () => {
         expect(jumpTo).not.toHaveBeenCalled();
         dispose();
     });
+
+    it("shows the query it searched, and the matches as a set, from the pass that found them", async () => {
+        const { search, dispose } = open([md("a", "alpha"), md("b", "beta")]);
+        expect(search.searched()).toBe("");
+        search.performSearch("ALP");
+        // Typed but not yet searched: the view keeps what it was showing.
+        expect(search.searched()).toBe("");
+        await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        expect(search.searched()).toBe("alp");
+        expect([...search.matchSet()]).toEqual(["a"]);
+        search.performSearch("zzz");
+        await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        expect(search.searched()).toBe("zzz");
+        expect(search.matchSet().size).toBe(0);
+        dispose();
+    });
+
+    it("ends the shown query with an empty one and with the bar closing", async () => {
+        const { search, dispose } = open([md("a", "alpha")]);
+        search.performSearch("alp");
+        await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        search.performSearch("");
+        await vi.advanceTimersByTimeAsync(0);
+        expect(search.searched()).toBe("");
+        search.performSearch("alp");
+        await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        expect(search.searched()).toBe("alp");
+        search.close();
+        expect(search.searched()).toBe("");
+        dispose();
+    });
+
+    it("dims by default, and the choice outlasts the bar closing", () => {
+        const { search, dispose } = open([]);
+        expect(search.dim()).toBe(true);
+        search.setDim(false);
+        search.close();
+        expect(search.dim()).toBe(false);
+        dispose();
+    });
 });

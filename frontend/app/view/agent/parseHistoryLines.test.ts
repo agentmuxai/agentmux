@@ -1107,3 +1107,94 @@ describe("a stored user record with no verified origin", () => {
         expect(nodes.find((n) => n.type === "user_message")).toBeUndefined();
     });
 });
+
+// A replayed message shows when it was written, not when the history was loaded: the hover peek reads
+// `node.timestamp`, and "just now" for every jekt in a long history came from stamping them at parse time.
+describe("a replayed message carries its own time", () => {
+    const NOW = 1_790_000_000_000;
+    const jektLine = (ts: number, text: string, extra = ""): string =>
+        line({
+            type: "user_message",
+            message: `[JEKT:FROM=agenta TO=me TIER=info DELIVERY=host TRUST=host-verified MSGID=m-${ts} PRIORITY=normal TS=${ts}${extra}]\n${text}\n[/JEKT]`,
+        });
+    const timeOf = (nodes: { type: string; timestamp?: number }[], type: string): (number | undefined)[] =>
+        nodes.filter((n) => n.type === type).map((n) => n.timestamp);
+
+    it("reads a jekt from three hours ago and one from two days ago at their send times", () => {
+        const threeHours = Math.floor((NOW - 3 * 3_600_000) / 1000);
+        const twoDays = Math.floor((NOW - 2 * 86_400_000) / 1000);
+        const lines = [jektLine(twoDays, "older"), jektLine(threeHours, "newer")];
+        vi.spyOn(Date, "now").mockReturnValue(NOW + 60_000);
+        const { nodes } = parseHistoryLines(lines, "claude-stream-json", "me", [NOW - 1, NOW - 1]);
+        vi.restoreAllMocks();
+        expect(timeOf(nodes as never, "jekt_message")).toEqual([twoDays * 1000, threeHours * 1000]);
+    });
+
+    it("a jekt whose marker has no TS takes its line's batch stamp, not the time of the replay", () => {
+        const text = line({
+            type: "user_message",
+            message: "[JEKT:FROM=agenta TO=me TIER=info DELIVERY=host TRUST=host-verified MSGID=m-1 PRIORITY=normal]\nhi\n[/JEKT]",
+        });
+        vi.spyOn(Date, "now").mockReturnValue(NOW);
+        const { nodes } = parseHistoryLines([text], "claude-stream-json", "me", [NOW - 5 * 3_600_000]);
+        vi.restoreAllMocks();
+        expect(timeOf(nodes as never, "jekt_message")).toEqual([NOW - 5 * 3_600_000]);
+    });
+
+    it("a jekt with no TS and no stamps still gets a number, the load time, for the code that adds to it", () => {
+        const text = line({
+            type: "user_message",
+            message: "[JEKT:FROM=agenta TO=me TIER=info DELIVERY=host TRUST=host-verified MSGID=m-1 PRIORITY=normal]\nhi\n[/JEKT]",
+        });
+        vi.spyOn(Date, "now").mockReturnValue(NOW);
+        const { nodes } = parseHistoryLines([text], "claude-stream-json", "me");
+        vi.restoreAllMocks();
+        expect(timeOf(nodes as never, "jekt_message")).toEqual([NOW]);
+    });
+
+    it("a jekt arriving live still reads as now", () => {
+        const parser = new ClaudeCodeStreamParser();
+        vi.spyOn(Date, "now").mockReturnValue(NOW);
+        const node = parser.parseLine(jektLine(Math.floor(NOW / 1000) - 5, "hello")) as { timestamp?: number } | null;
+        vi.restoreAllMocks();
+        expect(node?.timestamp).toBe(NOW);
+    });
+
+    it("every message of a session with a compaction boundary and a resume keeps its own time", () => {
+        const t0 = NOW - 2 * 86_400_000;
+        const stamp = (i: number) => t0 + i * 3_600_000;
+        const lines = [
+            line({ type: "user_message", message: "first question" }),
+            line({ type: "text", content: "first answer" }),
+            jektLine(Math.floor(stamp(2) / 1000), "while you worked"),
+            JSON.stringify({
+                type: "system",
+                subtype: "compact_boundary",
+                compactMetadata: { trigger: "auto", preTokens: 1000, postTokens: 100, durationMs: 50 },
+                timestamp: new Date(stamp(3)).toISOString(),
+            }),
+            line({ type: "user_message", message: "second question" }),
+            JSON.stringify({
+                type: "system",
+                subtype: "agentmux_session_outcome",
+                outcome: "resumed",
+                attempted_sid: "sid-1",
+                actual_sid: "sid-1",
+                timestamp: new Date(stamp(5)).toISOString(),
+            }),
+            line({ type: "text", content: "second answer" }),
+            jektLine(Math.floor(stamp(7) / 1000), "after the resume"),
+        ];
+        const stamps = lines.map((_, i) => stamp(i));
+        vi.spyOn(Date, "now").mockReturnValue(NOW + 10 * 60_000);
+        const { nodes } = parseHistoryLines(lines, "claude-stream-json", "me", stamps, { includeResumedOutcomes: true });
+        vi.restoreAllMocks();
+        const late = nodes.filter((n) => ((n as { timestamp?: number }).timestamp ?? 0) > NOW - 3_600_000);
+        expect(late).toEqual([]);
+        expect(nodes.every((n) => (n as { timestamp?: number }).timestamp != null)).toBe(true);
+        expect(timeOf(nodes as never, "jekt_message")).toEqual([stamp(2), stamp(7)]);
+        expect(timeOf(nodes as never, "context_compacted")).toEqual([stamp(3)]);
+        expect(timeOf(nodes as never, "session_outcome")).toEqual([stamp(5)]);
+        expect(timeOf(nodes as never, "user_message")).toEqual([stamp(0), stamp(4)]);
+    });
+});

@@ -11,6 +11,25 @@ import type { LayoutModel } from "./layoutModel";
 import { closingTabs } from "./layoutClosing";
 
 /**
+ * The size a pane's content is given (block.tsx), as the two halves of a CSS `calc`: its tile's size less the
+ * gap, or null where the content just fills its container (a lone pane, a magnified one).
+ *
+ * During a pane drag's live reflow the tile is laid out at the size the armed drop leaves it (liveReflow.ts),
+ * and the content is sized with it. Left on the layout's own size it showed a blank strip in a pane that grew
+ * and was cut off in one that shrank.
+ */
+function innerRectOf(model: LayoutModel, nodeid: string, addlProps: LayoutNodeAdditionalProps | undefined): CSSProperties | null {
+    if (model.localTreeStateAtom().magnifiedNodeId === nodeid) return null;
+    const gapSizePx = model.gapSizePx();
+    if (model.numLeafs() <= 1 || !addlProps?.rect || !addlProps?.transform) return null;
+    const box = model.reflowFor(nodeid)?.box;
+    return {
+        width: `${box ? `${box.width}px` : addlProps.transform.width} - ${gapSizePx}px`,
+        height: `${box ? `${box.height}px` : addlProps.transform.height} - ${gapSizePx}px`,
+    } as CSSProperties;
+}
+
+/**
  * Gets the node model for the given node.
  * @param model The LayoutModel instance.
  * @param node The node for which to retrieve the node model.
@@ -91,24 +110,7 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                 // `atoms.activeTabId()` (SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md).
                 layoutModel: model,
                 additionalProps: addlPropsAtom,
-                innerRect: createMemo(() => {
-                    const treeState = model.localTreeStateAtom();
-                    // When magnified, return null so content fills the overlay container naturally
-                    if (treeState.magnifiedNodeId === nodeid) {
-                        return null;
-                    }
-                    const addlProps = addlPropsAtom();
-                    const numLeafs = model.numLeafs();
-                    const gapSizePx = model.gapSizePx();
-                    if (numLeafs > 1 && addlProps?.rect && addlProps?.transform) {
-                        return {
-                            width: `${addlProps.transform.width} - ${gapSizePx}px`,
-                            height: `${addlProps.transform.height} - ${gapSizePx}px`,
-                        } as CSSProperties;
-                    } else {
-                        return null;
-                    }
-                }),
+                innerRect: createMemo(() => innerRectOf(model, nodeid, addlPropsAtom())),
                 nodeId: nodeid,
                 blockId,
                 // Additive reactive companion to `blockId` above — see that

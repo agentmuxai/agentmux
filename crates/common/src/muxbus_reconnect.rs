@@ -103,8 +103,9 @@ pub enum IsolatedMuxbusReconnectReason {
     /// (`skip_cloud_subscriber`, `bootstrap/background.rs`): that is no new
     /// build's, and an in-app upgrade keeps the channel.
     ChannelDefaultIsolated,
-    /// No override; a local-package channel, on an OS whose stored sign-in
-    /// is read without a prompt (Windows, Linux): reconnects as usual.
+    /// No override; a local-package channel, where reading the stored sign-in
+    /// asks nothing new: Windows and Linux never ask, and on macOS a release
+    /// running on such a channel keeps its one signature. Reconnects as usual.
     LocalChannelNoPrompt,
     /// No override; `AGENTMUX_CHANNEL` is `"stable"`, starts with
     /// `"dev-"`, or is unset entirely.
@@ -122,7 +123,7 @@ impl IsolatedMuxbusReconnectReason {
             Self::ExplicitOptIn => "explicit opt-in",
             Self::ExplicitOptOut => "explicit opt-out",
             Self::ChannelDefaultIsolated => "channel default — isolated",
-            Self::LocalChannelNoPrompt => "local channel — reconnects (no keychain prompt on this OS)",
+            Self::LocalChannelNoPrompt => "local channel — reconnects (no keychain prompt for this build)",
             Self::ChannelDefaultGlobal => "channel default — global",
         }
     }
@@ -136,12 +137,20 @@ pub fn isolated_muxbus_reconnect_reason() -> IsolatedMuxbusReconnectReason {
     )
 }
 
-/// Whether reading the stored MuxBus sign-in can make the OS ask the user,
-/// once per code signature: macOS's keychain does, and a local build is a
-/// new signature every time. Windows' Credential Manager and Linux's secret
-/// store don't.
+/// Whether reading the stored MuxBus sign-in makes the OS ask the user again
+/// for this build. macOS's keychain asks once per code signature, and a local
+/// build is a new signature every time; a release keeps one signature, so it
+/// is asked once and never again, whatever channel its data is in (a release
+/// that a local build upgraded to keeps that build's `local-…` channel).
+/// Windows' Credential Manager and Linux's secret store don't ask at all.
 pub fn keychain_prompts_per_build() -> bool {
-    cfg!(target_os = "macos")
+    keychain_prompts_for(cfg!(target_os = "macos"), crate::build_kind::build_kind())
+}
+
+/// [`keychain_prompts_per_build`] for an OS and a kind of build: the question is about the
+/// build's signature, so it is answered from the build, never from the channel's name.
+pub(crate) fn keychain_prompts_for(macos: bool, kind: crate::build_kind::BuildKind) -> bool {
+    macos && kind == crate::build_kind::BuildKind::Local
 }
 
 /// [`isolated_muxbus_reconnect_reason`] for an explicit override, a channel
@@ -170,6 +179,18 @@ pub(crate) fn muxbus_reconnect_reason_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_local_build_on_macos_is_asked_again_by_the_keychain() {
+        use crate::build_kind::BuildKind::{Dev, Local, Release};
+        assert!(keychain_prompts_for(true, Local));
+        // A release that kept a local build's channel through an upgrade has the release's signature.
+        assert!(!keychain_prompts_for(true, Release));
+        assert!(!keychain_prompts_for(true, Dev));
+        for kind in [Release, Local, Dev] {
+            assert!(!keychain_prompts_for(false, kind), "{kind:?}");
+        }
+    }
 
     #[test]
     fn a_local_channel_reconnects_where_the_keychain_never_prompts() {

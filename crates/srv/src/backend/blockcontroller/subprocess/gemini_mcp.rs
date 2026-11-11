@@ -139,7 +139,9 @@ impl super::SubprocessController {
             return Vec::new();
         }
         let folder = crate::backend::blockcontroller::core::expand_home_dir(&config.working_dir);
-        let Ok(raw) = std::fs::read_to_string(Path::new(&folder).join(".mcp.json")) else { return Vec::new() };
+        // The config may be outside the folder (#3680); `read_for_turn` finds it and keeps the
+        // project's own servers.
+        let Some(raw) = crate::backend::mcp_config_file::read_for_turn(&folder) else { return Vec::new() };
         let path = config.env_vars.get("PATH").cloned();
         let env = launch_env(std::env::vars(), &config.env_vars);
         if env_value(&env, SETTINGS_ENV).is_some() {

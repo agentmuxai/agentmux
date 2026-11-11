@@ -71,9 +71,8 @@ pub struct ConsolidateStats {
 /// there. Used to stop trusting marker/stamp *existence* as proof of
 /// *effect* (see `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`
 /// Phase 0a/0b) — a stale marker (rebuilt/restored `objects.db` sitting next
-/// to an old flag file, or `m0000_bootstrap` stamping from a copied flag
-/// file with no matching data) is now detectable instead of silently
-/// trusted.
+/// to an old flag file, or a bootstrap stamping from a copied flag file with
+/// no matching data) is now detectable instead of silently trusted.
 ///
 /// Cheap: up to three `COUNT(*)` queries, safe to call on every startup.
 ///
@@ -102,12 +101,7 @@ pub fn consolidate_looks_incomplete(conn: &Connection) -> Result<bool, StoreErro
 /// all — distinct from a genuinely empty table, which also counts as `0`
 /// here on purpose (both mean "no source rows to backfill").
 fn table_row_count_if_exists(conn: &Connection, table: &str) -> Result<i64, StoreError> {
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-        [table],
-        |row| row.get(0),
-    )?;
-    if !exists {
+    if !crate::migrations::table_exists(conn, table)? {
         return Ok(0);
     }
     Ok(conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?)

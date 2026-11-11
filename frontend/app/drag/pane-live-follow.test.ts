@@ -47,20 +47,25 @@ describe("followPaneDrag", () => {
         expect(hub.begun).toEqual([]);
     });
 
-    it("sizes the picture to the landing rect while a drop is armed, back to the pane's own size without one, and lets go when the drag ends", async () => {
-        const [rect, setRect] = createSignal<{ width: number; height: number } | undefined>({ width: 1200.4, height: 266 });
+    it("cuts the picture to a smaller landing rect, never pads it to a larger one, and lets go when the drag ends", async () => {
+        // The pane is 300 by 200. A landing rect wider and shorter: only the height is cut.
+        const [rect, setRect] = createSignal<{ width: number; height: number } | undefined>({ width: 1200.4, height: 120.3 });
         const [active, setActive] = createSignal(true);
-        // A drop is already armed when the picture is up: it is sized at once.
+        // A drop is already armed when the picture is up: it is cut at once.
         await followPaneDrag("b1", "main", { rect, active });
-        expect(hub.resized).toEqual([{ width: 1200, height: 266 }]);
+        expect(hub.resized).toEqual([{ width: 300, height: 120 }]);
         // The same size again sends nothing.
-        setRect({ width: 1200, height: 266.2 });
+        setRect({ width: 900, height: 120 });
         expect(hub.resized).toHaveLength(1);
-        setRect({ width: 600, height: 400 });
-        expect(hub.resized).toHaveLength(2);
-        // No drop armed: the pane's own size.
-        setRect(undefined);
+        // Smaller on both axes.
+        setRect({ width: 150, height: 90 });
+        expect(hub.resized[1]).toEqual({ width: 150, height: 90 });
+        // Larger on both: the pane's own size, with no blank band beside it.
+        setRect({ width: 2000, height: 1000 });
         expect(hub.resized[2]).toEqual({ width: 300, height: 200 });
+        // No drop armed: still the pane's own size, so nothing is sent.
+        setRect(undefined);
+        expect(hub.resized).toHaveLength(3);
         // The drag ended: a later rect is ignored.
         setActive(false);
         setRect({ width: 100, height: 100 });

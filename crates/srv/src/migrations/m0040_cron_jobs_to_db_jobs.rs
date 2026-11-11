@@ -99,8 +99,7 @@ pub(super) fn copy_cron_jobs(shared: &Path) -> Result<usize, String> {
 fn missing(shared: &Path) -> Result<usize, String> {
     let conn = Connection::open_with_flags(shared, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| format!("open: {e}"))?;
     let has = |table: &str| -> Result<bool, String> {
-        conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)", [table], |r| r.get(0))
-            .map_err(|e| format!("probe {table}: {e}"))
+        crate::migrations::table_exists(&conn, table).map_err(|e| format!("probe {table}: {e}"))
     };
     if !has("db_cron_jobs")? {
         return Ok(0);
@@ -116,9 +115,7 @@ fn missing(shared: &Path) -> Result<usize, String> {
 /// How many jobs `db_jobs` holds (0 when the table is missing). Read-only.
 fn jobs_rows(shared: &Path) -> Result<usize, String> {
     let conn = Connection::open_with_flags(shared, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| format!("open: {e}"))?;
-    let has: bool = conn
-        .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_jobs')", [], |r| r.get(0))
-        .map_err(|e| format!("probe db_jobs: {e}"))?;
+    let has = crate::migrations::table_exists(&conn, "db_jobs").map_err(|e| format!("probe db_jobs: {e}"))?;
     if !has {
         return Ok(0);
     }

@@ -276,6 +276,7 @@ mod tests {
             ("https://compiled".to_string(), "compiled-id".to_string())
         );
         assert!(resolve_login(None, "https://compiled", "").is_err());
+        assert!(resolve_login(None, "", "compiled-id").is_err(), "half a pair is no pair");
         assert!(resolve_login(None, "", "").is_err());
     }
 

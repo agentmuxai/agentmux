@@ -51,8 +51,31 @@ describe("LanPeerList", () => {
         expect(screen.queryByText("203.0.113.30:4100")).toBeNull();
         fireEvent.click(screen.getByRole("button", { name: /charlie/ }));
         expect(screen.getByText("203.0.113.30:4100")).toBeTruthy();
-        expect(screen.getByText("Linux · stable")).toBeTruthy();
+        expect(screen.getByText("Linux")).toBeTruthy();
+        expect(screen.getByTestId("lan-peer-data-channel").textContent).toBe("Data instable");
         expect(screen.getByText(/42 sec\. ago/)).toBeTruthy();
+    });
+
+    it("calls a release a release whatever channel its data is in", () => {
+        // A release that a local build was upgraded to keeps that build's channel for its data.
+        const upgraded = inst({ channel: "local-main-b28b7a-0000000a", build: "release", install: "linux-appimage" });
+        render(() => <LanPeerList peers={[upgraded]} />);
+        fireEvent.click(screen.getByRole("button", { name: /charlie/ }));
+        expect(screen.getByText("Linux · release · AppImage")).toBeTruthy();
+        expect(screen.getByTestId("lan-peer-data-channel").textContent).toBe("Data inlocal-main-b28b7a-0000000a");
+        expect(screen.queryByText(/local build/)).toBeNull();
+    });
+
+    it("calls a local build a local build, and says nothing of a peer that did not say", () => {
+        const peers = [
+            inst({ instance_id: "a", hostname: "alpha", channel: "local-main-b28b7a-0000000a", build: "local" }),
+            inst({ instance_id: "b", hostname: "beta", channel: "local-main-b28b7a-0000000a" }),
+        ];
+        render(() => <LanPeerList peers={peers} />);
+        fireEvent.click(screen.getByRole("button", { name: /alpha/ }));
+        fireEvent.click(screen.getByRole("button", { name: /beta/ }));
+        expect(screen.getByText("Linux · local build")).toBeTruthy();
+        expect(screen.getByText("Linux")).toBeTruthy();
     });
 
     it("opens and closes each host on its own", () => {
@@ -86,10 +109,10 @@ describe("LanPeerList", () => {
     });
 
     it("says a peer is an install with no agents, and how it is installed", () => {
-        render(() => <LanPeerList peers={[inst({ hostname: "Area54", agents: [], last_polled_ok: 5, install: "windows-store", os: "windows" })]} />);
+        render(() => <LanPeerList peers={[inst({ hostname: "Area54", agents: [], last_polled_ok: 5, install: "windows-store", os: "windows", build: "release" })]} />);
         expect(screen.getByTestId("lan-peer-no-agents")).toBeTruthy();
         fireEvent.click(screen.getByRole("button", { name: /Area54/ }));
-        expect(screen.getByText("Windows · stable · Microsoft Store")).toBeTruthy();
+        expect(screen.getByText("Windows · release · Microsoft Store")).toBeTruthy();
         expect(screen.getByText(/this install runs no agents/)).toBeTruthy();
     });
 

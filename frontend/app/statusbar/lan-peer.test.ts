@@ -10,7 +10,8 @@ import {
     installLabel,
     lastSeenText,
     middleTruncate,
-    osAndChannel,
+    buildLabel,
+    peerRuns,
     peerKeyRefusals,
     showsChannel,
 } from "./lan-peer";
@@ -62,16 +63,27 @@ describe("lastSeenText", () => {
     });
 });
 
-describe("osAndChannel", () => {
-    it("names the OS and the channel, leaving out what was not advertised", () => {
-        expect(osAndChannel({ os: "macos", channel: "stable" })).toBe("macOS · stable");
-        expect(osAndChannel({ os: "", channel: "dev" })).toBe("dev");
-        expect(osAndChannel({ os: "linux", channel: "" })).toBe("Linux");
-        expect(osAndChannel({ os: "", channel: "" })).toBe("");
+describe("peerRuns", () => {
+    it("names the OS and the kind of build, leaving out what was not advertised", () => {
+        expect(peerRuns({ os: "macos", build: "release" })).toBe("macOS · release");
+        expect(peerRuns({ os: "", build: "dev" })).toBe("dev build");
+        expect(peerRuns({ os: "linux" })).toBe("Linux");
+        expect(peerRuns({ os: "" })).toBe("");
+    });
+
+    it("says what kind of build a peer is from what the peer says, never from its channel", () => {
+        // A release that a local build was upgraded to keeps that build's data channel.
+        const upgraded = { os: "linux", channel: "local-main-b28b7a-0000000a", build: "release", install: "linux-appimage" };
+        expect(peerRuns(upgraded)).toBe("Linux · release · AppImage");
+        expect(peerRuns({ ...upgraded, build: "local" })).toBe("Linux · local build · AppImage");
+        // A peer from before the kind was advertised: nothing is claimed for it.
+        expect(peerRuns({ ...upgraded, build: "" })).toBe("Linux · AppImage");
+        expect(buildLabel("local-main-b28b7a-0000000a")).toBe("");
+        expect(buildLabel(undefined)).toBe("");
     });
 });
 
-describe("installLabel and install in osAndChannel", () => {
+describe("installLabel and install in peerRuns", () => {
     it("says how a peer is installed, and nothing for what it did not advertise", () => {
         expect(installLabel("windows-store")).toBe("Microsoft Store");
         expect(installLabel("windows-setup")).toBe("installed");
@@ -79,7 +91,7 @@ describe("installLabel and install in osAndChannel", () => {
         expect(installLabel("")).toBe("");
         expect(installLabel("unknown")).toBe("");
         expect(installLabel(undefined)).toBe("");
-        expect(osAndChannel({ os: "windows", channel: "stable", install: "windows-store" })).toBe("Windows · stable · Microsoft Store");
+        expect(peerRuns({ os: "windows", build: "release", install: "windows-store" })).toBe("Windows · release · Microsoft Store");
     });
 });
 

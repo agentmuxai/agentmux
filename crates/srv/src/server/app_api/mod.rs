@@ -55,6 +55,7 @@ pub(crate) mod agent_seats;
 pub(crate) mod agent_rename;
 pub(crate) mod agent_definition;
 pub(crate) mod agent_model;
+pub(crate) mod agent_spend;
 pub(crate) mod agent_routes;
 pub(crate) mod agent_history_reclaim;
 pub(crate) mod agent_spawn;
@@ -197,6 +198,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     jobs_edit::register(engine, state);
     crate::server::account_episodes::register(engine, state);
     agent_model::register(engine, state);
+    agent_spend::register(engine, state);
     connectivity::register(engine);
 }
 
@@ -576,7 +578,7 @@ fn check_s1_resolved(
 /// Resolve an S1-authenticated agent id (the slug — AGENTMUX_AGENT_ID /
 /// bus:register id, e.g. "Agent3") to the agent's DEFINITION id, which is
 /// what `db_agent_identity_links.agent_id` stores (== `AgentDefinition.id`;
-/// see m0013 and `identity/resolver/inject.rs::resolve_bindings_for_instance`).
+/// see `identity/resolver/inject.rs::resolve_bindings_for_instance`).
 ///
 /// Every link-table operation reached from MuxAPI must go through
 /// this: MuxAPI callers authenticate with the slug, but writing the slug

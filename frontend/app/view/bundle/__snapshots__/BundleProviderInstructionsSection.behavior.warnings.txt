@@ -1,0 +1,154 @@
+-- a mixed value
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value=".">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Provider key has no usable path segment."
+        "It will still be saved, but skipped when this bundle is exported."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="x">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="../up">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Provider key cannot contain a ".." segment."
+        "It will still be saved, but skipped when this bundle is exported."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="x">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="/abs">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Provider key cannot start with a path separator."
+        "It will still be saved, but skipped when this bundle is exported."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="x">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="a/b">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="first">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="a\\b">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Two keys resolve to the same export path — only one of them survives export."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="second">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="b-claude">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="be brief">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="has:colon">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Provider key cannot contain a colon."
+        "It will still be saved, but skipped when this bundle is exported."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="x">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="plain">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="fine">
+    <datalist id="abf-known-providers">
+      <option value="alpha">
+      <option value="mid">
+      <option value="zeta">
+    <span data-stand="Button" class="bundle-view-provider-instruction-add" data-icon="plus">
+      "Add provider override"
+Button "Add provider override" click
+onChange {".":"x","../up":"x","/abs":"x","a/b":"first","a\\b":"second","b-claude":"be brief","has:colon":"x","plain":"fine"}
+focusWhenRendered input ""
+-- with a blank row
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value=".">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Provider key has no usable path segment."
+        "It will still be saved, but skipped when this bundle is exported."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="x">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="../up">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Provider key cannot contain a ".." segment."
+        "It will still be saved, but skipped when this bundle is exported."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="x">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="/abs">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Provider key cannot start with a path separator."
+        "It will still be saved, but skipped when this bundle is exported."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="x">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="a/b">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="first">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="a\\b">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Two keys resolve to the same export path — only one of them survives export."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="second">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="b-claude">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="be brief">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="has:colon">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Provider key cannot contain a colon."
+        "It will still be saved, but skipped when this bundle is exported."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="x">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="plain">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="fine">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Provider key cannot be empty."
+        "This row will not be saved until you name it."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="">
+    <datalist id="abf-known-providers">
+      <option value="alpha">
+      <option value="mid">
+      <option value="zeta">
+    <span data-stand="Button" class="bundle-view-provider-instruction-add" data-icon="plus">
+      "Add provider override"

@@ -46,6 +46,24 @@ pub struct CommandBrowserGrantsPowersData {
     pub powers: Vec<String>,
 }
 
+/// Data for `COMMAND_BROWSER_GRANTS_PERMISSION_SET`: let an agent use what a page asks for on one site.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserGrantsPermissionSetData {
+    pub agent: String,
+    /// One site: `https://meet.example.com`.
+    pub site: String,
+    /// Any of `camera`, `microphone`, `location`, `notifications`.
+    pub kinds: Vec<String>,
+}
+
+/// Data for `COMMAND_BROWSER_GRANTS_PERMISSION_REVOKE`: end one site permission.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserGrantsPermissionRevokeData {
+    pub id: String,
+}
+
 /// Data for `COMMAND_BROWSER_GRANTS_PAUSE_ALL`: turn the switch on or off.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -80,6 +98,19 @@ pub struct BrowserGrantRow {
     pub granted_at_ms: i64,
 }
 
+/// One site permission, as the screen lists it: an agent may use these on this site, until revoked.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SitePermissionRow {
+    pub id: String,
+    pub agent: String,
+    pub site: String,
+    pub kinds: Vec<String>,
+    /// Epoch milliseconds.
+    #[ts(type = "number")]
+    pub granted_at_ms: i64,
+}
+
 /// A console the screen offers to switch on.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -97,6 +128,10 @@ pub struct BrowserGrantsResult {
     pub rows: Vec<BrowserGrantRow>,
     pub presets: Vec<BrowserGrantPreset>,
     pub powers: Vec<String>,
+    /// What a page can be allowed to use on a site, for good (camera, microphone, location, notifications).
+    pub permission_kinds: Vec<String>,
+    /// The site permissions the person has given.
+    pub permissions: Vec<SitePermissionRow>,
     /// "Pause all agent browsing": the status bar and the Settings switch read it.
     pub pause_all: BrowserPauseAll,
 }

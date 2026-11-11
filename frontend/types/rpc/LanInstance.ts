@@ -19,7 +19,11 @@ os: string,
 /**
  * How the peer is installed (`InstallKind::label`, e.g. `windows-store`); empty when it predates advertising it.
  */
-install: string, address: string, port: number, agents: Array<string>, 
+install: string, 
+/**
+ * The kind of build the peer says its binary is (`BuildKind::label`), never read off its channel; empty when it predates advertising it.
+ */
+build: string, address: string, port: number, agents: Array<string>, 
 /**
  * Each listed agent's state and summary line as the peer reported them, by
  * lower-cased name (`lan/discovery/agent_names.rs`). Self-reported, for the Swarm.

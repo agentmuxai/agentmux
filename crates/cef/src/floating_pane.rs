@@ -142,7 +142,7 @@ static TACKED_FLOATERS: LazyLock<Mutex<std::collections::HashSet<isize>>> =
     LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
 
 /// Windows that must stay ABOVE tacked floaters — the approval pages
-/// (credential / memory-adoption), label → top-level HWND. They are made
+/// (credential / SSH), label → top-level HWND. They are made
 /// topmost only while tacked floaters are (`keep_above_should_be_topmost`),
 /// and re-raised over them on every re-stack: topmost windows stack by the
 /// most recent assertion, so without that an app switch back would put a

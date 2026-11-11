@@ -21,10 +21,10 @@ use super::super::zone_naming::{agent_archive_zone, agent_current_zone, is_valid
 
 /// Marker file written under the data dir when the migration completes.
 ///
-/// It is **evidence, not a gate**: `m0000_bootstrap` reads it (together with
-/// [`block_zones_look_incomplete`]) to stamp `0002` as already applied on an
-/// install that ran this migration before the framework existed, and
-/// `m0002`'s doctor check reports it. The migration itself no longer
+/// It is **evidence, not a gate**: `m0002`'s doctor check reports it (it was
+/// also what the retired bootstrap read, together with
+/// [`block_zones_look_incomplete`], to stamp `0002` on an install that ran
+/// this migration before the framework existed). The migration itself no longer
 /// short-circuits on its presence — SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03
 /// Phase 2: a marker whose mere *existence* is trusted as "done" is exactly
 /// the shape that left `0007`'s target table empty (§1.2/F1); a restored
@@ -85,8 +85,7 @@ fn existing_archive_snapshots(filestore: &FileStore, def_id: &str) -> Vec<Vec<u8
 /// That is the state this migration exists to fix, so `true` means it has
 /// not (fully) run on this data — regardless of what any marker says.
 ///
-/// Used by `m0000_bootstrap` (never stamp `0002` off the flag alone) and by
-/// `m0002`'s `verify()`. Never writes. `Err` when the blocks table cannot be
+/// Used by `m0002`'s `verify()`. Never writes. `Err` when the blocks table cannot be
 /// read at all — that is not "complete", and the callers must not treat it
 /// as such (codex P1 on #3070): bootstrap fails rather than stamps, the
 /// doctor reports an error.
@@ -264,8 +263,8 @@ pub fn migrate_block_zones_v1(
         }
     }
 
-    // Write the marker — evidence for m0000's pre-framework stamping and
-    // the doctor, never consulted by this function (see its doc comment).
+    // Write the marker — evidence for the doctor, never consulted by this
+    // function (see its doc comment).
     if let Err(e) = std::fs::write(&marker_path, b"v1\n") {
         tracing::warn!(
             marker = %marker_path.display(),

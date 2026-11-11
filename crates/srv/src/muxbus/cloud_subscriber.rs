@@ -389,7 +389,7 @@ async fn run_loop(
                         // the last-known-good credential in the store is
                         // left untouched rather than overwritten with a
                         // failed/partial result.
-                        let refreshed = crate::muxbus::pkce::refresh_token(&current, &http)
+                        let refreshed = crate::muxbus::host_adopt::refresh(&current, discovered.as_ref(), &http)
                             .await
                             .map_err(classify_refresh_token_error)?;
                         if !refreshed_same_account(&current, &refreshed) {

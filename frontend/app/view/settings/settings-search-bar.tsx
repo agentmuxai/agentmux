@@ -11,6 +11,7 @@ import { createMemo, createSignal, For, Show, type Accessor, type JSX } from "so
 
 import { FilterInput } from "@/app/element/ui";
 import { devModeOn } from "@/app/store/dev-mode";
+import { t } from "@/app/i18n/i18n";
 import { SETTINGS_INDEX, searchSettings, settingsPath } from "./settings-index";
 import type { SettingsIndexEntry } from "./settings-model";
 import "./settings-search-bar.scss";
@@ -85,7 +86,7 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
                     }}
                     onKeyDown={handleKeyDown}
                     inputRef={(el) => (inputRef = el)}
-                    placeholder="Search settings..."
+                    placeholder={t("settings.search.placeholder")}
                     testId="settings-search"
                 />
             </div>
@@ -114,7 +115,7 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
                     </For>
                     <Show when={results().length === 0}>
                         <div class="settings-search-empty" data-testid="settings-search-empty">
-                            No settings match "{props.query()}"
+                            {t("settings.search.empty", { query: props.query() })}
                         </div>
                     </Show>
                 </div>

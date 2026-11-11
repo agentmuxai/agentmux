@@ -42,6 +42,23 @@ fn the_transcript_is_counted_whole_and_then_only_from_where_the_last_count_stopp
 }
 
 #[test]
+fn counted_answers_without_reading_and_warm_fills_it_in_the_background() {
+    let gfs = Arc::new(FileStore::open_in_memory().unwrap());
+    let zone = "agent:warm-images:current";
+    assert_eq!(counted(zone), None, "nothing counted yet");
+    gfs.make_file(zone, FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_data(zone, FILE, &user_line(json!(LIST))).unwrap();
+    assert_eq!(counted(zone), None, "asking does not count");
+    warm(&gfs, zone);
+    warm(&gfs, zone);
+    let start = std::time::Instant::now();
+    while counted(zone).is_none() && start.elapsed() < std::time::Duration::from_secs(10) {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(counted(zone), Some(3));
+}
+
+#[test]
 fn a_transcript_made_again_after_an_archive_is_counted_from_its_top() {
     let gfs = FileStore::open_in_memory().unwrap();
     let zone = "agent:count-images-archived:current";

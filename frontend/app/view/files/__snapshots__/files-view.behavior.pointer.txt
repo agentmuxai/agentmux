@@ -5,7 +5,7 @@ blank space: selection={"names":[],"focus":"src","anchor":"pic.png"}
 > the row menu
 buildRowMenu(run.exe, openEntry,openInNewTab,copyPaths,askDeletePermanently)
 contextmenu notPrevented=false selection={"names":["run.exe"],"focus":"run.exe","anchor":"run.exe"}
-menu: ["Open","Open in Editor","Open with default app","Reveal in file manager","Mention in agent","Cut","Copy","Copy path","Rename","Move to Trash","Delete permanently…"]
+menu: ["Open","Open in Editor","Open with default app","Reveal in file manager","Cut","Copy","Copy path","Rename","Move to Trash","Delete permanently…"]
 openFolderInNewTab(["b1","/home/a/src",null])
 model.setStatus({"text":"Copied 2 paths","tone":"info"}, 2500)
 dialog: Delete "b.txt" permanently?This can't be undone: it skips the Trash.CancelDelete permanently

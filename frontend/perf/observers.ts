@@ -16,6 +16,8 @@
  */
 
 import { startLongFrameObserver } from "./long-frames";
+import { peekMuxObject, makeORef } from "@/store/mos";
+import { createSlowInteractionLogger, type SlowInteraction } from "./slow-interactions";
 import { perfStore } from "./store";
 
 const PERF_LOG_PREFIX = "[perf]";
@@ -67,8 +69,14 @@ function startEventObserver(): (() => void) | null {
         console.info(`${PERF_LOG_PREFIX} event observer unavailable in this runtime`);
         return null;
     }
+    const logSlow = createSlowInteractionLogger({
+        log: (line) => console.warn(line),
+        windowLabel: new URLSearchParams(window.location.search).get("windowLabel") ?? "main",
+        viewOf: (blockId) => peekMuxObject<Block>(makeORef("block", blockId))?.meta?.view,
+    });
     const observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries() as PerformanceEventTiming[]) {
+            logSlow(entry as SlowInteraction);
             // Skip events with no interactionId — those are paint-only
             // events (scrollstart, etc.) that don't reflect user input.
             const interactionId =

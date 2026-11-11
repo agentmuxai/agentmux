@@ -232,6 +232,8 @@ pub struct LanInstance {
     pub os: String,
     /// How the peer is installed (`InstallKind::label`, e.g. `windows-store`); empty when it predates advertising it.
     #[serde(default)] pub install: String,
+    /// The kind of build the peer says its binary is (`BuildKind::label`), never read off its channel; empty when it predates advertising it.
+    #[serde(default)] pub build: String,
     pub address: String,
     pub port: u16,
     /// The peer's `lan_key`; never serialized, as no reader of the JSON needs it.
@@ -517,7 +519,7 @@ impl LanDiscovery {
             ("hostname", hostname.as_str()),
             ("instance_id", instance_id.as_str()),
             ("channel", channel.as_str()),
-            ("os", os.as_str()), ("install", crate::backend::update::check::install_kind().label()),
+            ("os", os.as_str()), ("install", crate::backend::update::check::install_kind().label()), ("build", agentmux_common::build_kind::build_kind().label()),
             ("auth_key", auth_key.as_str()),
         ];
         if let Some(id) = install_id.as_deref() {
@@ -876,7 +878,7 @@ impl LanDiscovery {
         // this instance over UDP can tell two channels on one host apart. An
         // extra field: older parsers (mobile included) ignore it.
         response["channel"] = json!(crate::backend::reactive::registry::local_channel_id());
-        response["os"] = json!(crate::backend::host_os::local_os()); response["install"] = json!(crate::backend::update::check::install_kind().label());
+        response["os"] = json!(crate::backend::host_os::local_os()); response["install"] = json!(crate::backend::update::check::install_kind().label()); response["build"] = json!(agentmux_common::build_kind::build_kind().label());
         // What a phone merges this install with its cloud record by, and how
         // many channels this machine runs, shared on the LAN or not
         // (agentmux-mobile's SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06
@@ -1182,12 +1184,9 @@ impl LanDiscovery {
                     .get_property_val_str("auth_key")
                     .unwrap_or_default()
                     .to_string();
-                let channel = info
-                    .get_property_val_str("channel")
-                    .unwrap_or_default()
-                    .to_string();
+                let channel = info.get_property_val_str("channel").unwrap_or_default().to_string();
                 // Self-reported by the peer, so only a plain token is kept.
-                let (os, install) = crate::backend::lan::peer_words::os_and_install(&info);
+                let (os, install, build) = crate::backend::lan::peer_words::advertised(&info);
                 let other_ttl_secs = info.get_other_ttl();
 
                 let mut instances = self.instances.write();
@@ -1200,7 +1199,7 @@ impl LanDiscovery {
                     hostname: hostname.clone(),
                     version: version.clone(),
                     channel: channel.clone(),
-                    os: os.clone(), install: install.clone(),
+                    os: os.clone(), install: install.clone(), build: build.clone(),
                     address: address.clone(),
                     port: info.get_port(),
                     auth_key: auth_key.clone(),
@@ -1234,7 +1233,7 @@ impl LanDiscovery {
                 if !peer_id.is_empty() {
                     entry.instance_id = peer_id.clone();
                 }
-                crate::backend::lan::peer_words::keep_known(&mut entry.install, install);
+                crate::backend::lan::peer_words::keep_known(&mut entry.install, install); crate::backend::lan::peer_words::keep_known(&mut entry.build, build);
                 if !hostname.is_empty() {
                     entry.hostname = hostname;
                 }
@@ -1477,6 +1476,8 @@ struct LanPubkeyCacheEntry {
     /// The hosting install's certificate for the name key (`lan_cert`), when
     /// its answer had one (docs/specs/SPEC_LAN_KEY_CONTINUITY_2026_10_29.md).
     cert: Option<agentmux_common::jekt_sign::WanKeyRecord>,
+    /// The agent's own signature that the certifying install hosts it (`lan_install_sig`), when the answer had one.
+    install_sig: Option<String>,
     expires: std::time::Instant,
 }
 
@@ -1754,6 +1755,7 @@ impl LanDiscoveryController {
                 let uid = body.get("uid").and_then(|v| v.as_str()).filter(|u| !u.is_empty());
                 let uid_key = body.get("uid_public_key").and_then(|v| v.as_str()).and_then(|k| BASE64.decode(k).ok());
                 let cert = body.get("lan_cert").and_then(|v| serde_json::from_value(v.clone()).ok());
+                let install_sig = body.get("lan_install_sig").and_then(|v| v.as_str()).map(str::to_string);
                 if let Ok(mut cache) = self.pubkey_cache.write() {
                     cache.insert(
                         agent_id.to_string(),
@@ -1761,6 +1763,7 @@ impl LanDiscoveryController {
                             public_key: Some(pubkey_bytes.clone()),
                             uid_key: uid.zip(uid_key).map(|(u, k)| (u.to_string(), k)),
                             cert,
+                            install_sig,
                             expires: std::time::Instant::now()
                                 + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
                         },
@@ -1783,21 +1786,13 @@ impl LanDiscoveryController {
                     public_key: None,
                     uid_key: None,
                     cert: None,
+                    install_sig: None,
                     expires: std::time::Instant::now()
                         + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
                 },
             );
         }
         LanPubkeyLookup::NotFound
-    }
-
-    /// The UID and UID key the peer that answered [`Self::find_agent_lan_pubkey`]
-    /// for `agent_id` gave beside its name key, while that answer is cached
-    /// (identity M4d-6).
-    pub fn cached_lan_uid_key(&self, agent_id: &str) -> Option<(String, Vec<u8>)> {
-        let cache = self.pubkey_cache.read().ok()?;
-        let e = cache.get(agent_id).filter(|e| e.expires > std::time::Instant::now())?;
-        e.uid_key.clone()
     }
 
     /// Cache a peer's answer for `agent_id` as `find_agent_lan_pubkey` would.
@@ -1809,6 +1804,7 @@ impl LanDiscoveryController {
                 public_key: Some(public_key),
                 uid_key,
                 cert: None,
+                install_sig: None,
                 expires: std::time::Instant::now() + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
             },
         );

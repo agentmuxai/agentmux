@@ -34,9 +34,11 @@ import { onWindowDrag } from "@/app/drag/window-drag-events";
 import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
 import { Key } from "@/util/keyed";
 import { debounce } from "throttle-debounce";
+import { describeRejection } from "@/util/describe-rejection";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
-import { REST_CLIP } from "./liveReflow";
+import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
+import { REFLOW_CLIP, REFLOW_EDGES, REFLOW_TRANSFORM, reflowEdges, shownPx } from "./liveReflow";
 import "./tilelayout.scss";
 import { LayoutNode, LayoutTreeActionType, ResizeHandleProps, TileLayoutContents } from "./types";
 import { releaseTileDrag, startTileDrag } from "./tile-drag";
@@ -323,6 +325,16 @@ function useLeafGeometryNotify(platform: TileLayoutPlatform, layoutModel: Layout
     }
 }
 
+/**
+ * How a pane's drag picture is rasterised. An image in the pane that can't be inlined (a browser pane's
+ * favicon from another origin, an avatar that is gone) is left blank; without this the rasteriser rejects
+ * with that image's `error` event and there is no picture at all.
+ */
+const PREVIEW_RASTER = {
+    imagePlaceholder: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",
+    onImageErrorHandler: () => {},
+};
+
 function useDragPreview(
     getTileNode: () => HTMLDivElement | undefined,
     getPreviewRef: () => HTMLDivElement | undefined
@@ -378,15 +390,19 @@ function useDragPreview(
             setPreviewImageGeneration(prevElGen);
             const seq = ++previewRequestSeq;
             // Loaded with the first drag preview, not at startup.
-            import("html-to-image").then(({ toPng }) => toPng(getPreviewRef())).then((url) => {
-                // A newer rasterisation was requested while this one was in
-                // flight — it measured the pane more recently, so drop this
-                // result rather than clobbering it.
-                if (seq !== previewRequestSeq) return;
-                const newImg = new Image();
-                newImg.src = url;
-                setPreviewImage({ img: newImg, size: measured });
-            });
+            import("html-to-image")
+                .then(({ toPng }) => toPng(getPreviewRef(), PREVIEW_RASTER))
+                .then((url) => {
+                    // A newer rasterisation was requested while this one was in
+                    // flight — it measured the pane more recently, so drop this
+                    // result rather than clobbering it.
+                    if (seq !== previewRequestSeq) return;
+                    const newImg = new Image();
+                    newImg.src = url;
+                    setPreviewImage({ img: newImg, size: measured });
+                })
+                // The drag then shows the picture it had, or the browser's own: nothing waits on this one.
+                .catch((e) => console.warn(`[drag-preview] no picture of the pane: ${describeRejection(e)}`));
         }
     };
 
@@ -574,36 +590,44 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // positioning is untouched. Mirrors `workspace.tsx`'s identical
     // visibility+opacity treatment for the whole-tab reveal gate.
     const isRevealGated = () => gatingNodeIds().has(props.node.id);
-    // The live reflow of a pane drag (liveReflow.ts): every tile, the dragged pane's included, stands in for
-    // its future rect with a compositor-only translate and crop over its unchanged size, so nothing inside it
-    // lays out and nothing is squashed. The dragged tile is the drop's own preview at its landing rect, so it
-    // loses the blur a dragged tile otherwise has (`.dragging`). Essential spatial motion (it says where the
-    // drop lands), so it glides under reduced motion too, shorter. A CSS transition retargets from the current
-    // matrix on its own; a tile at rest keeps the transition (and the layout's own transform) for the drag's
-    // length, so it glides back; and the plain style (no transform transition) takes over in the same batch
-    // as the drop's real rect, so nothing glides twice.
+    // The live reflow of a pane drag (liveReflow.ts): every tile takes the rect the armed drop leaves it. Its
+    // size is set at once (`box`); its four edges glide, as registered properties (tilelayout.scss) that its
+    // transform and its clip are read from. Not a transition on the transform itself: that one runs on the
+    // compositor and a clip's on the main thread, and with the main thread busy laying the panes out the two
+    // came apart, a gap beside every pane. A tile carries its edges at rest too, so the first glide starts
+    // from them (docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md §3).
     const reflow = () => props.layoutModel.reflowFor(props.node.id);
     const tileStyle = createMemo<JSX.CSSProperties>(() => {
         const entry = reflow();
         const reduce = shouldReduceMotion("transition");
+        const own = addlProps()?.rect;
+        const shown = entry?.rect ?? (own && shownPx(own));
         const style: JSX.CSSProperties = {
             ...(tileTransform() as JSX.CSSProperties),
+            ...(shown && reflowEdges(shown)),
             visibility: isRevealGated() ? "hidden" : undefined,
             opacity: reduce ? undefined : isRevealGated() ? 0 : 1,
             transition: reduce ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
         };
         if (!entry) return style;
+        // Essential spatial motion, so it glides under reduced motion too, shorter. The plain style takes over
+        // in the same batch as the drop's real rect, so nothing glides twice.
         const timing = `var(${reduce ? "--duration-fast" : "--duration-base"}) ${EASE_OUT}`;
-        const glide = `transform ${timing}, clip-path ${timing}`;
-        const transform = entry.kind === "glide" ? entry.transform : style.transform;
+        const glide = REFLOW_EDGES.map((edge) => `${edge} ${timing}`).join(", ");
         return {
             ...style,
-            transform,
-            WebkitTransform: transform,
-            "clip-path": entry.kind === "glide" ? entry.clip : REST_CLIP,
-            "will-change": "transform",
+            transform: REFLOW_TRANSFORM,
+            WebkitTransform: REFLOW_TRANSFORM,
+            width: `${entry.box.width}px`,
+            height: `${entry.box.height}px`,
+            "clip-path": REFLOW_CLIP,
+            "will-change": "transform, clip-path",
+            // The dragged tile in its landing rect is the drop's own preview: not blurred as a dragged tile is.
             filter: entry.moved ? "none" : undefined,
-            transition: reduce ? glide : `${glide}, ${style.transition}`,
+            // A pane being torn off has left the layout: its neighbours close over its slot. It fades over
+            // the glide's own length (under reduced motion too), so its slot is never bare while they arrive.
+            ...(entry.leaving && { opacity: 0 }),
+            transition: entry.leaving ? `${glide}, opacity ${timing}` : reduce ? glide : `${glide}, ${style.transition}`,
         };
     });
 
@@ -676,7 +700,8 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
     return (
         <div
             class={clsx("tile-node", {
-                dragging: isDragging(),
+                // Not while the pane's picture is still being taken: the picture would show the blur.
+                dragging: isDragging() && !paneCaptureInFlight(),
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
                 "tile-resize-skip": skipsLayout(),

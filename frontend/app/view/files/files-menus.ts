@@ -5,10 +5,9 @@
 
 import type { ContextMenuItem } from "@/app/components/context-menu";
 import { shortcutFor } from "@/app/keybindings";
+import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { MENU_ICON } from "@/app/util/menu-icons";
-import { isMacOS } from "@/util/platformutil";
 import type { FsEntry } from "@/types/rpc/FsEntry";
-import { agentTargets, attachToAgent, mentionInAgent } from "./files-agent-mention";
 import { errorText, type FilesModel } from "./files-model";
 import { openInEditor, openTerminalHere, openWithOs, revealInOs } from "./files-open";
 import { clipboard } from "./files-ops";
@@ -19,7 +18,7 @@ import { CONFINED_MENU } from "./files-view-text";
 const forHost = (model: FilesModel, items: ContextMenuItem[]): ContextMenuItem[] => {
     if (model.root()) return items.filter((i) => i.type !== "action" || CONFINED_MENU.test(i.label));
     if (!model.connection()) return items;
-    const local = /^(Open with default app|Reveal in |Mention in agent|Attach to |Move .*to Trash)/;
+    const local = /^(Open with default app|Reveal in |Move .*to Trash)/;
     return items.filter((i) => i.type !== "action" || !local.test(i.label));
 };
 
@@ -34,8 +33,6 @@ export type RowMenuActions = {
 
 export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenuActions): ContextMenuItem[] => {
     const { openEntry, openInNewTab, copyPaths, askDeletePermanently } = actions;
-    const mentionIn = (list: FsEntry[]): void => mentionInAgent(model, list);
-    const attachTo = (target: { blockId: string; name: string }, list: FsEntry[]): void => attachToAgent(model, target, list);
     const list = model.selectedEntries();
     const many = list.length > 1;
     const path = model.pathOf(entry.name);
@@ -53,18 +50,7 @@ export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenu
         items.push({ type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(path, model.blockId, model.connection() || undefined).catch(fail) });
     }
     items.push(
-        { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", icon: MENU_ICON.reveal, onSelect: () => void revealInOs(path, model.blockId).catch(fail) },
-        // One item per agent pane on screen (the DOM menu has no submenus).
-        {
-            type: "action",
-            label: "Mention in agent", icon: MENU_ICON.mention,
-            shortcut: shortcutFor("files:mention"),
-            disabled: agentTargets().length === 0,
-            onSelect: () => mentionIn(many ? list : [entry]),
-        },
-        ...agentTargets().map((t): ContextMenuItem => ({
-            type: "action", label: `Attach to ${t.name}`, icon: MENU_ICON.attach, onSelect: () => attachTo(t, many ? list : [entry]),
-        })),
+        { type: "action", label: revealInFileManagerLabel(), icon: MENU_ICON.reveal, onSelect: () => void revealInOs(path, model.blockId).catch(fail) },
         { type: "separator" },
         { type: "action", label: "Cut", icon: MENU_ICON.cut, shortcut: shortcutFor("files:cut"), onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
         { type: "action", label: "Copy", icon: MENU_ICON.copy, shortcut: shortcutFor("files:copy"), onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
@@ -100,7 +86,7 @@ export const buildFolderMenu = (model: FilesModel, actions: Pick<RowMenuActions,
         },
         { type: "separator" },
         { type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(model.path(), model.blockId, model.connection() || undefined).catch(fail) },
-        { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", icon: MENU_ICON.reveal, onSelect: () => void revealInOs(model.path(), model.blockId).catch(fail) },
+        { type: "action", label: revealInFileManagerLabel(), icon: MENU_ICON.reveal, onSelect: () => void revealInOs(model.path(), model.blockId).catch(fail) },
         { type: "action", label: "Copy folder path", icon: MENU_ICON.copy, onSelect: () => void navigator.clipboard?.writeText(model.path()) },
         { type: "separator" },
         { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", icon: model.showHidden() ? MENU_ICON.hide : MENU_ICON.show, onSelect: () => model.toggleHidden() },

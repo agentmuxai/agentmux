@@ -20,6 +20,19 @@ const initializeMermaid = async () => {
     }
 };
 
+/**
+ * Mermaid renders into a scratch container it appends to <body> (`#d<id>`, with the diagram's own `#<id>` in it).
+ * It takes the container away when the render succeeds, but not when the diagram fails to parse: the error SVG stays
+ * in <body>, which is a flex row, so each failed diagram becomes a column beside the app and shrinks it. Called after
+ * every render, so success and failure both leave nothing behind. The diagram shown in the pane is a copy of the SVG
+ * text, so this never touches it.
+ */
+export function removeMermaidScratch(id: string, doc: Document = document): void {
+    doc.getElementById(`d${id}`)?.remove();
+    const stray = doc.getElementById(id);
+    if (stray && stray.parentElement === doc.body) stray.remove();
+}
+
 const Mermaid = ({ chart }: { chart: string }) => {
     let ref!: HTMLDivElement;
     const [svgContent, setSvgContent] = createSignal<string | null>(null);
@@ -44,9 +57,13 @@ const Mermaid = ({ chart }: { chart: string }) => {
                     .replace(/\n+$/, "");
 
                 const id = `mermaid-${++mermaidRenderCount}`;
-                const { svg } = await mermaidInstance.render(id, normalizedChart);
-                if (!cancelled) {
-                    setSvgContent(svg);
+                try {
+                    const { svg } = await mermaidInstance.render(id, normalizedChart);
+                    if (!cancelled) {
+                        setSvgContent(svg);
+                    }
+                } finally {
+                    removeMermaidScratch(id);
                 }
             } catch (err: any) {
                 console.error("Error rendering mermaid diagram:", err);

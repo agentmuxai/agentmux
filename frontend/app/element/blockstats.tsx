@@ -468,6 +468,7 @@ function LocalBadge(props: LocalBadgeProps) {
                 <Tooltip
                     placement="bottom"
                     immediate
+                    passive
                     forceOpen={inline() && !props.measuring && pinned()}
                     disable={props.measuring || dismissed()}
                     divClassName={`block-stats-badge ${inline() ? `inline ${form()}` : ""} ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}

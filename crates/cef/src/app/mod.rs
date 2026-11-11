@@ -295,16 +295,6 @@ wrap_window_delegate! {
             }
         }
 
-        // Windows in Views pane mode: the panes follow the window as on Linux.
-        #[cfg(target_os = "windows")]
-        fn on_window_bounds_changed(&self, window: Option<&mut Window>, _new_bounds: Option<&Rect>) {
-            if let (Some((state, label)), Some(window)) = (&self.window_registration, window) {
-                if crate::pane_backend::views() {
-                    crate::browser_panes::bounds::window_resized(state, label, window);
-                }
-            }
-        }
-
         #[cfg(target_os = "linux")]
         fn on_window_bounds_changed(&self, window: Option<&mut Window>, new_bounds: Option<&Rect>) {
             if let (Some((state, label)), Some(window)) = (&self.window_registration, window) {
@@ -353,7 +343,7 @@ wrap_window_delegate! {
             // a destroyed window to silently no-op or worse.
             if let Some((state, label)) = self.window_registration.as_ref() {
                 state.windows.lock().remove(label);
-                #[cfg(any(target_os = "linux", target_os = "windows"))]
+                #[cfg(target_os = "linux")]
                 crate::browser_panes::bounds::forget_window(label);
                 tracing::info!(
                     window_label = %label,

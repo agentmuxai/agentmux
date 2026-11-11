@@ -1,0 +1,1213 @@
+-- open: not editing
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+onDirtyChange false
+-- refreshNonce bumped
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+-- refreshed in place
+<body>
+  <div>
+    <div class="modal-layer-mount">
+      <div class="memory-pinned-layout" data-surface="armory-personal">
+        <div class="memory-pinned-top" data-testid="memory-pinned-top">
+          <div class="memory-editor-actions">
+            <button type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+              "Edit"
+          <div class="native-memory-history memory-history" data-testid="memory-history">
+            <div class="memory-history-size" data-testid="memory-history-size">
+              <span data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                "Now"
+                <strong>
+                  "~1.2k tok"
+              <span>
+                "7 days:"
+                "+300 tok"
+              <span>
+                "30 days:"
+                "+900 tok"
+              <svg class="memory-history-sparkline" aria-hidden="true">
+                <polyline>
+            <div class="native-memory-history-hint">
+              "Select two versions to compare, or revert directly to one."
+            <ul class="native-memory-history-list">
+              <li class="native-memory-history-item is-latest">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Human"
+                    <span class="native-memory-history-item-time">
+                      "T1794303360000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                      "~1.2k tok"
+                      "· +100"
+                    <span class="ui-tag ui-tag--chip ui-tag--accent ui-tag--xs">
+                      "current"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Agent"
+                    <span class="native-memory-history-item-time">
+                      "T1794139200000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4" aria-description="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4">
+                      "~1.1k tok"
+                      "· +200"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Jekt"
+                    <span class="native-memory-history-item-time">
+                      "T1793534400000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4" aria-description="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4">
+                      "~900 tok"
+                      "· +200"
+                  <div class="native-memory-history-item-warning" data-hover-tip="written in response to a jekt — TIER=coord, TRUST=lan-verified" aria-description="written in response to a jekt — TIER=coord, TRUST=lan-verified">
+                    "⚠"
+                    "written in response to a jekt — TIER=coord, TRUST=lan-verified"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Detected outside AgentMux"
+                    <span class="native-memory-history-item-time">
+                      "T1792584000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4" aria-description="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4">
+                      "~700 tok"
+                      "· +400"
+                  <div class="native-memory-history-item-warning" data-hover-tip="detected outside AgentMux's write path — provenance unknown" aria-description="detected outside AgentMux's write path — provenance unknown">
+                    "⚠"
+                    "detected outside AgentMux's write path — provenance unknown"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Revert"
+                    <span class="native-memory-history-item-time">
+                      "T1790856000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4" aria-description="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4">
+                      "~300 tok"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+        <div class="memory-pinned-handle" role="separator" aria-orientation="horizontal" aria-label="Resize editor" data-hover-tip="Drag to resize · double-click to reset" aria-description="Drag to resize · double-click to reset">
+        <div class="memory-pinned-bottom" data-testid="memory-pinned-bottom">
+          <div class="memory-content" data-testid="memory-content">
+            <div class="memory-content-markdown">
+              <div data-markdown="" data-scrollable="true">
+                "fresh"
+onDirtyChange false
+-- open: editing, no changes yet
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+onDirtyChange false
+-- press Edit
+-- refreshNonce bumped
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+onDirtyChange true
+onDirtyChange false
+-- followed along
+<body>
+  <div>
+    <div class="modal-layer-mount">
+      <div class="memory-pinned-layout" data-surface="armory-personal">
+        <div class="memory-pinned-top" data-testid="memory-pinned-top">
+          <div class="memory-editor-actions">
+            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+              "Save"
+            <button title="Cancel (Esc)" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+              "Cancel"
+            <span class="memory-editor-status">
+              "No changes"
+          <div class="native-memory-history memory-history" data-testid="memory-history">
+            <div class="memory-history-size" data-testid="memory-history-size">
+              <span data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                "Now"
+                <strong>
+                  "~1.2k tok"
+              <span>
+                "7 days:"
+                "+300 tok"
+              <span>
+                "30 days:"
+                "+900 tok"
+              <svg class="memory-history-sparkline" aria-hidden="true">
+                <polyline>
+            <div class="native-memory-history-hint">
+              "Select two versions to compare, or revert directly to one."
+            <ul class="native-memory-history-list">
+              <li class="native-memory-history-item is-latest">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Human"
+                    <span class="native-memory-history-item-time">
+                      "T1794303360000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                      "~1.2k tok"
+                      "· +100"
+                    <span class="ui-tag ui-tag--chip ui-tag--accent ui-tag--xs">
+                      "current"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Agent"
+                    <span class="native-memory-history-item-time">
+                      "T1794139200000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4" aria-description="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4">
+                      "~1.1k tok"
+                      "· +200"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Jekt"
+                    <span class="native-memory-history-item-time">
+                      "T1793534400000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4" aria-description="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4">
+                      "~900 tok"
+                      "· +200"
+                  <div class="native-memory-history-item-warning" data-hover-tip="written in response to a jekt — TIER=coord, TRUST=lan-verified" aria-description="written in response to a jekt — TIER=coord, TRUST=lan-verified">
+                    "⚠"
+                    "written in response to a jekt — TIER=coord, TRUST=lan-verified"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Detected outside AgentMux"
+                    <span class="native-memory-history-item-time">
+                      "T1792584000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4" aria-description="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4">
+                      "~700 tok"
+                      "· +400"
+                  <div class="native-memory-history-item-warning" data-hover-tip="detected outside AgentMux's write path — provenance unknown" aria-description="detected outside AgentMux's write path — provenance unknown">
+                    "⚠"
+                    "detected outside AgentMux's write path — provenance unknown"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Revert"
+                    <span class="native-memory-history-item-time">
+                      "T1790856000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4" aria-description="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4">
+                      "~300 tok"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+        <div class="memory-pinned-handle" role="separator" aria-orientation="horizontal" aria-label="Resize editor" data-hover-tip="Drag to resize · double-click to reset" aria-description="Drag to resize · double-click to reset">
+        <div class="memory-pinned-bottom" data-testid="memory-pinned-bottom">
+          <div class="memory-content" data-testid="memory-content">
+            <textarea aria-label="Edit MEMORY.md" spellcheck="false" class="memory-content-textarea" value="updated underneath">
+onDirtyChange false
+-- open: dirty, file changed
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+onDirtyChange false
+-- press Edit
+-- type "my draft"
+onDirtyChange true
+-- refreshNonce bumped
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+-- banner shown
+<body>
+  <div>
+    <div class="modal-layer-mount">
+      <div class="memory-pinned-layout" data-surface="armory-personal">
+        <div class="memory-pinned-top" data-testid="memory-pinned-top">
+          <div class="memory-editor-actions">
+            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+              "Save"
+            <button title="Cancel (Esc)" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+              "Cancel"
+            <span class="memory-editor-status">
+              "Unsaved changes"
+          <div class="memory-conflict-banner" role="alert" data-testid="memory-conflict-banner">
+            <span>
+              "This file changed since you started editing."
+              "Your draft is kept."
+            <div class="memory-conflict-banner-actions">
+              <button type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn" aria-pressed="false">
+                "View change"
+              <button type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+                "Keep editing"
+              <button title="Replace the saved version with your draft" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+                "Save anyway"
+              <button type="button" class="ui-button ui-tone-danger ui-density-compact memory-editor-btn is-danger">
+                "Discard my edits"
+          <div class="native-memory-history memory-history" data-testid="memory-history">
+            <div class="memory-history-size" data-testid="memory-history-size">
+              <span data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                "Now"
+                <strong>
+                  "~1.2k tok"
+              <span>
+                "7 days:"
+                "+300 tok"
+              <span>
+                "30 days:"
+                "+900 tok"
+              <svg class="memory-history-sparkline" aria-hidden="true">
+                <polyline>
+            <div class="native-memory-history-hint">
+              "Select two versions to compare, or revert directly to one."
+            <ul class="native-memory-history-list">
+              <li class="native-memory-history-item is-latest">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Human"
+                    <span class="native-memory-history-item-time">
+                      "T1794303360000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                      "~1.2k tok"
+                      "· +100"
+                    <span class="ui-tag ui-tag--chip ui-tag--accent ui-tag--xs">
+                      "current"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Agent"
+                    <span class="native-memory-history-item-time">
+                      "T1794139200000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4" aria-description="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4">
+                      "~1.1k tok"
+                      "· +200"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Jekt"
+                    <span class="native-memory-history-item-time">
+                      "T1793534400000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4" aria-description="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4">
+                      "~900 tok"
+                      "· +200"
+                  <div class="native-memory-history-item-warning" data-hover-tip="written in response to a jekt — TIER=coord, TRUST=lan-verified" aria-description="written in response to a jekt — TIER=coord, TRUST=lan-verified">
+                    "⚠"
+                    "written in response to a jekt — TIER=coord, TRUST=lan-verified"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Detected outside AgentMux"
+                    <span class="native-memory-history-item-time">
+                      "T1792584000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4" aria-description="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4">
+                      "~700 tok"
+                      "· +400"
+                  <div class="native-memory-history-item-warning" data-hover-tip="detected outside AgentMux's write path — provenance unknown" aria-description="detected outside AgentMux's write path — provenance unknown">
+                    "⚠"
+                    "detected outside AgentMux's write path — provenance unknown"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Revert"
+                    <span class="native-memory-history-item-time">
+                      "T1790856000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4" aria-description="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4">
+                      "~300 tok"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+        <div class="memory-pinned-handle" role="separator" aria-orientation="horizontal" aria-label="Resize editor" data-hover-tip="Drag to resize · double-click to reset" aria-description="Drag to resize · double-click to reset">
+        <div class="memory-pinned-bottom" data-testid="memory-pinned-bottom">
+          <div class="memory-content" data-testid="memory-content">
+            <textarea aria-label="Edit MEMORY.md" spellcheck="false" class="memory-content-textarea" value="my draft">
+-- press View change
+-- change viewed
+<body>
+  <div>
+    <div class="modal-layer-mount">
+      <div class="memory-pinned-layout" data-surface="armory-personal">
+        <div class="memory-pinned-top" data-testid="memory-pinned-top">
+          <div class="memory-editor-actions">
+            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+              "Save"
+            <button title="Cancel (Esc)" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+              "Cancel"
+            <span class="memory-editor-status">
+              "Unsaved changes"
+          <div class="memory-conflict-banner" role="alert" data-testid="memory-conflict-banner">
+            <span>
+              "This file changed since you started editing."
+              "Your draft is kept."
+            <div class="memory-conflict-banner-actions">
+              <button type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn" aria-pressed="true">
+                "View change"
+              <button type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+                "Keep editing"
+              <button title="Replace the saved version with your draft" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+                "Save anyway"
+              <button type="button" class="ui-button ui-tone-danger ui-density-compact memory-editor-btn is-danger">
+                "Discard my edits"
+            <pre class="memory-conflict-banner-diff" data-testid="memory-conflict-diff">
+              <div class="native-memory-diff-line is-removed">
+                "- v1"
+              <div class="native-memory-diff-line is-added">
+                "+ the agent wrote this"
+          <div class="native-memory-history memory-history" data-testid="memory-history">
+            <div class="memory-history-size" data-testid="memory-history-size">
+              <span data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                "Now"
+                <strong>
+                  "~1.2k tok"
+              <span>
+                "7 days:"
+                "+300 tok"
+              <span>
+                "30 days:"
+                "+900 tok"
+              <svg class="memory-history-sparkline" aria-hidden="true">
+                <polyline>
+            <div class="native-memory-history-hint">
+              "Select two versions to compare, or revert directly to one."
+            <ul class="native-memory-history-list">
+              <li class="native-memory-history-item is-latest">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Human"
+                    <span class="native-memory-history-item-time">
+                      "T1794303360000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                      "~1.2k tok"
+                      "· +100"
+                    <span class="ui-tag ui-tag--chip ui-tag--accent ui-tag--xs">
+                      "current"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Agent"
+                    <span class="native-memory-history-item-time">
+                      "T1794139200000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4" aria-description="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4">
+                      "~1.1k tok"
+                      "· +200"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Jekt"
+                    <span class="native-memory-history-item-time">
+                      "T1793534400000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4" aria-description="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4">
+                      "~900 tok"
+                      "· +200"
+                  <div class="native-memory-history-item-warning" data-hover-tip="written in response to a jekt — TIER=coord, TRUST=lan-verified" aria-description="written in response to a jekt — TIER=coord, TRUST=lan-verified">
+                    "⚠"
+                    "written in response to a jekt — TIER=coord, TRUST=lan-verified"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Detected outside AgentMux"
+                    <span class="native-memory-history-item-time">
+                      "T1792584000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4" aria-description="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4">
+                      "~700 tok"
+                      "· +400"
+                  <div class="native-memory-history-item-warning" data-hover-tip="detected outside AgentMux's write path — provenance unknown" aria-description="detected outside AgentMux's write path — provenance unknown">
+                    "⚠"
+                    "detected outside AgentMux's write path — provenance unknown"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Revert"
+                    <span class="native-memory-history-item-time">
+                      "T1790856000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4" aria-description="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4">
+                      "~300 tok"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+        <div class="memory-pinned-handle" role="separator" aria-orientation="horizontal" aria-label="Resize editor" data-hover-tip="Drag to resize · double-click to reset" aria-description="Drag to resize · double-click to reset">
+        <div class="memory-pinned-bottom" data-testid="memory-pinned-bottom">
+          <div class="memory-content" data-testid="memory-content">
+            <textarea aria-label="Edit MEMORY.md" spellcheck="false" class="memory-content-textarea" value="my draft">
+-- press Keep editing
+-- kept editing from the banner
+<body>
+  <div>
+    <div class="modal-layer-mount">
+      <div class="memory-pinned-layout" data-surface="armory-personal">
+        <div class="memory-pinned-top" data-testid="memory-pinned-top">
+          <div class="memory-editor-actions">
+            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+              "Save"
+            <button title="Cancel (Esc)" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+              "Cancel"
+            <span class="memory-editor-status">
+              "Unsaved changes"
+          <div class="native-memory-history memory-history" data-testid="memory-history">
+            <div class="memory-history-size" data-testid="memory-history-size">
+              <span data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                "Now"
+                <strong>
+                  "~1.2k tok"
+              <span>
+                "7 days:"
+                "+300 tok"
+              <span>
+                "30 days:"
+                "+900 tok"
+              <svg class="memory-history-sparkline" aria-hidden="true">
+                <polyline>
+            <div class="native-memory-history-hint">
+              "Select two versions to compare, or revert directly to one."
+            <ul class="native-memory-history-list">
+              <li class="native-memory-history-item is-latest">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Human"
+                    <span class="native-memory-history-item-time">
+                      "T1794303360000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                      "~1.2k tok"
+                      "· +100"
+                    <span class="ui-tag ui-tag--chip ui-tag--accent ui-tag--xs">
+                      "current"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Agent"
+                    <span class="native-memory-history-item-time">
+                      "T1794139200000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4" aria-description="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4">
+                      "~1.1k tok"
+                      "· +200"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Jekt"
+                    <span class="native-memory-history-item-time">
+                      "T1793534400000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4" aria-description="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4">
+                      "~900 tok"
+                      "· +200"
+                  <div class="native-memory-history-item-warning" data-hover-tip="written in response to a jekt — TIER=coord, TRUST=lan-verified" aria-description="written in response to a jekt — TIER=coord, TRUST=lan-verified">
+                    "⚠"
+                    "written in response to a jekt — TIER=coord, TRUST=lan-verified"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Detected outside AgentMux"
+                    <span class="native-memory-history-item-time">
+                      "T1792584000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4" aria-description="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4">
+                      "~700 tok"
+                      "· +400"
+                  <div class="native-memory-history-item-warning" data-hover-tip="detected outside AgentMux's write path — provenance unknown" aria-description="detected outside AgentMux's write path — provenance unknown">
+                    "⚠"
+                    "detected outside AgentMux's write path — provenance unknown"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Revert"
+                    <span class="native-memory-history-item-time">
+                      "T1790856000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4" aria-description="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4">
+                      "~300 tok"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+        <div class="memory-pinned-handle" role="separator" aria-orientation="horizontal" aria-label="Resize editor" data-hover-tip="Drag to resize · double-click to reset" aria-description="Drag to resize · double-click to reset">
+        <div class="memory-pinned-bottom" data-testid="memory-pinned-bottom">
+          <div class="memory-content" data-testid="memory-content">
+            <textarea aria-label="Edit MEMORY.md" spellcheck="false" class="memory-content-textarea" value="my draft">
+onDirtyChange false
+-- open: dirty, file unchanged
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+onDirtyChange false
+-- press Edit
+-- type "my draft"
+onDirtyChange true
+-- refreshNonce bumped
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+-- silent
+<body>
+  <div>
+    <div class="modal-layer-mount">
+      <div class="memory-pinned-layout" data-surface="armory-personal">
+        <div class="memory-pinned-top" data-testid="memory-pinned-top">
+          <div class="memory-editor-actions">
+            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+              "Save"
+            <button title="Cancel (Esc)" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+              "Cancel"
+            <span class="memory-editor-status">
+              "Unsaved changes"
+          <div class="native-memory-history memory-history" data-testid="memory-history">
+            <div class="memory-history-size" data-testid="memory-history-size">
+              <span data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                "Now"
+                <strong>
+                  "~1.2k tok"
+              <span>
+                "7 days:"
+                "+300 tok"
+              <span>
+                "30 days:"
+                "+900 tok"
+              <svg class="memory-history-sparkline" aria-hidden="true">
+                <polyline>
+            <div class="native-memory-history-hint">
+              "Select two versions to compare, or revert directly to one."
+            <ul class="native-memory-history-list">
+              <li class="native-memory-history-item is-latest">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Human"
+                    <span class="native-memory-history-item-time">
+                      "T1794303360000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                      "~1.2k tok"
+                      "· +100"
+                    <span class="ui-tag ui-tag--chip ui-tag--accent ui-tag--xs">
+                      "current"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Agent"
+                    <span class="native-memory-history-item-time">
+                      "T1794139200000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4" aria-description="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4">
+                      "~1.1k tok"
+                      "· +200"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Jekt"
+                    <span class="native-memory-history-item-time">
+                      "T1793534400000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4" aria-description="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4">
+                      "~900 tok"
+                      "· +200"
+                  <div class="native-memory-history-item-warning" data-hover-tip="written in response to a jekt — TIER=coord, TRUST=lan-verified" aria-description="written in response to a jekt — TIER=coord, TRUST=lan-verified">
+                    "⚠"
+                    "written in response to a jekt — TIER=coord, TRUST=lan-verified"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Detected outside AgentMux"
+                    <span class="native-memory-history-item-time">
+                      "T1792584000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4" aria-description="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4">
+                      "~700 tok"
+                      "· +400"
+                  <div class="native-memory-history-item-warning" data-hover-tip="detected outside AgentMux's write path — provenance unknown" aria-description="detected outside AgentMux's write path — provenance unknown">
+                    "⚠"
+                    "detected outside AgentMux's write path — provenance unknown"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Revert"
+                    <span class="native-memory-history-item-time">
+                      "T1790856000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4" aria-description="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4">
+                      "~300 tok"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+        <div class="memory-pinned-handle" role="separator" aria-orientation="horizontal" aria-label="Resize editor" data-hover-tip="Drag to resize · double-click to reset" aria-description="Drag to resize · double-click to reset">
+        <div class="memory-pinned-bottom" data-testid="memory-pinned-bottom">
+          <div class="memory-content" data-testid="memory-content">
+            <textarea aria-label="Edit MEMORY.md" spellcheck="false" class="memory-content-textarea" value="my draft">
+onDirtyChange false
+-- open: dirty, file deleted
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+onDirtyChange false
+-- press Edit
+-- type "my draft"
+onDirtyChange true
+-- refreshNonce bumped
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+-- banner: deleted
+<body>
+  <div>
+    <div class="modal-layer-mount">
+      <div class="memory-pinned-layout" data-surface="armory-personal">
+        <div class="memory-pinned-top" data-testid="memory-pinned-top">
+          <div class="memory-editor-actions">
+            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+              "Save"
+            <button title="Cancel (Esc)" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+              "Cancel"
+            <span class="memory-editor-status">
+              "Unsaved changes"
+          <div class="memory-conflict-banner" role="alert" data-testid="memory-conflict-banner">
+            <span>
+              "This file was deleted since you started editing."
+              "Your draft is kept."
+            <div class="memory-conflict-banner-actions">
+              <button type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn" aria-pressed="false">
+                "View change"
+              <button type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+                "Keep editing"
+              <button title="Replace the saved version with your draft" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+                "Save anyway"
+              <button type="button" class="ui-button ui-tone-danger ui-density-compact memory-editor-btn is-danger">
+                "Discard my edits"
+          <div class="native-memory-history memory-history" data-testid="memory-history">
+            <div class="memory-history-size" data-testid="memory-history-size">
+              <span data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                "Now"
+                <strong>
+                  "~1.2k tok"
+              <span>
+                "7 days:"
+                "+300 tok"
+              <span>
+                "30 days:"
+                "+900 tok"
+              <svg class="memory-history-sparkline" aria-hidden="true">
+                <polyline>
+            <div class="native-memory-history-hint">
+              "Select two versions to compare, or revert directly to one."
+            <ul class="native-memory-history-list">
+              <li class="native-memory-history-item is-latest">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Human"
+                    <span class="native-memory-history-item-time">
+                      "T1794303360000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                      "~1.2k tok"
+                      "· +100"
+                    <span class="ui-tag ui-tag--chip ui-tag--accent ui-tag--xs">
+                      "current"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Agent"
+                    <span class="native-memory-history-item-time">
+                      "T1794139200000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4" aria-description="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4">
+                      "~1.1k tok"
+                      "· +200"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Jekt"
+                    <span class="native-memory-history-item-time">
+                      "T1793534400000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4" aria-description="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4">
+                      "~900 tok"
+                      "· +200"
+                  <div class="native-memory-history-item-warning" data-hover-tip="written in response to a jekt — TIER=coord, TRUST=lan-verified" aria-description="written in response to a jekt — TIER=coord, TRUST=lan-verified">
+                    "⚠"
+                    "written in response to a jekt — TIER=coord, TRUST=lan-verified"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Detected outside AgentMux"
+                    <span class="native-memory-history-item-time">
+                      "T1792584000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4" aria-description="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4">
+                      "~700 tok"
+                      "· +400"
+                  <div class="native-memory-history-item-warning" data-hover-tip="detected outside AgentMux's write path — provenance unknown" aria-description="detected outside AgentMux's write path — provenance unknown">
+                    "⚠"
+                    "detected outside AgentMux's write path — provenance unknown"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Revert"
+                    <span class="native-memory-history-item-time">
+                      "T1790856000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4" aria-description="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4">
+                      "~300 tok"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+        <div class="memory-pinned-handle" role="separator" aria-orientation="horizontal" aria-label="Resize editor" data-hover-tip="Drag to resize · double-click to reset" aria-description="Drag to resize · double-click to reset">
+        <div class="memory-pinned-bottom" data-testid="memory-pinned-bottom">
+          <div class="memory-content" data-testid="memory-content">
+            <textarea aria-label="Edit MEMORY.md" spellcheck="false" class="memory-content-textarea" value="my draft">
+-- press Discard my edits
+onDirtyChange false
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+-- edits discarded
+<body>
+  <div>
+    <div class="modal-layer-mount">
+      <div class="memory-pinned-layout" data-surface="armory-personal">
+        <div class="memory-pinned-top" data-testid="memory-pinned-top">
+          <div class="memory-editor-actions">
+            <button type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+              "Edit"
+          <div class="native-memory-history memory-history" data-testid="memory-history">
+            <div class="memory-history-size" data-testid="memory-history-size">
+              <span data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                "Now"
+                <strong>
+                  "~1.2k tok"
+              <span>
+                "7 days:"
+                "+300 tok"
+              <span>
+                "30 days:"
+                "+900 tok"
+              <svg class="memory-history-sparkline" aria-hidden="true">
+                <polyline>
+            <div class="native-memory-history-hint">
+              "Select two versions to compare, or revert directly to one."
+            <ul class="native-memory-history-list">
+              <li class="native-memory-history-item is-latest">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Human"
+                    <span class="native-memory-history-item-time">
+                      "T1794303360000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                      "~1.2k tok"
+                      "· +100"
+                    <span class="ui-tag ui-tag--chip ui-tag--accent ui-tag--xs">
+                      "current"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Agent"
+                    <span class="native-memory-history-item-time">
+                      "T1794139200000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4" aria-description="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4">
+                      "~1.1k tok"
+                      "· +200"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Jekt"
+                    <span class="native-memory-history-item-time">
+                      "T1793534400000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4" aria-description="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4">
+                      "~900 tok"
+                      "· +200"
+                  <div class="native-memory-history-item-warning" data-hover-tip="written in response to a jekt — TIER=coord, TRUST=lan-verified" aria-description="written in response to a jekt — TIER=coord, TRUST=lan-verified">
+                    "⚠"
+                    "written in response to a jekt — TIER=coord, TRUST=lan-verified"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Detected outside AgentMux"
+                    <span class="native-memory-history-item-time">
+                      "T1792584000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4" aria-description="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4">
+                      "~700 tok"
+                      "· +400"
+                  <div class="native-memory-history-item-warning" data-hover-tip="detected outside AgentMux's write path — provenance unknown" aria-description="detected outside AgentMux's write path — provenance unknown">
+                    "⚠"
+                    "detected outside AgentMux's write path — provenance unknown"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Revert"
+                    <span class="native-memory-history-item-time">
+                      "T1790856000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4" aria-description="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4">
+                      "~300 tok"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+        <div class="memory-pinned-handle" role="separator" aria-orientation="horizontal" aria-label="Resize editor" data-hover-tip="Drag to resize · double-click to reset" aria-description="Drag to resize · double-click to reset">
+        <div class="memory-pinned-bottom" data-testid="memory-pinned-bottom">
+          <div class="memory-content" data-testid="memory-content">
+            <div class="memory-content-error">
+              "Failed to load content: agent:memory:read_file: not found"
+            <div class="memory-content-markdown">
+              <div data-markdown="" data-scrollable="true">
+                "v1"
+onDirtyChange false
+-- open: save refused as a conflict
+NativeMemoryHistoryCommand {"agent_id":"a1","filename":"MEMORY.md"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+onDirtyChange false
+-- press Edit
+-- type "my draft"
+onDirtyChange true
+-- press Save
+NativeMemoryWriteFileCommand {"agent_id":"a1","filename":"MEMORY.md","content":"my draft","provenance":{"source":"human"},"base_sha256":"3bfc269594ef649228e9a74bab00f042efc91d5acc6fbee31a382e80d42388fe"}
+NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
+-- refused
+<body>
+  <div>
+    <div class="modal-layer-mount">
+      <div class="memory-pinned-layout" data-surface="armory-personal">
+        <div class="memory-pinned-top" data-testid="memory-pinned-top">
+          <div class="memory-editor-actions">
+            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+              "Save"
+            <button title="Cancel (Esc)" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+              "Cancel"
+            <span class="memory-editor-status">
+              "Unsaved changes"
+          <div class="memory-conflict-banner" role="alert" data-testid="memory-conflict-banner">
+            <span>
+              "Not saved — this file changed since you started editing."
+              "Your draft is kept."
+            <div class="memory-conflict-banner-actions">
+              <button type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn" aria-pressed="false">
+                "View change"
+              <button type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary">
+                "Keep editing"
+              <button title="Replace the saved version with your draft" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+                "Save anyway"
+              <button type="button" class="ui-button ui-tone-danger ui-density-compact memory-editor-btn is-danger">
+                "Discard my edits"
+          <div class="native-memory-history memory-history" data-testid="memory-history">
+            <div class="memory-history-size" data-testid="memory-history-size">
+              <span data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                "Now"
+                <strong>
+                  "~1.2k tok"
+              <span>
+                "7 days:"
+                "+300 tok"
+              <span>
+                "30 days:"
+                "+900 tok"
+              <svg class="memory-history-sparkline" aria-hidden="true">
+                <polyline>
+            <div class="native-memory-history-hint">
+              "Select two versions to compare, or revert directly to one."
+            <ul class="native-memory-history-list">
+              <li class="native-memory-history-item is-latest">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Human"
+                    <span class="native-memory-history-item-time">
+                      "T1794303360000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                      "~1.2k tok"
+                      "· +100"
+                    <span class="ui-tag ui-tag--chip ui-tag--accent ui-tag--xs">
+                      "current"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Agent"
+                    <span class="native-memory-history-item-time">
+                      "T1794139200000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4" aria-description="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4">
+                      "~1.1k tok"
+                      "· +200"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Jekt"
+                    <span class="native-memory-history-item-time">
+                      "T1793534400000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4" aria-description="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4">
+                      "~900 tok"
+                      "· +200"
+                  <div class="native-memory-history-item-warning" data-hover-tip="written in response to a jekt — TIER=coord, TRUST=lan-verified" aria-description="written in response to a jekt — TIER=coord, TRUST=lan-verified">
+                    "⚠"
+                    "written in response to a jekt — TIER=coord, TRUST=lan-verified"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Detected outside AgentMux"
+                    <span class="native-memory-history-item-time">
+                      "T1792584000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4" aria-description="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4">
+                      "~700 tok"
+                      "· +400"
+                  <div class="native-memory-history-item-warning" data-hover-tip="detected outside AgentMux's write path — provenance unknown" aria-description="detected outside AgentMux's write path — provenance unknown">
+                    "⚠"
+                    "detected outside AgentMux's write path — provenance unknown"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Revert"
+                    <span class="native-memory-history-item-time">
+                      "T1790856000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4" aria-description="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4">
+                      "~300 tok"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+        <div class="memory-pinned-handle" role="separator" aria-orientation="horizontal" aria-label="Resize editor" data-hover-tip="Drag to resize · double-click to reset" aria-description="Drag to resize · double-click to reset">
+        <div class="memory-pinned-bottom" data-testid="memory-pinned-bottom">
+          <div class="memory-content" data-testid="memory-content">
+            <textarea aria-label="Edit MEMORY.md" spellcheck="false" class="memory-content-textarea" value="my draft">
+-- press Save anyway
+NativeMemoryWriteFileCommand {"agent_id":"a1","filename":"MEMORY.md","content":"my draft","provenance":{"source":"human"},"base_sha256":"8e5966554908cc04840d0975ab4d5870643b1649f85e7267f6b732a7a0bef383"}
+onDirtyChange false
+-- overwritten
+<body>
+  <div>
+    <div class="modal-layer-mount">
+      <div class="memory-pinned-layout" data-surface="armory-personal">
+        <div class="memory-pinned-top" data-testid="memory-pinned-top">
+          <div class="memory-editor-actions">
+            <button type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn">
+              "Edit"
+          <div class="native-memory-history memory-history" data-testid="memory-history">
+            <div class="memory-history-size" data-testid="memory-history-size">
+              <span data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                "Now"
+                <strong>
+                  "~1.2k tok"
+              <span>
+                "7 days:"
+                "+300 tok"
+              <span>
+                "30 days:"
+                "+900 tok"
+              <svg class="memory-history-sparkline" aria-hidden="true">
+                <polyline>
+            <div class="native-memory-history-hint">
+              "Select two versions to compare, or revert directly to one."
+            <ul class="native-memory-history-list">
+              <li class="native-memory-history-item is-latest">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Human"
+                    <span class="native-memory-history-item-time">
+                      "T1794303360000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4" aria-description="~1,200 tokens (est.) · 4.7 KB\nEstimated: characters ÷ 4">
+                      "~1.2k tok"
+                      "· +100"
+                    <span class="ui-tag ui-tag--chip ui-tag--accent ui-tag--xs">
+                      "current"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Agent"
+                    <span class="native-memory-history-item-time">
+                      "T1794139200000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4" aria-description="~1,100 tokens (est.) · 4.3 KB\nEstimated: characters ÷ 4">
+                      "~1.1k tok"
+                      "· +200"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Jekt"
+                    <span class="native-memory-history-item-time">
+                      "T1793534400000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4" aria-description="~900 tokens (est.) · 3.5 KB\nEstimated: characters ÷ 4">
+                      "~900 tok"
+                      "· +200"
+                  <div class="native-memory-history-item-warning" data-hover-tip="written in response to a jekt — TIER=coord, TRUST=lan-verified" aria-description="written in response to a jekt — TIER=coord, TRUST=lan-verified">
+                    "⚠"
+                    "written in response to a jekt — TIER=coord, TRUST=lan-verified"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source is-warning">
+                      "Detected outside AgentMux"
+                    <span class="native-memory-history-item-time">
+                      "T1792584000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4" aria-description="~700 tokens (est.) · 2.7 KB\nEstimated: characters ÷ 4">
+                      "~700 tok"
+                      "· +400"
+                  <div class="native-memory-history-item-warning" data-hover-tip="detected outside AgentMux's write path — provenance unknown" aria-description="detected outside AgentMux's write path — provenance unknown">
+                    "⚠"
+                    "detected outside AgentMux's write path — provenance unknown"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+              <li class="native-memory-history-item">
+                <label class="native-memory-history-item-select">
+                  <input type="checkbox" checked=false>
+                <div class="native-memory-history-item-body">
+                  <div class="native-memory-history-item-meta">
+                    <span class="native-memory-history-item-source">
+                      "Revert"
+                    <span class="native-memory-history-item-time">
+                      "T1790856000000"
+                    <span class="native-memory-history-item-tokens" data-hover-tip="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4" aria-description="~300 tokens (est.) · 1.2 KB\nEstimated: characters ÷ 4">
+                      "~300 tok"
+                <button type="button" class="ui-button ui-tone-neutral ui-density-compact native-memory-history-revert-btn">
+                  "Revert to this"
+        <div class="memory-pinned-handle" role="separator" aria-orientation="horizontal" aria-label="Resize editor" data-hover-tip="Drag to resize · double-click to reset" aria-description="Drag to resize · double-click to reset">
+        <div class="memory-pinned-bottom" data-testid="memory-pinned-bottom">
+          <div class="memory-content" data-testid="memory-content">
+            <div class="memory-content-markdown">
+              <div data-markdown="" data-scrollable="true">
+                "v1"

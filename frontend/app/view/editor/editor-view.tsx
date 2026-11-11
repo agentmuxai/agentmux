@@ -183,7 +183,7 @@ function EditorTreeColumn(props: {
                 classList={{ "editor-region--focused": props.focusRegion() === "tree" }}
                 style={{
                     width: `${model.treeWidthAtom()}px`,
-                    flex: `0 0 ${model.treeWidthAtom()}px`,
+                    flex: `0 1 ${model.treeWidthAtom()}px`,
                 }}
             >
                 <FileTree

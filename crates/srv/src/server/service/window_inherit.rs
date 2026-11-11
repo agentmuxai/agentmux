@@ -36,6 +36,11 @@ use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 /// The per-window appearance keys a new window copies from its creator.
 pub(crate) const INHERITED_KEYS: &[&str] = &["window:theme", "window:opacity"];
 
+/// What a row takes from the row it replaces (the same window in a new row: a reload, or a window
+/// recreated after a crash): its appearance, and the name the user gave the window. The old row is
+/// closed while the new one holds its workspace, so nothing else keeps the name.
+pub(crate) const REPLACED_KEYS: &[&str] = &["window:theme", "window:opacity", "window:displayname"];
+
 /// How long a pending entry waits for its window. A new window creates its
 /// row within a second or two of being opened.
 const PENDING_TTL: Duration = Duration::from_secs(30);
@@ -100,7 +105,12 @@ fn record_pending(label: &str, source_window_id: &str, after: u64) {
 /// The source window's appearance keys that are set, as a meta patch.
 /// `None` when the source is gone or has none of them set.
 pub(crate) fn appearance_patch(source: &Window) -> Option<serde_json::Value> {
-    let patch: serde_json::Map<String, serde_json::Value> = INHERITED_KEYS
+    patch_of(source, INHERITED_KEYS)
+}
+
+/// Those of `keys` the source has set, as a meta patch. `None` when it has none of them set.
+fn patch_of(source: &Window, keys: &[&str]) -> Option<serde_json::Value> {
+    let patch: serde_json::Map<String, serde_json::Value> = keys
         .iter()
         .filter_map(|k| {
             source
@@ -120,12 +130,31 @@ pub(crate) async fn apply_inheritance(
     source_window_id: &str,
     target_window_id: &str,
 ) -> Vec<agentmux_common::ipc::Event> {
+    copy_keys(state, source_window_id, target_window_id, INHERITED_KEYS).await
+}
+
+/// Copy onto `target_window_id` what a row takes from the row it replaces ([`REPLACED_KEYS`]).
+/// Returns the events to publish; empty when there is nothing to copy.
+pub(crate) async fn apply_replacement(
+    state: &AppState,
+    replaced_window_id: &str,
+    target_window_id: &str,
+) -> Vec<agentmux_common::ipc::Event> {
+    copy_keys(state, replaced_window_id, target_window_id, REPLACED_KEYS).await
+}
+
+async fn copy_keys(
+    state: &AppState,
+    source_window_id: &str,
+    target_window_id: &str,
+    keys: &[&str],
+) -> Vec<agentmux_common::ipc::Event> {
     let store = &state.mstore;
     let Some(patch) = store
         .get::<Window>(source_window_id)
         .ok()
         .flatten()
-        .and_then(|w| appearance_patch(&w))
+        .and_then(|w| patch_of(&w, keys))
     else {
         return Vec::new();
     };

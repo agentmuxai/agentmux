@@ -80,7 +80,7 @@ pub(crate) fn route_agent_message_from(
     expires_at_ms: Option<i64>,
 ) -> Result<AgentRoute, String> {
     let Some(ctrl) = backend::blockcontroller::get_controller(block_id) else {
-        return Err(format!("no controller for block {block_id}"));
+        return Err(format!("{} {block_id}", reactive::controller_wait::NO_CONTROLLER));
     };
     // A jekt, cron or broadcast is a real turn: it ends the hidden-reinjection
     // window as a person typing does, so ambient reads resume for an agent

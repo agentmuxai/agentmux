@@ -10,6 +10,10 @@ use crate::backend::agent_state::AgentState;
 pub(crate) enum HoldReason {
     /// A known agent with no process here.
     NotRunning,
+    /// The agent's pane is open here, but its controller is not there yet: AgentMux is starting and
+    /// resuming its panes (`backend::reactive::controller_wait`). Delivered when the controller registers; the
+    /// sender is told what a stopped agent's sender is while it is started (`HeldStart::Starting`).
+    Starting,
     /// The agent is here but its spawn gate refused: not signed in. Also an
     /// agent whose sign-in was refused (`AgentState::SignedOut`): to the
     /// sender it is the same condition.
@@ -36,6 +40,7 @@ impl HoldReason {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             HoldReason::NotRunning => "not_running",
+            HoldReason::Starting => "starting",
             HoldReason::NeedsLogin => "needs_login",
             HoldReason::Limited => "usage_limit",
             HoldReason::Idle => crate::backend::cold_hold::REASON_IDLE,
@@ -49,7 +54,8 @@ impl HoldReason {
     pub(crate) fn wait_reason(self) -> crate::backend::agent_availability::WaitReason {
         use crate::backend::agent_availability::WaitReason;
         match self {
-            HoldReason::NotRunning => WaitReason::NotRunning,
+            // Its start ends the wait, as for an agent that is not running.
+            HoldReason::NotRunning | HoldReason::Starting => WaitReason::NotRunning,
             HoldReason::NeedsLogin => WaitReason::NeedsLogin,
             HoldReason::Limited => WaitReason::UsageLimit,
             HoldReason::Idle => WaitReason::Cold,

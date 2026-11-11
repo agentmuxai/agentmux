@@ -37,7 +37,10 @@ pub(crate) fn strip_signing_keys(content: &str) -> Option<String> {
 }
 
 /// A container agent's workspace `.mcp.json`, with the signing keys an earlier launch wrote taken out.
-/// Run at each container start, under the lock the launch writes the file with. Best-effort: a failure is
+/// Run at each container start, under the lock the launch writes the file with. Only those keys are
+/// removed, and only when the file has them, so a file with none is left byte-for-byte as it was.
+/// This also covers a user's project: keys an older launch wrote there must not ride the workspace
+/// mount into the container (a launch no longer writes any, #3680). Best-effort: a failure is
 /// logged and the start goes on.
 pub(crate) fn strip_workspace_signing_keys(work_dir: &str) {
     if work_dir.trim().is_empty() {
@@ -126,6 +129,35 @@ pub(crate) fn realign_workspace_mcp_json(
         return;
     }
     let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
+    // A user's project keeps its own `.mcp.json` (#3680): the agent's file is AgentMux's
+    // relocated one, and that is the one a spawn may realign.
+    if let Some(path) = crate::backend::mcp_config_file::relocated_path(&expanded) {
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let (patched, previous) = match set_agent_id(&content, slug) {
+            Some((patched, previous)) => (patched, Some(previous)),
+            None if names_missing_a_key(&content, slug) => (content.clone(), None),
+            None => return,
+        };
+        let Some(body) = crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(&patched, mstore, slug) else {
+            tracing::warn!(work_dir, agent_id = slug, "spawn: signing keys unavailable; the agent's MCP config left as it was");
+            return;
+        };
+        if serde_json::from_str::<Value>(&body).ok() == serde_json::from_str::<Value>(&content).ok() {
+            return;
+        }
+        match crate::backend::mcp_config_file::write_relocated(&path, &body) {
+            Ok(()) => tracing::info!(
+                work_dir,
+                previous = ?previous,
+                agent_id = slug,
+                "spawn: rewrote the agent's MCP config from the definition"
+            ),
+            Err(e) => tracing::warn!(work_dir, error = %e, "spawn: could not rewrite the agent's MCP config"),
+        }
+        return;
+    }
     let Ok(wd) = crate::backend::workdir_fs::Workdir::open(std::path::Path::new(&expanded)) else {
         return;
     };
@@ -294,22 +326,27 @@ mod tests {
     #[test]
     fn a_host_spawn_rewrites_a_stale_workspace_file() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let data = tempfile::tempdir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join(".mcp.json");
-        std::fs::write(&file, mcp("loap-loap-2")).unwrap();
         let work_dir = dir.path().to_string_lossy().into_owned();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            // A user project's config is AgentMux's relocated file (#3680).
+            let file = crate::backend::mcp_config_file::config_path(&work_dir);
+            crate::backend::mcp_config_file::write_relocated(&file, &mcp("loap-loap-2")).unwrap();
 
-        realign_workspace_mcp_json(&store, &work_dir, "container", "loap-2");
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), mcp("loap-loap-2"));
+            realign_workspace_mcp_json(&store, &work_dir, "container", "loap-2");
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), mcp("loap-loap-2"));
 
-        realign_workspace_mcp_json(&store, &work_dir, "host", "loap-2");
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-        assert_eq!(v.pointer(AGENT_ID).and_then(Value::as_str), Some("loap-2"));
-        assert_ne!(
-            v.pointer("/mcpServers/agentmux/env/AGENTMUX_JEKT_KEY").and_then(Value::as_str),
-            Some("old-key"),
-            "the old name's key does not sign for the new one"
-        );
+            realign_workspace_mcp_json(&store, &work_dir, "host", "loap-2");
+            let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+            assert_eq!(v.pointer(AGENT_ID).and_then(Value::as_str), Some("loap-2"));
+            assert_ne!(
+                v.pointer("/mcpServers/agentmux/env/AGENTMUX_JEKT_KEY").and_then(Value::as_str),
+                Some("old-key"),
+                "the old name's key does not sign for the new one"
+            );
+            assert!(!dir.path().join(".mcp.json").exists(), "the project's own file is never written");
+        });
     }
 
     fn file_id_and_key(file: &std::path::Path) -> (String, Option<String>) {
@@ -323,33 +360,36 @@ mod tests {
     /// naming the slug but carrying no keys gets them.
     #[test]
     fn a_rewrite_without_keys_is_not_persisted_and_is_retried() {
+        let data = tempfile::tempdir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join(".mcp.json");
-        std::fs::write(&file, mcp("loap-loap-2")).unwrap();
         let work_dir = dir.path().to_string_lossy().into_owned();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            let file = crate::backend::mcp_config_file::config_path(&work_dir);
+            crate::backend::mcp_config_file::write_relocated(&file, &mcp("loap-loap-2")).unwrap();
 
-        let broken = crate::backend::storage::store::Store::open_in_memory().unwrap();
-        broken.test_break_name_key_tables().unwrap();
-        realign_workspace_mcp_json(&broken, &work_dir, "host", "loap-2");
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), mcp("loap-loap-2"), "not half-realigned");
+            let broken = crate::backend::storage::store::Store::open_in_memory().unwrap();
+            broken.test_break_name_key_tables().unwrap();
+            realign_workspace_mcp_json(&broken, &work_dir, "host", "loap-2");
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), mcp("loap-loap-2"), "not half-realigned");
 
-        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
-        realign_workspace_mcp_json(&store, &work_dir, "host", "loap-2");
-        let (id, key) = file_id_and_key(&file);
-        assert_eq!(id, "loap-2");
-        assert!(key.is_some_and(|k| k != "old-key"));
+            let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+            realign_workspace_mcp_json(&store, &work_dir, "host", "loap-2");
+            let (id, key) = file_id_and_key(&file);
+            assert_eq!(id, "loap-2");
+            assert!(key.is_some_and(|k| k != "old-key"));
 
-        let (stripped, _) = set_agent_id(&mcp("old"), "loap-3").unwrap();
-        std::fs::write(&file, stripped).unwrap();
-        realign_workspace_mcp_json(&store, &work_dir, "host", "loap-3");
-        assert!(file_id_and_key(&file).1.is_some(), "a matching id with no keys gets them");
+            let (stripped, _) = set_agent_id(&mcp("old"), "loap-3").unwrap();
+            crate::backend::mcp_config_file::write_relocated(&file, &stripped).unwrap();
+            realign_workspace_mcp_json(&store, &work_dir, "host", "loap-3");
+            assert!(file_id_and_key(&file).1.is_some(), "a matching id with no keys gets them");
 
-        let mut one_key: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-        one_key["mcpServers"]["agentmux"]["env"].as_object_mut().unwrap().remove("AGENTMUX_LAN_KEY");
-        std::fs::write(&file, one_key.to_string()).unwrap();
-        realign_workspace_mcp_json(&store, &work_dir, "host", "loap-3");
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-        assert!(v.pointer("/mcpServers/agentmux/env/AGENTMUX_LAN_KEY").is_some(), "a matching id with one key gets the other");
+            let mut one_key: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+            one_key["mcpServers"]["agentmux"]["env"].as_object_mut().unwrap().remove("AGENTMUX_LAN_KEY");
+            crate::backend::mcp_config_file::write_relocated(&file, &one_key.to_string()).unwrap();
+            realign_workspace_mcp_json(&store, &work_dir, "host", "loap-3");
+            let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+            assert!(v.pointer("/mcpServers/agentmux/env/AGENTMUX_LAN_KEY").is_some(), "a matching id with one key gets the other");
+        });
     }
 
     fn holds_no_key(content: &str) -> bool {
@@ -369,19 +409,22 @@ mod tests {
 
     #[test]
     fn a_container_start_removes_keys_an_earlier_launch_wrote_to_the_mounted_workspace() {
+        // A user's project too: keys an older launch wrote there must not reach the container.
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join(".mcp.json");
         std::fs::write(&file, mcp("loap-2")).unwrap();
         strip_workspace_signing_keys(&dir.path().to_string_lossy());
         assert!(holds_no_key(&std::fs::read_to_string(&file).unwrap()));
 
-        // Nothing there, or nothing to remove: no file is made or changed.
+        // A file with none of our keys is left byte-for-byte, and nothing there makes none.
+        let clean_body = r#"{ "mcpServers": { "mine": { "command": "mine-mcp" } } }"#;
+        let clean_dir = tempfile::tempdir().unwrap();
+        std::fs::write(clean_dir.path().join(".mcp.json"), clean_body).unwrap();
+        strip_workspace_signing_keys(&clean_dir.path().to_string_lossy());
+        assert_eq!(std::fs::read_to_string(clean_dir.path().join(".mcp.json")).unwrap(), clean_body);
         let empty = tempfile::tempdir().unwrap();
         strip_workspace_signing_keys(&empty.path().to_string_lossy());
         assert!(!empty.path().join(".mcp.json").exists());
-        let clean = std::fs::read_to_string(&file).unwrap();
-        strip_workspace_signing_keys(&dir.path().to_string_lossy());
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), clean);
     }
 
     fn agent_of_type(store: &crate::backend::storage::store::Store, agent_type: &str) -> (String, String) {
@@ -438,11 +481,15 @@ mod tests {
     #[test]
     fn no_rewrite_without_the_lock() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join(".mcp.json");
-        std::fs::write(&file, mcp("loap-loap-2")).unwrap();
-        std::fs::write(dir.path().join(".claude"), "not a folder").unwrap();
-        realign_workspace_mcp_json(&store, &dir.path().to_string_lossy(), "host", "loap-2");
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), mcp("loap-loap-2"));
+        let data = tempfile::tempdir().unwrap();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            let dir = data.path().join("agents").join("loap");
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = dir.join(".mcp.json");
+            std::fs::write(&file, mcp("loap-loap-2")).unwrap();
+            std::fs::write(dir.join(".claude"), "not a folder").unwrap();
+            realign_workspace_mcp_json(&store, &dir.to_string_lossy(), "host", "loap-2");
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), mcp("loap-loap-2"));
+        });
     }
 }

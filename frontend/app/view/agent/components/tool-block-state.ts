@@ -13,7 +13,7 @@
 import { createEffect, createMemo, createSignal, untrack, type Accessor, type Setter } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
-import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { formatPeekTime } from "@/util/format-time";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { ToolNode } from "../../../agent-model/types";
 import { TOOL_STATUS } from "../../../agent-model/tool-status";
@@ -216,7 +216,7 @@ export function useToolPeek(props: ToolBlockProps, header: Accessor<ToolHeaderPa
         peekTick(); // re-run every second so "ago" stays live while hovered
         const ts = props.node.timestamp;
         if (ts == null) return null;
-        return `${formatExactTime(ts)} · ${formatTimeAgo(ts)}`;
+        return formatPeekTime(ts);
     });
     const estimateText = createMemo(() => {
         const text = JSON.stringify(props.node.params ?? {}) + JSON.stringify(props.node.result ?? "");

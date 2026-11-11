@@ -30,7 +30,6 @@ import { useFilesLocal } from "./files-view-state";
 import { useFilesWindow } from "./files-view-window";
 
 export { formatModified } from "./files-rows";
-export { mentionToken } from "./files-agent-mention";
 export { errorMessage } from "./files-view-parts";
 
 export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext }): JSX.Element {
