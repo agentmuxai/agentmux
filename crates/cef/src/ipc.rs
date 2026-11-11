@@ -221,7 +221,7 @@ async fn route_command(
         "get_backend_info" => Ok(commands::backend::get_backend_info(state)),
         "get_health_signals" => Ok(crate::health_signals::snapshot(state)),
         "restart_backend" => commands::backend::restart_backend(state.clone()).await,
-        "close_window" => commands::window::close_window(state, args),
+        "close_window" | "close_request_seen" => commands::window::close_command(cmd, state, args),
         // Issue #2977 Workstream 1 — the tray's "Quit AgentMux". Explicit,
         // user-initiated shutdown that bypasses the background-service gate
         // (see `quit_app`'s doc for why the ordinary last-window path and
