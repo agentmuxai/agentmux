@@ -525,20 +525,6 @@ async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
     Ok(())
 }
 
-/// The accessible name the browser computed for the element: what a snapshot or a find shows for it. `None` when
-/// the browser gave no node to read it from, `Some("")` for an element with no name.
-pub(super) async fn accessible_name(cdp: &mut CdpSession, object_id: &str) -> Option<String> {
-    let backend = backend_of(cdp, object_id).await?;
-    let tree = cdp.call("Accessibility.getPartialAXTree", json!({ "backendNodeId": backend, "fetchRelatives": false })).await.ok()?;
-    name_in_partial_tree(&tree)
-}
-
-/// The name of the first node of a `getPartialAXTree` answer (the element's own).
-fn name_in_partial_tree(tree: &Value) -> Option<String> {
-    let node = tree.pointer("/nodes/0")?;
-    Some(node.pointer("/name/value").and_then(|n| n.as_str()).unwrap_or("").to_string())
-}
-
 /// What a click on an element may do: be made, or wait for the person to approve it.
 pub(super) enum ClickCheck {
     Click,
@@ -572,7 +558,7 @@ pub(super) async fn check_click(
     // The accessible name too (`click_label.js`): the element's own text and aria-label miss a name that comes
     // from a title, an image's alt or a child's label, and a click is named the same whichever way its ref
     // was found. `null` (the lookup failed) is passed on, and a click with no name of its own then asks.
-    let ax_name = accessible_name(cdp, obj).await.map_or(Value::Null, Value::String);
+    let ax_name = super::accessible_name::of(cdp, obj).await.map_or(Value::Null, Value::String);
     let info = call_on(cdp, obj, COMMIT_INFO, vec![ax_name]).await.map_err(unclassified)?;
     let committing = info
         .get("committing")
@@ -1255,17 +1241,6 @@ mod tests {
         assert_eq!(date_type(&facts("input", &[("type", "text")])), None);
         assert_eq!(date_type(&facts("input", &[])), None);
         assert_eq!(date_type(&facts("div", &[("type", "date")])), None);
-    }
-
-    #[test]
-    fn the_accessible_name_is_the_first_nodes() {
-        let named = json!({ "nodes": [{ "name": { "value": "Submit for certification" } }] });
-        assert_eq!(name_in_partial_tree(&named).as_deref(), Some("Submit for certification"));
-        // An element with no name is read as unnamed, not as unreadable.
-        assert_eq!(name_in_partial_tree(&json!({ "nodes": [{ "role": { "value": "button" } }] })).as_deref(), Some(""));
-        // No node to read it from: unreadable.
-        assert_eq!(name_in_partial_tree(&json!({ "nodes": [] })), None);
-        assert_eq!(name_in_partial_tree(&json!({})), None);
     }
 
     #[test]
