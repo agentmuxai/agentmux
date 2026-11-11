@@ -6,7 +6,7 @@
  * send-copy URL or text preview it shows, and the paging and keys.
  */
 
-import { createEffect, createResource } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AttachmentInfo } from "@/types/rpc/AttachmentInfo";
@@ -37,11 +37,22 @@ export type LightboxState = ReturnType<typeof createLightbox>;
 export function createLightbox(props: LightboxProps) {
     let dialogRef: HTMLDivElement | undefined;
     const item = () => props.items[Math.min(props.index, props.items.length - 1)];
-    // The transcript only knows ids and names; fetch the details on demand.
-    const [fetched] = createResource(
-        () => (item()?.info ? undefined : item()?.id),
-        async (id) => (await RpcApi.AttachmentsInfoCommand(TabRpcClient, { ids: [id] })).items[0],
-    );
+    // The transcript only knows ids and names; fetch the details on demand. A signal, not a resource: reading a
+    // resource while it loads suspends the pane's whole view, so opening a preview blanked the pane behind it and
+    // dropped its scroll position (#47406). Without the details the kind is guessed from the name.
+    const wanted = createMemo(() => (item()?.info ? undefined : item()?.id));
+    const [fetched, setFetched] = createSignal<AttachmentInfo | undefined>(undefined);
+    createEffect(() => {
+        const id = wanted();
+        setFetched(undefined);
+        if (!id) return;
+        let current = true;
+        onCleanup(() => (current = false));
+        RpcApi.AttachmentsInfoCommand(TabRpcClient, { ids: [id] }).then(
+            (r) => current && setFetched(r.items[0]),
+            () => {},
+        );
+    });
     const info = () => item()?.info ?? fetched();
     const kind = () => fileKind(info()?.kind, item()?.name ?? "");
     const url = useAttachmentUrl(() => (isPicture(kind()) ? item()?.id : undefined), "send");
