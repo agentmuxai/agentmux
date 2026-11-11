@@ -72,7 +72,7 @@ pub(crate) fn operator_made(job: &CronJob) -> bool {
 }
 
 /// The agent a task is for, `(name, uid)`; none for the backlog.
-fn target_of(state: &AppState, target: &str) -> (String, String) {
+pub(crate) fn target_of(state: &AppState, target: &str) -> (String, String) {
     let target = target.trim();
     if target.is_empty() {
         return (String::new(), String::new());
@@ -103,14 +103,31 @@ pub(crate) fn file_task(
     run_id: &str,
     title: &str,
     payload: &str,
+    target: (String, String),
+) -> Result<(String, i64), crate::backend::storage::StoreError> {
+    let first_line = format!("Filed by the job \"{}\" (job {}, run {run_id}).", crate::server::work_tasks::clean(&job.name), job.id);
+    file_task_as(store, FILED_BY, TASK_KIND, title, payload, target, &first_line)
+}
+
+/// File a task for an automation, as `kanban.act` `create` does: the queue
+/// row, its card (no review: the task isn't the operator's to accept) and its
+/// first history line. `filed_by` is who the history says did it, `kind` the
+/// task's tag, and `first_line` the history's first line. Returns its id and number.
+pub(crate) fn file_task_as(
+    store: &Store,
+    filed_by: &str,
+    kind: &str,
+    title: &str,
+    payload: &str,
     (target, target_uid): (String, String),
+    first_line: &str,
 ) -> Result<(String, i64), crate::backend::storage::StoreError> {
     let now = now_ms();
     let item = WorkItem {
         id: uuid::Uuid::new_v4().to_string(),
         title: crate::server::work_tasks::clean(title),
         payload: crate::server::work_tasks::clean(payload),
-        kind: TASK_KIND.to_string(),
+        kind: kind.to_string(),
         target_agent: target,
         target_group: String::new(),
         priority: 0,
@@ -121,7 +138,7 @@ pub(crate) fn file_task(
         claim_expires: None,
         attempts: 0,
         max_attempts: 3,
-        created_by: FILED_BY.to_string(),
+        created_by: filed_by.to_string(),
         created_by_uid: String::new(),
         created_at: now,
         updated_at: now,
@@ -131,20 +148,20 @@ pub(crate) fn file_task(
     store.work_queue_enqueue(&item)?;
     let card = NewCard {
         review_required: false,
-        requested_by: FILED_BY.to_string(),
+        requested_by: filed_by.to_string(),
         requested_by_kind: requested::OTHER.to_string(),
-        filed_by: FILED_BY.to_string(),
+        filed_by: filed_by.to_string(),
         ..Default::default()
     };
     let num = store.work_card_create(&item.id, &card, now)?;
     let event = WorkEvent {
         work_id: item.id.clone(),
         at: now,
-        actor: FILED_BY.to_string(),
+        actor: filed_by.to_string(),
         actor_kind: "system".to_string(),
         kind: "created".to_string(),
         to_state: work_state::OPEN.to_string(),
-        body: format!("Filed by the job \"{}\" (job {}, run {run_id}).", crate::server::work_tasks::clean(&job.name), job.id),
+        body: first_line.to_string(),
         ..Default::default()
     };
     store.work_event_add(&event)?;

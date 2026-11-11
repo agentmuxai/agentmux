@@ -25,6 +25,8 @@ pub fn install_state_hooks(state: &AppState) {
     // fallback.
     install_cron_delivery(state);
     crate::server::job_actions::install(state);
+    // The Drone blocks that act on AgentMux (App query, Message, Task, Spawn, Notify) reach it here.
+    crate::drone::host::install(state);
 
     // Durable jekt: replay messages held for an agent that was not running
     // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).

@@ -19,6 +19,8 @@ pub enum BlockKind {
     Api,
     Response,
     Variables,
+    Message,
+    Task,
 }
 
 impl BlockKind {
@@ -29,6 +31,8 @@ impl BlockKind {
             "api" => Some(Self::Api),
             "response" => Some(Self::Response),
             "variables" => Some(Self::Variables),
+            "message" => Some(Self::Message),
+            "task" => Some(Self::Task),
             _ => None,
         }
     }

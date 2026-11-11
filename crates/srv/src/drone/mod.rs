@@ -21,5 +21,6 @@
 
 pub mod data_flow;
 pub mod executor;
+pub(crate) mod host;
 pub mod storage;
 pub mod types;
