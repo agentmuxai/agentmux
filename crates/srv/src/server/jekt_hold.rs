@@ -24,6 +24,17 @@ use super::AppState;
 /// ([`HoldReason::NeedsLogin`]); the replay then waits for sign-in
 /// (`jekt_held::still_needs_login`). Delivered by UID or held, a message
 /// keeps its one-delivery `replay` reservation.
+pub(in crate::server) async fn hold_for_absent_target(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+    resp: &crate::backend::reactive::types::InjectionResponse,
+    reason: HoldReason,
+    replay: &mut replay::Reservation,
+) -> Option<serde_json::Value> {
+    hold_with_reason(state, auth_via, req, resp, reason, None, replay).await
+}
+
 /// A message an agent of this instance could not take for a reason that passes on its own: its spawn
 /// gate refused (not signed in: recoverable, so it is held for sign-in instead of failed,
 /// SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md Phase 0 item 4), or its pane is open and its
@@ -46,17 +57,6 @@ pub(in crate::server) async fn hold_for_refusal_here(
         return hold_for_absent_target(state, auth_via, req, resp, HoldReason::Starting, replay).await;
     }
     None
-}
-
-pub(in crate::server) async fn hold_for_absent_target(
-    state: &AppState,
-    auth_via: super::ReactiveAuthVia,
-    req: &InjectionRequest,
-    resp: &crate::backend::reactive::types::InjectionResponse,
-    reason: HoldReason,
-    replay: &mut replay::Reservation,
-) -> Option<serde_json::Value> {
-    hold_with_reason(state, auth_via, req, resp, reason, None, replay).await
 }
 
 /// Why messages to the agent on `block_id` wait now: it is signed out, or
