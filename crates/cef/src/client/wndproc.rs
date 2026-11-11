@@ -1048,6 +1048,10 @@ unsafe extern "system" fn close_routing_wndproc(
                 &label,
                 state.get_browser(&label).is_some(),
             ) {
+                // The window's page is asked first: it warns when the close stops working agents.
+                if crate::commands::window::close_ask::os_close(state, &label) == crate::commands::window::close_ask::OsClose::Ask {
+                    return 0; // swallowed — the page closes the window, or the request times out
+                }
                 tracing::info!(
                     "[close-routing] WM_CLOSE on HWND {:p} label={} — rerouting through CloseWindowTask",
                     hwnd, label,

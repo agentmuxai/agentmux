@@ -536,6 +536,9 @@ declare global {
          *  where a new window goes when that spot is on no monitor now. */
         openRestoredWindow: (w: { workspaceid: string; x?: number; y?: number; width?: number; height?: number }) => Promise<string>;
         closeWindow: (label?: string) => Promise<void>;
+        /** Tell the host this window's page got its `window-close-requested` (an OS close it
+         *  held back). A page that doesn't say so is taken for hung, and the window closes. */
+        closeRequestSeen: (seq: number) => Promise<void>;
         minimizeWindow: () => void;
         maximizeWindow: () => void;
         toggleDevtools: () => void;

@@ -353,6 +353,7 @@ wrap_window_delegate! {
             // a destroyed window to silently no-op or worse.
             if let Some((state, label)) = self.window_registration.as_ref() {
                 state.windows.lock().remove(label);
+                crate::commands::window::close_ask::forget(label);
                 #[cfg(any(target_os = "linux", target_os = "windows"))]
                 crate::browser_panes::bounds::forget_window(label);
                 tracing::info!(
@@ -384,6 +385,15 @@ wrap_window_delegate! {
                     label_owned.as_str()
                 }
             };
+            // A close nobody here decided on came from the OS (Alt+F4, the taskbar, the window
+            // manager): the window's page is asked first, as its own close button asks.
+            if let Some((state, label)) = self.window_registration.as_ref() {
+                use crate::commands::window::close_ask;
+                if close_ask::os_close(state, label) == close_ask::OsClose::Ask {
+                    crate::client::dlog(&format!("can_close({label}): held back, the page is asked"));
+                    return 0;
+                }
+            }
             let browser_view = self.browser_view.borrow();
             let Some(browser_view) = browser_view.as_ref() else {
                 crate::client::dlog(&format!(

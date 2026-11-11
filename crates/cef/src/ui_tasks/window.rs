@@ -721,11 +721,6 @@ pub(crate) fn begin_drain_and_cascade(state: &Arc<AppState>, reason: crate::stat
     }
 }
 
-pub fn post_close_window(state: &Arc<AppState>, label: &str) {
-    let mut task = CloseWindowTask::new(state.clone(), label.to_string());
-    post_task(ThreadId::UI, Some(&mut task));
-}
-
 // ── Memory-pressure → frontend banner event ────────────────────────────────
 
 wrap_task! {
