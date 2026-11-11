@@ -168,6 +168,42 @@ pub(crate) fn record(agent: &str, target: &str, kind: &str, message: &str, decis
     }));
 }
 
+/// One Audit row for a download the host saved into an agent's workspace without a dialog, or refused: the
+/// site (the pane's page), the file and its size, as the host worded them in `message`. The agent is
+/// `standing` for it: the person's setting allowed it, nothing was asked. Nothing was opened or run.
+fn audit_download(state: &AppState, agent: &str, pane: &str, saved: bool, message: &str) {
+    if agent.is_empty() {
+        return;
+    }
+    let url = state
+        .mstore
+        .get::<crate::backend::obj::Block>(pane)
+        .ok()
+        .flatten()
+        .and_then(|b| b.meta.get("url").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_default();
+    let site = agentmux_common::allowed_origins::target_origin(&url).unwrap_or_else(|| "a page".to_string());
+    let summary = format!("{site} sent a download to the pane {agent} is driving");
+    let (answer, error) = if saved {
+        (format!("saved {message}; not opened"), None)
+    } else {
+        (format!("not saved: {message}"), Some(message))
+    };
+    state.reactive_handler.log_sensitive_op_audit(
+        Some(agent),
+        agent,
+        "browser_download",
+        saved,
+        error,
+        &uuid::Uuid::new_v4().to_string(),
+        Some(&summary),
+        Some(&summary),
+        Some(&answer),
+        Some("low"),
+        true,
+    );
+}
+
 /// Dialogs the host said ended (navigation, close) while srv was asking or
 /// about to ask about them: their question's outcome isn't the person's
 /// answer, and the host has nothing left to answer. Bounded: an id stays
@@ -315,6 +351,7 @@ pub(crate) async fn handle_host_browser_dialog(
         let saved = notice == "download_saved";
         record(&agent, &target, notice, &what, if saved { "saved" } else { "blocked" }, reason);
         if notice.starts_with("download_") {
+            audit_download(&state, &agent, &banner_at, saved, &message);
             // A download is also an action in the pane's log, with the person's header.
             let how = if saved { crate::server::browser_actions::How::Allowed } else { crate::server::browser_actions::How::Refused(message.clone()) };
             crate::server::browser_actions::note(&banner_at, &agent, crate::server::browser_actions::Kind::Download).detail(&message).how(how).record(&state);
@@ -460,6 +497,25 @@ mod tests {
         assert!(take_ended("dlg-test-ended-1"));
         assert!(!take_ended("dlg-test-ended-1"));
         assert!(!take_ended("dlg-test-never"));
+    }
+
+    #[tokio::test]
+    async fn a_download_is_one_audit_row_with_the_site_the_file_and_its_size() {
+        let state = crate::server::tests::test_state();
+        let agent = format!("dl-agent-{}", uuid::Uuid::new_v4().simple());
+        audit_download(&state, &agent, "no-such-pane", true, "report.pdf (13 bytes) to /w/downloads/report.pdf");
+        audit_download(&state, &agent, "no-such-pane", false, "big.iso is 900 MB, over the 500 MB limit");
+        audit_download(&state, "", "no-such-pane", true, "ignored (1 byte) to /x");
+        let mut mine: Vec<_> = state.reactive_handler.get_audit_log(200).into_iter().filter(|r| r.target_agent == agent).collect();
+        mine.sort_by_key(|r| !r.success);
+        assert_eq!(mine.len(), 2, "one row per download, none for a pane with no agent");
+        let saved = &mine[0];
+        assert_eq!(saved.standing, Some(true));
+        assert_eq!(saved.level.as_deref(), Some("low"));
+        let answer = saved.answer.as_deref().unwrap();
+        assert!(answer.contains("report.pdf (13 bytes)") && answer.ends_with("not opened"), "{answer}");
+        assert!(saved.prompt.as_deref().unwrap().contains("sent a download"));
+        assert!(!mine[1].success && mine[1].answer.as_deref().unwrap().contains("over the 500 MB limit"));
     }
 
     #[test]

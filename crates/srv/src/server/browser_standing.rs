@@ -74,24 +74,25 @@ impl Store {
         Store { path: Some(path), rows }
     }
 
-    fn save(&self) {
-        let Some(path) = &self.path else { return };
-        let bytes = match serde_json::to_vec_pretty(&self.rows) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!(error = %e, "[browser-standing] couldn't encode the standing grants");
-                return;
-            }
-        };
-        if let Err(e) = write_atomic(path, &bytes) {
-            tracing::warn!(error = %e, "[browser-standing] couldn't save the standing grants");
-        }
+    /// Make `rows` the rows: written to the file first, and kept in memory only once that worked, so a
+    /// failed write leaves the person's view and the file the same.
+    fn commit(&mut self, rows: Vec<Row>) -> Result<(), String> {
+        write_rows(self.path.as_deref(), &rows)?;
+        self.rows = rows;
+        Ok(())
     }
+}
+
+/// `rows` as the file at `path` (None: nowhere, for tests). The error says what failed, for the person.
+pub(crate) fn write_rows<T: Serialize>(path: Option<&std::path::Path>, rows: &[T]) -> Result<(), String> {
+    let Some(path) = path else { return Ok(()) };
+    let bytes = serde_json::to_vec_pretty(rows).map_err(|e| format!("couldn't encode the rows: {e}"))?;
+    write_atomic(path, &bytes).map_err(|e| format!("couldn't save {}: {e}; nothing was changed", path.display()))
 }
 
 /// Write `bytes` to `path` so a reader never sees half a file: a temp file in
 /// the same folder, flushed, then renamed over it.
-fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let parent = path.parent().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "no folder to write in"))?;
     std::fs::create_dir_all(parent)?;
@@ -204,9 +205,10 @@ pub(crate) fn list() -> Vec<Row> {
 pub(crate) fn upsert(state: &AppState, agent: &str, sites: &[String], powers: &[String], wildcard_ok: bool) -> Result<Row, String> {
     let (row, existed) = {
         let mut s = store();
-        let had: Vec<String> = s.rows.iter().map(|r| r.id.clone()).collect();
-        let row = upsert_in(&mut s.rows, agent, sites, powers, wildcard_ok, chrono::Utc::now().timestamp_millis())?;
-        s.save();
+        let mut next = s.rows.clone();
+        let had: Vec<String> = next.iter().map(|r| r.id.clone()).collect();
+        let row = upsert_in(&mut next, agent, sites, powers, wildcard_ok, chrono::Utc::now().timestamp_millis())?;
+        s.commit(next)?;
         let existed = had.contains(&row.id);
         (row, existed)
     };
@@ -239,10 +241,11 @@ pub(crate) fn set_powers(state: &AppState, id: &str, powers: &[String]) -> Resul
     let powers: Vec<String> = browser_powers::names(&browser_powers::parse(Some(powers))?).iter().map(|n| n.to_string()).collect();
     let row = {
         let mut s = store();
-        let row = s.rows.iter_mut().find(|r| r.id == id).ok_or_else(|| "that standing grant is gone".to_string())?;
+        let mut next = s.rows.clone();
+        let row = next.iter_mut().find(|r| r.id == id).ok_or_else(|| "that standing grant is gone".to_string())?;
         row.powers = powers;
         let row = row.clone();
-        s.save();
+        s.commit(next)?;
         row
     };
     bypass::end_standing(state, &row.id, "you changed what it may do");
@@ -252,15 +255,16 @@ pub(crate) fn set_powers(state: &AppState, id: &str, powers: &[String]) -> Resul
 
 /// Remove row `id` and end the pane grants made from it, at once: an
 /// in-flight call ends and the strip comes down. Returns whether the row was
-/// there.
-pub(crate) fn revoke(state: &AppState, id: &str) -> bool {
+/// there; an error when the file could not be written, in which case the row stays (it would be back
+/// after a restart anyway).
+pub(crate) fn revoke(state: &AppState, id: &str) -> Result<bool, String> {
     let removed = {
         let mut s = store();
-        let before = s.rows.len();
-        s.rows.retain(|r| r.id != id);
-        let gone = s.rows.len() != before;
+        let mut next = s.rows.clone();
+        next.retain(|r| r.id != id);
+        let gone = next.len() != s.rows.len();
         if gone {
-            s.save();
+            s.commit(next)?;
         }
         gone
     };
@@ -269,7 +273,7 @@ pub(crate) fn revoke(state: &AppState, id: &str) -> bool {
         state.broker.publish_event::<crate::backend::mps_events::BrowserGrantsChanged>(&(), vec![], 0);
         tracing::info!(row = %id, "[browser-standing] a standing grant was revoked");
     }
-    removed
+    Ok(removed)
 }
 
 /// Panes whose standing grant the person ended with Stop. A standing row
@@ -407,11 +411,24 @@ mod tests {
     }
 
     #[test]
+    fn a_row_the_file_could_not_record_is_not_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        // A folder that cannot be made: its parent is a file.
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let mut s = Store { path: Some(blocker.join(FILE_NAME)), rows: rows() };
+        let kept = s.rows.clone();
+        let err = s.commit(Vec::new()).unwrap_err();
+        assert!(err.contains("couldn't save") && err.contains("nothing was changed"), "{err}");
+        assert_eq!(s.rows, kept, "the revoke that could not be written did not happen in memory either");
+    }
+
+    #[test]
     fn rows_survive_a_restart_and_an_unreadable_file_grants_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(FILE_NAME);
-        let mut s = Store { path: Some(path.clone()), rows: rows() };
-        s.save();
+        let mut s = Store { path: Some(path.clone()), rows: Vec::new() };
+        s.commit(rows()).unwrap();
         let reopened = Store::open(path.clone());
         assert_eq!(reopened.rows, s.rows);
         s.rows.clear();
@@ -455,7 +472,7 @@ mod tests {
         resume(pane);
         assert!(activate_at(&state, pane, agent, url).is_some());
         // Revoke ends the grant, and nothing makes it again.
-        assert!(revoke(&state, &id));
+        assert!(revoke(&state, &id).unwrap());
         assert!(bypass::active_for(pane, agent).is_none());
         assert!(activate_at(&state, pane, agent, url).is_none());
     }

@@ -2,11 +2,20 @@
 import type { BrowserGrantPreset } from "./BrowserGrantPreset";
 import type { BrowserGrantRow } from "./BrowserGrantRow";
 import type { BrowserPauseAll } from "./BrowserPauseAll";
+import type { SitePermissionRow } from "./SitePermissionRow";
 
 /**
  * Everything the screen shows: the grants, the presets, and the powers a row can carry.
  */
 export type BrowserGrantsResult = { rows: Array<BrowserGrantRow>, presets: Array<BrowserGrantPreset>, powers: Array<string>, 
+/**
+ * What a page can be allowed to use on a site, for good (camera, microphone, location, notifications).
+ */
+permission_kinds: Array<string>, 
+/**
+ * The site permissions the person has given.
+ */
+permissions: Array<SitePermissionRow>, 
 /**
  * "Pause all agent browsing": the status bar and the Settings switch read it.
  */

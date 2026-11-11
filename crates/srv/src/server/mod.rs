@@ -136,6 +136,7 @@ pub(crate) mod browser_control;
 pub(crate) mod browser_retake;
 pub(crate) mod browser_powers;
 pub(crate) mod browser_pause_all;
+pub(crate) mod browser_site_permissions;
 pub(crate) mod browser_standing;
 pub(crate) mod browser_terminal;
 pub(crate) mod browser_chooser;
