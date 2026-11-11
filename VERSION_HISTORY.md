@@ -1,5 +1,59 @@
 # AgentMux Version History
 
+## 0.60.24 — 2026-11-11
+
+- Split the bundle form's per-provider instructions into a state file and view parts, behaviour unchanged (BundleProviderInstructionsSection 155 -> 42 lines)
+- Split the Remotes pane's card details into view parts, behaviour unchanged (Detail 154 -> 19 lines)
+- Confirming a Remotes action (add a host, remove or install the helper, end a session) or a system tool install is asked over the pane you clicked in, not in a separate approval window
+- Adopting an agent's earlier memory, or releasing its claim on a memory folder, is confirmed over the Memory pane you clicked in, not in a separate approval window
+- fix(agents): keep an agent's .mcp.json out of a user's project and never write keys there (#3680)
+- Browser snapshot gives a ref (shown as clickable) to elements a page makes clickable with a script but that are not buttons, such as a div with a click handler
+- The Windows and Linux builds use the CEF 154.0.8037.98 runtime, with Chromium's security fixes from 154.0.8037.58 to .98
+- A route agent now stops at a daily spend cap: $20 per agent and $100 per route (the day is kept across restarts), the gateway refuses with a 402, its leader is told at 50%, the pane warns at 80% and the turn ends at 100%; a leader raises or resets the cap with Agents update spend_cap_usd
+- A running agent that has fallen out of the registry is put back within a minute, so messages, conversations and transcripts reach it again
+- The container image notes, the Build cache section and the Environment panel read their text from the dictionary, so they can be translated (#21624)
+- A question from a pane that is not an agent's (Remotes, Memory) is named by the pane in the waiting toast and list, not as "An agent asks for your consent", and the memory questions' buttons use the standard accent tone
+- An agent on a model route shows what it has used today against its cap as a chip on its Swarm card and in Agents list; at 80% its pane says so, and at the cap a card offers Raise, Reset today and Dismiss
+- A message in an agent's history shows when it was written in its hover panel (with the date when it is not from today), not "just now" for every replayed jekt (#47389)
+- Pane drag with layout:livereflow on: every pane takes its real size and place for the drop being aimed at, so nothing is cropped, stretched or left blank; terminals keep their size until the drag ends; the pane in hand is no longer blurred or padded with a blank band
+- A mermaid diagram that fails to render no longer leaves a column in the page that shrinks the app
+- Hovering the composer's CPU and memory readout no longer makes its panel flicker
+- A LAN agent name's key moves on its own only on a certificate from the install that vouched for it, retired keys are refused as retired, and the pin screen says why
+- A dev frontend that can't be reached no longer reloads the window in a loop or cycles pool windows: the window waits quietly, reloads when the address answers, and a dev build quits if it stays gone
+- An urgent resend replaces the held copy of a relayed message even when the relay put its lateness prefix on the held one
+- The composer's account chip shows the email cut in the middle when there is room, instead of one letter
+- A person can allow a page's camera, microphone, location or notifications on one site for an agent for good, from Settings > Agents on sites > Page permissions; each first use is still in the Audit view
+- The macOS release job's time limit is 240 minutes, and its long silent build prints a progress line every five minutes
+- The macOS release build logs the time of each phase and writes the table to the job summary
+- Revoking or changing a standing browser permission or grant now says so when the settings file could not be written, instead of showing it removed while the file still allows it
+- The macOS build uses the CEF 154.0.8037.98 runtime, with Chromium's security fixes since .58
+- A download an agent's own browser pane saves into its workspace is now one row in the Audit view (site, file, size), and a pane in the Personal profile keeps the Save As dialog
+- Browser: a click is judged by the element's accessible name as well as its own text, so a committing button whose name comes from a title, an image or a child's label asks for approval; a click whose name can't be read asks too
+- Microsoft Store installs: an update the Store lists is offered even when Windows reports it with the installed version; the panel no longer answers 'no newer version' for it
+- A question that opens in a pane you are not in (from srv, an agent or a web page) no longer takes the keyboard from the pane you are typing in: it waits, shows in the waiting toast, and takes the caret when you go to its pane
+- Every click, key press or focus change that takes 48 ms or more is logged with what was acted on (pane view, element role, no content), so slow interactions show in the log.
+- Hovering or pressing a pane's header no longer logs an unhandled error when the pane holds an image that can't be copied into its drag picture (a browser pane's favicon); the picture is made without that image
+- The slow-interaction log line shows the slowest event of an interaction, not the first one that crossed 48 ms.
+- A hidden pane's attachment strips keep their tiles instead of re-laying them out on every resize report, and a press in a system-info chart no longer forces a layout.
+- A text file attached to a message no longer blanks its agent pane while its thumbnail loads; with several attachments this could repeat every frame and stall the window
+- Split the Files preview panel into a state file and view parts, with no change to what it shows
+- The Swarm lists an agent once: a second pane of the agent that was closed because the agent is open elsewhere no longer gets its own row
+- Messaging an agent no longer routes to a stale second pane of it: a second pane's register is refused while the agent's own pane holds it, and a broadcast copy that only the relay queued is reported as queued_unconfirmed, not delivered
+- Split the Memory file view into a state file and view parts, with no change to what it shows
+- A signed-in AgentMux Cloud install moves to the sign-in host the cloud publishes the first time a refresh works there, and the build's fallback sign-in pair is current; a published host that fails changes nothing
+- Split the hover tooltip into a state file and a thin component, with no change to how it shows
+- srv no longer warns at start that an agent pane's built-in shell has no tab: it belongs to the agent's pane, and nothing was lost
+- The Files pane's right-click menu no longer offers Attach to an agent or Mention in agent (and Alt+K is gone); every Reveal action names the platform's own file manager
+- A dev build whose page had already loaded now quits 5 minutes after its dev server stops answering, like one whose page failed to load
+- The composer's model panel logs a failed request and says in the Model section why the other models could not be read
+- The composer's CPU and memory readout goes compact in a narrow pane instead of running past its edge, and no longer shows a help cursor
+- fix(agents): resolve relative MCP config paths and give the doctor its path (#47385, #47392)
+- A spend stop or warning that is a day old goes at the UTC midnight, and an agent that left its model route loses its spend chip
+- Dragging a pane: the other panes now move live to show where it will land (on by default; layout:livereflow false turns it off), and holding a pane over its own slot closes the layout over it to show the release will tear it off into a window
+- Startup cleanup: the duplicate-column ALTER loops, the table-exists probes and the pending-migration count each have one implementation
+- A flaky history-fill test no longer takes an earlier test's leftover fill for its own.
+- Layout: srv converts the pre-display-mode minimize fields once when it loads a tree, and the window no longer carries its own copy of the conversion
+
 ## 0.60.23 — 2026-11-10
 
 - Update rustls to 0.23.46 (TLS 1.3 key update, buffering, flush and Debug-output fixes)
