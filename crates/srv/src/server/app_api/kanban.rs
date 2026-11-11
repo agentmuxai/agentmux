@@ -46,7 +46,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
     engine.register_typed(COMMAND_KANBAN_LIST, move |_data: Value, _ctx| {
         let s = s.clone();
-        async move { list(&s).await }
+        async move { list(&s, &_data).await }
     });
     let s = state.clone();
     engine.register_typed(COMMAND_KANBAN_TASK, move |data: Value, _ctx| {
@@ -204,14 +204,14 @@ fn send_back_text(t: &BoardTask, by: &Decider<'_>, reason: &str) -> String {
 {}", crate::backend::kanban_delegate::RELAYED_REASON_MARK, quoted(reason)),
     };
     format!(
-        "Task #{} \"{}\" was sent back from review by {}{}
+        "Task {} \"{}\" was sent back from review by {}{}
 
 Fix that before anything else, then submit it again (id {}, attempt {}).",
-        t.card.num,
+        t.card.name(),
         quote_in_system_note(&t.item.title),
         by.sender(),
         why,
-        t.card.num,
+        t.card.id_arg(),
         t.item.attempts
     )
 }
@@ -247,14 +247,23 @@ fn task_json(t: &BoardTask, holder: Option<Value>, unavailable: Option<Value>, a
     v
 }
 
-async fn list(state: &AppState) -> Result<Value, String> {
+async fn list(state: &AppState, data: &Value) -> Result<Value, String> {
     let regs = state.reactive_handler.list_agents();
+    // One board's tasks: the one named, else the default board's. `all` is every board.
+    let board_key = data.get("board").and_then(Value::as_str).map(str::trim).filter(|b| !b.is_empty()).map(str::to_string);
     // The board is in the work store; an agent's accounts (below) are in the identity store.
     let (work, identity) = (state.work_store.clone(), state.identity_store.clone());
     let mstore = state.mstore.clone();
     tokio::task::spawn_blocking(move || {
         let now = now_ms();
-        let mut tasks = work.work_board_list(now - FINISHED_WINDOW_MS, LIST_LIMIT, now).map_err(|e| e.to_string())?;
+        let boards = work.work_boards_list(true, now).map_err(|e| e.to_string())?;
+        let scope = match board_key.as_deref() {
+            Some(k) if k.eq_ignore_ascii_case("all") => None,
+            k => Some(work.work_board_resolve(k, now).map_err(|e| e.to_string())?),
+        };
+        let mut tasks = work
+            .work_board_list_in(scope.as_ref().map(|b| b.id.as_str()), now - FINISHED_WINDOW_MS, LIST_LIMIT, now)
+            .map_err(|e| e.to_string())?;
         for t in &mut tasks {
             fill_media_paths(t);
         }
@@ -296,7 +305,12 @@ async fn list(state: &AppState) -> Result<Value, String> {
                 agent_colors.insert(uid.to_string(), Value::String(c));
             }
         }
-        Ok(json!({ "tasks": tasks_json, "agents": agents, "agent_colors": agent_colors, "stamp": stamp, "now": now }))
+        let default_board = boards.iter().find(|b| b.is_default).map(|b| b.slug.clone());
+        Ok(json!({
+            "tasks": tasks_json, "agents": agents, "agent_colors": agent_colors, "stamp": stamp, "now": now,
+            "boards": boards, "board": scope.as_ref().map(|b| b.slug.clone()).unwrap_or_else(|| "all".into()),
+            "default_board": default_board,
+        }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -400,6 +414,13 @@ struct ActRequest {
     /// ui_change: whether the task changes the UI (then it needs media to be handed in for review).
     #[serde(default)]
     ui_change: Option<bool>,
+    /// create: the board to file on (name or slug); the default board when absent. move: the board
+    /// to move the task to.
+    #[serde(default)]
+    board: Option<String>,
+    /// move to a board: remove the task's dependencies, which stay inside one board.
+    #[serde(default)]
+    drop_deps: Option<bool>,
 }
 
 /// "#12, #15" for the history.
@@ -409,7 +430,7 @@ fn after_words(store: &crate::backend::storage::store::Store, ids: &[String]) ->
     }
     let nums: Vec<String> = ids
         .iter()
-        .map(|id| store.work_board_get(id).ok().flatten().map(|t| format!("#{}", t.card.num)).unwrap_or_else(|| id.clone()))
+        .map(|id| store.work_board_get(id).ok().flatten().map(|t| t.card.name()).unwrap_or_else(|| id.clone()))
         .collect();
     format!("starts after {}", nums.join(", "))
 }
@@ -473,7 +494,7 @@ fn quoted(text: &str) -> String {
 
 /// What an agent receives when the operator starts a task on it.
 fn start_text(t: &BoardTask, attempt: i64, by: &Actor) -> String {
-    let n = t.card.num;
+    let (name, n) = (t.card.name(), t.card.id_arg());
     let title = quote_in_system_note(&t.item.title);
     let report = format!(
         "Report on it with Tasks (id {n}, attempt {attempt}): update at milestones, ask if you need {}, submit when it's done.",
@@ -481,7 +502,7 @@ fn start_text(t: &BoardTask, attempt: i64, by: &Actor) -> String {
     );
     let operator_wrote = t.card.filed_by.is_empty() && t.item.created_by == OPERATOR;
     if operator_wrote {
-        format!("Task #{n} from the Kanban: {title}\n\n{}\n\n{report}", neutralize_markers(&sanitize_message(&t.item.payload)))
+        format!("Task {name} from the Kanban: {title}\n\n{}\n\n{report}", neutralize_markers(&sanitize_message(&t.item.payload)))
     } else {
         let by = if t.card.filed_by.is_empty() { t.item.created_by.clone() } else { t.card.filed_by.clone() };
         let asked = match t.card.requested_by_kind.as_str() {
@@ -491,7 +512,7 @@ fn start_text(t: &BoardTask, attempt: i64, by: &Actor) -> String {
             _ => String::new(),
         };
         format!(
-            "Task #{n} from the Kanban: {title}. {} wrote it down; here it is as they wrote it:\n{}{asked}\n\n{report}",
+            "Task {name} from the Kanban: {title}. {} wrote it down; here it is as they wrote it:\n{}{asked}\n\n{report}",
             quote_in_system_note(&by),
             quoted(&t.item.payload)
         )
@@ -512,6 +533,15 @@ fn create_one(
     now: i64,
 ) -> Result<(String, i64), String> {
     let store = &state.work_store;
+    // The operator sees every board; an archived one takes no new tasks.
+    let board = crate::server::work_tasks::pick_board(state, req.board.as_deref(), None, true)?;
+    for a in after {
+        if let Ok(Some((other, n))) = store.work_task_board(a) {
+            if other.id != board.id {
+                return Err(format!("{} is on board {}: a task starts only after tasks on its own board ({})", other.task_ref(n), other.slug, board.slug));
+            }
+        }
+    }
     let (target, target_uid) = match req.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(a) => target_of(state, regs, a),
         None => (String::new(), String::new()),
@@ -546,6 +576,7 @@ fn create_one(
         return Err(why);
     }
     let card = NewCard {
+        board: board.id,
         repo: req.repo.clone().unwrap_or_default(),
         branch: String::new(),
         // Review is the PR's (muxreview), not the operator's: a task waits
@@ -697,7 +728,7 @@ mod tests {
     }
 
     async fn task_of(state: &AppState, id: &str) -> Value {
-        let board = list(state).await.unwrap();
+        let board = list(state, &Value::Null).await.unwrap();
         board["tasks"].as_array().unwrap().iter().find(|t| t["id"] == id).cloned().expect("on the board")
     }
 
@@ -1006,10 +1037,16 @@ mod tests {
         state.work_store = std::sync::Arc::new(own);
         let mine = act(&state, json!({"action": "create", "title": "A dev one", "payload": "p"})).await.unwrap();
 
-        let board = list(&state).await.unwrap();
+        let board = list(&state, &Value::Null).await.unwrap();
         let ids: Vec<&str> = board["tasks"].as_array().unwrap().iter().filter_map(|t| t["id"].as_str()).collect();
         assert_eq!(ids, vec![mine["id"].as_str().unwrap()], "the host's task {real} is not on this board");
         let seen = task(&state, &json!({"id": real["id"]})).await;
         assert!(seen.is_err(), "nor can this build open it: {seen:?}");
     }
+}
+
+/// The Kanban's list as the pane gets it, for the tests of the routes that file on boards.
+#[cfg(test)]
+pub(crate) async fn list_for_tests(state: &AppState, data: Value) -> Value {
+    list(state, &data).await.unwrap()
 }

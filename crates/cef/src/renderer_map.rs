@@ -96,24 +96,48 @@ wrap_render_process_handler! {
         // Runs in the renderer, once for each browser created in it. On Linux
         // the sandbox's PID namespace makes this a namespace-local PID; srv
         // translates (backend::tower::agentmux::own_view_pid).
-        fn on_browser_created(&self, browser: Option<&mut Browser>, _extra_info: Option<&mut DictionaryValue>) {
+        fn on_browser_created(&self, browser: Option<&mut Browser>, extra_info: Option<&mut DictionaryValue>) {
+            // An app window's browser gets the pane-rects query lane (ipc_query.rs).
+            crate::ipc_query::renderer::on_browser_created(browser.as_deref(), extra_info.as_deref());
             let Some(mut frame) = browser.and_then(|b| b.main_frame()) else { return };
             send_report(&mut frame, REPORT_BROWSER);
+        }
+
+        fn on_browser_destroyed(&self, browser: Option<&mut Browser>) {
+            crate::ipc_query::renderer::on_browser_destroyed(browser.as_deref());
         }
 
         // Runs for every frame's document, in whichever process hosts it: a
         // cross-site iframe's is another renderer, which Tower counts as the
         // page's too (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.1).
-        fn on_context_created(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _context: Option<&mut V8Context>) {
+        fn on_context_created(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, context: Option<&mut V8Context>) {
+            crate::ipc_query::renderer::on_context_created(browser.as_deref(), frame.as_deref(), context.as_deref());
             if let Some(frame) = frame {
                 send_report(frame, REPORT_FRAME);
             }
         }
 
-        fn on_context_released(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _context: Option<&mut V8Context>) {
+        fn on_context_released(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, context: Option<&mut V8Context>) {
+            crate::ipc_query::renderer::on_context_released(browser.as_deref(), frame.as_deref(), context.as_deref());
             if let Some(frame) = frame {
                 send_report(frame, REPORT_FRAME_GONE);
             }
+        }
+
+        // The browser process answering a query (ipc_query.rs).
+        fn on_process_message_received(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            source_process: ProcessId,
+            message: Option<&mut ProcessMessage>,
+        ) -> ::std::os::raw::c_int {
+            crate::ipc_query::renderer::on_process_message_received(
+                browser.as_deref(),
+                frame.as_deref(),
+                source_process,
+                message.as_deref(),
+            ) as ::std::os::raw::c_int
         }
     }
 }

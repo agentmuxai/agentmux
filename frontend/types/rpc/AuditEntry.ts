@@ -35,4 +35,20 @@ links: AuditLinks,
 /**
  * Where it came from and how it travelled. Absent for a row that has no such record (an agent start, a tool call).
  */
-provenance?: AuditProvenance, };
+provenance?: AuditProvenance, 
+/**
+ * The dialog's text as read, for a sensitive-op row (`os_prompt_answer`). Absent otherwise.
+ */
+prompt?: string, 
+/**
+ * The exact value given. Never a password or other secret value (the guard refuses those).
+ */
+answer?: string, 
+/**
+ * The op's risk level: `low`, `medium` or `high`.
+ */
+level?: string, 
+/**
+ * `true` when a remembered grant allowed it, with no fresh countdown.
+ */
+standing?: boolean, };

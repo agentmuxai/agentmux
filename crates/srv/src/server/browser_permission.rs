@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! A page's camera or microphone request in a browser pane an agent drives
+//! A page's camera, microphone, location or notification request in a browser pane an agent drives
 //! (docs/reports/REPORT_AGENTS_AND_OS_PROMPTS_2026_11_07.md §3 tier 1, §4). The host holds the request
 //! and asks here (`/api/v1/host/browser_permission`). Nothing is allowed on the agent's word: the
 //! first ask files an `os_prompt_answer` request like any sensitive operation (the super agent
@@ -28,6 +28,9 @@ use agentmux_common::time::now_ms;
 /// CEF's `cef_media_access_permission_types_t` bits.
 const DEVICE_AUDIO_CAPTURE: u32 = 1;
 const DEVICE_VIDEO_CAPTURE: u32 = 2;
+/// CEF's `cef_permission_request_types_t` bits for a permission prompt (a different list from the media bits).
+const PROMPT_GEOLOCATION: u32 = 256;
+const PROMPT_NOTIFICATIONS: u32 = 32768;
 /// How long an approved site stays allowed.
 const GRANT_MS: i64 = 30 * 60 * 1000;
 /// Asks and grants kept: the oldest go first.
@@ -49,6 +52,8 @@ struct Grant {
     site: String,
     kinds: Vec<&'static str>,
     until_ms: i64,
+    /// Whether the Audit log already has a `standing` row for this grant: one row per grant, however often the page asks again.
+    audited: bool,
 }
 
 static ASKS: Mutex<Vec<Ask>> = Mutex::new(Vec::new());
@@ -62,22 +67,42 @@ fn grants() -> std::sync::MutexGuard<'static, Vec<Grant>> {
     GRANTS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// What the page asked for, in words. Anything but a camera or microphone is refused with why.
-fn kinds_of(requested: u32) -> Result<Vec<&'static str>, &'static str> {
-    if requested & !(DEVICE_AUDIO_CAPTURE | DEVICE_VIDEO_CAPTURE) != 0 {
-        return Err("the page asked to capture the screen or the computer's sound, which an agent's pane is never allowed");
+/// What the page asked for, in words. `prompt` says which list `requested` is from: a permission prompt
+/// (location, notifications) or a media request (camera, microphone). Anything else is refused with why.
+fn kinds_of(requested: u32, prompt: bool) -> Result<Vec<&'static str>, &'static str> {
+    let (table, refusal): (&[(u32, &'static str)], &str) = if prompt {
+        (
+            &[(PROMPT_GEOLOCATION, "location"), (PROMPT_NOTIFICATIONS, "notifications")],
+            "the page asked for a permission an agent's pane is never given",
+        )
+    } else {
+        (
+            &[(DEVICE_VIDEO_CAPTURE, "camera"), (DEVICE_AUDIO_CAPTURE, "microphone")],
+            "the page asked to capture the screen or the computer's sound, which an agent's pane is never allowed",
+        )
+    };
+    if requested & !table.iter().fold(0, |all, (bit, _)| all | bit) != 0 {
+        return Err(refusal);
     }
-    let mut kinds = Vec::new();
-    if requested & DEVICE_VIDEO_CAPTURE != 0 {
-        kinds.push("camera");
-    }
-    if requested & DEVICE_AUDIO_CAPTURE != 0 {
-        kinds.push("microphone");
-    }
+    let kinds: Vec<&'static str> = table.iter().filter(|(bit, _)| requested & bit != 0).map(|(_, name)| *name).collect();
     if kinds.is_empty() {
         return Err("the page asked for nothing AgentMux can name");
     }
     Ok(kinds)
+}
+
+/// The kinds as the thing used, for a sentence: "the camera and the microphone", "notifications".
+fn what_of(kinds: &[&str]) -> String {
+    let named: Vec<&str> = kinds
+        .iter()
+        .map(|k| match *k {
+            "camera" => "the camera",
+            "microphone" => "the microphone",
+            "location" => "the computer's location",
+            _ => "notifications",
+        })
+        .collect();
+    named.join(" and ")
 }
 
 fn covers(g: &Grant, agent: &str, target: &str, site: &str, kinds: &[&str], now: i64) -> bool {
@@ -86,6 +111,42 @@ fn covers(g: &Grant, agent: &str, target: &str, site: &str, kinds: &[&str], now:
 
 fn is_granted(agent: &str, target: &str, site: &str, kinds: &[&str], now: i64) -> bool {
     grants().iter().any(|g| covers(g, agent, target, site, kinds, now))
+}
+
+/// Marks the grant that covers this ask as audited; true only the first time, so a page re-asking during
+/// its 30 minutes adds no further Audit rows.
+fn first_use_of_grant(agent: &str, target: &str, site: &str, kinds: &[&str], now: i64) -> bool {
+    match grants().iter_mut().find(|g| covers(g, agent, target, site, kinds, now)) {
+        Some(g) if !g.audited => {
+            g.audited = true;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// A remembered grant covered this ask, with no fresh countdown: one Audit row for it, flagged
+/// `standing` (§4.6) so it reads the same as a fresh countdown's row rather than vanishing into
+/// the per-pane notice log alone — a site allowed many times unattended should still show up.
+/// `lasting` says a row the person made in Settings allowed it, which has no 30 minutes to put in the answer.
+fn audit_standing_allow(state: &AppState, agent: &str, site: &str, kinds: &[&str], message: &str, lasting: bool) {
+    let mut facts = facts_for(agent, site, kinds);
+    if lasting {
+        facts.insert("answer".to_string(), format!("allow {} for {site} (a standing permission from Settings)", what_of(kinds)));
+    }
+    state.reactive_handler.log_sensitive_op_audit(
+        Some(agent),
+        agent,
+        "os_prompt_answer.standing",
+        true,
+        None,
+        &uuid::Uuid::new_v4().to_string(),
+        Some(message),
+        facts.get("prompt").map(String::as_str),
+        facts.get("answer").map(String::as_str),
+        facts.get("level").map(String::as_str),
+        true,
+    );
 }
 
 /// The open request this agent already filed for this site and these kinds, if it still waits.
@@ -109,13 +170,13 @@ fn remember(ask: Ask) {
 
 /// The facts of the request, from what AgentMux saw: only the site is the page's, cleaned as every fact is.
 fn facts_for(agent: &str, site: &str, kinds: &[&str]) -> BTreeMap<String, String> {
-    let what = kinds.join(" and ");
+    let what = what_of(kinds);
     BTreeMap::from([
         ("agent".to_string(), agent.to_string()),
         ("app".to_string(), "Browser".to_string()),
         ("window".to_string(), site.to_string()),
-        ("prompt".to_string(), format!("{site} wants to use the {what}")),
-        ("answer".to_string(), format!("allow the {what} for {site} for 30 minutes")),
+        ("prompt".to_string(), format!("{site} wants to use {what}")),
+        ("answer".to_string(), format!("allow {what} for {site} for 30 minutes")),
         ("level".to_string(), "medium".to_string()),
         ("reason".to_string(), "the page asked while the agent was driving this pane".to_string()),
     ])
@@ -124,13 +185,14 @@ fn facts_for(agent: &str, site: &str, kinds: &[&str]) -> BTreeMap<String, String
 /// What the agent is told when its pane's page asked and the person is being asked.
 fn asked_reason(site: &str, what: &str) -> String {
     format!(
-        "{site} asked to use the {what}. AgentMux denied it for now and filed it as a sensitive operation: the super agent \
+        "{site} asked to use {what}. AgentMux denied it for now and filed it as a sensitive operation: the super agent \
          reviews it and the person can veto its countdown. An [AgentMux] note brings the answer; then ask the page again"
     )
 }
 
-/// `POST /api/v1/host/browser_permission` — the host holds a page's camera or microphone request in a
-/// pane an agent drives and asks what to do. Body `{target, origin, requested}`; answers `allow`, or
+/// `POST /api/v1/host/browser_permission` — the host holds a page's camera, microphone, location or
+/// notification request in a pane an agent drives and asks what to do. Body `{target, origin, requested,
+/// prompt}` (`prompt`: the bits are a permission prompt's, not a media request's); answers `allow`, or
 /// `deny` (with the agent told why in its next `Browser` call). Host only.
 pub(crate) async fn handle_host_browser_permission(
     State(state): State<AppState>,
@@ -148,20 +210,30 @@ pub(crate) async fn handle_host_browser_permission(
     let answered = |decision: &str| (StatusCode::OK, Json(json!({ "ok": true, "data": { "decision": decision } }))).into_response();
     let origin = s("origin");
     let site = agentmux_common::allowed_origins::target_origin(&origin).unwrap_or(origin);
-    let kinds = match kinds_of(requested) {
+    let kinds = match kinds_of(requested, body.get("prompt").and_then(Value::as_bool).unwrap_or(false)) {
         Ok(k) => k,
         Err(why) => {
             record(&agent, &target, "permission", &format!("{site} asked for a permission"), "denied", why);
             return answered("deny");
         }
     };
-    let what = kinds.join(" and ");
-    let message = format!("{site} asked to use the {what}");
+    let what = what_of(&kinds);
+    let message = format!("{site} asked to use {what}");
     if agent.is_empty() || site.is_empty() {
         return answered("deny");
     }
+    if super::browser_site_permissions::allowed(&agent, &site, &kinds) {
+        record(&agent, &target, "permission", &message, "allowed", "you allowed it on this site in Settings");
+        if super::browser_site_permissions::first_use(&agent, &target, &site, &kinds) {
+            audit_standing_allow(&state, &agent, &site, &kinds, &message, true);
+        }
+        return answered("allow");
+    }
     if is_granted(&agent, &target, &site, &kinds, now_ms()) {
         record(&agent, &target, "permission", &message, "allowed", "the person's countdown for this site ended without a veto");
+        if first_use_of_grant(&agent, &target, &site, &kinds, now_ms()) {
+            audit_standing_allow(&state, &agent, &site, &kinds, &message, false);
+        }
         return answered("allow");
     }
     if open_ask(&agent, &target, &site, &kinds).is_some() {
@@ -174,7 +246,7 @@ pub(crate) async fn handle_host_browser_permission(
         return answered("deny");
     }
     let facts = facts_for(&agent, &site, &kinds);
-    let reason = format!("let {site} use the {what} in the pane {agent} is driving");
+    let reason = format!("let {site} use {what} in the pane {agent} is driving");
     match crate::server::sensitive_handlers::file_request(&state, &uid, &agent, "os_prompt_answer", &facts, &reason).await {
         Ok(filed) => {
             let request_id = filed["id"].as_str().unwrap_or_default().to_string();
@@ -186,7 +258,7 @@ pub(crate) async fn handle_host_browser_permission(
     answered("deny")
 }
 
-/// What the countdown ending unvetoed does: the site may use the camera or microphone for a while,
+/// What the countdown ending unvetoed does: the site may use what it asked for for a while,
 /// for each agent that still asks.
 pub(crate) fn grant_after_countdown(_state: &AppState, request_id: &str) -> Result<(), String> {
     // One lock for the take and the store-back, so an ask filed meanwhile is not overwritten.
@@ -209,7 +281,7 @@ pub(crate) fn grant_after_countdown(_state: &AppState, request_id: &str) -> Resu
         if g.len() >= MAX_KEPT {
             g.remove(0);
         }
-        g.push(Grant { agent: a.agent, target: a.target, site: a.site, kinds: a.kinds, until_ms });
+        g.push(Grant { agent: a.agent, target: a.target, site: a.site, kinds: a.kinds, until_ms, audited: false });
         any = true;
     }
     if any {
@@ -225,11 +297,23 @@ mod tests {
 
     #[test]
     fn a_camera_or_microphone_is_named_and_anything_else_is_refused() {
-        assert_eq!(kinds_of(DEVICE_VIDEO_CAPTURE), Ok(vec!["camera"]));
-        assert_eq!(kinds_of(DEVICE_AUDIO_CAPTURE | DEVICE_VIDEO_CAPTURE), Ok(vec!["camera", "microphone"]));
-        assert!(kinds_of(4).unwrap_err().contains("screen"));
-        assert!(kinds_of(DEVICE_VIDEO_CAPTURE | 8).is_err(), "a screen share with the camera is still a screen share");
-        assert!(kinds_of(0).is_err());
+        assert_eq!(kinds_of(DEVICE_VIDEO_CAPTURE, false), Ok(vec!["camera"]));
+        assert_eq!(kinds_of(DEVICE_AUDIO_CAPTURE | DEVICE_VIDEO_CAPTURE, false), Ok(vec!["camera", "microphone"]));
+        assert!(kinds_of(4, false).unwrap_err().contains("screen"));
+        assert!(kinds_of(DEVICE_VIDEO_CAPTURE | 8, false).is_err(), "a screen share with the camera is still a screen share");
+        assert!(kinds_of(0, false).is_err());
+    }
+
+    #[test]
+    fn a_location_or_notification_prompt_is_named_and_the_media_bits_are_not_its_bits() {
+        assert_eq!(kinds_of(PROMPT_GEOLOCATION, true), Ok(vec!["location"]));
+        assert_eq!(kinds_of(PROMPT_GEOLOCATION | PROMPT_NOTIFICATIONS, true), Ok(vec!["location", "notifications"]));
+        assert!(kinds_of(1, true).is_err(), "bit 1 is a camera in a media request, nothing in a prompt");
+        assert!(kinds_of(PROMPT_NOTIFICATIONS | (1 << 14), true).is_err(), "something else with it is refused");
+        assert!(kinds_of(PROMPT_GEOLOCATION, false).is_err(), "a prompt's bits are not a media request's");
+        assert_eq!(what_of(&["camera", "microphone"]), "the camera and the microphone");
+        assert_eq!(what_of(&["location"]), "the computer's location");
+        assert_eq!(what_of(&["notifications"]), "notifications");
     }
 
     #[test]
@@ -239,14 +323,14 @@ mod tests {
         let checked = spec.check_facts(&facts).unwrap();
         assert_eq!(checked["app"], "Browser");
         assert_eq!(checked["level"], "medium");
-        assert!(checked["prompt"].contains("https://meet.example") && checked["answer"].contains("camera and microphone"));
+        assert!(checked["prompt"].contains("https://meet.example") && checked["answer"].contains("the camera and the microphone"));
         let summary = spec.summary(&checked);
         assert!(summary.starts_with("answer a prompt for an agent (") && summary.contains("meet.example"), "{summary}");
     }
 
     #[test]
     fn a_grant_covers_its_agent_pane_site_and_kinds_until_it_runs_out() {
-        let g = Grant { agent: "a".into(), target: "p".into(), site: "https://s".into(), kinds: vec!["camera", "microphone"], until_ms: 1000 };
+        let g = Grant { agent: "a".into(), target: "p".into(), site: "https://s".into(), kinds: vec!["camera", "microphone"], until_ms: 1000, audited: false };
         assert!(covers(&g, "a", "p", "https://s", &["camera"], 999));
         assert!(covers(&g, "a", "p", "https://s", &["camera", "microphone"], 999));
         assert!(!covers(&g, "a", "p", "https://s", &["camera"], 1000), "expired");
@@ -271,5 +355,45 @@ mod tests {
         assert!(is_granted("bp-agent", "pane-1", &site, &["camera"], now_ms()));
         assert!(!is_granted("bp-agent", "pane-1", &site, &["microphone"], now_ms()), "the microphone was not asked for");
         assert!(grant_after_countdown(&state, &id).is_err(), "a second run finds nothing to grant");
+    }
+
+    #[tokio::test]
+    async fn a_standing_grant_writes_one_audit_row_flagged_standing() {
+        let state = crate::server::tests::test_state();
+        // Counted by this test's own agent, not by the log's length: the log keeps only its newest rows,
+        // so after earlier tests in one process (the nightly's `--test-threads=1`) its length no longer grows.
+        let agent = format!("bp-agent-{}", uuid::Uuid::new_v4().simple());
+        audit_standing_allow(&state, &agent, "https://standing.example", &["camera", "microphone"], "https://standing.example asked to use the camera and the microphone", false);
+        let mine: Vec<_> = state.reactive_handler.get_audit_log(200).into_iter().filter(|r| r.target_agent == agent).collect();
+        assert_eq!(mine.len(), 1, "exactly one row");
+        let row = &mine[0];
+        assert_eq!(row.standing, Some(true));
+        assert!(row.prompt.as_deref().unwrap().contains("standing.example"));
+        assert!(row.answer.as_deref().unwrap().contains("camera") && row.answer.as_deref().unwrap().contains("microphone"));
+        assert_eq!(row.level.as_deref(), Some("medium"));
+        assert!(row.answer.as_deref().unwrap().ends_with("for 30 minutes"));
+    }
+
+    #[tokio::test]
+    async fn a_settings_row_is_audited_without_a_30_minute_duration() {
+        let state = crate::server::tests::test_state();
+        let agent = format!("bp-agent-{}", uuid::Uuid::new_v4().simple());
+        audit_standing_allow(&state, &agent, "https://lasting.example", &["camera"], "https://lasting.example asked to use the camera", true);
+        let mine: Vec<_> = state.reactive_handler.get_audit_log(200).into_iter().filter(|r| r.target_agent == agent).collect();
+        assert_eq!(mine.len(), 1);
+        let answer = mine[0].answer.as_deref().unwrap();
+        assert!(answer.contains("a standing permission from Settings") && !answer.contains("30 minutes"), "{answer}");
+        assert_eq!(mine[0].standing, Some(true));
+    }
+
+    #[test]
+    fn a_page_asking_again_during_a_grant_is_audited_once() {
+        let site = format!("https://{}.example", uuid::Uuid::new_v4().simple());
+        grants().push(Grant { agent: "bp-agent-3".into(), target: "pane-9".into(), site: site.clone(), kinds: vec!["camera"], until_ms: now_ms() + GRANT_MS, audited: false });
+        assert!(first_use_of_grant("bp-agent-3", "pane-9", &site, &["camera"], now_ms()), "the first use is audited");
+        for _ in 0..5 {
+            assert!(!first_use_of_grant("bp-agent-3", "pane-9", &site, &["camera"], now_ms()), "a repeat ask adds no row");
+        }
+        assert!(!first_use_of_grant("bp-agent-3", "pane-9", &site, &["microphone"], now_ms()), "an uncovered ask is not a use");
     }
 }

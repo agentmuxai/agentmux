@@ -94,6 +94,7 @@ pub(crate) fn cancel_for_block(block_id: &str) {
     for id in ids {
         answer(&id, false);
     }
+    super::chooser_hold::cancel_for_block(block_id);
     recent().lock().remove(block_id);
 }
 

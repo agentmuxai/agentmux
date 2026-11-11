@@ -12,6 +12,12 @@
  *  `META_TITLE`); cleared here when the session ends (useBlockActivity.ts). */
 export const META_TITLE = "term:ambient_summary";
 
+/** When the title was stored or last confirmed as still right (epoch ms), and the human turn it
+ *  was judged at. Written by the backend with the title (`ambient/title.rs`); `0` means "judge it
+ *  again at the next message" (`markTitleStale`). The pane ages a title by them (`title-schedule.ts`). */
+export const META_TITLE_AT = "term:ambient_summary_at";
+export const META_TITLE_TURN = "term:ambient_summary_turn";
+
 /** The terminal's own title (OSC 0/2), the free fallback when there is no session title. */
 export const META_OSC_TITLE = "term:osc_title";
 

@@ -405,7 +405,7 @@ fn held_tasks(state: &AppState, block_ids: &[&str]) -> HashMap<String, Vec<(Acco
         } else {
             String::new()
         };
-        let task = AccountEpisodeTask { id: t.item.id.clone(), number: t.card.num, title: t.item.title.clone() };
+        let task = AccountEpisodeTask { id: t.item.id.clone(), number: t.card.num, task_ref: t.card.name(), title: t.item.title.clone() };
         out.entry(holder.block_id.clone()).or_default().push((task, requester));
     }
     out
@@ -444,21 +444,21 @@ fn view(state: &AppState, ep: &Episode) -> AccountAvailability {
 }
 
 /// For each requester of a task the newly blocked `panes` hold: the panes,
-/// and the numbers of that requester's tasks each one holds.
-fn requester_items(state: &AppState, panes: &[BlockedPane]) -> std::collections::BTreeMap<String, Vec<(BlockedPane, Vec<i64>)>> {
+/// and the refs of that requester's tasks each one holds.
+fn requester_items(state: &AppState, panes: &[BlockedPane]) -> std::collections::BTreeMap<String, Vec<(BlockedPane, Vec<String>)>> {
     let ids: Vec<&str> = panes.iter().map(|p| p.block_id.as_str()).collect();
     let held = held_tasks(state, &ids);
-    let mut out: std::collections::BTreeMap<String, Vec<(BlockedPane, Vec<i64>)>> = Default::default();
+    let mut out: std::collections::BTreeMap<String, Vec<(BlockedPane, Vec<String>)>> = Default::default();
     for pane in panes {
-        let mut by_requester: std::collections::BTreeMap<String, Vec<i64>> = Default::default();
+        let mut by_requester: std::collections::BTreeMap<String, Vec<(i64, String)>> = Default::default();
         for (task, requester) in held.get(&pane.block_id).into_iter().flatten() {
             if !requester.is_empty() {
-                by_requester.entry(requester.clone()).or_default().push(task.number);
+                by_requester.entry(requester.clone()).or_default().push((task.number, task.task_ref.clone()));
             }
         }
-        for (requester, mut numbers) in by_requester {
-            numbers.sort_unstable();
-            out.entry(requester).or_default().push((pane.clone(), numbers));
+        for (requester, mut held) in by_requester {
+            held.sort_unstable();
+            out.entry(requester).or_default().push((pane.clone(), held.into_iter().map(|(_, r)| r).collect()));
         }
     }
     out
@@ -475,7 +475,7 @@ fn requester_notes(state: &AppState, episodes: &Mutex<Episodes>, account_id: &st
         .into_iter()
         .filter(|(requester, _)| fresh.contains(requester))
         .map(|(requester, items)| {
-            let refs: Vec<(&BlockedPane, &[i64])> = items.iter().map(|(p, n)| (p, n.as_slice())).collect();
+            let refs: Vec<(&BlockedPane, &[String])> = items.iter().map(|(p, n)| (p, n.as_slice())).collect();
             let text = format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&machine::leader_note(&refs)));
             (requester, text)
         })
@@ -585,6 +585,28 @@ pub(crate) fn clear_signed_out(mstore: &Arc<Store>, identity: &Store, event_bus:
         after_clearing();
     }
     cleared
+}
+
+/// Restarts every open pane of the agent with its conversation resumed. A persistent pane in a turn is restarted when the
+/// turn ends. A one-shot (subprocess) pane, a container agent's, is not restarted: a restart would end the turn it is in,
+/// and its next turn reads the agent's choice anyway; nor is a stopped agent, which would be started by it. Those are counted apart. Returns how many were restarted, how many
+/// pick the change up at their next turn, and why the others were not restarted.
+pub(crate) fn restart_panes_of(state: &AppState, def_id: &str) -> (u32, u32, Vec<String>) {
+    let (mut restarted, mut next_turn, mut failed) = (0, 0, Vec::new());
+    for block in switch::open_panes(state, def_id) {
+        // No controller: the agent is stopped, and a restart would start it. It reads the choice when it is started.
+        let one_shot = crate::backend::blockcontroller::get_controller(&block.oid)
+            .is_none_or(|c| c.controller_type() == crate::backend::blockcontroller::BLOCK_CONTROLLER_SUBPROCESS);
+        if one_shot {
+            next_turn += 1;
+            continue;
+        }
+        match moves::restart(state, &block) {
+            Ok(()) => restarted += 1,
+            Err(e) => failed.push(e),
+        }
+    }
+    (restarted, next_turn, failed)
 }
 
 /// These RPCs are the operator's, except `agent.account.switch` and

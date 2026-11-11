@@ -70,6 +70,9 @@ struct EnqueueParams {
     first: Option<String>,
     #[serde(default)]
     ui_change: Option<bool>,
+    /// The board to file on, by name or slug; the default board when absent.
+    #[serde(default)]
+    board: Option<String>,
 }
 
 /// The uid of the agent here that `typed` names, or why none can be named.
@@ -112,6 +115,7 @@ pub(crate) async fn tasks_enqueue(state: &AppState, actor: &str, params: Value) 
         after: p.after,
         first: p.first,
         ui_change: p.ui_change,
+        board: p.board,
     };
     let (status, axum::response::Json(body)) = enqueue_core(state, req, Filer::Remote(actor)).await;
     if status.is_success() {
@@ -130,13 +134,24 @@ struct ListParams {
     state: String,
     #[serde(default)]
     limit: Option<usize>,
+    /// A board by name or slug, or `all`; the default board when absent.
+    #[serde(default)]
+    board: Option<String>,
 }
 
 /// `tasks.list`: this machine's board, read-only: `{items: [...]}`, each with its number.
 pub(crate) fn tasks_list(state: &AppState, params: Value) -> Result<Value, Failure> {
+    tasks_list_for(state, None, params)
+}
+
+/// [`tasks_list`] for the agent `actor` (`slug@machine`), which sees only the boards whose agent list
+/// has it.
+pub(crate) fn tasks_list_for(state: &AppState, actor: Option<&str>, params: Value) -> Result<Value, Failure> {
     // No params at all is a plain "list".
     let p: ListParams = if params.is_null() { ListParams::default() } else { params_of(params)? };
-    let items = list_items(state, &p.state, p.limit).map_err(|e| fail("failed", e))?;
+    let who = actor.map(|a| (a, ""));
+    let items = list_items(state, &p.state, p.limit, p.board.as_deref(), who)
+        .map_err(|e| fail(if e.starts_with("no board") { "bad_params" } else { "failed" }, e))?;
     Ok(json!({ "items": items }))
 }
 

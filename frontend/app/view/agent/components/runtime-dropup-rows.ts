@@ -5,6 +5,7 @@
 
 import { getProvider } from "../providers";
 import { refreshCodexModels } from "../providers/codex-models-refresh";
+import { dismissModelUndone } from "../model-undone";
 import { runningModelNote } from "../resolved-model";
 import { isPersistentLaunch } from "../launch-args";
 import {
@@ -17,6 +18,7 @@ import {
 } from "../runtime-capabilities";
 import type { EffortLevel, PermissionMode } from "../../../agent-model/types";
 import type { DropupAgreement } from "./runtime-dropup-agreement";
+import { backRow, BACK_VALUE, parseCompactValue, parseRouteValue, routeRows } from "./runtime-dropup-routes";
 import {
     EFFORT_OPTIONS,
     MODE_OPTIONS,
@@ -45,6 +47,9 @@ function modeOptions(s: DropupState) {
 
 /** The running-model line under the Model rows: what the CLI resolved the selection to, or a placeholder. */
 function runningModelRow(s: DropupState, a: DropupAgreement): Row {
+    // On a route the harness reports its own alias; the route and model are what answers.
+    const onRoute = s.routeModel();
+    if (onRoute) return { kind: "note", section: "model", text: `Running: ${onRoute.label} on ${onRoute.route_label}` };
     // What the CLI resolved the selection to, on the last reply (the argv
     // only carries an alias).
     const last = runningModelNote({
@@ -59,6 +64,31 @@ function runningModelRow(s: DropupState, a: DropupAgreement): Row {
     return last
         ? { kind: "note", section: "model", text: last.differs ? `⚠ ${last.text}` : last.text }
         : { kind: "note", section: "model", text: "Running model: shown after the first reply", placeholder: true };
+}
+
+/**
+ * The Model section: the harness's own models and, when srv offers routes for this harness, a Back row and a group
+ * per route. A row srv says cannot be picked is greyed with its reason and kept out of keyboard navigation.
+ */
+function addModelSection(s: DropupState, rows: Row[], options: OptionRow[], selected: string) {
+    const panel = s.routes.panel();
+    const onRoute = s.routeModel() !== null || s.routes.onSavedRoute();
+    rows.push({ kind: "header", section: "model" });
+    const add = (row: OptionRow) => {
+        rows.push({ kind: "option", ...row });
+        if (!row.disabled) options.push(row);
+    };
+    const back = panel ? backRow(panel) : null;
+    if (back) add(back);
+    if (panel && panel.routes.length > 0) rows.push({ kind: "group", section: "model", text: "Your plan", note: "the harness's own sign-in" });
+    for (const o of s.modelOptions()) {
+        add({ section: "model", value: o.value, label: o.label, description: o.description, current: !onRoute && selected === o.value });
+    }
+    if (!panel) return;
+    for (const { route, rows: routeModels } of routeRows(panel, s.props.contextTokens)) {
+        rows.push({ kind: "group", section: "model", text: route.label, note: route.key_present ? "billed to your key in the Vault" : "key missing" });
+        routeModels.forEach(add);
+    }
 }
 
 /** Single pass builds both the render list (rows, incl. section headers) and the flat option list keyboard nav / selection walks. */
@@ -93,7 +123,7 @@ export function buildRows(s: DropupState, a: DropupAgreement): { rows: Row[]; op
     };
 
     addSection("mode", modeOptions(s), s.isCodex() ? codexModeFor(r.permissionMode).value : r.permissionMode, true);
-    addSection("model", s.modelOptions(), r.model, false);
+    addModelSection(s, rows, options, r.model);
     rows.push(runningModelRow(s, a));
     // Claude: the five rows whether or not effort applies (Haiku), so picking
     // Haiku doesn't shrink the panel; they are just not selectable then.
@@ -116,6 +146,43 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
         s.setSelectedOptIndex((i) => (i + delta + options.length) % options.length);
     };
 
+    // A route model or Back moves the agent through srv; a harness model off a route is the runtime setting it always was,
+    // and from a route it first leaves the route (without a restart of its own: the runtime change restarts).
+    const pickModel = async (value: string) => {
+        const panel = s.routes.panel();
+        const move = async (route: string, model: string, restart: boolean) => {
+            try {
+                const { failed } = await s.routes.moveTo(route, model, restart);
+                // Saved, but a pane that could not restart still runs the old model: say so, as the pick cannot be retried.
+                s.setApplyError(failed.length > 0 ? `Saved, but the running pane did not switch: ${failed.join("; ")}` : null);
+                return true;
+            } catch (err: any) {
+                s.setApplyError(err?.message ?? String(err));
+                return false;
+            }
+        };
+        const target = parseRouteValue(value);
+        const compactTarget = parseCompactValue(value);
+        let moved = false;
+        if (compactTarget && s.props.compactThenSwitch) {
+            try {
+                await s.props.compactThenSwitch(compactTarget.route, compactTarget.model);
+                s.setApplyError(null);
+                await s.routes.refresh();
+            } catch (err: any) {
+                s.setApplyError(err?.message ?? String(err));
+            }
+        } else if (value === BACK_VALUE && panel?.previous) moved = await move(panel.previous.route, panel.previous.model, true);
+        else if (target) moved = await move(target.route, target.model, true);
+        // A harness model: the runtime setting it always was (which shows its own failure), from a route after leaving it.
+        else if (!(s.routeModel() || s.routes.onSavedRoute()) || (await move("", "", false))) {
+            await s.updateRuntime({ model: value });
+            moved = true;
+        }
+        // The agent was moved on by hand: a card about the change srv undid no longer says where it is.
+        if (moved && s.props.blockId) await dismissModelUndone(s.props.blockId);
+    };
+
     // Enter applies and keeps the panel open — deliberate departure from
     // FlyoutMenu's close-on-select. This panel hosts three independent axes,
     // not one value from one list; SPEC §9.2.
@@ -124,7 +191,7 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
         const choice = options[idx];
         if (!choice) return;
         if (choice.section === "mode") await s.updateRuntime({ permissionMode: choice.value as PermissionMode });
-        else if (choice.section === "model") await s.updateRuntime({ model: choice.value });
+        else if (choice.section === "model") await pickModel(choice.value);
         else await s.updateRuntime({ effort: choice.value as EffortLevel });
     };
 
@@ -141,6 +208,7 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
         const w = s.referenceEl ? parseFloat(getComputedStyle(s.referenceEl).width) : NaN;
         s.setHeldWidth(Number.isFinite(w) && w > 0 ? w : null);
         if (s.isCodex()) refreshCodexModels();
+        void s.routes.refresh();
         s.setOpen(true);
     };
 

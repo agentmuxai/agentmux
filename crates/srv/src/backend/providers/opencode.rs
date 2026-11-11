@@ -27,7 +27,7 @@ pub(super) static OPENCODE: ProviderConfig = ProviderConfig {
     auth_extra_env: &[("OPENCODE_DISABLE_AUTOUPDATE", "1"), ("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT", "1")],
     unset_env: &[],
     npm_package: "opencode-ai",
-    pinned_version: "1.19.0",
+    pinned_version: "1.19.5",
     base_url_env_var: None,
     supported_vendors: &["opencode"],
     startup_instructions_filename: Some("AGENTS.md"),

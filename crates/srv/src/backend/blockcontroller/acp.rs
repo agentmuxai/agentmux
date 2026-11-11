@@ -71,19 +71,47 @@ fn initialize_params() -> serde_json::Value {
     })
 }
 
-/// `session/new`, or `session/load` of `resume` when the agent can load one,
+/// How an agent takes an earlier session back, from its `initialize` answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SessionRestore {
+    /// Neither: every start is a new session.
+    No,
+    /// `session/load` (`agentCapabilities.loadSession`): the agent replays the conversation first.
+    Load,
+    /// `session/resume` (`agentCapabilities.sessionCapabilities.resume`, dsh): the conversation comes back
+    /// with no replay.
+    Resume,
+}
+
+impl SessionRestore {
+    /// The way an agent that said `can_load` and/or `can_resume` takes a session back. A replay is
+    /// preferred when both are offered, as before `session/resume` was supported.
+    pub(super) fn of(can_load: bool, can_resume: bool) -> Self {
+        if can_load {
+            Self::Load
+        } else if can_resume {
+            Self::Resume
+        } else {
+            Self::No
+        }
+    }
+}
+
+/// `session/new`, or `session/load` / `session/resume` of `resume` when the agent can take one back,
 /// with the agent's MCP servers (`acp_mcp`).
 fn session_request(
     resume: Option<&str>,
-    load_session: bool,
+    restore: SessionRestore,
     cwd: &str,
     mcp_servers: &[serde_json::Value],
 ) -> (&'static str, serde_json::Value) {
-    match resume.filter(|_| load_session) {
-        Some(sid) => (
-            "session/load",
-            serde_json::json!({ "sessionId": sid, "cwd": cwd, "mcpServers": mcp_servers }),
-        ),
+    let method = match restore {
+        SessionRestore::Load => "session/load",
+        SessionRestore::Resume => "session/resume",
+        SessionRestore::No => "session/new",
+    };
+    match resume.filter(|_| restore != SessionRestore::No) {
+        Some(sid) => (method, serde_json::json!({ "sessionId": sid, "cwd": cwd, "mcpServers": mcp_servers })),
         None => ("session/new", serde_json::json!({ "cwd": cwd, "mcpServers": mcp_servers })),
     }
 }
@@ -510,18 +538,21 @@ impl Controller for AcpController {
             inner.loading_session = None;
             inner.session_failed = false;
         }
-        // AgentMux's MCP servers: the `.mcp.json` the launch wrote where the
-        // session runs (startup_files). None when there is none.
-        let mcp_path = std::path::Path::new(&session_cwd(&cwd)).join(".mcp.json");
+        // AgentMux's MCP servers: the config the launch wrote for this agent, which is
+        // outside the working directory when that is the user's own project (#3680).
+        // None when there is none.
+        let mcp_json = crate::backend::mcp_config_file::read_for_turn(&session_cwd(&cwd));
         let mut env_vars = self.spawn_env(&block_meta);
         if let Some(pi) = crate::backend::providers::pi_beside_pi_acp(&cmd) {
             env_vars.entry("PI_ACP_PI_COMMAND".to_string()).or_insert(pi);
         }
         let provider = super::super::obj::meta_get_string(&block_meta, "agentProvider", "");
+        super::acp_prelaunch::prepare_env(&provider, &mut env_vars);
         super::acp_prelaunch::prepare(&provider, &env_vars, &session_cwd(&cwd));
+        super::acp_prelaunch::check_runtime(&provider, &env_vars)?;
         {
             let mut inner = self.inner.lock().unwrap();
-            inner.mcp_json = std::fs::read_to_string(mcp_path).ok();
+            inner.mcp_json = mcp_json;
             inner.mcp_env = env_vars.clone();
         }
 

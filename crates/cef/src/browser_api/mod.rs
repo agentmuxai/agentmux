@@ -28,10 +28,13 @@ use axum::Router;
 
 use crate::state::AppState;
 
+pub mod accessible_name;
 pub mod act;
 pub mod capture;
 pub mod capture_download;
 pub mod cdp;
+pub mod chooser_files;
+pub mod clickable;
 pub mod combobox;
 pub mod dates;
 pub mod file_chooser;
@@ -43,6 +46,7 @@ pub mod key_typing;
 pub mod last_input;
 pub mod page_state;
 pub mod page_url;
+pub mod press;
 pub mod ref_tables;
 pub mod resolver;
 pub mod routes;
@@ -93,6 +97,8 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))
         .route("/agentmux/browser/dispatch_key", post(routes::dispatch_key))
+        .route("/agentmux/browser/press", post(press::press_route))
+        .route("/agentmux/browser/chooser_files", post(chooser_files::chooser_files_route).layer(act::set_files_body_limit()))
         .route("/agentmux/browser/terminal_state", post(terminal::terminal_state))
         .route("/agentmux/browser/terminal_keys", post(terminal::terminal_keys))
         .route("/agentmux/browser/navigate", post(routes::navigate))
@@ -105,6 +111,8 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/list_shortcuts", post(shortcuts::list_shortcuts))
         .route("/agentmux/browser/run_command", post(shortcuts::run_command))
         .route("/agentmux/browser/press_keys", post(shortcuts::press_keys))
+        .route("/agentmux/browser/set_shortcut", post(shortcuts::set_shortcut))
+        .route("/agentmux/browser/reset_shortcuts", post(shortcuts::reset_shortcuts))
 }
 
 /// Shared state for the browser API — primarily the resolver's

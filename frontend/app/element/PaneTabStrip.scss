@@ -216,6 +216,10 @@
     display: flex;
     flex-direction: row;
     align-items: stretch;
+    // As a flex item it would otherwise take its content's intrinsic width as
+    // a minimum, leaving a shrinkable lone tab nothing to shrink against and
+    // scrolling the strip instead (#30300, measured on Linux).
+    min-width: 0;
     height: var(--pane-tab-strip-height);
     zoom: var(--pane-tab-strip-zoom, 1);
 }
@@ -234,6 +238,15 @@
     max-width: 240px;
     display: flex;
     align-items: stretch;
+}
+
+// A LONE tab may shrink to the strip and ellipsize instead of scrolling: in a
+// ~318 px pane the "CPU, memory and network" tab used to keep its width and
+// the strip scrolled ("u, memory and network", #30300). Several tabs are left
+// exactly as before: each at its own width, the strip scrolling once they no
+// longer fit — no short tab is widened by a floor.
+.pane-tab-strip-inner:not(:has(.pane-tab-tip ~ .pane-tab-tip)) .pane-tab-tip {
+    flex: 0 1 auto;
 }
 
 .pane-tab {
@@ -493,6 +506,20 @@
 
     img {
         object-fit: contain;
+    }
+
+    // The model badge on a harness logo (DualProviderLogo) keeps the size it was given, not the box's.
+    .dual-provider-logo-badge {
+        .provider-logo {
+            width: auto;
+            height: auto;
+        }
+
+        svg {
+            width: 1em;
+            height: 1em;
+            font-size: inherit;
+        }
     }
 }
 

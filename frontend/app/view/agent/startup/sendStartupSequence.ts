@@ -22,6 +22,8 @@ export interface StartupSequenceDeps {
     workDir: () => string;
     version: () => string;
     peerAgents: () => AgentDefinition[];
+    /** What the agents on a model route really run, by agent id (srv's `agent.peer-labels`). */
+    peerLabels?: () => Promise<{ labels?: Record<string, string> }>;
     getAgentContent: (contentType: "startup") => Promise<{ content?: string } | null>;
     listIdentities: () => Promise<Array<{ provider: string; account_id: string }>>;
     loadAccounts: () => Parameters<typeof resolveAccounts>[1];
@@ -52,10 +54,12 @@ export async function sendStartupSequence(d: StartupSequenceDeps): Promise<void>
         if (!agent) return;
 
         // Gather inputs in parallel where possible
-        const [startupContentResult, version, identityLinks] = await Promise.all([
+        const [startupContentResult, version, identityLinks, peerLabels] = await Promise.all([
             d.getAgentContent("startup").catch(() => null),
             Promise.resolve(d.version()),
             d.listIdentities().catch(() => []),
+            // The peer list is still sent, with the harness alone, when this fails.
+            d.peerLabels?.().then((r) => r?.labels).catch(() => undefined),
         ]);
 
         // A bundle's instructions are no longer sent here: the agent's Bundles
@@ -82,6 +86,7 @@ export async function sendStartupSequence(d: StartupSequenceDeps): Promise<void>
             version,
             accounts,
             peerAgents: d.peerAgents(),
+            peerLabels,
             startupContent,
         });
 

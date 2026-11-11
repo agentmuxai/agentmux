@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The shortcut table's MuxAPI routes: `list_shortcuts`, `run_command` and
-//! `press_keys` (docs/specs/PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md
+//! The shortcut table's MuxAPI routes: `list_shortcuts`, `run_command`,
+//! `press_keys`, `set_shortcut` and `reset_shortcuts` (docs/specs/PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md
 //! §4). srv sends the caller's own, verified block; these resolve the window
 //! whose page holds it and call the frontend's `window.__agentmux_shortcuts`
 //! there (frontend/app/keybindings/app-api.ts). No script from the request
@@ -46,6 +46,28 @@ pub struct PressReq {
     pub keys: String,
     #[serde(default)]
     pub target: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SetReq {
+    pub block_id: String,
+    pub command: String,
+    #[serde(default)]
+    pub bindings: Vec<String>,
+    #[serde(default)]
+    pub when: Option<String>,
+    /// The agent that asked, which the page names to the person.
+    pub agent: String,
+}
+
+#[derive(Deserialize)]
+pub struct ResetReq {
+    pub block_id: String,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub all: bool,
+    pub agent: String,
 }
 
 type Reply = (StatusCode, Json<ApiResponse<Value>>);
@@ -171,6 +193,39 @@ pub async fn press_keys(State(state): State<Arc<AppState>>, headers: HeaderMap, 
     reply(
         with_window(&state, &req.block_id, |mut cdp| async move {
             let r = press(&mut cdp, &plan_call).await;
+            (cdp, r)
+        })
+        .await,
+    )
+}
+
+/// `POST /agentmux/browser/set_shortcut`: the page applies the same edit the Settings view makes, refuses what an
+/// agent may not do, and tells the person (which can undo it).
+pub async fn set_shortcut(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(req): Json<SetReq>) -> Reply {
+    if !authorized(&headers, &state.ipc_token) {
+        return unauthorized();
+    }
+    let request = json!({ "command": req.command, "bindings": req.bindings, "when": req.when });
+    let call = format!("set({request}, {})", js_str(&req.agent));
+    reply(
+        with_window(&state, &req.block_id, |mut cdp| async move {
+            let r = eval(&mut cdp, &api_call(&call)).await;
+            (cdp, r)
+        })
+        .await,
+    )
+}
+
+/// `POST /agentmux/browser/reset_shortcuts`: one command, or every command, back on its defaults.
+pub async fn reset_shortcuts(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(req): Json<ResetReq>) -> Reply {
+    if !authorized(&headers, &state.ipc_token) {
+        return unauthorized();
+    }
+    let request = json!({ "command": req.command, "all": req.all });
+    let call = format!("reset({request}, {})", js_str(&req.agent));
+    reply(
+        with_window(&state, &req.block_id, |mut cdp| async move {
+            let r = eval(&mut cdp, &api_call(&call)).await;
             (cdp, r)
         })
         .await,

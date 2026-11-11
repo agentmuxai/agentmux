@@ -306,3 +306,27 @@ async fn a_name_that_is_not_a_browser_tool_is_not_in_the_family() {
     assert!(call_tool(&srv, "BrowserNope", json!({})).await.is_err());
     assert!(srv.seen.lock().unwrap().is_empty());
 }
+
+#[test]
+fn enter_taken_as_a_click_says_what_it_was_and_how_it_went() {
+    let d = json!({
+        "resolved": "Enter in a field of a form presses the form's default button",
+        "after": { "tag": "button", "type": "submit" },
+        "page": { "url": "https://a.example/done", "changed": true },
+        "bypassed": true,
+    });
+    let said = key_result_text(Some(&d));
+    assert!(said.starts_with("Pressed: Enter in a field of a form presses the form's default button."), "{said}");
+    assert!(said.contains("without asking") && said.contains("https://a.example/done"), "{said}");
+    let plain = key_result_text(Some(&json!({ "resolved": "Space on a checkbox presses it", "after": { "checked": true } })));
+    assert!(plain.contains("\"checked\":true") && !plain.contains("without asking"), "{plain}");
+}
+
+#[test]
+fn a_grant_with_enter_and_space_says_they_are_clicks_and_one_without_says_refused() {
+    let with = json!({ "origins": ["https://a.example"], "minutes_left": 55, "powers": ["clicks", "enter_space"], "always": false });
+    let said = granted_text(&with);
+    assert!(said.contains("Enter and Space (action key) are taken as the click they are") && !said.contains("Enter/Space stay refused"), "{said}");
+    let without = json!({ "origins": ["https://a.example"], "minutes_left": 55, "powers": ["clicks"], "always": false });
+    assert!(granted_text(&without).contains("eval and Enter/Space stay refused"));
+}

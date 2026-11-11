@@ -222,6 +222,7 @@ partial list.
 | [`SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10`](SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md) | SPEC: Agent-Driven Interactive PTY Shell API |
 | [`SPEC_AGENT_LAUNCH_NAME_NO_AUTOFILL_2026_09_08`](SPEC_AGENT_LAUNCH_NAME_NO_AUTOFILL_2026_09_08.md) | SPEC: Agent launch name — no autofill, ghost-text placeholder only |
 | [`SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04`](SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md) | SPEC — Tighten the agent-pane login flow: auto-unblock on external bind, "Bind account" button |
+| [`SPEC_AGENT_MODEL_ENDPOINT_ENV_2026_11_08`](SPEC_AGENT_MODEL_ENDPOINT_ENV_2026_11_08.md) | SPEC: agents can point a Claude Code agent at another model server |
 | [`SPEC_AGENT_OPEN_LATENCY_2026_09_27`](SPEC_AGENT_OPEN_LATENCY_2026_09_27.md) | SPEC: opening an agent from My Agents should be near-instant — where the time goes, and what to change |
 | [`SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20`](SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md) | SPEC: Vault Icon on the Agent-Setup Button + Responsive Tabs in the Per-Agent "Armory" |
 | [`SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26`](SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md) | Agent Pane Mount/Auth Notifications & Launch-Auth Reducer |
@@ -432,6 +433,7 @@ partial list.
 | [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
 | [`SPEC_PANE_FILE_DROP_2026_05_30`](SPEC_PANE_FILE_DROP_2026_05_30.md) | SPEC: Drag-and-drop files into Terminal and Agent panes |
 | [`SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19`](SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19.md) | SPEC: Pane Header Height + Tab Active Indicator Edge-to-Edge |
+| [`SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10`](SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md) | SPEC: The pane header's horizontal scroll covers tabs, +, grip and aux controls (minimize stays pinned) |
 | [`SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21`](SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md) | SPEC: the pane header's tail color follows the pane, not the active tab |
 | [`SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21`](SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md) | SPEC: pane header informational text becomes a hover tooltip |
 | [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
@@ -617,6 +619,7 @@ partial list.
 | [`SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29`](SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md) | Agent pane: the latest message stays tight against the bottom edge, always |
 | [`SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23`](SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md) | SPEC: Agent pane bounded live window — migration plan |
 | [`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md) | SPEC: Closing a pane shuts down every agent in it — gracefully, in order |
+| [`SPEC_AGENT_PANE_CPU_MEMORY_READOUT_IN_COMPOSER_STRIP_2026_11_07`](SPEC_AGENT_PANE_CPU_MEMORY_READOUT_IN_COMPOSER_STRIP_2026_11_07.md) | Spec: the agent pane's top band is a priority layout, and the CPU and memory readout moves from it into the composer strip |
 | [`SPEC_AGENT_PANE_FAILURE_ROW_FOLLOWS_LIVE_STATE_2026_10_29`](SPEC_AGENT_PANE_FAILURE_ROW_FOLLOWS_LIVE_STATE_2026_10_29.md) | Spec: the agent pane's failure row follows the agent's live state |
 | [`SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md) | SPEC: Attach any file in the agent composer (PDF, Office, text, code, …) |
 | [`SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05`](SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) | SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest |
@@ -639,6 +642,7 @@ partial list.
 | [`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23`](SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md) | SPEC: Agent seats in the UI: role, lead and area on the agent, shown where you meet it |
 | [`SPEC_AGENT_SELF_QUIT_2026_09_24`](SPEC_AGENT_SELF_QUIT_2026_09_24.md) | SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only) |
 | [`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24`](SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md) | SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN |
+| [`SPEC_AGENT_SPAWN_NOTICE_IN_THE_PANE_2026_11_08`](SPEC_AGENT_SPAWN_NOTICE_IN_THE_PANE_2026_11_08.md) | Spec: an agent starting agents is a notice in its pane with a veto, not an out-of-window approval |
 | [`SPEC_AGENT_STATE_BACKGROUND_WORK_2026_11_01`](SPEC_AGENT_STATE_BACKGROUND_WORK_2026_11_01.md) | Spec: a new agent state beside Working and Idle: Background |
 | [`SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01`](SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md) | SPEC: One teardown path for everything an agent owns |
 | [`SPEC_AGENT_TERMINAL_DRIVING_2026_10_15`](SPEC_AGENT_TERMINAL_DRIVING_2026_10_15.md) | SPEC: Agents drive terminals through MuxAPI: keys, screen, wait, commands, terminal panes |
@@ -755,6 +759,7 @@ partial list.
 | [`SPEC_LAYOUT_FILES_2026_09_25`](SPEC_LAYOUT_FILES_2026_09_25.md) | SPEC: Layout files — "Layouts → Save layout…" and the `agentmux.layout` file format |
 | [`SPEC_LINUX_PACKAGES_XZ_2026_10_14`](SPEC_LINUX_PACKAGES_XZ_2026_10_14.md) | Spec: compress the Linux deb, rpm and portable tarball with xz |
 | [`SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24`](SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md) | Spec: upgrading a .deb or .rpm install from the app, and an apt/dnf repository |
+| [`SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06`](SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md) | SPEC: Live reflow while dragging a pane or pane tab (the end state for pane drag and drop) |
 | [`SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02`](SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02.md) | Spec: one ASCII animation per kind of long-running work |
 | [`SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) | SPEC: Pinned Activity Dock — Unified Long-Running Activities |
 | [`SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21`](SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21.md) | Spec: code in markdown on shiki, and the frontend libraries we can drop |
@@ -783,6 +788,7 @@ partial list.
 | [`SPEC_PACKS_2026_11_05`](SPEC_PACKS_2026_11_05.md) | SPEC: Computer-use skills: per-application knowledge for computer use (Word, Excel, Ableton Live, WaveLab, Blender first) |
 | [`SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28`](SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md) | A pane shows it is closing, and a close stops waiting on srv |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
+| [`SPEC_PANE_LOCATE_FLASH_ONE_FRAMEWORK_2026_11_08`](SPEC_PANE_LOCATE_FLASH_ONE_FRAMEWORK_2026_11_08.md) | Spec: the pane locate flash, one framework for every path that surfaces an existing pane |
 | [`SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02`](SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md) | Spec: pane modals, not window modals, for sign-in and OAuth; an audit of every window modal (2026-11-02) |
 | [`SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18`](SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18.md) | Spec: Selecting a pane from Swarm — the lost click, and one state machine for "show this pane" |
 | [`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) | SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign) |
@@ -801,10 +807,12 @@ partial list.
 | [`SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25`](SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md) | SPEC: one resume gate, and native continuation across logins of the same identity |
 | [`SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13`](SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md) | SPEC: Resume phases: the "Given to the agent" card in its place, then the agent catches up and tells the user where it is |
 | [`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27`](SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md) | SPEC: one way to reveal a block — including a background tab in a multi-tab pane |
+| [`SPEC_ROUTE_AGENT_BRAKES_2026_11_10`](SPEC_ROUTE_AGENT_BRAKES_2026_11_10.md) | Route agent brakes: a spend cap, budgeted compaction and loop detection |
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01`](SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01.md) | settings.json lists every setting with its default commented out, kept 1-to-1 by a guard, safe to copy and paste |
 | [`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03`](SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md) | SPEC: share authentication across channels — no re-login on every build |
+| [`SPEC_SHARED_KANBAN_ACROSS_MACHINES_2026_11_01`](SPEC_SHARED_KANBAN_ACROSS_MACHINES_2026_11_01.md) | SPEC: Shared Kanban: one board across a user's machines, by LAN or AgentMux Cloud |
 | [`SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01`](SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md) | SPEC: one shared 16-colour palette, evenly spaced by human perception, for panes, agents, tabs, windows and browser profiles |
 | [`SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28`](SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md) | The Shortcuts pane: a split opens tiles for every pane type and widget, last used first |
 | [`SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25`](SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md) | Signed checksums for update downloads |
@@ -837,6 +845,7 @@ partial list.
 | [`SPEC_UNRESPONSIVE_AGENTS_2026_10_23`](SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md) | SPEC: unresponsive agents — out-of-quota and signed-out states, the reset time, held messages, the per-account notice |
 | [`SPEC_UPDATE_UNPACK_7Z_IN_RUST_2026_10_19`](SPEC_UPDATE_UNPACK_7Z_IN_RUST_2026_10_19.md) | Spec: the Windows upgrade unpacks the release's .7z itself, not with tar.exe |
 | [`SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15`](SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md) | SPEC: upgrading AgentMux, for users and for agents |
+| [`SPEC_USER_DATA_SYNC_LAYER_2026_11_01`](SPEC_USER_DATA_SYNC_LAYER_2026_11_01.md) | SPEC: one sync layer for a user's own data: Kanban boards and Vaults across their machines, by LAN or AgentMux Cloud |
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
 | [`SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28`](SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md) | SPEC: secrets nobody types. The Vault generates, captures, delivers and rotates them, and the browser saves, generates and fills sign-ins |
 | [`SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19`](SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md) | SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them |

@@ -35,7 +35,7 @@ import { sleep } from "@/util/util";
 import { createTranscriptSettleLatch, TranscriptCursor } from "../transcript-cursor";
 import { beginAgentOpen, finishAgentOpen, openTraceEnv, resetAgentOpenTracesForTests } from "../open-trace";
 import { __resetOpenTailForTests, type OpenTailResult } from "./open-tail";
-import { MAX_SAVED_HELD, OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, useHistoryPagination } from "./useHistoryPagination";
+import { OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, useHistoryPagination } from "./useHistoryPagination";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 let dispose: (() => void) | null = null;
@@ -165,14 +165,12 @@ describe("first screen", () => {
         expect([...overlay.documentState.collapsedNodes]).toEqual(["x"]);
         expect([...overlay.documentState.pinnedNodes]).toEqual(["y"]);
         expect(overlay.detailsOpen).toBe(true);
-        // A snapshot without held ids brings none back.
         expect(overlay.documentState.heldOpenNodes.size).toBe(0);
-        expect(overlay.documentState.restoredHeldNodes).toBeUndefined();
     });
 
-    it("held ids in the snapshot come back as held and as restored (the newest few, strings only)", async () => {
+    it("held ids an older snapshot carries are not brought back: a restored pane opens every row closed", async () => {
         const onSnapshotOverlay = vi.fn();
-        const many = Array.from({ length: MAX_SAVED_HELD + 5 }, (_, i) => `h${i}`);
+        const many = Array.from({ length: 45 }, (_, i) => `h${i}`);
         openTail.mockResolvedValue(
             tailOf(3, 100, {
                 snapshot: JSON.stringify({
@@ -186,8 +184,8 @@ describe("first screen", () => {
         mount({ onSnapshotOverlay });
         await flush();
         const ds = onSnapshotOverlay.mock.calls[0][0].documentState;
-        expect([...ds.heldOpenNodes]).toEqual(many.slice(-MAX_SAVED_HELD));
-        expect([...ds.restoredHeldNodes]).toEqual(many.slice(-MAX_SAVED_HELD));
+        expect(ds.heldOpenNodes.size).toBe(0);
+        expect(ds).not.toHaveProperty("restoredHeldNodes");
     });
 });
 

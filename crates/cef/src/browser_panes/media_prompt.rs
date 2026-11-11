@@ -134,12 +134,18 @@ struct PendingRequest {
 /// grant covers the request) and must emit the prompt event *after* this
 /// returns, so an implausibly fast answer still finds the entry.
 pub fn park(callback: MediaAccessCallback, block_id: &str, origin: &str, requested: u32) -> u64 {
+    park_boxed(Box::new(callback), block_id, origin, requested)
+}
+
+/// [`park`] for any callback that can be continued with the bits allowed (a page's location or
+/// notification prompt in an agent's pane, `client::agent_permission`).
+pub fn park_boxed(callback: Box<dyn MediaContinuation>, block_id: &str, origin: &str, requested: u32) -> u64 {
     debug_assert_ne!(
         cef::currently_on(cef::ThreadId::UI),
         0,
         "media prompts must be parked on the CEF UI thread"
     );
-    REGISTRY.with(|r| r.borrow_mut().park(Box::new(callback), block_id, origin, requested))
+    REGISTRY.with(|r| r.borrow_mut().park(callback, block_id, origin, requested))
 }
 
 /// Resolve a parked request. `None` if it is already gone — an unknown id, a

@@ -44,6 +44,11 @@ pub struct HeldNotes {
 #[derive(Debug, Default)]
 struct Pane {
     notes: Vec<(String, String)>,
+    /// Keys invalidated since they were last held. A note can be out of the
+    /// set while a message carries it (it is taken on attach); if that message
+    /// is later dropped, [`HeldNotes::put_back`] must not resurrect a note its
+    /// own invalidation (`forget_key`/`replace`) has since removed.
+    forgotten: HashSet<String>,
     touched: u64,
 }
 
@@ -65,6 +70,8 @@ impl HeldNotes {
         let text = super::sanitize::with_system_note_marker(text);
         let pane = self.pane(block_id);
         pane.notes.retain(|(k, _)| k != key);
+        // A fresh note under this key supersedes any earlier invalidation.
+        pane.forgotten.remove(key);
         pane.notes.push((key.to_string(), text.into_owned()));
         if pane.notes.len() > MAX_PER_PANE {
             pane.notes.remove(0);
@@ -74,21 +81,28 @@ impl HeldNotes {
     /// Hold `text` under `key` in place of the note held under `old_key`.
     /// `false`, holding nothing, when no note is held under `old_key`.
     pub fn replace(&mut self, block_id: &str, old_key: &str, key: &str, text: &str) -> bool {
-        let Some(pane) = self.panes.get_mut(block_id) else { return false };
+        let pane = self.pane(block_id);
         let before = pane.notes.len();
         pane.notes.retain(|(k, _)| k != old_key);
-        if pane.notes.len() == before {
-            return false;
+        // Even when the old note is out with a queued message, its key is now
+        // invalidated and must not come back if that message is dropped (#3894
+        // follow-up).
+        pane.forgotten.insert(old_key.to_string());
+        let replaced = pane.notes.len() != before;
+        if replaced {
+            self.hold(block_id, key, text);
         }
-        self.hold(block_id, key, text);
-        true
+        replaced
     }
 
     /// Drop the note held for `block_id` under `key`, if any.
     pub fn forget_key(&mut self, block_id: &str, key: &str) {
-        if let Some(pane) = self.panes.get_mut(block_id) {
-            pane.notes.retain(|(k, _)| k != key);
-        }
+        let pane = self.pane(block_id);
+        pane.notes.retain(|(k, _)| k != key);
+        // Recorded even when nothing is held: the note may be out with a
+        // message that is waiting, and must not return if that message is
+        // dropped (#3894 follow-up).
+        pane.forgotten.insert(key.to_string());
     }
 
     /// Whether a note is held for `block_id` under `key`.
@@ -96,9 +110,12 @@ impl HeldNotes {
         self.panes.get(block_id).is_some_and(|p| p.notes.iter().any(|(k, _)| k == key))
     }
 
-    /// Every note held for `block_id`, oldest first; none are held after.
+    /// Every note held for `block_id`, oldest first; none are held after. The
+    /// pane stays, with the keys invalidated while a message carries its
+    /// notes, so a later [`Self::put_back`] still sees them (#3894 follow-up).
     pub fn take(&mut self, block_id: &str) -> Vec<(String, String)> {
-        self.panes.remove(block_id).map(|p| p.notes).unwrap_or_default()
+        let Some(pane) = self.panes.get_mut(block_id) else { return Vec::new() };
+        std::mem::take(&mut pane.notes)
     }
 
     /// `notes`, taken for a message that didn't go, are held again ahead of
@@ -108,8 +125,12 @@ impl HeldNotes {
             return;
         }
         let pane = self.pane(block_id);
-        let mut all: Vec<(String, String)> =
-            notes.into_iter().filter(|(k, _)| !pane.notes.iter().any(|(newer, _)| newer == k)).collect();
+        // Not a note its own invalidation removed while the message waited
+        // (#3894 follow-up), and not one a newer note has since taken.
+        let mut all: Vec<(String, String)> = notes
+            .into_iter()
+            .filter(|(k, _)| !pane.forgotten.contains(k) && !pane.notes.iter().any(|(newer, _)| newer == k))
+            .collect();
         all.append(&mut pane.notes);
         let excess = all.len().saturating_sub(MAX_PER_PANE);
         pane.notes = all.split_off(excess);
@@ -127,6 +148,16 @@ fn held() -> MutexGuard<'static, HeldNotes> {
 /// UID goes through [`ReactiveHandler::hold_system_note`].
 pub fn hold(block_id: &str, key: &str, text: &str) {
     held().hold(block_id, key, text);
+}
+
+/// Notes that went on a message srv then dropped (a deferred jekt that
+/// expired before the process could take it): hold them again for the agent's
+/// next message, under their original keys. They are not the jekt's to lose —
+/// a `[AgentMux]` note about the app's own state outlives the sender's
+/// deadline (#3894) — and the keys are what a later `replace` or `forget_key`
+/// for the same note acts on, so a restored note can still be superseded.
+pub fn put_back(block_id: &str, notes: Vec<(String, String)>) {
+    held().put_back(block_id, notes);
 }
 
 /// Drop the note held for `block_id` under `key`, if any (it went stale).
@@ -250,6 +281,13 @@ impl Attached {
     /// The texts of the notes taken for the message, oldest first.
     pub fn note_texts(&self) -> Vec<String> {
         self.notes.iter().map(|(_, text)| text.clone()).collect()
+    }
+
+    /// The notes taken for the message with their original keys, so a message
+    /// that is dropped can put them back exactly as they were (the keys are
+    /// what [`HeldNotes::replace`] and [`HeldNotes::forget_key`] act on).
+    pub fn keyed_notes(&self) -> Vec<(String, String)> {
+        self.notes.clone()
     }
 
     /// The message carrying the notes went to the agent.
@@ -412,6 +450,54 @@ mod tests {
         assert_eq!(texts(&h.take("b")), ["[AgentMux] were paused"]);
     }
 
+    /// #3894 follow-up: while a message waits (the controller's deferred
+    /// queue), the notes it took are out of the held set; an invalidation in
+    /// that window must still reach them, so a dropped message cannot restore
+    /// a note that has been superseded.
+    #[test]
+    fn a_note_invalidated_while_a_message_waits_is_not_put_back() {
+        let mut h = HeldNotes::default();
+        h.hold("b", "paused", "[AgentMux] cloud delivery paused");
+        let waiting = h.take("b");
+        h.forget_key("b", "paused");
+        h.put_back("b", waiting);
+        assert!(!h.holds("b", "paused"), "the invalidation wins over the dropped message");
+    }
+
+    #[test]
+    fn a_note_replaced_while_a_message_waits_is_not_put_back() {
+        let mut h = HeldNotes::default();
+        h.hold("b", "paused", "[AgentMux] cloud delivery paused");
+        let waiting = h.take("b");
+        assert!(!h.replace("b", "paused", "outage", "[AgentMux] still paused"), "nothing held to replace");
+        h.hold("b", "resumed", "[AgentMux] resumed");
+        h.put_back("b", waiting);
+        assert_eq!(texts(&h.take("b")), ["[AgentMux] resumed"]);
+    }
+
+    /// A second message taking the same pane must not clear the invalidation
+    /// the first one's wait recorded.
+    #[test]
+    fn an_invalidation_survives_a_later_take_of_the_same_pane() {
+        let mut h = HeldNotes::default();
+        h.hold("b", "paused", "[AgentMux] paused");
+        let first = h.take("b");
+        h.forget_key("b", "paused");
+        assert!(h.take("b").is_empty(), "the second message takes nothing");
+        h.put_back("b", first);
+        assert!(!h.holds("b", "paused"), "the invalidation still wins");
+    }
+
+    /// A dropped message's note still comes back when nothing invalidated it.
+    #[test]
+    fn a_note_untouched_while_the_message_waited_is_put_back() {
+        let mut h = HeldNotes::default();
+        h.hold("b", "other", "[AgentMux] other");
+        let waiting = h.take("b");
+        h.put_back("b", waiting);
+        assert!(h.holds("b", "other"));
+    }
+
     #[test]
     fn the_queue_is_bounded_per_pane_and_in_panes() {
         let mut h = HeldNotes::default();
@@ -530,7 +616,7 @@ never attached
         let sent = Arc::new(Mutex::new(0usize));
         let handler = ReactiveHandler::new();
         let (s1, s2) = (sent.clone(), sent.clone());
-        handler.set_message_sender(Arc::new(move |_: &str, _: &str, _: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
+        handler.set_message_sender(Arc::new(move |_: &str, _: &str, _: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires_at_ms: Option<i64>| {
             *s1.lock().unwrap() += 1;
             Ok(SenderDelivery::Delivered)
         }));

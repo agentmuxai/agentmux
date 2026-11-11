@@ -8,6 +8,7 @@
 // the React app bootstraps.
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import type { HostKey } from "@/app/keybindings/host-keys";
 import type { HealthPayload } from "@/app/store/health-signals";
 import { jsContextMenuApi } from "@/app/host/js-context-menu";
 import { benchMark } from "@/util/startup-bench";
@@ -241,6 +242,9 @@ function windowEventApi() {
         },
         setZoomFactor: (zoomFactor: number) => {
             invokeCommand("set_zoom_factor", { factor: zoomFactor }).catch(console.error);
+        },
+        setHostKeys: (keys: HostKey[]) => {
+            invokeCommand("set_host_keys", { keys }).catch(console.error);
         },
 
         // --- Updater ---
@@ -588,6 +592,9 @@ function crossWindowDragApi() {
         },
         liveFollowEnd: async () => {
             await invokeCommand("live_follow_end");
+        },
+        liveFollowResize: async (args) => {
+            await invokeCommand("live_follow_resize", args);
         },
     } satisfies Partial<AppApi>;
 }

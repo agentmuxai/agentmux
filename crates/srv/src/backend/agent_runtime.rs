@@ -526,6 +526,27 @@ pub(crate) fn model_takes_effort(model: &str) -> bool {
     !model.to_ascii_lowercase().contains("haiku")
 }
 
+/// The model a Claude Code agent pointed at a custom server (`ANTHROPIC_BASE_URL` in its `cmd:env` that is
+/// not Anthropic's) asks it for: `ANTHROPIC_MODEL`, else the alias (`sonnet`, `opus`, `haiku`) the CLI maps to
+/// that tier's `ANTHROPIC_DEFAULT_*_MODEL`. None where the agent is not on a custom server, or names no model.
+pub(crate) fn endpoint_model(meta: &MetaMapType) -> Option<String> {
+    let env = meta.get("cmd:env")?.as_object()?;
+    // Names are read without regard to case, as the launch does (`spawn_env::endpoint`).
+    let all = |name: &str| {
+        let mut spellings: Vec<_> = env.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).collect();
+        spellings.sort_by(|a, b| a.0.cmp(b.0));
+        spellings.into_iter().filter_map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).collect::<Vec<_>>()
+    };
+    let get = |name: &str| all(name).into_iter().next();
+    all("ANTHROPIC_BASE_URL").into_iter().find(|u| !crate::backend::agent_env::is_anthropic_url(u))?;
+    get("ANTHROPIC_MODEL").map(str::to_string).or_else(|| {
+        [("ANTHROPIC_DEFAULT_SONNET_MODEL", "sonnet"), ("ANTHROPIC_DEFAULT_OPUS_MODEL", "opus"), ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "haiku")]
+            .into_iter()
+            .find(|(name, _)| get(name).is_some())
+            .map(|(_, alias)| alias.to_string())
+    })
+}
+
 /// Claude model names: the aliases and concrete ids. A pane carried over from
 /// before per-provider models can have one stored for a Codex agent; it must
 /// never reach Codex, which rejects it (frontend `buildRuntimeArgs.ts` guards the
@@ -544,7 +565,40 @@ fn is_claude_model(m: &str) -> bool {
 pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<String> {
     let raw_provider = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
     let listed = account_listed_models(crate::backend::providers::resolve_provider_alias(&raw_provider));
-    with_runtime_flags_listed(meta, args, &listed)
+    let args = with_runtime_flags_listed(meta, args, &listed);
+    with_mcp_config_flag(meta, args)
+}
+
+/// Point a Claude turn at the agent's MCP config when it lives outside the working directory
+/// (#3680): a launch into the user's own project writes it under AgentMux's data root, which
+/// Claude does not find on its own. `--mcp-config` adds it to whatever Claude already reads, so
+/// the project's own `.mcp.json` keeps reaching it. Every other harness is handed the servers by
+/// srv (`mcp_config_file::read_for_turn`), so it needs no flag.
+///
+/// Never overrides a `--mcp-config` already in the argv (an agent's own provider flags), and
+/// idempotent, so a pane that spawns through more than one of the paths gets one flag.
+fn with_mcp_config_flag(meta: &MetaMapType, mut args: Vec<String>) -> Vec<String> {
+    let provider = crate::backend::providers::resolve_provider_alias(&crate::backend::obj::meta_get_string(meta, "agentProvider", ""));
+    if provider != "claude" || flag_value(&args, &["--mcp-config"]).is_some() {
+        return args;
+    }
+    let work_dir = crate::backend::obj::meta_get_string(meta, "cmd:cwd", "");
+    if work_dir.trim().is_empty() {
+        return args;
+    }
+    let Some(path) = crate::backend::mcp_config_file::relocated_path(&work_dir) else {
+        return args;
+    };
+    if !path.is_file() {
+        return args;
+    }
+    let runtime = crate::backend::runtime_adapter::RuntimeKind::of_block_meta(meta);
+    let shown = runtime
+        .adapter()
+        .map_mount(crate::backend::runtime_adapter::MountRole::McpConfig, &path.to_string_lossy());
+    args.push("--mcp-config".to_string());
+    args.push(shown);
+    args
 }
 
 /// [`with_runtime_flags`], given the models the provider's accounts list.
@@ -558,6 +612,15 @@ fn with_runtime_flags_listed(meta: &MetaMapType, args: Vec<String>, listed: &[St
     // for — would silently get nothing (ReAgent P1 on #4116). Unknown → "".
     let raw_provider = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
     let provider_id = crate::backend::providers::resolve_provider_alias(&raw_provider);
+    // An agent pointed at a server of its own asks that server for the model its environment names, not
+    // for a Claude model the server does not have (a local Ollama answers `claude-sonnet-5-5` with 404).
+    if provider_id == "claude" {
+        if let Some(model) = endpoint_model(meta) {
+            let mut out = without_flags(without_model_flags(args), &["--effort"]);
+            out.extend(["--model".to_string(), model]);
+            return out;
+        }
+    }
     let Some(default_model) = launch_default_model(provider_id, listed) else {
         return args;
     };
@@ -1151,6 +1214,30 @@ mod tests {
         m
     }
 
+    /// #3680: a Claude agent working in the user's own project gets the config AgentMux wrote
+    /// outside that project, once, and no other provider is given the flag (srv hands them the
+    /// servers from the same file).
+    #[test]
+    fn a_user_project_turn_is_pointed_at_the_agents_config_outside_it_once() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let project_str = project.path().to_string_lossy().into_owned();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            let path = crate::backend::mcp_config_file::relocated_path(&project_str).unwrap();
+            crate::backend::mcp_config_file::write_relocated(&path, r#"{"mcpServers":{"agentmux":{}}}"#).unwrap();
+            let mut meta = meta_with("claude", None);
+            meta.insert("cmd:cwd".to_string(), json!(project_str));
+            let out = with_runtime_flags(&meta, s(&["--model", "sonnet"]));
+            let at = out.iter().position(|a| a == "--mcp-config").expect("a Claude turn is pointed at its config");
+            assert_eq!(out[at + 1], path.to_string_lossy());
+            assert_eq!(with_runtime_flags(&meta, out.clone()).iter().filter(|a| *a == "--mcp-config").count(), 1, "added once");
+
+            let mut codex = meta_with("codex", None);
+            codex.insert("cmd:cwd".to_string(), json!(project_str));
+            assert!(!with_runtime_flags(&codex, s(&["exec", "-"])).iter().any(|a| a == "--mcp-config"));
+        });
+    }
+
     #[test]
     fn a_stored_pane_with_no_flags_gets_what_its_menu_shows() {
         let meta = meta_with(
@@ -1326,5 +1413,49 @@ mod tests {
             );
         }
         assert!(with_runtime_flags(&meta_with("claude", None), vec![]).is_empty());
+    }
+
+    fn endpoint_meta(env: Value) -> MetaMapType {
+        let mut m = meta_with("claude", Some(json!({"model": "sonnet", "effort": "high", "permissionMode": "bypass"})));
+        m.insert("cmd:env".to_string(), env);
+        m
+    }
+
+    #[test]
+    fn an_agent_on_a_custom_server_asks_it_for_its_own_model_not_a_claude_one() {
+        let meta = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "http://192.0.2.68:11434", "ANTHROPIC_MODEL": "flint:40b-a2b"}));
+        // srv's own default (`--model claude-sonnet-5-5 --effort high`) is already in the stored argv.
+        let args = ss(&["--print", "--model", "claude-sonnet-5-5", "--effort", "high", "--resume", "sid"]);
+        let out = with_runtime_flags_listed(&meta, args, &[]);
+        assert_eq!(out, ss(&["--print", "--resume", "sid", "--model", "flint:40b-a2b"]));
+        // Idempotent: a second pass changes nothing.
+        assert_eq!(with_runtime_flags_listed(&meta, out.clone(), &[]), out);
+    }
+
+    #[test]
+    fn with_no_model_named_the_tiers_alias_is_used_and_anthropic_itself_is_left_alone() {
+        let tier = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "http://localhost:11434", "ANTHROPIC_DEFAULT_SONNET_MODEL": "qwen3-coder:30b"}));
+        assert_eq!(endpoint_model(&tier).as_deref(), Some("sonnet"));
+        let none = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "http://localhost:11434"}));
+        assert_eq!(endpoint_model(&none), None);
+        let anthropic = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "ANTHROPIC_MODEL": "claude-opus-5-5"}));
+        assert_eq!(endpoint_model(&anthropic), None);
+        let out = with_runtime_flags_listed(&anthropic, ss(&["--print"]), &[]);
+        assert!(out.contains(&"--model".to_string()) && !out.contains(&"claude-opus-5-5".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn the_endpoint_names_are_read_in_any_case() {
+        let meta = endpoint_meta(json!({"anthropic_base_url": "http://localhost:11434", "Anthropic_Model": "flint:40b-a2b"}));
+        assert_eq!(endpoint_model(&meta).as_deref(), Some("flint:40b-a2b"));
+        let both = endpoint_meta(json!({"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "anthropic_base_url": "http://localhost:11434", "ANTHROPIC_MODEL": "m"}));
+        assert_eq!(endpoint_model(&both).as_deref(), Some("m"), "a spelling that is not Anthropic's decides");
+    }
+
+    #[test]
+    fn an_agent_with_no_endpoint_keeps_the_model_flags_it_has() {
+        let meta = meta_with("claude", Some(json!({"model": "sonnet", "effort": "high", "permissionMode": "bypass"})));
+        let args = ss(&["--print", "--model", "opus", "--effort", "max"]);
+        assert_eq!(with_runtime_flags_listed(&meta, args.clone(), &[]), args);
     }
 }

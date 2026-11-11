@@ -11,6 +11,7 @@ import {
     totalSize,
     update,
     windowRange,
+    windowRangeOf,
 } from "./reducer";
 import {
     AgentPaneLayoutCommand,
@@ -381,7 +382,7 @@ describe("agent-pane-layout reducer", () => {
         };
 
         it("returns the rows overlapping the viewport, padded by overscan", () => {
-            let s = build(); // 20 rows × 100px = 2000px; overscan default 5
+            let s = { ...build(), overscanPx: 0 }; // 20 rows × 100px = 2000px; overscan default 5, no pixel overscan
             s = apply(s, { type: "Scrolled", scrollTop: 1000, viewportPx: 300 });
             const w = windowRange(s);
             // Rows are 100px + ROW_GAP_PX apart: row 9 spans 936..1036 and
@@ -389,6 +390,41 @@ describe("agent-pane-layout reducer", () => {
             // ±5 overscan, clamped.
             expect(w.startIndex).toBe(4);
             expect(w.endIndex).toBe(17);
+        });
+
+        it("covers at least overscanPx past each edge when the rows are thin", () => {
+            // 40 rows of 20px (24px apart): five rows of overscan is only 120px.
+            let s = initialState();
+            const ids = Array.from({ length: 40 }, (_, i) => `t${i}`);
+            s = apply(s, { type: "NodesChanged", orderedIds: ids });
+            for (const id of ids) s = apply(s, { type: "RowMeasured", nodeId: id, state: "collapsed", cssPx: 20 });
+            s = apply(s, { type: "Scrolled", scrollTop: 480, viewportPx: 200 });
+            const withRows = windowRangeOf(positions({ ...s, overscanPx: 0 }), 480, 200, s.overscan);
+            const withPx = windowRange({ ...s, overscanPx: 300 });
+            expect(withPx.startIndex).toBeLessThan(withRows.startIndex);
+            expect(withPx.endIndex).toBeGreaterThan(withRows.endIndex);
+            // Every row within 300px above the viewport top (480) and below its bottom (680) is in the window.
+            const pos = positions(s);
+            for (const [i, p] of pos.entries()) {
+                if (p.end > 480 - 300 && p.start < 680 + 300) {
+                    expect(i).toBeGreaterThanOrEqual(withPx.startIndex);
+                    expect(i).toBeLessThanOrEqual(withPx.endIndex);
+                }
+            }
+        });
+
+        it("a viewport that grows under a stale window still lands on rendered rows (the composer emptying on send)", () => {
+            // The browser clamps the scroll position down by the growth: the window computed before the clamp
+            // must still reach the new viewport top.
+            let s = initialState();
+            const ids = Array.from({ length: 60 }, (_, i) => `g${i}`);
+            s = apply(s, { type: "NodesChanged", orderedIds: ids });
+            for (const id of ids) s = apply(s, { type: "RowMeasured", nodeId: id, state: "collapsed", cssPx: 20 });
+            const contentEnd = positions(s)[59].end;
+            const before = windowRangeOf(positions(s), contentEnd - 800, 800, s.overscan, s.overscanPx);
+            const grownTop = contentEnd - 800 - 400; // 400px taller viewport at the bottom: the scroll position clamps down by 400
+            const firstVisible = positions(s).findIndex((p) => p.end > grownTop);
+            expect(before.startIndex).toBeLessThanOrEqual(firstVisible);
         });
 
         it("empty region → empty range", () => {

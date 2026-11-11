@@ -111,6 +111,20 @@ describe("tear-off snapshot", () => {
         expect(shots.drawn).toEqual([[20, 40, 600, 400, 0, 0, 600, 400]]);
     });
 
+    it("a picture older than the age limit is dropped, unless the live follow has been showing it", async () => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        mountPane("b1");
+        prewarmTearOffSnapshot("b1", { x: 60, y: 35 });
+        vi.advanceTimersByTime(30_000);
+        expect(await takeTearOffSnapshot("b1")).toBeUndefined();
+
+        vi.setSystemTime(new Date(0));
+        prewarmTearOffSnapshot("b1", { x: 60, y: 35 });
+        expect(await peekTearOffSnapshot("b1", 500)).toBeDefined();
+        vi.advanceTimersByTime(30_000);
+        expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
+    });
+
     it("shows a pane's picture to the live follow with the grab and size, and leaves it for the tear-off", async () => {
         mountPane("b1", { left: 10, top: 20, width: 300, height: 200 });
         prewarmTearOffSnapshot("b1", { x: 60, y: 35 });

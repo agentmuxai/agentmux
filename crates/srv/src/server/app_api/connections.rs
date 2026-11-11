@@ -226,7 +226,7 @@ pub(crate) async fn remote_ssh_locate(cmd: CommandRemoteSshLocateData) -> Result
 }
 
 /// Add a host to the user's ssh config (§4.4 of SPEC_REMOTES_PANE_2026_10_05.md),
-/// once they confirm the exact block in the window of pane `cmd.blockid`.
+/// once they confirm the exact block in pane `cmd.blockid`.
 async fn add_remote(state: &AppState, cmd: CommandRemoteAddData) -> Result<(), String> {
     use crate::backend::remote::ssh_config_edit::{self, NewHost};
     if cmd.blockid.is_empty() {
@@ -254,7 +254,7 @@ async fn add_remote(state: &AppState, cmd: CommandRemoteAddData) -> Result<(), S
         "ok_label": "Add",
         "cancel_label": "Cancel",
     });
-    let answer = ask_user(state, &cmd.blockid, question).await?;
+    let answer = ask_in_pane(state, &cmd.blockid, question).await?;
     if !(answer.answered && answer.approve) {
         return Err("kept: the user chose not to add it".into());
     }
@@ -327,8 +327,8 @@ async fn test_remote(state: &AppState, connection: &str, block: &str) -> Result<
 }
 
 /// Remove AgentMux's helper from SSH host `connection` (Remotes, §4.9 of
-/// SPEC_REMOTES_PANE_2026_10_05.md), once the user confirms in the window of
-/// pane `block`, naming the sessions that will end.
+/// SPEC_REMOTES_PANE_2026_10_05.md), once the user confirms in pane `block`,
+/// naming the sessions that will end.
 async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Result<(), String> {
     use crate::backend::remote::{files, helper_hosts, helper_install, host::HostSsh};
     let name = ssh_host(connection, "has no AgentMux helper to remove")?;
@@ -351,11 +351,11 @@ async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Resul
         ),
         "ok_label": "Remove",
         "cancel_label": "Keep It",
-        // The window draws a destructive answer in the danger tone, not the
-        // loud attention fill.
+        // A destructive answer is drawn in the danger tone, not the loud
+        // attention fill.
         "destructive": true,
     });
-    let answer = ask_user(state, block, question).await?;
+    let answer = ask_in_pane(state, block, question).await?;
     if !(answer.answered && answer.approve) {
         return Err("kept: the user chose not to remove it".into());
     }
@@ -382,7 +382,7 @@ async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Resul
 }
 
 /// Give the helper install its question (SPEC_REMOTES_PANE_2026_10_05.md
-/// §4.9): the approval window, and `conn:helper` from the settings.
+/// §4.9): asked in the pane that needs it, and `conn:helper` from the settings.
 pub fn install_helper_consent(state: &AppState) {
     use crate::backend::remote::helper_consent;
     let app = state.clone();
@@ -392,7 +392,7 @@ pub fn install_helper_consent(state: &AppState) {
         ask: Box::new(move |block, question| {
             let app = app.clone();
             Box::pin(async move {
-                let a = ask_user(&app, &block, question).await?;
+                let a = ask_in_pane(&app, &block, question).await?;
                 Ok(helper_consent::Answer { answered: a.answered, approve: a.approve, remember: a.checkbox })
             })
         }),
@@ -425,8 +425,8 @@ fn remote_name(connection: &str) -> Result<String, String> {
     }
 }
 
-/// The user's yes to ending session `id` on `conn`, asked in the window of
-/// pane `block`. `Err` unless they said yes.
+/// The user's yes to ending session `id` on `conn`, asked in pane `block`.
+/// `Err` unless they said yes.
 async fn confirm_session_end(
     state: &AppState,
     block: &str,
@@ -445,7 +445,7 @@ async fn confirm_session_end(
         "cancel_label": "Keep It",
         "destructive": true,
     });
-    let answer = ask_user(state, block, question).await?;
+    let answer = ask_in_pane(state, block, question).await?;
     if answer.answered && answer.approve {
         Ok(())
     } else {
@@ -639,6 +639,24 @@ pub(crate) async fn ask_user(
         .map_err(|e| format!("could not ask the user: {e}"))
 }
 
+/// Ask the person `question`, the confirmation of their own click in pane
+/// `block_id`, as a modal over that pane (`sagas::pane_confirm`). With no pane
+/// named there is nowhere of its own to ask it, so it goes to the approval
+/// window ([`ask_user`]) as before. Either way an agent calling the command
+/// can't give the answer.
+pub(crate) async fn ask_in_pane(
+    state: &AppState,
+    block_id: &str,
+    question: serde_json::Value,
+) -> Result<UserAnswer, String> {
+    use crate::sagas::pane_confirm;
+    if block_id.is_empty() {
+        return ask_user(state, block_id, question).await;
+    }
+    let a = pane_confirm::ask(state, block_id, pane_confirm::Question::from_json(&question)).await?;
+    Ok(UserAnswer { answered: a.answered, approve: a.approve, text: String::new(), checkbox: a.checkbox })
+}
+
 /// The agent an SSH request comes from, proven: its signed identity
 /// (`UiAutomationAuth`, made with its own jekt key, which no other agent
 /// holds) verified, and the pane derived from it, never taken from the
@@ -661,12 +679,14 @@ pub(crate) fn verified_agent(
     Ok(auth.agent_id.clone())
 }
 
-/// The user's consent for the agent `agent_id` (verified, [`verified_agent`])
-/// in `agent_block_id` to run `what` on the SSH `connection` with the user's
-/// identity (spec §8.2). `connection` is the canonical name
+/// Tell the user that the agent `agent_id` (verified, [`verified_agent`]) in
+/// `agent_block_id` wants to run `what` on the SSH `connection` with the user's
+/// identity (spec §8.2), and whether it may. `connection` is the canonical name
 /// (`ConnTarget::name`), so one host is one consent however it is spelled.
-/// "Always" for that agent and host is remembered (`remote::agent_access`)
-/// and asks nothing again; otherwise the user is asked ([`ask_user`]).
+/// "Always" for that agent and host is remembered (`remote::agent_access`) and
+/// shows nothing again; otherwise the agent's pane shows a card with a
+/// countdown that goes ahead on its own (`agent_notice`), which the user can
+/// stop, hurry or turn into "Always".
 pub(crate) async fn consent_for_ssh(
     state: &AppState,
     agent_block_id: &str,
@@ -674,57 +694,34 @@ pub(crate) async fn consent_for_ssh(
     connection: &str,
     what: &str,
 ) -> Result<(), String> {
-    use crate::backend::remote::agent_access;
+    use crate::sagas::agent_notice::{self, Kind, Notice, Outcome};
     let agent_id = Some(agent_id.to_string()).filter(|a| !a.trim().is_empty());
     let agent = agent_label(agent_id.as_deref());
     let connection = connection.trim();
-    if agent_id
-        .as_deref()
-        .is_some_and(|id| agent_access::always_allowed(id, connection))
-    {
-        tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), "agent ssh access: allowed (always)");
-        return Ok(());
+    let notice = Notice {
+        kind: Kind::SshAccess,
+        block_id: agent_block_id.to_string(),
+        agent_id: agent_id.clone().unwrap_or_default(),
+        agent: agent.clone(),
+        connection: connection.to_string(),
+        headline: format!("{} is using {}", one_line(&agent, 60), one_line(connection, 80)),
+        body: format!("It will run this on {}, as you, with your SSH keys.", one_line(connection, 80)),
+        quote: one_line(what, 400),
+        always_label: format!("Always allow {} on {}", one_line(&agent, 40), one_line(connection, 80)),
+        waived: None,
+    };
+    let outcome = agent_notice::announce(state, notice, || super::agent_spawn::requester_here(state, agent_block_id)).await;
+    tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), outcome = ?outcome, "agent ssh access");
+    match outcome {
+        Outcome::Go(_) => Ok(()),
+        Outcome::Stopped => Err(format!("the user stopped {agent} using {connection}")),
+        Outcome::Gone => Err(format!("{agent}'s pane was closed before it could use {connection}")),
     }
-    let question = serde_json::json!({
-        "kind": "consent",
-        "title": format!("Agent access to {}", one_line(connection, 80)),
-        "message": format!(
-            "{agent} wants to run this on {}, as you, with your SSH keys:\n\n{}\n\nAllow it?",
-            one_line(connection, 80),
-            one_line(what, 400)
-        ),
-        "checkbox": match &agent_id {
-            Some(_) => format!("Always allow {agent} on {}", one_line(connection, 80)),
-            None => String::new(),
-        },
-        "ok_label": "Allow",
-        "cancel_label": "Deny",
-    });
-    let answer = ask_user(state, agent_block_id, question)
-        .await
-        .map_err(|e| format!("{agent} needs the user's permission to use {connection}, and {e}"))?;
-    if !(answer.answered && answer.approve) {
-        tracing::info!(agent = %agent, connection = %connection, answered = answer.answered, "agent ssh access: not allowed");
-        return Err(if answer.answered {
-            format!("the user denied {agent} access to {connection}")
-        } else {
-            format!("the user did not answer whether {agent} may use {connection}")
-        });
-    }
-    let always = answer.checkbox && agent_id.is_some();
-    if let Some(id) = agent_id.as_deref().filter(|_| always) {
-        let config_home = crate::backend::base::get_mux_config_dir();
-        if let Err(e) = remember_always_in(&state.broker, &config_home, id, connection) {
-            tracing::warn!(error = %e, "agent ssh access: could not remember 'always'");
-        }
-    }
-    tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), always, "agent ssh access: allowed");
-    Ok(())
 }
 
 /// Remember "always" for `agent` on `connection` under `config_home`, and tell
 /// every open Connectors → Remotes, whose host rows list these grants.
-fn remember_always_in(
+pub(crate) fn remember_always_in(
     broker: &Broker,
     config_home: &std::path::Path,
     agent: &str,

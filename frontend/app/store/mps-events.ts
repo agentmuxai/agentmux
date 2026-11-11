@@ -213,6 +213,7 @@ export const WpsEvent = {
     AppUpgradeRequests: "app:upgraderequests",
     /** Agents' requests to drive a native app, and the grants in force (crates/srv/src/backend/desktop_gate.rs). */
     AppDesktop: "app:desktop",
+    AgentEndpointNotice: "agent:endpoint-notice",
     /** An account episode opened, changed or closed: agents out of quota or signed out on one account
      *  (crates/srv/src/server/account_episodes/mod.rs). */
     AccountAvailability: "accountavailability",
@@ -223,6 +224,12 @@ export const WpsEvent = {
     /** A sensitive request's countdown for the person to veto, and its end (crates/srv/src/sagas/sensitive_window.rs). */
     SensitivePending: "sensitive:pending",
     SensitiveCleared: "sensitive:cleared",
+    /** An agent's start of an agent (or another act the person may stop): a one-line notice or a countdown card, and its end (crates/srv/src/sagas/agent_notice.rs). */
+    AgentNotice: "agent:notice",
+    /** A question srv asks the person in a pane, as a modal over that pane, and its end (crates/srv/src/sagas/pane_confirm.rs). */
+    PaneConfirm: "pane:confirm",
+    /** The agents the person said "Always" to, after a change (crates/srv/src/backend/agent_grants.rs). */
+    AgentGrants: "agent:grants",
     AmbientSpent: "ambient:spent",
     BlockReveal: "block:reveal",
     /** An agent opened a pane without taking the person's tab; the window they are in offers to show it (crates/srv/src/server/http_open.rs). */

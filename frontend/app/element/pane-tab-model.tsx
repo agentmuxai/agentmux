@@ -20,11 +20,13 @@ import { getPaneTab } from "@/app/store/pane-tab-registry";
 import { atoms } from "@/app/store/global";
 import { makeIconClass } from "@/util/util";
 import { FaviconImage } from "./FaviconImage";
+import { DualProviderLogo } from "./DualProviderLogo";
 import { ProviderLogo } from "./ProviderLogo";
 
 export type PaneTabIcon =
     | { kind: "fa"; name: string; color?: string }
-    | { kind: "provider"; provider: string }
+    /** `vendor`: the badge on the harness (an agent pane's model answering), when it has one. */
+    | { kind: "provider"; provider: string; vendor?: string }
     | { kind: "img"; src: string };
 
 /** A small mark at an icon's bottom-right that says something about the tab (the browser identity it
@@ -48,6 +50,8 @@ export interface PaneTabContext {
 export interface PaneTabDescriptor {
     label?: (ctx: PaneTabContext) => string | undefined;
     icon?: (ctx: PaneTabContext) => PaneTabIcon | undefined;
+    /** A line of the tooltip naming what the tab runs (an agent's harness and the model answering). */
+    modelLine?: (ctx: PaneTabContext) => string | undefined;
     /** A mark on the icon, which the icon (own or the live favicon) keeps showing under it. */
     badge?: (ctx: PaneTabContext) => PaneTabBadge | undefined;
     /** Returns a rename action when this tab can be renamed right now. */
@@ -59,6 +63,7 @@ export interface PaneTabInfo {
     label: string;
     icon: PaneTabIcon;
     badge?: PaneTabBadge;
+    modelLine?: string;
     rename?: (title: string) => Promise<void>;
     /**
      * What the tab shows that came from its view's live name or favicon and is not yet in the block's
@@ -188,6 +193,7 @@ export function describePaneTab(
         label,
         icon,
         badge: d?.badge?.(ctx),
+        modelLine: d?.modelLine?.(ctx),
         rename: d?.renamer?.(ctx),
         persist: persist.name !== undefined || persist.favicon !== undefined ? persist : undefined,
     };
@@ -200,7 +206,7 @@ function sameIcon(a: PaneTabIcon | undefined, b: PaneTabIcon | undefined): boole
         case "fa":
             return a.name === (b as typeof a).name && a.color === (b as typeof a).color;
         case "provider":
-            return a.provider === (b as typeof a).provider;
+            return a.provider === (b as typeof a).provider && a.vendor === (b as typeof a).vendor;
         case "img":
             return a.src === (b as typeof a).src;
     }
@@ -223,7 +229,11 @@ export function PaneTabIconView(props: { icon: () => PaneTabIcon | undefined; ba
                 )}
             </Match>
             <Match when={icon()?.kind === "provider" && (icon() as Extract<PaneTabIcon, { kind: "provider" }>)}>
-                {(p) => <ProviderLogo provider={p().provider} size={14} />}
+                {(p) => (
+                    <Show when={p().vendor} fallback={<ProviderLogo provider={p().provider} size={14} />}>
+                        {(vendor) => <DualProviderLogo harness={p().provider} vendor={vendor()} size={14} bare />}
+                    </Show>
+                )}
             </Match>
             <Match when={icon()?.kind === "img" && (icon() as Extract<PaneTabIcon, { kind: "img" }>)}>
                 {(img) => <FaviconImage src={img().src} />}

@@ -89,8 +89,10 @@ pub struct StoreCheck {
     pub state: &'static str,
     /// Why, when the state is `unknown`; empty otherwise.
     pub message: String,
-    /// When `available`: the version of the Store's package update (`0.60.17`), the version the
-    /// page offers; empty when the Store listed an update without a readable version.
+    /// When `available`: the version the listed item's package carries (`0.60.17`); empty when it had
+    /// none readable. Windows documents that package as "the package that has an update available", so
+    /// it can be the installed version and not the update's: the page names a version only when it is
+    /// newer than this build, and offers the update either way.
     pub version: String,
 }
 
@@ -119,6 +121,17 @@ pub fn decide_check(listed: Result<Vec<Option<(u16, u16, u16)>>, String>) -> Sto
         Err(why) if why == NO_ANSWER => StoreCheck::new("no_answer", String::new(), String::new()),
         Err(why) => StoreCheck::new("unknown", why, String::new()),
     }
+}
+
+/// The one log line per check: what the Store answered and how long it took, so a report of "the Store
+/// says no newer version" can be checked against the log afterwards.
+pub fn check_log_line(check: &StoreCheck, took: Duration) -> String {
+    let version = if check.version.is_empty() { "-" } else { &check.version };
+    let mut line = format!("[store-check] state={} version={version} took_ms={}", check.state, took.as_millis());
+    if !check.message.is_empty() {
+        line.push_str(&format!(" why={}", check.message));
+    }
+    line
 }
 
 /// Ask the Store whether it has an update for AgentMux, without installing it.
@@ -185,7 +198,8 @@ fn list_error(e: String) -> String {
     if e == NO_ANSWER { e } else { format!("couldn't list updates: {e}") }
 }
 
-/// The version of one listed update's package, when the Store gives one.
+/// The version one listed update's package carries, when the Store gives one (see `StoreCheck::version`:
+/// it can be the installed package's).
 #[cfg(target_os = "windows")]
 fn update_version(update: &windows::Services::Store::StorePackageUpdate) -> Option<(u16, u16, u16)> {
     let v = update.Package().ok()?.Id().ok()?.Version().ok()?;
@@ -220,7 +234,12 @@ pub async fn run(state: &std::sync::Arc<crate::state::AppState>, cmd: &str, args
     tracing::info!("[ipc] {cmd}");
     let gone = |e: tokio::task::JoinError| format!("store_update: {e}");
     match cmd {
-        "store_update_check" => json(tokio::task::spawn_blocking(check_update).await.map_err(gone)?),
+        "store_update_check" => {
+            let started = Instant::now();
+            let check = tokio::task::spawn_blocking(check_update).await.map_err(gone)?;
+            tracing::info!("{}", check_log_line(&check, started.elapsed()));
+            json(check)
+        }
         "store_update_came_back" => json(super::store_restart::came_back()),
         _ => {
             let target = args.get("version").and_then(|v| v.as_str()).unwrap_or_default().to_string();
@@ -306,6 +325,19 @@ pub fn install_update(_target: &str, _web_endpoint: &str, _auth_key: &str) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_check_leaves_one_line_with_the_answer_and_the_time() {
+        let took = Duration::from_millis(5400);
+        let none = decide_check(Ok(vec![]));
+        assert_eq!(check_log_line(&none, took), "[store-check] state=none version=- took_ms=5400");
+        let available = decide_check(Ok(vec![Some((0, 60, 22))]));
+        assert_eq!(check_log_line(&available, took), "[store-check] state=available version=0.60.22 took_ms=5400");
+        let unknown = decide_check(Err("the Microsoft Store is Windows only".into()));
+        assert_eq!(check_log_line(&unknown, took), "[store-check] state=unknown version=- took_ms=5400 why=the Microsoft Store is Windows only");
+        let silent = decide_check(Err(NO_ANSWER.into()));
+        assert_eq!(check_log_line(&silent, Duration::from_secs(60)), "[store-check] state=no_answer version=- took_ms=60000");
+    }
 
     #[test]
     fn nothing_listed_means_the_store_has_no_newer_version() {

@@ -14,8 +14,8 @@
 //! Launching an agent spends tokens until someone stops it, so (§3.5): only
 //! a verified agent spawns, host or container (a container leader gets container workers: same image,
 //! each with its own container and workspace), a worker doesn't, a leader has at most
-//! [`MAX_LIVE_WORKERS`], and unless the user's own turn asked for it the user
-//! is asked first.
+//! [`MAX_LIVE_WORKERS`], and unless the user's own turn asked for it the user is told first, in the
+//! leader's pane, by a card with a countdown that goes ahead on its own (`announce_start`).
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -40,7 +40,7 @@ pub(crate) use many::handle_agent_spawn_many;
 pub(crate) const COACHED_BY_META_KEY: &str = "agent:coached_by";
 
 /// Live workers a leader may have at once (§3.5).
-pub(crate) const MAX_LIVE_WORKERS: usize = 3;
+pub(crate) const MAX_LIVE_WORKERS: usize = 12;
 
 /// The agent that made this one with `Agents create`, `{agent, id}`, kept on the new agent's definition (agent
 /// content) so that agent can delete it again (`Agents delete`). srv writes it; a client may not, and a fork does
@@ -49,7 +49,8 @@ pub(crate) const CREATED_BY_CONTENT: &str = "agent:created_by";
 
 /// Content only srv writes, and that a fork of the agent does not take along.
 pub(crate) fn written_only_by_srv(content_type: &str) -> bool {
-    content_type == WORKER_OF_CONTENT || content_type == CREATED_BY_CONTENT || content_type == crate::backend::model_gateway::launch::CONTENT_TYPE
+    content_type == WORKER_OF_CONTENT || content_type == CREATED_BY_CONTENT || content_type == crate::backend::model_gateway::launch::CONTENT_TYPE || content_type == crate::backend::model_gateway::switch::PREVIOUS_TYPE
+        || content_type == crate::backend::model_gateway::launch::LEAVING_TYPE
 }
 
 /// The agent that made `def_id`: the one that created it, or the leader it is a worker of.
@@ -94,7 +95,8 @@ pub(crate) struct SpawnAgentResult {
     pub account_id: String,
     /// Why it isn't on the account asked for or the leader's, when it isn't.
     pub account_note: Option<String>,
-    /// Whether the user was asked (the turn wasn't the user's own).
+    /// Whether the user was shown a card with a countdown (the turn wasn't the user's own, and neither
+    /// "Always" nor the "Agents may start agents" setting applied).
     pub asked_user: bool,
     /// `native` or `container`, and the image of a container agent.
     pub runtime: String,
@@ -166,7 +168,7 @@ async fn spawn_with(
         }
     }
     let (provider, mut runtime) = route::choose(state, &leader, &req.route, req.model.as_deref(), req.effort.as_deref())?;
-    runtime.placement = container::decide_here(state, &req.container, &leader.def, &leader.def).await?;
+    runtime.placement = container::decide_here(state, &req.container, &leader.def, &leader.def, &provider).await?;
     let tab_id = super::agent_block::resolve_tab_id_or_active(&state.mstore, &leader.block_id)
         .map_err(|e| refuse(StatusCode::CONFLICT, format!("NO_TAB: your pane isn't in a tab: {e}")))?;
     // Held until the worker's pane exists (or nothing was made), so a second
@@ -178,7 +180,7 @@ async fn spawn_with(
         return Err(refuse(
             StatusCode::CONFLICT,
             format!(
-                "TOO_MANY_WORKERS: you have {live} workers open, the most at once; close one \
+                "TOO_MANY_WORKERS: you have {live} workers open, the most at once is {MAX_LIVE_WORKERS}; close one \
                  (Stop pane) when its work is done, then spawn again"
             ),
         ));
@@ -718,10 +720,69 @@ fn coached_by_id(meta: &MetaMapType) -> Option<&str> {
     meta.get(COACHED_BY_META_KEY)?.get("id")?.as_str()
 }
 
-/// May the spawn go ahead? At once when the user's own turn asked for it (the
-/// `QuitSelf` rule, `self_quit::gate`), otherwise only when the user says so
-/// in the approval window, which no agent can answer. Returns whether the
-/// user was asked.
+/// Tell the person in the leader's pane that it starts agents, and whether it may go ahead
+/// (docs/specs/SPEC_AGENT_SPAWN_NOTICE_IN_THE_PANE_2026_11_08.md). Nothing waits for a click:
+/// - the person's own turn asked for it and the agent chose no route (the `QuitSelf` rule,
+///   `self_quit::gate`), the "Agents may start agents" setting is on, or the person said Always to
+///   this leader: a one-line notice, and it goes ahead;
+/// - otherwise a card with a countdown (Stop it, Start now, Always allow), and it goes ahead when
+///   the countdown ends. With no window connected there is no one to stop it, so it goes ahead.
+///
+/// `Err` when the person stopped it, or the leader is gone. Returns whether a card was shown.
+pub(super) async fn announce_start(
+    state: &AppState,
+    leader: &Leader,
+    user_instruction: &str,
+    route_asked: bool,
+    headline: String,
+    body: String,
+    quote: &str,
+) -> Result<bool, SpawnError> {
+    use crate::sagas::agent_notice::{self, Go, Kind, Notice, Outcome, Waiver};
+    let provenance = blockcontroller::get_controller(&leader.block_id).and_then(|c| c.turn_provenance());
+    let gate = crate::sagas::self_quit::gate(provenance.as_ref(), user_instruction);
+    let waived = if gate.is_ok() && !route_asked {
+        Some(Waiver::UserTurn)
+    } else if agents_may_start_agents(state) {
+        Some(Waiver::Setting)
+    } else {
+        None
+    };
+    let notice = Notice {
+        kind: Kind::Spawn,
+        block_id: leader.block_id.clone(),
+        agent_id: leader.def.id.clone(),
+        agent: leader.def.name.clone(),
+        connection: String::new(),
+        headline,
+        body,
+        quote: if quote.trim().is_empty() { String::new() } else { one_line(quote, 400) },
+        always_label: format!("Always allow {} to start agents", one_line(&leader.def.name, 40)),
+        waived,
+    };
+    match agent_notice::announce(state, notice, || requester_here(state, &leader.block_id)).await {
+        Outcome::Go(Go::Waived(_) | Go::Granted | Go::Headless) => Ok(false),
+        Outcome::Go(_) => Ok(true),
+        Outcome::Stopped => Err(refuse(StatusCode::FORBIDDEN, "NOT_ALLOWED: the user stopped it, so nothing was started")),
+        Outcome::Gone => Err(refuse(StatusCode::CONFLICT, "NOT_AN_AGENT_PANE: your pane was closed before the start, so nothing was started")),
+    }
+}
+
+/// `agent:maystartagents`: the person turned on "Agents may start agents" in Settings, so no
+/// agent's start shows a card.
+pub(crate) const SETTING_MAY_START_AGENTS: &str = "agent:maystartagents";
+
+fn agents_may_start_agents(state: &AppState) -> bool {
+    state.config_watcher.get_settings().extra.get(SETTING_MAY_START_AGENTS).and_then(serde_json::Value::as_bool).unwrap_or(false)
+}
+
+/// Whether the requester is still there to start things for: its pane exists and its agent was not
+/// stopped since (an explicit stop keeps the pane). A parked agent's pane exists and it still runs.
+pub(crate) fn requester_here(state: &AppState, block_id: &str) -> bool {
+    state.mstore.get::<Block>(block_id).ok().flatten().is_some() && !super::agent_attach::stopped_this_run(block_id)
+}
+
+/// What the person is shown about one worker.
 async fn consent(
     state: &AppState,
     leader: &Leader,
@@ -732,55 +793,25 @@ async fn consent(
     brief: &str,
     user_instruction: &str,
 ) -> Result<bool, SpawnError> {
-    let provenance = blockcontroller::get_controller(&leader.block_id).and_then(|c| c.turn_provenance());
-    let gate = crate::sagas::self_quit::gate(provenance.as_ref(), user_instruction);
-    if gate.is_ok() && !runtime.route_asked {
-        return Ok(false);
-    }
-    let why = gate.err().map_or_else(|| "a model route spends the person's key".to_string(), |w| w.as_str().to_string());
-    tracing::info!(leader = %leader.def.name, why = why.as_str(), "agent.spawn: asking the user");
-    let question = json!({
-        "kind": "consent",
-        "title": format!("{} wants to start a worker", one_line(&leader.def.name, 60)),
-        "message": consent_message(&leader.def.name, name, model, runtime, account, brief),
-        "checkbox": "",
-        "ok_label": "Start it",
-        "cancel_label": "Don't",
-    });
-    ask_consent(state, leader, question, "a worker", "the worker").await
-}
-
-/// Put `question` to the user and return whether they approved it. `these` names what is started in the
-/// refusals' words ("a worker" / "the worker").
-async fn ask_consent(state: &AppState, leader: &Leader, question: serde_json::Value, these: &str, them: &str) -> Result<bool, SpawnError> {
-    let answer = super::connections::ask_user(state, &leader.block_id, question)
-        .await
-        .map_err(|e| refuse(StatusCode::FORBIDDEN, format!("NOT_ALLOWED: starting {these} needs the user's go-ahead, and {e}")))?;
-    if answer.answered && answer.approve {
-        Ok(true)
-    } else if answer.answered {
-        Err(refuse(StatusCode::FORBIDDEN, format!("NOT_ALLOWED: the user said no to starting {them}")))
-    } else {
-        Err(refuse(StatusCode::FORBIDDEN, "NOT_ALLOWED: the user didn't answer, so nothing was started"))
-    }
-}
-
-fn consent_message(leader: &str, name: Option<&str>, model: Option<&str>, runtime: &WorkerRuntime, account: &WorkerAccount, brief: &str) -> String {
     let who = match name {
         Some(n) => format!("a new agent, {}", one_line(n, 60)),
         None => "a new agent".to_string(),
+    };
+    let headline = format!("{} is starting {who}", one_line(&leader.def.name, 60));
+    announce_start(state, leader, user_instruction, runtime.route_asked, headline, consent_message(name, model, runtime, account), brief).await
+}
+
+/// The facts of a start, from srv's record: its model, placement, who pays.
+fn consent_message(name: Option<&str>, model: Option<&str>, runtime: &WorkerRuntime, account: &WorkerAccount) -> String {
+    let who = match name {
+        Some(n) => one_line(n, 60),
+        None => "A new agent".to_string(),
     };
     let on = model.map(|m| format!(" on {}", one_line(m, 40))).unwrap_or_default();
     let on = format!("{on}{}", runtime.placement.describe());
     let note = account.note.as_deref().map(|n| format!(" {}", one_line(n, 200))).unwrap_or_default();
     let paid_by = if account.id.is_empty() { runtime.route_line.clone() } else { format!(" It runs on the account {}.{note}", one_line(&account.label, 80)) };
-    format!(
-        "{} wants to start {who}{on}, from its own instructions, in its team tab, with this task:\n\n{}\n\n\
-         {} It spends tokens until it is stopped. Start it?",
-        one_line(leader, 60),
-        one_line(brief, 400),
-        paid_by.trim(),
-    )
+    format!("{who}{on}, from its leader's instructions, in the leader's team tab.{} It spends tokens until it is stopped.", if paid_by.trim().is_empty() { String::new() } else { format!(" {}", paid_by.trim()) })
 }
 
 /// `s` on one line, at most `max` characters.

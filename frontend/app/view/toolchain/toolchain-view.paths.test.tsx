@@ -202,10 +202,10 @@ describe("what each row asks for", () => {
     });
 
     it("reads an agent CLI's version, path and source from the install check", async () => {
-        h.installed.claude = { installed: true, version: "2.1.288", path: "/opt/claude", source: "system_path" };
+        h.installed.claude = { installed: true, version: "2.1.321", path: "/opt/claude", source: "system_path" };
         await mount();
         expect(within(card("claude")).getByRole("img", { name: "Installed" })).toBeInTheDocument();
-        expect(card("claude").textContent).toContain("2.1.288");
+        expect(card("claude").textContent).toContain("2.1.321");
         expect(card("claude").textContent).toContain("your install");
         open(card("claude"));
         expect(await screen.findByText("/opt/claude")).toBeInTheDocument();
@@ -213,7 +213,7 @@ describe("what each row asks for", () => {
     });
 
     it("shows no path for an installed agent CLI that gave none", async () => {
-        h.installed.claude = { installed: true, version: "2.1.288", path: null, source: null };
+        h.installed.claude = { installed: true, version: "2.1.321", path: null, source: null };
         await mount();
         open(card("claude"));
         await screen.findByText("up to date");
@@ -349,7 +349,7 @@ describe("the shared capability rows", () => {
 
 describe("Refresh", () => {
     it("forgets the old answers, asks again for every row and widget, and forces the agent CLIs", async () => {
-        h.installed.claude = { installed: true, version: "2.1.288" };
+        h.installed.claude = { installed: true, version: "2.1.321" };
         await mount();
         expect(card("git").textContent).toContain("2.40.0");
         const resolves = h.rpc.ResolveCliCommand.mock.calls.length;
@@ -449,16 +449,16 @@ describe("the latest versions", () => {
     });
 
     it("notes a pin that trails upstream on an agent CLI at its pin", async () => {
-        h.installed.claude = { installed: true, version: "2.1.288" };
+        h.installed.claude = { installed: true, version: "2.1.321" };
         h.versions = { claude: "3.0.0" };
         await mount();
-        await waitFor(() => expect(card("claude").textContent).toContain("pin 2.1.288 · upstream 3.0.0"));
+        await waitFor(() => expect(card("claude").textContent).toContain("pin 2.1.321 · upstream 3.0.0"));
         expect(card("codex").textContent).not.toContain("upstream");
     });
 
     it("takes a later answer from the cache while it is fresh, without asking again", async () => {
         h.versions = { claude: "3.0.0" };
-        h.installed.claude = { installed: true, version: "2.1.288" };
+        h.installed.claude = { installed: true, version: "2.1.321" };
         const first = await mount();
         await waitFor(() => expect(card("claude").textContent).toContain("upstream 3.0.0"));
         first.unmount();
@@ -534,8 +534,8 @@ describe("the latest versions", () => {
     });
 
     it("does not give a tool without a package a latest version", async () => {
-        h.installed.goose = { installed: true, version: "1.54.0" };
-        h.installed.claude = { installed: true, version: "2.1.288" };
+        h.installed.goose = { installed: true, version: "1.58.0" };
+        h.installed.claude = { installed: true, version: "2.1.321" };
         h.versions = { goose: "9.9.9", claude: "3.0.0" };
         await mount();
         await waitFor(() => expect(card("claude").textContent).toContain("upstream 3.0.0"));
@@ -544,7 +544,7 @@ describe("the latest versions", () => {
     });
 
     it("keeps a latest version a later check does not mention", async () => {
-        h.installed.claude = { installed: true, version: "2.1.288" };
+        h.installed.claude = { installed: true, version: "2.1.321" };
         h.versions = { claude: "3.0.0" };
         await mount();
         await waitFor(() => expect(card("claude").textContent).toContain("upstream 3.0.0"));
@@ -559,7 +559,7 @@ describe("the latest versions", () => {
 
 describe("the count of tools that are behind", () => {
     it("is absent while nothing is behind its pin, including tools not found", async () => {
-        h.installed.claude = { installed: true, version: "2.1.288" };
+        h.installed.claude = { installed: true, version: "2.1.321" };
         await mount();
         expect(screen.queryByText(/behind/)).toBeNull();
     });
@@ -569,8 +569,8 @@ describe("the count of tools that are behind", () => {
         await mount();
         const one = await screen.findByText("1 tool is behind");
         expect(one.closest(".ui-pill")).toHaveAttribute("title", expect.stringContaining("offers Update"));
-        expect(dot(card("claude"))).toHaveAccessibleName("Update available: 2.1.288");
-        expect(card("claude").textContent).toContain("2.1.288 available");
+        expect(dot(card("claude"))).toHaveAccessibleName("Update available: 2.1.321");
+        expect(card("claude").textContent).toContain("2.1.321 available");
         cleanup();
         h.installed.codex = { installed: true, version: "0.1.0" };
         await mount();
@@ -596,7 +596,7 @@ describe("updating a tool that is behind its pin", () => {
     });
 
     it("offers nothing for a tool that is current or not installed", async () => {
-        h.installed.claude = { installed: true, version: "2.1.288" };
+        h.installed.claude = { installed: true, version: "2.1.321" };
         await mount();
         fireEvent.click(card("claude"));
         fireEvent.click(card("codex"));
@@ -621,7 +621,7 @@ describe("installing and removing AgentMux's own copy of an agent CLI", () => {
     it("offers Install for a CLI AgentMux installs and has no copy of, npm or download", async () => {
         await mount();
         fireEvent.click(card("claude"));
-        expect((await screen.findByTestId("provider-install")).textContent).toBe("claude -> 2.1.288");
+        expect((await screen.findByTestId("provider-install")).textContent).toBe("claude -> 2.1.321");
         fireEvent.click(card("claude"));
         fireEvent.click(card("goose"));
         expect((await screen.findByTestId("provider-install")).textContent).toMatch(/^goose -> \d/);
@@ -629,7 +629,7 @@ describe("installing and removing AgentMux's own copy of an agent CLI", () => {
     });
 
     it("offers Uninstall, not Install, for AgentMux's own copy", async () => {
-        h.installed.goose = { installed: true, version: "1.54.0", source: "local_install" };
+        h.installed.goose = { installed: true, version: "1.58.0", source: "local_install" };
         await mount();
         fireEvent.click(card("goose"));
         expect((await screen.findByTestId("provider-uninstall")).textContent).toBe("goose");
@@ -637,7 +637,7 @@ describe("installing and removing AgentMux's own copy of an agent CLI", () => {
     });
 
     it("offers neither for the copy the person chose to run from their PATH", async () => {
-        h.installed.goose = { installed: true, version: "1.54.0", source: "system_path" };
+        h.installed.goose = { installed: true, version: "1.58.0", source: "system_path" };
         await mount();
         fireEvent.click(card("goose"));
         await screen.findByText("Use the CLI on my PATH");
@@ -685,7 +685,7 @@ describe("a card's actions and details", () => {
     });
 
     it("lists a card's longer notes in its details, and only those that have one", async () => {
-        h.installed.claude = { installed: true, version: "2.1.288", path: "/c", source: "system_path" };
+        h.installed.claude = { installed: true, version: "2.1.321", path: "/c", source: "system_path" };
         await mount();
         open(card("claude"));
         expect(

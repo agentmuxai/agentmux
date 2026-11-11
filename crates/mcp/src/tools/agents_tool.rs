@@ -141,8 +141,8 @@ fn str_arg(args: &Value, key: &str) -> Option<String> {
     args.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
 }
 
-/// How long `spawn` waits for srv: the user's approval window (srv's
-/// `ask_user`, 120 s and 15 s of grace), then an `agent.open` that may
+/// How long `spawn` waits for srv: the person's 30 s countdown in the
+/// pane (srv's `agent_notice`), then an `agent.open` that may
 /// install the worker's CLI (150 s), with room to spare. A wait that ran out
 /// while srv carried on would launch a worker that never gets its brief.
 const SPAWN_WAIT: std::time::Duration = std::time::Duration::from_secs(360);
@@ -242,7 +242,7 @@ async fn create_agent(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
-/// `spawn` with `workers`: srv checks them all, asks the user once, and launches all or none
+/// `spawn` with `workers`: srv checks them all, tells the user once, and launches all or none
 /// (`/api/v1/agent/spawn_many`); only then does each brief go to its worker, so a refused or failed
 /// batch has sent nothing.
 async fn spawn_many(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -601,7 +601,7 @@ async fn rename_agent(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
 
 /// The fields `update` may change (`/api/v1/agent/update`); the name, provider, environment, accounts and
 /// seat have their own actions.
-const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes", "route", "model"];
+const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes", "route", "model", "spend_cap_usd", "reset_spend_today"];
 /// What decides what an agent runs, where its traffic goes or which project files it reads: the operator's to set in
 /// My Agents, as `env_set` refuses the same.
 const OPERATOR_FIELDS: &[&str] = &["shell", "provider_flags", "working_directory", "model_vendor_base_url"];

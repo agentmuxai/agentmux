@@ -26,7 +26,7 @@ pub struct UserAttentionEvent {
     pub key: String,
     /// The pane it's in; empty for none.
     pub block_id: String,
-    /// `browser`, `consent` or `widget`.
+    /// `browser`, `consent`, `widget`, or `confirm` (a pane asks the person about their own click).
     pub kind: String,
     pub text: String,
     /// The windows showing it; empty means every window.
@@ -58,7 +58,7 @@ pub struct Asking {
 
 impl Asking {
     /// Announces a call to action in pane `block_id` (empty: no pane) of
-    /// kind `kind` (`browser`, `consent`, `widget`), described by `text`.
+    /// kind `kind` (`browser`, `consent`, `widget`, `confirm`), described by `text`.
     pub fn start(broker: &Arc<Broker>, store: &Store, block_id: &str, kind: &str, text: &str) -> Self {
         let window_ids = if block_id.is_empty() {
             Vec::new()

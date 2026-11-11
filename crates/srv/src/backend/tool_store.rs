@@ -277,6 +277,17 @@ pub(crate) fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<S
 /// [`probe_version`] with extra environment for the child, for a CLI that must not start its own
 /// update on a probe.
 pub(crate) fn probe_version_with_env(cmd: &str, version_arg: &Option<String>, env: &[(&str, &str)]) -> Option<String> {
+    probe_version_inner(cmd, version_arg, env, false)
+}
+
+/// [`probe_version_with_env`] for "does this program run": a non-zero exit gives `None`, so an
+/// error message that happens to contain a number (macOS runs a file that is not a program through
+/// `sh`, which prints its path and 127) is never read as a version.
+pub(crate) fn probe_version_when_it_runs(cmd: &str, version_arg: &Option<String>, env: &[(&str, &str)]) -> Option<String> {
+    probe_version_inner(cmd, version_arg, env, true)
+}
+
+fn probe_version_inner(cmd: &str, version_arg: &Option<String>, env: &[(&str, &str)], must_succeed: bool) -> Option<String> {
     let arg = version_arg.as_deref()?;
     let mut command = std::process::Command::new(cmd);
     // `cmd` is a third-party binary, so it gets the strict policy for the same
@@ -290,6 +301,9 @@ pub(crate) fn probe_version_with_env(cmd: &str, version_arg: &Option<String>, en
         command.no_window();
     }
     let output = command.output().ok()?;
+    if must_succeed && !output.status.success() {
+        return None;
+    }
     // Some tools write version to stderr (e.g. older jq), try both.
     let text = if !output.stdout.is_empty() {
         String::from_utf8_lossy(&output.stdout).into_owned()

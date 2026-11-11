@@ -25,12 +25,26 @@ pub(super) enum TakeBack {
     Done(Value),
 }
 
+/// How a task is written (`#12`, or `work#12` off the default board).
+fn task_ref(state: &AppState, id: &str) -> Option<String> {
+    crate::server::work_tasks::ref_of(state, id).map(|(r, _)| r)
+}
+
 impl Act<'_> {
     /// The task the request names.
     pub(super) fn task(&self) -> Result<BoardTask, String> {
         let id = self.req.id.as_deref().ok_or("id is required")?;
         let id = resolve_id(self.state, id);
-        self.state.work_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or_else(|| "no such task".to_string())
+        let task = self.state.work_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or_else(|| "no such task".to_string())?;
+        // An agent sees only the boards whose agent list has it; the operator sees them all.
+        if !self.actor.is_operator {
+            if let Some((board, _)) = self.state.work_store.work_task_board(&task.item.id).map_err(|e| e.to_string())? {
+                if !board.visible_to(&self.actor.name, "") {
+                    return Err("no such task".to_string());
+                }
+            }
+        }
+        Ok(task)
     }
 
     pub(super) fn create(&self) -> Result<Value, String> {
@@ -58,12 +72,15 @@ impl Act<'_> {
                     std::slice::from_ref(&spec_id),
                     now,
                 )?;
-                json!({ "ok": true, "id": spec_id, "num": spec_num, "build_id": build_id, "build_num": build_num })
+                json!({
+                    "ok": true, "id": spec_id, "num": spec_num, "ref": task_ref(state, &spec_id),
+                    "build_id": build_id, "build_num": build_num, "build_ref": task_ref(state, &build_id),
+                })
             }
             None => {
                 let kind = req.kind.clone().unwrap_or_default();
                 let (id, num) = create_one(state, regs, req, title, payload, &kind, &after, now)?;
-                json!({ "ok": true, "id": id, "num": num })
+                json!({ "ok": true, "id": id, "num": num, "ref": task_ref(state, &id) })
             }
         })
     }
@@ -102,13 +119,50 @@ impl Act<'_> {
         Ok(json!({ "ok": true }))
     }
 
+    /// Refuse a task for an agent its board's agent list leaves out: it would be handed a payload
+    /// it can't see on the board.
+    fn receiver_sees_board(&self, work_id: &str, agent: &str, uid: &str) -> Result<(), String> {
+        match self.state.work_store.work_task_board(work_id).map_err(|e| e.to_string())? {
+            Some((b, _)) if !b.visible_to(agent, uid) => Err(format!("{agent} isn't on board {}: its agent list leaves {agent} out", b.slug)),
+            _ => Ok(()),
+        }
+    }
+
+    /// Move the task to another board (`board`): a new task there with the next number, the original
+    /// closed with a pointer. An agent sees only the boards its agent list has it on.
+    fn move_to_board(&self, to: &str) -> Result<Value, String> {
+        let Act { state, req, actor, now, .. } = *self;
+        let t = self.task()?;
+        let who = (!actor.is_operator).then_some((actor.name.as_str(), ""));
+        crate::server::work_tasks::pick_board(state, Some(to), who, true)?;
+        if let Some((from, _)) = state.work_store.work_task_board(&t.item.id).map_err(|e| e.to_string())? {
+            if who.is_some_and(|(a, u)| !from.visible_to(a, u)) {
+                return Err("no such task".into());
+            }
+        }
+        let moved = state
+            .work_store
+            .work_task_move(&t.item.id, to, &actor.name, req.drop_deps == Some(true), now)
+            .map_err(|e| e.to_string())?;
+        Ok(json!({
+            "ok": true, "id": moved.id, "ref": moved.to_ref, "from": moved.from_ref, "board": moved.board, "num": moved.num,
+            "dropped_dependencies": moved.dropped_deps, "target_cleared": moved.target_cleared,
+        }))
+    }
+
     pub(super) fn move_task(&self) -> Result<Value, String> {
         let Act { state, req, actor, regs, now, .. } = *self;
+        if let Some(to) = req.board.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+            return self.move_to_board(to);
+        }
         let store = &state.work_store;
         let t = self.task()?;
         let id = &t.item.id;
         if let Some(agent) = req.agent.as_deref() {
             let (name, uid) = target_of(state, regs, agent);
+            if !name.is_empty() {
+                self.receiver_sees_board(&t.item.id, &name, &uid)?;
+            }
             if !store.work_assign(id, &name, &uid, now).map_err(|e| e.to_string())? {
                 return Err("only a waiting task can be moved to another agent".into());
             }
@@ -144,6 +198,7 @@ impl Act<'_> {
             return Err(format!("{} isn't running", reg.agent_id));
         }
         let uid = reg.uid.clone().unwrap_or_default();
+        self.receiver_sees_board(&t.item.id, &reg.agent_id, &uid)?;
         let started = store
             .work_start_for(&t.item.id, &reg.agent_id, &uid, now, LEASE_MS)
             .map_err(|e| e.to_string())?
@@ -181,11 +236,11 @@ impl Act<'_> {
         }
         let reg = holder_of(regs, &t.item).cloned().filter(alive).ok_or("its agent isn't running")?;
         let msg = format!(
-            "Answer{} on task #{} \"{}\": {text}\n\nCarry on with it (id {}, attempt {}).",
+            "Answer{} on task {} \"{}\": {text}\n\nCarry on with it (id {}, attempt {}).",
             if actor.is_operator { String::new() } else { format!(" from {}", quote_in_system_note(&actor.name)) },
-            t.card.num,
+            t.card.name(),
             quote_in_system_note(&t.item.title),
-            t.card.num,
+            t.card.id_arg(),
             t.item.attempts
         );
         tell(state, &reg, actor, msg).await.map_err(|e| format!("couldn't reach {}: {e}", reg.agent_id))?;
@@ -221,7 +276,7 @@ impl Act<'_> {
         // then the unfinished spec keeps them from being claimed, and no
         // claim can slip in between.
         let research = crate::backend::kanban::is_research_kind(&t.item.kind);
-        let why = format!("its {} #{} was cancelled", t.item.kind.trim().to_ascii_lowercase(), t.card.num);
+        let why = format!("its {} {} was cancelled", t.item.kind.trim().to_ascii_lowercase(), t.card.name());
         let mut held: Vec<String> = Vec::new();
         let mut were_held: Vec<String> = Vec::new();
         if research {
@@ -320,6 +375,7 @@ impl Act<'_> {
         };
         store.work_queue_enqueue(&item).map_err(|e| e.to_string())?;
         let card = NewCard {
+            board: String::new(),
             repo: facts.as_ref().and_then(|f| f.repo_key()).unwrap_or_default(),
             branch: facts.as_ref().and_then(|f| f.branch.clone()).unwrap_or_default(),
             review_required: true,
@@ -401,10 +457,10 @@ impl Act<'_> {
         // Cancel tells nobody, so the old holder is told here: it may still be
         // working on the task, or be about to hand it in.
         let note = format!(
-            "[AgentMux] {} took task #{} \"{}\" back from you. Stop working on it and don't hand it in: \
+            "[AgentMux] {} took task {} \"{}\" back from you. Stop working on it and don't hand it in: \
              your claim (attempt {}) is closed.{}",
             actor.who(),
-            t.card.num,
+            t.card.name(),
             quote_in_system_note(&t.item.title),
             t.item.attempts,
             if text.is_empty() { String::new() } else { format!(" Reason given: {}", quote_in_system_note(text)) }

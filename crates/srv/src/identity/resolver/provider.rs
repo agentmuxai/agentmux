@@ -73,7 +73,8 @@ pub fn provider_class(provider: &str) -> Option<ProviderClass> {
         // config / auth directory. The match arm enumerates which
         // providers we currently treat as OAuth-class for identity
         // bundles. Originally just claude / codex / openclaw (spec
-        // §4.3) — gemini and copilot were added later
+        // §4.3) — grok and muse came last (they have no status command:
+        // `cli_sign_in_files` reads their login file); gemini and copilot were added later
         // (REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md
         // §2.5 / §6, Phase C) to close a drift gap: the frontend's
         // `ProviderDefinition` table already marked both
@@ -86,7 +87,7 @@ pub fn provider_class(provider: &str) -> Option<ProviderClass> {
         // `oauth_class_matches_frontend_authtype_oauth_set` below,
         // which pins this set staying in sync with the frontend going
         // forward so this doesn't silently drift again.
-        "claude" | "codex" | "openclaw" | "gemini" | "copilot" => {
+        "claude" | "codex" | "openclaw" | "gemini" | "copilot" | "grok" | "muse" => {
             crate::backend::providers::get_provider(provider).map(|cfg| {
                 ProviderClass::OAuth {
                     config_dir_env_var: cfg.auth_config_dir_env_var,
@@ -128,6 +129,16 @@ mod tests {
             provider_class("copilot"),
             Some(ProviderClass::OAuth { config_dir_env_var: "COPILOT_HOME" }),
         );
+        // Grok Build (`grok login`, files under GROK_HOME) and Muse Code (`muse login`, files
+        // under XDG_CONFIG_HOME): no status command, so `cli_sign_in_files` reads their login file.
+        assert_eq!(
+            provider_class("grok"),
+            Some(ProviderClass::OAuth { config_dir_env_var: "GROK_HOME" }),
+        );
+        assert_eq!(
+            provider_class("muse"),
+            Some(ProviderClass::OAuth { config_dir_env_var: "XDG_CONFIG_HOME" }),
+        );
     }
 
     #[test]
@@ -144,7 +155,7 @@ mod tests {
         // mirror of the frontend table — if you add a new `authType:
         // "oauth"` provider there, update FRONTEND_OAUTH_TYPED here too, in
         // the SAME change, not as a follow-up.
-        const FRONTEND_OAUTH_TYPED: &[&str] = &["claude", "codex", "gemini", "openclaw", "copilot"];
+        const FRONTEND_OAUTH_TYPED: &[&str] = &["claude", "codex", "gemini", "openclaw", "copilot", "grok", "muse"];
         const ALL_KNOWN_PROVIDERS: &[&str] = &[
             "claude", "codex", "muxcode", "gemini", "qwen", "openclaw", "kimi", "copilot", "pi", "kilo", "cline", "opencode", "goose", "grok", "dsh", "aider", "crush", "muse",
         ];

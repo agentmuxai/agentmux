@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fake uploads</title>
+<!-- Copyright 2026, AgentMux Corp. SPDX-License-Identifier: Apache-2.0 -->
+<p>File choosers for <code>set_files</code> with <code>chooser: true</code> (README.md). What each input holds is in <code>window.__got</code>; each attempt to open one in <code>window.__opens</code>.</p>
+
+<!-- A custom "Choose Files" button that makes its input on the fly, as Cloud Shell's Upload dialog does. -->
+<button id="choose-one">Choose Files</button>
+<!-- One that takes several files, only text or PDF. -->
+<button id="choose-many">Choose several</button>
+<!-- A button that opens the chooser a moment after the click, as a page that does its work first would. -->
+<button id="choose-later">Choose later</button>
+<!-- A button that asks for a folder. -->
+<button id="choose-folder">Choose a folder</button>
+<!-- With ?frame=1 a frame from the next port, another site: README.md. -->
+<div id="framebox"></div>
+<!-- Shows what was chosen, and whether the browser raised the events itself. -->
+<pre id="shown">nothing chosen</pre>
+
+<script>
+    window.__got = [];
+    window.__opens = [];
+    window.__frameGot = [];
+    window.addEventListener("message", (e) => { if (e.data && e.data.framePick) window.__frameGot.push(e.data.framePick); });
+    if (new URLSearchParams(location.search).has("frame")) {
+        const f = document.createElement("iframe");
+        f.src = `${location.protocol}//${location.hostname}:${Number(location.port) + 1}/frame.html`;
+        f.width = 420;
+        f.height = 60;
+        document.getElementById("framebox").appendChild(f);
+    }
+    const shown = document.getElementById("shown");
+    function open(kind, accept, multiple, folder) {
+        const input = document.createElement("input");
+        input.type = "file";
+        if (accept) input.accept = accept;
+        if (multiple) input.multiple = true;
+        if (folder) input.webkitdirectory = true;
+        const events = [];
+        for (const type of ["input", "change"]) input.addEventListener(type, (e) => events.push({ type: e.type, trusted: e.isTrusted }));
+        input.addEventListener("change", async () => {
+            const files = await Promise.all(Array.from(input.files).map(async (f) => ({ name: f.name, size: f.size, text: await f.text() })));
+            window.__got.push({ kind, files, events });
+            shown.textContent = JSON.stringify(window.__got[window.__got.length - 1]);
+        });
+        window.__opens.push({ kind, active: navigator.userActivation.isActive });
+        input.click();
+    }
+    document.getElementById("choose-one").addEventListener("click", () => open("one", "", false, false));
+    document.getElementById("choose-many").addEventListener("click", () => open("many", ".txt,.pdf", true, false));
+    document.getElementById("choose-later").addEventListener("click", () => setTimeout(() => open("later", "", false, false), 300));
+    document.getElementById("choose-folder").addEventListener("click", () => open("folder", "", false, true));
+</script>

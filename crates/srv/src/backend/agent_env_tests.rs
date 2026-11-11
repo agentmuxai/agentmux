@@ -37,9 +37,8 @@ fn names_agentmux_owns_or_that_hold_credentials_are_refused() {
         "GH_CONFIG_DIR",
         "CLAUDE_CONFIG_DIR",
         "CODEX_HOME",
-        "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
-        "ANTHROPIC_BASE_URL",
+        "OPENAI_BASE_URL",
         "MY_SERVICE_TOKEN",
         "DB_PASSWORD",
         "AWS_SECRET_ACCESS_KEY_ID_KEY",
@@ -206,7 +205,7 @@ fn an_edit_replaces_every_copy_of_a_repeated_name() {
 #[test]
 fn an_edit_cannot_touch_a_refused_name_either_way() {
     assert!(edit("", &map(&[("PATH", "/x")]), &[]).is_err());
-    assert!(edit("ANTHROPIC_API_KEY=abc\n", &BTreeMap::new(), &["ANTHROPIC_API_KEY".to_string()]).is_err());
+    assert!(edit("OPENAI_API_KEY=abc\n", &BTreeMap::new(), &["OPENAI_API_KEY".to_string()]).is_err());
     assert!(edit("", &map(&[("TZ", "ghp_abcdefghijklmnopqrstuvwxyz0123456789")]), &[]).is_err());
 }
 
@@ -231,4 +230,145 @@ fn credential_looking_values_are_never_shown_to_an_agent() {
     assert_eq!(change.added.get("RUST_BACKTRACE").map(String::as_str), Some("vim"));
     assert_eq!(change.added.get("SERVICE_TOKEN").map(String::as_str), Some(HIDDEN));
     assert_eq!(change.added.get("FORCE_COLOR").map(String::as_str), Some(HIDDEN));
+}
+
+
+// ── the model endpoint of a Claude Code agent ──────────────────────────────────
+
+#[test]
+fn the_endpoint_names_are_allowed_and_other_harnesses_endpoints_are_not() {
+    for name in ENDPOINT_NAMES {
+        assert_eq!(name_problem(name), None, "{name}");
+        // One spelling: a second would be a second way to write the same setting.
+        assert!(name_problem(&name.to_ascii_lowercase()).is_some(), "{name} in lower case");
+    }
+    for name in ["ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"] {
+        assert_eq!(name_problem(name), None, "{name}");
+    }
+    // Not verified for any other harness, and the reserved patterns still catch the rest.
+    for name in ["OPENAI_BASE_URL", "OPENAI_API_BASE", "GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL", "ANTHROPIC_FOUNDRY_BASE_URL", "ANTHROPIC_BEDROCK_BASE_URL", "AWS_BEARER_TOKEN_BEDROCK"] {
+        assert!(name_problem(name).is_some(), "{name} should be refused");
+    }
+}
+
+#[test]
+fn a_server_address_is_plain_http_or_https_with_no_sign_in_query_or_fragment() {
+    for ok in ["http://192.0.2.68:11434", "http://localhost:11434", "https://llm.example.com/v1", "http://[::1]:8080", "https://proxy.example.com:8443/anthropic"] {
+        assert_eq!(value_problem("ANTHROPIC_BASE_URL", ok), None, "{ok}");
+    }
+    for bad in [
+        "",
+        "192.0.2.68:11434",
+        "ftp://x.example.com",
+        "file:///etc/passwd",
+        "http://user:pw@example.com",
+        "https://token@example.com/v1",
+        "http://example.com/v1?key=abc",
+        "http://example.com/#frag",
+        "http://",
+        "http:///path",
+        "http://exa mple.com",
+        "http://example.com\nX=1",
+    ] {
+        assert!(value_problem("ANTHROPIC_BASE_URL", bad).is_some(), "{bad:?} should be refused");
+    }
+}
+
+#[test]
+fn a_key_is_a_vault_reference_or_a_short_placeholder_never_a_secret() {
+    for name in ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] {
+        for ok in ["ollama", "none", "lm-studio", "OLLAMA", "vault:2f9c1d", "vault: 2f9c1d"] {
+            assert_eq!(value_problem(name, ok), None, "{name}={ok}");
+        }
+        for bad in [
+            "",
+            "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
+            "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            "a-long-looking-secret-value-123456",
+            // The shape of a placeholder is the shape of a short real key: only the listed words pass.
+            "local-llm_1",
+            "abcd1234efgh5678",
+            "has space",
+            "vault:",
+            "vault:   ",
+            "[hidden]",
+        ] {
+            assert!(value_problem(name, bad).is_some(), "{name}={bad:?} should be refused");
+        }
+    }
+    assert_eq!(vault_ref("vault:abc"), Some("abc"));
+    assert_eq!(vault_ref("vault: abc "), Some("abc"));
+    assert_eq!(vault_ref("vault:"), None);
+    assert_eq!(vault_ref("ollama"), None);
+}
+
+#[test]
+fn a_model_name_and_a_timeout_are_checked_too() {
+    assert_eq!(value_problem("ANTHROPIC_DEFAULT_SONNET_MODEL", "flint:40b-a2b"), None);
+    assert_eq!(value_problem("ANTHROPIC_DEFAULT_HAIKU_MODEL", "qwen3-coder:30b[1m]"), None);
+    assert_eq!(value_problem("API_TIMEOUT_MS", "600000"), None);
+    assert!(value_problem("ANTHROPIC_DEFAULT_OPUS_MODEL", "two words").is_some());
+    assert!(value_problem("ANTHROPIC_DEFAULT_OPUS_MODEL", "").is_some());
+    assert!(value_problem("API_TIMEOUT_MS", "10 minutes").is_some());
+    assert!(value_problem("API_TIMEOUT_MS", "-1").is_some());
+}
+
+#[test]
+fn only_api_anthropic_com_over_https_is_anthropic() {
+    assert!(is_anthropic_url("https://api.anthropic.com"));
+    assert!(is_anthropic_url("https://api.anthropic.com/v1"));
+    assert!(is_anthropic_url(" https://API.Anthropic.com:443/ "));
+    for not in [
+        "http://api.anthropic.com",
+        "https://api.anthropic.com.evil.example",
+        "https://example.com/api.anthropic.com",
+        "http://192.0.2.68:11434",
+        "https://anthropic.com",
+        "https://api.anthropic.com:x@evil.example",
+        "https://api.anthropic.com@evil.example/",
+        "https://api.anthropic.com:8443",
+        "https://api.anthropic.com?@evil.example",
+        "",
+    ] {
+        assert!(!is_anthropic_url(not), "{not:?}");
+    }
+}
+
+#[test]
+fn a_key_is_never_shown_to_an_agent_but_the_address_and_models_are() {
+    let text = "ANTHROPIC_BASE_URL=http://192.0.2.68:11434\nANTHROPIC_AUTH_TOKEN=ollama\nANTHROPIC_MODEL=flint:40b-a2b\n";
+    let shown = redacted(text);
+    assert!(shown.contains("ANTHROPIC_BASE_URL=http://192.0.2.68:11434"), "{shown}");
+    assert!(shown.contains("ANTHROPIC_MODEL=flint:40b-a2b"), "{shown}");
+    assert!(shown.contains("ANTHROPIC_AUTH_TOKEN=[hidden]"), "{shown}");
+    assert!(!shown.contains("ollama"), "{shown}");
+    let change = diff("", text);
+    assert_eq!(change.added["ANTHROPIC_AUTH_TOKEN"], HIDDEN);
+    assert_eq!(change.added["ANTHROPIC_BASE_URL"], "http://192.0.2.68:11434");
+}
+
+#[test]
+fn an_edit_sets_the_endpoint_and_keeps_the_operators_other_lines() {
+    let current = "# mine\nPATH_NOTE=1\nOPENAI_API_KEY=operator-secret\n";
+    let set = map(&[("ANTHROPIC_BASE_URL", "http://192.0.2.68:11434"), ("ANTHROPIC_AUTH_TOKEN", "ollama"), ("ANTHROPIC_MODEL", "flint:40b-a2b")]);
+    let text = edit(current, &set, &[]).unwrap();
+    assert!(text.starts_with(current), "{text}");
+    assert!(text.contains("ANTHROPIC_BASE_URL=http://192.0.2.68:11434\n"), "{text}");
+    assert_eq!(edit(current, &map(&[("ANTHROPIC_BASE_URL", "http://u:p@host")]), &[]).is_err(), true);
+}
+
+#[test]
+fn names_in_the_list_are_found_in_a_change() {
+    let change = diff("TZ=UTC\n", "TZ=UTC\nANTHROPIC_BASE_URL=http://localhost:11434\n");
+    assert!(change.touches_endpoint());
+    assert!(!diff("", "TZ=UTC\n").touches_endpoint());
+    assert!(diff("ANTHROPIC_MODEL=a\n", "ANTHROPIC_MODEL=b\n").touches_endpoint());
+    assert!(diff("ANTHROPIC_API_KEY=ollama\n", "").touches_endpoint());
+    // What needs a server to reach is setting an endpoint name: not removing one, not a model name.
+    assert!(diff("", "ANTHROPIC_BASE_URL=http://192.0.2.68:11434\n").sets_endpoint());
+    assert!(diff("API_TIMEOUT_MS=1\n", "API_TIMEOUT_MS=2\n").sets_endpoint());
+    assert!(!diff("ANTHROPIC_BASE_URL=http://192.0.2.68:11434\n", "").sets_endpoint());
+    assert!(!diff("", "ANTHROPIC_MODEL=a\n").sets_endpoint());
+    assert!(!diff("", "TZ=UTC\n").sets_endpoint());
+
 }

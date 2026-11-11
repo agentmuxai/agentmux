@@ -41,7 +41,7 @@ describe("the bus", () => {
         const offPlay = onPaneLocatePlay(played);
         emitPaneLocate("a");
         emitPaneLocatePlay("b", "pane-1");
-        expect(asked.mock.calls).toEqual([["a"]]);
+        expect(asked.mock.calls).toEqual([["a", {}]]);
         expect(played.mock.calls).toEqual([["b", "pane-1"]]);
         offAsk();
         offPlay();
@@ -49,6 +49,15 @@ describe("the bus", () => {
         emitPaneLocatePlay("c", "pane-1");
         expect(asked).toHaveBeenCalledTimes(1);
         expect(played).toHaveBeenCalledTimes(1);
+    });
+
+    it("tells every listener how the pane was surfaced: focus moved by default, or not", () => {
+        const asked = vi.fn();
+        const off = onPaneLocate(asked);
+        emitPaneLocate("a");
+        emitPaneLocate("b", { focus: false });
+        expect(asked.mock.calls).toEqual([["a", {}], ["b", { focus: false }]]);
+        off();
     });
 
     it("a listener that throws does not stop the others", () => {
@@ -59,7 +68,7 @@ describe("the bus", () => {
         });
         const off2 = onPaneLocate(after);
         emitPaneLocate("a");
-        expect(after).toHaveBeenCalledWith("a");
+        expect(after).toHaveBeenCalledWith("a", {});
         off1();
         off2();
         warn.mockRestore();

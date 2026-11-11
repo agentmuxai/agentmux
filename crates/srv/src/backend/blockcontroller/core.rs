@@ -87,6 +87,12 @@ pub(crate) fn apply_working_dir(
     crate::backend::pane_env::sanitize_process_command(cmd);
 
     for (k, v) in env_vars {
+        // A login variable the endpoint step emptied is taken out of the child itself: the inherited copy of
+        // srv's own environment is the person's, and must not reach a server the agent was pointed at.
+        if v.is_empty() && crate::backend::spawn_env::endpoint::is_account_variable(k) {
+            cmd.env_remove(k);
+            continue;
+        }
         let expanded = crate::backend::base::expand_home_dir_safe(v);
         cmd.env(k, expanded.to_string_lossy().as_ref());
     }

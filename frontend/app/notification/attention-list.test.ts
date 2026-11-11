@@ -6,7 +6,10 @@ import { mergeAttention } from "./attention-list";
 
 vi.mock("@/app/store/agent-runtime-live", () => ({ sharedAgentRuntime: () => ({ rows: () => [] }) }));
 vi.mock("./waiting-for-you", () => ({ waitingPanes: () => [] }));
+vi.mock("@/app/block/pane-color-scheme", () => ({ paneRoleColor: () => undefined }));
+vi.mock("@/app/block/pane-identity", () => ({ isLightThemeActive: () => false }));
 vi.mock("@/app/store/global", () => ({ MOS: {}, workspace: () => null }));
+vi.mock("@/app/element/pane-tab-model", () => ({ describePaneTab: () => ({ label: "" }) }));
 
 const row = (over: Partial<AgentRuntime>): AgentRuntime =>
     ({
@@ -33,11 +36,30 @@ describe("mergeAttention", () => {
             {
                 blockId: "b1",
                 name: "Korp",
+                agentId: "a",
                 color: "#3b82f6",
                 what: "asks to approve a Bash call",
                 since: 100,
                 local: true,
             },
+        ]);
+    });
+
+    it("names a pane that is not an agent's by its own name, and says it is a pane", () => {
+        const paneName = (blockId: string) => (blockId === "remotes" ? "Connectors · Remotes" : undefined);
+        const items = mergeAttention(
+            [pane("remotes", "asks you to confirm", 100), pane("b1", "asks you a question", 200), pane("new", "needs you", 300)],
+            [row({ name: "Korp", block_id: "b1" })],
+            seen,
+            () => undefined,
+            paneName
+        );
+        expect(items.map((i) => [i.blockId, i.name, i.pane])).toEqual([
+            ["remotes", "Connectors · Remotes", true],
+            // An agent's row names it, whatever the pane is called.
+            ["b1", "Korp", undefined],
+            // Neither a row nor a name of its own: the old words.
+            ["new", "An agent", undefined],
         ]);
     });
 

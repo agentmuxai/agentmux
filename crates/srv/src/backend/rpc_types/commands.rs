@@ -119,6 +119,10 @@ pub const COMMAND_BROWSER_GRANTS_SET: &str = "browsergrants.set";
 pub const COMMAND_BROWSER_GRANTS_PRESET: &str = "browsergrants.preset";
 /// Revoke a standing grant: calls in flight end and the strip comes down (the user only).
 pub const COMMAND_BROWSER_GRANTS_REVOKE: &str = "browsergrants.revoke";
+/// Let an agent use a page's camera, microphone, location or notifications on one site, until revoked (the user only).
+pub const COMMAND_BROWSER_GRANTS_PERMISSION_SET: &str = "browsergrants.permissionset";
+/// Revoke one site permission (the user only).
+pub const COMMAND_BROWSER_GRANTS_PERMISSION_REVOKE: &str = "browsergrants.permissionrevoke";
 /// Change the powers a standing grant carries (the user only).
 pub const COMMAND_BROWSER_GRANTS_POWERS: &str = "browsergrants.powers";
 /// Turn "Pause all agent browsing" on or off: every driven pane refuses agent calls. Anyone may
@@ -218,6 +222,8 @@ pub const COMMAND_DELETE_AGENT: &str = "deleteagent";
 pub const COMMAND_GET_AGENT_CONTENT: &str = "getagentcontent";
 pub const COMMAND_SET_AGENT_CONTENT: &str = "setagentcontent";
 pub const COMMAND_GET_ALL_AGENT_CONTENT: &str = "getallagentcontent";
+/// Put an agent's environment back as it was before a model-server change, within its undo window.
+pub const COMMAND_UNDO_AGENT_ENDPOINT: &str = "undoagentendpoint";
 
 // Agent Skills
 pub const COMMAND_LIST_AGENT_SKILLS: &str = "listagentskills";
@@ -671,6 +677,15 @@ pub const COMMAND_IDENTITY_ACCOUNT_AVAILABILITY: &str = "identity.account.availa
 /// window only.
 pub const COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS: &str = "identity.account.move_agents";
 pub const COMMAND_AGENT_ACCOUNT_SWITCH: &str = "agent.account.switch";
+/// The model panel's content for a pane: the routes that serve its harness with their models, what cannot be picked and
+/// why, and where the agent is now. The operator's window only.
+pub const COMMAND_AGENT_MODEL_PANEL: &str = "agent.model.panel";
+/// What each agent on a model route really runs, by agent id ("DeepSeek V4.1 Flash via OpenRouter"), for the peer list in
+/// an agent's opening message: an agent's `provider` is its harness (`claude`), which on a route is not the model.
+pub const COMMAND_AGENT_PEER_LABELS: &str = "agent.peer-labels";
+/// A person's pick in the model panel: moves the agent to a model on a route, or back to the harness's own sign-in.
+/// The operator's window only: the click is the approval of the spend.
+pub const COMMAND_AGENT_MODEL_SWITCH: &str = "agent.model.switch";
 /// A sign-in the window ran for an account completed: its agents' "signed
 /// out" ends (#2237). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_SIGNED_IN: &str = "identity.account.signed_in";
@@ -918,6 +933,10 @@ pub const COMMAND_NATIVE_MEMORY_ADOPTION_LIST: &str = "agent:memory:adoption_lis
 /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2 (phase M3c): the
 /// folders an agent has claimed, for the human "release this folder" action.
 pub const COMMAND_NATIVE_MEMORY_CLAIMS: &str = "agent:memory:claims";
+/// What the person confirmed in the Memory pane: adopt the chosen folders of an
+/// adoption list, or release a claimed folder. From the AgentMux window only.
+pub const COMMAND_NATIVE_MEMORY_ADOPT: &str = "agent:memory:adopt";
+pub const COMMAND_NATIVE_MEMORY_RELEASE: &str = "agent:memory:release";
 
 // ---- Client type constants ----
 

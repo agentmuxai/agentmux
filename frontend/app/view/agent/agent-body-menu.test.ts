@@ -18,6 +18,16 @@ vi.mock("./open-history-tab", () => ({
     openOrFocusHistoryTab: (...args: unknown[]) => openHistory(...args),
 }));
 
+const setGrant = vi.fn((..._args: unknown[]) => Promise.resolve());
+const setGoogle = vi.fn((..._args: unknown[]) => Promise.resolve());
+let granted = false;
+let googleGranted = false;
+vi.mock("@/app/store/agent-grants", () => ({
+    startsAgentsWithoutAsking: () => granted,
+    setStartsAgentsWithoutAsking: (...args: unknown[]) => setGrant(...args),
+    usesGoogleWithoutAsking: () => googleGranted,
+    setUsesGoogleWithoutAsking: (...args: unknown[]) => setGoogle(...args),
+}));
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { agentBodyMenuItems, type AgentBodyMenuHost } from "./agent-body-menu";
 
@@ -41,11 +51,15 @@ describe("agentBodyMenuItems", () => {
     beforeEach(() => {
         openMemory.mockReset();
         openHistory.mockReset();
+        setGrant.mockClear();
+        setGoogle.mockClear();
+        granted = false;
+        googleGranted = false;
     });
 
     it("shows Seat, Bundles and Personal memory after History and Quick Fork on an agent pane", () => {
         const items = agentBodyMenuItems(host());
-        expect(labels(items)).toEqual(["Agent History", "Quick Fork", "View…", "Seat…", "Bundles…", "Personal memory", "Shut down"]);
+        expect(labels(items)).toEqual(["Agent History", "Quick Fork", "View…", "Seat…", "Bundles…", "Personal memory", "Starts agents without asking", "Shut down"]);
         expect(item(items, "Seat…").icon).toBe(MENU_ICON.seat);
         expect(item(items, "Bundles…").icon).toBe(MENU_ICON.bundles);
         expect(item(items, "Personal memory").icon).toBe(MENU_ICON.memory);
@@ -65,6 +79,24 @@ describe("agentBodyMenuItems", () => {
     it("opens Memory → Personal on the pane's own agent", () => {
         item(agentBodyMenuItems(host()), "Personal memory").click!();
         expect(openMemory).toHaveBeenCalledWith("personal", { agentId: "uid-x" });
+    });
+
+    it("shows whether the agent starts agents without asking, and flips it", () => {
+        expect(item(agentBodyMenuItems(host()), "Starts agents without asking")).toMatchObject({ type: "checkbox", checked: false });
+        granted = true;
+        const entry = item(agentBodyMenuItems(host()), "Starts agents without asking");
+        expect(entry.checked).toBe(true);
+        entry.click!();
+        expect(setGrant).toHaveBeenCalledWith("uid-x", false);
+    });
+
+    it("lists a Google Always only once it was given, and takes it back", () => {
+        expect(labels(agentBodyMenuItems(host()))).not.toContain("Uses Google without asking");
+        googleGranted = true;
+        const entry = item(agentBodyMenuItems(host()), "Uses Google without asking");
+        expect(entry).toMatchObject({ type: "checkbox", checked: true });
+        entry.click!();
+        expect(setGoogle).toHaveBeenCalledWith("uid-x", false);
     });
 
     it("keeps History, Quick Fork and View working", () => {

@@ -3,7 +3,8 @@
 
 //! The Muse Session Protocol (MSP) messages AgentMux sends to `muse serve`,
 //! and the MCP servers it passes in them. Checked against Muse Code
-//! 1.4.7-R6101.1 (`muse schema generate-ts`), SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.7.
+//! 1.4.14-R7309.1 (`muse schema generate-ts`; against 1.4.7 the stable surface only gained
+//! items, hook names and one capability), SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.7.
 
 use serde_json::{json, Map, Value};
 
@@ -11,7 +12,7 @@ use serde_json::{json, Map, Value};
 /// against, as `initialize` reports it in `schema.fingerprint`. Another one is
 /// logged, not refused: MSP is pre-1.0, and additions are additive.
 pub(super) const MSP_SCHEMA_FINGERPRINT: &str =
-    "sha256:6de32db08bbbe0deb478d2bfcaba001e9fb490986bc80db3aceb4d996abf7df9";
+    "sha256:c94c3d1f2f51e6424074b9ec43eac3eedcf532d3dcd77351ec1383a87d3049c6";
 
 /// `initialize`. `clientInfo.name` must match `[a-z0-9_]+`. The one capability
 /// asked for lets `session/start` carry MCP servers; `userInputDialogs: false`

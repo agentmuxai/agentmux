@@ -89,6 +89,8 @@ describe("the attention banner", () => {
         ["bypass", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example", "https://b.example"], minutes: 90 })],
         ["bypass-terminal", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["terminal"], local: false })],
         ["bypass-terminal-ask", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["terminal_ask"], local: false })],
+        ["bypass-enter-space", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["enter_space"], local: false })],
+        ["bypass-uploads", att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60, powers: ["uploads"], local: false })],
         [
             "line",
             att({
@@ -167,6 +169,14 @@ describe("the attention banner", () => {
         const v = mount({ attention: att({ kind: "notice", url: "https://x.example", why: "no" }), canGoBack: false });
         const back = [...v.container.querySelectorAll(".browser-attention-actions button")].find((b) => b.textContent?.trim() === "Back") as HTMLButtonElement;
         expect(back.disabled).toBe(true);
+    });
+
+    it("a cancelled file chooser says why and how to answer it, with Dismiss and no Back or Allow", () => {
+        const v = mount({ attention: att({ kind: "notice", chooser: "choose a file" }) });
+        const banner = v.banner() as HTMLElement;
+        expect(banner.textContent).toContain("The page asked to choose a file, but an agent drives this pane, so AgentMux cancelled it. Use Take over");
+        const labels = [...banner.querySelectorAll(".browser-attention-actions button")].map((b) => b.textContent?.trim());
+        expect(labels).toEqual(["Dismiss"]);
     });
 
     it("is gone when nothing is asked", () => {

@@ -12,8 +12,8 @@ trigger "Plan · Opus 5.5 · low" class=[ui-button ui-tone-neutral ui-density-co
   [model]
   - Opus 5.5 / Highest quality {current}
   - Sonnet 5.5 / Balanced speed and quality {}
-  - Haiku 4.5 / Fastest {}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {current}
@@ -36,8 +36,8 @@ trigger "Plan · Opus 5.5 · low" class=[ui-button ui-tone-neutral ui-density-co
   [model]
   - Opus 5.5 / Highest quality {current}
   - Sonnet 5.5 / Balanced speed and quality {}
-  - Haiku 4.5 / Fastest {active}
-  - Fable 5.1 / Long-horizon work {}
+  - Haiku 5.5 / Fastest {active}
+  - Fable 5.2 / Long-horizon work {}
   note (placeholder): Running model: shown after the first reply
   [effort]
   - low {current}

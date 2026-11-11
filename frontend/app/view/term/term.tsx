@@ -37,6 +37,7 @@ import { useZoomAnchor } from "@/app/store/zoom-anchor";
 import { termZoomAnchor, type ZoomTerminal } from "./term-zoom-anchor";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import { tip } from "@/app/element/tip";
+import { deferWhileSizesHeld } from "@/app/platform/pane-size-hold";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
 // Also resyncs when the backend restarts — local terminals have no connStatus change on restart,
@@ -208,9 +209,9 @@ function TerminalView(props: { model: TermViewModel }): JSX.Element {
         );
         window.term = termWrap;
         model.termRef.current = termWrap;
-        const rszObs = new ResizeObserver(() => {
-            termWrap.handleResizeLive();
-        });
+        // Not during a pane drag's live reflow: the terminal keeps its grid until the drag ends (pane-size-hold.ts).
+        // A run left waiting when the terminal goes away finds it disposed and does nothing.
+        const rszObs = new ResizeObserver(deferWhileSizesHeld(() => termWrap.handleResizeLive()));
         rszObs.observe(connectElemRef);
         termWrap.onSearchResultsDidChange = (results: { resultIndex: number; resultCount: number }) => {
             if (searchProps.resultsIndex) searchProps.resultsIndex._set(results.resultIndex);

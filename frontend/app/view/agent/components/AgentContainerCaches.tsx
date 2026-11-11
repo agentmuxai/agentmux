@@ -11,6 +11,7 @@
 import { createSignal, onMount, Show, type JSX } from "solid-js";
 
 import { Button, Field } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentContainerCachesResult } from "@/types/rpc/AgentContainerCachesResult";
@@ -61,16 +62,15 @@ export const AgentContainerCaches = (props: AgentContainerCachesProps): JSX.Elem
 
     return (
         <Show when={count() > 0 || freed() != null || error()}>
-            <Field label="Build cache" layout="stacked">
+            <Field label={t("containerCaches.label")} layout="stacked">
                 <div data-testid="container-caches">
                     <Show when={count() > 0}>
                         <p class="agent-primitive-modal-global-note" data-testid="container-caches-size">
-                            {formatBytes(total())} in {count()} {count() === 1 ? "volume" : "volumes"}: what {props.agentName}'s builds keep
-                            (the cargo registry and build output), so a new container or an image update does not start from nothing.
+                            {t("containerCaches.size", { size: formatBytes(total()), count: count(), name: props.agentName })}
                         </p>
                         <Show when={large()}>
                             <p class="agent-primitive-modal-global-note" role="status" data-testid="container-caches-large">
-                                That is a lot of disk. Clearing it frees the space; the next build starts cold.
+                                {t("containerCaches.large")}
                             </p>
                         </Show>
                         <div class="agent-primitive-modal-actions">
@@ -78,22 +78,22 @@ export const AgentContainerCaches = (props: AgentContainerCachesProps): JSX.Elem
                                 when={confirming()}
                                 fallback={
                                     <Button disabled={busy()} onClick={() => setConfirming(true)} data-testid="container-caches-clear">
-                                        Clear build cache
+                                        {t("containerCaches.clear")}
                                     </Button>
                                 }
                             >
                                 <Button tone="danger" busy={busy()} onClick={() => void clear()} data-testid="container-caches-confirm">
-                                    Remove {formatBytes(total())} and the container
+                                    {t("containerCaches.remove", { size: formatBytes(total()) })}
                                 </Button>
                                 <Button disabled={busy()} onClick={() => setConfirming(false)}>
-                                    Cancel
+                                    {t("containerCaches.cancel")}
                                 </Button>
                             </Show>
                         </div>
                     </Show>
                     <Show when={freed() != null}>
                         <p class="agent-primitive-modal-global-note" role="status" data-testid="container-caches-cleared">
-                            Cleared: {formatBytes(freed() ?? 0)} freed. The container starts again at the agent's next message.
+                            {t("containerCaches.cleared", { size: formatBytes(freed() ?? 0) })}
                         </p>
                     </Show>
                     <Show when={error()}>

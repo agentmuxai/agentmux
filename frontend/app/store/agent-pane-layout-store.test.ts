@@ -139,23 +139,24 @@ describe("agent-pane-layout store", () => {
 
         it("the reused-positions window is still correct (not stale) after scrolling", () => {
             const { layout } = mkPane();
-            const ids = Array.from({ length: 20 }, (_, i) => `n${i}`);
+            const ids = Array.from({ length: 200 }, (_, i) => `n${i}`);
             dispatch(BID, { type: "NodesChanged", orderedIds: ids });
             for (const id of ids) {
                 dispatch(BID, { type: "RowMeasured", nodeId: id, state: "collapsed", cssPx: 20 });
             }
             // Rows are 20px each, ROW_GAP_PX (4) apart: a 24px stride.
-            // scrollTop=200, viewportPx=40 → [200, 240) overlaps n8 (192..212)
-            // and n9 (216..236), padded by the default overscan (5) each side.
-            dispatch(BID, { type: "Scrolled", scrollTop: 200, viewportPx: 40 });
+            // scrollTop=2400, viewportPx=40 → [2400, 2440) overlaps n100 and n101. Five rows of overscan is only
+            // 120px, so the 600px overscan (the scroll-only path applies it too) decides: n75 is the first row
+            // ending below 1800, n126 the last starting above 3040.
+            dispatch(BID, { type: "Scrolled", scrollTop: 2400, viewportPx: 40 });
             const view = layout.mock.calls.at(-1)![0];
-            expect(view.window).toEqual({ startIndex: 3, endIndex: 14 });
+            expect(view.window).toEqual({ startIndex: 75, endIndex: 126 });
 
             // Scroll again (still no data change) — window must track the
             // NEW scrollTop, not the stale cached one.
             dispatch(BID, { type: "Scrolled", scrollTop: 0, viewportPx: 40 });
             const view2 = layout.mock.calls.at(-1)![0];
-            expect(view2.window).toEqual({ startIndex: 0, endIndex: 6 });
+            expect(view2.window).toEqual({ startIndex: 0, endIndex: 26 });
             // Positions array itself is still the same cached reference.
             expect(view2.rows).toBe(view.rows);
         });

@@ -192,6 +192,12 @@ events! {
     /// A sensitive request's countdown, and its end (`sagas::sensitive_window`).
     SensitivePending: crate::sagas::sensitive_window::EVENT_SENSITIVE_PENDING => crate::sagas::sensitive_window::SensitiveView,
     SensitiveCleared: crate::sagas::sensitive_window::EVENT_SENSITIVE_CLEARED => crate::sagas::sensitive_window::SensitiveClearedEvent,
+    /// An agent's start of an agent (or another act the person may stop): a one-line notice or a countdown card, and its end (`sagas::agent_notice`).
+    AgentNotice: crate::sagas::agent_notice::EVENT_AGENT_NOTICE => crate::sagas::agent_notice::NoticeView,
+    /// A question srv asks the person in a pane, as a modal over that pane, and its end (`sagas::pane_confirm`).
+    PaneConfirm: crate::sagas::pane_confirm::EVENT_PANE_CONFIRM => crate::sagas::pane_confirm::PaneConfirmView,
+    /// The agents the person said "Always" to, after a change (`backend::agent_grants`).
+    AgentGrants: crate::sagas::agent_notice::EVENT_AGENT_GRANTS => crate::sagas::agent_notice::GrantsEvent,
     /// A provider sign-in link to show as a notice with an Open action (`server::signin_notice`).
     SigninLink: "identity:signinlink" => crate::backend::signin_link_event::SigninLinkEvent,
     /// An OS notification to show, retract or act on (`notify::router`).
@@ -236,6 +242,9 @@ events! {
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
     /// An agent opened a pane; the person's active window offers to show it (`http_open`).
     PaneAgentOpened: "pane:agentopened" => PaneAgentOpenedEvent,
+    /// An agent's model server was changed through `Agents env_set`, or the change was undone: the agent's pane and
+    /// My Agents say so, with an Undo for a short while (`backend::endpoint_notice`).
+    AgentEndpointNotice: "agent:endpoint-notice" => crate::backend::endpoint_notice::EndpointNoticeEvent,
 
     // Published by a client through the HTTP relay, which checks the payload (`client_events!`).
     /// A line of a Bash call's output, its exit, its pid or which call it is (`agentmux-bashwrap`).

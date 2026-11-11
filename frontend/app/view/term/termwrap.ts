@@ -20,6 +20,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import * as TermTypes from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
 import { debugLog } from "@/util/debuglog";
+import { deferWhileSizesHeld, paneSizesHeld } from "@/app/platform/pane-size-hold";
 import { debounce, throttle } from "throttle-debounce";
 import { LARGE_BUFFER_COLS_THROTTLE_MS, liveRefit, liveRefits, PTY_RESIZE_DEBOUNCE_MS } from "./term-resize-policy";
 import { FilePathLinkProvider, makeFilePathHandler } from "./filelinkprovider";
@@ -143,7 +144,7 @@ export class TermWrap {
         this.hasResized = false;
         this.refitColsThrottled = throttle(LARGE_BUFFER_COLS_THROTTLE_MS, () => {
             liveRefits.schedule(this, () => {
-                if (this.disposed) return;
+                if (this.disposed || this.fitHeld()) return;
                 const dims = this.proposeFit();
                 if (dims) this.applyFit(dims);
                 this.schedulePtySize();
@@ -533,6 +534,7 @@ export class TermWrap {
         if (this.ptySizeTimer != null) this.flushPtySize();
         this.refitColsThrottled?.cancel?.();
         liveRefits.cancel(this);
+        this.resizeAfterHold.cancel();
         if (this.wedgeTimer != null) {
             clearInterval(this.wedgeTimer);
             this.wedgeTimer = null;
@@ -772,9 +774,23 @@ export class TermWrap {
         this.schedulePtySize();
     }
 
+    /** The resize a held fit owes: one, when the hold ends. */
+    private resizeAfterHold = deferWhileSizesHeld(() => this.handleResizeLive());
+
+    /**
+     * Whether a fit must wait: during a pane drag's live reflow the pane has the size of a drop that may never
+     * be made (pane-size-hold.ts). The observers already wait; this stops a fit that was queued just before the
+     * drag from measuring in it. It is owed again when the hold ends.
+     */
+    private fitHeld(): boolean {
+        if (!paneSizesHeld()) return false;
+        this.resizeAfterHold();
+        return true;
+    }
+
     /** One live refit, run by `liveRefits` this frame or a later one, measured then. */
     private refitLive = () => {
-        if (this.disposed) return;
+        if (this.disposed || this.fitHeld()) return;
         const dims = this.proposeFit();
         if (!dims) return;
         const current = { cols: this.terminal.cols, rows: this.terminal.rows };

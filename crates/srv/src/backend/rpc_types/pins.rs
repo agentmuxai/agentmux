@@ -57,6 +57,11 @@ pub struct LanPinInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub refused: Option<RefusedKeyInfo>,
+    /// The host of the install that vouched for the pinned key, when the pin is bound to one. Only that
+    /// install, or one it handed over to, moves the pin on its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bound_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -66,6 +71,10 @@ pub struct RefusedKeyInfo {
     #[ts(type = "number")]
     pub last_seen_at: i64,
     pub count: u32,
+    /// Why the key was not accepted, in a sentence, when srv has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub why: Option<String>,
 }
 
 /// An agent name on a channel and the install pinned to speak for it.

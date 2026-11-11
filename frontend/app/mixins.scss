@@ -38,13 +38,14 @@
     // A header too narrow for its controls sheds them by priority (element/width-fit.ts sets the
     // tier, each hiding what the one before did): the tab strip's last sliver, then the view's own
     // end buttons, then the window controls, which the grip's menu also offers. Close and the grip
-    // stay.
+    // stay, and so does a button that is the only way in to something (`block-frame-end-keep`: the agent
+    // pane's Messages button, now that the panel has no bar).
     &[data-fit="tabs"] .block-frame-default-header-tabstrip,
     &[data-fit="trim"] .block-frame-default-header-tabstrip,
     &[data-fit="min"] .block-frame-default-header-tabstrip,
-    &[data-fit="trim"] .block-frame-end-extra,
-    &[data-fit="min"] .block-frame-end-extra,
-    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close) {
+    &[data-fit="trim"] .block-frame-end-extra:not(.block-frame-end-keep),
+    &[data-fit="min"] .block-frame-end-extra:not(.block-frame-end-keep),
+    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close):not(.block-frame-end-keep) {
         display: none;
     }
 
@@ -228,7 +229,11 @@
         }
     }
 
-    .block-frame-end-icons {
+    // The aux group is the same controls in a different home: it lives inside the header's
+    // scrolling range (#29325), which needs display: contents on it, so the sizes and the
+    // separator rule below must reach it too.
+    .block-frame-end-icons,
+    .block-frame-header-aux {
         display: flex;
         flex-shrink: 0;
 

@@ -26,4 +26,26 @@ generation: number,
  * frontend build) so the endpoint degrades gracefully instead of going
  * silent.
  */
-user_message?: string, };
+user_message?: string, 
+/**
+ * The pane's recent conversation, oldest first, in the digest's own form
+ * (`[user] …`, `[assistant] …`, `[tool] Name`, `[error] …`), from the document
+ * it has already translated for its provider (`ambient-activity.ts`). Read
+ * alongside the user's message, so a short status question in the middle of
+ * new work still names that work. Without it the server reads the output
+ * file, which it can parse only for Claude-shaped streams.
+ */
+activity?: Array<string>, 
+/**
+ * The session's human-turn count this request is for. Stored with the title
+ * so the pane can tell how many messages ago it was last judged.
+ */
+turn?: number, 
+/**
+ * The title is old (many turns or hours), or the work moved on (a compaction):
+ * judge the session afresh, without showing the model the current title, so
+ * there is nothing to anchor on and "SKIP: still the same goal" is not the
+ * easy answer. The result replaces the title only if it names a different
+ * goal; a rewording confirms the title as still right.
+ */
+refresh?: boolean, };

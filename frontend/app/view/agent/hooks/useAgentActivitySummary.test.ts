@@ -12,6 +12,7 @@
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
+import type { DocumentNode } from "../../../agent-model/types";
 
 const hub = vi.hoisted(() => ({
     activitySummary: vi.fn(),
@@ -56,7 +57,7 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
-function setup(initialPhase: TurnPhase = { kind: "Idle" }) {
+function setup(initialPhase: TurnPhase = { kind: "Idle" }, document?: () => DocumentNode[]) {
     let setPhase!: (p: TurnPhase) => void;
     let dispose: () => void = () => {};
     createRoot((d) => {
@@ -67,6 +68,7 @@ function setup(initialPhase: TurnPhase = { kind: "Idle" }) {
             blockId: BLOCK_ID,
             turnPhase: phase,
             getRootWidth: () => 400,
+            document,
         });
     });
     return { setPhase, dispose };
@@ -184,6 +186,11 @@ const submit = (setPhase: (p: TurnPhase) => void, n: number, text = `message ${n
     setPhase({ kind: "Submitting", submittedAt: n, pendingContent: text });
     setPhase({ kind: "Streaming", bufferSize: 0, toolsActive: 0, lastEventMs: 0 });
 };
+/** The title was judged just now, at human turn `turn`: not aged, so only the schedule applies. */
+const judgedNow = (turn: number) => {
+    hub.meta["term:ambient_summary_at"] = Date.now();
+    hub.meta["term:ambient_summary_turn"] = turn;
+};
 const flush = async () => {
     for (let i = 0; i < 4; i++) await Promise.resolve();
 };
@@ -216,6 +223,7 @@ describe("useAgentActivitySummary — schedule (hardening PR 3)", () => {
 
     it("with a title, asks only on turns 2, 5 and 8", async () => {
         hub.meta["term:ambient_summary"] = "Fix the login race";
+        judgedNow(1);
         hub.activitySummary.mockResolvedValue({ summary: "", tokens: null });
         const { setPhase, dispose } = setup();
         for (let n = 1; n <= 9; n++) submit(setPhase, n);
@@ -231,6 +239,7 @@ describe("useAgentActivitySummary — schedule (hardening PR 3)", () => {
         hub.updateMeta.mockImplementation(() => new Promise(() => {}));
         hub.activitySummary.mockResolvedValue({ summary: "", tokens: null });
         hub.meta = { "term:ambient_summary": "Fix the login race" };
+        judgedNow(0);
         const { setPhase, dispose } = setup();
         for (let n = 1; n <= 5; n++) submit(setPhase, n);
         await flush();
@@ -244,11 +253,100 @@ describe("useAgentActivitySummary — schedule (hardening PR 3)", () => {
     it("a message on an unscheduled turn makes no request, so it can't supersede the scheduled one (#4238)", async () => {
         hub.activitySummary.mockImplementationOnce(() => new Promise(() => {}));
         hub.meta = { "term:ambient_summary": "Fix the login race", "term:human_turns": 4 };
+        judgedNow(4);
         const { setPhase, dispose } = setup();
         submit(setPhase, 5); // scheduled: asks
         submit(setPhase, 6); // not scheduled: no request
         await flush();
         expect(hub.activitySummary).toHaveBeenCalledTimes(1);
+        dispose();
+    });
+});
+
+
+describe("useAgentActivitySummary — an old title does not outlive its goal", () => {
+    const ask = (turns: number) => {
+        hub.activitySummary.mockResolvedValue({ summary: "", tokens: null });
+        const { setPhase, dispose } = setup();
+        for (let n = 1; n <= turns; n++) submit(setPhase, n);
+        return dispose;
+    };
+    const refreshes = () => hub.activitySummary.mock.calls.map(([, payload]) => [payload.turn, payload.refresh]);
+
+    it("a title judged nine messages ago is judged afresh, with no current title shown", async () => {
+        hub.meta["term:ambient_summary"] = "Compare AWS Bedrock and OpenRouter pricing";
+        judgedNow(1);
+        const dispose = ask(10);
+        await flush();
+        // 2, 5 and 8 are the schedule's (the model may answer SKIP); 10 is nine messages after turn 1.
+        expect(refreshes()).toEqual([
+            [2, false],
+            [5, false],
+            [8, false],
+            [10, true],
+        ]);
+        dispose();
+    });
+
+    it("a title judged more than two hours ago is judged afresh at the next message", async () => {
+        hub.meta["term:ambient_summary"] = "Compare AWS Bedrock and OpenRouter pricing";
+        hub.meta["term:ambient_summary_at"] = Date.now() - 3 * 60 * 60_000;
+        hub.meta["term:ambient_summary_turn"] = 0;
+        const dispose = ask(1);
+        await flush();
+        expect(refreshes()).toEqual([[1, true]]);
+        dispose();
+    });
+
+    it("a title with no stamp (an older build's, or restored) has no known age: judged afresh once", async () => {
+        hub.meta["term:ambient_summary"] = "Compare AWS Bedrock and OpenRouter pricing";
+        const dispose = ask(1);
+        await flush();
+        expect(refreshes()).toEqual([[1, true]]);
+        dispose();
+    });
+
+    it("a compaction marks the title stale: the next message judges it afresh", async () => {
+        hub.meta["term:ambient_summary"] = "Fix the login race";
+        judgedNow(0);
+        hub.meta["term:ambient_summary_at"] = 0; // markTitleStale
+        const dispose = ask(1);
+        await flush();
+        expect(refreshes()).toEqual([[1, true]]);
+        dispose();
+    });
+
+    it("a status question in the middle of new work carries that work with it", async () => {
+        hub.meta["term:ambient_summary"] = "Compare AWS Bedrock and OpenRouter pricing";
+        hub.meta["term:ambient_summary_at"] = Date.now() - 4 * 60 * 60_000;
+        hub.meta["term:ambient_summary_turn"] = 1;
+        hub.meta["term:human_turns"] = 20;
+        hub.activitySummary.mockResolvedValue({ summary: "", tokens: null });
+        const document = () =>
+            [
+                { type: "user_message", id: "u1", message: "now fix the Windows resize bug", isStartup: false },
+                { type: "markdown", id: "m1", content: "Found it in the child-window lag.", metadata: {} },
+            ] as unknown as DocumentNode[];
+        const { setPhase, dispose } = setup({ kind: "Idle" }, document);
+        submit(setPhase, 21, "whats the status on that?");
+        await flush();
+        const [, payload] = hub.activitySummary.mock.calls[0];
+        expect(payload.user_message).toBe("whats the status on that?");
+        expect(payload.activity).toEqual([
+            "[user] now fix the Windows resize bug",
+            "[assistant] Found it in the child-window lag.",
+        ]);
+        expect(payload.refresh).toBe(true);
+        expect(payload.turn).toBe(21);
+        dispose();
+    });
+
+    it("sends the turn the title is stamped with, and no activity from a pane without a document", async () => {
+        const dispose = ask(1);
+        await flush();
+        const [, payload] = hub.activitySummary.mock.calls[0];
+        expect(payload.turn).toBe(1);
+        expect(payload.activity).toBeUndefined();
         dispose();
     });
 });

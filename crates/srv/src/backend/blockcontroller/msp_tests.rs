@@ -32,7 +32,7 @@ fn agentmux_mcp() -> Map<String, Value> {
 
 fn init_result() -> Value {
     json!({"serverInfo": {"name": "muse", "version": "1.4.7"},
-           "schema": {"version": 1, "fingerprint": "sha256:6de32db08bbbe0deb478d2bfcaba001e9fb490986bc80db3aceb4d996abf7df9"},
+           "schema": {"version": 1, "fingerprint": "sha256:c94c3d1f2f51e6424074b9ec43eac3eedcf532d3dcd77351ec1383a87d3049c6"},
            "grantedCapabilities": ["sessionMcp"], "experimentalApi": false})
 }
 

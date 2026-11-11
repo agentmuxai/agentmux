@@ -4,13 +4,15 @@
 /**
  * The agent pane's right-click menu (`AgentViewModel.getBodyContextMenuItems`):
  * Agent History, Quick Fork and View for the pane's conversation, then Seat…,
- * Bundles… and Personal memory for the agent itself, and Shut down, the one act that ends it
+ * Bundles… and Personal memory for the agent itself, "Starts agents without asking" (its Always
+ * allow, taken back here), and Shut down, the one act that ends it
  * (closing the pane keeps it running). The pane header has no
  * button of its own (SPEC_DROP_THE_AGENT_STASH_2026_10_24.md, D6).
  */
 
 import type { ModalLayerRequest } from "@/app/element/modal-layer";
 import { MENU_ICON } from "@/app/util/menu-icons";
+import { setStartsAgentsWithoutAsking, setUsesGoogleWithoutAsking, startsAgentsWithoutAsking, usesGoogleWithoutAsking } from "@/app/store/agent-grants";
 import { openMemory } from "@/app/store/section-panes";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { isContainerAgentMode } from "@/util/runtime-kind";
@@ -67,7 +69,25 @@ export function agentBodyMenuItems(host: AgentBodyMenuHost): ContextMenuItem[] {
                 icon: MENU_ICON.bundles,
                 click: () => host.openModal?.({ kind: "agent-bundles", agentId, agentName }),
             },
-            { label: "Personal memory", icon: MENU_ICON.memory, click: () => void openMemory("personal", { agentId }) }
+            { label: "Personal memory", icon: MENU_ICON.memory, click: () => void openMemory("personal", { agentId }) },
+            // The card's Always allow, shown and taken back here (spec §4).
+            {
+                label: "Starts agents without asking",
+                type: "checkbox",
+                checked: startsAgentsWithoutAsking(agentId),
+                click: () => void setStartsAgentsWithoutAsking(agentId, !startsAgentsWithoutAsking(agentId)).catch(() => {}),
+            },
+            // A Google "Always" can only be given on its card, so the entry is there to take it back.
+            ...(usesGoogleWithoutAsking(agentId)
+                ? [
+                      {
+                          label: "Uses Google without asking",
+                          type: "checkbox" as const,
+                          checked: true,
+                          click: () => void setUsesGoogleWithoutAsking(agentId, false).catch(() => {}),
+                      },
+                  ]
+                : [])
         );
     }
     items.push({ type: "separator" }, { label: "Shut down", icon: MENU_ICON.shutdown, click: host.shutDown }, { type: "separator" });

@@ -6,7 +6,8 @@ use super::{ControllerType, ProviderConfig};
 // goose: `goose acp` speaks ACP over stdio. Not on npm: the user installs the
 // GitHub release (the install hint), and srv finds it on PATH or in
 // `known_install_paths`. Checked against 1.54.0 on 2026-10-14
-// (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.4).
+// (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.4); pin moved to 1.58.0 on 2026-11-09
+// after an ACP `initialize` against the real binary.
 pub(super) static GOOSE: ProviderConfig = ProviderConfig {
     id: "goose",
     cli_command: "goose",
@@ -26,7 +27,7 @@ pub(super) static GOOSE: ProviderConfig = ProviderConfig {
     auth_extra_env: &[("GOOSE_DISABLE_KEYRING", "1"), ("GOOSE_TELEMETRY_OFF", "1")],
     unset_env: &[],
     npm_package: "",
-    pinned_version: "1.54.0",
+    pinned_version: "1.58.0",
     base_url_env_var: None,
     supported_vendors: &["goose"],
     startup_instructions_filename: Some("AGENTS.md"),

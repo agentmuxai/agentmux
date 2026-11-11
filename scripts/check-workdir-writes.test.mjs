@@ -9,7 +9,7 @@ import { makeFixture } from "./lib/check-fixture.mjs";
 
 const AGENT_CONFIG = "crates/srv/src/backend/agent_config.rs";
 const AGENT_OPEN = "crates/srv/src/server/app_api/agent_open.rs";
-const EDITOR = "crates/srv/src/server/editor_handlers.rs";
+const EDITOR = "crates/srv/src/server/editor_handlers/agent_config.rs";
 
 let fx;
 afterEach(() => fx?.remove());
@@ -53,13 +53,9 @@ describe("check-workdir-writes", () => {
         expect(r.status).toBe(0);
     });
 
-    it("checks the editor handler only inside its registration region", () => {
-        const outside = repo({ [EDITOR]: "fn save() { std::fs::write(p, b\"\"); }\n" });
-        expect(outside.status).toBe(0);
-        fx.remove();
-        const inside = repo({
-            [EDITOR]: "engine.register_typed(\n    COMMAND_WRITE_AGENT_CONFIG,\n    |x| { std::fs::write(p, b\"\"); },\n);\nengine.register_typed(\n",
-        });
+    it("checks the whole agent-config handler file", () => {
+        const inside = repo({ [EDITOR]: "fn write_file() {\n    std::fs::write(p, b\"\");\n}\n" });
         expect(inside.status).toBe(1);
+        expect(inside.out).toContain(`${EDITOR}:2`);
     });
 });

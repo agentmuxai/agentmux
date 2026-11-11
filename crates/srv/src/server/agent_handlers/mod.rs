@@ -31,6 +31,7 @@ mod identity;
 mod identity_register_tests;
 mod identity_delete;
 pub(crate) use identity_delete::delete_identity_account;
+mod endpoint;
 mod instance;
 mod session;
 pub(crate) mod seat;
@@ -66,6 +67,7 @@ pub use input::{run_agent_turn, run_agent_turn_joining, AgentTurnDeps, TurnRegis
 
 pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     core::register(engine, state);
+    endpoint::register(engine, state);
     skills::register(engine, state);
     history::register(engine, state);
     template::register(engine, state);
@@ -78,6 +80,8 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     session::register(engine, state);
     seat::register(engine, state);
     crate::sagas::sensitive_window::register(engine, state);
+    crate::sagas::agent_notice::register(engine, state);
+    crate::sagas::pane_confirm::register(engine);
     crate::sagas::sensitive_runners::register_all();
     crate::server::pane_commands::register(engine, state);
     bundle::register(engine, state);

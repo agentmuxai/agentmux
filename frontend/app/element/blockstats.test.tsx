@@ -193,6 +193,87 @@ describe("where the badge is shown", () => {
         expect(statsBadgeShown(false, true)).toBe(true);
         expect(statsBadgeShown(false, false)).toBe(false);
     });
+
+    it("not in the frame of a pane that draws the readout itself", () => {
+        expect(statsBadgeShown(false, true, true)).toBe(false);
+        expect(statsBadgeShown(false, true, false)).toBe(true);
+    });
+});
+
+describe("the badge inline in the composer strip", () => {
+    const badge = (container: HTMLElement) => container.querySelector(".block-stats-badge") as HTMLElement;
+
+    it("draws the figures in the flow, in the full form, and as a focusable chip", () => {
+        const { container } = render(() => <BlockStatsBadge blockId="b1" placement="inline" />);
+        expect(badge(container).classList.contains("inline")).toBe(true);
+        expect(badge(container).textContent).toBe("0.3%90M");
+        expect(badge(container).querySelector(".stats-reading")?.getAttribute("tabindex")).toBe("0");
+    });
+
+    it("draws a processor icon and the CPU figure in the compact form, named by the whole reading", () => {
+        const { container } = render(() => <BlockStatsBadge blockId="b1" placement="inline" form="compact" />);
+        expect(badge(container).textContent).toBe("0.3%");
+        expect(badge(container).querySelector(".stats-icon")).toBeTruthy();
+        expect(badge(container).querySelector(".stats-mem")).toBeNull();
+        const chip = badge(container).querySelector(".stats-reading")!;
+        expect(chip.getAttribute("role")).toBe("img");
+        expect(chip.getAttribute("aria-label")).toBe("CPU 0.3%, memory 90M");
+    });
+
+    it("shows the full reading as the tooltip on both forms, on hover", async () => {
+        for (const form of ["full", "compact"] as const) {
+            detailCmd.mockResolvedValue(local());
+            const { container, unmount } = render(() => <BlockStatsBadge blockId="b1" placement="inline" form={form} />);
+            hover(container);
+            await waitFor(() => expect(value("Memory")).toBe("90.0 MB"));
+            expect(value("CPU")).toBe("0.3%");
+            unmount();
+        }
+    });
+
+    it("keeps the tooltip open while the chip has focus, and Escape closes it", async () => {
+        detailCmd.mockResolvedValue(local());
+        const { container } = render(() => <BlockStatsBadge blockId="b1" placement="inline" form="compact" />);
+        const chip = badge(container).querySelector(".stats-reading")!;
+        fireEvent.focus(chip);
+        await waitFor(() => expect(screen.getByText("Memory")).toBeTruthy());
+        fireEvent.keyDown(chip, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByText("Memory")).toBeNull());
+        fireEvent.focus(chip);
+        await waitFor(() => expect(screen.getByText("Memory")).toBeTruthy());
+        fireEvent.blur(chip);
+        await waitFor(() => expect(screen.queryByText("Memory")).toBeNull());
+    });
+
+    it("closes on Escape even while the pointer is still over the chip, and opens again once the pointer has left", async () => {
+        detailCmd.mockResolvedValue(local());
+        const { container } = render(() => <BlockStatsBadge blockId="b1" placement="inline" form="compact" />);
+        const chip = badge(container).querySelector(".stats-reading")!;
+        hover(container);
+        fireEvent.focus(chip);
+        await waitFor(() => expect(screen.getByText("Memory")).toBeTruthy());
+        fireEvent.keyDown(chip, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByText("Memory")).toBeNull());
+        fireEvent.mouseLeave(badge(container));
+        fireEvent.mouseLeave(chip);
+        hover(container);
+        await waitFor(() => expect(screen.getByText("Memory")).toBeTruthy());
+    });
+
+    it("is a plain, tooltip-less copy while it is only measured", () => {
+        const { container } = render(() => <BlockStatsBadge blockId="b1" placement="inline" measuring />);
+        expect(badge(container).textContent).toBe("0.3%90M");
+        expect(badge(container).querySelector("[tabindex]")).toBeNull();
+        hover(container);
+        expect(detailCmd).not.toHaveBeenCalled();
+    });
+
+    it("leaves the overlay's markup as it was", () => {
+        const { container } = render(() => <BlockStatsBadge blockId="b1" />);
+        expect(badge(container).classList.contains("inline")).toBe(false);
+        expect(badge(container).querySelector(".stats-reading")).toBeNull();
+        expect(badge(container).textContent).toBe("0.3%90M");
+    });
 });
 
 describe("formatting", () => {

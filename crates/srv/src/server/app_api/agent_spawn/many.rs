@@ -62,15 +62,15 @@ async fn plan(state: &AppState, leader: &Leader, specs: &[SpawnWorkerSpec]) -> R
             }
         }
         let (provider, mut runtime) = route::choose(state, leader, &spec.route, spec.model.as_deref(), spec.effort.as_deref()).map_err(|e| of_worker(n, e))?;
-        runtime.placement = container::decide_here(state, &spec.container, &leader.def, &leader.def).await.map_err(|e| of_worker(n, e))?;
+        runtime.placement = container::decide_here(state, &spec.container, &leader.def, &leader.def, &provider).await.map_err(|e| of_worker(n, e))?;
         let account = route::account(state, leader, &provider, &runtime, spec.account.as_deref()).map_err(|e| of_worker(n, e))?;
         planned.push(Planned { name: name.map(str::to_string), brief: brief.to_string(), runtime, account });
     }
     Ok(planned)
 }
 
-/// The one question for the whole batch: every worker, on one line each.
-pub(super) fn consent_message_many(leader: &str, planned: &[Planned]) -> String {
+/// What the person is shown about the whole batch: every worker, on one line each.
+pub(super) fn consent_message_many(planned: &[Planned]) -> String {
     let lines: Vec<String> = planned
         .iter()
         .map(|p| {
@@ -84,13 +84,10 @@ pub(super) fn consent_message_many(leader: &str, planned: &[Planned]) -> String 
             format!("• {who}{on}, {paid_by}: {}", one_line(&p.brief, 140))
         })
         .collect();
-    format!(
-        "{} wants to start {} new agents, from its own instructions, in its team tab:\n\n{}\n\n\
-         They spend tokens until they are stopped. Start them?",
-        one_line(leader, 60),
-        planned.len(),
-        lines.join("\n")
-    )
+    format!("{}
+
+They spend tokens until they are stopped.", lines.join("
+"))
 }
 
 pub(super) async fn spawn_many(
@@ -131,21 +128,9 @@ pub(super) async fn spawn_many(
         .collect();
     crate::server::agent_lifecycle::admit_batch(state, &wanted, false).await.map_err(|e| refuse(StatusCode::CONFLICT, e))?;
 
-    let provenance = blockcontroller::get_controller(&leader.block_id).and_then(|c| c.turn_provenance());
-    let asked_user = if crate::sagas::self_quit::gate(provenance.as_ref(), user_instruction).is_err() || planned.iter().any(|p| p.runtime.route_asked) {
-        tracing::info!(leader = %leader.def.name, workers = n, "agent.spawn_many: asking the user");
-        let question = json!({
-            "kind": "consent",
-            "title": format!("{} wants to start {n} workers", one_line(&leader.def.name, 60)),
-            "message": consent_message_many(&leader.def.name, &planned),
-            "checkbox": "",
-            "ok_label": "Start them",
-            "cancel_label": "Don't",
-        });
-        ask_consent(state, &leader, question, "workers", "the workers").await?
-    } else {
-        false
-    };
+    let headline = format!("{} is starting {n} new agents", one_line(&leader.def.name, 60));
+    let route_asked = planned.iter().any(|p| p.runtime.route_asked);
+    let asked_user = announce_start(state, &leader, user_instruction, route_asked, headline, consent_message_many(&planned), "").await?;
 
     // The room is claimed now; a refusal starts nothing. The start limit is not charged here: a worker
     // that has to be started for its brief is charged when the brief is delivered, as for one worker.

@@ -237,6 +237,19 @@ fn the_install_probe_passes_its_environment_to_the_program() {
     assert_eq!(got.as_deref(), Some("9.8.7"));
 }
 
+#[cfg(unix)]
+#[test]
+fn an_install_probe_needs_the_program_to_exit_cleanly_but_the_general_probe_does_not() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let prog = dir.path().join("p");
+    std::fs::write(&prog, "#!/bin/sh\necho \"goose 1.2.3 not found\" >&2\nexit 127\n").unwrap();
+    std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (cmd, arg) = (prog.to_string_lossy().into_owned(), Some("--version".to_string()));
+    assert_eq!(crate::backend::tool_store::probe_version_with_env(&cmd, &arg, &[]).as_deref(), Some("1.2.3"));
+    assert_eq!(crate::backend::tool_store::probe_version_when_it_runs(&cmd, &arg, &[]), None);
+}
+
 #[test]
 fn the_providers_that_update_themselves_get_their_switch_on_the_install_probe() {
     for (id, var) in [("antigravity", "AGY_CLI_DISABLE_AUTO_UPDATE"), ("muse", "MUSE_NO_AUTO_UPDATE"), ("grok", "GROK_DISABLE_AUTOUPDATER")] {

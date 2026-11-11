@@ -78,6 +78,8 @@ export function parseKey(spec: string, platform: KeyPlatform): KeySpec {
         if (m === "mod") {
             if (platform === "mac") out.meta = true;
             else out.ctrl = true;
+        } else if (m === "cmd" || m === "command") {
+            out.meta = true;
         } else if (m === "ctrl" || m === "shift" || m === "alt" || m === "meta") {
             out[m] = true;
         } else {
@@ -150,6 +152,13 @@ function keyLabel(k: KeySpec): string {
     if (k.letter) return k.letter.toUpperCase();
     if (k.code) return CODE_LABEL[k.code] ?? k.code.replace(/^(Digit|Numpad)/, (m) => (m === "Numpad" ? "Num" : ""));
     return NAMED_LABEL[k.named ?? ""] ?? k.named ?? "";
+}
+
+/** The token `parseKey` reads back as physical key `code`: a digit or a punctuation character, else null. */
+export function tokenForCode(code: string): string | null {
+    const digit = code.match(/^Digit([0-9])$/);
+    if (digit) return digit[1];
+    return Object.keys(PUNCT_CODE).find((ch) => PUNCT_CODE[ch] === code) ?? null;
 }
 
 /** "Ctrl+Shift+T" elsewhere, "⇧⌘T" on macOS (Apple's modifier order). */

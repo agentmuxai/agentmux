@@ -50,6 +50,8 @@ AgentMux uses Chromium/CEF's kernel **user-namespace sandbox** on Linux (`--disa
 - **Continue without sandbox this time** — proceeds for this session only, with the sandbox disabled (equivalent to `AGENTMUX_UNSAFE_NOSANDBOX=1`).
 - **Cancel** — exits.
 
+When the running binary is somewhere the fix cannot name (a development build, the portable `.tar.xz`), the dialog says so, shows the path, and offers only **Continue without sandbox this time** and **Cancel**: installing the profile would not help, and offering it would just ask again.
+
 If neither `zenity` nor `kdialog` is available (headless / minimal window manager, no PolicyKit), AgentMux prints the same explanation to stderr and exits rather than silently proceeding either sandboxed-and-broken or silently unsandboxed.
 
 **Manual alternatives**, if you'd rather not use the dialog:
@@ -72,10 +74,9 @@ alongside the binary there.
 
 **The portable `.tar.xz` is NOT covered.** It has no fixed install path by
 design (extract anywhere) — a static AppArmor profile fundamentally can't
-name a location that doesn't exist yet. "Fix it now" fails gracefully with
-an error (re-shows the dialog rather than crashing or claiming false
-success) if you hit this restriction using the tarball. Use the AppImage or
-`.deb`/`.rpm` instead, or fall back to `AGENTMUX_UNSAFE_NOSANDBOX=1`.
+name a location that doesn't exist yet. If you hit this restriction using
+the tarball, the dialog offers no "Fix it now" (see above). Use the AppImage
+or `.deb`/`.rpm` instead, or fall back to `AGENTMUX_UNSAFE_NOSANDBOX=1`.
 
 Full design: [`docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md`](specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md).
 

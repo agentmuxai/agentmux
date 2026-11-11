@@ -16,6 +16,7 @@
  * Spec: docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md section 3.4.
  */
 
+import { t } from "@/app/i18n/i18n";
 import type { ContainerImageAccess } from "@/types/rpc/ContainerImageAccess";
 import { isContainerAgentMode, isContainerAgentType, isContainerRuntime } from "@/util/runtime-kind";
 
@@ -70,9 +71,9 @@ export function containerImageForChoice(runtime: "host" | "container", choice: C
 export function developerImageNote(image: ContainerImageState): string | null {
     switch (image) {
         case "denied":
-            return "The developer image can't be downloaded: its registry refuses access. Pick the standard image, or try again later.";
+            return t("containerImage.developer.denied");
         case "not_found":
-            return "The developer image isn't published for this version of AgentMux yet. Pick the standard image, or update AgentMux.";
+            return t("containerImage.developer.notFound");
         default:
             return null;
     }
@@ -82,9 +83,9 @@ export function developerImageNote(image: ContainerImageState): string | null {
 export function containerImageNote(image: ContainerImageState): string | null {
     switch (image) {
         case "denied":
-            return "The container image can't be downloaded: its registry refuses access. New agents run as Native agents (on this computer) until that is fixed.";
+            return t("containerImage.note.denied");
         case "not_found":
-            return "The container image wasn't found in its registry. New agents run as Native agents (on this computer) until that is fixed.";
+            return t("containerImage.note.notFound");
         default:
             return null;
     }

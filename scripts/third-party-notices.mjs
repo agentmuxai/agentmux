@@ -423,7 +423,7 @@ export function buildNotices({ repoRoot, jsPackages, rustPackages, rustError, sh
   const header = [
     `AgentMux ${version}: third-party software notices`,
     "",
-    "AgentMux is Copyright AgentMux Corp. and licensed under the Apache License 2.0;",
+    "AgentMux is Copyright AgentMux Corp and licensed under the Apache License 2.0;",
     "see LICENSE.txt and NOTICE.txt in this folder. It includes the third-party",
     "software below, each under its own licence. Where a package offers a choice",
     "of licences, the one AgentMux uses it under is noted.",

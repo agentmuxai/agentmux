@@ -33,6 +33,12 @@ interface TooltipProps {
      * `delayMs`.
      */
     immediate?: boolean;
+    /**
+     * A status the pointer only reads: the panel takes no pointer events, so it can never sit under the
+     * pointer and end the hover that opened it (the anchor's mouseleave, a close, a reopen, every frame).
+     * Its text can't be selected either. Not for a tooltip with a link or a control in it.
+     */
+    passive?: boolean;
 }
 
 function TooltipInner(props: TooltipProps): JSX.Element {
@@ -181,7 +187,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                     gutter={10}
                     hideUntilPlaced
                     onShown={() => setIsPositioned(true)}
-                    shellClass="anchored-popover--tooltip"
+                    shellClass={props.passive ? "anchored-popover--tooltip anchored-popover--passive" : "anchored-popover--tooltip"}
                     class={cn("bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl")}
                     style={{
                         opacity: isVisible() && isPositioned() ? 1 : 0,
@@ -208,6 +214,7 @@ export function Tooltip(props: TooltipProps): JSX.Element {
             divOnClick={props.divOnClick}
             delayMs={props.delayMs}
             immediate={props.immediate}
+            passive={props.passive}
         />
     );
 }

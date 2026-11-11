@@ -75,11 +75,10 @@ describe("flashPatternForCategory (event sounds, spec §2.2)", () => {
     });
 
     it("strikes near full strength: the hard knock reads about twice as bright as a tool knock", () => {
-        for (const c of ["info", "warning"] as const) {
+        for (const c of ["info", "warning", "error"] as const) {
             expect(pattern(c)[0].intensity).toBeCloseTo(0.94, 2);
         }
-        expect(pattern("success")[0].intensity).toBeCloseTo(0.997, 3); // −0.1 dB
-        expect(pattern("error")[0].intensity).toBe(1);
+        expect(pattern("success")[0].intensity).toBe(1);
         const toolKnock = flashPatternForSyllable(paramsForTool("Edit")).strikes[0].intensity;
         expect(pattern("warning")[0].intensity / toolKnock).toBeGreaterThan(1.7);
     });
@@ -87,10 +86,10 @@ describe("flashPatternForCategory (event sounds, spec §2.2)", () => {
 
 describe("strike levels and intensity (spec §2.2, §3.2)", () => {
     it("puts the loudest event sounds at 0 dB and the single strikes just below", () => {
-        expect(Math.max(categoryStrikeLevelDb("success"), categoryStrikeLevelDb("error"))).toBeCloseTo(0, 5);
-        expect(categoryStrikeLevelDb("success")).toBeCloseTo(-0.1, 1);
-        expect(categoryStrikeLevelDb("info")).toBeCloseTo(-1.9, 1);
-        expect(categoryStrikeLevelDb("warning")).toBeCloseTo(-1.9, 1);
+        expect(categoryStrikeLevelDb("success")).toBeCloseTo(0, 5);
+        expect(categoryStrikeLevelDb("info")).toBeCloseTo(-1.8, 1);
+        expect(categoryStrikeLevelDb("warning")).toBeCloseTo(-1.8, 1);
+        expect(categoryStrikeLevelDb("error")).toBeCloseTo(-1.8, 1);
     });
 
     it("maps level to intensity: 2^(dB/20), clamped to [floor, 1]", () => {

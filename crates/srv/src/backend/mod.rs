@@ -3,6 +3,7 @@
 
 
 pub mod agent_admission;
+pub mod agent_grants;
 pub mod agent_line;
 pub mod agent_seat;
 pub mod agent_availability;
@@ -13,6 +14,7 @@ pub mod agent_color;
 pub mod palette;
 pub mod account_availability;
 pub mod agent_env;
+pub mod endpoint_notice;
 pub mod agent_runtime_state;
 pub mod install_events;
 pub mod signin_link_event;
@@ -56,6 +58,7 @@ pub mod fleet_feed;
 pub mod fleet_source;
 pub mod narrated_events;
 pub mod pending_background_pids;
+pub mod mcp_config_file;
 pub mod mcp_health;
 pub mod mcp_health_meta;
 pub mod message_origin;

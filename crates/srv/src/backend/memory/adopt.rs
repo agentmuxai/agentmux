@@ -14,8 +14,8 @@
 //!   another agent uses — and issues the list a `list_id`. Paths never
 //!   leave the server.
 //! - [`adopt`] takes `(list_id, index, dir hash)` choices only. It is
-//!   reached through the host's confirmation window, never an agent-held
-//!   credential (the service gates it on the host secret). A folder that
+//!   reached through the person's confirmation in the Memory pane, never an
+//!   agent-held credential (`agent:memory:adopt` is the window's only). A folder that
 //!   changed since the list was issued is refused.
 //!
 //! Merging never replaces the agent's current memory: a file the record

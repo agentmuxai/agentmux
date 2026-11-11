@@ -10,8 +10,7 @@ use serde_json::json;
 
 use crate::backend::blockcontroller;
 use crate::backend::reactive::{registry as agent_registry, AgentRegistration, InjectionRequest};
-use crate::backend::subagent_watcher;
-use crate::backend::base;
+use crate::backend::{base, subagent_watcher};
 
 use super::AppState;
 
@@ -84,7 +83,7 @@ pub(super) enum ForwardOutcome {
 /// arrived. All three now require `success: true`. No real peer is affected:
 /// `InjectionResponse::success` is a plain `bool` with no
 /// `skip_serializing_if`, so a genuine AgentMux srv always sends it.
-async fn forward_inject_to_peer(
+pub(super) async fn forward_inject_to_peer(
     state: &AppState,
     req: &InjectionRequest,
     forwarded_req: &InjectionRequest,
@@ -352,7 +351,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     };
     let observed_key = match lan_signer::resolve(state, &claimed).await {
         lan_signer::SignerKey::Pinned(key) => key,
-        lan_signer::SignerKey::Unknown => return,
+        lan_signer::SignerKey::Unknown | lan_signer::SignerKey::Unproven => return,
         lan_signer::SignerKey::Refused => {
             req.lan_verified = Some(false);
             return;
@@ -379,6 +378,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 
 mod channel_v2;
 mod forward_tiers;
+pub(super) mod peer_hold;
 pub(crate) mod lan_signer;
 mod registration_flags;
 pub(crate) mod former_slug;
@@ -862,7 +862,7 @@ pub(crate) async fn route_for_absent(
 /// The relay's lease answer as a route: hold here unless it says another
 /// install runs the agent or cannot say; an unreachable relay holds here
 /// (there is no relay to send through anyway).
-fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
+pub(super) fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
     use crate::muxbus::wan_lease::Holder;
     match answer {
         Holder::Free | Holder::Yours | Holder::Unreachable => AbsentRoute::HoldHere,
@@ -937,7 +937,7 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
         &req.target_agent,
         &req.message,
         priority,
-        carried.as_ref(), req.cloud_files.as_deref(), req.jekt_tier.as_ref(),
+        carried.as_ref(), req.cloud_files.as_deref(), req.jekt_tier.as_ref(), req.expires_at_ms,
     )
     .await;
 

@@ -1,49 +1,39 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The agent pane's Messages panel and its rail (docs/specs/SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5).
-// The shell is the kit's SidePanel, docked. Sizes and colours come from theme tokens only.
+// The agent pane's Messages panel (docs/specs/SPEC_JEKT_SIDE_PANEL_RESEARCH_AND_DESIGN_2026_11_04.md §5).
+// The shell is the kit's SidePanel, over the conversation. Sizes and colours come from theme tokens only.
 
-// The column beside the conversation: the panel or its rail, never more than 45% of the pane.
+// What holds the panel. The panel is the kit's SidePanel, over the content as the Kanban's task drawer is; opening it
+// never moves the conversation. Closed, the dock is empty and takes no room.
 .messages-dock {
     display: flex;
     flex: none;
     min-height: 0;
-    max-width: 45%;
-}
-
-// In a narrow pane the dock is the overlay: it lies over the conversation along the pane's right edge, like the
-// Kanban's task drawer (the kit's SidePanel is positioned against the pane's view), and is gone until opened.
-.messages-dock--overlay {
-    position: absolute;
-    z-index: var(--z-pane-overlay);
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(440px, 92%);
-    max-width: none;
-
-    .ui-side-panel--docked {
-        width: 100%;
-        box-shadow: -8px 0 24px rgb(0 0 0 / 25%);
-    }
-}
-
-.messages-dock--idle {
-    display: none;
-}
-
-.messages-header-button {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
 }
 
 .messages-panel {
+    // 95% of the pane's surface, so the conversation shows faintly behind it.
+    background: color-mix(in srgb, var(--main-bg-color) 95%, transparent);
     // The shell scrolls its own body; here the list scrolls and the head, filter and Needs-you strip stay put.
     overflow: hidden;
     min-height: 0;
     font-size: var(--text-sm);
+
+    // A close button that is easy to hit, and red under the pointer. It sits at the panel's top right corner, under
+    // the pane's top band (the panel's containing block is `.agent-view-row`, which starts below the band).
+    .ui-side-panel__head {
+        align-items: center;
+    }
+    .ui-side-panel__head .ui-icon-button {
+        --ui-height: 36px;
+        font-size: var(--text-lg);
+    }
+    .ui-side-panel__head .ui-icon-button:hover:not(:disabled) {
+        color: var(--error-text-color);
+        border-color: var(--error-line);
+        background: var(--error-bg);
+    }
 }
 
 .messages-panel__tools {
@@ -182,33 +172,15 @@
     justify-content: flex-end;
 }
 
-// The closed panel: a narrow rail on the right edge, its label turned on its side.
-.messages-rail {
-    flex: none;
-    width: 28px;
-    display: flex;
-    flex-direction: column;
+// The Messages button in the pane's header: the envelope, the unread count and a dot while something waits.
+.messages-header-button {
+    display: inline-flex;
     align-items: center;
-    border-left: 1px solid var(--border-color);
-    background: var(--main-bg-color);
-}
-
-.messages-rail__button {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-2);
-    width: 100%;
-    padding: var(--space-3) 0;
-}
-
-.messages-rail__text {
-    writing-mode: vertical-rl;
-    text-orientation: mixed;
+    gap: var(--space-1);
 }
 
 // A dot that does not clear with the count: something needs the person.
-.messages-rail__needs {
+.messages-header-button__needs {
     width: 8px;
     height: 8px;
     border-radius: 50%;

@@ -22,7 +22,7 @@ import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/store/p
 import { isLightThemeActive } from "@/app/block/pane-identity";
 import { MOS, pushNotification } from "@/app/store/global";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { readSwarmSummary } from "@/app/store/activitySummary";
+import { readPaneSummary } from "@/app/store/swarm-line";
 import { readSeatMeta, seatTooltipLine } from "@/app/agent-model/seat-format";
 import {
     closeBlockInStack,
@@ -47,6 +47,7 @@ import { persistTabInfo } from "./pane-tab-persist";
 import type { PaneTabColors } from "./PaneTabStrip";
 import {
     emitPaneLocatePlay,
+    LOCATE_COALESCE_MS,
     LOCATE_READY_TIMEOUT_HIDDEN_MS,
     LOCATE_READY_TIMEOUT_MS,
     locateSlotWaitMs,
@@ -95,8 +96,10 @@ export function usePaneStripReveal(isFocused: Accessor<boolean>, getRoot: () => 
 
 /**
  * The locate flash (pane-locate.ts): a reveal of one of this pane's blocks flashes the pane once it
- * is on screen. Any other reveal ends the one running or waiting here, so only the newest pane
- * flashes, and leaving the pane ends its own.
+ * is on screen. Any request for another block ends the one running or waiting here, so only the newest
+ * pane flashes; a repeat request for the block already waiting, or flashed a moment ago, is the same
+ * flash (one open can ask twice). Leaving the pane ends a flash that waited for focus; a flash for a
+ * pane shown without taking focus (`focus: false`) does not depend on it.
  */
 export function usePaneLocateFlash(
     nodeModel: NodeModel,
@@ -108,28 +111,49 @@ export function usePaneLocateFlash(
     let locateGate: ReadyGate | null = null;
     let locateDelay: ReturnType<typeof setTimeout> | undefined;
     let stopLocateFlash: (() => void) | null = null;
+    // The request this pane is serving: waiting for the pane to be seen, or drawn at `startedAt`.
+    let serving: { blockId: string; focus: boolean; startedAt: number | null } | null = null;
     const endLocate = () => {
         locateGate?.cancel();
         locateGate = null;
         clearTimeout(locateDelay);
         stopLocateFlash?.();
         stopLocateFlash = null;
+        serving = null;
     };
     onMount(() => {
-        const off = onPaneLocate((blockId) => {
+        const off = onPaneLocate((blockId, opts) => {
+            const focus = opts.focus !== false;
+            if (serving?.blockId === blockId && untrack(stackIds).includes(blockId)) {
+                const drawnAgo = serving.startedAt === null ? null : performance.now() - serving.startedAt;
+                if (drawnAgo === null || drawnAgo < LOCATE_COALESCE_MS) return;
+            }
             endLocate();
             if (!untrack(stackIds).includes(blockId)) return;
-            const gate = whenPaneReady(() => samplePane(getRoot(), isFocused() && activeBlockId() === blockId), {
+            const request = { blockId, focus, startedAt: null as number | null };
+            serving = request;
+            const holds = () => (!focus || isFocused()) && activeBlockId() === blockId;
+            const gate = whenPaneReady(() => samplePane(getRoot(), holds()), {
                 timeoutMs: document.visibilityState === "visible" ? LOCATE_READY_TIMEOUT_MS : LOCATE_READY_TIMEOUT_HIDDEN_MS,
             });
             locateGate = gate;
             void gate.ready.then((ready) => {
-                if (!ready || locateGate !== gate) return;
+                // A pane that never became visible serves nothing: the next request starts afresh.
+                if (!ready) {
+                    if (serving === request) serving = null;
+                    return;
+                }
+                if (locateGate !== gate) return;
                 const begin = () => {
                     const root = getRoot();
                     // Still the same target: the user may have switched tab while it waited.
-                    if (locateGate !== gate || !root || !isFocused() || activeBlockId() !== blockId) return;
+                    if (locateGate !== gate) return;
+                    if (!root || !holds()) {
+                        serving = null;
+                        return;
+                    }
                     recordLocateStart(performance.now());
+                    request.startedAt = performance.now();
                     stopLocateFlash = showLocateFlash(root, {
                         light: isLightThemeActive(),
                         reduced: shouldReduceMotion("feedback"),
@@ -148,12 +172,12 @@ export function usePaneLocateFlash(
             endLocate();
         });
     });
-    // Leaving the pane ends its flash: it must not mark a pane the user has left.
+    // Leaving the pane ends a flash that waited for its focus: it must not mark a pane the user has left.
     createEffect(
         on(
             isFocused,
             (focused) => {
-                if (!focused) endLocate();
+                if (!focused && serving?.focus !== false) endLocate();
             },
             { defer: true }
         )
@@ -337,7 +361,7 @@ export function tabSummaryOf(id: string, tabInfos: Accessor<Map<string, PaneTabI
     if (badge) return `Browsing as ${badge.label}`;
     const meta = blockMeta(id);
     if (meta?.view !== "agent") return undefined;
-    return readSwarmSummary(meta) ?? undefined;
+    return readPaneSummary(meta) ?? undefined;
 }
 
 /** An agent tab's seat, from the `agent:seat` srv seeds at agent.open (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4). */

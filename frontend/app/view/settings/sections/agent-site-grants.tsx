@@ -20,7 +20,7 @@ export const AGENT_SITE_GRANTS_SETTING = {
     id: "browser.agent_sites",
     label: "Agents on sites",
     description:
-        "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick \"ask me for each line\" instead to be shown every line in the pane, with Run it and Don't run, before it goes in.",
+        "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. Tick \"ask me for each line\" instead to be shown every line in the pane, with Run it and Don't run, before it goes in. Enter and Space lets it press those keys, each taken as the click it is (a form's default button, a button, a link, a checkbox) and checked like any click. Uploads lets it fill the file chooser a page opens with files from its own workspace, and only those.",
     section: "browser",
     keywords: ["agent", "agents", "site", "sites", "grant", "auto-approve", "terminal", "cloud shell", "revoke", "always", "standing", "permission"],
 } satisfies SettingsIndexEntry;

@@ -36,10 +36,12 @@ import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
 import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
+import type { EndpointNoticeEvent } from "@/types/rpc/EndpointNoticeEvent";
 import type { EventsDroppedEvent } from "@/types/rpc/EventsDroppedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { GoogleNoticeEvent } from "@/types/rpc/GoogleNoticeEvent";
+import type { GrantsEvent } from "@/types/rpc/GrantsEvent";
 import type { IncidentEvent } from "@/types/rpc/IncidentEvent";
 import type { InputHistoryChangedEvent } from "@/types/rpc/InputHistoryChangedEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
@@ -55,12 +57,14 @@ import type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
 import type { MuxObjBatch } from "@/types/rpc/MuxObjBatch";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import type { NoDirectLinksEvent } from "@/types/rpc/NoDirectLinksEvent";
+import type { NoticeView } from "@/types/rpc/NoticeView";
 import type { NotificationActivateEvent } from "@/types/rpc/NotificationActivateEvent";
 import type { NotificationRetractEvent } from "@/types/rpc/NotificationRetractEvent";
 import type { NotifyTrayState } from "@/types/rpc/NotifyTrayState";
 import type { OpenFloatingPaneEvent } from "@/types/rpc/OpenFloatingPaneEvent";
 import type { OsNotification } from "@/types/rpc/OsNotification";
 import type { PaneAgentOpenedEvent } from "@/types/rpc/PaneAgentOpenedEvent";
+import type { PaneConfirmView } from "@/types/rpc/PaneConfirmView";
 import type { PathChangedEvent } from "@/types/rpc/PathChangedEvent";
 import type { PendingClearedEvent } from "@/types/rpc/PendingClearedEvent";
 import type { PendingView } from "@/types/rpc/PendingView";
@@ -104,7 +108,10 @@ export type MuxEventPayloads = {
   "agent-api-retry": ApiRetryEvent;
   "agent-message-accepted": MessageAcceptedEvent;
   "agent-resume-retry": ResumeRetryEvent;
+  "agent:endpoint-notice": EndpointNoticeEvent;
+  "agent:grants": GrantsEvent;
   "agent:inputhistory": InputHistoryChangedEvent;
+  "agent:notice": NoticeView;
   "agent:process-added": ProcessAddedEvent;
   "agent:process-exited": ProcessExitedEvent;
   "agent:progress": AgentProgressEvent;
@@ -181,6 +188,7 @@ export type MuxEventPayloads = {
   openfloatingpane: OpenFloatingPaneEvent;
   output: ProtocolFrame;
   "pane:agentopened": PaneAgentOpenedEvent;
+  "pane:confirm": PaneConfirmView;
   "pins:changed": null;
   "processbroker:status-changed": ProcessStatus;
   "processbroker:tracked-blocks-changed": null;
@@ -228,7 +236,10 @@ export const TYPED_MUX_EVENTS = [
   "agent-api-retry",
   "agent-message-accepted",
   "agent-resume-retry",
+  "agent:endpoint-notice",
+  "agent:grants",
   "agent:inputhistory",
+  "agent:notice",
   "agent:process-added",
   "agent:process-exited",
   "agent:progress",
@@ -305,6 +316,7 @@ export const TYPED_MUX_EVENTS = [
   "openfloatingpane",
   "output",
   "pane:agentopened",
+  "pane:confirm",
   "pins:changed",
   "processbroker:status-changed",
   "processbroker:tracked-blocks-changed",

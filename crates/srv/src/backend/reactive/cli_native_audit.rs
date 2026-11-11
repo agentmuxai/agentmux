@@ -58,6 +58,10 @@ fn entry(ev: &Event) -> AuditLogEntry {
         tier: None,
         trust: None,
         msg_id: None,
+        prompt: None,
+        answer: None,
+        level: None,
+        standing: None,
     }
 }
 

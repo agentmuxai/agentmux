@@ -254,6 +254,8 @@ pub(super) fn apply_agent_names_poll(
         || entry.agent_accounts != peer.accounts
         || entry.agent_resets != peer.resets;
     entry.agents = peer.names;
+    // Kept after the peer goes quiet, so a message to one of these agents is held instead of lost.
+    crate::backend::lan::seen_agents::remember(&entry.agents, &entry.hostname, now_secs);
     entry.agent_status = peer.status;
     entry.agent_lines = peer.lines;
     entry.agent_providers = peer.providers;

@@ -145,5 +145,26 @@ else
         || bad "a stale, unused dir is pruned" "build-OLDEST survived; cache would grow ~400MB per build"
 fi
 
+# ── 3. --version answers before anything is extracted or started ────────
+# The real script, in a tiny AppDir with a staged VERSION: the flag must print the version,
+# exit 0, and leave no extraction cache behind (a first run would otherwise copy ~400MB).
+AD="$TMP/vdir"
+mkdir -p "$AD/usr/share/agentmux" "$TMP/vhome"
+cp "$APPRUN" "$AD/AppRun"
+printf '9.9.9' > "$AD/usr/share/agentmux/VERSION"
+for flag in --version -V; do
+    out="$(HOME="$TMP/vhome" bash "$AD/AppRun" "$flag" 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ "$out" = "AgentMux 9.9.9" ]; then
+        ok "AppRun $flag prints the version and exits 0"
+    else
+        bad "AppRun $flag prints the version and exits 0" "rc=$rc out='$out'"
+    fi
+done
+if [ ! -e "$TMP/vhome/.local" ]; then
+    ok "AppRun --version extracts and registers nothing"
+else
+    bad "AppRun --version extracts and registers nothing" "found $(ls -A "$TMP/vhome/.local")"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

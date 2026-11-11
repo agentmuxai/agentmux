@@ -8,19 +8,18 @@
  * One toast for the whole list, rewritten in place: an agent's name in its colour, what it wants, and a "Go to
  * agent" button per agent (at most five). It appears when an item enters the list, in the window that is in
  * front and only there (the OS notification is the signal when none is), and not for what was already waiting
- * when the window opened. It never takes focus. It clears itself when the list empties, and closing it with its
- * X does not answer anything and does not bring it back; a request that comes after does.
+ * when the window opened. It never takes focus. It goes after about ten seconds (the status bar's entry keeps the
+ * row, §3.6; a pointer over it holds it), when the list empties or while Do Not Disturb is on. Closing it with its
+ * X, or letting it go, does not answer anything and does not bring it back; a request that comes after does.
  */
 
-import { paneRoleColor } from "@/app/block/pane-color-scheme";
-import { isLightThemeActive } from "@/app/block/pane-identity";
 import { pushNotification, removeNotificationById } from "@/app/store/flash-notifications";
 import { focusManager } from "@/app/store/focusManager";
 import { getSettingsKeyAtom } from "@/app/store/global";
-import { revealBlock } from "@/app/util/reveal-block";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { createEffect, createRoot } from "solid-js";
-import { attentionItems, type AttentionItem } from "./attention-list";
+import { goToAttention } from "./attention-go";
+import { attentionItems, attentionTint, type AttentionItem } from "./attention-list";
 import { setNotificationAction } from "./usenotification";
 
 export const ATTENTION_TOAST_ID = "attention:waiting";
@@ -30,11 +29,15 @@ export const TOAST_MAX_LINKS = 5;
 export const START_GRACE_MS = 4000;
 /** A request that leaves the list and returns within this long is not new. */
 export const RETURN_MS = 5000;
+/** How long the toast stays for a request that is new; the status bar's entry keeps the row after it. */
+export const TOAST_LIFETIME_MS = 10_000;
 
 export interface AttentionToastDeps {
     items: () => AttentionItem[];
     /** The setting `notify:waiting:toast` (default on). */
     enabled: () => boolean;
+    /** Whether Do Not Disturb holds notices back now: the toast waits, the status bar's entry does not. */
+    paused: () => boolean;
     /** Whether this window is the one in front. */
     inFront: () => boolean;
     /** The pane the person has focused in this window. */
@@ -48,6 +51,8 @@ export interface AttentionToastDeps {
     tint?: (hex?: string) => string | undefined;
     now: () => number;
     graceMs?: number;
+    /** Runs `fn` after `ms`; returns what cancels it. Default `setTimeout`. */
+    later?: (fn: () => void, ms: number) => () => void;
 }
 
 const goKey = (blockId: string) => `attention:go:${blockId}`;
@@ -68,13 +73,13 @@ export function buildToast(
             id: ATTENTION_TOAST_ID,
             icon: "bell",
             type: "warning",
-            persistent: true,
+            expiresWithActions: true,
             title: i.name,
             titleColor: tint(i.color),
             message: `${i.what}${where(i)}`,
             timestamp: "",
             live: "status",
-            actions: [{ label: "Go to agent", actionKey: goKey(i.blockId) }],
+            actions: [{ label: i.pane ? "Go to pane" : "Go to agent", actionKey: goKey(i.blockId) }],
         };
     }
     const more = items.length - shown.length;
@@ -84,13 +89,18 @@ export function buildToast(
         id: ATTENTION_TOAST_ID,
         icon: "bell",
         type: "warning",
-        persistent: true,
-        title: `${items.length} agents need you`,
+        expiresWithActions: true,
+        title: `${items.length} ${items.some((i) => i.pane) ? "panes" : "agents"} need you`,
         message: lines.join("\n"),
         timestamp: "",
         live: "status",
         actions: shown.map((i) => ({ label: `Go to ${i.name}`, actionKey: goKey(i.blockId) })),
     };
+}
+
+/** Whether Do Not Disturb (`notify:pause:until`) holds notices back at `now`; srv's rule: unless attention is let through. */
+export function noticesPaused(until: number | undefined, allowAttention: boolean, now: number): boolean {
+    return (until ?? 0) > now && !allowAttention;
 }
 
 /** The toast's controller: call `update()` whenever the list, the setting or the window's focus changes. */
@@ -105,7 +115,14 @@ export function createAttentionToast(deps: AttentionToastDeps): { update: () => 
     // What the toast on screen says. The list re-reads on every agent event, and a toast pushed again, unchanged,
     // would be read out again by a screen reader.
     let said = "";
+    let cancelExpiry: (() => void) | undefined;
+    const later = deps.later ?? ((fn, ms) => {
+        const t = setTimeout(fn, ms);
+        return () => clearTimeout(t);
+    });
     const hide = () => {
+        cancelExpiry?.();
+        cancelExpiry = undefined;
         if (shown) deps.remove(ATTENTION_TOAST_ID);
         shown = false;
         said = "";
@@ -123,7 +140,7 @@ export function createAttentionToast(deps: AttentionToastDeps): { update: () => 
             for (const i of items) known.set(i.blockId, now);
             for (const [id, last] of known)
                 if (!items.some((i) => i.blockId === id) && now - last > RETURN_MS) known.delete(id);
-            if (items.length === 0 || !deps.enabled()) return hide();
+            if (items.length === 0 || !deps.enabled() || deps.paused()) return hide();
             const isNew = fresh.length > 0 && now - startedAt >= (deps.graceMs ?? START_GRACE_MS);
             // A window that is not in front starts none (the OS notification is the signal) but leaves the one it has:
             // the request it names still waits.
@@ -133,6 +150,8 @@ export function createAttentionToast(deps: AttentionToastDeps): { update: () => 
             said = says;
             // Its X and any of its buttons take the toast off the screen: what it named does not bring it back.
             const close = () => {
+                cancelExpiry?.();
+                cancelExpiry = undefined;
                 shown = false;
                 said = "";
                 for (const i of items) dismissed.add(i.blockId);
@@ -148,7 +167,11 @@ export function createAttentionToast(deps: AttentionToastDeps): { update: () => 
             );
             toast.onClose = close;
             shown = true;
-            deps.push({ ...toast, timestamp: new Date(now).toISOString() });
+            // The toast's own expiry takes it off the screen (and waits while the pointer is over it); this one tells
+            // the controller it is gone, so a list that changes later does not bring back what it already said.
+            cancelExpiry?.();
+            cancelExpiry = later(close, TOAST_LIFETIME_MS);
+            deps.push({ ...toast, timestamp: new Date(now).toISOString(), expiration: now + TOAST_LIFETIME_MS });
         },
     };
 }
@@ -162,16 +185,22 @@ export function installAttentionToast(): void {
     createRoot(() => {
         const inFront = makeWindowFocusSignal();
         const enabledAtom = getSettingsKeyAtom("notify:waiting:toast");
+        const pauseUntil = getSettingsKeyAtom("notify:pause:until");
+        const allowAttention = getSettingsKeyAtom("notify:pause:allowattention");
         const toast = createAttentionToast({
             items: attentionItems,
             enabled: () => enabledAtom() !== false,
+            paused: () => noticesPaused(pauseUntil(), allowAttention() === true, Date.now()),
             inFront,
             focusedBlock: focusManager.blockFocusAtom,
             push: pushNotification,
             remove: removeNotificationById,
             setAction: setNotificationAction,
-            reveal: (blockId) => void revealBlock(blockId, { source: "attention" }),
-            tint: (hex) => paneRoleColor(undefined, hex, isLightThemeActive(), "identity"),
+            reveal: (blockId) => {
+                const item = attentionItems().find((i) => i.blockId === blockId);
+                void goToAttention(item ?? { blockId, name: "the agent" });
+            },
+            tint: attentionTint,
             now: Date.now,
         });
         createEffect(() => toast.update());

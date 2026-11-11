@@ -173,6 +173,8 @@ function whatForKind(kind: string): string {
             return "needs you in the browser";
         case "consent":
             return "asks for your consent";
+        case "confirm":
+            return "asks you to confirm";
         case "widget":
             return "asks to install a widget";
         case "vault":

@@ -372,6 +372,7 @@ export function windowRangeOf(
     scrollTop: number,
     viewportPx: number,
     overscan: number,
+    overscanPx = 0,
 ): WindowRange {
     if (pos.length === 0) return { startIndex: 0, endIndex: -1 };
 
@@ -382,39 +383,54 @@ export function windowRangeOf(
     const bottom = top + viewportPx;
 
     // First row whose `end > top` (lowest index still visible at the top edge).
-    let lo = 0;
-    let hi = pos.length - 1;
-    let first = pos.length; // sentinel: none visible
-    while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (pos[mid].end > top) {
-            first = mid;
-            hi = mid - 1;
-        } else {
-            lo = mid + 1;
-        }
-    }
+    const first = firstEndingAfter(pos, top);
     if (first === pos.length) return { startIndex: 0, endIndex: -1 };
 
     // Last row whose `start < bottom` (highest index still visible).
-    lo = 0;
-    hi = pos.length - 1;
-    let last = -1;
+    const last = lastStartingBefore(pos, bottom);
+    if (last < first) return { startIndex: 0, endIndex: -1 };
+
+    // The wider of the row overscan and the pixel overscan, each side.
+    const startByPx = overscanPx > 0 ? firstEndingAfter(pos, top - overscanPx) : first;
+    const endByPx = overscanPx > 0 ? lastStartingBefore(pos, bottom + overscanPx) : last;
+    return {
+        startIndex: Math.max(0, Math.min(first - overscan, startByPx)),
+        endIndex: Math.min(pos.length - 1, Math.max(last + overscan, endByPx)),
+    };
+}
+
+/** The lowest index whose row ends below `y` (`pos.length` when none does). */
+function firstEndingAfter(pos: ReadonlyArray<RowPosition>, y: number): number {
+    let lo = 0;
+    let hi = pos.length - 1;
+    let found = pos.length;
     while (lo <= hi) {
         const mid = (lo + hi) >> 1;
-        if (pos[mid].start < bottom) {
-            last = mid;
+        if (pos[mid].end > y) {
+            found = mid;
+            hi = mid - 1;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    return found;
+}
+
+/** The highest index whose row starts above `y` (`-1` when none does). */
+function lastStartingBefore(pos: ReadonlyArray<RowPosition>, y: number): number {
+    let lo = 0;
+    let hi = pos.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (pos[mid].start < y) {
+            found = mid;
             lo = mid + 1;
         } else {
             hi = mid - 1;
         }
     }
-    if (last < first) return { startIndex: 0, endIndex: -1 };
-
-    return {
-        startIndex: Math.max(0, first - overscan),
-        endIndex: Math.min(pos.length - 1, last + overscan),
-    };
+    return found;
 }
 
 export function windowRange(state: AgentPaneLayoutState): WindowRange {
@@ -423,6 +439,7 @@ export function windowRange(state: AgentPaneLayoutState): WindowRange {
         state.scrollTop,
         state.viewportPx,
         state.overscan,
+        state.overscanPx,
     );
 }
 
@@ -450,6 +467,7 @@ export function computeLayoutView(state: AgentPaneLayoutState): LayoutView {
         state.scrollTop,
         state.viewportPx,
         state.overscan,
+        state.overscanPx,
     );
     return { rows, totalSize: total, window, scrollMarginPx: state.scrollMarginPx };
 }

@@ -758,7 +758,8 @@ pub(crate) fn agent_list_entries(mstore: &Store) -> Result<Vec<AgentListEntry>, 
             .map(|s| s.shellprocstatus)
             .unwrap_or_else(|| "init".to_string());
         let session_id = block.meta.get("agent:sessionid").and_then(|v| v.as_str()).map(|s| s.to_string());
-        agents.push(AgentListEntry { block_id: block.oid.clone(), tab_id: tab.unwrap_or_default(), agent_id, provider, status, session_id });
+        let route_cost_usd = crate::backend::model_gateway::spend::session_usd(&agent_id);
+        agents.push(AgentListEntry { block_id: block.oid.clone(), tab_id: tab.unwrap_or_default(), agent_id, provider, status, session_id, route_cost_usd });
     }
     Ok(agents)
 }

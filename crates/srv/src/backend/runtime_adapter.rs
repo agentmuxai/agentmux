@@ -94,6 +94,10 @@ pub enum MountRole {
     PersonalMemory,
     /// The CLI's own config folder (`CLAUDE_CONFIG_DIR`).
     CliHome,
+    /// The agent's MCP config when it lives outside its working directory (#3680). A container
+    /// gets its folder as a read-only bind and reads the file inside it; the host uses the path
+    /// as it is.
+    McpConfig,
 }
 
 /// A helper program AgentMux puts beside the agent's CLI.
@@ -250,6 +254,13 @@ impl RuntimeAdapter for ContainerAdapter {
             MountRole::Workspace => CONTAINER_WORKSPACE_DIR.to_string(),
             MountRole::PersonalMemory => super::container::container_memory_dir(),
             MountRole::CliHome => CONTAINER_CLAUDE_DIR.to_string(),
+            MountRole::McpConfig => {
+                let name = std::path::Path::new(host_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("mcp.json");
+                format!("{}/{name}", super::container::CONTAINER_MCP_CONFIG_DIR)
+            }
         }
     }
 
@@ -383,6 +394,13 @@ mod tests {
         assert_eq!(
             container.map_mount(MountRole::PersonalMemory, "/home/u/.claude-a/projects/x/memory"),
             "/home/agent/.claude/projects/-workspace/memory"
+        );
+        let config = "/home/u/.agentmux/mcp/abc/mcp.json";
+        assert_eq!(native.map_mount(MountRole::McpConfig, config), config);
+        assert_eq!(
+            container.map_mount(MountRole::McpConfig, config),
+            "/home/agent/.agentmux/mcp/mcp.json",
+            "the folder is mounted; the file keeps its name inside it"
         );
     }
 

@@ -110,6 +110,25 @@ describe("buildStartupPayload", () => {
         expect(result).toContain("**BetaBot** (gemini)");
     });
 
+    it("says what a route agent really runs, not just its harness", () => {
+        const peers = [
+            makeAgent({ id: "route-1", name: "Deephar", provider: "claude", description: "Anthropic's coding agent" }),
+            makeAgent({ id: "plain-1", name: "Plain", provider: "claude", description: "Anthropic's coding agent" }),
+        ];
+        const result = buildStartupPayload(makeOpts({ peerAgents: peers, peerLabels: { "route-1": "DeepSeek V4.1 Flash via OpenRouter" } }));
+        // The harness stays, the model and route are added, and the harness's own blurb (wrong for this model) is dropped.
+        expect(result).toContain("- **Deephar** (claude, DeepSeek V4.1 Flash via OpenRouter)\n");
+        expect(result).not.toContain("**Deephar** (claude, DeepSeek V4.1 Flash via OpenRouter) —");
+        // An agent on the harness's own sign-in is shown as before.
+        expect(result).toContain("- **Plain** (claude) — Anthropic's coding agent");
+    });
+
+    it("keeps a description someone wrote for a route agent", () => {
+        const peers = [makeAgent({ id: "route-1", name: "Deephar", provider: "claude", description: "Cheap bulk refactors" })];
+        const result = buildStartupPayload(makeOpts({ peerAgents: peers, peerLabels: { "route-1": "DeepSeek V4.1 Flash via OpenRouter" } }));
+        expect(result).toContain("**Deephar** (claude, DeepSeek V4.1 Flash via OpenRouter) — Cheap bulk refactors");
+    });
+
     it("excludes self from peer agents", () => {
         const self = makeAgent({ id: "test-agent", name: "TestAgent" });
         const result = buildStartupPayload(makeOpts({

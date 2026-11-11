@@ -14,4 +14,5 @@ pub mod mdns_diag;
 pub mod mdns_health;
 pub mod peer_words;
 pub mod ports;
+pub mod seen_agents;
 pub mod swarm_broadcast;

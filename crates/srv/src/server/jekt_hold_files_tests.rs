@@ -55,7 +55,7 @@ fn limited_agent() -> Limited {
     state.reactive_handler = Box::leak(Box::new(crate::backend::reactive::handler::ReactiveHandler::new()));
     let deliveries = Arc::new(Mutex::new(Vec::new()));
     let received = deliveries.clone();
-    state.reactive_handler.set_message_sender(Arc::new(move |_, message, _, _origin| {
+    state.reactive_handler.set_message_sender(Arc::new(move |_, message, _, _origin, _expires_at_ms| {
         received.lock().unwrap().push(message.to_string());
         Ok(crate::backend::reactive::types::SenderDelivery::Delivered)
     }));

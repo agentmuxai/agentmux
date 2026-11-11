@@ -29,6 +29,8 @@ const SEAM = [
     "app/host/cef-host-commands.ts",
     "app/init/host-detect.ts",
     "app/platform/ipc.ts",
+    // The CEF host's process-message lane for one command, with ipc.ts as its fallback.
+    "app/platform/ipc-query.ts",
     "cef-init.ts",
     "types/custom.d.ts",
     "app/host/cef-api.ts",

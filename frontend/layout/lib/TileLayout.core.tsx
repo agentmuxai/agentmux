@@ -36,6 +36,8 @@ import { Key } from "@/util/keyed";
 import { debounce } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
+import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
+import { REFLOW_CLIP, REFLOW_EDGES, REFLOW_TRANSFORM, reflowEdges, shownPx } from "./liveReflow";
 import "./tilelayout.scss";
 import { LayoutNode, LayoutTreeActionType, ResizeHandleProps, TileLayoutContents } from "./types";
 import { releaseTileDrag, startTileDrag } from "./tile-drag";
@@ -573,12 +575,43 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // positioning is untouched. Mirrors `workspace.tsx`'s identical
     // visibility+opacity treatment for the whole-tab reveal gate.
     const isRevealGated = () => gatingNodeIds().has(props.node.id);
-    const tileStyle = createMemo<JSX.CSSProperties>(() => ({
-        ...(tileTransform() as JSX.CSSProperties),
-        visibility: isRevealGated() ? "hidden" : undefined,
-        opacity: shouldReduceMotion("transition") ? undefined : isRevealGated() ? 0 : 1,
-        transition: shouldReduceMotion("transition") ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
-    }));
+    // The live reflow of a pane drag (liveReflow.ts): every tile takes the rect the armed drop leaves it. Its
+    // size is set at once (`box`); its four edges glide, as registered properties (tilelayout.scss) that its
+    // transform and its clip are read from. Not a transition on the transform itself: that one runs on the
+    // compositor and a clip's on the main thread, and with the main thread busy laying the panes out the two
+    // came apart, a gap beside every pane. A tile carries its edges at rest too, so the first glide starts
+    // from them (docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md §3).
+    const reflow = () => props.layoutModel.reflowFor(props.node.id);
+    const tileStyle = createMemo<JSX.CSSProperties>(() => {
+        const entry = reflow();
+        const reduce = shouldReduceMotion("transition");
+        const own = addlProps()?.rect;
+        const shown = entry?.rect ?? (own && shownPx(own));
+        const style: JSX.CSSProperties = {
+            ...(tileTransform() as JSX.CSSProperties),
+            ...(shown && reflowEdges(shown)),
+            visibility: isRevealGated() ? "hidden" : undefined,
+            opacity: reduce ? undefined : isRevealGated() ? 0 : 1,
+            transition: reduce ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
+        };
+        if (!entry) return style;
+        // Essential spatial motion, so it glides under reduced motion too, shorter. The plain style takes over
+        // in the same batch as the drop's real rect, so nothing glides twice.
+        const timing = `var(${reduce ? "--duration-fast" : "--duration-base"}) ${EASE_OUT}`;
+        const glide = REFLOW_EDGES.map((edge) => `${edge} ${timing}`).join(", ");
+        return {
+            ...style,
+            transform: REFLOW_TRANSFORM,
+            WebkitTransform: REFLOW_TRANSFORM,
+            width: `${entry.box.width}px`,
+            height: `${entry.box.height}px`,
+            "clip-path": REFLOW_CLIP,
+            "will-change": "transform, clip-path",
+            // The dragged tile in its landing rect is the drop's own preview: not blurred as a dragged tile is.
+            filter: entry.moved ? "none" : undefined,
+            transition: reduce ? glide : `${glide}, ${style.transition}`,
+        };
+    });
 
     return { skipsLayout, tileStyle };
 }
@@ -649,7 +682,8 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
     return (
         <div
             class={clsx("tile-node", {
-                dragging: isDragging(),
+                // Not while the pane's picture is still being taken: the picture would show the blur.
+                dragging: isDragging() && !paneCaptureInFlight(),
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
                 "tile-resize-skip": skipsLayout(),

@@ -22,7 +22,6 @@ import {
 } from "@/app/store/pane-tab-registry";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getApi } from "@/util/app-api";
-import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { registerPaneMounted } from "@/app/store/pane-content-holds";
 import { createPaneReadiness, PANE_REVEAL_BOUND_MS, type PaneReadinessPhase } from "@/app/store/pane-readiness";
@@ -42,7 +41,8 @@ import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount,
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
-import { logCoverPhases } from "./pane-cover-log";
+import { BlockSuspenseSpinner } from "./BlockSuspenseSpinner";
+import { agentNameOf, logBlockCover } from "./pane-cover-log";
 import { MissingWidget } from "./missing-widget";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
@@ -392,7 +392,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
                             spinner underneath it is the "two brains at once" case
                             the consolidation exists to remove, so suppress it for
                             that window. See SPEC_PANE_LOADING_CONSOLIDATION §5.3. */}
-                        <Suspense fallback={<Show when={!covered?.()}><BrainSpinner /></Show>}>
+                        <Suspense fallback={<Show when={!covered?.()}><BlockSuspenseSpinner blockId={nodeModel.blockId} agent={() => agentNameOf(blockData())} /></Show>}>
                             <PaneView blockId={nodeModel.blockId} blockRef={blockRef} contentRef={contentRef} viewType={blockViewType()} viewModel={viewModel} />
                         </Suspense>
                     </ErrorBoundary>
@@ -684,7 +684,7 @@ function Block(props: BlockProps): JSX.Element {
     // One cover, two sources: the controller until it goes live, this block's
     // own re-cover cycle afterwards.
     const coverPhase = (): PaneReadinessPhase => (readiness.phase() === "live" ? reCoverPhase() : readiness.phase());
-    logCoverPhases(props.nodeModel.blockId, { controller: readiness.phase, reCover: reCoverPhase });
+    logBlockCover(props.nodeModel.blockId, readiness, reCoverPhase, blockData, windowTabDisplayed);
 
     // Cross-fade the cover out on top of the real content instead of an instant
     // hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3/§4

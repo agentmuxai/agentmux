@@ -77,6 +77,26 @@ interface Steadying {
     cross: boolean;
     inputs: Map<string, PlacementInput>;
     timer?: ReturnType<typeof setTimeout>;
+    /** The layout the armed candidate belongs to (`layoutShape`): another one means the tree changed under the drag. */
+    shape?: string;
+}
+
+/**
+ * The frozen hit-test snapshot: the panes and rects a drag is hit-tested against. They are the layout model's
+ * own rects (`additionalProps().rect`, `getNodeRectById`), which no drag changes (the tree is written only by
+ * the commit on drop, and a live reflow moves panes with transforms the layout never reads), so a candidate is
+ * always chosen against the layout the drag started on. The one way they change under a drag is srv or another
+ * window changing the tree; then the armed candidate belongs to a layout that is gone, and the tracker starts
+ * again on the new one.
+ */
+export function layoutShape(model: LayoutModel): string {
+    const leafs = model.leafs?.() ?? [];
+    let shape = "";
+    for (const leaf of leafs) {
+        const r = model.getNodeRectById?.(leaf.id);
+        shape += r ? `${leaf.id}:${r.left},${r.top},${r.width},${r.height};` : `${leaf.id};`;
+    }
+    return shape;
 }
 
 const steadying = new WeakMap<LayoutModel, Steadying>();
@@ -87,8 +107,8 @@ function steadyingOf(model: LayoutModel, cross: boolean): Steadying {
     const have = steadying.get(model);
     if (have && have.cross === cross) return have;
     if (have) clearTimeout(have.timer);
-    // A pane from another tab arms at once: its drop record is taken with every sample.
-    const config = cross ? { ...DEFAULT_TRACKER, dwellMs: 0 } : DEFAULT_TRACKER;
+    // A pane from another tab arms at once, however fast the pointer: its drop record is taken with every sample.
+    const config = cross ? { ...DEFAULT_TRACKER, dwellMs: 0, fastPxPerMs: Infinity } : DEFAULT_TRACKER;
     const made = { tracker: new DropIntentTracker(config), cross, inputs: new Map<string, PlacementInput>() };
     steadying.set(model, made);
     steadied.add(model);
@@ -131,6 +151,13 @@ export function previewPlacement(
     const raw = { targetId: input.targetId, direction: placementDirection(model, input) };
     const held = steadyingOf(model, !!input.foreignNode);
     clearTimeout(held.timer);
+    const shape = layoutShape(model);
+    if (held.shape !== undefined && held.shape !== shape) {
+        // The tree changed under the drag: the armed candidate and the inputs describe panes that moved.
+        held.tracker.reset();
+        held.inputs.clear();
+    }
+    held.shape = shape;
     held.inputs.set(input.targetId, input);
     const now = performance.now();
     const { armed, flushAt } = held.tracker.step(input.draggedId, input.offset.x, input.offset.y, now, raw);

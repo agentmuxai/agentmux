@@ -151,11 +151,18 @@ if [ -z "${RELEASE_CHANNEL:-}" ]; then
     export AGENTMUX_BUILD_LABEL="$LABEL"
 fi
 
+# Time each phase and print the table on exit (and into the job summary in CI).
+. "$REPO_ROOT/scripts/phase-times.sh"
+
 task build:frontend
+phase_done "frontend"
 task build:backend
+phase_done "srv (cargo build --release)"
 task build:host
+phase_done "host"
 task copy:schema
 task bundle
+phase_done "schema and CEF bundle"
 
 APP="$REPO_ROOT/build/AgentMux.app"
 DMG="$OUTDIR/AgentMux_${VERSION}_${ARCH}.dmg"
@@ -584,6 +591,7 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 echo "==> Verifying srv's signing identity"
 bash "$REPO_ROOT/scripts/verify-srv-identity-darwin.sh" "$APP" "$CERT" \
     || { echo "❌ srv is not signed as ai.agentmux.srv by the signing team; not packaging." >&2; exit 1; }
+phase_done "assemble and sign"
 
 echo "==> Creating DMG (icon-view drag-to-install layout)"
 mkdir -p "$OUTDIR"
@@ -643,6 +651,7 @@ fi
 hdiutil convert "$RW" -format ULFO -o "$DMG" >/dev/null
 rm -f "$RW"
 codesign --force --timestamp --sign "$CERT" "$DMG"
+phase_done "DMG"
 
 NOTARIZED=0
 if [ "$NOTARIZE" = "1" ]; then
@@ -667,6 +676,7 @@ if [ "$NOTARIZE" = "1" ]; then
 else
     echo "==> Skipping notarization (NOTARIZE=0)"
 fi
+phase_done "notarize"
 
 echo ""
 if [ "$NOTARIZED" = "1" ]; then

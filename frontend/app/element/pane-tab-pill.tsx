@@ -303,9 +303,10 @@ export function usePillFlash(opts: {
         const unsubscribeLocate = onPaneLocatePlay((blockId, paneKey) => {
             if (blockId === id() && paneKey === opts.paneKey() && pill()) flashElement(pill()!, LOCATE_PILL_FLASH);
         });
-        // A newer reveal replaces the earlier one's pill, so two never show at once.
-        const unsubscribeRequest = onPaneLocate(() => {
-            if (pill()) cancelFlashPattern(pill()!, LOCATE_PILL_FLASH.pattern);
+        // A reveal of another block replaces the earlier one's pill, so two never show at once. A repeat
+        // request for this block is the same flash (the pane ignores it while it plays): its pill stays lit.
+        const unsubscribeRequest = onPaneLocate((blockId) => {
+            if (blockId !== id() && pill()) cancelFlashPattern(pill()!, LOCATE_PILL_FLASH.pattern);
         });
         onCleanup(() => {
             unsubscribe();
@@ -417,14 +418,19 @@ export function pillTooltipContent<T>(
         getTooltip?: (tab: T) => string;
         getTooltipDetail?: (tab: T) => string | undefined;
         getTooltipSeat?: (tab: T) => string | undefined;
+        getTooltipModel?: (tab: T) => string | undefined;
     },
     progressInfo: () => PaneTabProgress | null
 ): JSX.Element {
-    return props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab) || progressInfo() ? (
+    return props.getTooltipDetail?.(props.tab) ||
+        props.getTooltipSeat?.(props.tab) ||
+        props.getTooltipModel?.(props.tab) ||
+        progressInfo() ? (
         <div class="pane-tab-tip-body" data-testid="pane-tab-tip-body">
             <div class="pane-tab-tip-label">{props.getTooltip?.(props.tab) ?? props.getLabel(props.tab)}</div>
             <Show when={progressInfo()}>{(info) => <div class="pane-tab-tip-state">{info().text}</div>}</Show>
             <Show when={props.getTooltipSeat?.(props.tab)}>{(seat) => <div class="pane-tab-tip-seat">{seat()}</div>}</Show>
+            <Show when={props.getTooltipModel?.(props.tab)}>{(model) => <div class="pane-tab-tip-seat">{model()}</div>}</Show>
             <Show when={props.getTooltipDetail?.(props.tab)}>{(detail) => <div class="pane-tab-tip-summary">{detail()}</div>}</Show>
         </div>
     ) : (

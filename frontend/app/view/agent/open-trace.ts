@@ -37,6 +37,11 @@ export const OPEN_TIMEOUT_MS = 120_000;
 
 /** Steps, in the order they normally happen — also the line's key order. */
 const OPEN_PHASES = [
+    // The launch flow began, its auth dir came back, and the ResolveCli request left the pane: the time
+    // between them is the pane's own, before srv sees the request (`cli` is the answer's arrival).
+    "launch_start",
+    "auth_env",
+    "cli_sent",
     "cli",
     "config",
     "committed",

@@ -112,6 +112,10 @@ mod tests {
             cost: None,
             links: AuditLinks::default(),
             provenance: msg.map(|m| AuditProvenance { msg_id: Some(m.into()), sent_only: sent.then_some(true), ..Default::default() }),
+            prompt: None,
+            answer: None,
+            level: None,
+            standing: None,
         }
     }
 

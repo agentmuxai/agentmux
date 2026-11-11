@@ -7,7 +7,7 @@
  */
 
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
-import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { formatPeekTime } from "@/util/format-time";
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { useNodePeek } from "../hooks/useNodePeek";
@@ -141,7 +141,7 @@ export function createMarkdownPeek(props: MarkdownBlockProps) {
         peekTick();
         const ts = props.node.timestamp;
         if (ts == null) return null;
-        return `${formatExactTime(ts)} · ${formatTimeAgo(ts)}`;
+        return formatPeekTime(ts);
     });
     const peekEstimateText = createMemo(() => {
         const count = estimateTokenCount(props.node.content);

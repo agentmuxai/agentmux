@@ -471,7 +471,14 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        so nothing that copies catalog rows changes. Both default 0: a
 ///        catalog server reaches only the agents it is bound to.
 ///        `SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md` §2.1.
-pub const OBJECT_SCHEMA_VERSION: i64 = 44;
+///   v45 — db_lan_pin_installs: the install whose certificate vouched for a LAN
+///        name pin's key (instance id and host hint), kept beside the pin so a
+///        key moves only on that install's say; and db_lan_retired_keys: the
+///        fingerprints a name has moved off, with when and by whom, so a message
+///        signed with one is refused as retired. Tables of their own beside
+///        `db_lan_peer_pubkey_pins`, so that table's rows and readers are
+///        unchanged. See `storage/lan_peer_pin_installs.rs`.
+pub const OBJECT_SCHEMA_VERSION: i64 = 45;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.

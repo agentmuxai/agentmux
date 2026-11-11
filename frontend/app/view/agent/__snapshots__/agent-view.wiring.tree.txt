@@ -2,17 +2,20 @@
   <div.agent-view.agent-view--presentation tabindex="-1" style="--agent-pane-zoom: 1;">
     <PaneLoadingCover {"phase":"<fn>"}>
     <ShutdownOverlay {"agentName":"\"Korp\"","blockId":"\"blk-12345678\""}>
+    <AgentTopBand {"blockId":"\"blk-12345678\"","zoom":"<fn>"}>
     <div.agent-view-row>
       <div.agent-view-zoomed style="zoom: 1;">
         <AgentProgressBar {"active":"false","mount":"<fn>","stopping":"false"}>
-        <AgentSearchBar {"matchCount":"<fn>","matchIndex":"<fn>","onClose":"<fn>","onNext":"<fn>","onPrev":"<fn>","onSearch":"<fn>","searching":"<fn>","visible":"<fn>"}>
+        <AgentFindBandItem {"blockId":"\"blk-12345678\"","matchCount":"<fn>","matchIndex":"<fn>","onClose":"<fn>","onNext":"<fn>","onPrev":"<fn>","onSearch":"<fn>","searching":"<fn>","visible":"<fn>"}>
         <div.agent-document-scroll-region>
           <HistoryLoadingRow {"readiness":"<object>"}>
           <AgentDocumentView {"blockId":"\"blk-12345678\"","documentNodes":"<fn>","documentStateAtom":"<object>","followingRef":"<fn>","hasOlderHistory":"<fn>","highlightNodeId":"<fn>","layoutView":"<fn>","loadingOlder":"<fn>","newActivityRef":"<fn>","onAgentErrorLogin":"<fn>","onLoadOlder":"<fn>","onOpenHistory":"<fn>","registerHistoryReadyCallback":"<fn>","scrollCommand":"<fn>","scrollToBottomRef":"<fn>","zoomFactor":"<fn>"}>
           <NewActivityPill {"onJump":"<fn>","visible":"<fn>"}>
         <AgentBottomPanels {"agentId":"\"korp\"","agentName":"\"Korp\"","authProviderId":"\"claude\"","backgroundTasksAtom":"<fn>","block":"<fn>","blockId":"\"blk-12345678\"","failureRow":"<fn>","log":"<fn>","offline":"<object>","onAnswer":"<fn>","onCancel":"<fn>","onDecide":"<fn>","onStop":"<fn>","paneModel":"<object>","pendingDecisions":"<fn>","pendingMessages":"<fn>","pendingQuestions":"<fn>","providerId":"\"claude\"","status":"<object>","workingRowLoading":"<fn>","workingRowVisible":"<fn>"}>
         <AgentPreparingRow {"enabled":"<fn>","nodes":"<fn>"}>
-        <AgentComposerStrip {"agentMode":"\"host\"","authEmail":"null","authStatus":"\"unknown\"","autoCompact":"false","blockAtom":"<fn>","blockId":"\"blk-12345678\"","canSwitchAccount":"false","compacting":"false","contextNote":"null","contextTokens":"null","contextWindow":"undefined","lastReplyModel":"null","loading":"false","logOpen":"false","onCompact":"<fn>","onOpenView":"<fn>","onSwitchAccount":"<fn>","onToggleLog":"<fn>","pendingAccountLabel":"null","providerId":"\"claude\"","sessionTotals":"null","signInCheckedLater":"false","viewChip":"\"\"","viewOpen":"false"}>
+        <AgentModelUndoneCard {"card":"<fn>","onCompactThenSwitch":"<fn>","onDismiss":"<fn>"}>
+        <AgentComposerStrip {"agentMode":"\"host\"","authEmail":"null","authStatus":"\"unknown\"","autoCompact":"false","blockAtom":"<fn>","blockId":"\"blk-12345678\"","canSwitchAccount":"false","compacting":"false","contextNote":"null","contextTokens":"null","contextWindow":"undefined","conversationImages":"<fn>","lastReplyModel":"null","loading":"false","logOpen":"false","onCompact":"<fn>","onCompactThenSwitch":"<fn>","onOpenView":"<fn>","onSwitchAccount":"<fn>","onToggleLog":"<fn>","pendingAccountLabel":"null","providerId":"\"claude\"","sessionTotals":"null","signInCheckedLater":"false","viewChip":"\"\"","viewOpen":"false"}>
         <div.agent-composer-region data-toast-avoid="">
           <AgentFooter {"agentName":"\"Korp\"","getCompletions":"<fn>","isComposerEmptyRef":"<fn>","onRecallLatestQueued":"<fn>","onSendMessage":"<fn>","onStopAgent":"<fn>","onTyping":"<fn>","viewModel":"<object>"}>
+      <div.messages-dock style="zoom: 1;">
     <AgentShellDrawer {"blockId":"\"blk-12345678\"","cwd":"\"/work\"","onShellExited":"<fn>","onTermDispose":"<fn>","onTermReady":"<fn>","open":"false","persistedHeight":"undefined","shellSubBlockId":"undefined"}>

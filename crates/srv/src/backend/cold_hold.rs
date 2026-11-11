@@ -53,15 +53,33 @@ pub fn asks_to_wake(priority: Option<&str>) -> bool {
     priority.is_some_and(|p| matches!(p.trim().to_ascii_lowercase().as_str(), "urgent" | "high"))
 }
 
-/// A message that may wait: a sender proven on this machine, an ordinary tier,
-/// no files, and nothing the receiver's rules would treat as sensitive. Anything
-/// else is delivered as before.
+/// Why a message may not wait, or `None` when it may: a sender proven on this machine (or, with
+/// `proven_peer`, one proven by the LAN or WAN checks), an ordinary tier, no files, and nothing
+/// the receiver's rules would treat as sensitive. Anything else is delivered as before, and the
+/// reason is what the log says.
+pub fn why_not_routine(req: &InjectionRequest, proven_peer: bool) -> Option<&'static str> {
+    if req.sig_verified != Some(true) && !proven_peer {
+        Some("its sender is not proven")
+    } else if req.files.is_some() {
+        Some("it carries files")
+    } else if req.files_delivery.is_some() {
+        // Its files were dropped, with a note saying why (malformed, over the limits, a signature that did
+        // not match). A held row has nowhere to keep the note, so the message is delivered with it now.
+        Some("its files were dropped and a note says why")
+    } else if req.is_transcript_request {
+        Some("it asks for a transcript")
+    } else if matches!(req.jekt_tier, Some(JektTier::Sensitive)) {
+        Some("it is a sensitive-tier message")
+    } else if super::reactive::sanitize::is_sensitive_message(&req.message) {
+        Some("its text reads as sensitive")
+    } else {
+        None
+    }
+}
+
+/// A message that may wait, from a sender proven on this machine ([`why_not_routine`]).
 pub fn is_routine(req: &InjectionRequest) -> bool {
-    req.sig_verified == Some(true)
-        && req.files.is_none()
-        && !req.is_transcript_request
-        && !matches!(req.jekt_tier, Some(JektTier::Sensitive))
-        && !super::reactive::sanitize::is_sensitive_message(&req.message)
+    why_not_routine(req, false).is_none()
 }
 
 /// The task numbers a message names ("#812"), at most [`MAX_TASK_NUMBERS`].
@@ -209,6 +227,12 @@ mod tests {
         let mut transcript = routine();
         transcript.is_transcript_request = true;
         assert!(!is_routine(&transcript));
+        assert_eq!(why_not_routine(&unproven, false), Some("its sender is not proven"));
+        assert_eq!(why_not_routine(&unproven, true), None, "a proven peer on another machine may wait too");
+        assert_eq!(why_not_routine(&transcript, false), Some("it asks for a transcript"));
+        let mut dropped = routine();
+        dropped.files_delivery = Some(Default::default());
+        assert_eq!(why_not_routine(&dropped, true), Some("its files were dropped and a note says why"));
     }
 
     #[test]

@@ -29,11 +29,18 @@ import type { AgentKillProcessCommand } from "@/types/rpc/AgentKillProcessComman
 import type { AgentKillResult } from "@/types/rpc/AgentKillResult";
 import type { AgentKillTreeCommand } from "@/types/rpc/AgentKillTreeCommand";
 import type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
+import type { AgentModelPanel } from "@/types/rpc/AgentModelPanel";
+import type { AgentModelPanelReq } from "@/types/rpc/AgentModelPanelReq";
+import type { AgentModelSwitchReq } from "@/types/rpc/AgentModelSwitchReq";
+import type { AgentModelSwitchResult } from "@/types/rpc/AgentModelSwitchResult";
 import type { AgentMoveHereResult } from "@/types/rpc/AgentMoveHereResult";
+import type { AgentNoticeDecideResult } from "@/types/rpc/AgentNoticeDecideResult";
+import type { AgentNoticeGrantsResult } from "@/types/rpc/AgentNoticeGrantsResult";
 import type { AgentOpenPanesResult } from "@/types/rpc/AgentOpenPanesResult";
 import type { AgentOpenResult } from "@/types/rpc/AgentOpenResult";
 import type { AgentOpenTailResult } from "@/types/rpc/AgentOpenTailResult";
 import type { AgentPaneUnregisterResult } from "@/types/rpc/AgentPaneUnregisterResult";
+import type { AgentPeerLabels } from "@/types/rpc/AgentPeerLabels";
 import type { AgentProcessListCommand } from "@/types/rpc/AgentProcessListCommand";
 import type { AgentProcessListResult } from "@/types/rpc/AgentProcessListResult";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
@@ -90,6 +97,9 @@ import type { CommandAgentDefHideData } from "@/types/rpc/CommandAgentDefHideDat
 import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
 import type { CommandAgentLastRuntimeData } from "@/types/rpc/CommandAgentLastRuntimeData";
 import type { CommandAgentMoveHereData } from "@/types/rpc/CommandAgentMoveHereData";
+import type { CommandAgentNoticeDecideData } from "@/types/rpc/CommandAgentNoticeDecideData";
+import type { CommandAgentNoticeGrantsData } from "@/types/rpc/CommandAgentNoticeGrantsData";
+import type { CommandAgentNoticeSetGrantData } from "@/types/rpc/CommandAgentNoticeSetGrantData";
 import type { CommandAgentOpenData } from "@/types/rpc/CommandAgentOpenData";
 import type { CommandAgentOpenTailData } from "@/types/rpc/CommandAgentOpenTailData";
 import type { CommandAgentPaneUnregisterData } from "@/types/rpc/CommandAgentPaneUnregisterData";
@@ -124,6 +134,8 @@ import type { CommandBookmarksListData } from "@/types/rpc/CommandBookmarksListD
 import type { CommandBookmarksSetData } from "@/types/rpc/CommandBookmarksSetData";
 import type { CommandBrowserGrantsListData } from "@/types/rpc/CommandBrowserGrantsListData";
 import type { CommandBrowserGrantsPauseAllData } from "@/types/rpc/CommandBrowserGrantsPauseAllData";
+import type { CommandBrowserGrantsPermissionRevokeData } from "@/types/rpc/CommandBrowserGrantsPermissionRevokeData";
+import type { CommandBrowserGrantsPermissionSetData } from "@/types/rpc/CommandBrowserGrantsPermissionSetData";
 import type { CommandBrowserGrantsPowersData } from "@/types/rpc/CommandBrowserGrantsPowersData";
 import type { CommandBrowserGrantsPresetData } from "@/types/rpc/CommandBrowserGrantsPresetData";
 import type { CommandBrowserGrantsRevokeData } from "@/types/rpc/CommandBrowserGrantsRevokeData";
@@ -208,16 +220,19 @@ import type { CommandMemoryDeliveryClaimFallbackData } from "@/types/rpc/Command
 import type { CommandMemoryDeliveryComposeData } from "@/types/rpc/CommandMemoryDeliveryComposeData";
 import type { CommandMemoryLaunchCostData } from "@/types/rpc/CommandMemoryLaunchCostData";
 import type { CommandMigrateForkSlugsData } from "@/types/rpc/CommandMigrateForkSlugsData";
+import type { CommandNativeMemoryAdoptData } from "@/types/rpc/CommandNativeMemoryAdoptData";
 import type { CommandNativeMemoryAdoptionListData } from "@/types/rpc/CommandNativeMemoryAdoptionListData";
 import type { CommandNativeMemoryClaimsData } from "@/types/rpc/CommandNativeMemoryClaimsData";
 import type { CommandNativeMemoryDiffData } from "@/types/rpc/CommandNativeMemoryDiffData";
 import type { CommandNativeMemoryHistoryData } from "@/types/rpc/CommandNativeMemoryHistoryData";
 import type { CommandNativeMemoryListData } from "@/types/rpc/CommandNativeMemoryListData";
 import type { CommandNativeMemoryReadFileData } from "@/types/rpc/CommandNativeMemoryReadFileData";
+import type { CommandNativeMemoryReleaseData } from "@/types/rpc/CommandNativeMemoryReleaseData";
 import type { CommandNativeMemoryRevertData } from "@/types/rpc/CommandNativeMemoryRevertData";
 import type { CommandNativeMemoryWriteFileData } from "@/types/rpc/CommandNativeMemoryWriteFileData";
 import type { CommandNextPromptSuggestionData } from "@/types/rpc/CommandNextPromptSuggestionData";
 import type { CommandOtherBuildLayoutsData } from "@/types/rpc/CommandOtherBuildLayoutsData";
+import type { CommandPaneConfirmDecideData } from "@/types/rpc/CommandPaneConfirmDecideData";
 import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData";
 import type { CommandPaneMoveTabsData } from "@/types/rpc/CommandPaneMoveTabsData";
 import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
@@ -264,6 +279,7 @@ import type { CommandSkillUpsertData } from "@/types/rpc/CommandSkillUpsertData"
 import type { CommandSubprocessSpawnData } from "@/types/rpc/CommandSubprocessSpawnData";
 import type { CommandSupervisorSetModeData } from "@/types/rpc/CommandSupervisorSetModeData";
 import type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
+import type { CommandUndoAgentEndpointData } from "@/types/rpc/CommandUndoAgentEndpointData";
 import type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAgentIdentityData";
 import type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
 import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
@@ -381,6 +397,7 @@ import type { InstallCheckReq } from "@/types/rpc/InstallCheckReq";
 import type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
 import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
+import type { InstallSystemToolReq } from "@/types/rpc/InstallSystemToolReq";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
 import type { JobReporterAddReq } from "@/types/rpc/JobReporterAddReq";
@@ -448,12 +465,14 @@ import type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
 import type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
 import type { MuxEvent } from "@/types/rpc/MuxEvent";
 import type { NamedAgentRow } from "@/types/rpc/NamedAgentRow";
+import type { NativeMemoryAdoptReport } from "@/types/rpc/NativeMemoryAdoptReport";
 import type { NativeMemoryAdoptionListResult } from "@/types/rpc/NativeMemoryAdoptionListResult";
 import type { NativeMemoryClaimList } from "@/types/rpc/NativeMemoryClaimList";
 import type { NativeMemoryDiffResult } from "@/types/rpc/NativeMemoryDiffResult";
 import type { NativeMemoryHistoryResult } from "@/types/rpc/NativeMemoryHistoryResult";
 import type { NativeMemoryListResult } from "@/types/rpc/NativeMemoryListResult";
 import type { NativeMemoryReadFileResult } from "@/types/rpc/NativeMemoryReadFileResult";
+import type { NativeMemoryReleaseResult } from "@/types/rpc/NativeMemoryReleaseResult";
 import type { NativeMemoryRevertResult } from "@/types/rpc/NativeMemoryRevertResult";
 import type { NextPromptSuggestionResult } from "@/types/rpc/NextPromptSuggestionResult";
 import type { NotifyAckParams } from "@/types/rpc/NotifyAckParams";
@@ -469,6 +488,7 @@ import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
 import type { OperatorChallengeResult } from "@/types/rpc/OperatorChallengeResult";
 import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
+import type { PaneConfirmDecideResult } from "@/types/rpc/PaneConfirmDecideResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
@@ -544,6 +564,7 @@ import type { TowerPeerInfo } from "@/types/rpc/TowerPeerInfo";
 import type { TowerPeersResult } from "@/types/rpc/TowerPeersResult";
 import type { TowerSampleReq } from "@/types/rpc/TowerSampleReq";
 import type { TowerSnapshot } from "@/types/rpc/TowerSnapshot";
+import type { UndoAgentEndpointResult } from "@/types/rpc/UndoAgentEndpointResult";
 import type { UninstallReq } from "@/types/rpc/UninstallReq";
 import type { UninstallResult } from "@/types/rpc/UninstallResult";
 import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
@@ -826,6 +847,30 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<SensitiveDecideResult> {
     return client.rpcCall("sensitive.decide", data, opts);
+  },
+  // command "agent.notice.decide"
+  AgentNoticeDecideCommand(
+    client: RpcClient,
+    data: CommandAgentNoticeDecideData,
+    opts?: RpcOpts
+  ): Promise<AgentNoticeDecideResult> {
+    return client.rpcCall("agent.notice.decide", data, opts);
+  },
+  // command "agent.notice.setgrant"
+  AgentNoticeSetGrantCommand(
+    client: RpcClient,
+    data: CommandAgentNoticeSetGrantData,
+    opts?: RpcOpts
+  ): Promise<AgentNoticeGrantsResult> {
+    return client.rpcCall("agent.notice.setgrant", data, opts);
+  },
+  // command "agent.notice.grants"
+  AgentNoticeGrantsCommand(
+    client: RpcClient,
+    data: CommandAgentNoticeGrantsData,
+    opts?: RpcOpts
+  ): Promise<AgentNoticeGrantsResult> {
+    return client.rpcCall("agent.notice.grants", data, opts);
   },
   // command "agentstop"
   AgentStopCommand(client: RpcClient, data: CommandAgentStopData, opts?: RpcOpts): Promise<void> {
@@ -2026,6 +2071,14 @@ export const GeneratedApi = {
   MuxInfoCommand(client: RpcClient, opts?: RpcOpts): Promise<AppInfoResult> {
     return client.rpcCall("waveinfo", null, opts);
   },
+  // command "agent:memory:adopt"
+  NativeMemoryAdoptCommand(
+    client: RpcClient,
+    data: CommandNativeMemoryAdoptData,
+    opts?: RpcOpts
+  ): Promise<NativeMemoryAdoptReport> {
+    return client.rpcCall("agent:memory:adopt", data, opts);
+  },
   // command "agent:memory:adoption_list"
   NativeMemoryAdoptionListCommand(
     client: RpcClient,
@@ -2041,6 +2094,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<NativeMemoryClaimList> {
     return client.rpcCall("agent:memory:claims", data, opts);
+  },
+  // command "agent:memory:release"
+  NativeMemoryReleaseCommand(
+    client: RpcClient,
+    data: CommandNativeMemoryReleaseData,
+    opts?: RpcOpts
+  ): Promise<NativeMemoryReleaseResult> {
+    return client.rpcCall("agent:memory:release", data, opts);
   },
   // command "agent:memory:diff"
   NativeMemoryDiffCommand(
@@ -2133,6 +2194,14 @@ export const GeneratedApi = {
   // command "operator.challenge"
   OperatorChallengeCommand(client: RpcClient, opts?: RpcOpts): Promise<OperatorChallengeResult> {
     return client.rpcCall("operator.challenge", {}, opts);
+  },
+  // command "pane.confirm.decide"
+  PaneConfirmDecideCommand(
+    client: RpcClient,
+    data: CommandPaneConfirmDecideData,
+    opts?: RpcOpts
+  ): Promise<PaneConfirmDecideResult> {
+    return client.rpcCall("pane.confirm.decide", data, opts);
   },
   // command "pane.open"
   PaneOpenCommand(client: RpcClient, data: CommandPaneOpenData, opts?: RpcOpts): Promise<PaneOpenResult> {
@@ -2229,6 +2298,22 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<BrowserGrantsResult> {
     return client.rpcCall("browsergrants.revoke", data, opts);
+  },
+  // command "browsergrants.permissionset"
+  BrowserGrantsPermissionSetCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsPermissionSetData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.permissionset", data, opts);
+  },
+  // command "browsergrants.permissionrevoke"
+  BrowserGrantsPermissionRevokeCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsPermissionRevokeData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.permissionrevoke", data, opts);
   },
   // command "browsergrants.powers"
   BrowserGrantsPowersCommand(
@@ -2674,7 +2759,7 @@ export const GeneratedApi = {
   // command "toolchain.install_system_tool"
   ToolchainInstallSystemToolCommand(
     client: RpcClient,
-    data: ToolIdReq,
+    data: InstallSystemToolReq,
     opts?: RpcOpts
   ): Promise<InstallSystemToolResult> {
     return client.rpcCall("toolchain.install_system_tool", data, { timeout: 150000, ...opts });
@@ -2774,6 +2859,14 @@ export const GeneratedApi = {
   // command "unwatchmediadir"
   UnwatchMediaDirCommand(client: RpcClient, data: UnwatchMediaDirReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("unwatchmediadir", data, opts);
+  },
+  // command "undoagentendpoint"
+  UndoAgentEndpointCommand(
+    client: RpcClient,
+    data: CommandUndoAgentEndpointData,
+    opts?: RpcOpts
+  ): Promise<UndoAgentEndpointResult> {
+    return client.rpcCall("undoagentendpoint", data, opts);
   },
   // command "updateagent"
   UpdateAgentDefinitionCommand(
@@ -3035,6 +3128,22 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentAccountSwitchResult> {
     return client.rpcCall("agent.account.switch", data, { timeout: 120000, ...opts });
+  },
+  // command "agent.model.panel"
+  AgentModelPanelCommand(client: RpcClient, data: AgentModelPanelReq, opts?: RpcOpts): Promise<AgentModelPanel> {
+    return client.rpcCall("agent.model.panel", data, opts);
+  },
+  // command "agent.model.switch"
+  AgentModelSwitchCommand(
+    client: RpcClient,
+    data: AgentModelSwitchReq,
+    opts?: RpcOpts
+  ): Promise<AgentModelSwitchResult> {
+    return client.rpcCall("agent.model.switch", data, { timeout: 120000, ...opts });
+  },
+  // command "agent.peer-labels"
+  AgentPeerLabelsCommand(client: RpcClient, opts?: RpcOpts): Promise<AgentPeerLabels> {
+    return client.rpcCall("agent.peer-labels", {}, opts);
   },
   // command "identity.account.move_agents"
   IdentityAccountMoveAgentsCommand(
