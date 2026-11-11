@@ -127,6 +127,17 @@ describe("createSlowInteractionLogger", () => {
         expect(lines.map((l) => l.split(" ").slice(2, 4).join(" "))).toEqual(["click 504ms", "keydown 112ms"]);
     });
 
+    it("describes the target when the event arrives, not when the line is written", () => {
+        const { span } = page();
+        const { lines, log } = make(() => 0);
+        const live = entry({ interactionId: 12, target: span });
+        log(live);
+        // The click removed its own element before the line is written: the entry's target reads null then.
+        live.target = null;
+        settle();
+        expect(lines[0]).toContain("block=ab12cd34 view=agent target=span [data-strip-button]");
+    });
+
     it("keeps the first of two equally slow events, and does not let a faster later one replace it", () => {
         const { lines, log } = make(() => 0);
         log(entry({ name: "pointerdown", duration: 200, interactionId: 9 }));

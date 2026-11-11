@@ -108,12 +108,13 @@ export function createSlowInteractionLogger(opts: {
     const now = opts.now ?? (() => performance.now());
     // The events of one interaction (pointerdown, pointerup, click) arrive over some tenths of a second, and the
     // slow one is not always the first. The slowest so far waits `SETTLE_MS` after the last event of its id.
-    const waiting = new Map<number, { entry: SlowInteraction; timer: ReturnType<typeof setTimeout> }>();
+    // Described when it arrives: the entry's target is null once a click has removed its own element.
+    const waiting = new Map<number, { duration: number; text: string; timer: ReturnType<typeof setTimeout> }>();
     const done = new Set<number>();
     let windowStart = -Infinity;
     let inWindow = 0;
     let skipped = 0;
-    const emit = (entry: SlowInteraction): void => {
+    const emit = (text: string): void => {
         const t = now();
         if (t - windowStart >= WINDOW_MS) {
             windowStart = t;
@@ -126,7 +127,7 @@ export function createSlowInteractionLogger(opts: {
         inWindow++;
         const dropped = skipped ? ` (+${skipped} slow interactions not logged)` : "";
         skipped = 0;
-        opts.log(`${PERF_LOG_PREFIX} ${describeInteraction(entry, opts)}${dropped}`);
+        opts.log(`${PERF_LOG_PREFIX} ${text}${dropped}`);
     };
     const settle = (id: number): void => {
         const held = waiting.get(id);
@@ -134,7 +135,7 @@ export function createSlowInteractionLogger(opts: {
         waiting.delete(id);
         done.add(id);
         if (done.size > SEEN_IDS) done.delete(done.values().next().value as number);
-        emit(held.entry);
+        emit(held.text);
     };
     return (entry) => {
         // An entry with no interaction id is not input (scroll start, a hover repaint).
@@ -142,8 +143,10 @@ export function createSlowInteractionLogger(opts: {
         if (!id || entry.duration < SLOW_INTERACTION_MS || done.has(id)) return;
         const held = waiting.get(id);
         if (held) clearTimeout(held.timer);
+        const keep = held && held.duration >= entry.duration ? held : null;
         waiting.set(id, {
-            entry: held && held.entry.duration >= entry.duration ? held.entry : entry,
+            duration: keep ? keep.duration : entry.duration,
+            text: keep ? keep.text : describeInteraction(entry, opts),
             timer: setTimeout(() => settle(id), SETTLE_MS),
         });
     };
