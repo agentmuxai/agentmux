@@ -1796,15 +1796,6 @@ impl LanDiscoveryController {
         LanPubkeyLookup::NotFound
     }
 
-    /// The UID and UID key the peer that answered [`Self::find_agent_lan_pubkey`]
-    /// for `agent_id` gave beside its name key, while that answer is cached
-    /// (identity M4d-6).
-    pub fn cached_lan_uid_key(&self, agent_id: &str) -> Option<(String, Vec<u8>)> {
-        let cache = self.pubkey_cache.read().ok()?;
-        let e = cache.get(agent_id).filter(|e| e.expires > std::time::Instant::now())?;
-        e.uid_key.clone()
-    }
-
     /// Cache a peer's answer for `agent_id` as `find_agent_lan_pubkey` would.
     #[cfg(test)]
     pub fn seed_lan_pubkey_for_test(&self, agent_id: &str, public_key: Vec<u8>, uid_key: Option<(String, Vec<u8>)>) {
