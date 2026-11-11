@@ -191,6 +191,10 @@ async fn apply_once(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Op
     if (plan.scale - 1.0).abs() < 1e-9 {
         return Ok(None);
     }
+    // Reset while this fit was measuring: the reset stands.
+    if CANCELLED.lock().remove(&label) {
+        return Ok(None);
+    }
     cdp.call(
         "Emulation.setDeviceMetricsOverride",
         json!({
@@ -219,6 +223,8 @@ struct Applying {
 }
 
 static APPLYING: LazyLock<Mutex<HashMap<String, Applying>>> = LazyLock::new(Default::default);
+/// Panes reset while being fitted: the fit under way must not put the zoom back.
+static CANCELLED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
 /// The last size (in DIP) each pane was given: a move that keeps it needs no new fit.
 static LAST_SIZE: LazyLock<Mutex<HashMap<String, (i32, i32)>>> = LazyLock::new(Default::default);
 /// Panes whose size is kept before the map starts over.
@@ -232,6 +238,8 @@ async fn apply(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<
     let label = cdp.label().to_string();
     let mut result = Ok(None);
     let prior = ZOOMED.lock().get(&label).map(|e| e.plan);
+    // A reset from before this fit is not about it.
+    CANCELLED.lock().remove(&label);
     for _ in 0..FIT_PASSES {
         APPLYING.lock().insert(label.clone(), Applying { resized: false, prior });
         result = apply_once(cdp, block_id, ask).await;
@@ -240,7 +248,15 @@ async fn apply(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<
         }
     }
     APPLYING.lock().remove(&label);
+    CANCELLED.lock().remove(&label);
     result
+}
+
+/// A reset arrived for `label`: if it is being fitted, that fit is not to emulate anything.
+fn cancel_pending(applying: &HashMap<String, Applying>, cancelled: &mut HashSet<String>, label: &str) {
+    if applying.contains_key(label) {
+        cancelled.insert(label.to_string());
+    }
 }
 
 /// Is `size` a new size for `block_id`? Remembers it.
@@ -254,6 +270,7 @@ fn size_changed(sizes: &mut HashMap<String, (i32, i32)>, block_id: &str, size: (
 /// Take the emulation off a browser.
 async fn clear(cdp: &mut CdpSession) {
     ZOOMED.lock().remove(cdp.label());
+    cancel_pending(&APPLYING.lock(), &mut CANCELLED.lock(), cdp.label());
     let _ = cdp.call("Emulation.clearDeviceMetricsOverride", json!({})).await;
 }
 
@@ -574,6 +591,17 @@ mod tests {
         APPLYING.lock().insert("refit-test-label".to_string(), Applying { resized: false, prior: None });
         assert_eq!(status("refit-test-block", Some("refit-test-label"))["zoomed"], false);
         APPLYING.lock().remove("refit-test-label");
+    }
+
+    #[test]
+    fn a_reset_cancels_a_fit_that_is_under_way_and_only_that() {
+        let mut applying = HashMap::new();
+        applying.insert("fitting".to_string(), Applying { resized: false, prior: None });
+        let mut cancelled = HashSet::new();
+        cancel_pending(&applying, &mut cancelled, "idle");
+        assert!(cancelled.is_empty(), "nothing to cancel on a pane that is not being fitted");
+        cancel_pending(&applying, &mut cancelled, "fitting");
+        assert!(cancelled.contains("fitting"));
     }
 
     #[test]
