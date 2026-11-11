@@ -145,6 +145,16 @@ jobs:
         with:
           ref: ${{ steps.in.outputs.ref }}
 
+      # The ref above can be older than scripts/ci-apt.sh (a tag rebuilt by hand, a dispatch for an old SHA),
+      # so the apt helper comes from the revision this workflow file is at, not from the tree being built.
+      - name: Fetch the apt helper from the workflow revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .ci-helper
+          sparse-checkout: scripts/ci-apt.sh
+          sparse-checkout-cone-mode: false
+
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@v2
         with:
@@ -172,8 +182,8 @@ jobs:
           # RELEASE must not be built from stale package lists. `--strict` fails
           # when Ubuntu's own mirrors could not be refreshed, after the retries
           # in scripts/ci-apt.sh (the error AND the quiet warning form of it).
-          bash scripts/ci-apt.sh update --strict
-          bash scripts/ci-apt.sh install -y --no-install-recommends \
+          bash .ci-helper/scripts/ci-apt.sh update --strict
+          bash .ci-helper/scripts/ci-apt.sh install -y --no-install-recommends \
             cmake ninja-build \
             libwayland-dev libxkbcommon-dev libgtk-3-dev \
             libglib2.0-dev libpango1.0-dev libcairo2-dev \
@@ -258,7 +268,7 @@ jobs:
         run: sudo gem install --no-document fpm
 
       - name: Install rpmbuild
-        run: bash scripts/ci-apt.sh install -y --no-install-recommends rpm
+        run: bash .ci-helper/scripts/ci-apt.sh install -y --no-install-recommends rpm
 
       # ── Remote helpers ─────────────────────────────────────────────────────
       # Every package carries agentmux-remote for all four SSH host platforms
@@ -273,7 +283,7 @@ jobs:
         shell: bash
         run: |
           # qemu runs the arm64 helper in check-remote-helpers.sh.
-          bash scripts/ci-apt.sh install -y --no-install-recommends qemu-user-static
+          bash .ci-helper/scripts/ci-apt.sh install -y --no-install-recommends qemu-user-static
 
       # ── Build all Linux release formats from ONE compile ───────────────────
       # package-linux.sh's --format= flag accepts a comma-separated list and
