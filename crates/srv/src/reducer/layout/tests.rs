@@ -737,6 +737,37 @@ fn heal_loaded_layout_without_the_block_list_migrates_but_prunes_nothing() {
     assert!(root.children.iter().find(|c| c.id == "b").unwrap().minimized);
 }
 
+/// A restored session seeds its saved layout through `LayoutSetTree`; the window converts
+/// nothing, so a legacy minimize field in the saved tree is converted before it is stored.
+#[test]
+fn layout_set_tree_converts_legacy_minimize_fields_in_a_seeded_tree() {
+    let (mut state, tab_id) = fresh_tab();
+    seed_block(&mut state, &tab_id, "ba");
+    seed_block(&mut state, &tab_id, "bb");
+    let mut squeezed = leaf_node("b", "bb");
+    squeezed.size = 2.0;
+    squeezed.extra.insert("minimizedSize".into(), 25.into());
+    let events = update(
+        &mut state,
+        Command::LayoutSetTree {
+            tab_id: tab_id.clone(),
+            new_tree: Some(agentmux_common::LayoutNode {
+                id: "root".into(),
+                children: vec![leaf_node("a", "ba"), squeezed],
+                ..Default::default()
+            }),
+            correlation_id: "corr".into(),
+            slices: None,
+        },
+        &ctx(1),
+    );
+    let stored = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+    let b = stored.children.iter().find(|c| c.id == "b").unwrap();
+    assert!(b.minimized && b.extra.get("minimizedSize").is_none());
+    let Event::LayoutTreeReplaced { new_tree, .. } = &events[0] else { panic!("expected LayoutTreeReplaced") };
+    assert_eq!(new_tree.as_ref(), Some(stored), "the stored row carries the converted tree");
+}
+
 fn tree_with_dangling_leaf() -> agentmux_common::LayoutNode {
     agentmux_common::LayoutNode {
         id: "root".into(),
