@@ -20,6 +20,8 @@ import {
     type SelectOption,
 } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { sortByLastUsed } from "@/app/view/agent/agent-recency";
 import { useAgentList } from "@/app/view/agent/use-agent-list";
 import { refreshVault, vaultAvailable, vaultEntries } from "@/app/view/vault/vault-store";
@@ -91,8 +93,19 @@ interface EditorState {
     setConfirm: Setter<JobsSaveResult | null>;
     manifest: Accessor<JobTemplateInfo["manifest"]>;
     agentOptions: Accessor<SelectOption[]>;
+    droneOptions: Accessor<SelectOption[]>;
     nameOf: (id: string) => string;
     vault: () => readonly VaultEntryInfo[] | null;
+}
+
+/** The drones a job can run, by name. None when they can't be listed. */
+async function loadDroneOptions(): Promise<SelectOption[]> {
+    try {
+        const list = await RpcApi.ListDronesCommand(TabRpcClient, {});
+        return list.map((d) => ({ value: d.id, label: d.name || d.id }));
+    } catch {
+        return [];
+    }
 }
 
 function createEditorState(props: JobEditorProps): EditorState {
@@ -117,6 +130,10 @@ function createEditorState(props: JobEditorProps): EditorState {
             (a) => a.name
         ).map((a) => ({ value: a.id, label: a.name }))
     );
+    const [droneOptions, setDroneOptions] = createSignal<SelectOption[]>([]);
+    onMount(() => {
+        void loadDroneOptions().then(setDroneOptions);
+    });
     const nameOf = (id: string) => agentOptions().find((o) => o.value === id)?.label ?? id;
     const vault = () => (vaultAvailable() ? (vaultEntries() ?? []) : null);
     return {
@@ -147,6 +164,7 @@ function createEditorState(props: JobEditorProps): EditorState {
         setConfirm,
         manifest,
         agentOptions,
+        droneOptions,
         nameOf,
         vault,
     };
@@ -382,6 +400,7 @@ function JobForm(p: { ed: EditorState }): JSX.Element {
                     draft={ed.draft}
                     set={ed.setDraft}
                     agents={ed.agentOptions()}
+                    drones={ed.droneOptions()}
                     templated={ed.draft.template != null}
                 />
                 <PolicySection draft={ed.draft} set={ed.setDraft} defaults={ed.props.defaults} />

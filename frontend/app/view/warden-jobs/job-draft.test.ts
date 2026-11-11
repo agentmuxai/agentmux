@@ -88,6 +88,29 @@ describe("a blank job's definition", () => {
         expect(toLocalInput(new Date("2030-01-02T03:04").getTime())).toBe("2030-01-02T03:04");
     });
 
+    it("builds a drone action and leaves out what a drone run can't have yet", () => {
+        const d = blankDraft("UTC");
+        Object.assign(d, {
+            name: "n",
+            triggerKind: "manual",
+            actionKind: "drone",
+            droneId: "d-1",
+            timeoutMinutes: "30",
+            retries: "2",
+        });
+        const built = buildDefinition(d, null);
+        expect(built.errors).toEqual([]);
+        expect(built.definition.action).toEqual({ kind: "drone", drone_id: "d-1" });
+        expect(built.definition.policy).not.toHaveProperty("timeout_minutes");
+        expect(built.definition.policy).not.toHaveProperty("retries");
+        expect(buildDefinition({ ...d, droneId: "" }, null).errors).toContain("Choose the drone to run.");
+        expect(buildDefinition({ ...d, overlap: "cancel_other" }, null).errors).toContain(
+            "A drone run can't be cancelled yet, so a later run can't replace it."
+        );
+        const back = draftFromDefinition(built.definition, null, "edit");
+        expect([back.actionKind, back.droneId]).toEqual(["drone", "d-1"]);
+    });
+
     it("says what is missing instead of building it", () => {
         const d = blankDraft("UTC");
         Object.assign(d, { cron: " ", timeoutMinutes: "1.5", runCap: "-2" });

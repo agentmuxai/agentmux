@@ -37,6 +37,7 @@ const ACTIONS: { value: ActionKind; label: string }[] = [
     { value: "message", label: "Message an agent" },
     { value: "task", label: "File a task" },
     { value: "spawn", label: "Start a worker" },
+    { value: "drone", label: "Run a drone" },
 ];
 
 export function WhenSection(props: SectionProps): JSX.Element {
@@ -99,13 +100,65 @@ export function WhenSection(props: SectionProps): JSX.Element {
     );
 }
 
-export function WhatSection(
-    props: SectionProps & {
-        agents: readonly SelectOption[];
-        /** A template writes the brief. */
-        templated: boolean;
-    }
-): JSX.Element {
+/** The drone a job runs, chosen from the drones this workspace has. */
+function DroneField(props: SectionProps & { drones: readonly SelectOption[] }): JSX.Element {
+    if (props.draft.actionKind !== "drone") return null;
+    return (
+        <Field
+            label="Drone"
+            layout="stacked"
+            description="The drone reads what started the run as {{trigger.*}}. Its Agent blocks spend as they do when you press Run."
+        >
+            <Select
+                value={props.draft.droneId}
+                onChange={(v) => props.set("droneId", v)}
+                options={withCurrent(props.drones, props.draft.droneId, "Choose a drone")}
+            />
+        </Field>
+    );
+}
+
+/** A drone has no run to cancel from outside, so that choice is not offered for one. */
+function overlapOptions(kind: ActionKind): SelectOption[] {
+    return OVERLAPS.filter((o) => kind !== "drone" || o !== "cancel_other").map((o) => ({
+        value: o,
+        label: o.replace("_", " "),
+    }));
+}
+
+/** Timeout and retries: they govern an agent run, which a drone does not have. */
+function RunLimitFields(props: SectionProps): JSX.Element {
+    return (
+        <>
+            <Field label="Timeout (minutes)" layout="stacked">
+                <TextInput
+                    type="number"
+                    min="1"
+                    value={props.draft.timeoutMinutes}
+                    onInput={(e) => props.set("timeoutMinutes", e.currentTarget.value)}
+                />
+            </Field>
+            <Field label="Retries" layout="stacked" description="Infrastructure failures only, at most 3.">
+                <TextInput
+                    type="number"
+                    min="0"
+                    max="3"
+                    value={props.draft.retries}
+                    onInput={(e) => props.set("retries", e.currentTarget.value)}
+                />
+            </Field>
+        </>
+    );
+}
+
+type WhatProps = SectionProps & {
+    agents: readonly SelectOption[];
+    drones: readonly SelectOption[];
+    /** A template writes the brief. */
+    templated: boolean;
+};
+
+export function WhatSection(props: WhatProps): JSX.Element {
     const brief = (field: "brief" | "payload", label: string) => (
         <Show
             when={!props.templated}
@@ -167,6 +220,7 @@ export function WhatSection(
                 </div>
                 {brief("payload", "Details")}
             </Show>
+            <DroneField {...props} />
             <Show when={props.draft.actionKind === "spawn"}>
                 <Field
                     label="Leader"
@@ -218,7 +272,7 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                     <Select
                         value={props.draft.overlap}
                         onChange={(v) => props.set("overlap", v)}
-                        options={OVERLAPS.map((o) => ({ value: o, label: o.replace("_", " ") }))}
+                        options={overlapOptions(props.draft.actionKind)}
                     />
                 </Field>
                 <Field
@@ -232,23 +286,9 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                         options={CATCH_UPS.map((o) => ({ value: o, label: o }))}
                     />
                 </Field>
-                <Field label="Timeout (minutes)" layout="stacked">
-                    <TextInput
-                        type="number"
-                        min="1"
-                        value={props.draft.timeoutMinutes}
-                        onInput={(e) => props.set("timeoutMinutes", e.currentTarget.value)}
-                    />
-                </Field>
-                <Field label="Retries" layout="stacked" description="Infrastructure failures only, at most 3.">
-                    <TextInput
-                        type="number"
-                        min="0"
-                        max="3"
-                        value={props.draft.retries}
-                        onInput={(e) => props.set("retries", e.currentTarget.value)}
-                    />
-                </Field>
+                <Show when={props.draft.actionKind !== "drone"}>
+                    <RunLimitFields {...props} />
+                </Show>
                 <Field label="Group" layout="stacked" description="Runs of one group go one at a time.">
                     <TextInput value={props.draft.group} onInput={(e) => props.set("group", e.currentTarget.value)} />
                 </Field>
