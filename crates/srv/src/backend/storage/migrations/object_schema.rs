@@ -264,6 +264,22 @@ pub(super) const OBJECT_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_agent_
             in_containers INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0
         );
+        -- v45: the install that vouched for a LAN name pin, and the keys a name has moved off — see
+        -- OBJECT_SCHEMA_VERSION's v45 doc comment.
+        CREATE TABLE IF NOT EXISTS db_lan_pin_installs (
+            agent_id    TEXT PRIMARY KEY,
+            public_key  TEXT NOT NULL,
+            instance_id TEXT NOT NULL,
+            host_hint   TEXT NOT NULL DEFAULT '',
+            bound_at    INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS db_lan_retired_keys (
+            agent_id   TEXT NOT NULL,
+            key_fp     TEXT NOT NULL,
+            retired_at INTEGER NOT NULL DEFAULT 0,
+            retired_by TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (agent_id, key_fp)
+        );
 
         -- v34: skill_id's FK to this store's LOCAL db_skills is gone — see
         -- OBJECT_SCHEMA_VERSION's v34 doc comment above. agent_id's FK to

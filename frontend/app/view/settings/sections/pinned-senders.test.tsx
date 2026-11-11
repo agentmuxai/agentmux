@@ -121,6 +121,28 @@ describe("PinnedSenders", () => {
         expect(adopt.mock.calls[0][1]).toEqual({ kind: "lan", agent_id: "newbie", channel: undefined, expect: "dddddddddd" });
     });
 
+    it("says which install a pin is tied to and why a different key was not taken", async () => {
+        list.mockResolvedValue({
+            lan: [
+                {
+                    agent_id: "maop",
+                    key_fp: "aaaaaaaaaa",
+                    pinned_at: NOW - 3600,
+                    uid_pins: 0,
+                    bound_to: "starpower~abcd1234",
+                    refused: { key_fp: "bbbbbbbbbb", last_seen_at: NOW - 60, count: 1, why: "this key was retired on 2026-11-01 by starpower" },
+                },
+                { agent_id: "korp", key_fp: "cccccccccc", pinned_at: NOW - 3600, uid_pins: 0 },
+            ],
+            wan: [],
+        });
+        render(() => <PinnedSenders />);
+        await screen.findByText(/Vouched for by the install on starpower~abcd1234/);
+        expect(screen.getByText(/Why it was not accepted: this key was retired on 2026-11-01 by starpower/)).toBeTruthy();
+        expect(screen.getByText(/Accepting it makes it the key for this name from now on/)).toBeTruthy();
+        expect(screen.getByText(/Not tied to an install yet/)).toBeTruthy();
+    });
+
     it("reloads the list when srv says a pin changed", async () => {
         render(() => <PinnedSenders />);
         await screen.findByText(/Key cccccccccc/);
