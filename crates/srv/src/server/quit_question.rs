@@ -6,17 +6,14 @@
 //! Quitting stops every agent. A window's close warns first when it stops agents in the middle of
 //! a turn (`frontend/app/window/window-close.ts`). The tray's Quit never passes a page, and it is
 //! most often used with no window open, when the agents running are the ones nobody is looking at.
-//! So the launcher asks here, and puts the question in a dialog of its own
-//! (`crates/launcher/src/quit_ask.rs`).
+//! So the launcher asks here (`GET /agentmux/quit-question`), and puts the question in a dialog
+//! of its own (`crates/launcher/src/quit_ask.rs`).
 
 use axum::extract::State;
 use axum::response::Json;
 use serde_json::{json, Value};
 
 use super::AppState;
-
-/// `GET` this.
-pub(crate) const PATH: &str = "/agentmux/quit-question";
 
 /// The close warning's setting. Its "Don't ask again" turns this question off too.
 const CONFIRM_SETTING: &str = "window:confirmcloseworking";

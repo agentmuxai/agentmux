@@ -73,7 +73,8 @@ fn json_of(response: &str) -> Option<&str> {
     if !head.starts_with("HTTP/1.1 200") {
         return None;
     }
-    Some(&body[body.find('{')?..=body.rfind('}')?])
+    let (start, end) = (body.find('{')?, body.rfind('}')?);
+    (start < end).then(|| &body[start..=end])
 }
 
 /// Ask srv. Blocking, bounded by [`ANSWER_WITHIN`] for the connection and for each read.
@@ -107,7 +108,7 @@ fn text(q: &Question) -> String {
     let agents = if q.agents == 1 { "1 agent".to_string() } else { format!("{} agents", q.agents) };
     format!(
         "{} {verb} working. Quit AgentMux?\n\n\
-         This stops {agents}. Your tabs come back at the next launch and agents resume their conversations.",
+         This stops {agents}. Your windows open again at the next launch.",
         names_line(&q.working)
     )
 }
@@ -268,6 +269,7 @@ mod tests {
         assert_eq!(json_of("HTTP/1.1 404 Not Found\r\n\r\n{\"error\":\"x\"}"), None);
         assert_eq!(json_of("HTTP/1.1 200 OK\r\n\r\n"), None);
         assert_eq!(json_of("garbage"), None);
+        assert_eq!(json_of("HTTP/1.1 200 OK\r\n\r\n}{"), None);
     }
 
     #[test]
