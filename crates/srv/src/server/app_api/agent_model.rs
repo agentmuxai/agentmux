@@ -337,7 +337,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move {
             let (block, started) = (req.blockid.clone(), std::time::Instant::now());
             let result = match ctx.operator_only("only the AgentMux window reads the model panel") {
-                Ok(()) => tokio::task::spawn_blocking(move || panel(&s, &req)).await.map_err(|e| e.to_string())?,
+                Ok(()) => tokio::task::spawn_blocking(move || panel(&s, &req)).await.map_err(|e| format!("the panel request panicked: {e}")).and_then(|r| r),
                 Err(refused) => Err(refused),
             };
             logged(COMMAND_AGENT_MODEL_PANEL, &block, started, result)
@@ -355,7 +355,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move {
             let (block, started) = (req.blockid.clone(), std::time::Instant::now());
             let result = match ctx.operator_only("only a person moves an agent to a model route, because it spends their key") {
-                Ok(()) => tokio::task::spawn_blocking(move || switch_model(&s, &req)).await.map_err(|e| e.to_string())?,
+                Ok(()) => tokio::task::spawn_blocking(move || switch_model(&s, &req)).await.map_err(|e| format!("the switch request panicked: {e}")).and_then(|r| r),
                 Err(refused) => Err(refused),
             };
             logged(COMMAND_AGENT_MODEL_SWITCH, &block, started, result)
