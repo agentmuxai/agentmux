@@ -29,6 +29,12 @@
         cursor: grabbing;
     }
 
+    // First of the pinned end controls (blockframe.tsx): the room the header's gap left between it and the
+    // window controls when it sat in the scrolling range.
+    .block-frame-end-icons > & {
+        margin-right: var(--space-2);
+    }
+
     // Magnified or ephemeral: the pane can't move, so no grab cursor.
     &--no-drag,
     &--no-drag:active {

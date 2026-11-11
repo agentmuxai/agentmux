@@ -45,7 +45,7 @@
     &[data-fit="min"] .block-frame-default-header-tabstrip,
     &[data-fit="trim"] .block-frame-end-extra:not(.block-frame-end-keep),
     &[data-fit="min"] .block-frame-end-extra:not(.block-frame-end-keep),
-    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close):not(.block-frame-end-keep) {
+    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close):not(.block-frame-end-keep):not(.pane-grip) {
         display: none;
     }
 
