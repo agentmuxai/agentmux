@@ -134,7 +134,9 @@ async fn a_restore_asked_beside_an_open_window_waits_for_a_close_that_never_come
 #[tokio::test]
 async fn a_window_recreated_onto_the_workspace_of_the_row_it_replaces_keeps_it_and_leaves_no_closed_window() {
     let state = test_state();
-    let old = open(&state, "", "window-old").await;
+    let mut old = open(&state, "", "window-old").await;
+    old.meta.insert("window:displayname".into(), json!("Release work"));
+    state.mstore.update(&mut old).unwrap();
     let (workspaces, blocks) = {
         let s = state.srv_state.lock().await;
         (s.workspaces.len(), s.blocks.len())
@@ -156,6 +158,8 @@ async fn a_window_recreated_onto_the_workspace_of_the_row_it_replaces_keeps_it_a
     drop(s);
     let listed = client(&state).windowids;
     assert!(listed.contains(&new.oid) && !listed.contains(&old.oid), "{listed:?}");
+    let new = state.mstore.get::<Window>(&new.oid).unwrap().unwrap();
+    assert_eq!(new.meta.get("window:displayname"), Some(&json!("Release work")), "the user's name for the window comes across");
     let closed = super::super::session_closed::closed_entries(&state.mstore);
     assert!(closed.iter().all(|e| e["workspaceid"] != json!(old.workspaceid)), "not a closed window: {closed:?}");
 }

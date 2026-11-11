@@ -290,15 +290,17 @@ pub(super) async fn restored_name_events(state: &AppState, window_id: &str, ws_i
     }
 }
 
-/// The appearance this window takes from another: the row it replaces on a reload, and a window whose
-/// opener asked for it by host label. Returns the events to publish.
+/// What this window takes from another: the appearance and name of the row it replaces (on a reload, or
+/// recreated after a crash), and the appearance of a window whose opener asked for it by host label.
+/// Returns the events to publish.
 pub(super) async fn inherited_events(state: &AppState, args: &[serde_json::Value], window_id: &str, host_label: &str) -> Events {
     // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §4.6 — a reloaded window
     // other than the main one gets a new row each load (optional arg 6 is
-    // the row it had before), so its own theme and opacity come across.
+    // the row it had before), so its own theme and opacity come across. Its
+    // name too: nothing else keeps it once the old row is closed.
     let previous_window_id: Option<String> = service::get_optional_arg(args, 6).unwrap_or(None);
     let mut reload_events = match previous_window_id.filter(|p| !p.is_empty() && *p != window_id) {
-        Some(prev) => super::super::window_inherit::apply_inheritance(state, &prev, window_id).await,
+        Some(prev) => super::super::window_inherit::apply_replacement(state, &prev, window_id).await,
         None => Vec::new(),
     };
     // SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12 §6 — the window that
