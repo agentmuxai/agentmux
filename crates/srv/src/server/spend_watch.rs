@@ -29,6 +29,10 @@ use crate::server::AppState;
 pub const STOPPED_META_KEY: &str = "agent:spend_stopped";
 /// Block meta the pane's warning line reads, from 80% of the cap.
 pub const WARNING_META_KEY: &str = "agent:spend_warning";
+/// Block meta the chips read: what the agent has used today and its cap (`day` is days since the epoch, UTC).
+pub const TODAY_META_KEY: &str = "agent:spend_today";
+/// The least time between two writes of [`TODAY_META_KEY`] for an agent, unless its level or cap changed.
+const TODAY_EVERY_MS: i64 = 15_000;
 
 enum Event {
     Settled(Grant),
@@ -82,9 +86,26 @@ fn handle(state: &AppState, event: Event) {
     }
 }
 
+/// Writes the figure the chips show to the agent's open panes: at most every [`TODAY_EVERY_MS`] unless `force`.
+fn publish_today(state: &AppState, def_id: &str, agent: &str, cap: Option<f64>, spent: f64, now: i64, force: bool) {
+    static LAST: OnceLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> = OnceLock::new();
+    {
+        let mut last = LAST.get_or_init(Default::default).lock().unwrap();
+        if !force && last.get(agent).is_some_and(|at| now - at < TODAY_EVERY_MS) {
+            return;
+        }
+        last.insert(agent.to_string(), now);
+    }
+    let value = json!({ "day": now.div_euclid(86_400_000), "spent": spent, "cap": cap });
+    for block_id in worker_notes::live_panes_of(&state.mstore, def_id) {
+        set_meta(state, &block_id, TODAY_META_KEY, value.clone());
+    }
+}
+
 fn on_settled(state: &AppState, grant: &Grant, now: i64) {
     let (level, cap, spent) = cap::agent_level(&state.mstore, grant, now);
     let sent = spend::alerted(&grant.agent, now);
+    publish_today(state, &grant.def_id, &grant.agent, cap, spent, now, level > sent);
     let settings = state.config_watcher.get_settings().extra;
     // The first response of a day, or one after a cap was lifted in Settings: the stop is over.
     if spend::today(&grant.agent, now).requests == 1 || (sent >= 100 && level < 100 && cap::reached(&state.mstore, &settings, grant, now).is_none()) {
@@ -101,7 +122,8 @@ fn on_settled(state: &AppState, grant: &Grant, now: i64) {
         80 => warn(state, grant, &hit, now),
         _ => {
             let note = format!("{} has used ${spent:.2} of its ${cap:.2} for today on {}.", name_of(state, &grant.def_id), place_of(state, grant));
-            worker_notes::tell_leader(&state.mstore, &grant.def_id, &note);
+            // Nothing for the leader to act on yet: it reads this with its next turn, and is not woken for it.
+            worker_notes::tell_leader_held(&state.mstore, &grant.def_id, &note, &format!("spend-{}", grant.agent));
         }
     }
 }
@@ -177,6 +199,16 @@ fn stop(state: &AppState, grant: &Grant, hit: &Hit, now: i64) {
     worker_notes::tell_leader(&state.mstore, &grant.def_id, &note);
 }
 
+/// What `Agents list` shows for an agent on a model route: what it has used today and its cap. `None` for an agent that is
+/// not on one.
+pub(crate) fn view(mstore: &crate::backend::storage::store::Store, defs: &[crate::backend::storage::AgentDefinition], def_id: &str) -> Option<Value> {
+    launch::choice_of(mstore, def_id)?;
+    let slug = &defs.iter().find(|d| d.id == def_id)?.slug;
+    let spent = spend::today(slug, agentmux_common::time::now_ms()).cost_usd;
+    let cap = cap::agent_cap(mstore, def_id);
+    Some(json!({ "spent_usd": spent, "cap_usd": cap, "stopped": cap.is_some_and(|c| spent >= c) }))
+}
+
 /// The cap before and after a change.
 pub(crate) struct CapChange {
     pub from: Option<f64>,
@@ -199,6 +231,7 @@ pub(crate) fn change_cap(state: &AppState, def_id: &str, to: Option<f64>) -> Res
     if level < spend::alerted(&def.slug, now) {
         spend::set_alerted(&def.slug, level, now);
     }
+    publish_today(state, def_id, &def.slug, to, spent, now, true);
     if level < 100 {
         clear(state, def_id, STOPPED_META_KEY);
     }
@@ -211,8 +244,38 @@ pub(crate) fn change_cap(state: &AppState, def_id: &str, to: Option<f64>) -> Res
 /// Zeroes the agent's spend for today and takes its stop and warning off. Returns the dollars that were counted.
 pub(crate) fn reset_today(state: &AppState, def_id: &str) -> Result<f64, String> {
     let def = state.mstore.agent_def_get(def_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no agent {def_id}"))?;
-    let removed = spend::reset_today(&def.slug, agentmux_common::time::now_ms());
+    let now = agentmux_common::time::now_ms();
+    let removed = spend::reset_today(&def.slug, now);
+    publish_today(state, def_id, &def.slug, cap::agent_cap(&state.mstore, def_id), 0.0, now, true);
     clear(state, def_id, STOPPED_META_KEY);
     clear(state, def_id, WARNING_META_KEY);
     Ok(removed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::types::TokenCounts;
+    use crate::backend::storage::store::Store;
+
+    #[test]
+    fn agents_list_shows_spend_for_an_agent_on_a_route_and_nothing_for_any_other() {
+        let store = Store::open_in_memory().unwrap();
+        for (id, slug) in [("view-def", "view-agent"), ("plain-def", "plain-agent")] {
+            let mut def = crate::backend::storage::agents::test_agent_def(id, slug, "claude", "host", 1, "");
+            def.slug = slug.to_string();
+            store.agent_def_insert(&mut def).unwrap();
+        }
+        launch::set_choice(&store, "view-def", "claude", "openrouter", "").unwrap();
+        let model = catalog::route("openrouter").unwrap().model("deepseek/deepseek-v4.1-flash-1017").unwrap();
+        let used = TokenCounts { input: 1, ..Default::default() };
+        let now = agentmux_common::time::now_ms();
+        spend::record("view-agent", "openrouter", model, &used, Some(4.5), now);
+        let defs = store.agent_def_list().unwrap();
+        let shown = view(&store, &defs, "view-def").expect("an agent on a route");
+        assert_eq!((shown["spent_usd"].as_f64(), shown["cap_usd"].as_f64(), shown["stopped"].as_bool()), (Some(4.5), Some(20.0), Some(false)));
+        assert!(view(&store, &defs, "plain-def").is_none(), "a login agent has no spend line");
+        spend::record("view-agent", "openrouter", model, &used, Some(15.5), now);
+        assert_eq!(view(&store, &defs, "view-def").unwrap()["stopped"], json!(true));
+    }
 }

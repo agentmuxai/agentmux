@@ -280,7 +280,10 @@ pub fn set_alerted(agent: &str, level: u8, now_ms: i64) {
 pub fn reset_today(agent: &str, now_ms: i64) -> f64 {
     let d = day(now_ms);
     let mut removed = 0.0;
-    table().lock().unwrap().retain(|(a, _, day), one| {
+    // The clear is queued before the lock is let go, so a response settling at the same time cannot queue its row ahead of
+    // it: the writer would then delete spend that is still counted here.
+    let mut table = table().lock().unwrap();
+    table.retain(|(a, _, day), one| {
         let gone = a == agent && *day == d;
         if gone {
             removed += one.spend.cost_usd;
@@ -288,6 +291,7 @@ pub fn reset_today(agent: &str, now_ms: i64) -> f64 {
         !gone
     });
     queue(Write::Clear(agent.to_string(), d));
+    drop(table);
     removed
 }
 

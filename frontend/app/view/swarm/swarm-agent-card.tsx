@@ -18,6 +18,7 @@ import { lastActiveTitle } from "./swarm-last-active";
 import type { LongRunningToolRow } from "./swarm-longrunning";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 import { LOCAL_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
+import { SpendChip } from "@/app/view/agent/components/SpendChip";
 import { BuildSlotNote, LongToolNote, RowStateNotes, UnavailableChip } from "./swarm-row-notes";
 import { RegistrationBadge, type RegistrationFlag } from "./swarm-row-registration";
 import { SwarmSeatBadge } from "./swarm-seats";
@@ -120,6 +121,7 @@ export function AgentCardHead(props: AgentCardHeadProps): JSX.Element {
             <LongToolNote rows={longRunningRows} live={() => node().agentStatus === "running"} now={rowNow} />
             <BuildSlotNote blockId={node().blockId} now={rowNow} />
             <RowStateNotes meta={blockMeta()} />
+            <SpendChip meta={blockMeta()} now={rowNow} />
             <RegistrationBadge flag={props.registrationFlag} />
             <Show
                 when={props.unavailable()}

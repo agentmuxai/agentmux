@@ -31,6 +31,7 @@ import { AgentBottomPanels } from "./components/AgentBottomPanels";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentComposerRegion, AgentTranscriptRegion, AgentViewPopoverHost } from "./components/AgentPaneRegions";
 import { AgentModelUndoneCard } from "./components/AgentModelUndoneCard";
+import { AgentSpendCard } from "./components/AgentSpendCard";
 import { AgentPreparingRow } from "./components/AgentPreparingRow";
 import { AgentProgressBar } from "./components/AgentProgressBar";
 import { AgentFindBandItem } from "./components/AgentFindBandItem";
@@ -40,6 +41,7 @@ import { createMessagesPanelControls, MessagesPanelContext } from "./messages/me
 import { MessagesPanel } from "./messages/MessagesPanel";
 import { compactThenSwitch } from "./compact-then-switch";
 import { dismissModelUndone, readModelUndone, type ModelUndone } from "./model-undone";
+import { dismissSpendStopped, readSpendStopped, readSpendWarning, resetSpendToday, setSpendCap } from "./spend-stopped";
 import { openOrFocusHistoryTab } from "./open-history-tab";
 import { countImages } from "./components/runtime-dropup-routes";
 import { AgentTopBand } from "./top-band/AgentTopBand";
@@ -295,6 +297,14 @@ function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
                 card={() => readModelUndone(block()?.meta)}
                 onCompactThenSwitch={(card: ModelUndone) => compactThenSwitchTo(card.tried.route, card.tried.model)}
                 onDismiss={() => void dismissModelUndone(model.blockId)}
+            />
+            {/* An agent on a model route near or at its daily spend cap (spend-stopped.ts). */}
+            <AgentSpendCard
+                stopped={() => readSpendStopped(block()?.meta)}
+                warning={() => readSpendWarning(block()?.meta)}
+                onRaise={(cap) => setSpendCap(model.blockId, cap)}
+                onReset={() => resetSpendToday(model.blockId)}
+                onDismiss={(card) => void dismissSpendStopped(model.blockId, card)}
             />
 
             {/* The composer status strip: the activity ticker and the Log button (`detailsOpen` is reducer-owned). */}

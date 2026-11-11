@@ -646,6 +646,25 @@
     }
   },
   {
+    "command": "agent.spend",
+    "request": "agentmux_srv::server::app_api::agent_spend::AgentSpendReq",
+    "requestName": "AgentSpendReq",
+    "requestTs": {
+      "imports": [
+        "AgentSpendReq"
+      ],
+      "name": "AgentSpendReq"
+    },
+    "response": "agentmux_srv::server::app_api::agent_spend::AgentSpendResult",
+    "responseName": "AgentSpendResult",
+    "responseTs": {
+      "imports": [
+        "AgentSpendResult"
+      ],
+      "name": "AgentSpendResult"
+    }
+  },
+  {
     "command": "agent.start",
     "request": "agentmux_srv::server::agent_runtime::CommandAgentStartData",
     "requestName": "CommandAgentStartData",
