@@ -457,6 +457,11 @@ function getMuxObjectCacheStats(): { totalEntries: number; pinnedEntries: number
     return { totalEntries: muxObjectValueCache.size, pinnedEntries, totalRefCount };
 }
 
+/** Non-reactive read of an object already in the cache: undefined when it is not (it never starts a fetch). */
+function peekMuxObject<T extends MuxObj>(oref: string): T | undefined {
+    return getMuxObjectValue<T>(oref, false)?.getData().value;
+}
+
 /** Non-reactive read — returns the current value without tracking. */
 function getObjectValue<T extends MuxObj>(oref: string): T {
     const wov = getMuxObjectValue<T>(oref);
@@ -482,6 +487,7 @@ export {
     getMuxObjectLoadingAtom,
     loadAndPinMuxObject,
     makeORef,
+    peekMuxObject,
     reloadMuxObject,
     resyncMuxObjects,
     setObjectValue,
