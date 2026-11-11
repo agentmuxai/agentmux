@@ -184,7 +184,7 @@ jobs:
           if [ "${{ github.event_name }}" = "merge_group" ]; then
             printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\nversion_only=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
             printf 'rust_os=["ubuntu-latest"]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
-            echo "::notice::merge queue: fast gates only"
+            echo "::notice::merge queue: fast gates and the tests that read the tree"
             exit 0
           fi
 
