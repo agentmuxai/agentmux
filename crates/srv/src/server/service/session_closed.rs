@@ -632,23 +632,30 @@ pub(crate) fn agents_in(store: &Store, ws_id: &str) -> Vec<Value> {
     super::window_close::store_block_ids(store, ws_id)
         .into_iter()
         .filter_map(|block_id| {
-            let status = crate::backend::blockcontroller::get_controller(&block_id)?.get_runtime_status();
-            if !status.is_agent_pane {
-                return None;
-            }
-            let block = store.get::<crate::backend::obj::Block>(&block_id).ok().flatten();
-            let meta_str = |key: &str| {
-                block
-                    .as_ref()
-                    .and_then(|b| b.meta.get(key))
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-            };
-            let name = meta_str("agentName").or_else(|| meta_str("agentId")).unwrap_or_else(|| block_id.clone());
-            Some(json!({ "block_id": block_id, "name": name, "working": status.turn_active }))
+            let (name, working) = agent_of(store, &block_id)?;
+            Some(json!({ "block_id": block_id, "name": name, "working": working }))
         })
         .collect()
+}
+
+/// The agent running in block `block_id`: its name, and whether it is mid-turn. `None` for a block
+/// that is not an agent's, or has no controller.
+pub(crate) fn agent_of(store: &Store, block_id: &str) -> Option<(String, bool)> {
+    let status = crate::backend::blockcontroller::get_controller(block_id)?.get_runtime_status();
+    if !status.is_agent_pane {
+        return None;
+    }
+    let block = store.get::<crate::backend::obj::Block>(block_id).ok().flatten();
+    let meta_str = |key: &str| {
+        block
+            .as_ref()
+            .and_then(|b| b.meta.get(key))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let name = meta_str("agentName").or_else(|| meta_str("agentId")).unwrap_or_else(|| block_id.to_string());
+    Some((name, status.turn_active))
 }
 
 #[cfg(test)]

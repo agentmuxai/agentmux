@@ -863,6 +863,8 @@ fn forward_messaging_and_work_routes() -> Router<AppState> {
             "/agentmux/agents/self/keys",
             get(agent_self_keys::handle_agent_self_keys),
         )
+        // What the launcher asks before the tray's Quit.
+        .route(super::quit_question::PATH, get(super::quit_question::handle_quit_question))
         .route("/agentmux/work", get(work_queue::handle_work_list))
         .route("/agentmux/work/boards", get(work_boards::handle_boards_list))
         // Kanban: an agent's decision on a task in review (signed, not a token).

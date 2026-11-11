@@ -148,6 +148,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/agentmux/jobs/:id/runs"), Audience::Everyone),
     (Match::Route("/agentmux/jobs/runs/:run_id/report"), Audience::Everyone),
     (Match::Route("/agentmux/old-versions"), Audience::Everyone),
+    (Match::Route("/agentmux/quit-question"), Audience::Everyone),
     (Match::Route("/agentmux/reactive/agent"), Audience::Everyone),
     (Match::Route("/agentmux/reactive/agent-names"), Audience::Everyone),
     (Match::Route("/agentmux/reactive/availability"), Audience::Everyone),

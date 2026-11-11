@@ -85,6 +85,7 @@ pub(crate) mod cron;
 pub(crate) mod job_actions;
 pub(crate) mod job_caps;
 pub(crate) mod jobs_remote_stop;
+pub(crate) mod quit_question;
 pub(crate) mod work_queue;
 pub(crate) mod work_boards;
 mod work_media;
