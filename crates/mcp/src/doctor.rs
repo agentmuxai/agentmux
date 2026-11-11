@@ -399,13 +399,15 @@ mod tests {
     /// relocated config instead; an AgentMux-owned folder still reads the file in it.
     #[test]
     fn the_config_checked_follows_the_agent_where_its_config_lives() {
+        // Not `config_path`: that reads AGENTMUX_MCP_CONFIG, which a test run inside an agent
+        // pane inherits from the real spawn and would otherwise override this fixture.
         let project = Path::new("/agentmux-test-project");
-        let path = config_path(project);
+        let path = resolve_config_path(project, None, false);
         assert!(!path.starts_with(project), "the project file is not the agent's: {}", path.display());
         assert_eq!(path.file_name().and_then(|n| n.to_str()), Some("mcp.json"));
 
         let owned = dirs_home().join(".agentmux").join("agents").join("aria");
-        assert_eq!(config_path(&owned), owned.join(".mcp.json"));
+        assert_eq!(resolve_config_path(&owned, None, false), owned.join(".mcp.json"));
     }
 
     fn dirs_home() -> PathBuf {
