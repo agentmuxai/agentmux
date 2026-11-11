@@ -27,6 +27,8 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/notification/waiting-for-you", () => ({ startWaitingForYou: () => {}, endWaitingForYou: () => {} }));
+// The Memory pane is the selected one: the person just clicked in it, so its modal takes the caret.
+vi.mock("@/app/store/focusManager", () => ({ focusManager: { blockFocusAtom: () => "memory", ensureSelectionFocused: () => {} } }));
 // The panes that exist, by id: a test deletes one by setting it to undefined.
 const panes = new Map<string, ReturnType<typeof createSignal<object | undefined>>>();
 const pane = (id: string) => {

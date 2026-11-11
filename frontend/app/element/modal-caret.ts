@@ -1,0 +1,82 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Where the caret goes when a modal opens and closes.
+ *
+ * A window's or a tab's modal takes it as it opens and gives it back to the element that had it. A pane's
+ * modal does the same while its pane is the selected one. One that opens while the person is in another pane
+ * (a question from srv, an agent or a page) leaves the caret where it is: it waits until they select its pane
+ * (a click in it, "Go to pane"), and if it closes before that it gives nothing back, since it took nothing.
+ */
+
+import { createEffect, createSignal } from "solid-js";
+
+import { focusManager } from "@/app/store/focusManager";
+import { initialFocusTarget, paneToWaitFor } from "./modal-focus-trap";
+
+export type ModalInitialFocus = HTMLElement | (() => HTMLElement | null) | undefined;
+
+export interface ModalCaret {
+    /** Call before the region is locked: locking blurs what has the caret. */
+    remember: () => void;
+    /** The modal is mounted in `region` with the resolved `scope`. */
+    opened: (scope: string, region: HTMLElement) => void;
+    closed: () => void;
+}
+
+/** Call in the modal's component body. `panel`: the modal's panel once rendered; `initialFocus`: the caller's choice. */
+export function createModalCaret(panel: () => HTMLElement | undefined, initialFocus: () => ModalInitialFocus): ModalCaret {
+    let previousFocus: HTMLElement | null = null;
+    let tookFocus = false;
+    const [awaitedPane, setAwaitedPane] = createSignal<string | null>(null);
+
+    // Next frame, so the Portal has rendered. `late`: the modal was already on screen, and a control of it the
+    // person clicked keeps the caret.
+    const take = (late = false): void => {
+        tookFocus = true;
+        requestAnimationFrame(() => {
+            const el = panel();
+            if (!el || (late && el.contains(document.activeElement))) return;
+            const chosen = initialFocus();
+            const target = (typeof chosen === "function" ? chosen() : chosen) ?? initialFocusTarget(el);
+            (target ?? el).focus();
+        });
+    };
+
+    createEffect(() => {
+        const pane = awaitedPane();
+        if (pane == null || focusManager.blockFocusAtom() !== pane) return;
+        setAwaitedPane(null);
+        take(true);
+    });
+
+    return {
+        remember: () => {
+            previousFocus = (document.activeElement as HTMLElement) ?? null;
+        },
+        opened: (scope, region) => {
+            const pane = scope === "pane" ? paneToWaitFor(region, focusManager.blockFocusAtom) : null;
+            if (pane == null) return take();
+            tookFocus = false;
+            previousFocus = null;
+            setAwaitedPane(pane);
+        },
+        closed: () => {
+            setAwaitedPane(null);
+            if (!tookFocus) return;
+            // On the next tick, so Solid's cleanup has finished and the element isn't moved by an unrelated update.
+            queueMicrotask(() => {
+                if (previousFocus && previousFocus.isConnected && typeof previousFocus.focus === "function") {
+                    previousFocus.focus();
+                } else {
+                    // The opener is gone (the modal confirmed closing the pane it was opened from), or the modal
+                    // took the caret late: it goes to the selection, not <body>.
+                    // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1.
+                    focusManager.ensureSelectionFocused("modal-closed");
+                }
+                previousFocus = null;
+            });
+        },
+    };
+}

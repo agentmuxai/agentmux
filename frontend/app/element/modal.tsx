@@ -78,14 +78,14 @@ import { Portal } from "solid-js/web";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 
 import { nudgeDismissControl } from "./modal-dismiss-nudge";
-import { firstFocusable, initialFocusTarget, lastFocusable } from "./modal-focus-trap";
+import { createModalCaret } from "./modal-caret";
+import { firstFocusable, lastFocusable } from "./modal-focus-trap";
 import { ModalTitleIdContext } from "./modal-parts";
 import { acquireRegionLock, releaseRegionLock } from "./modal-region-lock";
 import { push, remove, isReachable, type StackEntry } from "./modal-stack";
 
 import { IconButton } from "./ui";
 import "./modal.scss";
-import { focusManager } from "@/app/store/focusManager";
 
 export { ModalHeader, ModalBody, ModalFooter } from "./modal-parts";
 
@@ -227,7 +227,11 @@ export const Modal: Component<ModalProps> = (props) => {
 
     let panelRef: HTMLDivElement | undefined;
     let rootRef: HTMLDivElement | undefined;
-    let previousFocus: HTMLElement | null = null;
+    // Taking the caret on open and giving it back on close (modal-caret.ts).
+    const caret = createModalCaret(
+        () => panelRef,
+        () => props.initialFocus
+    );
 
     // Cached on open so close targets exactly what open acquired, even
     // if focus / context moved meanwhile.
@@ -293,7 +297,7 @@ export const Modal: Component<ModalProps> = (props) => {
     });
 
     const openModal = (): void => {
-        previousFocus = (document.activeElement as HTMLElement) ?? null;
+        caret.remember();
 
         const resolved = resolveScope();
         mountNode = resolved.mount;
@@ -314,19 +318,7 @@ export const Modal: Component<ModalProps> = (props) => {
         push(stackEntry);
 
         setMounted(true);
-
-        // Focus resolution — next frame so the Portal has rendered.
-        requestAnimationFrame(() => {
-            if (!panelRef) return;
-            let target: HTMLElement | null = null;
-            if (typeof props.initialFocus === "function") {
-                target = props.initialFocus();
-            } else if (props.initialFocus) {
-                target = props.initialFocus;
-            }
-            if (!target) target = initialFocusTarget(panelRef);
-            (target ?? panelRef).focus();
-        });
+        caret.opened(resolved.scope, resolved.region);
     };
 
     const closeModal = (): void => {
@@ -341,21 +333,7 @@ export const Modal: Component<ModalProps> = (props) => {
 
         setMounted(false);
         setPortalMount(null);
-
-        // Restore focus on the next tick so Solid's cleanup has finished
-        // and the previously-focused element isn't immediately moved by
-        // an unrelated reactive update.
-        queueMicrotask(() => {
-            if (previousFocus && previousFocus.isConnected && typeof previousFocus.focus === "function") {
-                previousFocus.focus();
-            } else {
-                // The opener is gone (the modal confirmed closing the pane it
-                // was opened from): the caret goes to the selection, not <body>.
-                // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1.
-                focusManager.ensureSelectionFocused("modal-closed");
-            }
-            previousFocus = null;
-        });
+        caret.closed();
     };
 
     // Key handling. ESC fires on the *reachable topmost* — modals lower
