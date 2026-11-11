@@ -6,14 +6,13 @@
 //! in a throwaway `~/.agentmux`:
 //!
 //! 1. the incident itself — a stale consolidate marker beside an empty target
-//!    table — as a permanent regression test at the `m0000` + runner level
-//!    (Phase 0a's acceptance, promoted);
+//!    table — as a permanent regression test at the runner level (Phase 0a's
+//!    acceptance, promoted);
 //! 2. a crash between a migration's effect and its `db_migrations` mark, and
 //!    the next boot resuming without duplicating anything — the claim
 //!    `agents_consolidate.rs` makes in a comment, turned into a test;
 //! 3. an upgrade that skips many versions — only the first six recorded —
-//!    applying every later migration once, in registry order;
-//! 4. `m0000_bootstrap`'s stamping on the pre-framework data-dir shapes.
+//!    applying every later migration once, in registry order.
 //!
 //! (The concurrent-boot item shipped with Phase 3 in `runner::lock_tests`.)
 //!
@@ -31,7 +30,6 @@ use rusqlite::{params, Connection};
 use crate::backend::storage::store::Store;
 use crate::test_support::ISOLATED_AUTH_ENV_LOCK as ENV_LOCK;
 
-use super::m0000_bootstrap::M0000Bootstrap;
 use super::runner::{apply_pending, read_applied_ids, verify_applied, AppliedIds, ApplyProgress};
 use super::{Migration, MigrationContext, MigrationScope, VerifyOutcome, REGISTRY};
 
@@ -90,9 +88,7 @@ impl TempHome {
         }
     }
 
-    /// Marks this home as a real prior-usage install (`<home>/agents/` is the
-    /// proxy `m0000`/`m0001` use), which also keeps `m0001` from looking at
-    /// the developer's real `~/.waveterm`.
+    /// Marks this home as a real prior-usage install (`<home>/agents/` exists).
     fn mark_as_existing_install(&self) {
         std::fs::create_dir_all(self.home().join("agents")).unwrap();
     }
@@ -225,94 +221,23 @@ fn scope_of(id: &str) -> MigrationScope {
     REGISTRY.iter().find(|m| m.id() == id).map(|m| m.scope()).expect("registered id")
 }
 
-// ── 4. m0000_bootstrap stamping ────────────────────────────────────────────────
-
-#[test]
-fn bootstrap_on_a_fresh_install_stamps_nothing_and_creates_no_channel_store() {
-    let home = TempHome::new();
-    M0000Bootstrap.up(&home.ctx()).expect("bootstrap runs on a fresh install");
-    assert!(home.applied(MigrationScope::Global).is_empty(), "nothing pre-framework to stamp");
-    assert!(!home.channel_store().exists(), "bootstrap must not conjure a channel store");
-}
-
-#[test]
-fn bootstrap_stamps_every_pre_framework_marker_it_recognises() {
-    let home = TempHome::new();
-    home.mark_as_existing_install();
-    // Channel-scoped markers: the zones flag, and a consolidate flag backed
-    // by a genuinely populated db_agents (Phase 0a's content check passes).
-    std::fs::write(home.data_dir().join("migration_agent_zones_v1.flag"), b"1").unwrap();
-    home.insert_legacy_definition("tpl-1", "Coder");
-    Store::open(&home.channel_store()).unwrap().run_agents_consolidate(None).unwrap();
-    assert_eq!(count(&home.channel_store(), "db_agents"), 1);
-    std::fs::write(home.data_dir().join(CONSOLIDATE_FLAG), b"phase3a").unwrap();
-    // Global markers, under the (overridden) shared root.
-    let shared_agents = home.home().join("shared").join("agents");
-    for (dir, marker) in [
-        ("registry", ".migrated_from_sqlite"),
-        ("registry", ".backfilled_source_bases"),
-        ("definitions", ".migrated_definitions"),
-        ("transcripts", ".transcripts_backfilled"),
-    ] {
-        std::fs::create_dir_all(shared_agents.join(dir)).unwrap();
-        std::fs::write(shared_agents.join(dir).join(marker), b"1").unwrap();
-    }
-
-    M0000Bootstrap.up(&home.ctx()).expect("bootstrap");
-
-    assert_eq!(
-        home.applied(MigrationScope::Global),
-        vec![
-            "0001_legacy_data_dir",
-            "0004_registry_from_sqlite",
-            "0005_registry_source_bases",
-            "0006_definitions_global",
-            "0009_transcript_backfill",
-            "0010_session_ids",
-        ],
-        "0011 stays unstamped with no identity accounts; 0008 is never stamped by design"
-    );
-    assert_eq!(
-        home.applied(MigrationScope::Channel),
-        vec!["0002_block_zones_v1", "0003_template_sessions_v1", CONSOLIDATE_ID]
-    );
-}
-
-#[test]
-fn bootstrap_is_idempotent_on_a_second_run() {
-    let home = TempHome::new();
-    home.mark_as_existing_install();
-    std::fs::write(home.data_dir().join("migration_agent_zones_v1.flag"), b"1").unwrap();
-    drop(Store::open(&home.channel_store()).unwrap());
-    M0000Bootstrap.up(&home.ctx()).unwrap();
-    let first = (home.applied(MigrationScope::Global), home.applied(MigrationScope::Channel));
-    M0000Bootstrap.up(&home.ctx()).unwrap();
-    let second = (home.applied(MigrationScope::Global), home.applied(MigrationScope::Channel));
-    assert_eq!(first, second);
-    assert_eq!(first.1, vec!["0002_block_zones_v1", "0003_template_sessions_v1"]);
-}
-
 // ── 1. The incident: stale marker, empty target ───────────────────────────────
 
 #[test]
-fn a_stale_consolidate_marker_beside_an_empty_target_is_not_stamped_and_the_next_boot_backfills() {
+fn a_stale_consolidate_marker_beside_an_empty_target_does_not_stop_the_boot_backfilling() {
     // The shape behind the whole hardening spec (§1, F1/F2): a rebuilt or
-    // restored objects.db sitting next to a flag file that says "done". Before
-    // Phase 0a, m0000 would stamp 0007 applied off the flag alone and the
-    // backfill would never run again — db_agents empty forever.
+    // restored objects.db sitting next to a flag file that says "done". The
+    // flag alone must never count as proof: the backfill runs, because the
+    // target is empty.
     let home = TempHome::new();
     home.mark_as_existing_install();
     home.insert_legacy_definition("tpl-1", "Coder");
     home.insert_legacy_definition("tpl-2", "Reviewer");
     std::fs::write(home.data_dir().join(CONSOLIDATE_FLAG), b"phase3a").unwrap();
     assert_eq!(count(&home.channel_store(), "db_agents"), 0, "the target must start empty");
-
-    // Bootstrap alone: the flag is present, the content check fails, so 0007
-    // is left pending.
-    M0000Bootstrap.up(&home.ctx()).unwrap();
     assert!(
         !home.applied(MigrationScope::Channel).contains(&CONSOLIDATE_ID.to_string()),
-        "a stale marker must not be stamped as applied"
+        "a stale marker is not a recorded migration"
     );
 
     // The real boot: the runner sees 0007 pending and does the work.
@@ -337,11 +262,11 @@ fn a_stale_consolidate_marker_beside_an_empty_target_is_not_stamped_and_the_next
 }
 
 #[test]
-fn a_stale_zones_flag_beside_unmigrated_block_snapshots_is_not_stamped_and_the_next_boot_migrates() {
+fn a_stale_zones_flag_beside_unmigrated_block_snapshots_does_not_stop_the_boot_migrating() {
     // Hardening Phase 2: the same incident shape as 0007's, for 0002. A
     // data dir whose `migration_agent_zones_v1.flag` says done while an
     // agent block still holds a snapshot its agent's `:current` zone never
-    // received. Bootstrap must leave 0002 pending; the boot must migrate.
+    // received. The boot must migrate.
     use crate::backend::agent_session::{agent_current_zone, MIGRATION_MARKER_V1};
     use crate::backend::obj::{Block, MetaMapType};
     use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
@@ -369,10 +294,9 @@ fn a_stale_zones_flag_beside_unmigrated_block_snapshots_is_not_stamped_and_the_n
     drop((mstore, filestore));
     std::fs::write(home.data_dir().join(MIGRATION_MARKER_V1), b"v1\n").unwrap();
 
-    M0000Bootstrap.up(&home.ctx()).unwrap();
     assert!(
         !home.applied(MigrationScope::Channel).contains(&"0002_block_zones_v1".to_string()),
-        "a stale zones flag must not be stamped as applied"
+        "a stale zones flag is not a recorded migration"
     );
 
     home.apply_all(None);
@@ -489,9 +413,9 @@ fn losing_only_the_tracking_row_after_the_marker_is_written_short_circuits_on_th
 
 #[test]
 fn an_upgrade_that_skips_many_versions_applies_every_later_migration_once_in_registry_order() {
-    // A `db_migrations` that stops at 0005 — an install last run on a build
-    // from before 0006 existed — must get 0006 through the end of the
-    // registry, each exactly once, in order.
+    // A `db_migrations` that stops after the sixth registered migration — an
+    // install last run on a build from before the seventh existed — must get
+    // the seventh through the end of the registry, each exactly once, in order.
     let home = TempHome::new();
     home.mark_as_existing_install();
     let shared = Store::open_shared(&home.shared_store()).unwrap();

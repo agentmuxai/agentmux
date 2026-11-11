@@ -71,9 +71,8 @@ pub struct ConsolidateStats {
 /// there. Used to stop trusting marker/stamp *existence* as proof of
 /// *effect* (see `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`
 /// Phase 0a/0b) — a stale marker (rebuilt/restored `objects.db` sitting next
-/// to an old flag file, or `m0000_bootstrap` stamping from a copied flag
-/// file with no matching data) is now detectable instead of silently
-/// trusted.
+/// to an old flag file, or a bootstrap stamping from a copied flag file with
+/// no matching data) is now detectable instead of silently trusted.
 ///
 /// Cheap: up to three `COUNT(*)` queries, safe to call on every startup.
 ///

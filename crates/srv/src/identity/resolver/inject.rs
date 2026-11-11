@@ -59,8 +59,7 @@ use super::secret::{resolve_account_secret, resolve_secret};
 ///      non-OAuthConfigDir secret_ref) are always BLOCKING: the function
 ///      returns [`SpawnGateError`] before the CLI process is created.
 ///      `use_ambient_login` no longer exempts an agent and is not read
-///      here (the opt-out was retired, see
-///      m0017_ambient_login_grandfather.rs).
+///      here (the opt-out was retired).
 /// 5. If the agent definition's own provider is oauth-class and no binding
 ///    for it exists at all (fresh/never-bound or post-delete-cascade), the
 ///    same gate applies — implicit ambient fallback is how the
