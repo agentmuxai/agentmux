@@ -173,6 +173,36 @@ fn confirm(body: &str) -> Option<bool> {
     (answer != 0).then_some(answer == IDYES)
 }
 
+/// What `zenity` or `kdialog` said, from its exit code and what it wrote to stderr. Both exit 0
+/// for the first button (Quit) and 1 for the other one or a closed dialog (keep running). Anything
+/// else is a dialog that was never answered: `None`. So is an exit of 1 from a dialog that could
+/// not reach the display, which it says on stderr.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn linux_answer(exit_code: Option<i32>, stderr: &str) -> Option<bool> {
+    // How GTK and Qt say they have no display to draw on.
+    const NO_DISPLAY: [&str; 5] = ["open display", "connect to display", "x display", "wl_display", "init server"];
+    let said = stderr.to_ascii_lowercase();
+    match exit_code {
+        Some(0) => Some(true),
+        Some(1) if !NO_DISPLAY.iter().any(|phrase| said.contains(phrase)) => Some(false),
+        _ => None,
+    }
+}
+
+/// What `osascript` said. The Quit button exits 0 and prints its name. "Keep running" is the
+/// dialog's cancel button, so it (and Escape) exits non-zero with AppleScript's "User canceled"
+/// error, -128. Any other failure is a dialog that was never answered: `None`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn macos_answer(success: bool, stdout: &str, stderr: &str) -> Option<bool> {
+    if success && stdout.contains(&format!("button returned:{QUIT}")) {
+        Some(true)
+    } else if stderr.contains("(-128)") || (success && stdout.contains(&format!("button returned:{KEEP_RUNNING}"))) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Linux: `zenity`, or else `kdialog`, as the upgrade question uses. With neither installed there
 /// is no dialog.
 #[cfg(target_os = "linux")]
@@ -192,8 +222,15 @@ fn confirm(body: &str) -> Option<bool> {
         for key in crate::upgrade_linux::NOT_INHERITED {
             cmd.env_remove(key);
         }
-        match cmd.status() {
-            Ok(status) => return Some(status.success()),
+        cmd.stderr(std::process::Stdio::piped());
+        match cmd.output() {
+            Ok(out) => {
+                let answer = linux_answer(out.status.code(), &String::from_utf8_lossy(&out.stderr));
+                if answer.is_none() {
+                    crate::log(&format!("quit: {program} did not show the question ({}); quitting", out.status));
+                }
+                return answer;
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => {
                 crate::log(&format!("quit: couldn't open {program} to ask: {e}"));
@@ -221,10 +258,19 @@ fn confirm(body: &str) -> Option<bool> {
         .arg(body)
         .arg(DIALOG_TITLE)
         .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
         .output();
     match out {
-        Ok(out) => Some(out.status.success() && String::from_utf8_lossy(&out.stdout).contains(&format!("button returned:{QUIT}"))),
+        Ok(out) => {
+            let answer = macos_answer(
+                out.status.success(),
+                &String::from_utf8_lossy(&out.stdout),
+                &String::from_utf8_lossy(&out.stderr),
+            );
+            if answer.is_none() {
+                crate::log(&format!("quit: osascript did not show the question ({}); quitting", out.status));
+            }
+            answer
+        }
         Err(e) => {
             crate::log(&format!("quit: couldn't open osascript to ask: {e}"));
             None
@@ -289,6 +335,29 @@ mod tests {
         assert!(goes_ahead(Some(&q), |_| Some(true)));
         assert!(!goes_ahead(Some(&q), |_| Some(false)));
         assert!(goes_ahead(Some(&q), |_| None), "no dialog could be shown: quitting still works");
+    }
+
+    #[test]
+    fn a_dialog_that_failed_is_not_an_answer_to_keep_running() {
+        // Linux: 0 is Quit, 1 is the other button or a closed dialog.
+        assert_eq!(linux_answer(Some(0), ""), Some(true));
+        assert_eq!(linux_answer(Some(1), ""), Some(false));
+        assert_eq!(linux_answer(Some(1), "Gtk-Message: GtkDialog mapped without a transient parent"), Some(false));
+        // It never reached the screen: no answer, so the quit goes ahead.
+        assert_eq!(linux_answer(Some(1), "(zenity:4242): Gtk-WARNING **: cannot open display: "), None);
+        assert_eq!(linux_answer(Some(1), "qt.qpa.xcb: could not connect to display"), None);
+        assert_eq!(linux_answer(Some(5), ""), None, "zenity's timeout");
+        assert_eq!(linux_answer(Some(255), ""), None);
+        assert_eq!(linux_answer(None, ""), None, "ended by a signal");
+
+        // macOS: the Quit button, the cancel button (error -128), and everything else.
+        assert_eq!(macos_answer(true, "button returned:Quit\n", ""), Some(true));
+        let cancelled = "0:140: execution error: User canceled. (-128)";
+        assert_eq!(macos_answer(false, "", cancelled), Some(false));
+        assert_eq!(macos_answer(true, "button returned:Keep running\n", ""), Some(false));
+        assert_eq!(macos_answer(false, "", "execution error: No user interaction allowed. (-1713)"), None);
+        assert_eq!(macos_answer(false, "", ""), None);
+        assert_eq!(macos_answer(true, "", ""), None);
     }
 
     #[test]
