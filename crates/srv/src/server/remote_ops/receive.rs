@@ -212,10 +212,10 @@ pub(super) async fn receive(
     if !signed.verify_with(&key, max_params) {
         return refuse("bad_signature", "unproven");
     }
-    // The install is named by the certificate its agent's host issued, when this machine holds
-    // one; the request's own claim must agree with it, and is not believed alone.
-    // A certificate counts only if it certifies this agent's name and exactly this key, on the LAN
-    // channel, and is fresh (`lan_continuity::check_cert`); the cert carries the slug, not the uid.
+    crate::server::reactive::lan_continuity::bind_after_verified(state, &op.requester.slug, &key).await;
+    // The install is named by the certificate its agent's host issued, when this machine holds one; the
+    // request's own claim must agree with it. A certificate counts only if it certifies this agent's name
+    // and exactly this key, on the LAN channel, and is fresh (`lan_continuity::check_cert`).
     let cert = state
         .lan_discovery
         .cached_lan_cert(&op.requester.slug)

@@ -22,6 +22,7 @@ pub mod job_cloud;
 pub mod job_incidents;
 pub mod job_run_spend;
 pub mod job_runs;
+pub mod lan_peer_pin_installs;
 pub mod lan_peer_pubkey_pins;
 pub mod lan_peer_uid_pins;
 pub mod agents;
