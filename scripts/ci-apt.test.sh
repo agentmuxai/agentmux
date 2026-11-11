@@ -110,7 +110,7 @@ run APT_INSTALL_SEQ="ok" -- install -y libfoo-dev
 check "clean first try: one install, no refresh" "$([ $got = 0 ] && [ "$(calls install)" = 1 ] && [ "$(calls update)" = 0 ]; echo $?)" "exit $got: $out"
 
 run APT_INSTALL_SEQ="fail" -- install -y libfoo-dev
-check "never succeeds: exit 1 after 3 installs, with an error line" "$([ $got = 1 ] && [ "$(calls install)" = 3 ] && echo "$out" | grep -q '::error::apt-get install -y libfoo-dev failed after 3 attempts'; echo $?)" "exit $got, installs $(calls install): $out"
+check "never succeeds: exit 1 after 3 installs, with an error line" "$([ $got = 1 ] && [ "$(calls install)" = 3 ] && echo "$out" | grep -q '::error::apt-get install -y libfoo-dev failed after 3 attempt(s)'; echo $?)" "exit $got, installs $(calls install): $out"
 
 run CI_APT_ATTEMPTS=1 APT_INSTALL_SEQ="fail" -- install -y libfoo-dev
 check "CI_APT_ATTEMPTS bounds the tries" "$([ $got = 1 ] && [ "$(calls install)" = 1 ]; echo $?)" "exit $got, installs $(calls install)"
@@ -118,12 +118,25 @@ check "CI_APT_ATTEMPTS bounds the tries" "$([ $got = 1 ] && [ "$(calls install)"
 run -- install
 check "install with nothing to install is a usage error (2)" "$([ $got = 2 ]; echo $?)" "exit $got: $out"
 
+echo "budget"
+run CI_APT_BUDGET=1 APT_UPDATE_SEQ="bad" -- update --strict
+check "a spent budget stops the retries of an update" "$([ $got = 1 ] && [ "$(calls update)" = 1 ] && echo "$out" | grep -q 'budget'; echo $?)" "exit $got, updates $(calls update): $out"
+
+run CI_APT_BUDGET=1 APT_INSTALL_SEQ="fail" -- install -y libfoo-dev
+check "a spent budget stops the retries of an install" "$([ $got = 1 ] && [ "$(calls install)" = 1 ]; echo $?)" "exit $got, installs $(calls install): $out"
+
 echo "name resolution"
 run STUB_DNS_DOWN=2 APT_UPDATE_SEQ="ok" -- update
-check "waits for the archive hosts to resolve, then goes ahead" "$([ $got = 0 ] && echo "$out" | grep -q 'do not resolve yet; waiting' && ! echo "$out" | grep -q 'trying apt anyway'; echo $?)" "exit $got: $out"
+check "waits for the archive hosts to resolve, then goes ahead" "$([ $got = 0 ] && echo "$out" | grep -q 'do not resolve yet; waiting' && ! echo "$out" | grep -q '::error::'; echo $?)" "exit $got: $out"
 
 run STUB_DNS_DOWN=999 APT_UPDATE_SEQ="ok" -- update
-check "gives up waiting after CI_APT_DNS_WAIT, says so, and still tries apt" "$([ $got = 0 ] && echo "$out" | grep -q 'trying apt anyway' && [ "$(calls update)" = 1 ]; echo $?)" "exit $got: $out"
+check "update: no resolution after CI_APT_DNS_WAIT fails at once, without calling apt" "$([ $got = 1 ] && echo "$out" | grep -q '::error::the Ubuntu archive hosts still do not resolve' && [ "$(calls update)" = 0 ]; echo $?)" "exit $got, updates $(calls update): $out"
+
+run STUB_DNS_DOWN=999 APT_INSTALL_SEQ="ok" -- install -y libfoo-dev
+check "install: the same, and no install is tried" "$([ $got = 1 ] && [ "$(calls install)" = 0 ]; echo $?)" "exit $got, installs $(calls install): $out"
+
+run STUB_DNS_DOWN=999 CI_APT_DNS_WAIT=0 APT_UPDATE_SEQ="ok" -- update
+check "CI_APT_DNS_WAIT=0 skips the resolution check" "$([ $got = 0 ] && [ "$(calls update)" = 1 ]; echo $?)" "exit $got: $out"
 
 run -- frobnicate
 check "an unknown command is a usage error (2)" "$([ $got = 2 ]; echo $?)" "exit $got"

@@ -9,18 +9,17 @@
 #
 # Three layers, because one apt run with its defaults spent 11 minutes on a dead resolver and then failed:
 #   1. apt's own retries and a short per-file timeout (/etc/apt/apt.conf.d/80-ci-retries);
-#   2. a wait for the Ubuntu archive hosts to resolve before the first attempt (CI_APT_DNS_WAIT, 300 s), so a
-#      short outage costs a pause, not three timed-out attempts;
+#   2. a wait for the Ubuntu archive hosts to resolve before anything else (CI_APT_DNS_WAIT, 300 s; 0 skips the
+#      check). A short outage costs a pause, not three timed-out attempts; a longer one fails the step right there
+#      with the resolver state printed, instead of 11 minutes later;
 #   3. the whole command again, up to CI_APT_ATTEMPTS (3) times with a growing pause, each attempt bounded by
-#      `timeout` (CI_APT_UPDATE_LIMIT 180 s, CI_APT_INSTALL_LIMIT 300 s).
+#      `timeout` (CI_APT_UPDATE_LIMIT 180 s, CI_APT_INSTALL_LIMIT 300 s), and no new attempt once the call has
+#      used CI_APT_BUDGET (600 s).
 #
 # `update` succeeds when no Ubuntu archive host failed in its log; a broken THIRD-PARTY index and apt's exit code
 # alone do not count (a release must never build from stale Ubuntu lists, but a corrupt Google index must not stop it).
 # Without --strict, running out of attempts only warns, as the PR leg always has: its `install` is the real gate.
-# `install` exits non-zero when it never succeeded.
-#
-# A network that stays down for longer than all of this still fails the job, in minutes instead of a quarter hour.
-# Nothing here removes the network from the path.
+# `install` exits non-zero when it never succeeded. Nothing here removes the network from the path.
 
 set -uo pipefail
 
@@ -29,6 +28,7 @@ PAUSE=${CI_APT_PAUSE:-45}
 DNS_WAIT=${CI_APT_DNS_WAIT:-300}
 UPDATE_LIMIT=${CI_APT_UPDATE_LIMIT:-180}
 INSTALL_LIMIT=${CI_APT_INSTALL_LIMIT:-300}
+BUDGET=${CI_APT_BUDGET:-600}
 HOSTS="archive.ubuntu.com security.ubuntu.com"
 # The error form and the warning form: `-qq` turns an `Err:<n> <url>` record into `W: Failed to fetch ...`.
 UBUNTU_FAILED='^(E|Err):.*(archive\.ubuntu\.com|security\.ubuntu\.com)|^W: Failed to fetch.*(archive\.ubuntu\.com|security\.ubuntu\.com)'
@@ -45,18 +45,30 @@ resolves() {
     for h in $HOSTS; do getent hosts "$h" >/dev/null 2>&1 || return 1; done
 }
 
+# 0 when the Ubuntu archive hosts resolve (waiting up to DNS_WAIT for them to), 1 when they never did.
 wait_for_dns() {
-    local waited=0
+    [ "$DNS_WAIT" -gt 0 ] || return 0
+    local waited=0 h
     while ! resolves; do
         if [ "$waited" -ge "$DNS_WAIT" ]; then
-            log "the Ubuntu archive hosts still do not resolve after ${waited}s; trying apt anyway"
+            echo "::error::the Ubuntu archive hosts still do not resolve after ${waited}s: this runner has no name resolution for apt"
             { grep -v '^#' /etc/resolv.conf 2>/dev/null | head -5; for h in $HOSTS; do getent hosts "$h" || echo "no answer for $h"; done; } | sed 's/^/ci-apt:   /'
-            return 0
+            return 1
         fi
         log "the Ubuntu archive hosts do not resolve yet; waiting (${waited}s of ${DNS_WAIT}s)"
         sleep 15
         waited=$((waited + 15))
     done
+}
+
+# Whether attempt $1 may start: attempts left, and the call's budget not spent by the attempt's own pause.
+may_try() {
+    local next=$1 started=$2
+    [ "$next" -le "$ATTEMPTS" ] || return 1
+    if [ $((SECONDS - started + PAUSE * (next - 1))) -ge "$BUDGET" ]; then
+        log "not trying again: the ${BUDGET}s budget for this call is used up"
+        return 1
+    fi
 }
 
 pause_before() {
@@ -78,35 +90,36 @@ cmd_update() {
     local strict=0
     [ "${1:-}" != "--strict" ] || strict=1
     configure
-    wait_for_dns
-    local out
+    wait_for_dns || return 1
+    local out started=$SECONDS n=1
     out=$(mktemp)
-    local n
-    for n in $(seq 1 "$ATTEMPTS"); do
-        [ "$n" -eq 1 ] || pause_before "$n"
+    while :; do
         if update_once "$out"; then return 0; fi
+        n=$((n + 1))
+        may_try "$n" "$started" || break
+        pause_before "$n"
     done
     if [ "$strict" -eq 1 ]; then
-        echo "::error::apt-get update failed against the Ubuntu archive after $ATTEMPTS attempts - refusing to build from stale package lists"
+        echo "::error::apt-get update failed against the Ubuntu archive after $((n - 1)) attempt(s) - refusing to build from stale package lists"
         return 1
     fi
-    log "apt-get update still reports errors after $ATTEMPTS attempts; continuing (install is the real gate)"
+    log "apt-get update still reports errors after $((n - 1)) attempt(s); continuing (install is the real gate)"
 }
 
 cmd_install() {
     [ "$#" -gt 0 ] || { echo "usage: ci-apt.sh install <apt-get install arguments...>" >&2; return 2; }
     configure
-    wait_for_dns
-    local n
-    for n in $(seq 1 "$ATTEMPTS"); do
-        if [ "$n" -gt 1 ]; then
-            pause_before "$n"
-            # Lists that were stale or half fetched are the other way an install fails twice.
-            sudo timeout "$UPDATE_LIMIT" apt-get update >/dev/null 2>&1 || true
-        fi
+    wait_for_dns || return 1
+    local started=$SECONDS n=1
+    while :; do
         sudo timeout "$INSTALL_LIMIT" apt-get install "$@" && return 0
+        n=$((n + 1))
+        may_try "$n" "$started" || break
+        pause_before "$n"
+        # Lists that were stale or half fetched are the other way an install fails twice.
+        sudo timeout "$UPDATE_LIMIT" apt-get update >/dev/null 2>&1 || true
     done
-    echo "::error::apt-get install $* failed after $ATTEMPTS attempts"
+    echo "::error::apt-get install $* failed after $((n - 1)) attempt(s)"
     return 1
 }
 
