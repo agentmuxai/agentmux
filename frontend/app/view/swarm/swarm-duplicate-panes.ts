@@ -32,9 +32,10 @@ export function paneIdentity(blockId: string, meta: Record<string, unknown> | nu
 }
 
 /**
- * The blocks that get no row: a pane closed for another pane, while the pane it names or another pane of the same
- * agent is listed and is not closed that way itself. A closed pane whose agent has no other row keeps its row, so
- * the agent stays reachable from the list.
+ * The blocks that get no row: a pane closed for another pane, while another pane of the same agent is listed and
+ * is not closed that way itself. A closed pane whose agent has no other row keeps its row, so the agent stays
+ * reachable from the list. The pane it names decides only for a block that names no agent: that pane can since
+ * have been given to another agent (the picker reuses a pane in place), and the mark is not rewritten then.
  */
 export function closedSecondPanes(panes: readonly PaneIdentity[]): Set<string> {
     const holding = panes.filter((p) => !p.closedForAnotherPane);
@@ -43,7 +44,8 @@ export function closedSecondPanes(panes: readonly PaneIdentity[]): Set<string> {
     const hidden = new Set<string>();
     for (const p of panes) {
         if (!p.closedForAnotherPane) continue;
-        if (holdingBlocks.has(p.holderBlockId) || (p.agent !== "" && holdingAgents.has(p.agent))) hidden.add(p.blockId);
+        const listedElsewhere = p.agent === "" ? holdingBlocks.has(p.holderBlockId) : holdingAgents.has(p.agent);
+        if (listedElsewhere) hidden.add(p.blockId);
     }
     return hidden;
 }

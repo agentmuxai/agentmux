@@ -53,8 +53,13 @@ describe("closedSecondPanes", () => {
         ).toEqual(["old"]);
     });
 
-    it("drops it for the pane it names, whatever the two blocks call their agent", () => {
-        expect(hidden({ live: { agentId: "new-id" }, old: { agentId: "old-id", ...closedFor("live") } })).toEqual(["old"]);
+    it("keeps it when the pane it names has another agent now: it is its own agent's only row", () => {
+        expect(hidden({ reused: { agentId: "someone-else" }, old: { agentId: "m", ...closedFor("reused") } })).toEqual([]);
+        expect(hidden({ picker: {}, old: { agentId: "m", ...closedFor("picker") } })).toEqual([]);
+    });
+
+    it("drops a closed pane that names no agent for the pane it names", () => {
+        expect(hidden({ live: { agentId: "m" }, old: { ...closedFor("live") } })).toEqual(["old"]);
     });
 
     it("keeps a closed pane that is the agent's only row", () => {
