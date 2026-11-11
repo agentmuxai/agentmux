@@ -123,8 +123,8 @@ jobs:
       - name: Tools
         shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends gnupg apt-utils xz-utils createrepo-c rpm
+          bash scripts/ci-apt.sh update --strict
+          bash scripts/ci-apt.sh install -y -qq --no-install-recommends gnupg apt-utils xz-utils createrepo-c rpm
 
       # The repository as it is now (older versions stay), then the release's own files, checked against the
       # SHA-256 GitHub lists for them.
@@ -250,10 +250,10 @@ jobs:
           case "$IMAGE" in
             ubuntu:*|debian:*)
               script='export DEBIAN_FRONTEND=noninteractive
-                apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl >/dev/null
+                apt-get -o Acquire::Retries=5 update -qq && apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends ca-certificates curl >/dev/null
                 curl -fsSL "$REPO_URL/agentmux-archive-keyring.gpg" -o /usr/share/keyrings/agentmux-archive-keyring.gpg
                 curl -fsSL "$REPO_URL/agentmux.sources" -o /etc/apt/sources.list.d/agentmux.sources
-                apt-get update
+                apt-get -o Acquire::Retries=5 update
                 apt-cache madison agentmux | awk "{print \$3}" | grep -qx "$V"' ;;
             fedora:*)
               script='curl -fsSL "$REPO_URL/agentmux.repo" -o /etc/yum.repos.d/agentmux.repo
