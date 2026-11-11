@@ -12,7 +12,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "click_point.js"), "utf8");
-const clickPoint = new Function(`return (${src});`)();
+const run = new Function(`return (${src});`)();
+// The page's words come out between \u0001 and \u0002 for the host to mask; read the answer without them.
+const clickPoint = { call: (el) => { const got = run.call(el); return got && got.error ? { ...got, error: got.error.replace(/[\u0001\u0002]/g, "") } : got; } };
+const marked = (el) => run.call(el).error;
 
 const rect = (left, top, right, bottom) => ({ left, top, right, bottom, width: right - left, height: bottom - top });
 
@@ -199,5 +202,16 @@ describe("click_point: what can clip an element", () => {
         const line = el("button", rect(100, 100, 100, 130));
         const got = clickPoint.call(line);
         expect(got.error).not.toContain("outside the visible area");
+    });
+});
+
+describe("click_point: the page's words", () => {
+    it("sends a long text whole between markers, for the host to mask before it shortens it", () => {
+        const { el } = page({ topmost: (x, y, els) => els[1] });
+        const b = el("button", rect(100, 100, 200, 140), { text: "Copy" });
+        const secret = "Xy8Q~abcDEF1234ghijKLmnoPQRstu.vwxYZ0123";
+        el("div", rect(0, 0, 800, 200), { text: secret + " (copy it now)" });
+        const e = marked(b);
+        expect(e).toContain("\u0001" + secret + " (copy it now)\u0002");
     });
 });

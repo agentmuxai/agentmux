@@ -208,8 +208,17 @@ async fn apply_once(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Op
     Ok(Some(plan))
 }
 
-/// Panes being fitted now; the value says the pane was resized meanwhile, so the fit is done again.
-static APPLYING: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(Default::default);
+/// A pane being fitted now.
+#[derive(Debug, Clone, Copy)]
+struct Applying {
+    /// The pane was resized meanwhile, so the fit is done again.
+    resized: bool,
+    /// The zoom it had when the fit began (the entry is out of `ZOOMED` while the fit runs), for a status asked
+    /// meanwhile.
+    prior: Option<Plan>,
+}
+
+static APPLYING: LazyLock<Mutex<HashMap<String, Applying>>> = LazyLock::new(Default::default);
 /// The last size (in DIP) each pane was given: a move that keeps it needs no new fit.
 static LAST_SIZE: LazyLock<Mutex<HashMap<String, (i32, i32)>>> = LazyLock::new(Default::default);
 /// Panes whose size is kept before the map starts over.
@@ -222,10 +231,11 @@ const FIT_PASSES: u32 = 3;
 async fn apply(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<Plan>, String> {
     let label = cdp.label().to_string();
     let mut result = Ok(None);
+    let prior = ZOOMED.lock().get(&label).map(|e| e.plan);
     for _ in 0..FIT_PASSES {
-        APPLYING.lock().insert(label.clone(), false);
+        APPLYING.lock().insert(label.clone(), Applying { resized: false, prior });
         result = apply_once(cdp, block_id, ask).await;
-        if result.is_err() || !APPLYING.lock().get(&label).copied().unwrap_or(false) {
+        if result.is_err() || !APPLYING.lock().get(&label).is_some_and(|a| a.resized) {
             break;
         }
     }
@@ -292,20 +302,30 @@ impl ZoomReq {
     }
 }
 
+/// A zoom as the host tells srv.
+fn zoomed_json(plan: &Plan) -> Value {
+    json!({
+        "zoomed": true,
+        "factor": plan.scale,
+        "viewport_width": plan.width,
+        "viewport_height": plan.height,
+        "line": describe(plan),
+    })
+}
+
 /// How `block_id` is zoomed now, whatever the host did on its own since: a zoom that was dropped (a refused
 /// request, a pane that could not be fitted) or lost with its browser (a pane that woke from hibernation is a
 /// new browser) is not one. `live` is the label of the pane's browser now.
 fn status(block_id: &str, live: Option<&str>) -> Value {
+    // Being fitted right now (the zoom is out of the record until the fit is done): it is as it was before.
+    let refitting = live.and_then(|l| APPLYING.lock().get(l).and_then(|a| a.prior));
     let mut zoomed = ZOOMED.lock();
     let held = zoomed.iter().find(|(_, e)| e.block_id == block_id).map(|(l, e)| (l.clone(), e.plan));
+    if let (None, Some(plan)) = (&held, refitting) {
+        return zoomed_json(&plan);
+    }
     match held {
-        Some((label, plan)) if live == Some(label.as_str()) => json!({
-            "zoomed": true,
-            "factor": plan.scale,
-            "viewport_width": plan.width,
-            "viewport_height": plan.height,
-            "line": describe(&plan),
-        }),
+        Some((label, plan)) if live == Some(label.as_str()) => zoomed_json(&plan),
         stale => {
             if let Some((label, _)) = stale {
                 zoomed.remove(&label);
@@ -346,16 +366,7 @@ pub async fn zoom_route(
     };
     let _ = cdp.close().await;
     match result {
-        Ok(Some(p)) => (
-            StatusCode::OK,
-            Json(ApiResponse::ok(json!({
-                "zoomed": true,
-                "factor": p.scale,
-                "viewport_width": p.width,
-                "viewport_height": p.height,
-                "line": describe(&p),
-            }))),
-        ),
+        Ok(Some(p)) => (StatusCode::OK, Json(ApiResponse::ok(zoomed_json(&p)))),
         Ok(None) => (
             StatusCode::OK,
             Json(ApiResponse::ok(json!({ "zoomed": false, "factor": 1.0, "line": "zoom is off (100%)" }))),
@@ -377,8 +388,8 @@ pub fn on_pane_resized(state: &Arc<AppState>, block_id: &str, size: (i32, i32)) 
     }
     let Some(label) = state.live_browser_pane_label(block_id) else { return };
     // Being fitted right now: that pass looks again when it is done.
-    if let Some(resized) = APPLYING.lock().get_mut(&label) {
-        *resized = true;
+    if let Some(applying) = APPLYING.lock().get_mut(&label) {
+        applying.resized = true;
         return;
     }
     let generation = next_generation();
@@ -550,6 +561,19 @@ mod tests {
         assert_eq!(scale_point("pane-zoom-point-test", 200.0, 100.0), (100.0, 50.0));
         assert_eq!(scale_point("another-pane", 200.0, 100.0), (200.0, 100.0));
         ZOOMED.lock().remove("pane-zoom-point-test");
+    }
+
+    #[test]
+    fn a_status_asked_while_the_pane_is_being_fitted_says_the_zoom_it_had() {
+        let plan = p(640.0, 400.0, Ask::Factor(0.5), 0.0);
+        APPLYING.lock().insert("refit-test-label".to_string(), Applying { resized: false, prior: Some(plan) });
+        let s = status("refit-test-block", Some("refit-test-label"));
+        assert_eq!(s["zoomed"], true);
+        assert_eq!(s["line"], "viewport 1280x800 CSS, shown at 50%");
+        // A first fit has no zoom to report yet.
+        APPLYING.lock().insert("refit-test-label".to_string(), Applying { resized: false, prior: None });
+        assert_eq!(status("refit-test-block", Some("refit-test-label"))["zoomed"], false);
+        APPLYING.lock().remove("refit-test-label");
     }
 
     #[test]

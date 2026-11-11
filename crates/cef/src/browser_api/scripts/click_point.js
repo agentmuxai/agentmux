@@ -68,9 +68,11 @@ function () {
     box = next;
   }
 
+  // The page's own words in an answer are the host's to mask (a secret the page shows once) and shorten:
+  // they leave here whole, between \u0001 and \u0002 (`tidy_click_error` in act.rs).
   const name = el => {
     const text = ((el.getAttribute && el.getAttribute("aria-label")) || el.innerText || el.textContent || "").trim().replace(/\s+/g, " ");
-    return "<" + el.tagName.toLowerCase() + (text ? ' "' + text.slice(0, 40) + '"' : "") + ">";
+    return "<" + el.tagName.toLowerCase() + (text ? ' "\u0001' + text.slice(0, 400) + '\u0002"' : "") + ">";
   };
   if (empty(box)) {
     if (clipper) return { error: "not clicked: " + name(this) + " is cut off by " + name(clipper) + ", which clips it and can't be scrolled to it" + hint };
