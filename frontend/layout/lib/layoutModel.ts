@@ -279,6 +279,8 @@ export class LayoutModel {
     placeholderTransform: () => CSSProperties;
     /** The layout the pending drag action leaves: the ghost is its moved pane's rect (futureLayout.ts). */
     futureLayout: () => FutureLayout | undefined;
+    /** The layout a tear-off of the dragged pane leaves, while the drag shows one (tearOffPreview.ts). */
+    tearOffLayout: () => FutureLayout | undefined;
     /** Outlines of every other pane's rect in that layout, while a drop is previewed. */
     placementWireframe: () => { id: string; style: CSSProperties }[];
     /** The live reflow of a pane drag (liveReflow.ts): how a tile stands in for its future rect, or nothing. */
@@ -771,7 +773,11 @@ export class LayoutModel {
      * ghost, the wireframe (futureLayout.ts) and the live reflow (liveReflow.ts).
      */
     private createDropPreview(): void {
-        ({ futureLayout: this.futureLayout, placementWireframe: this.placementWireframe } = createPlacementPreview(this));
+        ({
+            futureLayout: this.futureLayout,
+            placementWireframe: this.placementWireframe,
+            tearOffLayout: this.tearOffLayout,
+        } = createPlacementPreview(this));
         this.placeholderTransform = createMemo<CSSProperties>(() =>
             this.getPlaceholderTransform(this.pendingTreeAction.throttledValueAtom())
         );

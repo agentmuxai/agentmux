@@ -454,6 +454,6 @@
 232 frontend/layout/lib/layoutPersistence.ts::handleBackendAction
 138 frontend/layout/lib/layoutResize.ts::onResizeMove
 201 frontend/layout/lib/layoutTree.ts::computeMoveNode
-203 frontend/layout/lib/tilelayout-shared.tsx::OverlayNodeWrapper
+201 frontend/layout/lib/tilelayout-shared.tsx::OverlayNodeWrapper
 105 frontend/perf/hud.tsx::PerfHud
 130 frontend/util/event-buffer.ts::PerSourceTracker::deliver

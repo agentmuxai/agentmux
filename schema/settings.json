@@ -376,8 +376,8 @@
         },
         "layout:livereflow": {
           "type": "boolean",
-          "description": "Live reflow while a pane is dragged: the other panes glide to where the drop leaves them, instead of a landing rectangle (SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06). Default off.",
-          "default": false,
+          "description": "Live reflow while a pane is dragged: the other panes glide to where the drop leaves them, and close over the slot of a pane that is about to be torn off (SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06). Default true; set false for the landing rectangle.",
+          "default": true,
           "x-section": "Animations"
         },
         "animation:preset": {

@@ -13,6 +13,7 @@ import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-
 import { setAnimationSettings } from "@/app/motion/motion";
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { deferWhileSizesHeld, paneSizesHeld, resetPaneSizeHoldForTests } from "@/app/platform/pane-size-hold";
+import { layoutWithoutOf } from "@/layout/lib/futureLayout";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import {
     envelope,
@@ -27,12 +28,21 @@ import {
     wholePx,
     type ReflowEntry,
 } from "@/layout/lib/liveReflow";
+import { showPlacement } from "@/layout/lib/placementPreview";
+import {
+    commitTearOff,
+    restOverOwnPane,
+    TEAR_OFF_COMMIT_WAIT_MS,
+    TEAR_OFF_REST_MS,
+    TEAR_OFF_REST_PX,
+} from "@/layout/lib/tearOffPreview";
 import {
     DropDirection,
     FlexDirection,
     LayoutTreeActionType,
     type LayoutNode,
     type LayoutTreeComputeMoveNodeAction,
+    type LayoutTreeDeleteNodeAction,
 } from "@/layout/lib/types";
 import type { SignalAtom } from "@/util/util";
 
@@ -205,11 +215,18 @@ describe("landingRectOf", () => {
 
 describe("the live reflow of a pane drag", () => {
     it("shows nothing with the setting off", () => {
-        setFlag(undefined);
+        setFlag(false);
         const m = modelOf(three());
         drag(m, "a", "c", DropDirection.Bottom);
         expect(m.liveReflowActive()).toBe(false);
         expect(entries(m, ["a", "b", "c"])).toEqual({ a: undefined, b: undefined, c: undefined });
+    });
+
+    it("is on when the setting is not set", () => {
+        setFlag(undefined);
+        const m = modelOf(three());
+        drag(m, "a", "c", DropDirection.Bottom);
+        expect(m.liveReflowActive()).toBe(true);
     });
 
     it("shows nothing before a drag starts, even with a preview pending", () => {
@@ -329,7 +346,7 @@ describe("the live reflow of a pane drag", () => {
         const got = entries(m, ["a", "b", "c"]);
         expect(got.a).toMatchObject({ moved: true });
         expect(got.b!.rect.left).toBeLessThan(own(m, "b").left);
-        expect(got.c).toEqual({ rect: own(m, "c"), box: ownSize(m, "c"), moved: false });
+        expect(got.c).toEqual({ rect: own(m, "c"), box: ownSize(m, "c"), moved: false, leaving: false });
     });
 
     it("leaves every pane on its own rect, the dragged one in its own slot, when the drop would change nothing", () => {
@@ -339,8 +356,8 @@ describe("the live reflow of a pane drag", () => {
         drag(m, "a", "b", DropDirection.Left);
         expect(m.liveReflowActive()).toBe(false);
         expect(entries(m, ["a", "b"])).toEqual({
-            a: { rect: own(m, "a"), box: ownSize(m, "a"), moved: false },
-            b: { rect: own(m, "b"), box: ownSize(m, "b"), moved: false },
+            a: { rect: own(m, "a"), box: ownSize(m, "a"), moved: false, leaving: false },
+            b: { rect: own(m, "b"), box: ownSize(m, "b"), moved: false, leaving: false },
         });
     });
 
@@ -383,7 +400,7 @@ describe("the live reflow of a pane drag", () => {
         drag(m, "a", "c", DropDirection.Bottom);
         expect(m.liveReflowActive()).toBe(false);
         for (const id of ["a", "b", "c"]) {
-            expect(m.reflowFor(id)).toEqual({ rect: own(m, id), box: ownSize(m, id), moved: false });
+            expect(m.reflowFor(id)).toEqual({ rect: own(m, id), box: ownSize(m, id), moved: false, leaving: false });
         }
         captured();
         expect(m.liveReflowActive()).toBe(true);
@@ -419,7 +436,7 @@ describe("the live reflow of a pane drag", () => {
     });
 
     it("holds no sizes with the setting off: nothing is resized by a drag then", () => {
-        setFlag(undefined);
+        setFlag(false);
         const m = modelOf(three());
         drag(m, "a", "c", DropDirection.Bottom);
         expect(paneSizesHeld()).toBe(false);
@@ -474,5 +491,143 @@ describe("the live reflow of a pane drag", () => {
         const m = modelOf(many);
         drag(m, "p0", `p${REFLOW_MAX_PANES}`, DropDirection.Right);
         expect(m.liveReflowActive()).toBe(false);
+    });
+});
+
+describe("the tear-off a drag shows over its own pane (tearOffPreview.ts)", () => {
+    /** A drag of `id` whose pointer is over that pane itself, at (x, y). */
+    function dragOverSelf(m: LayoutModel, id: string, x = 100, y = 100) {
+        m.activeDrag._set(true);
+        restOverOwnPane(m, id, x, y);
+    }
+
+    it("is the layout without the pane: none for a pane that is not in it, or that is its only pane", () => {
+        const m = modelOf(three());
+        const without = layoutWithoutOf(m, "a")!;
+        expect(without).toMatchObject({ movedId: "a", leaves: true });
+        expect(without.leafIds.sort()).toEqual(["b", "c"]);
+        expect(without.rects.a).toBeUndefined();
+        expect(without.rects.b).toMatchObject({ left: 0, width: 1200 });
+        // The model's own tree still has the pane.
+        expect(m.leafs().map((l) => l.id).sort()).toEqual(["a", "b", "c"]);
+        expect(layoutWithoutOf(m, "nope")).toBeUndefined();
+        expect(layoutWithoutOf(modelOf(leaf("only")), "only")).toBeUndefined();
+    });
+
+    it("closes the other panes over the slot once the pointer rests there, and the dragged pane is not shown", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        dragOverSelf(m, "a");
+        vi.advanceTimersByTime(TEAR_OFF_REST_MS - 1);
+        expect(m.liveReflowActive()).toBe(false);
+        expect(m.reflowFor("b")).toMatchObject({ rect: own(m, "b"), leaving: false });
+        vi.advanceTimersByTime(1);
+        expect(m.liveReflowActive()).toBe(true);
+        const without = m.tearOffLayout()!;
+        expect(m.reflowFor("b")).toMatchObject({ rect: shownPx(without.rects.b), moved: false, leaving: false });
+        expect(m.reflowFor("c")).toMatchObject({ rect: shownPx(without.rects.c), moved: false, leaving: false });
+        expect(m.reflowFor("b")!.rect).toMatchObject({ left: 0, width: 1200 });
+        // The pane itself stays laid out where it was, unseen: it is the picture in hand.
+        expect(m.reflowFor("a")).toEqual({ rect: own(m, "a"), box: ownSize(m, "a"), moved: false, leaving: true });
+        // No drop is armed, so the picture in hand keeps the pane's own size.
+        expect(landingRectOf(m)).toBeUndefined();
+    });
+
+    it("waits for the pointer to rest: one that keeps moving over its own pane shows nothing", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        dragOverSelf(m, "a", 100, 100);
+        for (let step = 1; step <= 10; step++) {
+            vi.advanceTimersByTime(TEAR_OFF_REST_MS - 20);
+            restOverOwnPane(m, "a", 100 + step * TEAR_OFF_REST_PX, 100);
+            expect(m.liveReflowActive()).toBe(false);
+        }
+        // It stops; a sample that barely moved does not start the wait again.
+        vi.advanceTimersByTime(TEAR_OFF_REST_MS - 20);
+        restOverOwnPane(m, "a", 101 + 10 * TEAR_OFF_REST_PX, 100);
+        vi.advanceTimersByTime(20);
+        expect(m.liveReflowActive()).toBe(true);
+    });
+
+    it("stays while the pointer moves about its own pane, and goes when it is over another pane", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        dragOverSelf(m, "a");
+        vi.advanceTimersByTime(TEAR_OFF_REST_MS);
+        restOverOwnPane(m, "a", 400, 300);
+        expect(m.reflowFor("a")).toMatchObject({ leaving: true });
+        showPlacement(m, { targetId: "c", rect: m.additionalProps().c.rect, offset: { x: 900, y: 790 }, draggedId: "a" }, DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.tearOffLayout()).toBeUndefined();
+        expect(m.reflowFor("a")).toMatchObject({ rect: shownPx(landingRectOf(m)!), moved: true, leaving: false });
+    });
+
+    it("stays through the release until the tree lets the pane go, so nothing springs back in between", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        dragOverSelf(m, "a");
+        vi.advanceTimersByTime(TEAR_OFF_REST_MS);
+        // The release: the source's handler ends the drag, the layout's commits the tear-off.
+        m.activeDrag._set(false);
+        commitTearOff(m, "a");
+        vi.advanceTimersByTime(TEAR_OFF_COMMIT_WAIT_MS - 1);
+        expect(m.reflowFor("b")!.rect).toMatchObject({ left: 0, width: 1200 });
+        expect(m.reflowFor("a")).toMatchObject({ leaving: true });
+        m.treeReducer({ type: LayoutTreeActionType.DeleteNode, nodeId: "a" } as LayoutTreeDeleteNodeAction);
+        expect(m.tearOffLayout()).toBeUndefined();
+        expect(entries(m, ["a", "b", "c"])).toEqual({ a: undefined, b: undefined, c: undefined });
+        // What was shown is what the layout now is.
+        expect(own(m, "b")).toMatchObject({ left: 0, width: 1200 });
+    });
+
+    it("shows a tear-off released before the pointer rested, from the release on", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        dragOverSelf(m, "a");
+        commitTearOff(m, "a");
+        m.activeDrag._set(false);
+        vi.advanceTimersByTime(20);
+        expect(m.reflowFor("b")!.rect).toMatchObject({ left: 0, width: 1200 });
+    });
+
+    it("lets the panes back if the tree never lets the pane go", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        dragOverSelf(m, "a");
+        m.activeDrag._set(false);
+        commitTearOff(m, "a");
+        vi.advanceTimersByTime(TEAR_OFF_COMMIT_WAIT_MS);
+        expect(m.tearOffLayout()).toBeUndefined();
+        expect(entries(m, ["a", "b"])).toEqual({ a: undefined, b: undefined });
+    });
+
+    it("ends with a drag that is cancelled or dropped elsewhere", async () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        dragOverSelf(m, "a");
+        vi.advanceTimersByTime(TEAR_OFF_REST_MS);
+        m.activeDrag._set(false);
+        await Promise.resolve();
+        expect(m.tearOffLayout()).toBeUndefined();
+        expect(entries(m, ["a", "b"])).toEqual({ a: undefined, b: undefined });
+        // A wait that was still running goes with the drag too.
+        dragOverSelf(m, "a");
+        m.activeDrag._set(false);
+        await Promise.resolve();
+        vi.advanceTimersByTime(TEAR_OFF_REST_MS);
+        expect(m.tearOffLayout()).toBeUndefined();
+    });
+
+    it("shows nothing for the only pane of a layout, and nothing with the setting off", () => {
+        vi.useFakeTimers();
+        const one = modelOf(leaf("only"));
+        dragOverSelf(one, "only");
+        vi.advanceTimersByTime(TEAR_OFF_REST_MS);
+        expect(one.liveReflowActive()).toBe(false);
+        setFlag(false);
+        const m = modelOf(three());
+        dragOverSelf(m, "a");
+        vi.advanceTimersByTime(TEAR_OFF_REST_MS);
+        expect(m.reflowFor("b")).toBeUndefined();
     });
 });

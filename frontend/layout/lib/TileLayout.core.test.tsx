@@ -438,7 +438,7 @@ describe("createTileLayout: a tile", () => {
 
     describe("the live reflow of a pane drag (liveReflow.ts)", () => {
         const rect = { left: 300, top: 0, width: 40, height: 20 };
-        const entry: ReflowEntry = { rect, box: { width: 40, height: 30 }, moved: false };
+        const entry: ReflowEntry = { rect, box: { width: 40, height: 30 }, moved: false, leaving: false };
 
         /** The tile's four edges, as its style carries them: left, top, right, bottom. */
         const edgesOf = (el: HTMLElement) => ["l", "t", "r", "b"].map((edge) => el.style.getPropertyValue(`--reflow-${edge}`));
@@ -487,6 +487,14 @@ describe("createTileLayout: a tile", () => {
             // Another pane keeps whatever the stylesheet gives a dragged tile.
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
             expect(el.style.filter).toBe("");
+        });
+
+        it("does not show a pane that is being torn off: its neighbours close over its slot (tearOffPreview.ts)", () => {
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { ...entry, leaving: true }]]));
+            expect(el.style.opacity).toBe("0");
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
+            expect(el.style.opacity).toBe("1");
         });
 
         it("drops the reflow's transform, size, crop and transition in one step when the reflow ends, so the drop does not glide twice", () => {

@@ -27,6 +27,7 @@ What is new: applying the future rects to the real panes as a visual, a source-p
 | A pane | the strip between panes (a resize seam) | the pane is inserted between the two; both neighbours share the gap | unchanged |
 | A pane tab (pill) of a pane with other tabs | another pane's edge band | a **hole opens** (the pill is not a pane yet): the target gives up its share; nothing closes at the source | `splitOutStackMember` |
 | A pane's only tab (pill) | another pane's edge band | as a pane drag: the source slot closes, the target splits | `computeMoveNode` |
+| A pane | rests over its own slot | a release there tears the pane off (`pane-self-release.ts`), so once the pointer has rested (220 ms within 6 px) the layout **shows the tear-off result**: the pane's tile goes and the other panes close over its slot. It stays through the release until the tree lets the pane go (`tearOffPreview.ts`; the operator, 2026-11-11: "it isnt clear what is happening, it is actually a tear off") | tear-off, unchanged |
 | A pane or pill | leaves the window | the source layout **shows the tear-off result** (the dragged pane's slot closes, siblings expand), as Chrome does; the torn window follows the cursor (existing live tear-off) | tear-off, unchanged |
 | A pane or pill | another window tab | no reflow in this tab; the tab bar's own highlight (existing) | unchanged |
 | A pane or pill | another window (cross-window) | the destination window reflows only once its monitor drives the same preview; **out of scope for phase 1** (§9, Q4) | unchanged |
@@ -103,7 +104,7 @@ So the polish on #26698 is kept small: the stand-in size fix and the visibility 
 
 ## 9. Plan, flag, decisions
 
-**Flag:** `layout:livereflow`, default off, until the phases below pass; the ghost remains the fallback path (it is the current behaviour), so turning the flag off is a revert to today.
+**Flag:** `layout:livereflow`, default on from 2026-11-11 (phase 2 passed its look checks on macOS and Linux, and the operator dragged it: "this looks good. When I drag a pane, the other move quite well around"); it was off before. The ghost remains the fallback path, so setting the flag to false is a revert to the landing rectangle.
 
 **Phases (each shippable, no tree-write path changes):**
 
@@ -133,8 +134,9 @@ So the polish on #26698 is kept small: the stand-in size fix and the visibility 
 | 1 | 0 and 1 | this spec; the frozen hit-test snapshot and the velocity gate in `dropIntentTracker.ts`; `futureLayoutOf` timing as a test with a budget; replayed-trace tests |
 | 2 | 2 | the DOM-pane transform reflow behind `layout:livereflow`, the source gliding into its slot, the pane in hand sized to the landing, cleanup contract, zero-counters test |
 | 2b | 2 | real sizes for every pane (the report of 2026-11-10): one layout per candidate, the clip glide, terminals hold their size, the capture gate, the picture cut and never padded, #47354 |
-| 3 | 3 | browser panes in lockstep (with the browser seat), flag default on |
-| 4 | 4 | the tear-off result shown in the source, the pill hole |
+| 2c | 2, part of 4 | the tear-off result shown when a pane rests over its own slot; flag default on |
+| 3 | 3 | browser panes in lockstep (with the browser seat) |
+| 4 | 4 | the tear-off result shown in the source when the pointer leaves the window, the pill hole |
 | 5 | zones | the simplified zone model (Camper's `determineDropDirection`), with Camper's review |
 
 ## 10. For Camper (layout and panes seat)
