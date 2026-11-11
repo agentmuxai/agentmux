@@ -90,6 +90,21 @@ export function createUtcDay(): Accessor<number> {
     return day;
 }
 
+/** The pane's stop card and warning, each gone once its UTC day is over without waiting for another event from srv. */
+export function createSpendCards(meta: Accessor<Record<string, unknown> | null | undefined>) {
+    const day = createUtcDay();
+    return {
+        stopped: () => {
+            day();
+            return readSpendStopped(meta());
+        },
+        warning: () => {
+            day();
+            return readSpendWarning(meta());
+        },
+    };
+}
+
 /** Today's figure for the chips, or null when none was written or it is from an earlier UTC day. */
 export function readSpendToday(meta: Record<string, unknown> | null | undefined, now: number = Date.now()): SpendToday | null {
     const raw = meta?.[SPEND_TODAY_META_KEY];
