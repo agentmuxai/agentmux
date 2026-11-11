@@ -423,10 +423,10 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // reducer's PoolWindowSpawnStart arm ALSO checks `quit_state !=
     // Running` and would no-op, but the early-out keeps the warn-log
     // shape identical to pre-PR for diagnostic continuity.
-    if state.is_quitting() {
+    if state.is_quitting() || crate::client::page_unreachable::pool_spawn_blocked() {
         tracing::warn!(
             target: "wrr",
-            "[wrr] spawn_pool_window skipped — quit_state != Running (drain mode)"
+            "[wrr] spawn_pool_window skipped — draining, or the app page can't be loaded"
         );
         return;
     }

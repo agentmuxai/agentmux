@@ -36,8 +36,8 @@
 598 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_close
 167 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_popup
 200 crates/cef/src/client/navigation.rs::AgentMuxHandler::on_load_end
-106 crates/cef/src/client/navigation.rs::AgentMuxHandler::on_load_error
-125 crates/cef/src/client/navigation.rs::render_load_error_html
+104 crates/cef/src/client/navigation.rs::AgentMuxHandler::on_load_error
+113 crates/cef/src/client/navigation.rs::render_load_error_html
 190 crates/cef/src/client/wndproc.rs::install_top_level_focus_restore_hook
 150 crates/cef/src/client/wndproc.rs::install_top_level_focus_restore_hook::wndproc_hook
 199 crates/cef/src/client/wndproc.rs::window_edge_resize_wndproc

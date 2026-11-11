@@ -47,6 +47,11 @@ pub fn on_main_window_ready(state: &Arc<AppState>) {
 }
 
 fn start_pending_pools(state: &Arc<AppState>, trigger: &str) {
+    // The fallback timer can fire while the page can't be loaded: stay pending, and
+    // the main window's `wave-ready` starts the pools once it does load.
+    if crate::client::page_unreachable::pool_spawn_blocked() {
+        return;
+    }
     if !STARTUP_POOLS_PENDING.swap(false, std::sync::atomic::Ordering::SeqCst) {
         return;
     }

@@ -373,6 +373,8 @@ pub fn pool_window_ready(
         .get("label")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing label".to_string())?;
+    // Its page loaded, so the app page loads again (before the refill it triggers).
+    crate::client::page_unreachable::note_loaded();
     super::window_pool::mark_pool_window_renderer_ready(state, label);
     Ok(serde_json::Value::Null)
 }

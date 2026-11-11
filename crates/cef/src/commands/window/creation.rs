@@ -281,8 +281,8 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         Some(_) => return Err("open_new_window: invalid workspace_id".to_string()),
         None => None,
     };
-    // H.7 invariant — also enforced inside open_window_with_kind (cold path).
-    state.check_no_pane_closing("open_new_window")?;
+    // H.7 invariant and the dead-page gate — also enforced inside open_window_with_kind (cold path).
+    state.check_top_level_creation_allowed("open_new_window")?;
 
     // Pool-first path — instant show with no renderer-spawn latency (~3s saved).
     // On macOS/Linux, emits pool:new-window (no workspaceId → fresh workspace).
