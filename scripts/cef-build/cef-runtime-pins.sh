@@ -15,4 +15,4 @@ CEF_WINDOWS_RUNTIME_TAG="cef-windows-x86_64-154.0.8037.58-r4"
 # archive's sha256 is checked by verify-runtime-archive.sh when a build downloads it.
 CEF_LINUX_RUNTIME_TAG="cef-linux-x86_64-154.0.8037.58-codecs-r5"
 CEF_LINUX_RUNTIME_SHA256="5aae8898bf44f86f7a5da84ca62d221abf930cff6dafcd06557339859cc30930"
-CEF_MACOS_RUNTIME_TAG="cef-macos-arm64-154.0.8037.58-codecs-r4"
+CEF_MACOS_RUNTIME_TAG="cef-macos-arm64-154.0.8037.98-codecs-r1"
