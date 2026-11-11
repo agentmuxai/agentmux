@@ -71,7 +71,6 @@
             display: inline-flex;
             align-items: center;
             gap: var(--space-1-5);
-            cursor: help;
 
             &:focus-visible {
                 @include mixins.focus-ring;

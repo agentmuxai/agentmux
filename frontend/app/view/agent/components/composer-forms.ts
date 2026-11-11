@@ -44,7 +44,7 @@ export function chooseCompactKeys(
         // Cost: how many collapse, then how late in the order they are (an earlier slot is the cheaper to give up).
         const cost = [picked.length, picked.reduce((sum, k) => sum + order.indexOf(k), 0)];
         if (cost[0] > bestCost[0] || (cost[0] === bestCost[0] && cost[1] >= bestCost[1])) continue;
-        if (rowCount({ ...full, ...Object.fromEntries(picked.map((k) => [k, compact[k]])) }) > target) continue;
+        if (rowCount({ ...full, ...Object.fromEntries(picked.map((k) => [k, compact[k]])) }) > target + 1e-9) continue;
         best = picked;
         bestCost = cost;
     }

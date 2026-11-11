@@ -569,6 +569,21 @@ export function computeComposerRows(
 }
 
 /**
+ * What a layout costs, to compare layouts by: its rows, plus up to half a row for each row wider than the strip
+ * (by how much of the strip it overruns). A unit that is never split (the CPU and memory readout beside the context
+ * reading) can be wider than a narrow strip even alone on its row, and the row count does not change when its slots
+ * go compact; this does, so the forms collapse the slots that bring such a row back inside, or as near as they can.
+ */
+export function rowsCost(rows: ComposerRow[], widths: Record<string, number>, gapPx: number, availableWidth: number): number {
+    const overrun = (row: ComposerRow): number => {
+        const keys = [...row.left, ...row.right];
+        const width = keys.reduce((sum, k) => sum + (widths[k] ?? 0), 0) + Math.max(0, keys.length - 1) * gapPx;
+        return availableWidth > 0 ? Math.min(1, Math.max(0, width - availableWidth) / availableWidth) : 0;
+    };
+    return rows.length + rows.reduce((sum, row) => sum + overrun(row), 0) / 2;
+}
+
+/**
  * Edge priority for interactive elements (2026-08-26, user-directed
  * follow-up to Rev 7): on every rendered line, interactive slots
  * (buttons/dropdowns — things you CLICK) sit flush against the strip's
