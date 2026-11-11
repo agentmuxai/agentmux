@@ -1,0 +1,87 @@
+-- select folder
+-- folder
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-folder files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "src"
+    <div class="files-preview-facts">
+      "T1700000000000"
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open folder"
+-- press Open folder
+onOpen src
+-- select image
+fetchMediaBlob /home/me/shot.png {"maxBytes":26214400,"blockId":"blk-1"}
+createObjectURL blob:img-1
+-- image
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-media">
+    <img src="blob:img-1" alt="shot.png">
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+-- double-click the image
+onOpen shot.png
+-- select truncated text
+abort /home/me/shot.png
+fetchMediaRange /home/me/big.log 0-262143 {"blockId":"blk-1"}
+revokeObjectURL blob:img-1
+-- truncated text
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="text" class="files-preview-code">
+      "x"
+    <div class="files-preview-more">
+      "Showing the first"
+      "256 KB"
+      "."
+      <button type="button" class="ui-button ui-tone-accent ui-button--link">
+        "Open the whole file"
+-- press Open the whole file
+onOpen big.log
+-- select video
+abort /home/me/big.log
+-- video
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-film files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "clip.mp4"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Play in a Media pane"
+-- press Play in a Media pane
+onOpen clip.mp4
+-- select binary
+fetchMediaRange /home/me/tool.dat 0-262143 {"blockId":"blk-1"}
+-- binary
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-file files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "tool.dat"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <div class="files-preview-facts">
+      "No preview: not a text file."
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open with default app"
+-- press Open with default app
+onOpenWithOs tool.dat
+-- select error entry
+abort /home/me/tool.dat
+-- error entry
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-file files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "locked.txt"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <div class="files-preview-facts">
+      "Permission denied"
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open with default app"
+-- press Open with default app
+onOpenWithOs locked.txt

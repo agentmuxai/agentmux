@@ -19,7 +19,6 @@ import {
     isPinned,
     platformLabel,
     plural,
-    REMOTE_COLORS,
     remoteColor,
     statusLabel,
     type RemoteGroup,
@@ -36,12 +35,13 @@ import {
     PaneBody,
     PaneScroll,
     SectionHeader,
-    Select,
     TextInput,
     type StatusTone,
 } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 import { connectionName, parseDestination } from "./add-remote";
+import { DetailActions, DetailAgents, DetailSettings, TestResult } from "./remotes-detail-parts";
+import { connectionAction, runConnectionAction } from "./remotes-connection";
 import { tip } from "@/app/element/tip";
 
 interface MenuState {
@@ -268,154 +268,17 @@ function RemoteCard(props: {
 function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.Element {
     const model = props.model;
     const r = () => props.record;
-    const connection = () => connectionAction(r());
-    const durable = () => r().settings?.["term:durable"];
     const run = (what: string, action: () => Promise<void>) => () => void model.run(what, action);
-
-    const commitNickname = (value: string) => {
-        const current = (r().settings?.["display:name"] as string | undefined) ?? "";
-        if (value.trim() === current.trim()) return;
-        void model.run("Rename", () => model.setNickname(r().name, value));
-    };
 
     return (
         <div class="remotes-detail">
             <Show when={r().status.state === "error" && r().status.error}>
                 <div class="remotes-detail-error">{r().status.error}</div>
             </Show>
-            <div class="remotes-detail-actions">
-                <Show when={connection()}>
-                    {(action) => <Button onClick={run(action(), () => runConnectionAction(model, r(), action()))}>{action()}</Button>}
-                </Show>
-                <Show when={r().kind === "ssh"}>
-                    <Button onClick={run("Sessions", () => model.showSessions(r().name))}>Sessions…</Button>
-                </Show>
-                <Button onClick={run(isPinned(r()) ? "Unpin" : "Pin", () => model.setPinned(r().name, !isPinned(r())))}>
-                    {isPinned(r()) ? "Unpin" : "Pin"}
-                </Button>
-                <Button onClick={run(isHidden(r()) ? "Unhide" : "Hide", () => model.setHidden(r().name, !isHidden(r())))}>
-                    {isHidden(r()) ? "Unhide" : "Hide"}
-                </Button>
-                <Show when={r().sources.includes("recent")}>
-                    <Button onClick={run("Forget", () => model.forget(r().name))}>Forget</Button>
-                </Show>
-                <Show when={r().helper.installed}>
-                    <Button tone="danger" onClick={run("Remove helper", () => model.removeHelper(r().name))}>
-                        Remove helper
-                    </Button>
-                </Show>
-                <Show when={r().kind === "ssh"}>
-                    <Button
-                        disabled={model.testing() === r().name}
-                        onClick={run("Test connection", () => model.testConnection(r().name))}
-                    >
-                        {model.testing() === r().name ? "Testing…" : "Test connection"}
-                    </Button>
-                </Show>
-                <Show when={r().sources.includes("ssh_config")}>
-                    <Button onClick={run("Edit in ssh config", () => model.editInSshConfig(r().name))}>Edit in ssh config</Button>
-                </Show>
-            </div>
-            <Show when={model.testResults()[r().name]}>
-                {(result) => (
-                    <div class={result() === true ? "remotes-test-ok" : "remotes-detail-error"} role="status">
-                        {result() === true ? "Connected and ran a command." : `Test failed: ${result()}`}
-                    </div>
-                )}
-            </Show>
-            <div class="remotes-settings">
-                <label class="remotes-setting">
-                    <span>Nickname</span>
-                    <TextInput
-                        placeholder={r().name}
-                        value={(r().settings?.["display:name"] as string | undefined) ?? ""}
-                        onBlur={(e) => commitNickname(e.currentTarget.value)}
-                        onKeyDown={(e) => {
-                            // Blurring commits it, once.
-                            if (e.key === "Enter") e.currentTarget.blur();
-                        }}
-                    />
-                </label>
-                <div class="remotes-setting">
-                    <span>Colour</span>
-                    <div class="remotes-colors" role="radiogroup" aria-label="Colour">
-                        <Button
-                            class="remotes-color"
-                            icon="ban"
-                            role="radio"
-                            aria-checked={!remoteColor(r())}
-                            title="None"
-                            aria-label="None"
-                            onClick={run("Colour", () => model.setColor(r().name, null))}
-                        />
-                        <For each={REMOTE_COLORS}>
-                            {(c) => (
-                                <Button
-                                    class="remotes-color"
-                                    role="radio"
-                                    aria-checked={remoteColor(r())?.toLowerCase() === c.value}
-                                    title={c.name}
-                                    aria-label={c.name}
-                                    onClick={run("Colour", () => model.setColor(r().name, c.value))}
-                                >
-                                    <span class="remotes-color-chip" style={{ background: c.value }} />
-                                </Button>
-                            )}
-                        </For>
-                    </div>
-                </div>
-                <Show when={r().kind === "ssh"}>
-                    <label class="remotes-setting">
-                        <span>Keep sessions alive</span>
-                        <Select
-                            value={durable() === true ? "on" : durable() === false ? "off" : "default"}
-                            onChange={(v) =>
-                                void model.run("Keep sessions alive", () =>
-                                    model.setDurable(r().name, v === "on" ? true : v === "off" ? false : null)
-                                )
-                            }
-                            options={[
-                                { value: "default", label: "As in Settings" },
-                                { value: "on", label: "On" },
-                                { value: "off", label: "Off" },
-                            ]}
-                        />
-                    </label>
-                    <label class="remotes-setting">
-                        <span>Install the helper</span>
-                        <Select
-                            value={(r().settings?.["conn:helper"] as string | undefined) || "ask"}
-                            onChange={(v) => void model.run("Install the helper", () => model.setHelperPolicy(r().name, v))}
-                            options={[
-                                { value: "ask", label: "As in Settings" },
-                                { value: "always", label: "Always" },
-                                { value: "never", label: "Never" },
-                            ]}
-                        />
-                    </label>
-                </Show>
-            </div>
-            <Show when={r().agents.length > 0}>
-                <div class="remotes-agents">
-                    <span>Agents always allowed here (as you, with your SSH keys):</span>
-                    <ul>
-                        <For each={r().agents}>
-                            {(agent) => (
-                                <li>
-                                    <span class="remotes-agent-name">{agent}</span>
-                                    <Button
-                                        tone="quiet"
-                                        aria-label={`Revoke ${agent} on ${r().name}`}
-                                        onClick={run("Revoke", () => model.revokeAgent(r().name, agent))}
-                                    >
-                                        Revoke
-                                    </Button>
-                                </li>
-                            )}
-                        </For>
-                    </ul>
-                </div>
-            </Show>
+            <DetailActions r={r} model={model} run={run} />
+            <TestResult r={r} model={model} />
+            <DetailSettings r={r} model={model} run={run} />
+            <DetailAgents r={r} model={model} run={run} />
         </div>
     );
 }
@@ -504,25 +367,6 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
             </div>
         </form>
     );
-}
-
-/** A remote's connection action: Connect when it is down, Disconnect when it
- *  is up, and neither while a login is under way (an ssh at a password
- *  prompt): nothing is up to close yet, and Connect would start a second login. */
-function connectionAction(r: RemoteRecord): "Connect" | "Disconnect" | null {
-    switch (r.status.state) {
-        case "connected":
-            return "Disconnect";
-        case "connecting":
-            return null;
-        default:
-            return "Connect";
-    }
-}
-
-/** Run a remote's {@link connectionAction}. */
-function runConnectionAction(model: RemotesViewModel, r: RemoteRecord, action: "Connect" | "Disconnect"): Promise<void> {
-    return action === "Connect" ? model.connect(r.name) : model.disconnect(r.name);
 }
 
 /** The right-click menu: the card's actions (§4.2). */
