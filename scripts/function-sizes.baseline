@@ -91,7 +91,7 @@
 141 crates/cef/src/ui_tasks/window.rs::CreateWindowTask::Task::execute
 114 crates/cef/src/ui_tasks/window.rs::MainFocusReclaimTask::Task::execute
 107 crates/cef/src/ui_tasks/window.rs::begin_drain_and_cascade
-162 crates/cef/src/wrr/win_event.rs::QuitWatchdogRecheckTask::Task::execute
+142 crates/cef/src/wrr/win_event.rs::QuitWatchdogRecheckTask::Task::execute
 284 crates/cef/src/wrr/win_event.rs::win_event_callback
 101 crates/launcher/build.rs::main
 148 crates/launcher/src/diag.rs::print_srv_summary
