@@ -3,8 +3,8 @@
 
 /**
  * PaneGrip — the pane's grip, in its header just left of the pane controls
- * (minimize / magnify / close), outside the scrolling tab strip, so it never
- * scrolls or fades with the tabs. Drag it to move the pane: the header's own
+ * (minimize / magnify / close), pinned with them and outside the scrolling
+ * range, so it never scrolls or fades with the tabs. Drag it to move the pane: the header's own
  * whole-pane drag covers it. Click it, or press Enter or Space, for the pane
  * menu (the header's own `contextmenu`).
  *

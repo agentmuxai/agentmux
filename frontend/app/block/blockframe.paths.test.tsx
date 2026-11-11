@@ -107,6 +107,8 @@ type Over = {
     viewIcon?: string;
     blockBg?: Record<string, unknown>;
     blockId?: string;
+    /** The view's own end buttons (an agent pane's search and Messages). */
+    endButtons?: number;
 };
 
 function setup(over: Over = {}) {
@@ -139,6 +141,11 @@ function setup(over: Over = {}) {
               manageConnection: over.manageConnection ? util.createSignalAtom(true) : undefined,
               viewIcon: over.viewIcon ? util.createSignalAtom(over.viewIcon) : undefined,
               blockBg: over.blockBg ? util.createSignalAtom(over.blockBg) : undefined,
+              endIconButtons: over.endButtons
+                  ? util.createSignalAtom(
+                        Array.from({ length: over.endButtons }, (_, i) => ({ elemtype: "iconbutton", icon: "search", title: `Aux ${i}`, click: () => {} }))
+                    )
+                  : undefined,
               getBodyContextMenuItems: () => [],
           } as never);
     const blockRef = { current: null as HTMLDivElement | null };
@@ -190,13 +197,33 @@ describe("the header", () => {
         const range = q(header, ".block-frame-header-scroll") as HTMLElement;
         expect(range).not.toBeNull();
         expect(q(range, ".block-frame-header-content")).not.toBeNull();
-        // The grip and the view's end buttons scroll with the tabs (#29325)...
-        expect(q(range, ".pane-grip")).not.toBeNull();
-        // ...and the window controls, minimize first, stay pinned after the range.
+        // The view's end buttons scroll with the tabs (#29325); the window controls stay pinned after the range,
+        // and the grip is pinned with them, just left of minimize.
+        expect(q(range, ".pane-grip")).toBeNull();
         const pinned = q(header, ".block-frame-end-icons") as HTMLElement;
         expect(pinned).not.toBeNull();
         expect(range.contains(pinned)).toBe(false);
         expect(q(pinned, ".block-frame-minimize")).not.toBeNull();
+        expect(pinned.firstElementChild?.classList.contains("pane-grip")).toBe(true);
+        expect(pinned.children[1]?.classList.contains("block-frame-minimize")).toBe(true);
+    });
+
+    it("keeps the grip right of the view's own buttons and their separator, just left of minimize", () => {
+        const t = setup({ noHeader: false, meta: { view: "term" }, endButtons: 2 });
+        const header = q(t.view.container, ".block-frame-default-header") as HTMLElement;
+        const grip = q(header, ".pane-grip") as HTMLElement;
+        const separator = q(header, ".block-frame-header-aux .block-frame-btn-separator") as HTMLElement;
+        const minimize = q(header, ".block-frame-minimize") as HTMLElement;
+        expect(separator).not.toBeNull();
+        const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+        expect(follows(separator, grip)).toBe(true);
+        expect(follows(grip, minimize)).toBe(true);
+        expect(grip.nextElementSibling).toBe(minimize);
+    });
+
+    it("draws no grip in a drag preview", () => {
+        const t = setup({ noHeader: false, preview: true });
+        expect(q(t.view.container, ".pane-grip")).toBeNull();
     });
 
     it("is drawn when the view says nothing about it", () => {

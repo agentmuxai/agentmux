@@ -788,13 +788,6 @@ function BlockFrame_Header(
                 </Show>
             </div>
             <div class="block-frame-header-spacer" aria-hidden="true" />
-            {/* The pane's grip, outside the scrolling tab strip, just left of
-                the pane controls. The header's whole-pane drag is vetoed for a
-                magnified or ephemeral pane (TileLayout.core.tsx canDrag); the
-                grip says so. */}
-            <Show when={!props.preview}>
-                <PaneGrip dragDisabled={props.nodeModel.isMagnified() || props.nodeModel.isEphemeral()} />
-            </Show>
             <AuxEndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} />
             </div>
             </div>
@@ -805,6 +798,13 @@ function BlockFrame_Header(
                 content={<>{tooltipHeaderElems()}</>}
             />
             <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
+                {/* The pane's grip: first of the pinned controls, so it is the one just left of the window
+                    controls in every pane, to the right of the view's own buttons and their separator, and
+                    it never scrolls away with the range. The header's whole-pane drag is vetoed for a
+                    magnified or ephemeral pane (TileLayout.core.tsx canDrag); the grip says so. */}
+                <Show when={!props.preview}>
+                    <PaneGrip dragDisabled={props.nodeModel.isMagnified() || props.nodeModel.isEphemeral()} />
+                </Show>
                 <EndIcons
                     viewModel={props.viewModel}
                     nodeModel={props.nodeModel}
