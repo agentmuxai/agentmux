@@ -4,7 +4,7 @@
 //! The server a running drone's blocks reach AgentMux through.
 //!
 //! A block is `run(node, &scope)` and has no server handle in its signature
-//! (the engine's rule: Drone phase 2, docs/specs/SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md §4.2).
+//! (the engine's rule: Drone phase 2, the Drone real-world jobs spec §4.2).
 //! The blocks that act on AgentMux itself (App query, Message, Task, Spawn, Notify) read it here.
 //! Set once at startup, the way `server::job_actions::install` and `server::jekt_cold::install` are.
 

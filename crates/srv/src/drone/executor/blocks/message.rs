@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Message block: sends a message to one agent through the normal path
-//! (docs/specs/SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md §4.2).
+//! (the Drone real-world jobs spec §4.2).
 //!
 //! Block config (`node.data`):
 //!   * `to`      required, the agent's id. Written in the graph, never built from a

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Task block: files a Kanban task for an agent, or for the backlog
-//! (docs/specs/SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md §4.2).
+//! (the Drone real-world jobs spec §4.2).
 //!
 //! Block config (`node.data`):
 //!   * `title`   required. The graph's words; each `{{...}}` value is quoted data (§6.2).
