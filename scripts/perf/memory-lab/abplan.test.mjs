@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { compareArgs, outcomeOf, parseAbArgs, planRuns, runArgs } from "./lib/abplan.mjs";
+import { compareArgs, outcomeOf, parseAbArgs, planRuns, runArgs, sideGivenUp, unrunnableSides } from "./lib/abplan.mjs";
 
 describe("an interleaved A/B run", () => {
     const base = ["--portable", "P", "--runs", "3", "--out", "out"];
@@ -56,5 +56,41 @@ describe("an interleaved A/B run", () => {
             "--margins", "budget.json",
         ]);
         expect(compareArgs(parseAbArgs(base), outcome)).not.toContain("--margins");
+    });
+});
+
+describe("a side that cannot run", () => {
+    const spec = parseAbArgs(["--portable", "P", "--runs", "4", "--out", "out"]);
+    const plan = planRuns(spec);
+    const failed = (run) => ({ ...run, ok: false });
+
+    it("gives each side the Claude version its own srv pins", () => {
+        const pinned = parseAbArgs(["--portable", "P", "--a-claude-version", "2.1.288", "--b-claude-version", "2.1.321"]);
+        const [a1, b1] = planRuns(pinned);
+        expect(runArgs(a1, pinned)).toContain("2.1.288");
+        expect(runArgs(a1, pinned)).not.toContain("2.1.321");
+        const bArgs = runArgs(b1, pinned);
+        expect(bArgs[bArgs.indexOf("--claude-version") + 1]).toBe("2.1.321");
+        expect(runArgs(a1, spec)).not.toContain("--claude-version");
+    });
+
+    it("stops trying a side after two failed runs with none finished, and only that side", () => {
+        const ran = [failed(plan[0]), { ...plan[1], ok: true }, failed(plan[2])];
+        expect(sideGivenUp(plan[4], ran)).toBe(true); // a3
+        expect(sideGivenUp(plan[5], ran)).toBe(false); // b3: B finished one
+        expect(sideGivenUp(plan[2], [failed(plan[0])])).toBe(false); // one failure is not enough
+        expect(sideGivenUp(plan[4], [failed(plan[0]), { ...plan[2], ok: true }])).toBe(false); // A finished one
+    });
+
+    it("says in words which side did not run and why, with the build when it is known", () => {
+        const done = { a: [], b: ["b1", "b2"] };
+        const outcome = { done, comparable: false };
+        const reasons = { a1: "12 of 12 agents never played their turn", a2: "the same" };
+        expect(unrunnableSides(plan, outcome, reasons, ["a3", "a4"], { a: "a8da0848e0123", b: "b4fa1c400" })).toEqual([
+            "A (build a8da0848e) did not run: 12 of 12 agents never played their turn (2 runs tried, 2 not tried after those failed).",
+        ]);
+        expect(unrunnableSides(plan, { done: { a: ["a1"], b: ["b1"] }, comparable: true }, {})).toEqual([]);
+        expect(unrunnableSides(plan, { done: { a: [], b: [] }, comparable: false }, {})).toHaveLength(2);
+        expect(unrunnableSides(plan, outcome, {})[0]).toContain("no run wrote a result");
     });
 });

@@ -195,8 +195,8 @@ export async function stopTree(pid, graceMs = 5000) {
 }
 
 /** Puts the scripted Claude in the instance's data folder (after its first start). */
-export function installScript(home, scriptPath) {
-    return installFakeClaude(home, scriptPath);
+export function installScript(home, scriptPath, claudeVersion) {
+    return installFakeClaude(home, scriptPath, claudeVersion || undefined);
 }
 
 /** The driver of one running instance. */

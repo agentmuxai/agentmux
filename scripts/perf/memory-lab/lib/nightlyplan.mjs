@@ -26,6 +26,8 @@ export function pickBuilds(runs, { bRunId = null } = {}) {
     return { b, a, reason };
 }
 
+import { unrunnableSides } from "./abplan.mjs";
+
 const MAX_MERGES = 40;
 
 /** The commits between A and B from GitHub's compare API: `{ total, shown: [{sha, title}], truncated }`. Squash merges are made by the bot; the title names the agent. */
@@ -51,4 +53,17 @@ export function planMarkdown({ a, b, merges, reason }) {
         for (const m of merges.shown) lines.push(`- \`${m.sha}\` ${m.title}`);
     }
     return lines.join("\n");
+}
+
+/**
+ * The section for a night where one side could not be measured: which side, and why, in the lab's own words. Empty when
+ * the runs compared (or there is no A/B result at all, e.g. B alone).
+ * @param {{plan?: object[], outcome?: {done: {a: string[], b: string[]}, comparable: boolean}, reasons?: object, skipped?: string[]}|null} ab  the lab's ab.json
+ * @param {{a?: {sha: string}|null, b?: {sha: string}|null}} plan  plan.json
+ */
+export function notComparedMarkdown(ab, plan) {
+    if (!ab?.outcome || ab.outcome.comparable) return "";
+    const lines = unrunnableSides(ab.plan ?? [], ab.outcome, ab.reasons ?? {}, ab.skipped ?? [], { a: plan?.a?.sha, b: plan?.b?.sha });
+    if (!lines.length) return "";
+    return ["### Not compared", "Nothing was measured as better or worse tonight.", lines.map((l) => `- ${l}`).join("\n")].join("\n\n");
 }
