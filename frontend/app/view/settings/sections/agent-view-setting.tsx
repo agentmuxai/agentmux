@@ -18,7 +18,7 @@ export const AGENT_VIEW_SETTING = {
     id: "agents.agent_view",
     label: "What an agent pane shows",
     description:
-        "The default for every agent pane that has not chosen its own: Full shows everything, Standard folds thinking, tool calls and jekts to one line and hides setup, Replies shows the conversation only. Errors and anything waiting for you always show. A pane's View menu (Alt+V cycles it) changes one pane.",
+        "The default for every agent pane that has not chosen its own: Full shows everything, Standard folds thinking, tool calls and jekts to one line and hides setup, Replies shows the conversation only. Errors and anything waiting for you always show. A pane's View menu changes one pane.",
     section: "agents",
     group: "Agent view",
     keywords: ["agent view", "verbosity", "verbose", "full", "standard", "replies", "thinking", "tool calls", "jekts", "hide", "show", "collapse", "agent:view"],
