@@ -66,6 +66,54 @@ const sameMeasured = (a: Measured, b: Measured): boolean =>
         return keys.length === Object.keys(a[form]).length && keys.every((k) => a[form][k] === b[form][k]);
     }) && JSON.stringify(a.middle) === JSON.stringify(b.middle);
 
+/** Every slot's width in its full form and, for those with a compact form, in that form; none until measured. */
+function formWidthsOf(
+    stripWidth: number,
+    widths: Record<string, number>,
+    m: Measured,
+    probeKeys: string[]
+): { full: Record<string, number>; compact: Record<string, number>; order: string[] } | null {
+    const probed = probeKeys.filter((k) => m.full[k] !== undefined && m.compact[k] !== undefined);
+    if (stripWidth === 0 || probed.length === 0) return null;
+    const full: Record<string, number> = { ...widths };
+    const compact: Record<string, number> = {};
+    // A slot the strip's own rules hide measures 0 and takes no part, as in `layoutWidths`.
+    for (const key of probed) {
+        if ((widths[key] ?? 0) <= 0) continue;
+        full[key] = m.full[key];
+        compact[key] = m.compact[key];
+    }
+    return { full, compact, order: COMPACT_ORDER.filter((k) => probed.includes(k)) };
+}
+
+/**
+ * A compact slot with budgets takes the widest one that keeps the rows the strip has: free room in the row is
+ * used, never a row more. Chosen from measured widths (bucketed), so a ticking readout can't flip it.
+ */
+function chooseBudgets(
+    slots: FormSlot[],
+    w: ReturnType<typeof formWidthsOf>,
+    collapsed: Set<string>,
+    middle: Measured["middle"],
+    rowCount: (widths: Record<string, number>) => number
+): Record<string, number> {
+    const out: Record<string, number> = {};
+    if (!w) return out;
+    const base = { ...w.full, ...Object.fromEntries([...collapsed].map((k) => [k, w.compact[k]])) };
+    const rows = rowCount(base);
+    for (const slot of slots) {
+        if (!slot.budgets || !collapsed.has(slot.key)) continue;
+        const measuredAt = middle[slot.key] ?? {};
+        const budget = chooseMiddleBudget(
+            slot.budgets,
+            (b) => measuredAt[b],
+            (width) => rowCount({ ...base, [slot.key]: width }) <= rows
+        );
+        if (budget !== undefined) out[slot.key] = budget;
+    }
+    return out;
+}
+
 export function useSlotForms(
     slots: Accessor<FormSlot[]>,
     stripWidth: Accessor<number>,
@@ -93,50 +141,17 @@ export function useSlotForms(
     });
     onCleanup(() => observer?.disconnect());
 
-    /** Every slot's width in its full form and, for those with a compact form, in that form; none until measured. */
-    const formWidths = createMemo(() => {
-        const width = stripWidth();
-        const widths = slotWidths();
-        const m = measured();
-        const probed = probeKeys().filter((k) => m.full[k] !== undefined && m.compact[k] !== undefined);
-        if (width === 0 || probed.length === 0) return null;
-        const full: Record<string, number> = { ...widths };
-        const compact: Record<string, number> = {};
-        // A slot the strip's own rules hide measures 0 and takes no part, as in `layoutWidths`.
-        for (const key of probed) {
-            if ((widths[key] ?? 0) <= 0) continue;
-            full[key] = m.full[key];
-            compact[key] = m.compact[key];
-        }
-        return { full, compact, order: COMPACT_ORDER.filter((k) => probed.includes(k)) };
-    });
+    const formWidths = createMemo(() => formWidthsOf(stripWidth(), slotWidths(), measured(), probeKeys()));
 
     const compactKeys = createMemo((): Set<string> => {
         const w = formWidths();
         return w ? chooseCompactKeys(w.order, w.full, w.compact, rowCount) : new Set();
     }, new Set<string>());
 
-    // A compact slot with budgets takes the widest one that keeps the rows the strip has: free room in the row is
-    // used, never a row more. Chosen from measured widths (bucketed), so a ticking readout can't flip it.
-    const budgets = createMemo((): Record<string, number> => {
-        const w = formWidths();
-        const out: Record<string, number> = {};
-        if (!w) return out;
-        const collapsed = compactKeys();
-        const base = { ...w.full, ...Object.fromEntries([...collapsed].map((k) => [k, w.compact[k]])) };
-        const rows = rowCount(base);
-        for (const slot of slots()) {
-            if (!slot.budgets || !collapsed.has(slot.key)) continue;
-            const middle = measured().middle[slot.key] ?? {};
-            const budget = chooseMiddleBudget(
-                slot.budgets,
-                (b) => middle[b],
-                (width) => rowCount({ ...base, [slot.key]: width }) <= rows
-            );
-            if (budget !== undefined) out[slot.key] = budget;
-        }
-        return out;
-    }, {});
+    const budgets = createMemo(
+        () => chooseBudgets(slots(), formWidths(), compactKeys(), measured().middle, rowCount),
+        {} as Record<string, number>
+    );
 
     const layoutWidths = createMemo((): Record<string, number> => {
         const widths = { ...slotWidths() };
