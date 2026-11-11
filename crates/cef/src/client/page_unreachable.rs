@@ -131,15 +131,14 @@ impl Core {
         self.failed.iter().cloned().collect()
     }
 
-    /// Forget the failed windows `alive` says are gone. A closed window can't load a
-    /// page, so it must not keep pools and new windows blocked; with none left the
-    /// stretch is over.
-    pub(crate) fn prune(&mut self, alive: impl Fn(&str) -> bool) {
-        let gone: Vec<String> = self.failed.iter().filter(|l| !alive(l)).cloned().collect();
+    /// Forget the failed windows in `gone`, and only those: a window that failed
+    /// after `gone` was worked out stays. A closed window can't load a page, so it
+    /// must not keep pools and new windows blocked; with none left the stretch is over.
+    pub(crate) fn prune(&mut self, gone: &[String]) {
         for label in gone {
-            self.failed.remove(&label);
-            self.watches.remove(&label);
-            self.reloads.remove(&label);
+            self.failed.remove(label);
+            self.watches.remove(label);
+            self.reloads.remove(label);
         }
         if self.failed.is_empty() {
             *self = Core::default();
@@ -170,8 +169,10 @@ pub(crate) fn is_dev() -> bool {
 /// Drop the failed windows that have been closed. Level-triggered on purpose: no
 /// close path has to remember to tell this module, so the block can't outlive its window.
 fn prune_closed(state: &AppState) {
-    let alive: HashSet<String> = core().lock().failed_labels().into_iter().filter(|l| state.get_browser(l).is_some()).collect();
-    core().lock().prune(|l| alive.contains(l));
+    let gone: Vec<String> = core().lock().failed_labels().into_iter().filter(|l| state.get_browser(l).is_none()).collect();
+    if !gone.is_empty() {
+        core().lock().prune(&gone);
+    }
 }
 
 /// True while the app page can't be loaded: the pools are not refilled.
@@ -408,12 +409,24 @@ mod tests {
         let mut c = Core::default();
         fail(&mut c, "main");
         fail(&mut c, "window-pool-ab");
-        c.prune(|l| l == "main");
+        c.prune(&["window-pool-ab".to_string()]);
         assert!(c.is_unreachable(), "main is still failed");
         assert_eq!(c.failed_labels(), vec!["main".to_string()]);
-        c.prune(|_| false);
+        c.prune(&["main".to_string()]);
         assert!(!c.is_unreachable());
         assert!(c.watches.is_empty() && c.reloads.is_empty() && c.since.is_none(), "a clean slate");
+    }
+
+    /// A window that fails after the closed ones were worked out is not among them.
+    #[test]
+    fn a_window_that_fails_meanwhile_is_not_pruned() {
+        let mut c = Core::default();
+        fail(&mut c, "window-pool-ab");
+        let gone = c.failed_labels();
+        fail(&mut c, "main");
+        c.prune(&gone);
+        assert_eq!(c.failed_labels(), vec!["main".to_string()]);
+        assert_eq!(c.watches.len(), 1, "main keeps its watch");
     }
 
     #[test]
@@ -424,7 +437,7 @@ mod tests {
             c.due(|_| true);
         }
         assert_eq!(fail(&mut c, "main"), Failure::GaveUp);
-        c.prune(|_| false);
+        c.prune(&["main".to_string()]);
         assert!(!c.is_unreachable());
     }
 
