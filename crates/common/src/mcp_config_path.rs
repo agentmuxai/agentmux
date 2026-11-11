@@ -62,16 +62,43 @@ fn owned_roots() -> Vec<PathBuf> {
     roots
 }
 
-/// `path` made absolute against the process's current directory, exactly as srv resolves a
-/// relative `cmd:cwd` (and ACP/MSP's `session_cwd` does). A relative working directory must hash
-/// the same on the write and the read path (#47392).
-fn absolutize(path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        return path.to_path_buf();
+/// `path` with every `.` and `..` resolved lexically, without touching the filesystem (the
+/// folder may not exist yet). A `..` above the root stays at the root.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            Component::RootDir => out.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => match out.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                // At a root or prefix there is nowhere above it to go.
+                Some(_) => {}
+                None => out.push(".."),
+            },
+            Component::Normal(part) => out.push(part),
+        }
     }
-    std::env::current_dir()
-        .map(|cwd| cwd.join(path))
-        .unwrap_or_else(|_| path.to_path_buf())
+    out
+}
+
+/// `path` made absolute against the process's current directory, exactly as srv resolves a
+/// relative `cmd:cwd` (and ACP/MSP's `session_cwd` does), with parent traversal resolved. The
+/// traversal must be gone before the ownership check, or `.agentmux/../project` reads as owned by
+/// its text and the launch writes the config (and its keys) into the project (#47392).
+fn absolutize(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    normalize_lexically(&absolute)
 }
 
 /// Whether `work_dir` is AgentMux's own folder, where the config belongs in it.
@@ -179,6 +206,19 @@ mod tests {
         let home = dirs::home_dir().unwrap();
         assert_eq!(expand_home(Path::new("~/work")), home.join("work"));
         assert_eq!(expand_home(Path::new("/already/absolute")), Path::new("/already/absolute"));
+    }
+
+    /// A `..` must be resolved before the ownership check: `.agentmux/agents/x/../../../..` reads
+    /// as AgentMux's by its text, but is the user's folder.
+    #[test]
+    fn parent_traversal_cannot_pass_as_an_agentmux_folder() {
+        let home = dirs::home_dir().unwrap();
+        let inside_agent = home.join(".agentmux").join("agents").join("aria");
+        assert!(is_agent_owned_workdir(&inside_agent), "the fixture starts owned");
+        let escapes = inside_agent.join("..").join("..").join("..").join("..").join("agentmux-escape-project");
+        assert!(!is_agent_owned_workdir(&escapes), "resolved out of .agentmux: {}", escapes.display());
+        assert_eq!(relocated_dir_for(&escapes), relocated_dir_for(&normalize_lexically(&escapes)), "one resolved key");
+        assert!(!config_path_for(&escapes).starts_with(normalize_lexically(&escapes)), "the config is not in the project");
     }
 
     /// #47392: the writer gets `cmd:cwd` as written; ACP/MSP resolve a relative one against the
