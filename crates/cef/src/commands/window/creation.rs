@@ -351,7 +351,7 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         initial_view.as_deref(),
         initial_meta.as_deref(),
         None,
-        false,
+        None,
     )
 }
 
@@ -416,7 +416,7 @@ pub fn open_subwindow(
         initial_view,
         initial_meta,
         None,
-        false,
+        None,
     )?;
     // An approval page (credential / SSH) renders only that
     // view. Record it so the browser API never resolves a pane into it
@@ -446,6 +446,10 @@ pub fn open_subwindow(
 /// lands roughly where it was, instead of at a new-window default position.
 /// `None` keeps the default placement (`open_new_window`/`open_subwindow`
 /// pass `None`; the tray panel and window-pool fallbacks may pass a rect).
+///
+/// `reproject_of`: `Some` only for a window recreated after a crash. It holds
+/// the srv window id the new window replaces, or `""` when that is not known
+/// (see [`reproject_params`]).
 pub(crate) fn open_window_with_kind(
     state: &Arc<AppState>,
     kind: crate::state::WindowKind,
@@ -453,7 +457,7 @@ pub(crate) fn open_window_with_kind(
     initial_view: Option<&str>,
     initial_meta: Option<&str>,
     explicit_rect: Option<agentmux_common::ipc::Rect>,
-    is_reproject: bool,
+    reproject_of: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     // Refuse while a pane is mid-close (H.7) or the instance is quitting.
     state.check_top_level_creation_allowed("open_window")?;
@@ -473,15 +477,9 @@ pub(crate) fn open_window_with_kind(
                 .filter(|m| !m.is_empty())
                 .map(|m| format!("&initialMeta={}", percent_encode(m)))
                 .unwrap_or_default();
-            // SPEC_PILLAR1_STEP4 Phase 4 — drives index.html's
-            // #startup-loading-headline ("Restoring session...") for
-            // reprojected windows only; an interactive "New Window"/"New
-            // Subwindow" never sets this. Cheap, frontend-only per the
-            // spec's §2.4 in-window-phase design.
-            let restoring_param = if is_reproject { "&restoring=1" } else { "" };
             format!(
                 "{}{}ipc_port={}&windowLabel={}{}{}{}",
-                base_url, separator, ipc_port, label, view_param, meta_param, restoring_param
+                base_url, separator, ipc_port, label, view_param, meta_param, reproject_params(reproject_of)
             )
         }
         Err(e) => {
@@ -599,9 +597,14 @@ pub(crate) fn open_window_with_kind(
 /// a deferred close for it. See `reproject_from_snapshot_and_stage_closures`,
 /// which both fast-path call sites (`launcher_ipc/mod.rs`,
 /// `client/lifecycle.rs`) now use instead of calling this function directly.
+///
+/// `srv_id_of` answers the srv window id a snapshot label had, when it is known. The new window
+/// is told it ([`reproject_params`]) and opens onto that window's workspace, so the user gets the
+/// tabs and agents the window had, not an empty one beside a "closed window" entry.
 pub(crate) fn reproject_from_snapshot(
     state: &Arc<AppState>,
     windows: &[agentmux_common::ipc::WindowSnapshot],
+    srv_id_of: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<(String, String)> {
     use std::collections::HashMap;
 
@@ -649,7 +652,8 @@ pub(crate) fn reproject_from_snapshot(
             },
             None => None,
         };
-        match open_window_with_kind(state, w.kind, new_parent, None, None, w.last_rect, true) {
+        let replaces = srv_id_of(&w.label).unwrap_or_default();
+        match open_window_with_kind(state, w.kind, new_parent, None, None, w.last_rect, Some(&replaces)) {
             Ok(new_label_val) => {
                 let new_label = new_label_val.as_str().unwrap_or_default().to_string();
                 tracing::info!(
@@ -710,14 +714,14 @@ pub(crate) fn reproject_from_snapshot_and_stage_closures(
     windows: &[agentmux_common::ipc::WindowSnapshot],
     backend_window_ids: &[(String, String)],
 ) {
-    let recreated_pairs = reproject_from_snapshot(state, windows);
-    if recreated_pairs.is_empty() {
-        return;
-    }
     let old_ids: std::collections::HashMap<&str, &str> = backend_window_ids
         .iter()
         .map(|(label, id)| (label.as_str(), id.as_str()))
         .collect();
+    let recreated_pairs = reproject_from_snapshot(state, windows, &|label| old_ids.get(label).map(|id| id.to_string()));
+    if recreated_pairs.is_empty() {
+        return;
+    }
     let mut pending = state.pending_reproject_closures.lock();
     for (old_label, new_label) in recreated_pairs {
         if let Some(old_id) = old_ids.get(old_label.as_str()) {
@@ -919,7 +923,7 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
             window_count = snapshots.len(),
             "[reproject] slow path: recreating windows from srv"
         );
-        let recreated_pairs = reproject_from_snapshot(&state, &snapshots);
+        let recreated_pairs = reproject_from_snapshot(&state, &snapshots, &|id| Some(id.to_string()));
 
         // Stash `new_label → old_window_id` — do NOT close the old id yet.
         // `reagent P1 (PR #2032): `open_window_with_kind`'s `Ok` only means a
@@ -945,6 +949,38 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
             }
         }
     });
+}
+
+/// What a recreated window's address carries beyond a new window's.
+///
+/// `restoring=1` drives index.html's "Restoring session..." headline (SPEC_PILLAR1_STEP4 Phase 4);
+/// an interactive "New Window" or "New Subwindow" never has it. `reprojectOf` names the srv window
+/// the new one replaces: its frontend opens onto that window's workspace and takes its theme and
+/// opacity (`replacedWindow` in `frontend/app/init/reload-window-id.ts`). The old row is closed only
+/// after the new window registers (`pending_reproject_closures`), so the workspace always has a row.
+fn reproject_params(reproject_of: Option<&str>) -> String {
+    match reproject_of {
+        None => String::new(),
+        Some("") => "&restoring=1".to_string(),
+        Some(old_id) => format!("&restoring=1&reprojectOf={}", percent_encode(old_id)),
+    }
+}
+
+#[cfg(test)]
+mod reproject_params_tests {
+    use super::reproject_params;
+
+    #[test]
+    fn only_a_recreated_window_is_restoring_and_it_names_the_window_it_replaces_when_known() {
+        assert_eq!(reproject_params(None), "");
+        assert_eq!(reproject_params(Some("")), "&restoring=1");
+        assert_eq!(
+            reproject_params(Some("0b6c2f0e-1d2a-4c3b-9e8f-7a6b5c4d3e2f")),
+            "&restoring=1&reprojectOf=0b6c2f0e-1d2a-4c3b-9e8f-7a6b5c4d3e2f"
+        );
+        // Whatever the id holds, it stays one parameter.
+        assert_eq!(reproject_params(Some("a&b=c")), "&restoring=1&reprojectOf=a%26b%3Dc");
+    }
 }
 
 fn percent_encode(s: &str) -> String {

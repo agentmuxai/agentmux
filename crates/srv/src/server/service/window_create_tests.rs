@@ -128,3 +128,34 @@ async fn a_restore_asked_beside_an_open_window_waits_for_a_close_that_never_come
     assert_ne!(second.workspaceid, first.workspaceid);
     assert!(!client(&state).meta.contains_key("session:restored_at_ms"), "the window list was never empty, so nothing is noted");
 }
+
+/// What a window recreated after a crash does, in the order it happens: told the row it replaces,
+/// it opens a row on that row's workspace, and the host closes the old row once the new one is up.
+#[tokio::test]
+async fn a_window_recreated_onto_the_workspace_of_the_row_it_replaces_keeps_it_and_leaves_no_closed_window() {
+    let state = test_state();
+    let old = open(&state, "", "window-old").await;
+    let (workspaces, blocks) = {
+        let s = state.srv_state.lock().await;
+        (s.workspaces.len(), s.blocks.len())
+    };
+
+    let args = vec![Value::Null, json!(old.workspaceid), json!("window-new"), json!(false), Value::Null, Value::Null, json!(old.oid)];
+    let ret = create(&state, args).await;
+    assert!(ret.success, "{:?}", ret.error);
+    let new: Window = serde_json::from_value(ret.data.unwrap()).unwrap();
+    assert_eq!(new.workspaceid, old.workspaceid);
+
+    let close = WebCallType { service: "window".into(), method: "CloseWindow".into(), uicontext: None, args: vec![json!(old.oid)] };
+    let ret = handle_window_service(&state, &close).await;
+    assert!(ret.success, "{:?}", ret.error);
+
+    assert!(state.mstore.get::<Workspace>(&old.workspaceid).unwrap().is_some(), "the workspace is the new window's now");
+    let s = state.srv_state.lock().await;
+    assert_eq!((s.workspaces.len(), s.blocks.len()), (workspaces, blocks), "nothing was made and nothing was closed");
+    drop(s);
+    let listed = client(&state).windowids;
+    assert!(listed.contains(&new.oid) && !listed.contains(&old.oid), "{listed:?}");
+    let closed = super::super::session_closed::closed_entries(&state.mstore);
+    assert!(closed.iter().all(|e| e["workspaceid"] != json!(old.workspaceid)), "not a closed window: {closed:?}");
+}
