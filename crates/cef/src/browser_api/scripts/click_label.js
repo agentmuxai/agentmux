@@ -82,7 +82,9 @@ function clickLabel(ariaLabel, labelledBy, text, el, axName) {
       why = inName ? "its name says \"" + inName + "\"" : "its text says \"" + inRest + "\"";
     }
   }
-  if (typeof axName === "string" && axName.trim()) {
+  // A link with text of its own is named by it: its accessible name repeats that text with the description
+  // joined on ("Billing history Pay an invoice"), which would make a sentence's word commit.
+  if (typeof axName === "string" && axName.trim() && !(e.link && name)) {
     const byAx = clickLabel(axName, "", "", e);
     return {
       name: name || byAx.name,

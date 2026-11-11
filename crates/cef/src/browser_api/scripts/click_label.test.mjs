@@ -109,6 +109,13 @@ describe("clickLabel: the accessible name", () => {
         expect(clickLabel(null, "", "", link, "Confirm order").committing).toBe(true);
     });
 
+    it("a link with text of its own keeps its description out of the name", () => {
+        // The accessible name joins the title and the description: it must not make the description's word commit.
+        expect(clickLabel(null, "", "Billing history\nPay an invoice", link, "Billing history Pay an invoice").committing).toBe(false);
+        // A link with no text of its own is judged by its accessible name.
+        expect(clickLabel(null, "", "", link, "Pay an invoice").committing).toBe(true);
+    });
+
     it("an unnamed click whose accessible name could not be read asks", () => {
         expect(clickLabel(null, "", "", button, null)).toMatchObject({ committing: true, unreadable: true, why: "its name could not be read" });
         // One that has a name of its own is judged by it.
