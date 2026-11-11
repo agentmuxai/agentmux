@@ -338,7 +338,6 @@
 118 frontend/app/element/markdown-incremental.ts::findSafeSplitPoint
 113 frontend/app/element/markdown-util.ts::transformBlocks
 235 frontend/app/element/modal.tsx::Modal
-159 frontend/app/element/tooltip.tsx::TooltipInner
 113 frontend/app/element/ui/CardGrid.tsx::CardGrid
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
