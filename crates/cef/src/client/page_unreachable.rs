@@ -207,8 +207,14 @@ pub(crate) fn note_loaded(label: &str) {
 /// An app window failed to load its page (`watch`: false for a failure no
 /// retry can clear). Starts the checking thread when there is something to do.
 pub(crate) fn on_failure(state: &Arc<AppState>, failed_url: &str, watch: bool) {
+    super::boot_watchdog::note_booted(&label_of(failed_url)); // a failed load is handled here, not by the boot watchdog
+    mark_unreachable(state, failed_url, watch);
+}
+
+/// [`on_failure`] without ending the window's boot watch: for a page that loaded and whose server went
+/// (`dev_server_watch`), where a window that never booted still needs the watchdog to reload it.
+pub(crate) fn mark_unreachable(state: &Arc<AppState>, failed_url: &str, watch: bool) {
     let label = label_of(failed_url);
-    super::boot_watchdog::note_booted(&label); // a failed load is handled here, not by the boot watchdog
     let outcome = core().lock().fail(&label, failed_url, watch, Instant::now());
     tracing::warn!(target: "wfr:gate", label = %label, outcome = ?outcome, "[load-error] the app page can't be loaded — no windows opened or pools refilled until it answers");
     if (watch || is_dev()) && !CHECKING.swap(true, Ordering::SeqCst) {

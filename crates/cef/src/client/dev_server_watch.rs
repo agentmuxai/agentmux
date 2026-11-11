@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 
-use super::page_unreachable::{address_answers, host_and_port, is_failed, label_of, note_loaded, on_failure};
+use super::page_unreachable::{address_answers, host_and_port, is_failed, label_of, mark_unreachable, note_loaded};
 use crate::state::AppState;
 
 const CHECK_EVERY: Duration = Duration::from_secs(5);
@@ -110,10 +110,12 @@ pub(crate) fn note_navigation(state: &Arc<AppState>, url: &str) {
 fn watch(state: Arc<AppState>) {
     loop {
         std::thread::sleep(CHECK_EVERY);
-        for label in served().lock().labels() {
-            if state.get_browser(&label).is_none() {
-                served().lock().forget(&label);
-            }
+        // The guard of a `for` expression lives to the end of the loop: take the labels first, forget under a lock of their own.
+        let labels = served().lock().labels();
+        let closed: Vec<String> = labels.into_iter().filter(|l| state.get_browser(l).is_none()).collect();
+        if !closed.is_empty() {
+            let mut s = served().lock();
+            closed.iter().for_each(|l| s.forget(l));
         }
         // The connects run without the lock, once per address: every window shares the dev server.
         let urls = served().lock().urls();
@@ -129,7 +131,8 @@ fn watch(state: Arc<AppState>) {
         let round = served().lock().round(&answers, is_failed);
         for (label, url) in round.down {
             tracing::warn!(label = %label, "[dev-server] the dev server no longer answers — treating the app page as unreachable");
-            on_failure(&state, &url, false);
+            // Not `on_failure`: a window that never booted keeps its boot watchdog, which reloads it once the server answers.
+            mark_unreachable(&state, &url, false);
         }
         for label in round.back {
             tracing::info!(label = %label, "[dev-server] the dev server answers again");
