@@ -67,13 +67,13 @@ A merge queue only lands a group when every required check passes on the group's
   - **`docs` (doc status + grep gates) runs in full.** Under a minute; it holds the size ratchet, the specs index check, the doc lifecycle, comment hygiene and the other grep gates. These are exactly the checks a merge race breaks.
   - **`docs-index` runs on ubuntu only.**
   - **`rust` runs on ubuntu only, and only `cargo check --tests`** (CEF-free crates, about 1.5 min on a warm cache). That catches what one PR's rename does to another's call. No nextest, doc tests or binding checks. The Rust cache is restored from main's but not saved by the queue, so queue runs don't evict PR caches.
-  - **`frontend` runs one leg, with `tsc --noEmit` and the generated-stub checks (`gen-rpc-stubs`, `gen-mux-events`), no vitest.**
+  - **`frontend` runs one leg, with `tsc --noEmit` and the generated-stub checks (`gen-rpc-stubs`, `gen-mux-events`), no vitest.** (Phase 8 changed this: both legs run, vitest included.)
   - `rust-macos` doesn't run (it isn't required).
   - `CI required` is unchanged: a skipped leg counts as passed, as it already does for path-conditional legs.
 - **`check`, `changeset`, `PR title names the agent`** describe the PR, not the code, and each PR's own run already passed before it could enter the queue. On `merge_group` each job runs and passes at once, saying so in its log.
 - **`Codex review`** is a commit status on the PR's head. On `merge_group`, a new workflow, `merge-queue-codex-status.yml`, sets `Codex review` to success on the group's commit. A PR can only enter the queue with that status green on its own head, so the queue commit inherits a result that was already required. It's a file of its own, not a job in `codex-review-gate.yml`, because that workflow's scheduled runs fail to start (Phase 6), and a merge group must not depend on whatever causes that.
 - **Expected queue time:** about 2–3 minutes: the docs gates and `tsc` run in parallel with a warm-cache `cargo check`.
-- **Where the queue mode lives:** in `ci-pr.yml`'s `changes` step, which writes `queue=true` and the narrowed matrices (`rust_os`, `frontend_shards`, `docs_index_os`). Every other run leaves them unset, and each matrix falls back to its full list, so PR and push runs are unchanged.
+- **Where the queue mode lives:** in `ci-pr.yml`'s `changes` step, which writes `queue=true` and the narrowed matrices (`rust_os`, `docs_index_os`; `frontend_shards` was narrowed to one leg until Phase 8). Every other run leaves them unset, and each matrix falls back to its full list, so PR and push runs are unchanged.
 - **Tests:** the workflows are linted with `actionlint`. A PR that only adds the triggers is safe on its own: `merge_group` never fires until the queue exists. The first queue run (Phase 2's canary) is the end-to-end test.
 
 ### Phase 2: turn on the merge queue (repository admin)
@@ -127,6 +127,14 @@ On 2026-11-02 main was red for about 3 hours. #6193 added a test that scans `cra
 - **The gate scripts** (import ratchets, function sizes, file sizes, the rest of the `docs` job) already ran in full in the queue (Phase 1); nothing changes there.
 - **Why a name list:** the cost of a test run is the compile of the srv test binary, not the tests, so the filter only decides which of the already-built tests run. A test that scans the source tree gets added to the list by name, in the same PR that writes it.
 - **Cost:** the queue now compiles the test targets, which `cargo check --tests` did not. See the PR for the measured time.
+
+### Phase 8: the queue runs vitest
+
+On 2026-11-10 main's `vitest (1/2)` went red for every PR. #6881 (Vite 8, merged at 10:14Z) added `scripts/shiki-no-themes.test.mjs`, whose last test runs the plugin against the installed Shiki; #6883 (mermaid 12 and Shiki 4.6.0) merged at 19:11Z, and 4.6.0 imports its themes in a form the plugin does not expect. #6883 went through the queue: its group's run (CI (PR), run 42881131825) had #6881 in its tree, and its `vitest (1/2)` job passed, but that job skipped the `vitest run` step (`if: needs.changes.outputs.queue != 'true'`) and ran only `tsc` and the generated-file checks, so no JavaScript test ever ran on the combined tree. The push to main was the first run of this one (run 42882800554). It is the JavaScript twin of Phase 7's race (11-02): about thirty vitest files read the source tree (the i18n key and literal ratchets, colour and token guards, import-layering tests) and a few read the installed packages, so a list by name, as Phase 7 keeps for the Rust tests, would be long and out of date within a week.
+
+- **What runs in the queue now:** both frontend legs in full, including `vitest run --shard=N/2`. `frontend_shards` is no longer narrowed for a merge group.
+- **Cost:** no added queue time. A full vitest leg takes about 280 to 305 s in a PR run (runs 42774863425 and 42882800554), and the queue's ubuntu Rust leg, which the group waits for anyway, takes about 410 s (run 42881131825). It is about 10 more runner minutes per group, not per PR, as the group of up to five PRs runs once.
+- **Still not in the queue:** the Windows and macOS legs, the rest of the Rust tests and the doc tests; each ran on its PR and runs again on the push to main.
 
 ## 6. Order and size
 
