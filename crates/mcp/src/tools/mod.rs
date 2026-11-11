@@ -148,6 +148,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("BrowserBack", "Browser with action \"back\""),
     ("BrowserForward", "Browser with action \"forward\""),
     ("BrowserReload", "Browser with action \"reload\""),
+    ("BrowserZoom", "Browser with action \"zoom\""),
     ("BrowserEval", "Browser with action \"eval\""),
     ("BrowserDispatchKey", "Browser with action \"key\""),
     ("BrowserFocusElement", "Browser with action \"focus\""),

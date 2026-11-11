@@ -32,6 +32,8 @@ fn zoomed() -> &'static Mutex<HashMap<String, Zoomed>> {
 
 /// How long the host has to fit a pane (it reflows the page and measures it).
 const HOST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+/// How long it has to say how a pane is zoomed now (it only reads its own record).
+const STATUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// `POST /api/v1/ui/browser/zoom` — zoom a pane the caller drives, or put it back (`reset`).
 pub(crate) async fn handle_ui_browser_zoom(
@@ -81,8 +83,34 @@ fn set(block_id: &str, agent: &str, data: &Value) {
     }
 }
 
-/// The lines for `agent`'s `Browser` tool to end an answer with: one per pane of theirs that is zoomed.
-pub(crate) fn notes_for(agent: &str) -> Vec<Value> {
+/// The lines for `agent`'s `Browser` tool to end an answer with: one per pane of theirs that is zoomed, as the
+/// host holds it now. The host changes a zoom on its own (it follows a resize, drops one it could not apply, and
+/// loses one with a browser that slept), so each pane is asked about; a host that cannot be reached leaves what
+/// was recorded. Asked without waking a pane that sleeps.
+pub(crate) async fn notes(state: &AppState, agent: &str) -> Vec<Value> {
+    let panes: Vec<String> = zoomed()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .filter(|(_, z)| z.agent == agent)
+        .map(|(pane, _)| pane.clone())
+        .collect();
+    if panes.is_empty() {
+        return Vec::new();
+    }
+    if let Ok(host) = get_host_ipc(state).await {
+        for pane in panes {
+            let body = json!({ "block_id": pane, "status": true });
+            let asked = crate::server::host_http::post_to_host(&state.http_client, &host, "zoom", body, Some(STATUS_TIMEOUT)).await;
+            if let Some(data) = asked.ok().filter(|r| r.get("ok").and_then(|o| o.as_bool()) == Some(true)).and_then(|r| r.get("data").cloned()) {
+                set(&pane, agent, &data);
+            }
+        }
+    }
+    notes_for(agent)
+}
+
+fn notes_for(agent: &str) -> Vec<Value> {
     let map = zoomed().lock().unwrap_or_else(|p| p.into_inner());
     let mut notes: Vec<Value> = map
         .iter()

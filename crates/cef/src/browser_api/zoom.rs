@@ -66,27 +66,29 @@ fn clamp_factor(f: f64) -> f64 {
     f.clamp(MIN_FACTOR, MAX_FACTOR)
 }
 
+/// Is what was asked for in range? Checked before anything is changed, so a refused request leaves a zoom as it was.
+pub fn check(ask: Ask) -> Result<(), String> {
+    match ask {
+        Ask::Factor(f) if !f.is_finite() || !(MIN_FACTOR..=MAX_FACTOR).contains(&f) => {
+            Err(format!("zoom factor {f} is out of range: use 0.25 to 2.0 (25% to 200%)"))
+        }
+        Ask::Width(w) if !w.is_finite() || !(MIN_WIDTH..=MAX_WIDTH).contains(&w) => {
+            Err(format!("zoom width {w} is out of range: use {MIN_WIDTH} to {MAX_WIDTH} CSS pixels"))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// The viewport for a pane of `pane_w` x `pane_h` CSS pixels. `content_w` is the page's width at the pane's
 /// own size, which `Fit` needs. A factor of 1 is a plan of its own (no emulation to apply).
 pub fn plan(pane_w: f64, pane_h: f64, ask: Ask, content_w: f64) -> Result<Plan, String> {
     if !(pane_w >= 1.0 && pane_h >= 1.0) {
         return Err("the pane has no size to fit (it may be hidden)".to_string());
     }
+    check(ask)?;
     let factor = match ask {
-        Ask::Factor(f) => {
-            if !f.is_finite() || !(MIN_FACTOR..=MAX_FACTOR).contains(&f) {
-                return Err(format!(
-                    "zoom factor {f} is out of range: use 0.25 to 2.0 (25% to 200%)"
-                ));
-            }
-            f
-        }
-        Ask::Width(w) => {
-            if !w.is_finite() || !(MIN_WIDTH..=MAX_WIDTH).contains(&w) {
-                return Err(format!("zoom width {w} is out of range: use {MIN_WIDTH} to {MAX_WIDTH} CSS pixels"));
-            }
-            clamp_factor(pane_w / w)
-        }
+        Ask::Factor(f) => f,
+        Ask::Width(w) => clamp_factor(pane_w / w),
         Ask::Fit => {
             let wanted = if content_w.is_finite() { content_w.max(pane_w) } else { pane_w };
             clamp_factor(pane_w / wanted).min(1.0)
@@ -155,6 +157,7 @@ pub fn scale_point(label: &str, x: f64, y: f64) -> (f64, f64) {
 /// Measure the pane at its own size, then emulate `ask`. A factor of 1 leaves no emulation. Returns the plan,
 /// and `None` when nothing is emulated.
 async fn apply(cdp: &mut CdpSession, block_id: &str, ask: Ask) -> Result<Option<Plan>, String> {
+    check(ask)?;
     let label = cdp.label().to_string();
     // What the browser showed under the zoom being replaced: until it shows something else, the old
     // emulation is still in force and its size is not the pane's.
@@ -226,21 +229,56 @@ pub struct ZoomReq {
     pub fit: bool,
     #[serde(default)]
     pub reset: bool,
+    /// Only say how the pane is zoomed now (srv asks, to keep what it tells the agent true).
+    #[serde(default)]
+    pub status: bool,
+}
+
+/// What a zoom call does.
+#[derive(Debug, PartialEq)]
+enum Op {
+    Set(Ask),
+    Reset,
+    Status,
 }
 
 impl ZoomReq {
-    /// What was asked: one of `factor`, `width`, `fit`; `None` for `reset`.
-    fn ask(&self) -> Result<Option<Ask>, String> {
-        let given = [self.factor.is_some(), self.width.is_some(), self.fit, self.reset];
+    /// What was asked: exactly one of `factor`, `width`, `fit`, `reset` and `status`.
+    fn op(&self) -> Result<Op, String> {
+        let given = [self.factor.is_some(), self.width.is_some(), self.fit, self.reset, self.status];
         if given.iter().filter(|g| **g).count() != 1 {
             return Err("zoom takes exactly one of factor (0.25 to 2.0), width (CSS pixels), fit or reset".to_string());
         }
         Ok(match (self.factor, self.width) {
-            (Some(f), _) => Some(Ask::Factor(f)),
-            (_, Some(w)) => Some(Ask::Width(w)),
-            _ if self.fit => Some(Ask::Fit),
-            _ => None,
+            (Some(f), _) => Op::Set(Ask::Factor(f)),
+            (_, Some(w)) => Op::Set(Ask::Width(w)),
+            _ if self.fit => Op::Set(Ask::Fit),
+            _ if self.reset => Op::Reset,
+            _ => Op::Status,
         })
+    }
+}
+
+/// How `block_id` is zoomed now, whatever the host did on its own since: a zoom that was dropped (a refused
+/// request, a pane that could not be fitted) or lost with its browser (a pane that woke from hibernation is a
+/// new browser) is not one. `live` is the label of the pane's browser now.
+fn status(block_id: &str, live: Option<&str>) -> Value {
+    let mut zoomed = ZOOMED.lock();
+    let held = zoomed.iter().find(|(_, e)| e.block_id == block_id).map(|(l, e)| (l.clone(), e.plan));
+    match held {
+        Some((label, plan)) if live == Some(label.as_str()) => json!({
+            "zoomed": true,
+            "factor": plan.scale,
+            "viewport_width": plan.width,
+            "viewport_height": plan.height,
+            "line": describe(&plan),
+        }),
+        stale => {
+            if let Some((label, _)) = stale {
+                zoomed.remove(&label);
+            }
+            json!({ "zoomed": false, "factor": 1.0, "line": "zoom is off (100%)" })
+        }
     }
 }
 
@@ -254,17 +292,21 @@ pub async fn zoom_route(
     if !super::routes::authorized_pub(&headers, &state.ipc_token) {
         return unauthorized();
     }
-    let ask = match req.ask() {
-        Ok(a) => a,
+    let op = match req.op() {
+        Ok(o) => o,
         Err(e) => return fail(e),
     };
+    if op == Op::Status {
+        let live = state.live_browser_pane_label(&req.block_id);
+        return (StatusCode::OK, Json(ApiResponse::ok(status(&req.block_id, live.as_deref()))));
+    }
     let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "zoom").await {
         Ok(c) => c,
         Err(e) => return fail(e),
     };
-    let result = match ask {
-        Some(ask) => apply(&mut cdp, &req.block_id, ask).await,
-        None => {
+    let result = match op {
+        Op::Set(ask) => apply(&mut cdp, &req.block_id, ask).await,
+        _ => {
             clear(&mut cdp).await;
             Ok(None)
         }
@@ -420,13 +462,40 @@ mod tests {
 
     #[test]
     fn exactly_one_thing_is_asked() {
-        let req = |factor, width, fit, reset| ZoomReq { block_id: "b".into(), factor, width, fit, reset };
-        assert_eq!(req(Some(0.5), None, false, false).ask(), Ok(Some(Ask::Factor(0.5))));
-        assert_eq!(req(None, Some(1280.0), false, false).ask(), Ok(Some(Ask::Width(1280.0))));
-        assert_eq!(req(None, None, true, false).ask(), Ok(Some(Ask::Fit)));
-        assert_eq!(req(None, None, false, true).ask(), Ok(None));
-        assert!(req(None, None, false, false).ask().is_err());
-        assert!(req(Some(0.5), None, true, false).ask().is_err());
+        let req = |factor, width, fit, reset, status| ZoomReq { block_id: "b".into(), factor, width, fit, reset, status };
+        assert_eq!(req(Some(0.5), None, false, false, false).op(), Ok(Op::Set(Ask::Factor(0.5))));
+        assert_eq!(req(None, Some(1280.0), false, false, false).op(), Ok(Op::Set(Ask::Width(1280.0))));
+        assert_eq!(req(None, None, true, false, false).op(), Ok(Op::Set(Ask::Fit)));
+        assert_eq!(req(None, None, false, true, false).op(), Ok(Op::Reset));
+        assert_eq!(req(None, None, false, false, true).op(), Ok(Op::Status));
+        assert!(req(None, None, false, false, false).op().is_err());
+        assert!(req(Some(0.5), None, true, false, false).op().is_err());
+    }
+
+    #[test]
+    fn a_request_out_of_range_is_refused_before_anything_changes() {
+        assert!(check(Ask::Factor(3.0)).is_err());
+        assert!(check(Ask::Width(100.0)).is_err());
+        assert!(check(Ask::Factor(0.5)).is_ok());
+        assert!(check(Ask::Fit).is_ok());
+    }
+
+    #[test]
+    fn the_status_is_what_the_host_holds_for_a_pane_that_is_still_the_same_browser() {
+        let plan = p(640.0, 400.0, Ask::Factor(0.5), 0.0);
+        ZOOMED.lock().insert(
+            "status-test-label".to_string(),
+            Entry { block_id: "status-test-block".into(), ask: Ask::Factor(0.5), plan, generation: next_generation() },
+        );
+        let s = status("status-test-block", Some("status-test-label"));
+        assert_eq!(s["zoomed"], true);
+        assert_eq!(s["line"], "viewport 1280x800 CSS, shown at 50%");
+        // The pane woke as a new browser: the zoom went with the old one.
+        let s = status("status-test-block", Some("another-label"));
+        assert_eq!(s["zoomed"], false);
+        assert_eq!(input_scale("status-test-label"), 1.0, "and the stale entry is gone");
+        // A pane that was never zoomed.
+        assert_eq!(status("never-zoomed", Some("x"))["zoomed"], false);
     }
 
     #[test]
