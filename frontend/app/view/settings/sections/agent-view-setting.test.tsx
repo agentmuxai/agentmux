@@ -49,6 +49,16 @@ describe("the default agent view in Settings", () => {
         expect(setConfig).toHaveBeenCalledWith({}, { "agent:view": { ...VIEW_PRESETS.standard, tools: "hidden" } });
     });
 
+    it("moves the highlight at once and keeps a quick second change on top of the first", () => {
+        render(() => <AgentsSection />);
+        fireEvent.click(within(group("Tool calls")).getByText("Expanded"));
+        expect(selected("Tool calls")).toBe("Expanded");
+        // The setting has not come back yet: this click must build on the first, not on Auto.
+        fireEvent.click(within(group("Jekts and agent messages")).getByText("Hidden"));
+        expect(setConfig).toHaveBeenLastCalledWith({}, { "agent:view": { ...VIEW_PRESETS.full, tools: "expanded", jekts: "hidden" } });
+        expect(selected("Tool calls")).toBe("Expanded");
+    });
+
     it("shows Custom, which is not a choice, when the switches match no preset", () => {
         settings = { "agent:view": { ...VIEW_PRESETS.full, thinking: "hidden" } };
         render(() => <AgentsSection />);
