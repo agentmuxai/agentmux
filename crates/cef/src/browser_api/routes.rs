@@ -585,8 +585,8 @@ pub async fn click_element(
         )));
     }
 
-    let x = cent.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let y = cent.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let at = |k: &str| cent.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let (x, y) = super::zoom::scale_point(cdp.label(), at("x"), at("y"));
 
     // Dispatch mousePressed + mouseReleased. `buttons: 1` = left
     // primary; `button: "left"` is the CDP enum.
@@ -1074,6 +1074,7 @@ pub async fn owned_panes(
         let mut owned = state.owned_panes.lock();
         owned.clear();
         owned.extend(req.panes);
+        super::zoom::clear_unowned(&state, &owned, &req.handoff);
     }
     crate::client::jsdialog::set_handoff(req.handoff);
     crate::client::agent_downloads::set_workdirs(req.download_workdirs);

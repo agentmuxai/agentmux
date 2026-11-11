@@ -65,6 +65,7 @@ pub mod visibility;
 pub mod vault_fill;
 pub mod vault_slots;
 pub mod wait;
+pub mod zoom;
 
 /// Register `/agentmux/browser/*` routes on the given axum Router.
 /// Called from `ipc::start_ipc_server` alongside the existing
@@ -105,6 +106,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/back", post(routes::back))
         .route("/agentmux/browser/forward", post(routes::forward))
         .route("/agentmux/browser/reload", post(routes::reload))
+        .route("/agentmux/browser/zoom", post(zoom::zoom_route))
         .route("/agentmux/browser/owned_panes", post(routes::owned_panes))
         .route("/agentmux/browser/dialog_answer", post(routes::dialog_answer))
         .route("/agentmux/browser/renderer_map", post(routes::renderer_map))

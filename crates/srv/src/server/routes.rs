@@ -736,6 +736,7 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
         .route("/api/v1/host/browser_permission", post(crate::server::browser_permission::handle_host_browser_permission))
         .route("/api/v1/ui/browser/dialogs", post(crate::server::browser_dialog::handle_ui_browser_dialogs))
+        .route("/api/v1/ui/browser/zoom", post(crate::server::browser_zoom::handle_ui_browser_zoom))
         .route("/api/v1/host/browser_popup", post(ui_handlers::handle_host_browser_popup))
         .route("/api/v1/host/browser_popup_window", post(ui_handlers::handle_host_browser_popup_window))
         .route("/api/v1/ui/browser/navigate", post(ui_handlers::handle_ui_browser_navigate))
