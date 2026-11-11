@@ -90,7 +90,20 @@ struct Entry {
 /// The config this doctor reads: the workspace file in a folder AgentMux owns, the relocated
 /// one in a user's project (#3680), and the bind-mounted one inside a container.
 fn config_path(workdir: &Path) -> PathBuf {
-    if crate::self_keys::in_container() {
+    // srv resolves it at spawn, where it knows the data root and the cwd; a pane strips the
+    // instance variables a reconstruction would need (#47385).
+    let configured = std::env::var_os("AGENTMUX_MCP_CONFIG")
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty());
+    resolve_config_path(workdir, configured.as_deref(), crate::self_keys::in_container())
+}
+
+/// [`config_path`] with its inputs given, so a test can pin them.
+fn resolve_config_path(workdir: &Path, configured: Option<&Path>, in_container: bool) -> PathBuf {
+    if let Some(configured) = configured {
+        return configured.to_path_buf();
+    }
+    if in_container {
         let mounted = agentmux_common::mcp_config_path::container_config_path();
         if mounted.is_file() {
             return mounted;
@@ -386,13 +399,15 @@ mod tests {
     /// relocated config instead; an AgentMux-owned folder still reads the file in it.
     #[test]
     fn the_config_checked_follows_the_agent_where_its_config_lives() {
+        // Not `config_path`: that reads AGENTMUX_MCP_CONFIG, which a test run inside an agent
+        // pane inherits from the real spawn and would otherwise override this fixture.
         let project = Path::new("/agentmux-test-project");
-        let path = config_path(project);
+        let path = resolve_config_path(project, None, false);
         assert!(!path.starts_with(project), "the project file is not the agent's: {}", path.display());
         assert_eq!(path.file_name().and_then(|n| n.to_str()), Some("mcp.json"));
 
         let owned = dirs_home().join(".agentmux").join("agents").join("aria");
-        assert_eq!(config_path(&owned), owned.join(".mcp.json"));
+        assert_eq!(resolve_config_path(&owned, None, false), owned.join(".mcp.json"));
     }
 
     fn dirs_home() -> PathBuf {
@@ -400,6 +415,17 @@ mod tests {
             .or_else(|| std::env::var_os("HOME"))
             .map(PathBuf::from)
             .unwrap_or_default()
+    }
+
+    /// #47385: the path srv resolved at spawn wins over any reconstruction, and without it the
+    /// fallback still relocates a user's project.
+    #[test]
+    fn the_config_is_the_path_srv_resolved_when_it_is_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let configured = dir.path().join("mcp.json");
+        assert_eq!(resolve_config_path(Path::new("/agentmux-test-project"), Some(&configured), false), configured);
+        let fallback = resolve_config_path(Path::new("/agentmux-test-project"), None, false);
+        assert!(!fallback.starts_with("/agentmux-test-project"), "{}", fallback.display());
     }
 
     #[test]

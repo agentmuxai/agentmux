@@ -88,6 +88,7 @@ pub const AGENT_ENV: &[EnvSpec] = &[
     spec("TEMP", HostOnly, "a host temp folder"),
     spec("TMP", HostOnly, "a host temp folder"),
     spec("AGENTMUX_AGENT_WORKDIR", HostOnly, "the host path of the agent's workspace; srv sets it for host agents only"),
+    spec("AGENTMUX_MCP_CONFIG", HostOnly, "the host path of the agent's MCP config; a container doctor uses the bind-mounted copy"),
     spec("CLAUDE_CODE_SHELL_PREFIX", HostOnly, "a host path; the image's own wrapper may predate prefix mode"),
 ];
 
