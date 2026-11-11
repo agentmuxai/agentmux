@@ -243,7 +243,7 @@ const SELECT_OPTION: &str = r#"function (want) {
 /// form's non-secret values (spec §5.4). The element's name and the
 /// description its text may carry are told apart by `scripts/click_label.js`.
 const COMMIT_INFO: &str = concat!(
-    r#"function () {
+    r#"function (axName) {
   const clickLabel = "#,
     include_str!("scripts/click_label.js"),
     r#";
@@ -269,12 +269,12 @@ const COMMIT_INFO: &str = concat!(
   }
   // A link fetches unless its name says it commits; a download or a file:
   // link never does (scripts/click_label.js).
-  const { name, description, committing, why } = clickLabel(this.getAttribute("aria-label"), labelledBy, this.innerText || this.value || "", {
+  const { name, description, committing, why, unreadable } = clickLabel(this.getAttribute("aria-label"), labelledBy, this.innerText || this.value || "", {
     submits,
     link: !!link,
     download: !!link && link.hasAttribute("download"),
     fileHref: /^file:/i.test(action),
-  });
+  }, axName);
   const fields = [];
   const secret = el => {
     const ty = (el.type || "").toLowerCase();
@@ -355,7 +355,7 @@ const COMMIT_INFO: &str = concat!(
   }
   const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
   const fingerprint = JSON.stringify([action, form ? [formGet("method"), formGet("enctype"), formGet("target")] : null, sub, this.outerHTML, link ? link.outerHTML : null, sent]);
-  return { committing, why, name, description, action, fields, fingerprint, secrets };
+  return { committing, why, unreadable: !!unreadable, name, description, action, fields, fingerprint, secrets };
 }"#
 );
 
@@ -555,14 +555,25 @@ pub(super) async fn check_click(
     let unclassified = |e: String| {
         format!("couldn't tell whether this click submits something, so it wasn't made ({e}); ask the user to click it")
     };
-    let info = call_on(cdp, obj, COMMIT_INFO, vec![]).await.map_err(unclassified)?;
+    // The accessible name too (`click_label.js`): the element's own text and aria-label miss a name that comes
+    // from a title, an image's alt or a child's label, and a click is named the same whichever way its ref
+    // was found. `null` (the lookup failed) is passed on, and a click with no name of its own then asks.
+    let ax_name = super::accessible_name::of(cdp, obj).await.map_or(Value::Null, Value::String);
+    let info = call_on(cdp, obj, COMMIT_INFO, vec![ax_name]).await.map_err(unclassified)?;
     let committing = info
         .get("committing")
         .and_then(|v| v.as_bool())
         .ok_or_else(|| unclassified("no answer from the page".to_string()))?;
     let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let unreadable = info.get("unreadable").and_then(|v| v.as_bool()).unwrap_or(false);
     let ask = json!({
-        "what": if name.is_empty() { format!("Click a button that submits a form{in_a_frame}") } else { format!("Click \"{name}\"{in_a_frame}") },
+        "what": if unreadable {
+            format!("Click an element whose name could not be read{in_a_frame}")
+        } else if name.is_empty() {
+            format!("Click a button that submits a form{in_a_frame}")
+        } else {
+            format!("Click \"{name}\"{in_a_frame}")
+        },
         // Shown under `what`, and judged with it: srv's payment check
         // reads both (scripts/click_label.js).
         "description": info.get("description").and_then(|v| v.as_str()).unwrap_or(""),
@@ -1236,10 +1247,11 @@ mod tests {
     fn the_click_label_rule_is_spliced_into_commit_info_whole() {
         // click_label.js is one function expression assigned to `clickLabel`
         // (its own tests run it); COMMIT_INFO is still one function.
-        assert!(COMMIT_INFO.starts_with("function () {\n  const clickLabel = // Copyright"));
-        assert!(COMMIT_INFO.contains("function clickLabel(ariaLabel, labelledBy, text, el) {"));
+        assert!(COMMIT_INFO.starts_with("function (axName) {\n  const clickLabel = // Copyright"));
+        assert!(COMMIT_INFO.contains("function clickLabel(ariaLabel, labelledBy, text, el, axName) {"));
         assert!(COMMIT_INFO.contains("}\n;\n  const t = "), "the rule ends before the rest of the function");
-        assert!(COMMIT_INFO.contains("const { name, description, committing, why } = clickLabel("));
+        assert!(COMMIT_INFO.contains("const { name, description, committing, why, unreadable } = clickLabel("));
+        assert!(COMMIT_INFO.contains("}, axName);"), "the accessible name reaches the rule");
         assert!(COMMIT_INFO.trim_end().ends_with('}'));
     }
 

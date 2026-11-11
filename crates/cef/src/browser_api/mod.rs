@@ -28,6 +28,7 @@ use axum::Router;
 
 use crate::state::AppState;
 
+pub mod accessible_name;
 pub mod act;
 pub mod capture;
 pub mod capture_download;
