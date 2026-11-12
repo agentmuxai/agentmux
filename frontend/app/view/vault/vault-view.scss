@@ -196,8 +196,8 @@
     }
 }
 
-// A card's brand badge stays with its last four; the Default pill keeps clear of the label.
-.vault-value {
+// A card's last four stay whole; the brand badge may wrap above them in a narrow pane, so the table doesn't outgrow it.
+.vault-last-four {
     white-space: nowrap;
 }
 
@@ -207,6 +207,11 @@
 
 .vault-card-expiry > * {
     flex: 1 1 0;
+}
+
+// Clear keeps its own width, so it lines up with the Clear buttons under it.
+.vault-card-expiry > .ui-button {
+    flex: 0 0 auto;
 }
 
 .vault-card-warn {

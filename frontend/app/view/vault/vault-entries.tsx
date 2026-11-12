@@ -102,7 +102,7 @@ function EntryValue(props: { entry: VaultEntryInfo }): JSX.Element {
             <Show when={props.entry.kind === "card" && CARD_BRANDS[props.entry.fields.brand ?? ""]}>
                 {(brand) => <Pill>{brand()}</Pill>}
             </Show>{" "}
-            {props.entry.tail ? `•••• ${props.entry.tail}` : "••••"}
+            <span class="vault-last-four">{props.entry.tail ? `•••• ${props.entry.tail}` : "••••"}</span>
         </td>
     );
 }
