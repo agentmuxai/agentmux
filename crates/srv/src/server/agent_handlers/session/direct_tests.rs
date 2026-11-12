@@ -102,14 +102,22 @@ fn a_local_rows_empty_session_id_is_filled_only_from_a_non_empty_registry_one() 
     assert_eq!(with_registry_session_id(&with_sid("mine"), Some("reg")).session_id, "mine");
 }
 
+/// The expected path built the way the handler builds it, so it holds where the separator is not `/`.
+fn joined(base: &str, name: &str) -> String {
+    Path::new(base).join(name).to_string_lossy().to_string()
+}
+
 #[test]
 fn a_registry_only_agents_workdir_comes_from_its_own_base_then_the_channels_then_the_bare_name() {
     let mut with_base = record("i", "d", "n", 1, None).data;
     with_base.source_agents_base = Some("/other/agents".to_string());
-    assert_eq!(synthesized_instance(with_base, Some(Path::new("/chan"))).working_directory, "/other/agents/work");
+    assert_eq!(
+        synthesized_instance(with_base, Some(Path::new("/chan"))).working_directory,
+        joined("/other/agents", "work")
+    );
 
     let plain = record("i", "d", "n", 1, None).data;
-    assert_eq!(synthesized_instance(plain.clone(), Some(Path::new("/chan"))).working_directory, "/chan/work");
+    assert_eq!(synthesized_instance(plain.clone(), Some(Path::new("/chan"))).working_directory, joined("/chan", "work"));
     assert_eq!(synthesized_instance(plain, None).working_directory, "work");
 }
 
