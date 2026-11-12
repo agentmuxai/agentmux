@@ -268,7 +268,7 @@
             align-self: stretch;
             width: 26px;
             // The header's padding above and below, less its 1px bottom border: 32px in all.
-            margin-block: calc(-1 * var(--space-1)) calc(-1 * var(--space-1) - 1px);
+            margin-block: calc(-1 * var(--space-1)) calc(-1 * var(--space-1) + 1px);
 
             .ui-button--chrome {
                 flex: 1 1 0;
