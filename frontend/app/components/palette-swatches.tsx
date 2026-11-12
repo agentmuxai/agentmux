@@ -30,7 +30,8 @@ export interface PaletteSwatchesProps {
     label: string;
     /** Put a leading swatch that means "no colour" (its name, e.g. "No colour", "Default") in the grid. */
     noneLabel?: string;
-    /** Swatches per row. Default: two even rows, 8 of the 16 (9 and 8 with the "none" swatch). */
+    /** Swatches per row, fixed. Default: two even rows, 8 of the 16 (9 and 8 with the "none" swatch). A context that
+     *  must narrow the grid with its pane's width leaves this out and sets `--palette-cols` in its own styles. */
     columns?: number;
     class?: string;
 }
@@ -40,10 +41,10 @@ export function PaletteSwatches(p: PaletteSwatchesProps): JSX.Element {
     const tone = (slot: PaletteSlot) => paneRoleColor(undefined, slot.id, isLightThemeActive(), "identity");
     return (
         <div
-            class={clsx("palette-swatches", p.class)}
+            class={clsx("palette-swatches", p.noneLabel && "palette-swatches--with-none", p.class)}
             role="group"
             aria-label={p.label}
-            style={{ "--palette-cols": p.columns ?? (p.noneLabel ? 9 : 8) } as JSX.CSSProperties}
+            style={p.columns === undefined ? undefined : ({ "--palette-cols": p.columns } as JSX.CSSProperties)}
         >
             <Show when={p.noneLabel}>
                 {(label) => (

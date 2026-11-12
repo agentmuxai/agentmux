@@ -28,15 +28,19 @@ describe("PaletteSwatches", () => {
         }
     });
 
-    it("lays the swatches out in two even rows, with or without the none swatch", () => {
-        const cols = (c: HTMLElement) => (c.querySelector(".palette-swatches") as HTMLElement).style.getPropertyValue("--palette-cols");
+    it("leaves the columns to its styles (two even rows, 8 of the 16, or 9 and 8 with the none swatch) unless asked", () => {
+        const grid = (c: HTMLElement) => c.querySelector(".palette-swatches") as HTMLElement;
         const plain = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} />);
-        expect(cols(plain.container)).toBe("8");
+        expect(grid(plain.container).style.getPropertyValue("--palette-cols")).toBe("");
+        expect(grid(plain.container).classList.contains("palette-swatches--with-none")).toBe(false);
         plain.unmount();
         const none = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} noneLabel="None" />);
-        expect(cols(none.container)).toBe("9");
+        expect(grid(none.container).style.getPropertyValue("--palette-cols")).toBe("");
+        expect(grid(none.container).classList.contains("palette-swatches--with-none")).toBe(true);
+        none.unmount();
+        const fixed = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} columns={5} />);
+        expect(grid(fixed.container).style.getPropertyValue("--palette-cols")).toBe("5");
     });
-
     it("reports the slot picked", () => {
         const onSelect = vi.fn();
         const { container } = render(() => <PaletteSwatches label="c" value={null} onSelect={onSelect} />);
