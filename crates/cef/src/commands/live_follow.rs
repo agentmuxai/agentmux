@@ -20,6 +20,17 @@ pub(crate) fn follow_origin(cursor: (i32, i32), offset: (i32, i32)) -> (i32, i32
     (cursor.0 - offset.0, cursor.1 - offset.1)
 }
 
+/// The picture's top-left for a cursor, with the whole picture kept inside `area` (a monitor's work area:
+/// left, top, width, height): at its offset from the cursor until an edge of the area stops it, as a window
+/// stops at the edge of the screen. The cursor itself goes on.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn place_within(cursor: (i32, i32), offset: (i32, i32), size: (i32, i32), area: (i32, i32, i32, i32)) -> (i32, i32) {
+    let (ox, oy) = follow_origin(cursor, offset);
+    let (x, y, _, _) =
+        crate::commands::window_pool::clamp_rect_within(ox, oy, size.0, size.1, area.0, area.1, area.2, area.3);
+    (x, y)
+}
+
 /// Whether the picture is shown for a cursor at `cursor_y`. A window tab's shows below the tear line (the
 /// strip's bottom edge plus the tear threshold, the same rule `decideTabRelease` uses) and not over another
 /// AgentMux window, where a release merges the tab. A pane has no tear line: its picture is the dragged pane
@@ -137,8 +148,9 @@ mod win {
 
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
-        ClientToScreen, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
-        BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
+        ClientToScreen, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, GetMonitorInfoW,
+        MonitorFromWindow, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, MONITORINFO,
+        MONITOR_DEFAULTTONEAREST,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
@@ -182,6 +194,12 @@ mod win {
         source_size: (i32, i32),
         /// Screen y below which a window tab's picture is shown; a pane has none and shows everywhere.
         tear_line_y: Option<i32>,
+        /// A pane's picture stays on the monitor its window is on: that monitor's work area, physical pixels
+        /// (left, top, width, height). Carried onto a second monitor, the whole picture jumped across the
+        /// moment its corner passed the edge (the operator, 2026-11-12: "simply not allow the pane to make
+        /// out of the monitor agentmux is running on, so it behaves like a typical edge of the screen").
+        /// A window tab has none: it is torn off onto whichever monitor it is carried to.
+        home: Option<(i32, i32, i32, i32)>,
         shown: bool,
         /// Where the picture was last put (clamped to the work area).
         last: (i32, i32),
@@ -257,6 +275,7 @@ mod win {
         );
         let offset = (px(num(args, "offsetX")?), px(num(args, "offsetY")?));
         let tear_line_y = args.get("tearLineY").and_then(|v| v.as_f64()).map(|line| client_top + px(line));
+        let home = if tear_line_y.is_none() { unsafe { work_area_of(source) } } else { None };
         let bgra = Arc::new(decode_bgra(&jpeg, size.0 as u32, size.1 as u32)?);
 
         end_now();
@@ -270,6 +289,7 @@ mod win {
             source: bgra,
             source_size: size,
             tear_line_y,
+            home,
             shown: false,
             last: (0, 0),
             landed: false,
@@ -356,7 +376,7 @@ mod win {
             }
             return;
         }
-        let (px, py) = place((x, y), f.offset, f.size);
+        let (px, py) = place((x, y), f.offset, f.size, f.home);
         f.last = (px, py);
         let (insert_after, flags) = if f.shown {
             (std::ptr::null_mut(), SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS)
@@ -368,17 +388,30 @@ mod win {
         unsafe { SetWindowPos(hwnd, insert_after, px, py, 0, 0, flags) };
     }
 
-    /// Where the picture goes for the cursor: at its offset, pulled inside the work area of the monitor it
-    /// lands on, as the window promote does, so the real window opens exactly here.
-    fn place(cursor: (i32, i32), offset: (i32, i32), size: (i32, i32)) -> (i32, i32) {
+    /// Where the picture goes for the cursor: at its offset, pulled inside a work area, as the window promote
+    /// does, so the real window opens exactly here. The area is `home` for a pane (its window's monitor), and
+    /// for a window tab the monitor the picture lands on.
+    fn place(cursor: (i32, i32), offset: (i32, i32), size: (i32, i32), home: Option<(i32, i32, i32, i32)>) -> (i32, i32) {
         let (ox, oy) = super::follow_origin(cursor, offset);
-        match crate::app::get_monitor_work_area_physical(ox, oy) {
-            Some((wx, wy, ww, wh)) => {
-                let (x, y, _, _) = crate::commands::window_pool::clamp_rect_within(ox, oy, size.0, size.1, wx, wy, ww, wh);
-                (x, y)
-            }
+        match home.or_else(|| crate::app::get_monitor_work_area_physical(ox, oy)) {
+            Some(area) => super::place_within(cursor, offset, size, area),
             None => (ox, oy),
         }
+    }
+
+    /// The work area of the monitor `hwnd` is on, or is nearest to: left, top, width, height, physical pixels.
+    unsafe fn work_area_of(hwnd: HWND) -> Option<(i32, i32, i32, i32)> {
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if monitor.is_null() {
+            return None;
+        }
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(monitor, &mut info) == 0 {
+            return None;
+        }
+        let rc = info.rcWork;
+        Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
     }
 
     /// Whether the window picture is on screen now. Asked from the drag's own thread on every cursor move, while
@@ -602,7 +635,23 @@ mod win {
 
 #[cfg(test)]
 mod tests {
-    use super::{compose, follow_origin, offset_within, picture_wanted};
+    use super::{compose, follow_origin, offset_within, picture_wanted, place_within};
+
+    #[test]
+    fn a_panes_picture_stops_whole_at_the_edge_of_its_monitor_while_the_cursor_goes_on() {
+        // A 1920 by 1040 work area, with a second monitor to its right. The picture is 600 by 400, held at (100, 20).
+        let (home, size, offset) = ((0, 0, 1920, 1040), (600, 400), (100, 20));
+        // Well inside: at its offset from the cursor.
+        assert_eq!(place_within((900, 500), offset, size, home), (800, 480));
+        // Its right edge would pass the monitor's: it stops flush with the edge.
+        assert_eq!(place_within((1700, 500), offset, size, home), (1320, 480));
+        // The cursor is on the second monitor, corner and all: the picture is still on the first, whole.
+        assert_eq!(place_within((2600, 500), offset, size, home), (1320, 480));
+        // The other edges stop it the same way, and a monitor that does not start at 0 is its own area.
+        assert_eq!(place_within((50, -300), offset, size, home), (0, 0));
+        assert_eq!(place_within((900, 2000), offset, size, home), (800, 640));
+        assert_eq!(place_within((100, 500), offset, size, (1920, 0, 2560, 1400)), (1920, 480));
+    }
 
     #[test]
     fn the_grab_keeps_its_place_on_a_resized_picture_and_comes_back_whole_at_the_panes_own_size() {

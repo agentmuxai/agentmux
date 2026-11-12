@@ -7,7 +7,9 @@
  * (tearoff-snapshot.ts), held at the grab the pointer pressed it with, and it follows from the drag's first
  * move wherever the cursor goes: over the layout, where the drop is a tile drop and the other panes make room
  * under it, and outside every AgentMux window, where the drop tears the pane off and the floating window
- * opens where the picture was last seen. No translucent ghost ever stands in for the pane.
+ * opens where the picture was last seen. No translucent ghost ever stands in for the pane. The picture stays
+ * on the monitor its window is on: it stops whole at that monitor's edge, as a window does, while the cursor
+ * goes on (the host's `home`, live_follow.rs).
  *
  * While a drop is armed, the picture is made smaller until it fits the rect the drop would give the pane (the
  * live reflow's landing rect, liveReflow.ts), so the pane in hand is never larger than the place it is going
