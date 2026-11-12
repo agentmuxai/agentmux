@@ -172,6 +172,21 @@ describe("HistoryAgents", () => {
             ]);
         });
 
+        it("names each data cell's column, so a narrow pane can stack a row as a card", async () => {
+            const { container } = mountAgents();
+            await screen.findByText("Parent");
+            const row = rowOf(container, "parent-1");
+            expect(Array.from(row.querySelectorAll("td")).map((c) => c.getAttribute("data-label"))).toEqual([
+                null,
+                "Provider",
+                "History",
+                "Archived",
+                "Last active",
+                null,
+            ]);
+            expect(row.querySelectorAll("td.warden-history-cell-wide")).toHaveLength(2);
+        });
+
         it("shows an agent's name, short id, provider, kept size, archives and last activity", async () => {
             const { container } = mountAgents();
             await screen.findByText("Parent");

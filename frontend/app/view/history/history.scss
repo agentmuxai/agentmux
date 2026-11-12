@@ -6,6 +6,10 @@
 @use "../../element/popover-frame" as popoverFrame;
 
 .warden-history {
+    // The pane's own width, so the lists below can stack instead of running past the edge
+    // (a thin pane, down to 200 px).
+    container: history / inline-size;
+
     .is-hidden {
         display: none;
     }
@@ -21,8 +25,14 @@
 
 .warden-history-bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
+}
+
+.warden-history-filter {
+    flex: 1 1 8em;
+    min-width: 0;
 }
 
 .warden-history-table,
@@ -163,4 +173,76 @@ tr[data-deleted] td {
     width: 100%;
     height: 100%;
     overflow: hidden;
+}
+
+// A row of the agent list and of its sessions list becomes a card when the pane is too narrow for
+// six columns: the first cell and the wide ones take the full line, the rest sit two to a line under
+// their column's name, and nothing is cut or scrolls sideways.
+@mixin history-cards {
+    display: block;
+
+    thead {
+        display: none;
+    }
+
+    tbody {
+        display: block;
+    }
+
+    tr {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: var(--space-3);
+        padding: var(--space-2) 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    td {
+        display: block;
+        min-width: 0;
+        padding: 1px 0;
+        border-bottom: 0;
+        overflow-wrap: anywhere;
+        text-align: left;
+
+        &[data-label]::before {
+            content: attr(data-label);
+            display: block;
+            font-size: 0.85em;
+            opacity: 0.6;
+        }
+    }
+
+    .warden-history-cell-wide {
+        grid-column: 1 / -1;
+    }
+
+    .warden-history-agent {
+        flex-wrap: wrap;
+    }
+
+    .warden-history-cwd {
+        max-width: none;
+        white-space: normal;
+    }
+}
+
+@container history (max-width: 599px) {
+    .warden-manager-table.warden-history-table,
+    .warden-manager-table.warden-history-sessions {
+        @include history-cards;
+    }
+
+    .warden-history-sessions-row > td {
+        display: block;
+        grid-column: 1 / -1;
+        padding-left: var(--space-2);
+    }
+}
+
+@container history (max-width: 199px) {
+    .warden-manager-table.warden-history-table tr,
+    .warden-manager-table.warden-history-sessions tr {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }

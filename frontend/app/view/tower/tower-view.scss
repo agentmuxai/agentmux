@@ -1165,8 +1165,8 @@ th[aria-sort="descending"] .tower-sort {
     font-size: 0.9em;
 }
 
-// Under 420 px the sparkline column goes first; the figures stay.
-@container (max-width: 420px) {
+// Under 480 px the sparkline column goes first; the figures stay.
+@container (max-width: 479px) {
     .tower-memory-table .tower-memory-trend-head,
     .tower-memory-table .tower-memory-trend {
         display: none;
@@ -1178,5 +1178,61 @@ th[aria-sort="descending"] .tower-sort {
     .tower-memory-table,
     .tower-memory-chart {
         display: none;
+    }
+}
+
+// ── A thin pane (down to about 200 px; the figures and names never give way to a badge or a note) ──
+
+// The toolbar's machine picker takes what the view tabs (icons only, see towerViewTabs) leave.
+@container (max-width: 479px) {
+    .tower-machine {
+        flex: 1 1 8em;
+        max-width: none;
+        min-width: 0;
+    }
+}
+
+// The headline's count and the hour's change go to a second line instead of cutting the name and the figure.
+@container (min-width: 161px) and (max-width: 479px) {
+    .tower-headline {
+        flex-wrap: wrap;
+        row-gap: 0;
+    }
+
+    .tower-headline-label {
+        flex: 0 0 auto;
+    }
+
+    .tower-headline-note,
+    .tower-headline-change {
+        flex: 0 1 auto;
+    }
+}
+
+// A part's or row's amber growth note drops under its name when the name and note do not fit on one line,
+// and the rows' indents shrink, so the name keeps its room.
+@container (max-width: 479px) {
+    .tower-memory-table {
+        .tower-name-line {
+            flex-wrap: wrap;
+            row-gap: 0;
+        }
+
+        .tower-memory-grow {
+            flex: 0 1 auto;
+            max-width: 100%;
+        }
+    }
+
+    .tower-memory-row .tower-name {
+        padding-left: var(--space-3);
+    }
+
+    .tower-memory-child .tower-name {
+        padding-left: var(--space-6);
+    }
+
+    .tower-memory-hint td {
+        padding-left: var(--space-3);
     }
 }

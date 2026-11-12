@@ -55,6 +55,7 @@ export {
 } from "./Tag";
 export {
     TabbedPane,
+    tabbedPaneLayout,
     tabId,
     tabPanelId,
     Tabs,
