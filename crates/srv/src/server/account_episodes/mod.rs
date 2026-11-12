@@ -223,7 +223,9 @@ fn refresh() {
 
 /// The failure kinds an episode is made of: a usage limit or a refused sign-in.
 fn blocking_failure(block: &Block) -> Option<agent_state::StoredFailure> {
-    failure_of_block(block).filter(|f| matches!(f.code, FailureClass::UsageLimit | FailureClass::Auth))
+    // A route out of credits is no account's limit: no account moves or wakes for it (`backend::route_credits`).
+    failure_of_block(block)
+        .filter(|f| matches!(f.code, FailureClass::UsageLimit | FailureClass::Auth) && f.title != crate::agents::failure::ROUTE_CREDITS_TITLE)
 }
 
 fn signature(f: &agent_state::StoredFailure) -> String {

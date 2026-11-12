@@ -66,6 +66,8 @@ pub(crate) fn start(state: AppState) {
     if inbox().set(tx).is_err() {
         return;
     }
+    // A route out of credits stops every agent on it; its first success ends that (`on_settled`).
+    crate::backend::route_credits::install(state.broker.clone(), state.mstore.clone(), state.event_bus.clone());
     tokio::spawn(async move {
         let mut refresh = tokio::time::interval(REFRESH_EVERY);
         refresh.tick().await;
@@ -160,6 +162,8 @@ fn publish_today(state: &AppState, def_id: &str, agent: &str, cap: Option<f64>, 
 }
 
 fn on_settled(state: &AppState, grant: &Grant, now: i64) {
+    // A response that worked: a route that was out of credits is not.
+    crate::backend::route_credits::cleared(&state.mstore, &state.event_bus, &grant.route);
     let (level, cap, spent) = cap::agent_level(&state.mstore, grant, now);
     let sent = spend::alerted(&grant.agent, now);
     publish_today(state, &grant.def_id, &grant.agent, cap, spent, now, level > sent);
