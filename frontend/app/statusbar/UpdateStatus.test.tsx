@@ -612,7 +612,7 @@ describe("Maintenance on a Microsoft Store install", () => {
         fireEvent.click(screen.getByRole("button", { name: "What's new" }));
         expect(openLink).toHaveBeenCalledWith(RELEASE_0_59_27);
         fireEvent.click(screen.getByRole("button", { name: "Update in the Store" }));
-        await vi.waitFor(() => expect(storeUpdate).toHaveBeenCalledWith("0.59.27"));
+        await vi.waitFor(() => expect(storeUpdate).toHaveBeenCalledWith());
     });
 
     it("offers the update when GitHub knows of nothing newer, or was never asked", async () => {
@@ -679,12 +679,12 @@ describe("Maintenance on a Microsoft Store install", () => {
         }
     });
 
-    it("installing an update the Store did not name passes no version, and a stay says so without one", async () => {
+    it("a stay after an update the Store did not name says so without a version", async () => {
         storeCheck.mockResolvedValue(listed("0.59.26"));
         updateStatus.mockResolvedValue(STORE);
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
-        await vi.waitFor(() => expect(storeUpdate).toHaveBeenCalledWith(""));
+        await vi.waitFor(() => expect(storeUpdate).toHaveBeenCalledWith());
         expect(storeStayedLine({ state: "stayed", from: "0.59.26", target: "" })).toBe(
             "The Store closed AgentMux to install an update, but this is still v0.59.26. Try Update in the Store again, or install it from the Microsoft Store app.",
         );
@@ -886,13 +886,6 @@ describe("Maintenance on a Microsoft Store install", () => {
         render(() => <MaintenanceSection />);
         await screen.findByRole("button", { name: "Update in the Store" });
         expect(screen.getByText("The Store downloads v0.59.27. Restart now then installs it and opens AgentMux again.")).toBeTruthy();
-    });
-
-    it("passes the release being installed to the host, so a restart can tell what it came back from", async () => {
-        updateStatus.mockResolvedValue(STORE);
-        render(() => <MaintenanceSection />);
-        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
-        await vi.waitFor(() => expect(storeUpdate).toHaveBeenCalledWith("0.59.27"));
     });
 
     it("on a start that came back updated, tells the person once", async () => {
