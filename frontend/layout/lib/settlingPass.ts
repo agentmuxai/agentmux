@@ -11,7 +11,8 @@
  *
  * The tree, the layout's rects, focus and what goes to srv are final before a pass opens: only the drawing
  * glides. A pass opens in the same batch as the new rects, with every tile still at the rect it showed, and
- * sends them to their own rects on the next frame, so the glide has a start. It ends when the glide is over
+ * sends them to their own rects once that has been drawn (`afterSeedFrame`), so the glide has a start and does
+ * not begin in the frame that lays the panes out at their new sizes. It ends when the glide is over
  * (`reflowSettleMs`), and the tiles' plain style, already final, takes over. Terminals keep their grid for the
  * pass and fit once at its end, by the reflow's own hold. A pane that shrinks (its neighbour opened) keeps its
  * larger size under its closing clip and takes its real size at the end too (liveReflow.ts `envelope`).
@@ -61,7 +62,7 @@ export interface SettlingPass {
     ghosts: PaneGhost[];
     /** The panes that came or were restored, by node id: each fades in at its own rect. */
     enters: string[];
-    /** False for the frame the pass opens on (the tiles stand at `from`), true from the next. */
+    /** False until the frame the pass opens on has been drawn (the tiles stand at `from`), true from then. */
     gliding: boolean;
 }
 
@@ -142,8 +143,8 @@ function mayGlide(model: LayoutModel, state: State, paneCount: number): boolean 
 
 /** What changed in the arrangement between two layouts of `model`. */
 interface Change {
-    /** The panes that left, and those that came. */
-    gone: LayoutNode[];
+    /** The panes that left, by node id, and those that came. */
+    gone: string[];
     came: LayoutNode[];
     /** The panes minimized by this change, and those restored by it, by node id. */
     minimized: Set<string>;
@@ -153,20 +154,25 @@ interface Change {
 }
 
 /**
- * The change from `prevLeafs` to `nextLeafs`. What was minimized and the order the panes had are read from
- * what `model` last published; the new order is the tree's (`updateTree` has set it by now).
+ * The change from `prevLeafs` to `nextLeafs`. Which panes there were, their order and which were minimized
+ * are read from what `model` last published; the new order is the tree's (`updateTree` has set it by now).
+ *
+ * The panes there were are the published order's ids, not `prevLeafs`' own: the tree changes its nodes in
+ * place, and a leaf that a new pane is put under becomes the branch of the two and hands its id to the node
+ * that now holds its pane (`addIntermediateNode`), so by now that old leaf carries another id.
  */
 function changeOf(model: LayoutModel, prevLeafs: LayoutNode[], nextLeafs: LayoutNode[]): Change {
-    const prevIds = new Set(prevLeafs.map((leaf) => leaf.id));
+    const before = untrack(model.leafOrder) ?? [];
+    const after = model.treeState.leafOrder ?? [];
+    const published = before.length === prevLeafs.length;
+    const prevIds = new Set(published ? before.map((entry) => entry.nodeid) : prevLeafs.map((leaf) => leaf.id));
     const nextIds = new Set(nextLeafs.map((leaf) => leaf.id));
     const wasMinimized = untrack(model.minimizedNodeIds);
     const stayed = nextLeafs.filter((leaf) => prevIds.has(leaf.id));
     const flipped = (to: boolean) =>
         new Set(stayed.filter((leaf) => !!leaf.minimized === to && wasMinimized.has(leaf.id) !== to).map((leaf) => leaf.id));
-    const gone = prevLeafs.filter((leaf) => !nextIds.has(leaf.id));
+    const gone = [...prevIds].filter((id) => !nextIds.has(id));
     const came = nextLeafs.filter((leaf) => !prevIds.has(leaf.id));
-    const before = untrack(model.leafOrder) ?? [];
-    const after = model.treeState.leafOrder ?? [];
     const sameSet = gone.length === 0 && came.length === 0 && before.length === after.length;
     const reordered = sameSet && before.some((entry, i) => entry.nodeid !== after[i].nodeid);
     return { gone, came, minimized: flipped(true), restored: flipped(false), reordered };
@@ -226,20 +232,38 @@ export function planSettlingPass(
     const open = untrack(state.pass);
     const moves = movesOf(open, change, prevProps, nextLeafs, nextProps);
     const ghosts = [...(open?.ghosts ?? [])];
-    for (const leaf of change.gone) {
-        const rect = prevProps[leaf.id]?.rect;
+    for (const id of change.gone) {
+        const rect = prevProps[id]?.rect;
         if (!rect) continue;
         // A pane that was gliding itself is not at its layout rect yet: its ghost stands where the pane is
         // drawn, its start while its glide has not begun and its travelling edges after.
-        const own = open?.moves.get(leaf.id);
-        const stood = !own ? rect : own.from && !open!.gliding ? own.from : drawnRect(leaf.id, rect);
-        ghosts.push({ id: leaf.id, rect: stood });
+        const own = open?.moves.get(id);
+        const stood = !own ? rect : own.from && !open!.gliding ? own.from : drawnRect(id, rect);
+        ghosts.push({ id, rect: stood });
     }
     if (moves.size === 0 && ghosts.length === 0) return undefined;
     // A pane still fading in from the open pass goes on fading.
     const still = (open?.enters ?? []).filter((id) => nextProps[id] && !change.minimized.has(id));
     const enters = [...new Set([...still, ...change.came.map((leaf) => leaf.id), ...change.restored])];
     return { moves, ghosts, enters, gliding: false };
+}
+
+/**
+ * Run `fn` once the frame that is being made now has been drawn: on the frame after the next. Returns what
+ * cancels it.
+ *
+ * The change that opens a pass gives the panes their new sizes, and the first frame pays for all of it: the
+ * layout of every resized pane, what watches their sizes, the paint. A glide that started in that frame ran
+ * its clock through that work with nothing drawn, and its first drawn frame was most of the way there (about
+ * 100 ms and 80% of the way in the macOS look check of #7066). One frame later the work is done and the
+ * tiles are drawn where they stood, so the glide's own frames are cheap.
+ */
+function afterSeedFrame(fn: () => void): () => void {
+    let cancel: () => void = () => {};
+    cancel = onNextFrame(() => {
+        cancel = onNextFrame(fn);
+    });
+    return () => cancel();
 }
 
 /** Open `pass` on `model`'s layout, in place of one that is open. Call it in the batch that writes the new rects. */
@@ -249,7 +273,7 @@ export function openSettlingPass(model: LayoutModel, pass: SettlingPass): void {
     state.cancel?.();
     state.setPass(pass);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const cancelFrame = onNextFrame(() => {
+    const cancelFrame = afterSeedFrame(() => {
         // A frame that outlived its pass (one that was replaced or ended) must not bring it back.
         if (untrack(state.pass) !== pass) return;
         state.setPass({ ...pass, gliding: true });
