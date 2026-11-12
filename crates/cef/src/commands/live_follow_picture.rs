@@ -5,6 +5,53 @@
 // is shown at, and, for a pane, cut out of a picture of its window once the pane stands in its landing rect.
 // Nothing here knows a window or a lock: slices in, pixels out.
 
+use std::sync::Arc;
+
+/// How many pictures of the pane in a landing rect are kept for a drag, and how many bytes of them: a drag
+/// wanders between a handful of drops, and coming back to one shows its picture at once.
+const KEPT_PICTURES: usize = 8;
+const KEPT_BYTES: usize = 96 * 1024 * 1024;
+
+/// A picture of the pane as it stands in a landing rect, at the size the hand shows it for that rect.
+pub(crate) struct Landed {
+    /// The landing rect it was taken in, as the page names it.
+    pub key: String,
+    pub bgra: Arc<Vec<u8>>,
+    pub size: (i32, i32),
+}
+
+/// The pictures taken of a pane in its landing rects during one drag: the ones kept, oldest first, and one
+/// just taken that waits for the page to say the pane stood still for it.
+#[derive(Default)]
+pub(crate) struct LandedPictures {
+    kept: Vec<Landed>,
+    staged: Option<Landed>,
+}
+
+impl LandedPictures {
+    /// The picture kept for `key` at `size`, if there is one.
+    pub fn kept_for(&self, key: &str, size: (i32, i32)) -> Option<Arc<Vec<u8>>> {
+        self.kept.iter().find(|p| p.key == key && p.size == size).map(|p| p.bgra.clone())
+    }
+
+    /// Hold a picture just taken until it is adopted; a newer one replaces it.
+    pub fn stage(&mut self, picture: Landed) {
+        self.staged = Some(picture);
+    }
+
+    /// Keep the staged picture, if it is `key`'s, in place of any older one of that rect. The oldest go
+    /// when there are too many, or too many bytes of them; the one just kept always stays.
+    pub fn adopt(&mut self, key: &str) {
+        let Some(staged) = self.staged.take_if(|s| s.key == key) else { return };
+        self.kept.retain(|p| p.key != key);
+        self.kept.push(staged);
+        let bytes = |kept: &[Landed]| kept.iter().map(|p| p.bgra.len()).sum::<usize>();
+        while self.kept.len() > 1 && (self.kept.len() > KEPT_PICTURES || bytes(&self.kept) > KEPT_BYTES) {
+            self.kept.remove(0);
+        }
+    }
+}
+
 /// The picture at `size`, from `source` (BGRA at `source_size`): the whole picture, resized. Each pixel is the
 /// mean of the source pixels it covers, so a pane made smaller stays readable. A source of other proportions
 /// than `size` is stretched to it; a source shorter than its size paints black.
@@ -102,7 +149,65 @@ pub(crate) fn crop_bgra(rgb: &[u8], image_width: u32, rect: (u32, u32, u32, u32)
 
 #[cfg(test)]
 mod tests {
-    use super::{compose, crop_bgra, crop_rect, Wash};
+    use super::{compose, crop_bgra, crop_rect, Landed, LandedPictures, Wash, KEPT_BYTES, KEPT_PICTURES};
+    use std::sync::Arc;
+
+    fn landed(key: &str, bytes: usize) -> Landed {
+        Landed { key: key.to_string(), bgra: Arc::new(vec![0; bytes]), size: (10, 10) }
+    }
+
+    #[test]
+    fn a_picture_is_kept_only_once_it_is_adopted_under_its_own_rect() {
+        let mut pictures = LandedPictures::default();
+        pictures.stage(landed("200x300", 4));
+        // Staged, not kept: nothing shows it yet.
+        assert!(pictures.kept_for("200x300", (10, 10)).is_none());
+        // Adopting another rect's name keeps nothing, and the staged one still waits.
+        pictures.adopt("100x100");
+        assert!(pictures.kept_for("200x300", (10, 10)).is_none());
+        pictures.adopt("200x300");
+        assert!(pictures.kept_for("200x300", (10, 10)).is_some());
+        // Kept for the size it was made at, and no other.
+        assert!(pictures.kept_for("200x300", (11, 10)).is_none());
+        // Adopted once: a second adopt has nothing staged.
+        pictures.adopt("200x300");
+        assert_eq!(pictures.kept.len(), 1);
+    }
+
+    #[test]
+    fn a_newer_picture_of_a_rect_replaces_the_older_one() {
+        let mut pictures = LandedPictures::default();
+        for bytes in [4, 8] {
+            pictures.stage(landed("200x300", bytes));
+            pictures.adopt("200x300");
+        }
+        assert_eq!(pictures.kept.len(), 1);
+        assert_eq!(pictures.kept_for("200x300", (10, 10)).unwrap().len(), 8);
+    }
+
+    #[test]
+    fn the_oldest_pictures_go_when_there_are_too_many_or_too_many_bytes() {
+        let mut pictures = LandedPictures::default();
+        for i in 0..KEPT_PICTURES + 2 {
+            pictures.stage(landed(&format!("k{}", i), 4));
+            pictures.adopt(&format!("k{}", i));
+        }
+        assert_eq!(pictures.kept.len(), KEPT_PICTURES);
+        assert!(pictures.kept_for("k0", (10, 10)).is_none());
+        assert!(pictures.kept_for("k2", (10, 10)).is_some());
+        // Two that together pass the byte cap: the older goes. One that passes it alone still stays.
+        let mut large = LandedPictures::default();
+        for key in ["a", "b"] {
+            large.stage(landed(key, KEPT_BYTES / 2 + 1));
+            large.adopt(key);
+        }
+        assert!(large.kept_for("a", (10, 10)).is_none());
+        assert!(large.kept_for("b", (10, 10)).is_some());
+        large.stage(landed("c", KEPT_BYTES + 1));
+        large.adopt("c");
+        assert_eq!(large.kept.len(), 1);
+        assert!(large.kept_for("c", (10, 10)).is_some());
+    }
 
     /// A 4 by 2 BGRA picture whose pixel (x, y) is (10x, 100y, 7, 255), so a resize is read back by value.
     fn picture() -> Vec<u8> {

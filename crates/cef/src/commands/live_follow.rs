@@ -132,7 +132,7 @@ mod win {
         WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     };
 
-    use crate::commands::live_follow_picture::{compose, crop_bgra, crop_rect, Wash};
+    use crate::commands::live_follow_picture::{compose, crop_bgra, crop_rect, Landed, LandedPictures, Wash};
     use crate::state::AppState;
 
     const CLASS_NAME: &str = "AgentMuxLiveFollow";
@@ -152,18 +152,6 @@ mod win {
     const MAX_DIM: i32 = 8_000;
     /// The JPEG quality a pane's window is pictured at for `capture`.
     const CAPTURE_QUALITY: u8 = 80;
-    /// How many pictures of the pane in a landing rect are kept for a drag, and how many bytes of them: a
-    /// drag wanders between a handful of drops, and coming back to one shows its picture at once.
-    const KEPT_PICTURES: usize = 8;
-    const KEPT_BYTES: usize = 96 * 1024 * 1024;
-
-    /// A picture of the pane as it stands in a landing rect, at the size the hand shows it for that rect.
-    struct Landed {
-        /// The landing rect it was taken in, as the page names it.
-        key: String,
-        bgra: Arc<Vec<u8>>,
-        size: (i32, i32),
-    }
 
     struct Follower {
         hwnd: usize,
@@ -196,28 +184,9 @@ mod win {
         landed: bool,
         /// The landing rect whose own picture is on show, or none while it is the first picture resized.
         shows: Option<String>,
-        /// The pictures taken of the pane in a landing rect, oldest first (`KEPT_PICTURES`, `KEPT_BYTES`).
-        kept: Vec<Landed>,
-        /// One just taken, until the page says the pane stood still for it (`resize` with `adopt`).
-        staged: Option<Landed>,
-    }
-
-    impl Follower {
-        /// The picture kept for `key` at `size`, if there is one.
-        fn kept_for(&self, key: &str, size: (i32, i32)) -> Option<Arc<Vec<u8>>> {
-            self.kept.iter().find(|p| p.key == key && p.size == size).map(|p| p.bgra.clone())
-        }
-
-        /// Keep the staged picture, if it is `key`'s: the page saw the pane stand still while it was taken.
-        fn adopt(&mut self, key: &str) {
-            let Some(staged) = self.staged.take_if(|s| s.key == key) else { return };
-            self.kept.retain(|p| p.key != key);
-            self.kept.push(staged);
-            let bytes = |kept: &[Landed]| kept.iter().map(|p| p.bgra.len()).sum::<usize>();
-            while self.kept.len() > 1 && (self.kept.len() > KEPT_PICTURES || bytes(&self.kept) > KEPT_BYTES) {
-                self.kept.remove(0);
-            }
-        }
+        /// The pictures taken of the pane in its landing rects (`capture`): one is staged until the page says
+        /// the pane stood still for it (`resize` with `adopt`), then kept for the drag.
+        pictures: LandedPictures,
     }
 
     static FOLLOWER: Mutex<Option<Follower>> = Mutex::new(None);
@@ -312,8 +281,7 @@ mod win {
             last: (0, 0),
             landed: false,
             shows: None,
-            kept: Vec::new(),
-            staged: None,
+            pictures: LandedPictures::default(),
         });
         tracing::info!(
             target: "dnd:tearoff",
@@ -369,9 +337,9 @@ mod win {
             let Some(f) = guard.as_mut() else { return Ok(serde_json::Value::Null) };
             let size = asked_size(args, f.scale)?;
             if let Some(key) = key.filter(|_| adopt) {
-                f.adopt(key);
+                f.pictures.adopt(key);
             }
-            let kept = key.and_then(|key| f.kept_for(key, size));
+            let kept = key.and_then(|key| f.pictures.kept_for(key, size));
             let shows = kept.as_ref().and(key);
             if f.size == size && f.shows.as_deref() == shows {
                 return Ok(serde_json::Value::Null);
@@ -472,7 +440,7 @@ mod win {
         let guard = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?;
         let Some(f) = guard.as_ref() else { return Ok(None) };
         let size = asked_size(args, f.scale)?;
-        if f.kept_for(key, size).is_some() {
+        if f.pictures.kept_for(key, size).is_some() {
             return Ok(None);
         }
         Ok(Some(CapturePlan {
@@ -527,7 +495,7 @@ mod win {
             total_ms = started.elapsed().as_millis() as u64,
             "[live-follow] the pane was pictured in its landing rect"
         );
-        f.staged = Some(Landed { key: plan.key, bgra, size: plan.size });
+        f.pictures.stage(Landed { key: plan.key, bgra, size: plan.size });
         Ok(true)
     }
 
