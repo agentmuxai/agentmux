@@ -17,7 +17,7 @@ vi.mock("./live-follow", () => ({
     resizeLiveFollow: async (_api: unknown, size: unknown) => void hub.resized.push(size),
 }));
 
-import { followPaneDrag, followSize, MIN_FOLLOW_SCALE } from "./pane-live-follow";
+import { followPaneDrag, followSize, HAND_SCALE } from "./pane-live-follow";
 
 beforeEach(() => {
     hub.begun = [];
@@ -47,39 +47,41 @@ describe("followPaneDrag", () => {
         expect(hub.begun).toEqual([]);
     });
 
-    it("resizes the whole picture to fit a smaller landing rect, never pads it to a larger one, and lets go when the drag ends", async () => {
-        // The pane is 300 by 200. A landing rect wider and shorter: the pane is made smaller in its own
-        // proportions until its height fits.
-        const [rect, setRect] = createSignal<{ width: number; height: number } | undefined>({ width: 1200.4, height: 120 });
+    it("gives the picture the landing rect's shape, smaller than it, and its own size again with no drop, until the drag ends", async () => {
+        // The pane is 300 by 200. An upright landing rect of the same area: its shape, at the hand's share.
+        const [rect, setRect] = createSignal<{ width: number; height: number } | undefined>({ width: 200, height: 300 });
         const [active, setActive] = createSignal(true);
         // A drop is already armed when the picture is up: it is resized at once.
         await followPaneDrag("b1", "main", { rect, active });
-        expect(hub.resized).toEqual([{ width: 180, height: 120 }]);
-        // The same size again sends nothing.
-        setRect({ width: 900, height: 120 });
+        expect(hub.resized).toEqual([{ width: 140, height: 210 }]);
+        // The same rect again sends nothing.
+        setRect({ width: 200, height: 300 });
         expect(hub.resized).toHaveLength(1);
-        // Smaller on both axes: the tighter one decides.
-        setRect({ width: 150, height: 150 });
-        expect(hub.resized[1]).toEqual({ width: 150, height: 100 });
-        // Larger on both: the pane's own size, with no blank band beside it.
-        setRect({ width: 2000, height: 1000 });
-        expect(hub.resized[2]).toEqual({ width: 300, height: 200 });
-        // No drop armed: still the pane's own size, so nothing is sent.
+        // A smaller, square one.
+        setRect({ width: 100, height: 100 });
+        expect(hub.resized[1]).toEqual({ width: 70, height: 70 });
+        // No drop armed: the pane's own size and shape.
         setRect(undefined);
-        expect(hub.resized).toHaveLength(3);
+        expect(hub.resized[2]).toEqual({ width: 300, height: 200 });
         // The drag ended: a later rect is ignored.
         setActive(false);
         setRect({ width: 100, height: 100 });
         expect(hub.resized).toHaveLength(3);
     });
 
-    it("keeps the pane's proportions, never grows it, and never makes it too small to be a pane", () => {
+    it("takes the landing rect's shape at the hand's share of the smaller of the two, the rect and the pane", () => {
         const own = { width: 600, height: 400 };
         expect(followSize(own)).toEqual(own);
-        expect(followSize(own, { width: 2000, height: 1000 })).toEqual(own);
-        expect(followSize(own, { width: 300, height: 400 })).toEqual({ width: 300, height: 200 });
-        expect(followSize(own, { width: 600, height: 300 })).toEqual({ width: 450, height: 300 });
-        // A sliver of a landing rect: the floor.
-        expect(followSize(own, { width: 30, height: 400 })).toEqual({ width: 600 * MIN_FOLLOW_SCALE, height: 400 * MIN_FOLLOW_SCALE });
+        // A landing rect smaller than the pane: its shape, smaller by the share on both axes.
+        expect(followSize(own, { width: 300, height: 400 })).toEqual({ width: 210, height: 280 });
+        expect(HAND_SCALE).toBe(0.7);
+        // The pane's own rect: the pane, smaller by the share.
+        expect(followSize(own, own)).toEqual({ width: 420, height: 280 });
+        // A larger one of another shape: that shape, with the area of the pane's share, not blown up to the rect.
+        const upright = followSize(own, { width: 800, height: 1200 });
+        expect(upright).toEqual({ width: 280, height: 420 });
+        expect(upright.width * upright.height).toBe(420 * 280);
+        // A rect with no size is no landing rect.
+        expect(followSize(own, { width: 0, height: 400 })).toEqual(own);
     });
 });
