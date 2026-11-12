@@ -9,11 +9,11 @@
 //! came back, reached neither: the pane stayed "Not authenticated" for hours after the account read
 //! signed in, and a restart did not help.
 //!
-//! On every tick, a signed-out pane whose account holds a token that is still good **and was issued
-//! after the turn failed** (it expires later than the failure was recorded, so it is not the token
-//! that was refused) has its failure cleared and is told, as after a sign-in. A token tried once for
-//! a pane is not tried again for it: a login the provider refuses for another reason costs one turn,
-//! not one a tick.
+//! On every tick, a signed-out pane whose account holds a token that is still good has its failure
+//! cleared and is told, as after a sign-in. An access token that expired is no longer good, so the
+//! token a turn was refused on for that reason cannot pass. A token the provider refuses for another
+//! reason (revoked, say) can: it is tried once for a pane per [`TRIED_MS`] and not again, so such a
+//! login costs one turn, not one a tick.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -38,15 +38,11 @@ const TRIED_MS: i64 = 6 * 60 * 60 * 1000;
 /// within [`TRIED_MS`].
 static TRIED: LazyLock<Mutex<HashMap<String, (i64, i64)>>> = LazyLock::new(Default::default);
 
-/// Whether a token expiring at `expiry_ms` is a new login for a turn that failed at `failed_at_ms`
-/// (unix ms), at `now_ms`: still good now, and expiring after the failure. A failure stored without
-/// its time is judged on the token being good now alone.
-pub(super) fn is_new_login(expiry_ms: Option<i64>, failed_at_ms: Option<u64>, now_ms: i64) -> bool {
-    let Some(expiry) = expiry_ms else { return false };
-    if expiry <= now_ms {
-        return false;
-    }
-    failed_at_ms.is_none_or(|at| expiry > i64::try_from(at).unwrap_or(i64::MAX))
+/// Whether the credentials file holds a token that is still good at `now_ms` (unix ms). The failure
+/// being cleared is a past one, so a token good now is not the expired one the turn was refused on; it
+/// can still be one the provider refuses for another reason (revoked), which [`first_try`] bounds.
+pub(super) fn is_good_token(expiry_ms: Option<i64>, now_ms: i64) -> bool {
+    expiry_ms.is_some_and(|expiry| expiry > now_ms)
 }
 
 /// Records that `expiry_ms` is tried for `block_id` at `now_ms`; `false` when it already was within
@@ -76,7 +72,7 @@ pub(super) fn run(state: &AppState, panes: &[BlockedPane]) {
         let expiry = claude_token_expiry_ms(dir);
         let Some(block) = state.mstore.get::<Block>(&pane.block_id).ok().flatten() else { continue };
         let Some(failure) = failure_of_block(&block).filter(|f| f.code == FailureClass::Auth) else { continue };
-        let Some(expiry) = expiry.filter(|_| is_new_login(expiry, failure.at_ms, now_ms)) else { continue };
+        let Some(expiry) = expiry.filter(|_| is_good_token(expiry, now_ms)) else { continue };
         if !first_try(&mut tried, &pane.block_id, expiry, now_ms) {
             continue;
         }
@@ -96,28 +92,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_token_issued_after_the_failure_is_a_new_login() {
-        // Failed at 1000 on a token that had expired; the file now holds one good until 9000 (now 2000).
-        assert!(is_new_login(Some(9000), Some(1000), 2000));
+    fn a_token_good_now_passes() {
+        assert!(is_good_token(Some(9000), 2000));
     }
 
     #[test]
-    fn a_token_that_is_expired_or_missing_is_not() {
-        assert!(!is_new_login(Some(1500), Some(1000), 2000), "expired now");
-        assert!(!is_new_login(None, Some(1000), 2000), "no token");
-    }
-
-    #[test]
-    fn the_token_the_turn_was_refused_on_is_not_new() {
-        // The turn failed at 5000; a token that expires at or before then was there when it failed.
-        assert!(!is_new_login(Some(4000), Some(5000), 3000), "expiry not after the failure");
-        assert!(!is_new_login(Some(5000), Some(5000), 3000), "expiry equal to the failure");
-    }
-
-    #[test]
-    fn a_failure_without_its_time_is_judged_on_the_token_being_good() {
-        assert!(is_new_login(Some(9000), None, 2000));
-        assert!(!is_new_login(Some(1000), None, 2000));
+    fn a_token_that_is_expired_missing_or_expiring_now_does_not() {
+        assert!(!is_good_token(Some(1500), 2000), "expired");
+        assert!(!is_good_token(Some(2000), 2000), "expiring this instant");
+        assert!(!is_good_token(None, 2000), "no token");
     }
 
     #[test]

@@ -552,6 +552,11 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
             OAuthProbeStatus::NeedsReauth => Some("this is a CLI sign-in with no stored key: its credentials file holds no token, so it needs a sign-in".to_string()),
         };
         let result = IdentityAccountValidateResult { valid, status: probe.as_str().to_string(), masked_tail: String::new(), error };
+        // Only Claude's probe reads the token's expiry; the others call a refresh token or key valid
+        // whatever its age, which does not prove a pane's refused login works.
+        if provider != "claude" {
+            return Ok(result);
+        }
         return Ok(proven(account_id, result));
     }
     let aid = account_id.to_string();
