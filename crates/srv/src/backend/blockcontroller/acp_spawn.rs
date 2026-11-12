@@ -48,6 +48,9 @@ struct LineState {
     /// An error that ended the turn: a turn end follows it, since the error itself doesn't say
     /// whether other prompts are still running.
     turn_ended_by_error: bool,
+    /// The line answered the last prompt still running: the turn is over. A rejected steering prompt sent while an
+    /// earlier one runs is an answer too, but the turn goes on.
+    turn_over: bool,
 }
 
 impl AcpController {
@@ -323,7 +326,7 @@ impl AcpStdoutReader {
             self.on_session(&json, loaded);
             self.on_prompt_resolved(&json, &mut state);
             if !state.replaying && !state.recovered_error {
-                self.watch_for_loops(&json);
+                self.watch_for_loops(&json, &state);
                 self.watch_context(&json);
             }
         }
@@ -333,12 +336,16 @@ impl AcpStdoutReader {
 
     /// Feeds the line to the loop guard and ends the turn with `session/cancel` when it says the agent is stuck (the same
     /// brake the Claude controller has: `blockcontroller/loop_stop.rs`).
-    fn watch_for_loops(&self, json: &serde_json::Value) {
+    fn watch_for_loops(&self, json: &serde_json::Value, state: &LineState) {
         let mut brakes = self.watch.lock().unwrap();
-        let turn_over = json.get("id").is_some() && (json.pointer("/result/stopReason").is_some() || json.get("error").is_some());
-        if turn_over {
-            brakes.loop_guard.observe_acp(json);
-            brakes.ended_by_guard = false;
+        let is_answer = json.get("id").is_some() && (json.pointer("/result/stopReason").is_some() || json.get("error").is_some());
+        if is_answer {
+            // Only the answer to the last prompt running ends the turn: the guard's count and its cancel survive a
+            // steering prompt the agent rejects while an earlier one goes on.
+            if state.turn_over {
+                brakes.loop_guard.observe_acp(json);
+                brakes.ended_by_guard = false;
+            }
             return;
         }
         if brakes.ended_by_guard {
@@ -608,6 +615,7 @@ impl AcpStdoutReader {
             if turn_is_over && json.get("error").is_some() {
                 state.turn_ended_by_error = true;
             }
+            state.turn_over = turn_is_over;
             if turn_is_over {
                 self.health_clone.set_active_turn(false);
                 // Publish the flip so live controllerstatus
@@ -734,6 +742,33 @@ mod brake_tests {
             failing_round(&r, n);
         }
         assert!(rx.try_recv().is_ok(), "the next turn's loop is cut too");
+    }
+
+    /// A steering prompt the agent rejects while an earlier prompt still runs answers a prompt, but the turn goes on: the
+    /// guard keeps what it counted, and a turn it already cancelled is not cancelled again (#47457).
+    #[tokio::test]
+    async fn a_rejected_steering_prompt_does_not_reset_the_guard_while_the_turn_goes_on() {
+        let (r, mut rx) = reader();
+        r.outstanding_prompt_ids_clone.lock().unwrap().extend([3, 4]);
+        for n in 1..=4 {
+            failing_round(&r, n);
+        }
+        r.handle_line(json!({ "jsonrpc": "2.0", "id": 4, "error": { "code": -32000, "message": "busy" } }).to_string());
+        assert!(rx.try_recv().is_err(), "four failures are not a loop");
+        failing_round(&r, 5);
+        assert!(rx.try_recv().is_ok(), "the four counted before the rejection still count");
+        r.outstanding_prompt_ids_clone.lock().unwrap().insert(5);
+        r.handle_line(json!({ "jsonrpc": "2.0", "id": 5, "error": { "code": -32000, "message": "busy" } }).to_string());
+        for n in 6..=10 {
+            failing_round(&r, n);
+        }
+        assert!(rx.try_recv().is_err(), "the turn was cancelled once and a rejected prompt does not cancel it again");
+        // The last prompt running answers: the turn is over and the guard looks again.
+        r.handle_line(json!({ "jsonrpc": "2.0", "id": 3, "result": { "stopReason": "cancelled" } }).to_string());
+        for n in 11..=15 {
+            failing_round(&r, n);
+        }
+        assert!(rx.try_recv().is_ok(), "the next turn is watched");
     }
 
     #[tokio::test]
