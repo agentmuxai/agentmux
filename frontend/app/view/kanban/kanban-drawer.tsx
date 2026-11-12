@@ -4,7 +4,7 @@
 // A task opened on the Kanban: its prompt, the operator's own words, the checklist, links, its history,
 // and the moves its column allows (SPEC_WARDEN_KANBAN_2026_10_20.md §6.4, §6.7).
 
-import { createResource, createSignal, For, Show, type Accessor, type JSX, type Resource, type Setter } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, Show, type Accessor, type JSX, type Setter } from "solid-js";
 
 import { Button, Select, SidePanel, TextArea } from "@/app/element/ui";
 import { createBlock } from "@/app/store/block-layout-actions";
@@ -87,7 +87,7 @@ interface DrawerProps {
 interface DrawerState {
     props: DrawerProps;
     t: () => KanbanTask;
-    detail: Resource<KanbanTaskDetail | null>;
+    detail: Accessor<KanbanTaskDetail | null>;
     text: Accessor<string>;
     setText: Setter<string>;
     startOn: Accessor<string>;
@@ -112,12 +112,30 @@ interface DrawerState {
 
 function createDrawerState(props: DrawerProps): DrawerState {
     const t = () => props.task;
-    // Re-read the history whenever the task changes on the board.
+    // Re-read the history whenever the task changes on the board. A signal filled by the fetch, never a
+    // `createResource`: a pending resource read suspends the nearest `<Suspense>`, which is the pane's, and
+    // the whole pane would be swapped for its spinner (and the board come back scrolled to the top).
     // A string, so an equal task after a refresh is the same source and isn't fetched again.
-    const [detail] = createResource(
-        () => `${t().id}|${t().updated_at}|${t().card.updated_at}`,
-        (key) => props.model.detail(key.split("|")[0])
+    const [fetched, setFetched] = createSignal<KanbanTaskDetail | null>(null);
+    let asked = 0;
+    const key = createMemo(() => `${t().id}|${t().updated_at}|${t().card.updated_at}`);
+    createEffect(
+        on(
+            key,
+            (key) => {
+                const id = key.split("|")[0];
+                const turn = ++asked;
+                void props.model.detail(id).then((d) => {
+                    if (turn === asked) setFetched(d);
+                });
+            }
+        )
     );
+    // The last answer stays while the same task is read again; another task's is never shown under this one.
+    const detail = () => {
+        const d = fetched();
+        return d && d.task.id === t().id ? d : null;
+    };
     const [text, setText] = createSignal("");
     const [startOn, setStartOn] = createSignal("");
     const [busy, setBusy] = createSignal(false);
