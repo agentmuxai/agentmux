@@ -750,7 +750,7 @@ async fn interrupted_runs_are_closed_after_a_restart() {
             error: String::new(),
         })
         .unwrap();
-    let drone_row = ledger.drone_started("dr1", "d1", "My drone", 1).unwrap();
+    let drone_row = ledger.drone_started("dr1", "d1", "My drone", 1, &Value::Null).unwrap();
 
     assert_eq!(ledger.recover_after_restart(), 3);
     for id in [&running, &scheduled, &drone_row] {
@@ -770,7 +770,7 @@ async fn interrupted_runs_are_closed_after_a_restart() {
 async fn a_drone_run_is_written_to_the_ledger_with_its_cost() {
     use crate::drone::types::BlockState;
     let rig = rig();
-    let id = rig.ledger.drone_started("dr-9", "d-9", "Nightly graph", 100).unwrap();
+    let id = rig.ledger.drone_started("dr-9", "d-9", "Nightly graph", 100, &Value::Null).unwrap();
     let r = rig.store.job_run_get(&id).unwrap().unwrap();
     assert_eq!((r.job_source.as_str(), r.trigger.as_str(), r.state.as_str()), (SOURCE_DRONE, TRIGGER_MANUAL, state::RUNNING));
     assert_eq!((r.job_name.as_str(), r.links["drone_run_id"].as_str()), ("Nightly graph", Some("dr-9")));
@@ -790,7 +790,7 @@ async fn a_drone_run_is_written_to_the_ledger_with_its_cost() {
     let r = rig.store.job_run_get(&id).unwrap().unwrap();
     assert_eq!((r.state.as_str(), r.infra.as_str(), r.cost_usd), (state::FINISHED, infra::OK, 0.12));
 
-    let failed = rig.ledger.drone_started("dr-10", "d-9", "Nightly graph", 200).unwrap();
+    let failed = rig.ledger.drone_started("dr-10", "d-9", "Nightly graph", 200, &Value::Null).unwrap();
     rig.ledger.drone_finished(&failed, false, &Default::default(), "block t1: boom");
     let r = rig.store.job_run_get(&failed).unwrap().unwrap();
     assert_eq!((r.infra.as_str(), r.summary.as_str()), (infra::ERROR, "block t1: boom"));

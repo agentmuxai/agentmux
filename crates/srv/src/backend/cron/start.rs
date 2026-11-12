@@ -13,7 +13,7 @@ use super::{CronScheduler, FireOutcome, Fired};
 use crate::backend::jobs;
 use crate::backend::storage::cron::CronJob;
 
-/// What a `task` or `spawn` action did.
+/// What a `task`, `spawn` or `drone` action did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionOutcome {
     /// The task was filed: its queue id and card number.
@@ -21,15 +21,18 @@ pub enum ActionOutcome {
     /// The worker is open. Its brief is delivered to it as any message
     /// is, and the run ends when the worker's first turn does.
     Spawned { block_id: String, def_id: String, slug: String, brief: String, keep: bool },
+    /// The drone run started. The job's row is running and linked to it
+    /// already, and the drone's end closes it.
+    Drone,
     Failed(String),
 }
 
-/// Runs a job's `task` or `spawn` action (the server installs it: both need
+/// Runs a job's `task`, `spawn` or `drone` action (the server installs it: both need
 /// its stores and the spawn path).
 pub type ActionRunner = Arc<dyn Fn(CronJob, String) -> Pin<Box<dyn Future<Output = ActionOutcome> + Send>> + Send + Sync>;
 
 impl CronScheduler {
-    /// Run `task` and `spawn` actions through `runner` from now on. Once.
+    /// Run `task`, `spawn` and `drone` actions through `runner` from now on. Once.
     pub fn install_actions(&self, runner: ActionRunner) {
         let _ = self.actions.set(runner);
     }
@@ -41,7 +44,7 @@ impl CronScheduler {
         let delivery_started = agentmux_common::time::now_ms();
         let mut to_deliver = job.clone();
         let mut worker_started = false;
-        if matches!(job.action_kind.as_str(), "task" | "spawn") {
+        if matches!(job.action_kind.as_str(), "task" | "spawn" | "drone") {
             let acted = match self.actions.get() {
                 Some(runner) => runner(job.clone(), run_id.clone().unwrap_or_default()).await,
                 None => ActionOutcome::Failed("this build can't run the job's action here".to_string()),
@@ -52,6 +55,14 @@ impl CronScheduler {
                         let (runs, run_id, name) = (runs.clone(), run_id.clone(), job.name.clone());
                         let _ = tokio::task::spawn_blocking(move || runs.task_filed(&run_id, &name, &work_id, num)).await;
                     }
+                    let outcome = FireOutcome::Delivered { block_id: None };
+                    if scheduled {
+                        self.record_result(&job.id, &outcome);
+                    }
+                    self.publish_changed();
+                    return Fired { run_id, outcome: Some(outcome), waiting: None };
+                }
+                ActionOutcome::Drone => {
                     let outcome = FireOutcome::Delivered { block_id: None };
                     if scheduled {
                         self.record_result(&job.id, &outcome);

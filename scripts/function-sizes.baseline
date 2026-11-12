@@ -222,7 +222,7 @@
 102 crates/srv/src/bootstrap/stores.rs::prepare_in_process
 113 crates/srv/src/bootstrap/watchers.rs::start_parent_watcher
 154 crates/srv/src/broker/state.rs::update
-137 crates/srv/src/drone/executor/engine.rs::execute
+140 crates/srv/src/drone/executor/engine.rs::execute
 134 crates/srv/src/identity/oauth_client.rs::start_code_flow
 125 crates/srv/src/identity/resolver/oauth_probe.rs::probe_oauth_status
 111 crates/srv/src/messaging/discord/gateway.rs::handle_dispatch

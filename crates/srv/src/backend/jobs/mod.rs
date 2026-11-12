@@ -33,7 +33,7 @@ pub mod watchdog;
 use std::sync::Arc;
 
 use agentmux_common::time::now_ms;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::backend::cron::{FireOutcome, MissReason};
 use crate::backend::mps::Broker;
@@ -527,7 +527,14 @@ impl RunLedger {
     }
 
     /// A Drone run started: its `manual` row, running, linked to the run.
-    pub fn drone_started(&self, drone_run_id: &str, drone_id: &str, drone_name: &str, started_at_ms: i64) -> Option<String> {
+    pub fn drone_started(
+        &self,
+        drone_run_id: &str,
+        drone_id: &str,
+        drone_name: &str,
+        started_at_ms: i64,
+        trigger: &Value,
+    ) -> Option<String> {
         let mut run = self.row(drone_id, SOURCE_DRONE, drone_name, TRIGGER_MANUAL, started_at_ms);
         run.state = state::RUNNING.to_string();
         run.triggered_by = BY_OPERATOR.to_string();
@@ -535,6 +542,7 @@ impl RunLedger {
             "drone_run_id": drone_run_id,
             "channel": crate::backend::reactive::registry::local_channel_id(),
         });
+        add_trigger_digest(&mut run.links, trigger);
         match self.store.job_run_insert(&run) {
             Ok(true) => {
                 self.changed(drone_id);
@@ -546,6 +554,25 @@ impl RunLedger {
                 None
             }
         }
+    }
+
+    /// A job's `drone` action started Drone run `drone_run_id`: the job's
+    /// own row (made when the fire began) runs from now and links to it, and
+    /// `drone_finished` closes it. No transcript: the run is the Drone's.
+    pub fn drone_attached(&self, run_id: &str, drone_run_id: &str, trigger: &Value, now: i64) {
+        if let Err(e) = self.store.job_run_mark_running(run_id, "", "", "", "", now) {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't mark a Drone run running");
+            return;
+        }
+        let mut links = json!({
+            "drone_run_id": drone_run_id,
+            "channel": crate::backend::reactive::registry::local_channel_id(),
+        });
+        add_trigger_digest(&mut links, trigger);
+        if let Err(e) = self.store.job_run_add_links(run_id, &links) {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't link a Drone run");
+        }
+        self.run_changed(run_id);
     }
 
     /// A Drone run ended: `ok` and the summed cost of its Agent blocks, or
@@ -626,6 +653,18 @@ fn retry_later(error: &str) -> bool {
         || crate::backend::reactive::is_unavailable_refusal(error)
         || error.contains("out of quota")
         || error.contains("usage limit")
+}
+
+/// Note what started a Drone run without keeping it: its size and SHA-256,
+/// so the ledger shows that two runs had the same input (the body can hold
+/// text nobody should keep; real-world jobs spec D11). `Null` is no input.
+fn add_trigger_digest(links: &mut Value, trigger: &Value) {
+    use sha2::{Digest, Sha256};
+    if trigger.is_null() {
+        return;
+    }
+    let body = trigger.to_string();
+    links["trigger"] = json!({ "sha256": hex::encode(Sha256::digest(body.as_bytes())), "bytes": body.len() });
 }
 
 /// The summed `cost_usd` of a Drone run's blocks: only Agent blocks report

@@ -21,15 +21,23 @@ const DRONE_ENV_PREFIX: &str = "AGENTMUX_DR_";
 /// Holds the per-run scope. Maps:
 ///   * `outputs[block_id]` — the JSON output of a completed block
 ///   * `vars[name]` — drone-scope variables (set by Variables block)
+///   * `trigger` — what started the run: the input of `rundrone`, or what
+///     the job passed; `Null` when nothing did (`{{trigger.*}}`)
 #[derive(Debug, Default)]
 pub struct ExecutionScope {
     pub outputs: HashMap<String, Value>,
     pub vars: HashMap<String, Value>,
+    pub trigger: Value,
 }
 
 impl ExecutionScope {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A scope for a run started by `trigger`.
+    pub fn with_trigger(trigger: Value) -> Self {
+        Self { trigger, ..Self::default() }
     }
 
     /// Resolve `{{...}}` tokens in `input` against this scope. Unknown
@@ -96,6 +104,14 @@ impl ExecutionScope {
             let name = rest.first()?;
             let v = self.vars.get(*name)?;
             return Some(walk(v.clone(), &rest[1..]));
+        } else if head == "trigger" {
+            // `{{trigger.path}}`: the run input. Missing keys resolve to
+            // nothing, so the token stays visible like any unknown one.
+            let mut v = &self.trigger;
+            for key in &rest {
+                v = v.get(*key)?;
+            }
+            return Some(v.clone());
         } else if head == "env" {
             // Restrict `{{env.NAME}}` to vars under the drone
             // namespace prefix. Without this guard a Response template
@@ -168,6 +184,20 @@ mod tests {
         let mut scope = ExecutionScope::new();
         scope.vars.insert("name".to_string(), json!("world"));
         assert_eq!(scope.resolve("hi {{var.name}}"), "hi world");
+    }
+
+    #[test]
+    fn resolves_trigger_path() {
+        let scope = ExecutionScope::with_trigger(json!({ "run": { "conclusion": "failure", "attempt": 2 } }));
+        assert_eq!(scope.resolve("{{trigger.run.conclusion}} #{{trigger.run.attempt}}"), "failure #2");
+    }
+
+    #[test]
+    fn trigger_without_input_or_key_stays_visible() {
+        let none = ExecutionScope::new();
+        assert_eq!(none.resolve("{{trigger.x}}"), "{{trigger.x}}");
+        let scope = ExecutionScope::with_trigger(json!({ "a": 1 }));
+        assert_eq!(scope.resolve("{{trigger.b}}"), "{{trigger.b}}");
     }
 
     #[test]
