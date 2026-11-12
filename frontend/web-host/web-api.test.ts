@@ -21,9 +21,20 @@ describe("the browser host's AppApi", () => {
     it("refuses what only a desktop host can do, naming it", async () => {
         const api = buildWebApi();
         await expect(api.openNewWindow()).rejects.toThrow("A new window isn't available in the browser");
-        const windows = api.windows as unknown as Record<string, () => Promise<void>>;
-        await expect(windows.anything()).rejects.toThrow("windows.anything isn't available in the browser");
+        await expect(api.windows.getRect("main")).rejects.toThrow("windows.getRect isn't available in the browser");
+        await expect(api.approvals.decideSsh("a", true, "", false)).rejects.toThrow(
+            "approvals.decideSsh isn't available in the browser"
+        );
         await expect(api.restartBackend()).rejects.toThrow("Restarting the backend isn't available in the browser");
+    });
+
+    it("leaves the optional host members out, so the UI's presence checks find no desktop host", () => {
+        const { approvals, browserPanes } = buildWebApi();
+        expect(typeof approvals.decideDesktop).toBe("undefined");
+        expect(approvals.vault).toBeUndefined();
+        expect(approvals.attestOperator).toBeUndefined();
+        expect(approvals.appUpdate).toBeUndefined();
+        expect(browserPanes.autocomplete).toBeUndefined();
     });
 
     it("holds no srv key: the proxy in front of srv adds it", () => {

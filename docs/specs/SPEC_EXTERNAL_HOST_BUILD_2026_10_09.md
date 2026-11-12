@@ -55,4 +55,4 @@ None at runtime. The module is chosen when the bundle is built; the desktop bund
 
 - `web-host-module.ts` points srv's endpoints at the page's own origin and installs `window.api`.
 - `web-api.ts` is the `AppApi` for a browser: every `HostCaps` entry off, so the UI hides what needs the desktop. It ends in `satisfies AppApi`, so a member added to `AppApi` fails the type check until the browser host answers it.
-- Serve the bundle from a headless srv (`agentmux-srv --headless --frontend-dir dist/web`) behind a proxy on the page's own origin that adds srv's key; the page holds none.
+- Serve the bundle from a headless srv (`agentmux-srv --headless --frontend-dir dist/web`) behind a proxy on the page's own origin that adds srv's key; the page holds none. Whoever can reach that proxy has srv's full access, so it stays on loopback: a development setup.

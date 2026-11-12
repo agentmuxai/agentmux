@@ -10,7 +10,8 @@
 //   node scripts/build-web.mjs [--out <dir>]     default: dist/web
 //
 // Serve the result from a headless srv (`agentmux-srv --headless --frontend-dir <dir>`)
-// behind a proxy on the page's own origin that adds srv's key.
+// behind a proxy on the page's own origin that adds srv's key. Whoever can reach that
+// proxy has srv's full access, so it stays on loopback: a development setup.
 
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -18,6 +19,10 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outFlag = process.argv.indexOf("--out");
+if (outFlag > 0 && !process.argv[outFlag + 1]) {
+    console.error("usage: node scripts/build-web.mjs [--out <dir>]");
+    process.exit(2);
+}
 const outDir = path.resolve(root, outFlag > 0 ? process.argv[outFlag + 1] : "dist/web");
 
 // Vite's own entry run with this node: no shell, so the same on every platform.

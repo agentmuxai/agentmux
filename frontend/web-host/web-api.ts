@@ -26,13 +26,22 @@ function browserPlatform(): NodeJS.Platform {
     return "linux";
 }
 
-/** A host sub-API none of whose capabilities the browser has: every call is
- *  refused (the UI doesn't make them, its capability checks hide the UI). */
-function unavailableHostApi<T extends object>(name: string): T {
-    return new Proxy({} as T, {
-        get: (_t, prop) => notInBrowser(`${name}.${String(prop)}`),
-    });
+/** The keys of `T` that are not optional: the ones every host answers. */
+type RequiredKeys<T> = { [K in keyof T]-?: object extends Pick<T, K> ? never : K }[keyof T];
+
+/**
+ * A host sub-API none of whose capabilities the browser has: each required
+ * member refuses its call (the UI doesn't make them, its capability checks
+ * hide the UI). The optional members are left out, so the UI's "does this host
+ * have it" checks (`typeof api.decideDesktop === "function"`) find none.
+ * `required` names exactly `T`'s required members: a member added to `T` fails
+ * the type check until it is listed.
+ */
+function unavailableHostApi<T extends object>(name: string, required: Record<RequiredKeys<T>, true>): T {
+    return Object.fromEntries(Object.keys(required).map((key) => [key, notInBrowser(`${name}.${key}`)])) as T;
 }
+
+const refused = <K extends string>(...keys: K[]) => Object.fromEntries(keys.map((k) => [k, true])) as Record<K, true>;
 
 let lastPointer = { x: 0, y: 0 };
 
@@ -63,7 +72,7 @@ function reserveExternalWindow(): ExternalWindow | null {
         meta.name = "referrer";
         meta.content = "no-referrer";
         doc.head.append(meta);
-        doc.body.style.cssText = "margin:48px;font:15px/1.5 system-ui,sans-serif;color:#666";
+        doc.body.style.cssText = "margin:48px;font:15px/1.5 system-ui,sans-serif;color:GrayText";
         doc.body.textContent = "Opening the sign-in page…";
     } catch {
         // Only the waiting page; the window itself is what matters.
@@ -87,9 +96,71 @@ function desktopOnlyApi() {
         getAutostartStatus: notInBrowser("Start at login"),
         openSettingsFileInEditor: notInBrowser("Opening the settings file"),
         ensureSettingsFile: notInBrowser("The settings file"),
-        browserPanes: unavailableHostApi<BrowserPaneHostApi>("browserPanes"),
-        windows: unavailableHostApi<WindowHostApi>("windows"),
-        approvals: unavailableHostApi<ApprovalHostApi>("approvals"),
+        browserPanes: unavailableHostApi<BrowserPaneHostApi>(
+            "browserPanes",
+            refused(
+                "create",
+                "resize",
+                "setRects",
+                "close",
+                "navigate",
+                "showPopup",
+                "closePopup",
+                "goBack",
+                "goForward",
+                "reload",
+                "stop",
+                "cancelDownload",
+                "startDownload",
+                "focus",
+                "cut",
+                "copy",
+                "paste",
+                "print",
+                "viewSource",
+                "inspectElement",
+                "screenshot",
+                "authSubmit",
+                "authCancel",
+                "authSave",
+                "setOverlayClip",
+                "respondMediaPermission",
+                "revokeMedia"
+            )
+        ),
+        windows: unavailableHostApi<WindowHostApi>(
+            "windows",
+            refused(
+                "startDrag",
+                "maximize",
+                "getPosition",
+                "setPosition",
+                "getRect",
+                "setRect",
+                "getCursorScreenPoint",
+                "getPaneDebugState",
+                "captureViewport",
+                "recycleBegin",
+                "recycleDeclined",
+                "recycleCancel",
+                "takeReloadSnapshot",
+                "openFloatingPane",
+                "isMaximized",
+                "toggleFloatingMaximize",
+                "setFloatingAlwaysOnTop",
+                "getFloatingRedockTarget",
+                "updateFloatingRedockHover",
+                "clearFloatingRedockHover",
+                "setFloatingRedockTarget",
+                "poolWindowReady",
+                "panePoolWindowReady",
+                "resolveWindowAtCursor"
+            )
+        ),
+        approvals: unavailableHostApi<ApprovalHostApi>(
+            "approvals",
+            refused("decideCredential", "decideSsh", "decideBrowserAttention", "decideWidget")
+        ),
     } satisfies Partial<AppApi>;
 }
 
