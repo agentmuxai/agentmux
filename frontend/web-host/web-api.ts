@@ -322,6 +322,7 @@ function dragApi() {
         liveFollowBegin: resolved(undefined),
         liveFollowEnd: resolved(undefined),
         liveFollowResize: resolved(undefined),
+        liveFollowCapture: resolved({ staged: false }),
         setHostKeys: noop,
     } satisfies Partial<AppApi>;
 }
