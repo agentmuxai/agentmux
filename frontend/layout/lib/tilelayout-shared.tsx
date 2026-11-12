@@ -33,6 +33,7 @@ import {
     LayoutTreeComputeMoveNodeAction,
 } from "./types";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
+import { shouldReduceMotion } from "@/app/motion/motion";
 import { clearPlacement, previewPlacement } from "./placementPreview";
 import { commitTearOff, leaveOwnPane, restOverOwnPane } from "./tearOffPreview";
 import {
@@ -44,6 +45,7 @@ import {
 import { dragState, isCrossTabDrag } from "./tilelayout-drag-state";
 import { stackMovePlan } from "./stackMembers";
 import { tileItemType } from "@/app/drag/drag-types";
+import { setTransform } from "./utils";
 
 /**
  * Whether a cross-tab drop at `compute` is offered (has an indicator). A target the move would
@@ -52,6 +54,31 @@ import { tileItemType } from "@/app/drag/drag-types";
  */
 function crossTabDropOffered(model: LayoutModel, compute: LayoutTreeComputeMoveNodeAction): boolean {
     return computeMoveNode(model.treeState, compute) !== undefined;
+}
+
+/**
+ * The frames of the panes that just left the layout, each fading where its pane stood while the others glide
+ * over its place (settlingPass.ts). A frame only, not the pane's content, and nothing a pointer or a screen
+ * reader meets. Under the panes, outside their container: a lone pane is styled as its container's only child.
+ */
+export function ClosedPaneGhosts(props: { layoutModel: LayoutModel }) {
+    const ghosts = () => props.layoutModel.settlingPass()?.ghosts ?? [];
+    // The glide's own length, the shorter one under reduced motion (TileLayout.core.tsx `tileStyle`).
+    const duration = () => `var(${shouldReduceMotion("transition") ? "--duration-fast" : "--duration-base"})`;
+    return (
+        <div class="ghost-container" aria-hidden="true">
+            <Key each={ghosts()} by={(ghost) => ghost.id}>
+                {(ghost) => (
+                    <div
+                        class="tile-ghost"
+                        style={{ ...(setTransform(ghost().rect) as JSX.CSSProperties), "animation-duration": duration() }}
+                    >
+                        <div class="tile-ghost-frame" />
+                    </div>
+                )}
+            </Key>
+        </div>
+    );
 }
 
 export function NodeBackdrops(props: { layoutModel: LayoutModel }) {

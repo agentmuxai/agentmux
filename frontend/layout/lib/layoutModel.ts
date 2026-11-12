@@ -12,6 +12,7 @@ import { createEffect, createMemo, createRoot, getOwner, on, runWithOwner, Owner
 import { chipDropRect } from "./chipPlaceholder";
 import { createPlacementPreview, type FutureLayout } from "./futureLayout";
 import { createLiveReflow, type ReflowEntry } from "./liveReflow";
+import { createSettlingPass, type SettlingPass } from "./settlingPass";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode, withDerivedNodeIds } from "./layoutNode";
 import { computeMoveNode } from "./layoutTree";
@@ -287,6 +288,8 @@ export class LayoutModel {
     reflowFor: (nodeId: string) => ReflowEntry | undefined;
     /** Whether the live reflow is showing a drop now: the panes are the outline, so no wireframe and no dim. */
     liveReflowActive: () => boolean;
+    /** The glide of the panes after one left outside a drag, while it runs (settlingPass.ts). */
+    settlingPass: () => SettlingPass | undefined;
     /**
      * CSS properties for the overlay container.
      */
@@ -780,7 +783,8 @@ export class LayoutModel {
 
     /**
      * The drag's drop preview, in the constructor's reactive owner: the layout the pending action leaves, the
-     * ghost, the wireframe (futureLayout.ts) and the live reflow (liveReflow.ts).
+     * ghost, the wireframe (futureLayout.ts), the live reflow (liveReflow.ts) and its second source, the
+     * settling pass (settlingPass.ts).
      */
     private createDropPreview(): void {
         ({
@@ -791,6 +795,7 @@ export class LayoutModel {
         this.placeholderTransform = createMemo<CSSProperties>(() =>
             this.getPlaceholderTransform(this.pendingTreeAction.throttledValueAtom())
         );
+        this.settlingPass = createSettlingPass(this);
         ({ reflowFor: this.reflowFor, liveReflowActive: this.liveReflowActive } = createLiveReflow(this));
     }
 
