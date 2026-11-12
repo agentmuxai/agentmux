@@ -78,12 +78,10 @@ const UpdateStatus = (): JSX.Element => {
         const state = fromSrv() ? releaseDownload()?.state : undefined;
         return state === "downloading" || state === "unpacking";
     };
-    // The panel is for a staged release and for the wait on agents after Restart now; once the
-    // launcher has been asked, only its own dialog can stop it.
-    const hasPanel = () => {
-        const state = staged()?.state;
-        return state === "ready" || state === "waiting";
-    };
+    // The panel is for a staged release, for the wait on agents after Restart now, and for the
+    // restart that follows by itself: once the launcher has been asked the panel only says so,
+    // since its own dialog is then the one place to stop it.
+    const hasPanel = () => !!staged();
     const [panelOpen, setPanelOpen] = createSignal(false);
     let chipRef: HTMLDivElement | undefined;
     const updaterStatus = () => (staged() ? "ready" : fromSrv() ? "available" : atoms.updaterStatusAtom());
@@ -91,9 +89,9 @@ const UpdateStatus = (): JSX.Element => {
     const clickable = () => updaterStatus() === "ready" || updaterStatus() === "available";
 
     const handleClick = () => {
-        // A release srv staged: What's new / Restart now / Later. A restart under way, or a
-        // release srv found but did not stage: the version panel, which has the rest. The click
-        // itself installs nothing: Restart now still ends in the launcher's own dialog.
+        // A release srv staged: What's new / Restart now / Later, and what a restart under way
+        // waits for. A release srv found but did not stage: the version panel, which has the rest.
+        // The click itself installs nothing: Restart now still ends in the launcher's own dialog.
         if (hasPanel()) {
             setPanelOpen(!panelOpen());
             return;

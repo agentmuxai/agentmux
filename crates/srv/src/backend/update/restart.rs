@@ -6,8 +6,8 @@
 //! phase 3b).
 //!
 //! Once a release is staged (`update::download`), the user's click waits for
-//! every agent to finish its turn (for as long as that takes, with the count
-//! in the panel read again every pass; "Now" skips the wait, and Cancel stops
+//! every agent to finish its turn (for as long as that takes, with who is
+//! waited for read again every pass; "Now" skips the wait, and Cancel stops
 //! it), then srv asks the launcher to restart into the new
 //! version with an `AGENTMUXSRV-UPGRADE` line on its stderr. The launcher
 //! checks the folder again and asks the user itself
@@ -16,6 +16,14 @@
 //! cancelled here (No in the dialog does). If nothing has happened three
 //! minutes later (declined, or an AgentMux that can't restart itself), the
 //! status goes back to ready and says so.
+//!
+//! What the wait is for, and nothing else: an agent whose process is alive
+//! and which is in the middle of a turn ([`busy_controllers`]). A turn held
+//! up by a request that is being retried is still a turn, and the status says
+//! so, since such a wait can be long. What agents left running in the
+//! background is not waited for: it is listed, and the restart stops it.
+//! With nobody to wait for the state is `restarting` at once: `waiting`
+//! always names at least one agent.
 //!
 //! Every change of state happens under [`RUN`], checked against the run it
 //! belongs to, so a Cancel can never be overtaken by a run it stopped.
@@ -27,7 +35,7 @@ use std::time::Duration;
 use agentmux_common::srv_stderr::{UpgradeTarget, INSTALL_RESULT_FILE, UPGRADE_DECLINED_FILE};
 
 use crate::backend::blockcontroller::{BlockControllerRuntimeStatus, STATUS_DONE};
-use crate::backend::update::check::{self, AppUpdateStatus, DownloadStatus};
+use crate::backend::update::check::{self, AppUpdateStatus, DownloadStatus, WaitingOn};
 
 const POLL: Duration = Duration::from_secs(2);
 /// How long the launcher has to ask the user and quit. Longer than the
@@ -58,10 +66,18 @@ fn if_current(run: u64, f: impl FnOnce()) -> bool {
 /// running that it stops, [`stopping`]) is listed with it; the launcher's
 /// dialog lists it too. Gathered by the caller, outside [`RUN`]: it scans
 /// every agent pane's processes.
-fn set(d: &DownloadStatus, state: &str, waiting_for: u32, error: Option<String>, stopping: Vec<String>) {
+fn set(d: &DownloadStatus, state: &str, waiting_on: Vec<WaitingOn>, error: Option<String>, stopping: Vec<String>) {
     let stopping = if matches!(state, "waiting" | "restarting") { stopping } else { Vec::new() };
     crate::backend::background_work::write_for_launcher(&stopping);
-    check::set_download(Some(DownloadStatus { state: state.to_string(), waiting_for, error, stopping, ..d.clone() }));
+    check::set_download(Some(with_wait(d, state, waiting_on, error, stopping)));
+}
+
+/// `d` in `state`. Only `waiting` says who is waited for, and it always names someone: a wait for nobody is not a
+/// wait, so it is said as `restarting`, which is what comes next.
+fn with_wait(d: &DownloadStatus, state: &str, waiting_on: Vec<WaitingOn>, error: Option<String>, stopping: Vec<String>) -> DownloadStatus {
+    let waiting_on = if state == "waiting" { waiting_on } else { Vec::new() };
+    let state = if state == "waiting" && waiting_on.is_empty() { "restarting" } else { state };
+    DownloadStatus { state: state.to_string(), waiting_for: waiting_on.len() as u32, waiting_on, error, stopping, ..d.clone() }
 }
 
 /// [`stopping`] off the async threads.
@@ -75,26 +91,69 @@ pub(crate) fn stopping() -> Vec<String> {
     crate::backend::background_work::running().iter().map(|w| crate::backend::background_work::describe(w, now)).collect()
 }
 
-/// The controllers in the middle of a turn, a line each (block id, kind, process state) for the log.
+/// A pane's controller, as the wait reads it.
+#[derive(Debug, Clone, Default)]
+struct Seen {
+    block: String,
+    kind: String,
+    status: BlockControllerRuntimeStatus,
+    /// The agent's name; empty for a pane that has none.
+    agent: String,
+    /// Its CLI is trying a request to the model again now: `Some(None)` when the request got no answer (the
+    /// network), `Some(Some(status))` when the API answered with that HTTP status.
+    retry: Option<Option<u16>>,
+}
+
+/// One agent the restart waits for: what a window is told, and its line for the log (block id, kind, process state).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Busy {
+    on: WaitingOn,
+    log: String,
+}
+
+/// The controllers in the middle of a turn.
 ///
 /// A controller whose process has ended can't be in a turn: a `turn_active` left behind by an agent that stopped
-/// or errored mid-turn is not counted, or the restart would wait for something that will never finish.
-fn busy_controllers<'a>(controllers: impl Iterator<Item = (&'a str, &'a str, &'a BlockControllerRuntimeStatus)>) -> Vec<String> {
+/// or errored mid-turn is not counted, or the restart would wait for something that will never finish. An agent
+/// whose request is being retried is still in its turn and is waited for; it says why, since the retries of a
+/// request that gets no answer can go on for minutes.
+fn busy_controllers(controllers: &[Seen]) -> Vec<Busy> {
     controllers
-        .filter(|(_, _, status)| status.turn_active && status.shellprocstatus != STATUS_DONE)
-        .map(|(block, kind, status)| format!("{block} ({kind}, {})", status.shellprocstatus))
+        .iter()
+        .filter(|c| c.status.turn_active && c.status.shellprocstatus != STATUS_DONE)
+        .map(|c| {
+            let (why, held_up) = match c.retry {
+                None => ("turn", ""),
+                Some(None) => ("network_retry", ", retrying after no answer from the API"),
+                Some(Some(_)) => ("api_retry", ", retrying after an API error"),
+            };
+            Busy {
+                on: WaitingOn { agent: c.agent.clone(), why: why.to_string() },
+                log: format!("{} ({}, {}{held_up})", c.block, c.kind, c.status.shellprocstatus),
+            }
+        })
         .collect()
 }
 
 /// Agents in the middle of a turn, read now each time it is asked and never kept.
-fn busy_now() -> Vec<String> {
-    let controllers = crate::backend::blockcontroller::get_all_controllers();
-    let statuses: Vec<_> = controllers.iter().map(|(block, c)| (block.clone(), c.controller_type().to_string(), c.get_runtime_status())).collect();
-    busy_controllers(statuses.iter().map(|(block, kind, status)| (block.as_str(), kind.as_str(), status)))
+fn busy_now() -> Vec<Busy> {
+    let names: std::collections::HashMap<String, String> =
+        crate::backend::reactive::get_global_handler().list_agents().into_iter().map(|a| (a.block_id, a.agent_id)).collect();
+    let seen: Vec<Seen> = crate::backend::blockcontroller::get_all_controllers()
+        .iter()
+        .map(|(block, c)| Seen {
+            block: block.clone(),
+            kind: c.controller_type().to_string(),
+            status: c.get_runtime_status(),
+            agent: names.get(block).cloned().unwrap_or_default(),
+            retry: crate::backend::agent_api_retry::current_api_retry(block).retry.map(|r| r.error_status),
+        })
+        .collect();
+    busy_controllers(&seen)
 }
 
-fn working_agents() -> u32 {
-    busy_now().len() as u32
+fn waited_for(busy: &[Busy]) -> Vec<WaitingOn> {
+    busy.iter().map(|b| b.on.clone()).collect()
 }
 
 /// The staged release of the latest version, if it is still on disk.
@@ -142,8 +201,9 @@ pub fn start(now: bool) -> Result<AppUpdateStatus, String> {
     let (d, target) = staged(&check::current_status())?;
     *current += 1;
     let run_id = *current;
-    // The list follows at once from `run`, off the async threads.
-    set(&d, "waiting", if now { 0 } else { working_agents() }, None, Vec::new());
+    // With nobody to wait for (or "Now") this says `restarting` at once: the launcher is asked a moment later.
+    // What the restart stops follows from `run`, off the async threads.
+    set(&d, "waiting", if now { Vec::new() } else { waited_for(&busy_now()) }, None, Vec::new());
     drop(current);
     tokio::spawn(run(run_id, d, target, now));
     Ok(check::current_status())
@@ -160,7 +220,7 @@ pub fn cancel() -> Result<AppUpdateStatus, String> {
         }
         Some(d) if d.state == "waiting" => {
             *current += 1;
-            set(d, "ready", 0, None, Vec::new());
+            set(d, "ready", Vec::new(), None, Vec::new());
             Ok(check::current_status())
         }
         _ => Ok(status),
@@ -207,21 +267,22 @@ fn take_declined(file: &Path, version: &str) -> bool {
 }
 
 async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
-    // Waits for every agent to finish its turn for as long as that takes. It ends when the count reaches zero, with
-    // "Now", or when the user cancels (which supersedes this run). The count in the panel is read again each pass,
-    // and who is being waited for is logged whenever that changes, so a wait that doesn't end can be explained.
+    // Waits for every agent to finish its turn for as long as that takes. It ends when nobody is in one, with
+    // "Now", or when the user cancels (which supersedes this run). Who is waited for is read again each pass,
+    // and logged whenever that changes, so a wait that doesn't end can be explained.
     let mut last_busy: Option<Vec<String>> = None;
     loop {
         let busy = if now { Vec::new() } else { busy_now() };
         if busy.is_empty() {
             break;
         }
-        if last_busy.as_ref() != Some(&busy) {
-            tracing::info!(version = %d.version, busy = ?busy, "upgrade: waiting for agents to finish their turn");
-            last_busy = Some(busy.clone());
+        let lines: Vec<String> = busy.iter().map(|b| b.log.clone()).collect();
+        if last_busy.as_ref() != Some(&lines) {
+            tracing::info!(version = %d.version, busy = ?lines, "upgrade: waiting for agents to finish their turn");
+            last_busy = Some(lines);
         }
         let listed = stopping_now().await;
-        if !if_current(run_id, || set(&d, "waiting", busy.len() as u32, None, listed)) {
+        if !if_current(run_id, || set(&d, "waiting", waited_for(&busy), None, listed)) {
             return;
         }
         tokio::time::sleep(POLL).await;
@@ -235,7 +296,7 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
         if let Some(file) = declined.as_deref() {
             let _ = std::fs::remove_file(file);
         }
-        set(&d, "restarting", 0, None, listed);
+        set(&d, "restarting", Vec::new(), None, listed);
         tracing::info!(version = %d.version, target = ?target, "upgrade: asking the launcher to restart");
         eprintln!("{}", agentmux_common::srv_stderr::upgrade_line(&d.version, &target));
     });
@@ -254,12 +315,12 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
         // A `.deb`/`.rpm` upgrade the launcher couldn't start: it says why.
         if let Some(why) = take_install_failure(&crate::backend::update::download::updates_root(), &d.version) {
             tracing::info!(version = %d.version, %why, "upgrade: the package install didn't start");
-            if_current(run_id, || set(&d, "ready", 0, Some(why), Vec::new()));
+            if_current(run_id, || set(&d, "ready", Vec::new(), Some(why), Vec::new()));
             return;
         }
         if declined.as_deref().is_some_and(|f| take_declined(f, &d.version)) {
             tracing::info!(version = %d.version, "upgrade: the restart was declined");
-            if_current(run_id, || set(&d, "ready", 0, None, Vec::new()));
+            if_current(run_id, || set(&d, "ready", Vec::new(), None, Vec::new()));
             return;
         }
     }
@@ -267,7 +328,7 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
         set(
             &d,
             "ready",
-            0,
+            Vec::new(),
             Some("AgentMux didn't restart: the upgrade was declined or not answered in time, or this AgentMux can't restart itself. Try again, or install the new version from the release page.".into()),
             Vec::new(),
         )
@@ -282,8 +343,60 @@ mod tests {
         BlockControllerRuntimeStatus { turn_active, shellprocstatus: process.to_string(), ..Default::default() }
     }
 
+    fn seen(list: &[(&str, &str, BlockControllerRuntimeStatus)]) -> Vec<Seen> {
+        list.iter()
+            .map(|(block, kind, status)| Seen { block: block.to_string(), kind: kind.to_string(), status: status.clone(), ..Default::default() })
+            .collect()
+    }
+
+    /// The log's lines for who is waited for.
     fn busy(list: &[(&str, &str, BlockControllerRuntimeStatus)]) -> Vec<String> {
-        busy_controllers(list.iter().map(|(block, kind, status)| (*block, *kind, status)))
+        busy_controllers(&seen(list)).into_iter().map(|b| b.log).collect()
+    }
+
+    fn agent(name: &str, turn_active: bool, retry: Option<Option<u16>>) -> Seen {
+        Seen { block: format!("b-{name}"), kind: "persistent".into(), status: controller(turn_active, "running"), agent: name.into(), retry }
+    }
+
+    fn on(agent: &str, why: &str) -> WaitingOn {
+        WaitingOn { agent: agent.into(), why: why.into() }
+    }
+
+    #[test]
+    fn an_agent_retrying_a_request_is_waited_for_and_says_what_holds_it_up() {
+        let list = [
+            agent("Vmer", true, Some(None)),
+            agent("Deke", true, Some(Some(529))),
+            agent("Posa", true, None),
+            // A retry left from a turn that has ended holds nothing up.
+            agent("Idle", false, Some(None)),
+        ];
+        let busy = busy_controllers(&list);
+        assert_eq!(waited_for(&busy), [on("Vmer", "network_retry"), on("Deke", "api_retry"), on("Posa", "turn")]);
+        assert_eq!(busy[0].log, "b-Vmer (persistent, running, retrying after no answer from the API)");
+        assert_eq!(busy[1].log, "b-Deke (persistent, running, retrying after an API error)");
+        assert_eq!(busy[2].log, "b-Posa (persistent, running)");
+        // Its process ended mid-retry: nothing is left to finish.
+        let mut gone = agent("Vmer", true, Some(None));
+        gone.status.shellprocstatus = "done".into();
+        assert!(busy_controllers(&[gone]).is_empty());
+    }
+
+    #[test]
+    fn a_wait_always_names_someone_and_a_wait_for_nobody_is_the_restart() {
+        let d = download("ready", None);
+        let waiting = with_wait(&d, "waiting", vec![on("Vmer", "turn"), on("Deke", "network_retry")], None, vec!["Vmer: `task dev`".into()]);
+        assert_eq!((waiting.state.as_str(), waiting.waiting_for), ("waiting", 2));
+        assert_eq!(waiting.waiting_on, [on("Vmer", "turn"), on("Deke", "network_retry")]);
+        assert_eq!(waiting.stopping, ["Vmer: `task dev`"]);
+        // Nobody in a turn, or "Now": never `waiting` with a count of 0.
+        let nobody = with_wait(&d, "waiting", Vec::new(), None, Vec::new());
+        assert_eq!((nobody.state.as_str(), nobody.waiting_for, nobody.waiting_on.len()), ("restarting", 0, 0));
+        // Who was waited for is not carried into the states after the wait.
+        for state in ["restarting", "ready"] {
+            let after = with_wait(&waiting, state, vec![on("Vmer", "turn")], None, Vec::new());
+            assert_eq!((after.state.as_str(), after.waiting_for, after.waiting_on.len()), (state, 0, 0));
+        }
     }
 
     #[test]
@@ -329,6 +442,7 @@ mod tests {
             can_download: true,
             download,
             install_first: None,
+            rev: 0,
         }
     }
 
@@ -342,6 +456,7 @@ mod tests {
             folder: folder.map(|f| f.display().to_string()),
             installer: None,
             waiting_for: 0,
+            waiting_on: Vec::new(),
             stopping: Vec::new(),
         }
     }

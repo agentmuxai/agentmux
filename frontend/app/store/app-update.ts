@@ -27,6 +27,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { DownloadStatus } from "@/types/rpc/DownloadStatus";
+import type { WaitingOn } from "@/types/rpc/WaitingOn";
 
 export type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 
@@ -40,10 +41,29 @@ const [appUpdate, setAppUpdate] = createSignal<AppUpdateStatus | null>(null);
 /** What srv last said, or null before it has. */
 export { appUpdate };
 
-/** Take a status from `app.update-status` or the event; ignores anything malformed. */
+/**
+ * How far back a status can have been overtaken. The answer to a click and the event for the change after it
+ * cross by milliseconds; a status older than this is another run of srv, or a clock that was set back, and is taken.
+ */
+const OVERTAKEN_WITHIN_MS = 10 * 60 * 1000;
+
+/**
+ * Whether a status numbered `next` is older than the one numbered `have` (srv's `rev`, which rises with every
+ * change). 0 is a status that doesn't say, which is taken as it comes.
+ */
+export function overtaken(next: number, have: number): boolean {
+    return next > 0 && have > 0 && next < have && have - next < OVERTAKEN_WITHIN_MS;
+}
+
+/**
+ * Take a status from `app.update-status`, a click's answer or the event; ignores anything malformed, and a status
+ * srv has already replaced: a click's answer ("waiting") can arrive after the event for what came next
+ * ("restarting"), and must not put the window back.
+ */
 export function acceptAppUpdate(next: unknown): void {
     const s = next as Partial<AppUpdateStatus> | null | undefined;
     if (typeof s?.state !== "string" || !STATES.has(s.state) || typeof s.current !== "string") return;
+    if (overtaken(s.rev ?? 0, appUpdate()?.rev ?? 0)) return;
     setAppUpdate(s as AppUpdateStatus);
 }
 
@@ -287,10 +307,10 @@ export function releaseNotesUrl(version: string | null | undefined): string {
  */
 export function stagedRelease(
     s: AppUpdateStatus | null = appUpdate(),
-): { version: string; state: "ready" | "waiting" | "restarting"; waitingFor: number } | null {
+): { version: string; state: "ready" | "waiting" | "restarting"; waitingFor: number; waitingOn: WaitingOn[] } | null {
     const d = availableRelease(s) ? releaseDownload(s) : null;
     if (!d || (d.state !== "ready" && d.state !== "waiting" && d.state !== "restarting")) return null;
-    return { version: d.version, state: d.state, waitingFor: d.waiting_for ?? 0 };
+    return { version: d.version, state: d.state, waitingFor: d.waiting_for ?? 0, waitingOn: d.waiting_on ?? [] };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
