@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The freeze-frame a browser pane holds while a menu hides its native surface (Linux, and Windows in
- * Views pane mode): which panes it applies to, when it captures (on pointer-down of a menu anchor, or
+ * The freeze-frame a browser pane holds while a menu hides its native surface (a Views pane on Linux
+ * or Windows whose host does not cut it around the menu): which panes it applies to, when it captures (on pointer-down of a menu anchor, or
  * when the overlay's clip arrives), what the held frame and its geometry are, how long it is held, and
  * what it hands the host to wait on.
  */
@@ -14,13 +14,14 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import type { BrowserViewModel } from "./browser-model";
 import type { PaneRect } from "./use-pane-rect-sync";
 
-const env = vi.hoisted(() => ({ screenshot: vi.fn(), views: { on: false } }));
+const env = vi.hoisted(() => ({ screenshot: vi.fn(), views: { on: false }, clip: { on: false } }));
 
 vi.mock("@/util/app-api", () => ({
-    getApi: () => ({ browserPanes: { screenshot: env.screenshot } }),
-}));
-vi.mock("@/app/platform/pane-backend", () => ({
-    isViewsPanesOnWindows: () => env.views.on,
+    getApi: () => ({
+        browserPanes: { screenshot: env.screenshot },
+        getAboutModalDetails: () => ({ paneBackend: env.views.on ? "views" : "hwnd", paneClip: env.clip.on }),
+        listen: () => Promise.resolve(() => {}),
+    }),
 }));
 
 import { useFreezeFrame, type FreezeFrame } from "./use-freeze-frame";
@@ -80,6 +81,7 @@ beforeEach(() => {
     vi.useFakeTimers();
     userAgent(LINUX);
     env.views.on = false;
+    env.clip.on = false;
     env.screenshot.mockReset().mockResolvedValue({ png_base64: "AAAA" });
     Object.defineProperty(window, "devicePixelRatio", { value: 2, configurable: true });
     const placeholder = document.createElement("div");
@@ -105,6 +107,21 @@ describe("which panes it applies to", () => {
         prewarm();
         await flush();
         expect(env.screenshot).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing where the host cuts the pane around the menu and it stays live", async () => {
+        env.clip.on = true;
+        mount();
+        prewarm();
+        clip({ rects: [{ x: 0, y: 0, w: 1000, h: 1000 }], wait: vi.fn() });
+        await flush();
+        expect(env.screenshot).not.toHaveBeenCalled();
+
+        userAgent(WINDOWS);
+        env.views.on = true;
+        prewarm();
+        await flush();
+        expect(env.screenshot).not.toHaveBeenCalled();
     });
 
     it("does nothing on macOS, where the pane stays live", async () => {

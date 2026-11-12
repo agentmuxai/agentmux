@@ -14,7 +14,7 @@ import { DEFAULT_TRACKER, DropIntentTracker } from "./dropIntentTracker";
 import { dragState } from "./tilelayout-drag-state";
 import { clampCrossTabDirection } from "./crossTabDrag";
 import type { LayoutModel } from "./layoutModel";
-import { leaveOwnPane } from "./tearOffPreview";
+import { leaveOwnPane, pointerOutsideWindow } from "./tearOffPreview";
 import { DropDirection, LayoutTreeActionType, type LayoutNode, type LayoutTreeComputeMoveNodeAction } from "./types";
 import { determineDropDirection } from "./utils";
 
@@ -68,7 +68,11 @@ export function showPlacement(
         // only; the drop never commits this pending action locally.
         nodeToMove: input.foreignNode,
     } as LayoutTreeComputeMoveNodeAction;
-    // The pointer is over another pane: no tear-off is shown (tearOffPreview.ts).
+    // A sample the throttle held back past the pointer's exit: the pointer is outside now, and what the
+    // window shows is the tear-off (tearOffPreview.ts), which a placement would replace. Coming back is
+    // the window's `dragenter`, not a stale sample.
+    if (pointerOutsideWindow(model)) return compute;
+    // The pointer is over another pane: no tear-off is shown.
     leaveOwnPane(model);
     model.treeReducer(compute);
     return compute;

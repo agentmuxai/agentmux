@@ -126,13 +126,13 @@ function drawnRect(nodeId: string, fallback: Dimensions): Dimensions {
 }
 
 /** Whether a change of `model`'s tree may glide now. */
-function mayGlide(model: LayoutModel, state: State, paneCount: number): boolean {
+function mayGlide(model: LayoutModel, state: State, paneCount: number, tearOffShown = false): boolean {
     if (!liveReflowEnabled() || scaledMs(DURATION_BASE_MS) <= 0) return false;
     if (paneCount > REFLOW_MAX_PANES || paneCaptureInFlight()) return false;
     // A tab that is being switched to or made is hidden until it has settled (tab-reveal.ts): the panes that
     // open into it meanwhile are not seen arriving.
     if (tabSwitching()) return false;
-    if (state.dragShown || model.activeDrag() || model.tearOffLayout()) return false;
+    if (model.activeDrag() || (!tearOffShown && (state.dragShown || model.tearOffLayout()))) return false;
     // Magnified now, or as last published (the pane that closed was the magnified one): the tiles are hidden.
     if (model.isResizing() || model.treeState.magnifiedNodeId || model.magnifiedNodeIdAtom()) return false;
     // A window tab that is not shown keeps its layout mounted (workspace.tsx marks it, pane-overlay.ts
@@ -208,6 +208,26 @@ function movesOf(
         if (from && !sameShown(from, to)) moves.set(leaf.id, { from, to });
     }
     return moves;
+}
+
+/**
+ * A tear-off a drag showed is taken off with nothing committed (Escape, a drag that ended elsewhere): the
+ * panes are drawn at the rects it gave them (`shown`, by node id) and glide back to their own. A drag that is
+ * still live keeps its own reflow, which does this by itself.
+ */
+export function settleBack(model: LayoutModel, shown: Record<string, Dimensions>): void {
+    const state = states.get(model);
+    if (!state || untrack(model.activeDrag)) return;
+    const leafs = untrack(model.leafs);
+    if (!untrack(() => mayGlide(model, state, leafs.length, true))) return;
+    const props = untrack(model.additionalProps);
+    const moves = new Map<string, PaneMove>();
+    for (const leaf of leafs) {
+        const from = shown[leaf.id];
+        const to = props[leaf.id]?.rect;
+        if (from && to && movesWithReflow(leaf) && !sameShown(from, to)) moves.set(leaf.id, { from, to });
+    }
+    if (moves.size > 0) openSettlingPass(model, { moves, ghosts: [], enters: [], gliding: false });
 }
 
 /**

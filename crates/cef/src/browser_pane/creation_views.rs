@@ -75,17 +75,24 @@ use crate::state::AppState;
 /// (Views works in DIP, the page's CSS pixels); Linux and macOS use the rect as
 /// sent, as they always have.
 pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
+    let scale = views_scale(window);
+    let dip = |v: i32| (v as f64 / scale).round() as i32;
+    Rect { x: dip(rect.x), y: dip(rect.y), width: dip(rect.width), height: dip(rect.height) }
+}
+
+/// How many of the page's physical pixels one Views unit is in `window`: its display's scale on
+/// Windows, 1 on Linux and macOS (and for a window with no display).
+pub(crate) fn views_scale(window: Option<&Window>) -> f64 {
     #[cfg(target_os = "windows")]
     if let Some(scale) = window
         .and_then(|w| w.display())
         .map(|d| cef::ImplDisplay::device_scale_factor(&d) as f64)
         .filter(|s| *s > 0.0)
     {
-        let dip = |v: i32| (v as f64 / scale).round() as i32;
-        return Rect { x: dip(rect.x), y: dip(rect.y), width: dip(rect.width), height: dip(rect.height) };
+        return scale;
     }
     let _ = window;
-    rect.clone()
+    1.0
 }
 
 /// The two setters `place_at` calls on an overlay, so the order it calls them in has a test.
@@ -587,15 +594,12 @@ pub(crate) fn resize_browser_pane_view_inner(
     // macOS visibility is rect-only: overlays no longer hide the pane there —
     // the hole-punch mask (ui_tasks/pane_hole_mask.rs, applied by
     // SetPaneOverlayClipViewsTask) handles overlay occlusion while the pane
-    // stays visible. Consulting overlay state here (as compute_pane_visible
-    // does) would wrongly hide the whole pane on a resize that happens while
-    // a menu is open. Known spike gap: a resize/move under a STATIC open
+    // stays visible. Consulting overlay state here would wrongly hide the
+    // whole pane on a resize that happens while a menu is open. Known spike gap: a resize/move under a STATIC open
     // menu leaves the mask holes at their old pane-relative offset until the
     // next overlay-clip dispatch.
     #[cfg(target_os = "macos")]
     let visible = pane_rect.2 > 0 && pane_rect.3 > 0;
-    #[cfg(not(target_os = "macos"))]
-    let visible = crate::browser_panes::compute_pane_visible(state, &window_label, pane_rect);
 
     // On macOS, CEF's SetSize/SetPosition are permanent no-ops on NativeWidgetMacNSWindow,
     // and window.layout() triggers NativeWidgetMac::SetBounds() which resets the frame
@@ -656,21 +660,19 @@ pub(crate) fn resize_browser_pane_view_inner(
         let window = state.windows.lock().get(&window_label).cloned();
         let rect = followed_rect(label, window.as_ref(), rect);
         place_overlay(&controller, window.as_ref(), &rect);
-        // Visibility = AND of the two independent hide reasons:
-        //  - Zero-area rect (frontend placed the placeholder in `display:none`
+        // What is shown has two independent reasons:
+        //  - A zero-area rect (the frontend put the placeholder in `display:none`
         //    when the tab is inactive → getBoundingClientRect reports 0×0).
-        //  - This pane's bounds intersect a registered overlay-clip rect for
-        //    its window (DOM modal/menu/tooltip is on top of it).
-        // Both are tracked in AppState; `compute_pane_visible` is the single
-        // authoritative answer, shared with `SetPaneOverlayClipViewsTask`.
-        // Without consulting overlay-clip state here, a positive-rect resize
-        // (e.g. user drags a splitter while a modal is open) would clobber
-        // the airspace's set_visible(0) — Codex review on PR #881.
-        // Only on a change: re-showing a shown pane is not free.
-        let shown = if visible { 1 } else { 0 };
-        if controller.is_visible() != shown {
-            controller.set_visible(shown);
-        }
+        //  - What the app page has over the pane (a modal, a menu, a tooltip): the
+        //    overlay rects registered for its window, cut out of the pane.
+        // `views_clip::apply` answers both from AppState, here and in
+        // `SetPaneOverlayClipViewsTask`. Without the overlay rects here, a resize
+        // while a modal is open (a splitter drag) would show the pane over it
+        // (#881). The cut is in the overlay's own coordinates, so
+        // it is sent again now that the overlay has its new size.
+        let scale = views_scale(window.as_ref());
+        let placed = (rect.width, rect.height);
+        let visible = crate::browser_panes::views_clip::apply_placed(state, label, &window_label, &controller, pane_rect, placed, scale);
         // Linux lays the window out for the move to show; on Windows setting the
         // overlay's bounds is enough.
         if layout && cfg!(target_os = "linux") {
@@ -713,6 +715,8 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
     state.browser_pane_physical_rects.lock().remove(label);
     crate::browser_panes::bounds::note_layout_base(label, None);
+    #[cfg(not(target_os = "macos"))]
+    crate::browser_panes::views_clip::forget(label);
     let Some((_, controller)) = entry else {
         tracing::debug!(
             label = %label,

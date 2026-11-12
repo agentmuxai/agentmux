@@ -136,7 +136,7 @@ So the polish on #26698 is kept small: the stand-in size fix and the visibility 
 | 2b | 2 | real sizes for every pane (the report of 2026-11-10): one layout per candidate, the clip glide, terminals hold their size, the capture gate, the picture cut and never padded, #47354 |
 | 2c | 2, part of 4 | the tear-off result shown when a pane rests over its own slot; flag default on |
 | 3 | 3 | browser panes in lockstep (with the browser seat) |
-| 4 | 4 | the tear-off result shown in the source when the pointer leaves the window, the pill hole |
+| 4 | 4 | the tear-off result shown in the source when the pointer leaves the window (whole-pane drags: `tearOffPreview.ts` `leaveWindow`, watched in `tile-drag.ts`), the pill hole (not yet) |
 | 5 | zones | the simplified zone model (Camper's `determineDropDirection`), with Camper's review |
 
 ## 10. For Camper (layout and panes seat)
