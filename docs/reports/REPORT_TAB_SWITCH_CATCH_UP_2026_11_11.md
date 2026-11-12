@@ -57,7 +57,7 @@ Why: `fillRest` (`hooks/useHistoryPagination.ts`) holds while `fillPaused()` is 
   - B: show of a tab hidden for 5 minutes while one agent kept working.
   - C: as B with all three agents streaming (the operator's clarification; not in the logs, §1.5).
   - Each twice. The same again after the change.
-- **Host and build:** narko, `origin/main`.
+- **Host and build:** the operator's machine, in an isolated home, `origin/main`.
 - **Time:** about 10 minutes of runs, after a build I would do anyway.
 - **Screen and input:** the dev window is visible on the desktop for those minutes; no real mouse or keyboard; one screen recording of the pane before and after.
 
