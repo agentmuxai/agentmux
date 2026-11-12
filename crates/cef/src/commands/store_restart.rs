@@ -31,6 +31,25 @@ static DIR: OnceLock<PathBuf> = OnceLock::new();
 /// installs nothing, so the next start has nothing to finish (it downloads again, which is quick).
 static DOWNLOADED: AtomicBool = AtomicBool::new(false);
 
+/// A Restart now is under way in this process (its install call may stay open as long as the Store waits for the
+/// person). Windows are separate pages with their own state, so the guard has to be here, not in the page.
+static RESTARTING: AtomicBool = AtomicBool::new(false);
+
+/// Held for as long as a restart is under way; a second one finds it taken.
+struct InFlight;
+
+impl InFlight {
+    fn enter() -> Option<Self> {
+        (!RESTARTING.swap(true, Ordering::SeqCst)).then_some(Self)
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        RESTARTING.store(false, Ordering::SeqCst);
+    }
+}
+
 /// The Store has the update downloaded (set by "Update in the Store").
 pub fn set_downloaded(yes: bool) {
     DOWNLOADED.store(yes, Ordering::SeqCst);
@@ -177,6 +196,10 @@ pub fn restart_now(state: &std::sync::Arc<crate::state::AppState>) -> Restart {
     if let Err(why) = restart_wanted(DOWNLOADED.load(Ordering::SeqCst)) {
         return Restart::refused(why);
     }
+    // One restart at a time: a second window's click must not schedule the reopen or ask the Store again.
+    let Some(_in_flight) = InFlight::enter() else {
+        return Restart::refused("A restart is already under way in another window.");
+    };
     super::store_update::raise_own_window();
     let reopen = super::store_reopen::schedule(current());
     if let Err(why) = &reopen {
@@ -214,6 +237,14 @@ mod tests {
 
     fn marker(at_ms: u64) -> Marker {
         Marker { from: "0.60.14".into(), target: "0.60.15".into(), at_ms, reopen_failed: false }
+    }
+
+    #[test]
+    fn only_one_restart_runs_at_a_time_and_the_next_can_start_when_it_ends() {
+        let first = InFlight::enter().expect("nothing was under way");
+        assert!(InFlight::enter().is_none(), "a second window's restart finds it taken");
+        drop(first);
+        assert!(InFlight::enter().is_some(), "free again once the first has ended");
     }
 
     #[test]
