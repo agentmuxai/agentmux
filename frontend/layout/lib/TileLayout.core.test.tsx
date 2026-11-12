@@ -472,6 +472,20 @@ describe("createTileLayout: a tile", () => {
         /** The tile's four edges, as its style carries them: left, top, right, bottom. */
         const edgesOf = (el: HTMLElement) => ["l", "t", "r", "b"].map((edge) => el.style.getPropertyValue(`--reflow-${edge}`));
 
+        it("glides a tile that is still fading in: its edges' transition stands alone, with no opacity beside it", () => {
+            // A second pane opened while the first was fading in: the first is named by the pass and has a glide.
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setPass({ moves: new Map(), ghosts: [], enters: ["n1"], gliding: true });
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
+            expect(el.classList.contains("tile-entering")).toBe(true);
+            expect(el.style.transition).not.toContain("undefined");
+            expect(el.style.transition).not.toContain("opacity");
+            for (const edge of ["l", "t", "r", "b"]) {
+                expect(el.style.transition).toContain(`--reflow-${edge} var(--duration-base) ease-out`);
+            }
+            h.model.set.setPass(undefined);
+        });
+
         it("gives a tile its future rect: its four edges glide, its place and crop are read from them, its size is set at once", () => {
             const platform = makePlatform();
             const { el, node } = mountWithTile(platform);

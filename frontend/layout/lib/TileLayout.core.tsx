@@ -638,7 +638,8 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
             // A pane being torn off has left the layout: its neighbours close over its slot. It fades over
             // the glide's own length (under reduced motion too), so its slot is never bare while they arrive.
             ...(entry.leaving && { opacity: 0 }),
-            transition: entry.leaving ? `${glide}, opacity ${timing}` : reduce ? glide : `${glide}, ${style.transition}`,
+            // The tile's own opacity transition rides along where it has one (none for a pane that is fading in).
+            transition: entry.leaving ? `${glide}, opacity ${timing}` : style.transition ? `${glide}, ${style.transition}` : glide,
         };
     });
 
