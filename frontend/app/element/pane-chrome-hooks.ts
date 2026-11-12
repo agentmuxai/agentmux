@@ -166,14 +166,15 @@ export function usePaneLocateFlash(
                         serving = null;
                         return;
                     }
-                    retiringFlash?.();
-                    retiringFlash = null;
                     recordLocateStart(performance.now());
                     request.startedAt = performance.now();
                     stopLocateFlash = showLocateFlash(root, {
                         light: isLightThemeActive(),
                         reduced: shouldReduceMotion("feedback"),
                     });
+                    // After the new one is up: it starts at the strength the old one had, so nothing dips.
+                    retiringFlash?.();
+                    retiringFlash = null;
                     emitPaneLocatePlay(blockId, nodeModel.nodeId);
                 };
                 // Flashes start at least a gap apart. The newest request waits for
