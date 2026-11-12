@@ -36,6 +36,10 @@ struct Output {
     acting_as: Option<String>,
 }
 
+/// Set to `1` in a container's commands only while this machine has a publish guard (gh-agent installed); the
+/// container's pre-push hook reads it (`agentmux-bashwrap`'s `publish_scan`) and asks nothing when it is absent.
+pub const PUBLISH_GUARD_ENV: &str = "AGENTMUX_PUBLISH_GUARD";
+
 /// `gh-agent` on the host's PATH, if it is installed.
 pub fn installed() -> Option<PathBuf> {
     which::which("gh-agent").ok()

@@ -171,9 +171,19 @@ fn running() -> &'static tokio::sync::Semaphore {
     RUNNING.get_or_init(|| tokio::sync::Semaphore::new(MAX_RUNNING))
 }
 
+/// The answer when there is no guard to run here: the hook does nothing and says nothing.
+fn no_guard() -> Response {
+    Json(json!({ "guard": "none", "code": 0, "lines": [] })).into_response()
+}
+
 /// `POST /api/v1/github/push-scan`
 pub(crate) async fn handle_push_scan(State(state): State<AppState>, caller: Option<Extension<Caller>>, Json(req): Json<PushScanRequest>) -> Response {
     let refuse = |status: StatusCode, message: String| (status, Json(json!({ "error": message }))).into_response();
+    // A machine with no gh-agent has no publish guard to run: first of all, before the rate limit, the request's
+    // validity or the agent lookup can refuse anything, the answer is that there is nothing to do.
+    if gh_agent_token::installed().is_none() {
+        return no_guard();
+    }
     let Some(uid) = caller.as_ref().and_then(|Extension(c)| c.uid()).map(str::to_string) else {
         return refuse(StatusCode::UNAUTHORIZED, "no agent token: a push is judged for an agent's own commands".to_string());
     };
@@ -188,7 +198,7 @@ pub(crate) async fn handle_push_scan(State(state): State<AppState>, caller: Opti
     };
     // A native agent's own pre-push hook runs the guard in its clone; this route is for what runs in a container.
     if !in_container {
-        return Json(json!({ "guard": "none", "code": 0, "lines": [] })).into_response();
+        return no_guard();
     }
     let repo = match validate(&req) {
         Ok(repo) => repo,
@@ -196,10 +206,6 @@ pub(crate) async fn handle_push_scan(State(state): State<AppState>, caller: Opti
     };
     if !limiter().allow(&slug_of_agent, Instant::now()) {
         return refuse(StatusCode::TOO_MANY_REQUESTS, format!("too many pushes to check in a minute (at most {RATE_LIMIT}): wait a minute and push again"));
-    }
-    // A machine with no gh-agent has no publish guard to run: the hook does nothing and says nothing.
-    if gh_agent_token::installed().is_none() {
-        return Json(json!({ "guard": "none", "code": 0, "lines": [] })).into_response();
     }
     let Ok(_slot) = running().try_acquire() else {
         return refuse(StatusCode::TOO_MANY_REQUESTS, "other pushes are being checked on this machine: try again in a moment".to_string());

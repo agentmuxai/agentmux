@@ -186,6 +186,12 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // gateway that is where the container is pointed.
     crate::backend::container::listener::point_env_at_listener(&mut out);
     point_gateway_at_srv(&mut out);
+    // Whether this machine has a publish guard for the container's pre-push hook to ask: said only here, so a
+    // machine without one is never asked (and never refuses a push for want of an answer).
+    out.retain(|(k, _)| k != crate::identity::gh_agent_token::PUBLISH_GUARD_ENV);
+    if crate::identity::gh_agent_token::installed().is_some() {
+        out.push((crate::identity::gh_agent_token::PUBLISH_GUARD_ENV.to_string(), "1".to_string()));
+    }
     out
 }
 
@@ -341,6 +347,14 @@ mod tests {
         let own: HashMap<String, String> = [("ANTHROPIC_BASE_URL".to_string(), "https://proxy.example/anthropic".to_string())].into_iter().collect();
         let own: HashMap<_, _> = container_exec_env("cc-block-own", &own).into_iter().collect();
         assert_eq!(own["ANTHROPIC_BASE_URL"], "https://proxy.example/anthropic", "an address that is not the gateway is left alone");
+    }
+
+    #[test]
+    fn the_publish_guard_marker_is_srvs_to_say_and_only_where_gh_agent_is_installed() {
+        let env: HashMap<String, String> = [("AGENTMUX_PUBLISH_GUARD".to_string(), "1".to_string())].into_iter().collect();
+        let out: Vec<_> = container_exec_env("cc-block-guard", &env).into_iter().filter(|(k, _)| k == "AGENTMUX_PUBLISH_GUARD").collect();
+        let installed = crate::identity::gh_agent_token::installed().is_some();
+        assert_eq!(out, if installed { vec![("AGENTMUX_PUBLISH_GUARD".to_string(), "1".to_string())] } else { vec![] }, "once, and not carried in from the agent's own environment");
     }
 
     #[test]

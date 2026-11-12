@@ -8,14 +8,15 @@
 //! (`POST /api/v1/github/push-scan`), which gives it as data to the host's `gh-agent scan-push`. The host never opens
 //! the container's clone; the material is all it sees.
 //!
-//! - A machine with no publish guard (no `gh-agent`) answers `guard: none`: the hook does nothing and says nothing.
+//! - A machine with no publish guard (no `gh-agent`), and a native agent's shell, never reach srv: srv says
+//!   `AGENTMUX_PUBLISH_GUARD=1` only in a container's commands on a machine that has the guard, and the hook does
+//!   nothing and says nothing without it.
 //! - A push to a repository the guard finds private is not collected at all.
 //! - On a machine that has the guard, a public repository's push whose check cannot run (srv unreachable, too slow,
 //!   too large, refused) is refused, with what to do.
 //!
 //! The git commands are the ones gh-agent's own pre-push hook runs; the two judge the same text.
 
-use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -65,13 +66,25 @@ pub struct Changeset {
 /// `owner/repo`, lowercase, of a github.com remote URL (https, ssh or scp form); `None` for anything else.
 pub fn repo_of_remote_url(url: &str) -> Option<String> {
     let url = url.trim();
-    let after = url.split_once("github.com").map(|(before, after)| (before, after))?;
+    // Host names are case-insensitive; the lowercase copy has the same byte offsets as the original.
+    let at = url.to_ascii_lowercase().find("github.com")?;
+    let (before, after) = (&url[..at], &url[at + "github.com".len()..]);
     // Whatever precedes the host must end the scheme or the user: `https://`, `git@`, `ssh://git@`, or `ssh.` is ssh.github.com.
-    let before = after.0;
-    if !(before.is_empty() || before.ends_with('/') || before.ends_with('@') || before.ends_with('.')) {
+    let before_lower = before.to_ascii_lowercase();
+    if !(before.is_empty() || before.ends_with('/') || before.ends_with('@') || before_lower.ends_with("ssh.")) {
         return None;
     }
-    let rest = after.1.trim_start_matches(|c: char| c == ':' || c.is_ascii_digit()).trim_start_matches('/');
+    // A port belongs to a URL (`ssh://git@ssh.github.com:443/o/r`). In scp form (`git@github.com:o/r`) the colon only
+    // separates the host from the path, and an owner may start with digits (`1password`).
+    let rest = if url.contains("://") {
+        let no_port = after.strip_prefix(':').and_then(|p| {
+            let path = p.trim_start_matches(|c: char| c.is_ascii_digit());
+            (path.len() < p.len() && path.starts_with('/')).then_some(path)
+        });
+        no_port.unwrap_or(after).trim_start_matches('/')
+    } else {
+        after.strip_prefix(':').unwrap_or(after).trim_start_matches('/')
+    };
     let rest = rest.trim_end_matches('/');
     let rest = rest.strip_suffix(".git").unwrap_or(rest);
     let (owner, name) = rest.split_once('/')?;
@@ -251,14 +264,31 @@ fn show(lines: &[String]) {
     }
 }
 
+/// Whether this push is one for the guard to look at: a container's command on a machine srv says has a publish guard
+/// (`AGENTMUX_PUBLISH_GUARD`, which srv sets only while gh-agent is installed). Anywhere else the hook does nothing:
+/// it makes no request, so a machine without a guard, and a native agent (whose own gh-agent hook guards its push),
+/// can never be refused for want of an answer.
+fn guarded_here() -> bool {
+    let is_set = |name: &str| std::env::var(name).is_ok_and(|v| v == "1");
+    is_set("AGENTMUX_IN_CONTAINER") && is_set("AGENTMUX_PUBLISH_GUARD")
+}
+
 /// The publish guard's part of `pre-push <remote> <url>`: 0 to go on, anything else refuses the push.
 pub fn check_push(remote: &str, url: &str, input: &str) -> i32 {
+    let allow = std::env::var("GH_AGENT_ALLOW_NEW_DOCS").is_ok_and(|v| v == "1");
+    check_with(remote, url, input, guarded_here(), allow, &ask, &real_git)
+}
+
+/// [`check_push`] with its surroundings given: whether the machine is guarded, the override, srv, and git.
+fn check_with(remote: &str, url: &str, input: &str, guarded: bool, allow: bool, ask: &dyn Fn(&str, bool, &[Part]) -> Answer, git: Git) -> i32 {
+    if !guarded {
+        return 0;
+    }
     let Some(repo) = repo_of_remote_url(url) else { return 0 };
     let updates = parse_updates(input);
     if updates.is_empty() {
         return 0;
     }
-    let allow = std::env::var("GH_AGENT_ALLOW_NEW_DOCS").is_ok_and(|v| v == "1");
     // First only whether this machine guards this repository, so a private one's push is not read.
     match ask(&repo, allow, &[]) {
         Answer::NotNeeded => return 0,
@@ -266,7 +296,7 @@ pub fn check_push(remote: &str, url: &str, input: &str) -> i32 {
         Answer::Judged { public: false, .. } => return 0,
         Answer::Judged { public: true, .. } => {}
     }
-    let parts = match collect(&updates, remote, &real_git) {
+    let parts = match collect(&updates, remote, git) {
         Ok(p) => p,
         Err(why) => return refuse_unavailable(&why),
     };
@@ -282,11 +312,6 @@ pub fn check_push(remote: &str, url: &str, input: &str) -> i32 {
             i32::from(code != 0)
         }
     }
-}
-
-#[allow(dead_code)]
-fn flush_stderr() {
-    let _ = std::io::stderr().flush();
 }
 
 #[cfg(test)]
@@ -306,6 +331,15 @@ mod tests {
             ("ssh://git@github.com/agentmuxai/agentmux.git", Some("agentmuxai/agentmux")),
             ("ssh://git@ssh.github.com:443/agentmuxai/agentmux.git", Some("agentmuxai/agentmux")),
             ("https://x-access-token:t@github.com/o/r.git", Some("o/r")),
+            ("https://GitHub.com/O/R.git", Some("o/r")),
+            ("HTTPS://GITHUB.COM/o/r", Some("o/r")),
+            ("git@GitHub.com:o/r.git", Some("o/r")),
+            ("git@github.com:1password/r.git", Some("1password/r")),
+            ("git@github.com:123/r.git", Some("123/r")),
+            ("https://github.com/123/r", Some("123/r")),
+            ("ssh://git@github.com:22/1password/r.git", Some("1password/r")),
+            ("ssh://git@ssh.github.com:443/1password/r.git", Some("1password/r")),
+            ("https://github.com:443/o/r", Some("o/r")),
             ("https://notgithub.com/o/r.git", None),
             ("https://github.com.evil.example/o/r.git", None),
             ("https://gitlab.com/o/r.git", None),
@@ -452,5 +486,43 @@ mod tests {
         assert_eq!(body["parts"][0]["ref"], "refs/heads/x");
         assert!(body["parts"][0].get("tag_message").is_none());
         assert_eq!(body["parts"][0]["changesets"], json!([]));
+    }
+
+    const PUSH: &str = "refs/heads/x bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb refs/heads/x 0000000000000000000000000000000000000000\n";
+
+    /// Runs the hook's check with srv's answers, counting the requests it made.
+    fn check(guarded: bool, url: &str, answers: Vec<Answer>) -> (i32, usize) {
+        let git = fake("1");
+        let asked = RefCell::new(0usize);
+        let answers = RefCell::new(answers.into_iter());
+        let ask = |_: &str, _: bool, _: &[Part]| -> Answer {
+            *asked.borrow_mut() += 1;
+            answers.borrow_mut().next().expect("asked more than the test expected")
+        };
+        let code = check_with("origin", url, PUSH, guarded, false, &ask, &|a| git.run(a));
+        (code, asked.into_inner())
+    }
+
+    #[test]
+    fn a_machine_with_no_guard_and_a_native_agent_are_never_asked_and_never_refused() {
+        // Every way the question would fail, were it asked: unreachable, no environment, 401, 400, 429, 500, too large.
+        for why in ["couldn't reach AgentMux", "AGENTMUX_LOCAL_URL isn't set", "401", "400", "too many pushes", "500", "too large"] {
+            let (code, asked) = check(false, "https://github.com/o/r.git", vec![Answer::Unavailable(why.into())]);
+            assert_eq!((code, asked), (0, 0), "{why}");
+        }
+    }
+
+    #[test]
+    fn on_a_guarded_machine_a_check_that_cannot_run_refuses_and_a_private_repository_is_not_read() {
+        let url = "https://github.com/o/r.git";
+        assert_eq!(check(true, url, vec![Answer::Unavailable("down".into())]), (1, 1));
+        assert_eq!(check(true, url, vec![Answer::NotNeeded]), (0, 1));
+        assert_eq!(check(true, url, vec![Answer::Judged { public: false, code: 0, lines: vec![] }]), (0, 1));
+        let public = || Answer::Judged { public: true, code: 0, lines: vec![] };
+        assert_eq!(check(true, url, vec![public(), Answer::Judged { public: true, code: 0, lines: vec![] }]), (0, 2));
+        assert_eq!(check(true, url, vec![public(), Answer::Judged { public: true, code: 1, lines: vec!["no".into()] }]), (1, 2));
+        assert_eq!(check(true, url, vec![public(), Answer::Unavailable("timed out".into())]), (1, 2));
+        // not a github.com remote: nothing to ask
+        assert_eq!(check(true, "https://gitlab.com/o/r.git", vec![]), (0, 0));
     }
 }
