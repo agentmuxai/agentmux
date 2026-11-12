@@ -1203,9 +1203,13 @@ th[aria-sort="descending"] .tower-sort {
         flex: 0 0 auto;
     }
 
+    // The count and the hour's change wrap onto more lines rather than ending in an ellipsis.
     .tower-headline-note,
     .tower-headline-change {
         flex: 0 1 auto;
+        overflow: visible;
+        text-overflow: clip;
+        white-space: normal;
     }
 }
 

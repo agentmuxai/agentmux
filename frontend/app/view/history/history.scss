@@ -23,6 +23,11 @@
     gap: var(--space-2);
 }
 
+// A long unbroken word (a setting's name in a footnote) breaks instead of widening the pane.
+.warden-history .warden-manager-footnote {
+    overflow-wrap: anywhere;
+}
+
 .warden-history-bar {
     display: flex;
     flex-wrap: wrap;
