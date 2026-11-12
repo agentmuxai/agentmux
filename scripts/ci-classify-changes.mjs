@@ -20,6 +20,13 @@
  *   R3  CI configuration is never documentation — a PR editing the test setup
  *       must not be able to skip the tests it edits.
  *
+ *   R8  A PR whose changed files are all documentation or under frontend/ and
+ *       outside what the Rust crates read from it needs the frontend legs
+ *       but none of the Rust ones (rust=false, frontend=true). The Rust side
+ *       reads exactly the paths in RUST_READS_FRONTEND; a test lists every
+ *       frontend path the crates name, so a new read cannot go unlisted. The
+ *       merge queue runs everything on the merged result (see below).
+ *
  *   R7  A PR that only moves the release version (a release PR) needs none
  *       of the build jobs: every changed file is documentation or a version
  *       manifest, and every changed manifest line is that one version moving
@@ -80,6 +87,21 @@ const DOCS_ONLY_PATTERNS = [
     /^NOTICE$/,
     /^CODE_OF_CONDUCT(\.[a-z]+)?$/i,
     /^CONTRIBUTING(\.[a-z]+)?$/i,
+];
+
+/**
+ * R8. The files under frontend/ that the Rust crates or the Rust job's own steps read, so a change to one of them
+ * must run the Rust legs: the ts-rs output and the schemas the srv tests regenerate and compare
+ * (frontend/types/rpc/), the key table cef includes at build time, the manifest a srv test checks, and the widget
+ * singleton file another srv test reads, and the layout vectors a third reads. scripts/ci-classify-changes.test.mjs scans the crates for paths of
+ * frontend/ and fails when one is not listed here.
+ */
+const RUST_READS_FRONTEND = [
+    /^frontend\/types\/rpc\//,
+    /^frontend\/app\/keybindings\/host-keys\.json$/,
+    /^frontend\/app\/store\/rpc-api\//,
+    /^frontend\/app\/store\/widget-singleton\.ts$/,
+    /^frontend\/layout\/tests\/fixtures\//,
 ];
 
 /**
@@ -186,6 +208,12 @@ export function versionOnlyChange(entries) {
 /** A semantic version as Cargo and npm accept it: X.Y.Z, optional -pre and +build. */
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/;
 
+/** R8: a file under frontend/ that no Rust crate or Rust-job step reads. */
+export function isFrontendOnlyPath(rawPath) {
+    const p = normalize(rawPath);
+    return p.startsWith("frontend/") && !RUST_READS_FRONTEND.some((re) => re.test(p));
+}
+
 /** True when this single path provably cannot affect any build output. */
 export function isDocsOnlyPath(rawPath) {
     const p = normalize(rawPath);
@@ -230,6 +258,17 @@ export function classifyChanges(files) {
             docs_only: true,
             docs_index,
             reason: `all ${paths.length} changed file(s) are documentation`,
+        };
+    }
+
+    // R8: only the frontend (and documentation) changed, and nothing the Rust side reads.
+    if (nonDocs.every(isFrontendOnlyPath)) {
+        return {
+            rust: false,
+            frontend: true,
+            docs_only: false,
+            docs_index,
+            reason: `all ${nonDocs.length} non-doc file(s) are frontend files no Rust crate reads, e.g. ${nonDocs[0]} (R8)`,
         };
     }
 
