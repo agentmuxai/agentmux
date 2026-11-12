@@ -11,8 +11,9 @@
  *
  * The tree, the layout's rects, focus and what goes to srv are final before a pass opens: only the drawing
  * glides. A pass opens in the same batch as the new rects, with every tile still at the rect it showed, and
- * sends them to their own rects once that has been drawn (`afterSeedFrame`), so the glide has a start and does
- * not begin in the frame that lays the panes out at their new sizes. It ends when the glide is over
+ * sends them to their own rects on the first frame after that which runs on time (`whenFramesFlow`), so the
+ * glide has a start and does not begin while the panes are being laid out at their new sizes. It ends when
+ * the glide is over
  * (`reflowSettleMs`), and the tiles' plain style, already final, takes over. Terminals keep their grid for the
  * pass and fit once at its end, by the reflow's own hold. A pane that shrinks (its neighbour opened) keeps its
  * larger size under its closing clip and takes its real size at the end too (liveReflow.ts `envelope`).
@@ -33,7 +34,6 @@ import type { LayoutModel } from "./layoutModel";
 import {
     liveReflowEnabled,
     movesWithReflow,
-    onNextFrame,
     REFLOW_EDGES,
     REFLOW_MAX_PANES,
     reflowSettleMs,
@@ -60,9 +60,9 @@ export interface SettlingPass {
     moves: Map<string, PaneMove>;
     /** The panes that left. */
     ghosts: PaneGhost[];
-    /** The panes that came or were restored, by node id: each fades in at its own rect. */
+    /** The panes that came or were restored, by node id: each fades in at its own rect, with the glide. */
     enters: string[];
-    /** False until the frame the pass opens on has been drawn (the tiles stand at `from`), true from then. */
+    /** False while the tiles stand at `from` (the frame the pass opens on, and any late ones after it), true from then. */
     gliding: boolean;
 }
 
@@ -268,22 +268,44 @@ export function planSettlingPass(
     return { moves, ghosts, enters, gliding: false };
 }
 
+/** A frame whose callbacks run this long after the frame's own time is late: the main thread was busy. */
+export const LATE_FRAME_MS = 34;
+/** How long a pass stands at its start for a frame on time before it glides all the same. */
+export const SEED_WAIT_MAX_MS = 400;
+
+/** Whether a frame with the time `frameTime` (what its callbacks are given), running at `now`, is late. */
+export function frameIsLate(frameTime: number | undefined, now: number): boolean {
+    return typeof frameTime === "number" && now - frameTime > LATE_FRAME_MS;
+}
+
 /**
- * Run `fn` once the frame that is being made now has been drawn: on the frame after the next. Returns what
- * cancels it.
+ * Run `fn` on the first frame after the one being made now that runs on time, or at once where there are no
+ * frames (a test). Returns what cancels it.
  *
- * The change that opens a pass gives the panes their new sizes, and the first frame pays for all of it: the
- * layout of every resized pane, what watches their sizes, the paint. A glide that started in that frame ran
- * its clock through that work with nothing drawn, and its first drawn frame was most of the way there (about
- * 100 ms and 80% of the way in the macOS look check of #7066). One frame later the work is done and the
- * tiles are drawn where they stood, so the glide's own frames are cheap.
+ * The change that opens a pass gives the panes their new sizes, and the frame being made pays for all of it:
+ * the layout of every resized pane, what watches their sizes, the paint. A glide that starts in that frame
+ * runs its clock through that work with nothing drawn. One frame later is not enough either: the frame after
+ * a slow one runs late, with the time it was due as its own, and a transition that starts in it is given
+ * that time as its start, so the next frame on time shows it most of the way there (a minimize to the
+ * header on macOS: a frame of about 96 ms, then 70% of the glide in one step, #7066). So the tiles stand
+ * where they were until a frame runs on time, and at most `SEED_WAIT_MAX_MS`.
  */
-function afterSeedFrame(fn: () => void): () => void {
-    let cancel: () => void = () => {};
-    cancel = onNextFrame(() => {
-        cancel = onNextFrame(fn);
-    });
-    return () => cancel();
+function whenFramesFlow(fn: () => void): () => void {
+    if (typeof requestAnimationFrame !== "function") {
+        fn();
+        return () => {};
+    }
+    const since = performance.now();
+    let frames = 0;
+    let id = 0;
+    const frame = (frameTime?: number) => {
+        const now = performance.now();
+        const wait = ++frames < 2 || (frameIsLate(frameTime, now) && now - since < SEED_WAIT_MAX_MS);
+        if (wait) id = requestAnimationFrame(frame);
+        else fn();
+    };
+    id = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(id);
 }
 
 /** Open `pass` on `model`'s layout, in place of one that is open. Call it in the batch that writes the new rects. */
@@ -293,7 +315,7 @@ export function openSettlingPass(model: LayoutModel, pass: SettlingPass): void {
     state.cancel?.();
     state.setPass(pass);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const cancelFrame = afterSeedFrame(() => {
+    const cancelFrame = whenFramesFlow(() => {
         // A frame that outlived its pass (one that was replaced or ended) must not bring it back.
         if (untrack(state.pass) !== pass) return;
         state.setPass({ ...pass, gliding: true });

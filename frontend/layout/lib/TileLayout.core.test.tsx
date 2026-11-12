@@ -417,17 +417,24 @@ describe("createTileLayout: a tile", () => {
         const pass = (enters: string[], gliding: boolean): SettlingPass => ({ moves: new Map(), ghosts: [], enters, gliding });
         h.model.set.setPass(pass(["other"], false));
         expect(el.classList.contains("tile-entering")).toBe(false);
+        // While the pass stands at its start the pane is not drawn: its fade starts with the glide.
         h.model.set.setPass(pass(["n1"], false));
-        expect(el.classList.contains("tile-entering")).toBe(true);
-        // The pass going on to its glide is a new pass with the same panes: the fade is not started again.
-        const sets = vi.spyOn(el.classList, "toggle");
+        expect(el.classList.contains("tile-entering")).toBe(false);
+        expect(el.style.opacity).toBe("0");
+        expect(el.style.transition).toBe("");
         h.model.set.setPass(pass(["n1"], true));
+        expect(el.classList.contains("tile-entering")).toBe(true);
+        expect(el.style.opacity).toBe("1");
+        // A second pass that names it while it fades (another pane opened) is gliding too: not started again.
+        const sets = vi.spyOn(el.classList, "toggle");
+        h.model.set.setPass(pass(["n1", "other"], true));
         expect(el.classList.contains("tile-entering")).toBe(true);
         expect(sets).not.toHaveBeenCalled();
         // The stylesheet's own length (the glide's), with nothing set on the tile.
         expect(el.style.getPropertyValue("animation-duration")).toBe("");
         h.model.set.setPass(undefined);
         expect(el.classList.contains("tile-entering")).toBe(false);
+        expect(el.style.opacity).toBe("1");
     });
 
     it("skips laying out a minimized pane while the window resizes, and says it is behind", () => {

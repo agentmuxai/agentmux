@@ -16,7 +16,7 @@ import { holdRevealGate, scheduleRevealLift } from "@/app/store/tab-reveal";
 import { deferWhileSizesHeld, paneSizesHeld, resetPaneSizeHoldForTests } from "@/app/platform/pane-size-hold";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { REFLOW_MAX_PANES, reflowSettleMs, shownPx } from "@/layout/lib/liveReflow";
-import { planSettlingPass } from "@/layout/lib/settlingPass";
+import { frameIsLate, LATE_FRAME_MS, planSettlingPass, SEED_WAIT_MAX_MS } from "@/layout/lib/settlingPass";
 import { commitTearOff, leaveWindow, returnToWindow } from "@/layout/lib/tearOffPreview";
 import {
     FlexDirection,
@@ -205,6 +205,53 @@ describe("a pane closes", () => {
         vi.advanceTimersByTime(1);
         expect(paneSizesHeld()).toBe(false);
         expect(fit).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("the frame a pass starts its glide on", () => {
+    /**
+     * Frames that are given their own time, by a clock the test moves: one that runs in the first `lateForMs`
+     * of the clock runs 80 ms after its own time, as the frames after a slow one do.
+     */
+    function frames(lateForMs: number) {
+        const start = 1000;
+        let now = start;
+        vi.spyOn(performance, "now").mockImplementation(() => now);
+        vi.stubGlobal("requestAnimationFrame", (fn: (time: number) => void) =>
+            setTimeout(() => fn(now - start < lateForMs ? now - 80 : now), FRAME_MS)
+        );
+        return { pass: (ms: number) => ((now += ms), vi.advanceTimersByTime(ms)) };
+    }
+
+    it("is late when it runs well after its own time", () => {
+        expect(frameIsLate(1000, 1000 + LATE_FRAME_MS)).toBe(false);
+        expect(frameIsLate(1000, 1001 + LATE_FRAME_MS)).toBe(true);
+        expect(frameIsLate(undefined, 5000)).toBe(false);
+    });
+
+    it("is not the frame after a slow one, which runs late: the tiles stand until a frame is on time", () => {
+        const m = modelOf(three());
+        // The frame the pass opens on, then one that runs 80 ms after its own time, then one on time.
+        const clock = frames(2 * FRAME_MS + 1);
+        const before = own(m, "b");
+        close(m, "c");
+        clock.pass(FRAME_MS);
+        clock.pass(FRAME_MS);
+        expect(m.settlingPass()!.gliding).toBe(false);
+        expect(m.reflowFor("b")!.rect).toEqual(before);
+        clock.pass(FRAME_MS);
+        expect(m.settlingPass()!.gliding).toBe(true);
+        expect(m.reflowFor("b")!.rect).toEqual(own(m, "b"));
+    });
+
+    it("stops waiting for a frame on time after a while: the panes glide all the same", () => {
+        const m = modelOf(three());
+        const clock = frames(Infinity);
+        close(m, "c");
+        clock.pass(SEED_WAIT_MAX_MS - FRAME_MS);
+        expect(m.settlingPass()!.gliding).toBe(false);
+        clock.pass(2 * FRAME_MS);
+        expect(m.settlingPass()!.gliding).toBe(true);
     });
 });
 
