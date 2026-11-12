@@ -27,7 +27,8 @@
             "@/shadcn/*": ["frontend/app/shadcn/*"],
             "@/perf": ["frontend/perf/index.ts"],
             "@host-module": ["frontend/cef-host-module.ts"],
-            "@/perf/*": ["frontend/perf/*"]
+            "@/perf/*": ["frontend/perf/*"],
+            "@/web-host/*": ["frontend/web-host/*"]
         },
         "lib": ["dom", "dom.iterable", "es6"],
         "types": ["vite/client", "@testing-library/jest-dom/vitest"],
