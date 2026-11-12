@@ -17,8 +17,10 @@
  *
  * Nothing here touches the tree or the layout's own rects: they stay the drag's hit-test snapshot
  * (placementPreview.ts), and the commit on drop stays the one tree write. Terminals hold their grid until the
- * drag ends (pane-size-hold.ts). A browser pane is a native window that neither a transform nor a clip
- * moves, so it is left where it is for now. On unless the `layout:livereflow` setting is false.
+ * drag ends (pane-size-hold.ts). A browser pane's page is a native window that neither a transform nor a clip
+ * moves; for the length of a drag it is cut away behind a picture of itself and held where it was
+ * (browser-view.tsx, use-pane-rect-sync.ts), so its tile is plain DOM and moves with the rest, once every
+ * page's cut has landed (page-cut-gate.ts). On unless the `layout:livereflow` setting is false.
  * docs/specs/SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md §4, §5, §6;
  * docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md.
  *
@@ -27,9 +29,11 @@
  */
 
 import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
+import { pageCutsPending } from "@/app/drag/page-cut-gate";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
 import { DURATION_BASE_MS, DURATION_FAST_MS } from "@/app/motion/tokens";
+import { notifyPaneReflow } from "@/app/platform/pane-anim";
 import { holdPaneSizes } from "@/app/platform/pane-size-hold";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { getObjectValue, makeORef } from "@/app/store/mos";
@@ -93,7 +97,10 @@ function isBrowserBlock(blockId: string | undefined): boolean {
     return !!blockId && getObjectValue<Block>(makeORef("block", blockId))?.meta?.view === "browser";
 }
 
-/** Whether the reflow can move `leaf`'s tile: every pane but a browser pane, a native window. */
+/**
+ * Whether a glide outside a drag (settlingPass.ts) can move `leaf`'s tile: every pane but a browser pane, whose
+ * page is live then, a native window that stays where the layout put it. A drag's reflow moves them all.
+ */
 export function movesWithReflow(leaf: LayoutNode): boolean {
     return !isBrowserBlock(shownBlockId(leaf));
 }
@@ -224,8 +231,9 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
     // candidate is armed (then it is its own layout rect), so a tile's transition stays on from the drag's
     // start to its end and only the end takes it off, in the same batch as the drop's real rects. No drop is
     // shown while the dragged pane's picture is still being taken (a capture of the window, which must show
-    // the pane as it stood, pane-capture-gate.ts), but each tile has its entry at rest by then: the first
-    // candidate's clip glides from the resting one, where from no clip at all it would jump.
+    // the pane as it stood, pane-capture-gate.ts), nor while a browser page is still on screen at the drag's
+    // start (page-cut-gate.ts: its tile would leave it behind), but each tile has its entry at rest by then:
+    // the first candidate's clip glides from the resting one, where from no clip at all it would jump.
     // A tear-off is shown through the release, until the tree lets the pane go, so the drag being over does
     // not end it (tearOffPreview.ts).
     const targets = createMemo((): Targets | undefined => {
@@ -234,7 +242,9 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         if (!model.activeDrag() && !tearOff) return settlingTargets(model.settlingPass());
         const leafs = model.leafs();
         if (leafs.length > REFLOW_MAX_PANES) return undefined;
-        const future = paneCaptureInFlight() ? undefined : (model.futureLayout() ?? tearOff);
+        // A tear-off shown after the release has no page to wait for: the drag's cuts are over.
+        const waiting = paneCaptureInFlight() || (model.activeDrag() && pageCutsPending());
+        const future = waiting ? undefined : (model.futureLayout() ?? tearOff);
         const current = model.additionalProps();
         const futureRectOfBlock = new Map<string, Dimensions>();
         for (const id of future?.leafIds ?? []) {
@@ -243,7 +253,6 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         }
         const byId: Targets["byId"] = new Map();
         for (const leaf of leafs) {
-            if (!movesWithReflow(leaf)) continue;
             const from = current[leaf.id]?.rect;
             if (!from) continue;
             // The dragged pane keeps its node id through the preview: its future rect is the landing rect.
@@ -255,6 +264,11 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         }
         return { byId, showing: !!future && byId.size > 0 };
     }, undefined, { equals: sameTargets });
+
+    // A browser page is put where its pane's placeholder is, and nothing tells it when only a transform
+    // moved that: each change of what the tiles show has the pages look again (pane-anim.ts). A page held for
+    // the drag ignores it; one whose tile a tear-off still shows after the release follows.
+    createEffect(on(targets, () => notifyPaneReflow(), { defer: true }));
 
     // Terminals keep their grid for as long as tiles can take a size the drop may never commit. On a boolean,
     // not on the targets themselves: those are new for every candidate, and letting go and holding again

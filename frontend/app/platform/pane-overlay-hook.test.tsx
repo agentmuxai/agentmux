@@ -16,7 +16,7 @@ vi.mock("@/store/global", () => ({ getSettingsKeyAtom: () => () => undefined }))
 
 import { PaneStackMemberActiveProvider } from "@/app/tab/pane-stack-member";
 import { WindowTabDisplayedProvider } from "@/app/workspace/window-tab-visibility";
-import { __autoOverlayRectCount, __overlayRectCount, useHiddenTabMarker, usePaneOverlay } from "./pane-overlay";
+import { __autoOverlayRectCount, __overlayRectCount, useHiddenTabMarker, usePaneOverlay, usePaneOverlayRect, type OverlayRect } from "./pane-overlay";
 import { startPaneOverlayAutoService } from "./pane-overlay-auto";
 
 function makeEl(): HTMLElement {
@@ -39,6 +39,47 @@ const owners: { name: string; Provider: (p: { value: Accessor<boolean>; children
     { name: "window tab", Provider: (p) => <WindowTabDisplayedProvider value={p.value}>{p.children}</WindowTabDisplayedProvider> },
     { name: "pane-stack member", Provider: (p) => <PaneStackMemberActiveProvider value={p.value}>{p.children}</PaneStackMemberActiveProvider> },
 ];
+
+function RectOverlay(p: { rect: Accessor<OverlayRect | undefined> }) {
+    usePaneOverlayRect(p.rect);
+    return null;
+}
+
+describe("usePaneOverlayRect: a hole given as a rect (a browser page cut away for a drag)", () => {
+    afterEach(() => cleanup());
+
+    test("is there while it has a rect, follows the rect, and goes with the rect or with the component", () => {
+        const [rect, setRect] = createSignal<OverlayRect | undefined>(undefined);
+        const before = __overlayRectCount();
+        const { unmount } = render(() => <RectOverlay rect={rect} />);
+        expect(__overlayRectCount()).toBe(before);
+        setRect({ x: 10, y: 20, w: 100, h: 50 });
+        expect(__overlayRectCount()).toBe(before + 1);
+        setRect({ x: 40, y: 20, w: 100, h: 50 });
+        expect(__overlayRectCount()).toBe(before + 1);
+        // A collapsed page has no hole.
+        setRect({ x: 0, y: 0, w: 0, h: 0 });
+        expect(__overlayRectCount()).toBe(before);
+        setRect({ x: 10, y: 20, w: 100, h: 50 });
+        unmount();
+        expect(__overlayRectCount()).toBe(before);
+    });
+
+    test("cuts nothing while its window tab is hidden", () => {
+        const [shown, setShown] = createSignal(false);
+        const before = __overlayRectCount();
+        render(() => (
+            <WindowTabDisplayedProvider value={shown}>
+                <RectOverlay rect={() => ({ x: 10, y: 20, w: 100, h: 50 })} />
+            </WindowTabDisplayedProvider>
+        ));
+        expect(__overlayRectCount()).toBe(before);
+        setShown(true);
+        expect(__overlayRectCount()).toBe(before + 1);
+        setShown(false);
+        expect(__overlayRectCount()).toBe(before);
+    });
+});
 
 describe("overlays and the shown state of the tab or pane-stack member they came from", () => {
     afterEach(() => {

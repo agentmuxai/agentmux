@@ -16,10 +16,12 @@
  * Chromium briefly change the visible page's viewport to render the clip,
  * which flickered the window as the drag began.
  *
- * A native browser pane is the exception: its page is a separate CEF browser
- * drawn above the DOM placeholder, so the window's capture shows only the
- * placeholder. It keeps its own screenshot, of its own whole page (no clip,
- * so no flicker).
+ * A native browser pane's page is a separate CEF browser drawn above the DOM
+ * placeholder, so the window's capture shows the pane's header and address bar
+ * around an empty placeholder. Its picture is that capture with the page's own
+ * screenshot (of its whole page: no clip, so no flicker) drawn into the
+ * placeholder, so the pane in hand looks like the pane. Before, it was the
+ * page alone: the pane lost its header the moment it was picked up.
  */
 
 import { getApi, MOS } from "@/app/store/global";
@@ -139,6 +141,69 @@ async function cropToPane(jpeg_base64: string, rect: CssRect): Promise<string | 
         return await blobToBase64(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 }));
     } finally {
         full.close();
+    }
+}
+
+/** `inner` (the page's placeholder) in the picture of `pane`, both CSS px of the window, in the picture's pixels. */
+export function pageRectInPicture(
+    inner: CssRect,
+    pane: CssRect,
+    scale: number,
+    picture: { width: number; height: number }
+): { x: number; y: number; w: number; h: number } | null {
+    const x = Math.max(0, Math.round((inner.left - pane.left) * scale));
+    const y = Math.max(0, Math.round((inner.top - pane.top) * scale));
+    const w = Math.min(picture.width, Math.round((inner.left - pane.left + inner.width) * scale)) - x;
+    const h = Math.min(picture.height, Math.round((inner.top - pane.top + inner.height) * scale)) - y;
+    return w > 0 && h > 0 ? { x, y, w, h } : null;
+}
+
+/**
+ * A browser pane's picture: the window's capture cropped to the pane, with the page's screenshot drawn where
+ * the page stands (`placeholder`). The two are asked for together. Without the window's capture (it failed) the
+ * picture is the page alone, as it was; without the page's (asleep, not loaded) it is the pane as the window
+ * shows it. `shot` is called once the window has been pictured.
+ */
+async function captureBrowserPane(blockId: string, rect: CssRect, placeholder: CssRect | null, shot: () => void): Promise<string | null> {
+    const page = getApi()
+        .browserPanes.screenshot(blockId, { format: "jpeg", quality: 80 })
+        .then(
+            (got) => got?.png_base64 || null,
+            () => null
+        );
+    const frame = await getApi()
+        .windows.captureViewport(ownWindowLabel(), 80)
+        .then(
+            (got) => got.jpeg_base64,
+            () => null
+        );
+    shot();
+    const pageShot = await page;
+    if (!frame || !placeholder) return pageShot;
+    return track(composeBrowserPane(frame, rect, pageShot, placeholder));
+}
+
+async function composeBrowserPane(frame: string, rect: CssRect, pageShot: string | null, placeholder: CssRect): Promise<string | null> {
+    const full = await createImageBitmap(base64ToBlob(frame, "image/jpeg"));
+    // A page's picture that does not decode leaves the pane as the window shows it.
+    let page: ImageBitmap | null = null;
+    try {
+        page = pageShot ? await createImageBitmap(base64ToBlob(pageShot, "image/jpeg")) : null;
+    } catch {
+        page = null;
+    }
+    try {
+        const crop = cropRectInImage(rect, window.innerWidth, full);
+        if (!crop) return pageShot;
+        const canvas = new OffscreenCanvas(crop.w, crop.h);
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(full, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
+        const at = page && pageRectInPicture(placeholder, rect, full.width / window.innerWidth, { width: crop.w, height: crop.h });
+        if (page && at) ctx?.drawImage(page, 0, 0, page.width, page.height, at.x, at.y, at.w, at.h);
+        return await blobToBase64(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 }));
+    } finally {
+        full.close();
+        page?.close();
     }
 }
 
@@ -283,11 +348,12 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
     // The drag's own drawing waits for the capture: it is a picture of the window as drawn when it runs
     // (pane-capture-gate.ts). The crop and the encoding after it hold nothing back.
     const captured = beginPaneCapture();
+    const paneRect = { left: r.left, top: r.top, width: r.width, height: r.height };
+    // The page's own placeholder: the one that is drawn (a pane keeps its other tabs' views mounted, hidden).
+    const ph = isBrowser ? Array.from(el.querySelectorAll(".browser-placeholder")).find(isRendered)?.getBoundingClientRect() : undefined;
     const capture = isBrowser
-        ? getApi()
-              .browserPanes.screenshot(blockId, { format: "jpeg", quality: 80 })
-              .then((shot) => shot?.png_base64 || null)
-        : capturePane({ left: r.left, top: r.top, width: r.width, height: r.height }, captured);
+        ? captureBrowserPane(blockId, paneRect, ph ? { left: ph.left, top: ph.top, width: ph.width, height: ph.height } : null, captured)
+        : capturePane(paneRect, captured);
     const picture = capture.then(
         (b64) => {
             captured();

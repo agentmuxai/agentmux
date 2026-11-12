@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, createSignal } from "solid-js";
+import { beginPageCut, PAGE_CUT_MAX_MS, resetPageCutGateForTests } from "@/app/drag/page-cut-gate";
 import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
 import { setAnimationSettings } from "@/app/motion/motion";
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
@@ -74,7 +75,7 @@ vi.mock("@/app/store/global", () => ({
 vi.mock("@/app/store/block-atom-cache", () => ({
     getSettingsKeyAtom: (key: string) => (key === "layout:livereflow" ? flag : () => undefined),
 }));
-// A block whose id starts with "browser" is a browser pane: a native window a transform cannot move.
+// A block whose id starts with "browser" is a browser pane: its page is a native window, cut away for a drag.
 vi.mock("@/app/store/mos", () => ({
     makeORef: (_otype: string, oid: string) => oid,
     getObjectValue: (oid: string) => (oid.startsWith("browser") ? { meta: { view: "browser" } } : { meta: { view: "term" } }),
@@ -146,6 +147,7 @@ beforeEach(() => {
     rows.clear();
     setFlag(true);
     resetPaneCaptureGateForTests();
+    resetPageCutGateForTests();
     resetPaneSizeHoldForTests();
 });
 
@@ -381,20 +383,56 @@ describe("the live reflow of a pane drag", () => {
         for (const id of ["a", "b", "c", "d"]) expect(m.reflowFor(id)).toMatchObject({ rect: own(m, id), moved: false });
     });
 
-    it("never moves a browser pane, dragged or not: a native window does not follow CSS", () => {
+    it("moves a browser pane like any other, dragged or not: its page is cut away for the drag, its tile is DOM", () => {
         const m = modelOf(row("r", 10, leaf("browser-x"), col("col", 10, leaf("b"), leaf("c"))));
         drag(m, "b", "browser-x", DropDirection.Left);
         const got = entries(m, ["browser-x", "b", "c"]);
-        expect(got["browser-x"]).toBeUndefined();
+        expect(got["browser-x"]).toMatchObject({ rect: futureOf(m, "browser-x"), moved: false, leaving: false });
+        expect(got["browser-x"]!.rect).not.toEqual(own(m, "browser-x"));
         expect(got.b).toMatchObject({ moved: true });
         expect(got.c).toBeDefined();
-        // The browser pane as the dragged one: it is left where it is too.
+        // The browser pane as the dragged one: it goes to its landing rect too.
         const m2 = modelOf(three());
         m2.treeState.rootNode!.children![0].data!.blockId = "browser-a";
         m2.updateTree();
         drag(m2, "a", "c", DropDirection.Bottom);
-        expect(m2.reflowFor("a")).toBeUndefined();
+        expect(m2.reflowFor("a")).toMatchObject({ rect: shownPx(landingRectOf(m2)!), moved: true });
         expect(m2.reflowFor("b")).toBeDefined();
+    });
+
+    it("shows no drop while a browser page is still on screen at the drag's start, and never waits for one for long", () => {
+        vi.useFakeTimers();
+        const m = modelOf(row("r", 10, leaf("browser-x"), col("col", 10, leaf("b"), leaf("c"))));
+        const cutOne = beginPageCut();
+        const cutTwo = beginPageCut();
+        drag(m, "b", "browser-x", DropDirection.Left);
+        expect(m.liveReflowActive()).toBe(false);
+        for (const id of ["browser-x", "b", "c"]) expect(m.reflowFor(id)).toMatchObject({ rect: own(m, id), moved: false });
+        // Every page has to be cut, not the first one only; a cut reported twice counts once.
+        cutOne();
+        cutOne();
+        expect(m.liveReflowActive()).toBe(false);
+        cutTwo();
+        expect(m.liveReflowActive()).toBe(true);
+        expect(m.reflowFor("browser-x")!.rect).toEqual(futureOf(m, "browser-x"));
+        // A catcher that never reports stops holding the reflow back.
+        const m2 = modelOf(three());
+        beginPageCut();
+        drag(m2, "a", "c", DropDirection.Bottom);
+        expect(m2.liveReflowActive()).toBe(false);
+        vi.advanceTimersByTime(PAGE_CUT_MAX_MS);
+        expect(m2.liveReflowActive()).toBe(true);
+    });
+
+    it("does not wait for a page once the drag is over: a tear-off shown through the release has none to cut", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        m.activeDrag._set(false);
+        beginPageCut();
+        commitTearOff(m, "a");
+        vi.advanceTimersByTime(20);
+        expect(m.liveReflowActive()).toBe(true);
     });
 
     it("moves nothing while the dragged pane's picture is still being taken, with every tile's entry at rest for the first glide to start from", () => {

@@ -13,7 +13,7 @@
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createSignal, onCleanup } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeTestHostApi } from "@/app/host/test-host";
 
@@ -32,7 +32,13 @@ vi.mock("@/app/block/pane-tab-visibility", () => ({ usePaneTabVisibility: () => 
 vi.mock("@/app/workspace/window-tab-visibility", () => ({ useWindowTabId: () => "t1" }));
 vi.mock("@/store/global", () => ({ getSettingsKeyAtom: (k: string) => () => state.settings[k] }));
 vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: (v: string) => state.log.push(`open pane ${v}`) }));
-vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
+// The drag hole draws nothing: it registers the page's own rect. The log says when, and with what.
+vi.mock("@/app/platform/pane-overlay", () => ({
+    usePaneOverlayRect: (rect: () => unknown) => {
+        state.log.push(`hole cut at ${JSON.stringify(rect())}`);
+        onCleanup(() => state.log.push("hole released"));
+    },
+}));
 vi.mock("@/app/motion/motion", () => ({ scaledMs: (ms: number) => ms, shouldReduceMotion: () => state.reduceMotion }));
 vi.mock("./use-pane-rect-sync", () => ({
     usePaneRectSync: (p: unknown) => {
@@ -110,7 +116,12 @@ function mount(o: Opts = {}) {
     const [visible, setVisible] = createSignal(o.visible ?? true);
     (globalThis as any).__visibility = () => (visible() ? "active" : "hidden");
     const [paneCreated, setPaneCreated] = createSignal(o.paneCreated ?? false);
-    (globalThis as any).__rectSync = { paneCreated, createPane: async () => {}, paneRect: () => null };
+    (globalThis as any).__rectSync = {
+        paneCreated,
+        createPane: async () => {},
+        paneRect: () => null,
+        pageRectCss: () => ({ x: 10, y: 60, w: 300, h: 160 }),
+    };
     const [underway, setUnderway] = createSignal(false);
     (globalThis as any).__underway = underway;
     (globalThis as any).__dragSnapshot = () => o.dragSnapshot ?? null;
@@ -906,6 +917,7 @@ describe("the pane's markup", () => {
         await v.settle();
         lines.push(`## drag over\n${markup(v.container.querySelector(".browser-drag-catcher"))}`);
         vi.unstubAllGlobals();
+        lines.push(`## the hole\n${state.log.filter((l) => l.startsWith("hole")).join("\n")}`);
         await expect(lines.join("\n") + "\n").toMatchFileSnapshot(snap("drag-catcher"));
     });
 
@@ -954,6 +966,7 @@ describe("the pane's markup", () => {
                 `rect keys ${Object.keys(state.rect).sort().join(",")}`,
                 `rect.model is model ${state.rect.model === v.model}`,
                 `drag keys ${Object.keys(state.drag).sort().join(",")}`,
+                `rect.held follows the drag ${state.rect.held()} ${(v.setUnderway(true), state.rect.held())}`,
             ];
             await expect(lines.join("\n") + "\n" + out()).toMatchFileSnapshot(snap("hook-args"));
         } finally {
