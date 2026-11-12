@@ -204,7 +204,7 @@ jobs:
           FILES=""
           if RAW="$(gh api \
                "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-               --paginate --jq '.[] | {filename, patch}' 2>/dev/null)"; then
+               --paginate --jq '.[] | {filename, patch, previous_filename}' 2>/dev/null)"; then
             FILES="$(printf '%s' "$RAW" | jq -s '.')" || FILES=""
           fi
 

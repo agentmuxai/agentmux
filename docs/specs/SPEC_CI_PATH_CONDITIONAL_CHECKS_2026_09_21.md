@@ -167,7 +167,8 @@ ts-rs output and schemas under `frontend/types/rpc/`, the key table cef includes
 widget singleton file srv tests read, and the layout vectors another srv test reads. A test scans the crates for every
 path of `frontend/` they name (an `include_str!`, a join on the manifest directory, ts-rs's `export_to`) and fails when
 one is not listed, so a new read cannot slip past; a file outside `frontend/` (a manifest, a script, a workflow)
-runs everything.
+runs everything. A renamed file counts under both names (the API's `previous_filename`), so moving a listed file to a
+plain frontend path still runs the Rust legs.
 
 What the skipped Rust job used to check for these files is not lost: the RPC codegen hygiene check (pure node over the
 committed generated types and `frontend/app`) moved into the frontend job, which every non-documentation PR runs; the

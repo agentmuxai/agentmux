@@ -284,10 +284,12 @@ export function classifyChanges(files) {
 }
 
 /**
- * Classify the PR files API's entries ({filename, patch}). A version-only PR
+ * Classify the PR files API's entries ({filename, patch, previous_filename}). A version-only PR
  * (R7) skips the build jobs; anything else is classified by its paths exactly
  * as classifyChanges does, and an entry without a string filename is malformed
- * (R2: run everything).
+ * (R2: run everything). A renamed file counts under both of its names: the old
+ * path is changed too (a Rust test may still read it), and a rename is never a
+ * version-only change.
  */
 export function classifyPullFiles(entries) {
     const list = Array.isArray(entries) ? entries : [];
@@ -295,7 +297,10 @@ export function classifyPullFiles(entries) {
     if (list.length === 0 || names.some((n) => n === null)) {
         return { ...classifyChanges([]), version_only: false };
     }
-    const version = versionOnlyChange(list);
+    const moved = list.map((e) => e.previous_filename).filter((p) => p !== undefined && p !== null);
+    // A previous name that is not a string is malformed too (R2).
+    if (moved.some((p) => typeof p !== "string")) return { ...classifyChanges([]), version_only: false };
+    const version = moved.length > 0 ? { ok: false, reason: "a file was renamed" } : versionOnlyChange(list);
     if (version.ok) {
         return {
             rust: false,
@@ -306,7 +311,7 @@ export function classifyPullFiles(entries) {
             reason: `version-only change, ${version.from} -> ${version.to} (R7)`,
         };
     }
-    const byPath = classifyChanges(names);
+    const byPath = classifyChanges([...names, ...moved]);
     return { ...byPath, version_only: false, reason: `${byPath.reason}; not version-only: ${version.reason}` };
 }
 

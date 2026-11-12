@@ -419,6 +419,32 @@ describe("R8 — a PR that only touches the frontend skips the Rust legs", () =>
     });
 });
 
+describe("R8 — a renamed file counts under its old name too", () => {
+    it("runs the Rust legs when a file the crates read is moved to a path they do not", () => {
+        const r = classifyPullFiles([
+            { filename: "frontend/app/store/widget-view.ts", previous_filename: "frontend/app/store/widget-singleton.ts", patch: "@@ -1 +1 @@\n-a\n+b" },
+        ]);
+        expect(r).toMatchObject({ rust: true, version_only: false });
+    });
+
+    it("runs the Rust legs when a Rust file is moved into frontend/", () => {
+        const r = classifyPullFiles([{ filename: "frontend/app/x.ts", previous_filename: "crates/srv/src/x.rs", patch: "" }]);
+        expect(r).toMatchObject({ rust: true });
+    });
+
+    it("keeps the skip for a frontend file moved between frontend paths no crate reads", () => {
+        const r = classifyPullFiles([{ filename: "frontend/app/b.ts", previous_filename: "frontend/app/a.ts", patch: "" }]);
+        expect(r).toMatchObject({ rust: false, frontend: true });
+    });
+
+    it("never takes a rename for a version-only change, and a bad previous name runs everything", () => {
+        const patch = '@@ -1,3 +1,3 @@\n-  "version": "0.60.14",\n+  "version": "0.60.15",';
+        const r = classifyPullFiles([{ filename: "package.json", patch }, { filename: "docs/b.md", previous_filename: "docs/a.md", patch: "" }]);
+        expect(r.version_only).toBe(false);
+        expect(classifyPullFiles([{ filename: "frontend/a.ts", previous_filename: 5, patch: "" }])).toMatchObject({ rust: true, frontend: true });
+    });
+});
+
 describe("R8 — every frontend path a crate names is one the classifier sends to the Rust legs", () => {
     const root = join(dirname(fileURLToPath(import.meta.url)), "..", "crates");
     const rustFiles = (dir) =>
