@@ -432,7 +432,6 @@
 102 frontend/app/view/toolchain/SystemToolInstallInline.tsx::SystemToolInstallInline
 105 frontend/app/view/tower/tower-agents.tsx::Detail
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
-126 frontend/app/view/tower/tower-view.tsx::TowerView
 121 frontend/app/view/vault/vault-entries.tsx::VaultEntries
 136 frontend/app/view/vault/vault-reveal.tsx::VaultRevealDialog
 104 frontend/app/view/vault/vault-secrets.tsx::VaultSecrets

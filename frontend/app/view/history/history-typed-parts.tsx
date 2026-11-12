@@ -20,6 +20,7 @@ export function TypedBar(props: Part): JSX.Element {
     return (
         <div class="warden-history-bar">
             <Select
+                class="warden-history-select"
                 ariaLabel="Agent"
                 density="compact"
                 value={t.agentId()}
@@ -27,7 +28,7 @@ export function TypedBar(props: Part): JSX.Element {
                 disabled={t.list().length === 0}
                 options={t.list().map((a) => ({ value: a.id, label: a.name }))}
             />
-            <FilterInput value={t.query()} onInput={t.setQuery} placeholder="Search what was typed" />
+            <FilterInput class="warden-history-filter" value={t.query()} onInput={t.setQuery} placeholder="Search what was typed" />
             <Button
                 tone="quiet"
                 density="compact"
@@ -71,8 +72,8 @@ function EntryRow(props: Part & { item: InputHistoryItem }): JSX.Element {
     const { t, item } = props;
     return (
         <tr data-entry={item.id}>
-            <td class="warden-history-typed-when">{formatWhen(item.sent_at_ms)}</td>
-            <td>
+            <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">{formatWhen(item.sent_at_ms)}</td>
+            <td class="warden-history-cell-wide">
                 <div class="warden-history-typed-text" {...tip(item.text)}>
                     {item.text}
                 </div>
@@ -80,7 +81,7 @@ function EntryRow(props: Part & { item: InputHistoryItem }): JSX.Element {
                     <div class="warden-manager-dim warden-history-typed-tags">{tags(item)}</div>
                 </Show>
             </td>
-            <td class="warden-history-actions">
+            <td class="warden-history-actions warden-history-cell-wide">
                 <Show
                     when={t.confirmId() === item.id}
                     fallback={

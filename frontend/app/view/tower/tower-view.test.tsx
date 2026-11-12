@@ -1248,6 +1248,29 @@ describe("Tower's Panes view", () => {
         renderTower();
         expect(screen.getByTestId("tower-view").style.zoom).toBe("1.5");
     });
+
+    it("shows the view tabs as icons while the pane is too narrow for their labels", async () => {
+        let report: ((width: number) => void) | undefined;
+        class FakeObserver {
+            constructor(private cb: (entries: { contentRect: { width: number } }[]) => void) {}
+            observe(el: Element) {
+                if (el.getAttribute("data-testid") === "tower-view") report = (width) => this.cb([{ contentRect: { width } }]);
+            }
+            disconnect() {}
+        }
+        vi.stubGlobal("ResizeObserver", FakeObserver);
+        try {
+            renderTower();
+            const tabs = () => screen.getByRole("tablist", { name: "Tower view" });
+            await waitFor(() => expect(report).toBeDefined());
+            report!(280);
+            await waitFor(() => expect(tabs().classList.contains("ui-tabs--icon-only")).toBe(true));
+            report!(700);
+            await waitFor(() => expect(tabs().classList.contains("ui-tabs--icon-only")).toBe(false));
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
 });
 
 /** SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §3: memory is

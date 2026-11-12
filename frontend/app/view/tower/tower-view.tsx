@@ -14,6 +14,7 @@ import {
     IconButton,
     SegmentedControl,
     Select,
+    tabbedPaneLayout,
     tabPanelId,
     Tabs,
     TextInput,
@@ -21,7 +22,7 @@ import {
 import type { TowerPeerInfo, TowerProcess, TowerSnapshot } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import clsx from "clsx";
-import { createEffect, createMemo, createSignal, For, type JSX, Match, Show, Switch } from "solid-js";
+import { createEffect, createMemo, createSignal, For, type JSX, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import { agentColor, AgentsView } from "./tower-agents";
 import { KindBreakdown, KindIcon, LoadCells } from "./tower-kind-ui";
 import { type KindGroup, kindGroups, kindOf, KINDS, sortKindGroups } from "./tower-kinds";
@@ -30,6 +31,7 @@ import type { TowerViewModel } from "./tower-model";
 import { PanesView } from "./tower-panes";
 import { ProcessName } from "./tower-process-name";
 import { SortHeader } from "./tower-sort-header";
+import { towerViewTabs } from "./tower-view-tabs";
 import {
     count,
     filterProcesses,
@@ -95,9 +97,23 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
     const cpu = (fraction: number | undefined) => formatCpu(fraction, m.snapshot()?.cpu_count ?? 1);
     const [pairing, setPairing] = createSignal(false);
     const isPeer = () => m.connection().startsWith("peer:");
+    const tabs = createMemo(() => towerViewTabs(m));
+    // The view tabs are icons with tooltips while the pane is too narrow for their labels (as in a TabbedPane).
+    let root: HTMLDivElement | undefined;
+    const [paneWidth, setPaneWidth] = createSignal(Infinity);
+    // From the width and the tab count both: choosing another machine changes the count without a resize.
+    const iconTabs = () => tabbedPaneLayout(paneWidth(), tabs().length) === "top-icons";
+    onMount(() => {
+        if (!root || typeof ResizeObserver === "undefined") return;
+        const observer = new ResizeObserver((entries) => {
+            setPaneWidth(entries[entries.length - 1].contentRect.width);
+        });
+        observer.observe(root);
+        onCleanup(() => observer.disconnect());
+    });
 
     return (
-        <div class="tower-view" data-testid="tower-view" style={{ zoom: m.zoom() }}>
+        <div ref={root} class="tower-view" data-testid="tower-view" style={{ zoom: m.zoom() }}>
             <div class="tower-toolbar">
                 <Select
                     density="compact"
@@ -119,53 +135,8 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                     />
                 </Show>
                 <Tabs<TowerViewKind>
-                    items={
-                        !m.hasTasks()
-                            ? [
-                                  {
-                                      id: "processes",
-                                      label: "Processes",
-                                      icon: "server",
-                                      tooltip: "Every process on that machine",
-                                  },
-                              ]
-                            : [
-                                  // This computer's AgentMux only, like Panes.
-                                  ...(m.remote()
-                                      ? []
-                                      : [
-                                            {
-                                                id: "memory" as const,
-                                                label: "Memory",
-                                                icon: "memory",
-                                                tooltip: "AgentMux's memory, and what it is made of",
-                                            },
-                                        ]),
-                                  {
-                                      id: "agents",
-                                      label: "Agents",
-                                      icon: "robot",
-                                      tooltip: "Each agent and what it runs",
-                                  },
-                                  {
-                                      id: "processes",
-                                      label: "Processes",
-                                      icon: "server",
-                                      tooltip: "Every process on this machine",
-                                  },
-                                  // This computer's AgentMux only (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.4).
-                                  ...(m.remote()
-                                      ? []
-                                      : [
-                                            {
-                                                id: "panes" as const,
-                                                label: "Panes",
-                                                icon: "table-columns",
-                                                tooltip: "Each window, tab and pane, and what it costs",
-                                            },
-                                        ]),
-                              ]
-                    }
+                    items={tabs()}
+                    iconOnly={iconTabs()}
                     value={m.effectiveView()}
                     onChange={(v) => m.setView(v)}
                     idPrefix={idPrefix}
