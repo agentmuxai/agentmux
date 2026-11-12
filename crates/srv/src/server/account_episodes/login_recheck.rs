@@ -29,8 +29,14 @@ use super::machine::BlockedPane;
 use super::resume::Failed;
 use super::{canonical, AgentState};
 
-/// For each pane, the token expiry it was last cleared for: the same token is not tried twice.
-static TRIED: LazyLock<Mutex<HashMap<String, i64>>> = LazyLock::new(Default::default);
+/// How long a try is remembered. Clearing a pane removes its failure, so the pane leaves the signed-out
+/// set at once: the memory has to outlive that, or a login the provider keeps refusing would be tried
+/// again at every failure.
+const TRIED_MS: i64 = 6 * 60 * 60 * 1000;
+
+/// For each pane, the token expiry it was last cleared for and when: the same token is not tried twice
+/// within [`TRIED_MS`].
+static TRIED: LazyLock<Mutex<HashMap<String, (i64, i64)>>> = LazyLock::new(Default::default);
 
 /// Whether a token expiring at `expiry_ms` is a new login for a turn that failed at `failed_at_ms`
 /// (unix ms), at `now_ms`: still good now, and expiring after the failure. A failure stored without
@@ -43,12 +49,14 @@ pub(super) fn is_new_login(expiry_ms: Option<i64>, failed_at_ms: Option<u64>, no
     failed_at_ms.is_none_or(|at| expiry > i64::try_from(at).unwrap_or(i64::MAX))
 }
 
-/// Records that `expiry_ms` is tried for `block_id`; `false` when it already was.
-pub(super) fn first_try(tried: &mut HashMap<String, i64>, block_id: &str, expiry_ms: i64) -> bool {
-    if tried.get(block_id) == Some(&expiry_ms) {
+/// Records that `expiry_ms` is tried for `block_id` at `now_ms`; `false` when it already was within
+/// [`TRIED_MS`]. Entries older than that are dropped.
+pub(super) fn first_try(tried: &mut HashMap<String, (i64, i64)>, block_id: &str, expiry_ms: i64, now_ms: i64) -> bool {
+    tried.retain(|_, (_, at)| now_ms - *at < TRIED_MS);
+    if tried.get(block_id).is_some_and(|(e, _)| *e == expiry_ms) {
         return false;
     }
-    tried.insert(block_id.to_string(), expiry_ms);
+    tried.insert(block_id.to_string(), (expiry_ms, now_ms));
     true
 }
 
@@ -56,13 +64,11 @@ pub(super) fn first_try(tried: &mut HashMap<String, i64>, block_id: &str, expiry
 pub(super) fn run(state: &AppState, panes: &[BlockedPane]) {
     let signed_out: Vec<&BlockedPane> = panes.iter().filter(|p| matches!(p.state, AgentState::SignedOut) && canonical(&p.provider) == "claude").collect();
     if signed_out.is_empty() {
-        TRIED.lock().unwrap_or_else(|e| e.into_inner()).clear();
         return;
     }
     let accounts = state.id_store.identity_list(None).unwrap_or_default();
     let now_ms = agentmux_common::time::now_ms();
     let mut tried = TRIED.lock().unwrap_or_else(|e| e.into_inner());
-    tried.retain(|id, _| signed_out.iter().any(|p| &p.block_id == id));
     let mut cleared = Vec::new();
     for pane in signed_out {
         let Some(account) = accounts.iter().find(|a| a.id == pane.account_id) else { continue };
@@ -71,7 +77,7 @@ pub(super) fn run(state: &AppState, panes: &[BlockedPane]) {
         let Some(block) = state.mstore.get::<Block>(&pane.block_id).ok().flatten() else { continue };
         let Some(failure) = failure_of_block(&block).filter(|f| f.code == FailureClass::Auth) else { continue };
         let Some(expiry) = expiry.filter(|_| is_new_login(expiry, failure.at_ms, now_ms)) else { continue };
-        if !first_try(&mut tried, &pane.block_id, expiry) {
+        if !first_try(&mut tried, &pane.block_id, expiry, now_ms) {
             continue;
         }
         crate::backend::blockcontroller::core::persist_last_failure(&block.oid, None, &Some(state.mstore.clone()), &Some(state.event_bus.clone()));
@@ -117,9 +123,20 @@ mod tests {
     #[test]
     fn a_token_is_tried_once_for_a_pane() {
         let mut tried = HashMap::new();
-        assert!(first_try(&mut tried, "b1", 9000));
-        assert!(!first_try(&mut tried, "b1", 9000), "the same token again");
-        assert!(first_try(&mut tried, "b1", 12000), "a newer token");
-        assert!(first_try(&mut tried, "b2", 9000), "another pane");
+        assert!(first_try(&mut tried, "b1", 9000, 100));
+        assert!(!first_try(&mut tried, "b1", 9000, 200), "the same token again");
+        assert!(first_try(&mut tried, "b1", 12000, 300), "a newer token");
+        assert!(first_try(&mut tried, "b2", 9000, 400), "another pane");
+    }
+
+    #[test]
+    fn a_try_outlives_the_pane_leaving_the_signed_out_set() {
+        // Cleared at 100, the turn fails on the same token and the pane is signed out again much later,
+        // with other panes tried in between: still not tried again until the memory runs out.
+        let mut tried = HashMap::new();
+        assert!(first_try(&mut tried, "b1", 9000, 100));
+        assert!(first_try(&mut tried, "b2", 7000, 5_000), "another pane meanwhile");
+        assert!(!first_try(&mut tried, "b1", 9000, TRIED_MS - 1), "the same token inside the window");
+        assert!(first_try(&mut tried, "b1", 9000, TRIED_MS + 101), "after the window it is tried once more");
     }
 }
