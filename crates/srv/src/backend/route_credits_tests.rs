@@ -136,7 +136,7 @@ async fn the_first_402_marks_every_agent_on_the_route_and_the_first_success_clea
 }
 
 /// A model switch recorded during a turn names the destination as the agent's choice while its harness still runs
-/// the route it left: a late 402 belongs to the route left, not to the healthy destination (Codex P2 on #7051).
+/// the route it left: a late 402 belongs to the route left, not to the healthy destination (#47472).
 #[tokio::test]
 async fn a_402_after_a_switch_during_a_turn_is_the_route_left_not_the_destination() {
     let state = crate::server::tests::test_state();
