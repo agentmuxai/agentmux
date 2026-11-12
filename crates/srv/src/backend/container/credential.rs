@@ -196,8 +196,8 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
 }
 
 /// The marker's value: `1` where gh-agent's own hooks can judge a container's push (the hook asks srv),
-/// `older-gh-agent` where gh-agent is installed but cannot (the hook says the push was not scanned and lets it go
-/// on), `0` where there is no gh-agent (the hook does nothing and says nothing, and never refuses a push for want
+/// `older-gh-agent` where gh-agent is installed but cannot (the hook refuses a push to a GitHub repository and
+/// says how to fix the host), `0` where there is no gh-agent (the hook does nothing and says nothing, and never refuses a push for want
 /// of an answer).
 fn publish_guard_marker(gh_agent_installed: bool, can_judge: bool) -> &'static str {
     match (gh_agent_installed, can_judge) {

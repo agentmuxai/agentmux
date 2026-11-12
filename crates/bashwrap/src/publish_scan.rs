@@ -11,8 +11,10 @@
 //! - A machine with no publish guard, and a native agent's shell, never reach srv: srv says
 //!   `AGENTMUX_PUBLISH_GUARD=1` in a container's commands on a machine whose guard can judge a container's push,
 //!   `=0` on one that has no guard, and `=older-gh-agent` on one whose gh-agent is too old to judge it. The hook
-//!   does nothing and says nothing for `0`. For `older-gh-agent`, and where srv says nothing (an AgentMux older than
-//!   the check), the hook says once per push that it was checked for credentials only, and lets it go on.
+//!   does nothing and says nothing for `0`. Where srv says nothing (an AgentMux older than the check), the hook says
+//!   once per push that it was checked for credentials only, and lets it go on: nothing on that host can judge it.
+//! - With `older-gh-agent`, a push to a GitHub repository is refused, saying to update gh-agent on the host and to
+//!   have it rewrite its hooks (the version is read from the hooks' header).
 //! - With `1`, an AgentMux that has no route to ask (404 or 405) refuses the push, and says to update AgentMux.
 //! - A push to a repository the guard finds private is not collected at all.
 //! - On a machine that has the guard, a public repository's push whose check cannot run (srv unreachable, too slow,
@@ -287,7 +289,7 @@ enum Guard {
     /// A container's command where srv said nothing: an AgentMux older than the check. Said out loud.
     OlderAgentMux,
     /// A container's command on a machine whose gh-agent cannot judge a container's push (`AGENTMUX_PUBLISH_GUARD=older-gh-agent`).
-    /// Said out loud, like [`Guard::OlderAgentMux`].
+    /// The push to a GitHub repository is refused, saying how to fix the host: it is one of ours and the fix takes a minute.
     OlderGhAgent,
 }
 
@@ -324,8 +326,9 @@ fn check_with(remote: &str, url: &str, input: &str, guard: Guard, allow: bool, a
         return 0;
     }
     if guard == Guard::OlderGhAgent {
-        eprintln!("agentmux: this push to a GitHub repository was checked for credentials only: the gh-agent on this host is older than the publish check needs, so the push itself was not scanned.");
-        return 0;
+        eprintln!("agentmux: this push to a GitHub repository was not checked, so it is not sent: the gh-agent on this host is too old to judge a container's push (it needs 0.13 or later).");
+        eprintln!("agentmux: ask your leader to update gh-agent on the host and then run `gh-agent hooks-path` there: the check reads the version from the hooks' header, and hooks an older gh-agent wrote keep refusing after the update.");
+        return 1;
     }
     // First only whether this machine guards this repository, so a private one's push is not read.
     match ask(&repo, allow, &[]) {
@@ -575,9 +578,9 @@ mod tests {
     }
 
     #[test]
-    fn a_gh_agent_too_old_to_judge_a_container_push_lets_it_go_and_says_so_without_asking() {
-        assert_eq!(check_guard(Guard::OlderGhAgent, "https://github.com/o/r.git", vec![]), (0, 0));
-        // Nothing to say about a remote that is not GitHub's, or a push that updates nothing.
+    fn a_gh_agent_too_old_to_judge_a_container_push_refuses_a_github_push_without_asking() {
+        assert_eq!(check_guard(Guard::OlderGhAgent, "https://github.com/o/r.git", vec![]), (1, 0));
+        // Nothing to refuse for a remote that is not GitHub's.
         assert_eq!(check_guard(Guard::OlderGhAgent, "https://gitlab.com/o/r.git", vec![]), (0, 0));
     }
 
