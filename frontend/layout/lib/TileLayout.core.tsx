@@ -56,6 +56,7 @@ import {
     type DragPreviewSize,
 } from "./drag-preview-size";
 import {
+    ClosedPaneGhosts,
     DisplayNodesWrapper,
     MagnifiedPaneOverlay,
     NodeBackdrops,
@@ -283,6 +284,7 @@ function tileLayout(
             class={clsx("tile-layout", props.contents.className, { animate: animate() })}
             style={tileStyle()}
         >
+            <ClosedPaneGhosts layoutModel={layoutModel} />
             <div
                 ref={(el) => {
                     (layoutModel.displayContainerRef as any).current = el;

@@ -355,6 +355,33 @@ async fn only_a_move_to_a_working_login_tells_the_agent_it_is_signed_in() {
     cleanup(&[&moved, &unlinked, &unchecked]);
 }
 
+/// A move restarts its panes after the relink, so the relink only clears the failure and names the pane
+/// (task #2481): telling it there would reach the old process, still on the expired login.
+#[tokio::test]
+async fn a_move_names_the_signed_out_pane_at_the_relink_but_tells_it_only_after_the_restart() {
+    let state = test_state();
+    let tab = new_tab(&state).await;
+    let mut failed = failure("auth", None, None);
+    failed["atMs"] = json!(1_700_000_000_000u64);
+    let moved = pane(&state, &tab, "u1", "Moved-later", "old", Some(failed), false).await;
+    let before = failed_panes(&state.mstore, &state.identity_store, "u1", "claude");
+
+    let (cleared, signed_out) = rebind_clearing(&state.mstore, &state.event_bus, before, "new", true);
+    assert_eq!(cleared, 1);
+    assert_eq!(signed_out, vec![Failed { block_id: moved.clone(), failed_at_ms: Some(1_700_000_000_000) }]);
+    assert!(stored_failure(&state, &moved).is_none(), "the failure is cleared at the relink");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let (next, _guard) = crate::backend::reactive::held_notes::attach(&moved, "x");
+    assert!(!next.contains("Signed in again"), "nothing told it before the restart: {next}");
+
+    // After the restart, only a pane that restarted is told, and not when the failover tells it itself.
+    let ids = [moved.as_str()];
+    assert_eq!(switch::panes_to_tell("operator", signed_out.clone(), &ids), signed_out);
+    assert!(switch::panes_to_tell("operator", signed_out.clone(), &[]).is_empty(), "a pane that didn't restart is not told");
+    assert!(switch::panes_to_tell(failover::ACTOR_EXPIRED, signed_out, &ids).is_empty(), "login_expiry::resume tells its own");
+    cleanup(&[&moved]);
+}
+
 /// A sign-in to one account says nothing about another.
 #[tokio::test]
 async fn a_sign_in_leaves_another_accounts_panes_alone() {

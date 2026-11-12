@@ -216,6 +216,13 @@ pub(crate) async fn connect(request: impl IntoClientRequest + Unpin) -> Result<(
     connect_with_env(request, |name| std::env::var(name).ok()).await
 }
 
+/// [`connect`], failing as a connect that cannot reach the network does when it takes longer than `limit`.
+pub(crate) async fn connect_within(request: impl IntoClientRequest + Unpin, limit: std::time::Duration) -> Result<(Socket, Response), Error> {
+    tokio::time::timeout(limit, connect(request))
+        .await
+        .unwrap_or_else(|_| Err(Error::Io(io::Error::new(io::ErrorKind::TimedOut, "the WebSocket handshake took too long"))))
+}
+
 async fn connect_with_env(request: impl IntoClientRequest + Unpin, get: impl Fn(&str) -> Option<String>) -> Result<(Socket, Response), Error> {
     let request = request.into_client_request()?;
     let uri = request.uri();

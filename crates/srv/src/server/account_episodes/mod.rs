@@ -536,6 +536,16 @@ pub fn after_rebind(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<
 /// choice found valid, or a key that just passed its check. Not for an unlink (no account at all) or a key
 /// nobody has checked, whose next turn could fail again.
 pub fn after_rebind_telling(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<(String, Vec<String>)>, account_id: &str, tell: bool) -> usize {
+    let (cleared, signed_out) = rebind_clearing(mstore, event_bus, before, account_id, tell);
+    resume::start(signed_out, agentmux_common::time::now_ms());
+    cleared
+}
+
+/// [`after_rebind_telling`] without the telling: how many failures were cleared, and the panes among them (with
+/// `tell` set) whose last turn failed on the login, for the caller to pass to [`resume::start`] once the pane is
+/// running on the new account. A move restarts its panes after the relink, so telling at the relink would reach
+/// the old process, still on the expired login.
+pub(super) fn rebind_clearing(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<(String, Vec<String>)>, account_id: &str, tell: bool) -> (usize, Vec<Failed>) {
     let mut cleared = 0;
     let mut signed_out = Vec::new();
     for (block_id, accounts) in before {
@@ -553,8 +563,7 @@ pub fn after_rebind_telling(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, befo
         tracing::info!(cleared, "account episode: a rebind cleared its old account's failures");
         after_clearing();
     }
-    resume::start(signed_out, agentmux_common::time::now_ms());
-    cleared
+    (cleared, signed_out)
 }
 
 /// Failures were cleared: replay what was held for those agents, and let the

@@ -20,60 +20,55 @@ import {
     userProfiles,
 } from "@/app/view/browser/browser-profiles";
 import { ProfileBadge } from "@/app/view/browser/browser-profile-menu";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 import { settingsAtom } from "@/app/store/global";
 import { NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 import { AGENT_SITE_GRANTS_SETTING, AgentSiteGrants } from "./agent-site-grants";
 import { browserPauseAll, setAgentBrowsingPaused, startBrowserPauseAll } from "@/app/store/browser-pause-all";
 
 export const BROWSER_SETTINGS = {
-    profiles: {
+    profiles: settingEntry({
         id: "browser.profiles",
-        label: "Browser profiles",
-        description:
-            "Each profile keeps its own sign-ins, cookies and site data, so one site can be open as two accounts side by side. Open a tab in one from the Profile button in a browser pane. Personal is the one every tab started with; it can't be removed. An agent can browse as a profile only if you switch on \"Agents may use it\" for that profile; on Windows it can also use an Incognito tab.",
+        labelKey: "settings.browser.profiles.label",
+        descriptionKey: "settings.browser.profiles.description",
         section: "browser",
         keywords: ["profile", "profiles", "account", "accounts", "sign in", "cookies", "incognito", "identity", "work", "agent", "agents"],
-    },
-    searchSuggestions: {
+    }),
+    searchSuggestions: settingEntry({
         id: "browser.search_suggestions",
-        label: "Search suggestions while typing",
-        description:
-            "The address bar also asks your search engine for suggestions as you type, as Chrome does, which sends it what you type before you press Enter. Incognito tabs never ask, as in Chrome. Turn it off to keep suggestions to this computer (your history and the addresses you typed).",
+        labelKey: "settings.browser.searchSuggestions.label",
+        descriptionKey: "settings.browser.searchSuggestions.description",
         section: "browser",
         keywords: ["autocomplete", "suggestions", "address bar", "omnibox", "google", "search", "privacy", "browser:searchsuggestions"],
-    },
-    hibernate: {
+    }),
+    hibernate: settingEntry({
         id: "browser.hibernate",
-        label: "Hibernate hidden browser panes",
-        description:
-            "A browser pane out of sight for a while goes to sleep: its page is put away to free its memory, often 100 to 200 MB, and loads again when you're about to look at it, with a note while it restores. It comes back with its back/forward history, scroll position and anything typed into it, on browser engines that support it; on older ones it loads fresh. Never a pane an agent is using, one playing or capturing media, one with something typed into it, or a local dev server.",
+        labelKey: "settings.browser.hibernate.label",
+        descriptionKey: "settings.browser.hibernate.description",
         section: "browser",
         keywords: ["hibernate", "sleep", "sleeping", "memory", "discard", "tabs", "browser:hibernate"],
-    },
-    hibernateAfter: {
+    }),
+    hibernateAfter: settingEntry({
         id: "browser.hibernate_after",
-        label: "Minutes hidden before it sleeps",
-        description: "Sooner when the computer is low on memory: 5 minutes, then 1.",
+        labelKey: "settings.browser.hibernateAfter.label",
+        descriptionKey: "settings.browser.hibernateAfter.description",
         section: "browser",
         keywords: ["hibernate", "sleep", "minutes", "delay", "browser:hibernateafter"],
-    },
-    keepAwakeSites: {
+    }),
+    keepAwakeSites: settingEntry({
         id: "browser.keep_awake_sites",
-        label: "Sites that never sleep",
-        description:
-            "Browser panes on these sites stay awake however long they are hidden. A site covers its subdomains (example.com covers mail.example.com); write an address with https:// to keep just that one.",
+        labelKey: "settings.browser.keepAwakeSites.label",
+        descriptionKey: "settings.browser.keepAwakeSites.description",
         section: "browser",
         keywords: ["hibernate", "sleep", "keep awake", "never", "sites", "exceptions", "browser:keepawakesites"],
-    },
-    pauseAll: {
+    }),
+    pauseAll: settingEntry({
         id: "browser.pause_all",
-        label: "Pause all agent browsing",
-        description:
-            "An emergency stop: while it is on, every browser pane an agent drives refuses every call the agent makes, and the clocks of auto-approve grants stand still. It stays on after a restart until you turn it off here, in the status bar or from the command palette.",
+        labelKey: "settings.browser.pauseAll.label",
+        descriptionKey: "settings.browser.pauseAll.description",
         section: "browser",
         keywords: ["pause", "stop", "agent", "agents", "browsing", "emergency", "freeze", "resume", "auto-approve"],
-    },
+    }),
     agentSites: AGENT_SITE_GRANTS_SETTING,
 } satisfies Record<string, SettingsIndexEntry>;
 

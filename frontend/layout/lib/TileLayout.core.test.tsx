@@ -81,6 +81,7 @@ vi.mock("./layoutModelHooks", () => ({
     useNodeModel: (_m: unknown, node: { id: string }) => h.nodeModels.get(node.id),
 }));
 vi.mock("./tilelayout-shared", () => ({
+    ClosedPaneGhosts: () => null,
     DisplayNodesWrapper: (p: DisplayNodesProps) => {
         h.displayNodes = p;
         return null;
