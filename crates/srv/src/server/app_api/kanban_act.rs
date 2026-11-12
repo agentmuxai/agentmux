@@ -39,7 +39,7 @@ impl Act<'_> {
         // An agent sees only the boards whose agent list has it; the operator sees them all.
         if !self.actor.is_operator {
             if let Some((board, _)) = self.state.work_store.work_task_board(&task.item.id).map_err(|e| e.to_string())? {
-                if !board.visible_to(&self.actor.name, "") {
+                if !board.visible_to(&self.actor.name, &self.actor.uid) {
                     return Err("no such task".to_string());
                 }
             }
@@ -133,7 +133,7 @@ impl Act<'_> {
     fn move_to_board(&self, to: &str) -> Result<Value, String> {
         let Act { state, req, actor, now, .. } = *self;
         let t = self.task()?;
-        let who = (!actor.is_operator).then_some((actor.name.as_str(), ""));
+        let who = (!actor.is_operator).then_some((actor.name.as_str(), actor.uid.as_str()));
         crate::server::work_tasks::pick_board(state, Some(to), who, true)?;
         if let Some((from, _)) = state.work_store.work_task_board(&t.item.id).map_err(|e| e.to_string())? {
             if who.is_some_and(|(a, u)| !from.visible_to(a, u)) {
