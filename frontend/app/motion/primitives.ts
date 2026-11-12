@@ -346,26 +346,25 @@ export interface MergeOptions {
     /** Adjust each flying copy before it is shown (see `travel`). */
     onCopy?: (copy: HTMLElement) => void;
     /**
-     * Called with each destination once it is drawn: the x (viewport px) past which its copy is not drawn, or
-     * undefined for no limit. A piece whose place reaches past that edge (a tab scrolled out of a full strip)
-     * flies toward its place and is cut off at the edge, instead of crossing what lies beyond it. A piece whose
-     * place lies within the edge is not cut off at all, wherever it starts.
+     * Called with each destination, on every frame of the flight: the x (viewport px) past which its copy is
+     * not drawn, or undefined for no limit. A piece whose place reaches past that edge (a tab scrolled out of
+     * a full strip) flies toward its place and is cut off at the edge, instead of crossing what lies beyond
+     * it. A piece whose place lies within the edge is not cut off, wherever it starts. Read again on each
+     * frame because the edge moves while the panes glide into their new sizes.
      */
     clipRight?: (dest: Element) => number | undefined;
 }
 
-/** A fixed layer on <body> that draws nothing right of `x`; the copies fly inside it. */
-function clippedLayer(x: number): HTMLElement {
+/** A fixed layer on <body> for one flying copy; `cutRight` draws nothing right of an x. */
+function copyLayer(): HTMLElement {
     const layer = document.createElement("div");
-    Object.assign(layer.style, {
-        position: "fixed",
-        inset: "0",
-        pointerEvents: "none",
-        zIndex: "10000",
-        clipPath: `inset(0 calc(100% - ${x}px) 0 0)`,
-    });
+    Object.assign(layer.style, { position: "fixed", inset: "0", pointerEvents: "none", zIndex: "10000" });
     document.body.append(layer);
     return layer;
+}
+
+function cutRight(layer: HTMLElement, x: number | undefined): void {
+    layer.style.clipPath = x === undefined ? "none" : `inset(0 calc(100% - ${x}px) 0 0)`;
 }
 
 /**
@@ -384,8 +383,35 @@ export function mergeInto(
     const pulseKind = opts.pulse ?? (opts.land ? false : "bounce");
     const flights: MotionHandle[] = [];
     const pulses: MotionHandle[] = [];
-    const layers: HTMLElement[] = [];
-    const removeLayers = () => layers.splice(0).forEach((l) => l.remove());
+    const slots: { layer: HTMLElement; el: Element }[] = [];
+    let clipFrame: number | undefined;
+    const stopClipping = () => {
+        if (clipFrame === undefined) return;
+        if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(clipFrame);
+        else clearTimeout(clipFrame);
+        clipFrame = undefined;
+    };
+    const removeLayers = () => {
+        stopClipping();
+        slots.splice(0).forEach((slot) => slot.layer.remove());
+    };
+    // The cut of each copy's layer: only a copy whose place reaches past its edge is cut.
+    const applyClips = () => {
+        for (const { layer, el } of slots) {
+            const limit = opts.clipRight?.(el);
+            const cut = limit !== undefined && Number.isFinite(limit) && el.getBoundingClientRect().right > limit;
+            cutRight(layer, cut ? limit : undefined);
+        }
+    };
+    const clipEachFrame = () => {
+        clipFrame = undefined;
+        if (cancelled || !slots.length) return;
+        applyClips();
+        clipFrame =
+            typeof requestAnimationFrame === "function"
+                ? requestAnimationFrame(clipEachFrame)
+                : (setTimeout(clipEachFrame, 16) as unknown as number);
+    };
     let cancelled = false;
     let frame: number | undefined;
     let settle!: () => void;
@@ -403,18 +429,11 @@ export function mergeInto(
     const run = () => {
         frame = undefined;
         const els = typeof dest === "function" ? dest() : dest;
-        // One layer per limit, made when a piece needs it.
-        const byLimit = new Map<number, HTMLElement>();
+        // With a limit to keep, each copy flies in a layer of its own, cut or not as its place needs.
         const layerFor = (el: Element): HTMLElement | undefined => {
-            if (typeof document === "undefined") return undefined;
-            const limit = opts.clipRight?.(el);
-            if (limit === undefined || !Number.isFinite(limit) || el.getBoundingClientRect().right <= limit) return undefined;
-            let layer = byLimit.get(limit);
-            if (!layer) {
-                layer = clippedLayer(limit);
-                byLimit.set(limit, layer);
-                layers.push(layer);
-            }
+            if (!opts.clipRight || typeof document === "undefined") return undefined;
+            const layer = copyLayer();
+            slots.push({ layer, el });
             return layer;
         };
         sources.forEach((from, i) => {
@@ -425,13 +444,17 @@ export function mergeInto(
                 flights.push(travel(el, from, { category, delay: i * stagger, onArrive, onCopy: opts.onCopy, layer: layerFor(el) }));
             else onArrive();
         });
+        if (slots.length) {
+            applyClips();
+            clipEachFrame();
+        }
         // Done when every piece has landed and its pulse has ended.
         void Promise.all(flights.map((f) => f.finished))
-            .then(() => Promise.all(pulses.map((p) => p.finished)))
             .then(() => {
                 removeLayers();
-                settle();
-            });
+                return Promise.all(pulses.map((p) => p.finished));
+            })
+            .then(settle);
     };
 
     if (typeof dest === "function") {

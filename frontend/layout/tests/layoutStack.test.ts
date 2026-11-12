@@ -1731,7 +1731,8 @@ describe("minimizing next to a minimized pane (merge)", () => {
             model.minimizeNodeToggle(idOf(model, "b1"));
             vi.advanceTimersByTime(20); // the frame the strip draws the arrivals in
             const real = target.querySelector<HTMLElement>('[data-tab-id="b1"]')!;
-            const copies = [...document.body.children].filter((el) => el.classList.contains("pane-tab"));
+            // Each copy flies in a layer of its own on <body> (cut off at the destination strip's edge when its place is past it).
+            const copies = [...document.querySelectorAll(".pane-tab")].filter((el) => !source.contains(el) && !target.contains(el));
 
             expect(copies).toHaveLength(2);
             expect((copies[0] as HTMLElement).style.position).toBe("fixed");

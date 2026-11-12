@@ -450,7 +450,9 @@ describe("mergeInto", () => {
         expect((fake.calls[0].el as HTMLElement).className).toBe("pill");
     });
 
-    it("cuts off only the copies whose place reaches past the limit the caller gives, in a layer that draws nothing right of it", async () => {
+    const clipOf = (copy: Element) => (copy.parentElement as HTMLElement).style.getPropertyValue("clip-path");
+
+    it("cuts off only the copies whose place reaches past the limit the caller gives, each in a layer of its own", async () => {
         const fits = at(300, 10); // right edge 400, inside the limit
         const past = at(1400, 10); // a tab scrolled out of a full strip
         const clipRight = vi.fn(() => 640);
@@ -458,17 +460,19 @@ describe("mergeInto", () => {
         expect(clipRight).toHaveBeenCalledWith(fits);
         expect(clipRight).toHaveBeenCalledWith(past);
         const [fitsCopy, pastCopy] = fake.calls.map((c) => c.el);
-        expect(fitsCopy.parentElement).toBe(document.body);
-        const layer = pastCopy.parentElement as HTMLElement;
-        expect(layer).not.toBe(document.body);
-        expect(layer.parentElement).toBe(document.body);
-        expect(layer.style.position).toBe("fixed");
-        expect(layer.style.getPropertyValue("clip-path")).toContain("640px");
+        const layers = [fitsCopy, pastCopy].map((c) => c.parentElement as HTMLElement);
+        expect(layers[0]).not.toBe(layers[1]);
+        for (const layer of layers) {
+            expect(layer.parentElement).toBe(document.body);
+            expect(layer.style.position).toBe("fixed");
+        }
+        expect(clipOf(fitsCopy)).toBe("none");
+        expect(clipOf(pastCopy)).toContain("640px");
         // The copy still goes to the piece's real place: the layer cuts it off.
         expect(fake.calls[1].keyframes[1]).toEqual({ transform: "translate(1400px, -20px)" });
         fake.calls.forEach((c) => c.finish());
         await handle.finished;
-        expect(layer.isConnected).toBe(false);
+        expect(layers.every((l) => !l.isConnected)).toBe(true);
     });
 
     it("does not cut off a copy that starts right of the limit and flies to a place inside it", () => {
@@ -476,10 +480,28 @@ describe("mergeInto", () => {
             clipRight: () => 640,
             land: () => {},
         });
-        expect(fake.calls[0].el.parentElement).toBe(document.body);
+        expect(clipOf(fake.calls[0].el)).toBe("none");
     });
 
-    it("takes the layer away when it is cancelled, and uses the page when there is no limit", () => {
+    it("reads the limit and the place again on every frame, as the panes glide into their new sizes", async () => {
+        const rect = { left: 1000, top: 10, width: 100, height: 20, right: 1100, bottom: 30 };
+        const el = div();
+        el.getBoundingClientRect = () => rect as DOMRect;
+        let limit = 640;
+        mergeInto([rectOf(0, 0)], [el], { clipRight: () => limit, land: () => {} });
+        const copy = fake.calls[0].el;
+        expect(clipOf(copy)).toContain("640px");
+        // The strip's edge moves out past the place while the destination pane grows: the copy is not cut any more.
+        limit = 1400;
+        await new Promise((r) => setTimeout(r, 40));
+        expect(clipOf(copy)).toBe("none");
+        // And the place moves out past the edge again.
+        Object.assign(rect, { left: 1500, right: 1600 });
+        await new Promise((r) => setTimeout(r, 40));
+        expect(clipOf(copy)).toContain("1400px");
+    });
+
+    it("takes the layers away when it is cancelled, and uses the page when there is no limit function", async () => {
         const cancelled = mergeInto([rectOf(0, 0)], [at(700, 10)], { clipRight: () => 640 });
         const layer = fake.calls[0].el.parentElement as HTMLElement;
         expect(layer).not.toBe(document.body);
@@ -488,7 +510,7 @@ describe("mergeInto", () => {
         expect(layer.isConnected).toBe(false);
 
         fake.calls.length = 0;
-        mergeInto([rectOf(0, 0)], [at(700, 10)], { clipRight: () => undefined });
+        mergeInto([rectOf(0, 0)], [at(700, 10)]);
         expect(fake.calls[0].el.parentElement).toBe(document.body);
     });
 
