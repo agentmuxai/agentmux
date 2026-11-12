@@ -22,11 +22,11 @@
 163 crates/cef/src/browser_api/routes.rs::screenshot
 210 crates/cef/src/browser_pane/creation.rs::CreateBrowserPaneTask::Task::execute
 397 crates/cef/src/browser_pane/creation_views.rs::create_browser_pane_view
-124 crates/cef/src/browser_pane/creation_views.rs::resize_browser_pane_view_inner
+119 crates/cef/src/browser_pane/creation_views.rs::resize_browser_pane_view_inner
 240 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass
 168 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass::wndproc_hook
 293 crates/cef/src/browser_panes/clip.rs::BrowserPaneManager::set_pane_overlay_clip_hwnd
-136 crates/cef/src/browser_panes/clip.rs::SetPaneOverlayClipViewsTask::Task::execute
+120 crates/cef/src/browser_panes/clip.rs::SetPaneOverlayClipViewsTask::Task::execute
 143 crates/cef/src/browser_panes/mod.rs::BrowserPaneManager::create
 417 crates/cef/src/client/crash_recovery.rs::AgentMuxHandler::on_render_process_terminated
 246 crates/cef/src/client/error_catalog.rs::describe

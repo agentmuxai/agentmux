@@ -36,7 +36,8 @@
 //!   (`browser_panes_set_rects`).
 //! - `zoom`: `zoom_in`/`zoom_out`/`step_zoom`, `next_zoom_factor`.
 //! - `clip`: focus + the Win32/X11 overlay-clip airspace workaround
-//!   (`set_pane_overlay_clip`, `focus`, `defocus_all`, `compute_pane_visible`).
+//!   (`set_pane_overlay_clip`, `focus`, `defocus_all`); `views_clip`: what a
+//!   Views pane shows under an overlay.
 
 use std::sync::Arc;
 
@@ -54,15 +55,9 @@ pub(crate) mod discard;
 pub(crate) mod media_grants;
 pub(crate) mod media_prompt;
 mod navigation;
-mod zoom;
-
-// `compute_pane_visible` is called from `browser_pane::creation_views` via
-// `crate::browser_panes::compute_pane_visible` — re-export so that external
-// path keeps resolving now that the definition lives in the `clip` submodule.
-// Same cfg gate as the definition (Linux only — macOS uses the hole-punch
-// mask, Windows uses SetWindowRgn; see `clip::compute_pane_visible`'s doc).
 #[cfg(not(target_os = "macos"))]
-pub(crate) use clip::compute_pane_visible;
+pub(crate) mod views_clip;
+mod zoom;
 
 /// Abstraction over the CEF-side operations `close()` performs on the host
 /// process. Production implements this over `&Arc<AppState>` and Win32;

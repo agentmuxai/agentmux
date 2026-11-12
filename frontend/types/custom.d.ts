@@ -1104,8 +1104,10 @@ declare global {
         cefVersion?: string;
         channel?: string;
         platform?: string;
-        /** Windows only in practice: "views" when browser panes are CEF Views overlays (they hide whole under a menu). */
+        /** Windows only in practice: "views" when browser panes are CEF Views overlays. */
         paneBackend?: "views" | "hwnd";
+        /** Windows and Linux: a Views pane under a menu is cut around it and stays live, where it used to hide whole. */
+        paneClip?: boolean;
         arch?: string;
     }
 
