@@ -50,6 +50,10 @@ pub struct FillReq {
     /// field still has them: the page could have changed it while they read.
     pub expect_origin: String,
     pub expect_fingerprint: String,
+    /// `"month"` or `"year"`: the field is a `<select>`, and `text` names the option to choose
+    /// (`03`, `2027`), as a number or a name.
+    #[serde(default)]
+    pub choose: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,8 +70,10 @@ pub struct FieldInfo {
     pub slots: Vec<&'static str>,
     /// A password or one-time-code field: never filled from the Vault.
     pub password_like: bool,
-    /// Whether it takes typed text at all.
+    /// Whether it takes typed text, or is a `<select>` a card's month or year can be chosen in.
     pub fillable: bool,
+    /// A `<select>`: it is chosen in, not typed in.
+    pub select: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -80,7 +86,7 @@ pub struct FillData {
 }
 
 /// What a person reads as the field's name, for the approval prompt.
-fn display_label(f: &DomFacts) -> String {
+pub(super) fn display_label(f: &DomFacts) -> String {
     [f.label.trim(), f.attr("aria-label").trim(), f.attr("placeholder").trim(), f.attr("name").trim(), f.attr("id").trim()]
         .into_iter()
         .find(|s| !s.is_empty())
@@ -91,12 +97,12 @@ fn display_label(f: &DomFacts) -> String {
 }
 
 /// Identifies a field by its markup, so a changed one isn't mistaken for it.
-fn fingerprint(f: &DomFacts) -> String {
+pub(super) fn fingerprint(f: &DomFacts) -> String {
     [f.local_name.as_str(), f.attr("type"), f.attr("name"), f.attr("id"), f.attr("autocomplete"), f.attr("aria-label"), f.attr("placeholder"), f.label.trim()]
         .join("\u{1f}")
 }
 
-fn takes_text(f: &DomFacts) -> bool {
+pub(super) fn takes_text(f: &DomFacts) -> bool {
     match f.local_name.as_str() {
         "textarea" => true,
         "input" => !matches!(
@@ -105,6 +111,10 @@ fn takes_text(f: &DomFacts) -> bool {
         ),
         _ => false,
     }
+}
+
+pub(super) fn is_select(f: &DomFacts) -> bool {
+    f.local_name == "select"
 }
 
 /// Where a reference is and what it is, from the pane's latest snapshot.
@@ -169,7 +179,8 @@ pub async fn field_info_route(
                 fingerprint: fingerprint(&l.facts),
                 slots: vault_slots::slots(&l.facts),
                 password_like: vault_slots::password_like(&l.facts),
-                fillable: takes_text(&l.facts),
+                fillable: takes_text(&l.facts) || is_select(&l.facts),
+                select: is_select(&l.facts),
             })),
         ),
         Err(e) => fail(e),
@@ -241,6 +252,9 @@ async fn fill(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Fi
     let frame_id = frame.as_ref().map(|f| f.frame_id.as_str());
     let ctx = isolated_context(cdp, frame_id).await?;
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
+    if let Some(kind) = req.choose.as_deref() {
+        return choose(cdp, &obj, &located, req, kind).await;
+    }
 
     let length = req.text.encode_utf16().count();
     if let Some(max) = snapshot::max_length(&located.facts).filter(|max| length > *max) {
@@ -279,6 +293,61 @@ async fn fill(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Fi
     })
 }
 
+/// Checks `this` is still the approved `<select>` (as [`CHECK_AND_SET`] does a text field) and
+/// chooses the option the text names: a month by its number or name (`3`, `03`, `March`, `Mar`),
+/// a year by its four digits or its last two. Nothing is chosen when no option matches, and the
+/// answer says whether the select holds the choice after the page's handlers ran, never which.
+const CHOOSE: &str = r#"function (origin, v, kind, attr, tag, attrs) {
+  const w = this.ownerDocument && this.ownerDocument.defaultView;
+  if (!this.isConnected || !w || w.origin !== origin) return { error: "origin" };
+  if (this.localName !== tag || tag !== "select") return { error: "changed" };
+  if (this.disabled) return { error: "changed" };
+  this.scrollIntoView({ block: "center", inline: "center" });
+  this.focus();
+  for (const [k, want] of Object.entries(attrs)) {
+    if ((this.getAttribute(k) || "") !== want) return { error: "changed" };
+  }
+  const want = Number(v);
+  const names = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  const fits = (text) => {
+    const words = String(text).toLowerCase().match(/[a-z]+|\d+/g) || [];
+    return words.some((t) => {
+      if (/^\d+$/.test(t)) return kind === "month" ? Number(t) === want : Number(t) === want || (t.length === 2 && Number(t) === want % 100);
+      return kind === "month" && t.length >= 3 && names[want - 1] && names[want - 1].startsWith(t);
+    });
+  };
+  const options = Array.from(this.options);
+  let at = options.findIndex((o) => !o.disabled && fits(o.value));
+  if (at < 0) at = options.findIndex((o) => !o.disabled && fits(o.label || o.textContent));
+  if (at < 0) return { error: "nooption" };
+  this.setAttribute(attr, "1");
+  this.selectedIndex = at;
+  this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  this.dispatchEvent(new Event("change", { bubbles: true }));
+  return { same: this.selectedIndex === at, validation: this.validationMessage || "" };
+}"#;
+
+/// A month or year chosen in a `<select>`.
+async fn choose(cdp: &mut super::cdp::CdpSession, obj: &str, located: &Located, req: &FillReq, kind: &str) -> Result<FillData, String> {
+    if !matches!(kind, "month" | "year") || !is_select(&located.facts) {
+        return Err("only a month or a year is chosen in a list, and only in a list".into());
+    }
+    let attrs: serde_json::Map<String, Value> = FINGERPRINT_ATTRS.iter().map(|k| (k.to_string(), json!(located.facts.attr(k)))).collect();
+    let tag = located.facts.local_name.clone();
+    let seen = call_on(cdp, obj, CHOOSE, vec![json!(req.expect_origin), json!(req.text), json!(kind), json!(TAINT_ATTR), json!(tag), Value::Object(attrs)]).await?;
+    match seen.get("error").and_then(Value::as_str) {
+        None => {}
+        Some("origin") => return Err(format!("the field is no longer in {}, so nothing was chosen", req.expect_origin)),
+        Some("nooption") => return Err(format!("the list has no option for the card's expiry {kind}: nothing was chosen")),
+        Some(_) => return Err("the field changed when it took the focus, so nothing was chosen; ask again to show the person what it is now".to_string()),
+    }
+    Ok(FillData {
+        filled: true,
+        validation: seen.get("validation").and_then(Value::as_str).unwrap_or("").chars().take(300).collect(),
+        changed_by_page: seen.get("same").and_then(Value::as_bool) != Some(true),
+    })
+}
+
 fn date_type(f: &DomFacts) -> Option<String> {
     let ty = f.attr("type").trim().to_ascii_lowercase();
     (f.local_name == "input" && super::dates::is_date_input(&ty)).then_some(ty)
@@ -295,7 +364,8 @@ fn check_still_approved(l: &Located, req: &FillReq) -> Result<(), String> {
     if vault_slots::password_like(&l.facts) {
         return Err("this is a password or one-time-code field: the Vault doesn't fill those; ask the person to fill it".into());
     }
-    if !takes_text(&l.facts) {
+    let chosen = req.choose.is_some() && is_select(&l.facts);
+    if !chosen && !takes_text(&l.facts) {
         return Err("this isn't a field that takes typed text".into());
     }
     Ok(())
@@ -319,7 +389,7 @@ mod tests {
     }
 
     fn request_for(l: &Located) -> FillReq {
-        FillReq { block_id: "b".into(), ref_: "e1".into(), text: "x".into(), expect_origin: l.origin.clone(), expect_fingerprint: fingerprint(&l.facts) }
+        FillReq { block_id: "b".into(), ref_: "e1".into(), text: "x".into(), expect_origin: l.origin.clone(), expect_fingerprint: fingerprint(&l.facts), choose: None }
     }
 
     #[test]
@@ -402,6 +472,29 @@ mod tests {
         let err = super::super::dates::to_input_value(&ty, "05/06/1990").unwrap_err();
         assert!(err.contains("05/06/1990"), "the parser's own error quotes it: {err}");
         assert!(date_type(&facts("input", &[("type", "text")], "")).is_none());
+    }
+
+    #[test]
+    fn a_list_is_chosen_in_only_when_the_request_says_so_and_is_checked_before_it_is_set() {
+        let month = located(facts("select", &[("name", "exp_month")], "Month"));
+        let mut req = request_for(&month);
+        assert!(check_still_approved(&month, &req).unwrap_err().contains("takes typed text"), "a list is not typed in");
+        req.choose = Some("month".into());
+        assert!(check_still_approved(&month, &req).is_ok());
+        assert!(is_select(&month.facts) && !takes_text(&month.facts));
+        // A text field named in a choosing request is still refused as not being a list.
+        let text = located(facts("input", &[("name", "exp_month")], "Month"));
+        let mut asked = request_for(&text);
+        asked.choose = Some("month".into());
+        assert!(check_still_approved(&text, &asked).is_ok(), "approval is the same; `choose` refuses it before anything is set");
+
+        let at = |needle: &str| CHOOSE.find(needle).unwrap_or_else(|| panic!("{needle}"));
+        assert!(at("w.origin !== origin") < at("this.localName !== tag"));
+        assert!(at("this.getAttribute(k)") < at("this.setAttribute(attr"));
+        assert!(at("this.setAttribute(attr") < at("this.selectedIndex = at"));
+        assert!(at("if (at < 0) return { error: \"nooption\" }") < at("this.setAttribute(attr"), "nothing is marked or chosen without a matching option");
+        assert!(!CHOOSE.contains("activeElement"));
+        assert!(CHOOSE.contains(r#"new Event("input", { bubbles: true, composed: true })"#));
     }
 
     #[test]

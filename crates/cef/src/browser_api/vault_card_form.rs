@@ -1,0 +1,129 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! The card fields of a form
+//! (docs/specs/SPEC_VAULT_CARD_ENTRIES_FULL_CARD_DATA_AND_AUTOFILL_2026_11_08.md §6).
+//!
+//! `/agentmux/browser/card_form`: given the reference of one field, every field in
+//! the same frame that looks like a part of a card (`vault_slots`), in the page's
+//! order, with what it takes (a choice, a length, a placeholder, a pattern). srv
+//! asks the person once for the lot and fills them one by one through `vault_fill`;
+//! each of those checks the field again. Password and one-time-code fields are never
+//! listed. Nothing here reads a value.
+
+use std::sync::Arc;
+
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::Json;
+use serde::Serialize;
+
+use super::act::{describe, describe_markup, fail, unauthorized};
+use super::snapshot;
+use super::types::ApiResponse;
+use super::vault_fill::{display_label, fingerprint, is_select, locate, takes_text, FieldReq};
+use super::vault_slots;
+use crate::state::AppState;
+
+/// The most fields of a page looked at: a form has a handful, a page a few hundred.
+const MAX_LOOKED_AT: usize = 400;
+
+/// The slots a whole-card fill uses.
+const CARD_SLOTS: [&str; 7] = [
+    vault_slots::CARD_NUMBER,
+    vault_slots::CARD_EXPIRY,
+    vault_slots::CARD_EXP_MONTH,
+    vault_slots::CARD_EXP_YEAR,
+    vault_slots::CARD_CVC,
+    vault_slots::CARD_NAME,
+    vault_slots::CARD_ZIP,
+];
+
+#[derive(Debug, Serialize)]
+pub struct CardField {
+    #[serde(rename = "ref")]
+    pub ref_: String,
+    pub label: String,
+    pub fingerprint: String,
+    pub slot: &'static str,
+    pub select: bool,
+    pub max_length: Option<usize>,
+    pub placeholder: String,
+    pub pattern: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CardForm {
+    pub origin: String,
+    pub page: String,
+    pub fields: Vec<CardField>,
+}
+
+/// `e12` before `e102`: references in the order the snapshot numbered them.
+fn order_of(r: &str) -> (usize, String) {
+    let digits: String = r.chars().skip_while(|c| !c.is_ascii_digit()).take_while(char::is_ascii_digit).collect();
+    (digits.parse().unwrap_or(usize::MAX), r.to_string())
+}
+
+/// `POST /agentmux/browser/card_form`.
+pub async fn card_form_route(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(req): Json<FieldReq>) -> (StatusCode, Json<ApiResponse<CardForm>>) {
+    if !super::routes::authorized_pub(&headers, &state.ipc_token) {
+        return unauthorized();
+    }
+    let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "vault-card-form").await {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let found = card_form(&state, &mut cdp, &req).await;
+    let _ = cdp.close().await;
+    match found {
+        Ok(form) => (StatusCode::OK, Json(ApiResponse::ok(form))),
+        Err(e) => fail(e),
+    }
+}
+
+async fn card_form(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &FieldReq) -> Result<CardForm, String> {
+    let (located, _, frame) = locate(state, &req.block_id, &req.ref_, root).await?;
+    let table = state.browser_api.ref_tables.get(&req.block_id).ok_or("no snapshot of this pane yet: take one first")?;
+    let mut refs: Vec<(String, i64)> = table.refs.iter().filter(|(r, _)| table.frames.get(*r) == frame.as_ref()).map(|(r, b)| (r.clone(), *b)).collect();
+    refs.sort_by_key(|(r, _)| order_of(r));
+    refs.truncate(MAX_LOOKED_AT);
+
+    let mut in_frame = root.in_session(frame.as_ref().and_then(|f| f.session.as_deref()));
+    let mut fields = Vec::new();
+    for (r, backend) in refs {
+        // The markup first: most of a page's references are not form fields at all.
+        let Some(markup) = describe_markup(&mut in_frame, backend).await else { continue };
+        if !matches!(markup.local_name.as_str(), "input" | "select" | "textarea") || !(takes_text(&markup) || is_select(&markup)) {
+            continue;
+        }
+        let Some(facts) = describe(&mut in_frame, backend).await else { continue };
+        if vault_slots::password_like(&facts) {
+            continue;
+        }
+        let Some(slot) = vault_slots::slots(&facts).into_iter().find(|s| CARD_SLOTS.contains(s)) else { continue };
+        fields.push(CardField {
+            ref_: r,
+            label: display_label(&facts),
+            fingerprint: fingerprint(&facts),
+            slot,
+            select: is_select(&facts),
+            max_length: snapshot::max_length(&facts),
+            placeholder: facts.attr("placeholder").trim().chars().take(40).collect(),
+            pattern: facts.attr("pattern").trim().chars().take(120).collect(),
+        });
+    }
+    Ok(CardForm { origin: located.origin, page: located.page, fields })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn references_are_in_the_order_the_snapshot_numbered_them() {
+        let mut refs = vec!["e102", "e12", "e2"];
+        refs.sort_by_key(|r| order_of(r));
+        assert_eq!(refs, ["e2", "e12", "e102"]);
+    }
+}

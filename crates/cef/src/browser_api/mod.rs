@@ -62,6 +62,7 @@ pub mod terminal;
 pub mod text_read;
 pub mod types;
 pub mod visibility;
+pub mod vault_card_form;
 pub mod vault_fill;
 pub mod vault_slots;
 pub mod wait;
@@ -89,6 +90,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/wait_for", post(wait::wait_for_route))
         .route("/agentmux/browser/field_info", post(vault_fill::field_info_route))
         .route("/agentmux/browser/vault_fill", post(vault_fill::vault_fill_route))
+        .route("/agentmux/browser/card_form", post(vault_card_form::card_form_route))
         .route("/agentmux/browser/signin_fill", post(signin_fill::signin_fill_route))
         .route("/agentmux/browser/signup_fill", post(signup_fill::signup_fill_route))
         .route("/agentmux/browser/capture_value", post(capture::capture_value_route))

@@ -38,7 +38,7 @@ pub(crate) struct VaultFillRequest {
     pane: Option<String>,
     #[serde(rename = "ref")]
     ref_: String,
-    /// `"id"` or `"id.part"`: fill from an entry.
+    /// `"id"` or `"id.part"`: fill from an entry. A card named by its id alone (or `card`, the default card) is filled whole.
     #[serde(default)]
     vault: Option<String>,
     /// Or, with no entry yet: the kind and label of the value the person is asked to
@@ -167,6 +167,14 @@ fn fill_request(agent: &str, block_id: String, target: &FillTarget, field: &Fiel
     }
 }
 
+/// From an entry, the agent says why, before anything is read or asked.
+fn reason_given(req: &VaultFillRequest) -> Result<String, Response> {
+    if req.vault.is_none() {
+        return Ok(String::new());
+    }
+    vault::history::require_reason(req.reason.as_deref()).map_err(|e| err_response(StatusCode::BAD_REQUEST, e))
+}
+
 /// `POST /api/v1/ui/browser/vault_fill`.
 pub(crate) async fn handle_vault_fill(
     State(state): State<AppState>,
@@ -178,15 +186,14 @@ pub(crate) async fn handle_vault_fill(
         Err((code, e)) => return err_response(code, e),
     };
     let agent = req.auth.agent_id.chars().take(64).collect::<String>();
-    // From an entry, the agent says why, before anything is read or asked.
-    let reason_given = if req.vault.is_some() {
-        match vault::history::require_reason(req.reason.as_deref()) {
-            Ok(r) => r,
-            Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
-        }
-    } else {
-        String::new()
+    let reason_given = match reason_given(&req) {
+        Ok(r) => r,
+        Err(refused) => return refused,
     };
+    // A card's id with no part, or `card`: the whole card, filled after one question.
+    if let Some(done) = card::whole_card(&state, caller.as_deref(), &req, &block_id, &agent, &reason_given).await {
+        return done;
+    }
     // The entry and part, by name only: nothing here reads the value yet.
     let store = state.identity_store.clone();
     let (wanted, kind, label, who) = (req.vault.clone(), req.request_kind.clone(), req.request_label.clone(), agent.clone());
@@ -352,6 +359,8 @@ pub(crate) async fn handle_vault_fill(
         }
     }
 }
+
+mod card;
 
 #[cfg(test)]
 mod tests;

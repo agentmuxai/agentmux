@@ -1,0 +1,150 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! The card a whole-card fill is for, resolved by name before anything is asked
+//! (docs/specs/SPEC_VAULT_CARD_ENTRIES_FULL_CARD_DATA_AND_AUTOFILL_2026_11_08.md §6).
+//!
+//! `Browser` `fill` with `vault: "<card id>"` names the card; `vault: "card"` means the
+//! person's default one. `vault: "<id>.<part>"` is the older one-field fill and is not
+//! resolved here. What is returned is what the person is shown in the approval (the
+//! brand, the last four and the expiry) and nothing the agent could use.
+
+use super::{card, kinds, seal, vaults, FillTarget};
+use crate::backend::storage::store::Store;
+
+/// A card named for a whole-card fill.
+pub struct CardTarget {
+    /// The entry, for the use record and the approval; its `part` is the number.
+    pub fill: FillTarget,
+    pub brand: &'static str,
+    pub last_four: String,
+    /// The expiry month and year, when the card has one.
+    pub expiry: Option<(u32, i32)>,
+    /// Past its month: asks every time, and no "Always" covers it.
+    pub expired: bool,
+}
+
+impl CardTarget {
+    /// What the person reads the card as: "Visa •••• 4242, expires 03/27".
+    pub fn describe(&self) -> String {
+        let brand = card_brand_name(self.brand);
+        let tail = if self.last_four.is_empty() { String::new() } else { format!(" •••• {}", self.last_four) };
+        let when = match self.expiry {
+            Some((m, y)) if self.expired => format!(", expired {}/{y:04}", card::month_text(m)),
+            Some((m, y)) => format!(", expires {}/{:02}", card::month_text(m), y % 100),
+            None => String::new(),
+        };
+        format!("{}{tail}{when}", if brand.is_empty() { "card" } else { brand })
+    }
+}
+
+fn card_brand_name(brand: &str) -> &'static str {
+    match brand {
+        "visa" => "Visa",
+        "mastercard" => "Mastercard",
+        "amex" => "American Express",
+        "discover" => "Discover",
+        "diners" => "Diners Club",
+        "jcb" => "JCB",
+        "unionpay" => "UnionPay",
+        _ => "",
+    }
+}
+
+/// Whether `vault` names a whole card: a card's id with no part, or `card` for the default.
+/// `Ok(None)` for anything else (a part, another kind of entry): the old fill takes it.
+pub fn card_target(store: &Store, vault: &str, agent: Option<&str>) -> Result<Option<CardTarget>, String> {
+    let (id, part) = super::slots::split(vault);
+    if part.is_some() {
+        return Ok(None);
+    }
+    let named = store.vault_get(id).map_err(|e| e.to_string())?;
+    let row = match named {
+        Some(row) if row.kind != card::KIND => return Ok(None),
+        Some(row) => row,
+        None if id == card::KIND => default_card(store, agent)?,
+        None => return Ok(None),
+    };
+    if !vaults::entry_row_usable(store, &row.vault_id, agent)? {
+        return Err(format!("no Vault entry {id:?}: Vault's list action shows the entries"));
+    }
+    let kind = kinds::kind(card::KIND).ok_or("the card kind is missing")?;
+    let key = seal::key(false)?;
+    let parts = seal::open(&key, &row.id, &row.sealed)?;
+    let number = parts.get("number").and_then(card::normalize_number).unwrap_or_default();
+    let last_four: String = number.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    let expiry = card::expiry_of(&parts);
+    let expired = expiry.is_some_and(|(m, y)| card::expired(m, y, super::expiry::today()));
+    Ok(Some(CardTarget {
+        brand: card::brand(&number),
+        last_four,
+        expiry,
+        expired,
+        fill: FillTarget {
+            id: row.id,
+            kind: kind.name,
+            typed: false,
+            kind_info: kind,
+            label: row.label,
+            part: "number",
+            slot: None,
+            what: "card".to_string(),
+            created_at: row.created_at,
+            version: None,
+        },
+    }))
+}
+
+/// The person's default card among the Vaults the agent may use: the most recently saved if two
+/// say they are (one Vault keeps only one, but two Vaults each can).
+fn default_card(store: &Store, agent: Option<&str>) -> Result<super::VaultRow, String> {
+    let mut found: Option<super::VaultRow> = None;
+    for row in store.vault_list().map_err(|e| e.to_string())? {
+        if row.kind != card::KIND || !vaults::entry_row_usable(store, &row.vault_id, agent)? {
+            continue;
+        }
+        let fields: std::collections::BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+        if fields.get(card::DEFAULT).map(String::as_str) != Some("yes") {
+            continue;
+        }
+        if found.as_ref().is_none_or(|f| row.updated_at > f.updated_at) {
+            found = Some(row);
+        }
+    }
+    found.ok_or_else(|| "you have no default card: name one by its id (Vault's list action shows them), or ask the person which to use".to_string())
+}
+
+/// The card's parts for the host to type, opened only once the person has said yes; never
+/// returned to an agent. Refused if the entry was replaced while they decided.
+pub fn parts_for_fill(store: &Store, id: &str, created_at: i64) -> Result<seal::Parts, String> {
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    if row.created_at != created_at {
+        return Err(format!("{} was replaced while the person was deciding: nothing was typed", row.label));
+    }
+    let key = seal::key(false)?;
+    seal::open(&key, &row.id, &row.sealed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(brand: &'static str, last_four: &str, expiry: Option<(u32, i32)>, expired: bool) -> CardTarget {
+        let kind = kinds::kind(card::KIND).expect("card kind");
+        CardTarget {
+            fill: FillTarget { id: "card-a".into(), kind: kind.name, typed: false, kind_info: kind, label: "A".into(), part: "number", slot: None, what: "card".into(), created_at: 1, version: None },
+            brand,
+            last_four: last_four.into(),
+            expiry,
+            expired,
+        }
+    }
+
+    #[test]
+    fn a_card_is_described_by_its_brand_last_four_and_expiry() {
+        assert_eq!(target("visa", "4242", Some((3, 2027)), false).describe(), "Visa •••• 4242, expires 03/27");
+        assert_eq!(target("amex", "0005", Some((12, 2030)), false).describe(), "American Express •••• 0005, expires 12/30");
+        assert_eq!(target("visa", "4242", Some((3, 2026)), true).describe(), "Visa •••• 4242, expired 03/2026");
+        assert_eq!(target("", "", None, false).describe(), "card");
+    }
+}
