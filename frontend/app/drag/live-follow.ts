@@ -47,7 +47,7 @@ export function endLiveFollow(api: Api): void {
 }
 
 /**
- * Give the picture another size, DIP: the host cuts or pads the picture it was given, never scales it. Calls
+ * Give the picture another size, DIP: the host resizes the picture it was given to it. Calls
  * go out in order, so a later size can't land before an earlier one. A failure only leaves the old size.
  */
 let resizes: Promise<unknown> = Promise.resolve();

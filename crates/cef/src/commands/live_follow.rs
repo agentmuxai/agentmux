@@ -76,34 +76,55 @@ pub async fn resize_blocking(args: &serde_json::Value) -> Result<serde_json::Val
         .map_err(|e| format!("live_follow_resize join error: {}", e))?
 }
 
-/// Where the cursor holds a picture of `size`: at the grab the pane was pressed with, pulled inside the picture
-/// when that is smaller, so the cursor stays on it. Always from the original grab, never from a previous size's
-/// offset, so a wide slot after a narrow one has the original alignment back.
+/// Where the cursor holds a picture of `size`, made from one of `source_size` that was pressed at `grab`: the
+/// same spot of the pane, so the grab scales with the picture, and is kept inside it. Always from the original
+/// grab, never from a previous size's offset, so the pane's own size has the original alignment back.
 #[cfg(any(target_os = "windows", test))]
-pub(crate) fn offset_within(grab: (i32, i32), size: (i32, i32)) -> (i32, i32) {
-    (grab.0.min(size.0 - 1).max(0), grab.1.min(size.1 - 1).max(0))
+pub(crate) fn offset_within(grab: (i32, i32), source_size: (i32, i32), size: (i32, i32)) -> (i32, i32) {
+    let scaled = |g: i32, from: i32, to: i32| {
+        let at = if from > 0 && from != to { (g as i64 * to as i64 / from as i64) as i32 } else { g };
+        at.min(to - 1).max(0)
+    };
+    (scaled(grab.0, source_size.0, size.0), scaled(grab.1, source_size.1, size.1))
 }
 
-/// The picture at `size`, from `source` (BGRA at `source_size`): the source's top-left at its own scale, cut at
-/// the right and bottom where `size` is smaller, and the rest filled with the source's bottom-right pixel (the
-/// pane's background, as a rule) where it is larger. Never scaled, so the pane keeps its proportions, as the
-/// tiles of the live reflow do (liveReflow.ts). A source shorter than its size paints as padding only.
+/// The picture at `size`, from `source` (BGRA at `source_size`): the whole picture, resized. Each pixel is the
+/// mean of the source pixels it covers, so a pane made smaller stays readable. The page asks for a size of the
+/// pane's own proportions (pane-live-follow.ts), so nothing is stretched; before, a smaller size cut the
+/// picture at its right and bottom, and the pane in hand lost its close buttons and half its content. A source
+/// shorter than its size paints black.
 #[cfg(any(target_os = "windows", test))]
 pub(crate) fn compose(source: &[u8], source_size: (i32, i32), size: (i32, i32)) -> Vec<u8> {
     let (sw, sh) = (source_size.0.max(0) as usize, source_size.1.max(0) as usize);
     let (w, h) = (size.0.max(0) as usize, size.1.max(0) as usize);
-    let whole = sw > 0 && sh > 0 && source.len() >= sw * sh * 4;
-    let pad: [u8; 4] = if whole {
-        let i = (sw * sh - 1) * 4;
-        [source[i], source[i + 1], source[i + 2], 255]
-    } else {
-        [0, 0, 0, 255]
+    if sw == 0 || sh == 0 || source.len() < sw * sh * 4 {
+        return [0, 0, 0, 255].repeat(w * h);
+    }
+    if (sw, sh) == (w, h) {
+        return source[..w * h * 4].to_vec();
+    }
+    // The source columns and rows each output pixel covers: at least one, so a larger size repeats pixels.
+    let span = |i: usize, from: usize, to: usize| {
+        let start = i * from / to;
+        let end = ((i + 1) * from).div_ceil(to).clamp(start + 1, from);
+        (start.min(from - 1), end)
     };
-    let mut out = pad.repeat(w * h);
-    if whole {
-        let (cw, ch) = (w.min(sw), h.min(sh));
-        for y in 0..ch {
-            out[y * w * 4..y * w * 4 + cw * 4].copy_from_slice(&source[y * sw * 4..y * sw * 4 + cw * 4]);
+    let cols: Vec<(usize, usize)> = (0..w).map(|x| span(x, sw, w)).collect();
+    let mut out = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        let (y0, y1) = span(y, sh, h);
+        for &(x0, x1) in &cols {
+            let mut sum = [0u32; 3];
+            for sy in y0..y1 {
+                let row = &source[(sy * sw + x0) * 4..(sy * sw + x1) * 4];
+                for px in row.chunks_exact(4) {
+                    sum[0] += px[0] as u32;
+                    sum[1] += px[1] as u32;
+                    sum[2] += px[2] as u32;
+                }
+            }
+            let n = ((y1 - y0) * (x1 - x0)) as u32;
+            out.extend_from_slice(&[(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8, 255]);
         }
     }
     out
@@ -150,13 +171,13 @@ mod win {
     struct Follower {
         hwnd: usize,
         size: (i32, i32),
-        /// Cursor to the window's top-left, physical pixels: `grab` pulled inside the current size (`offset_within`).
+        /// Cursor to the window's top-left, physical pixels: `grab` scaled to the current size (`offset_within`).
         offset: (i32, i32),
         /// The grab the pane was pressed with, physical pixels, kept as is across resizes.
         grab: (i32, i32),
         /// DIP to the source window's physical pixels.
         scale: f64,
-        /// The picture as first shown, BGRA at `source_size`: another size is cut or padded from it (`compose`).
+        /// The picture as first shown, BGRA at `source_size`: another size is resized from it (`compose`).
         source: Arc<Vec<u8>>,
         source_size: (i32, i32),
         /// Screen y below which a window tab's picture is shown; a pane has none and shows everywhere.
@@ -243,7 +264,7 @@ mod win {
         *FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())? = Some(Follower {
             hwnd,
             size,
-            offset: super::offset_within(offset, size),
+            offset: super::offset_within(offset, size, size),
             grab: offset,
             scale,
             source: bgra,
@@ -283,8 +304,8 @@ mod win {
     }
 
     /// Give the picture another size (`windowWidth`, `windowHeight`, DIP): the rect the drop would give the
-    /// pane while one is armed, or the pane's own size again (pane-live-follow.ts). The picture is cut or
-    /// padded from the one first shown, never scaled, and keeps its grab offset, pulled inside the new size.
+    /// pane while one is armed, or the pane's own size again (pane-live-follow.ts). The picture is resized
+    /// from the one first shown, and the cursor keeps its place on the pane.
     /// Composed outside the follower's lock, which the hook thread takes on every move.
     pub fn resize(args: &serde_json::Value) -> Result<serde_json::Value, String> {
         let (hwnd, size, source, source_size) = {
@@ -305,7 +326,7 @@ mod win {
         // The picture ended, or another began, while this one was composed.
         let Some(f) = guard.as_mut().filter(|f| f.hwnd == hwnd) else { return Ok(serde_json::Value::Null) };
         f.size = size;
-        f.offset = super::offset_within(f.grab, size);
+        f.offset = super::offset_within(f.grab, f.source_size, size);
         *PENDING_REPAINT.lock().map_err(|_| "repaint state poisoned".to_string())? = Some(Repaint { bgra, size });
         unsafe { PostMessageW(hwnd as HWND, WM_FOLLOW_RESIZE, 0, 0) };
         Ok(serde_json::Value::Null)
@@ -584,37 +605,45 @@ mod tests {
     use super::{compose, follow_origin, offset_within, picture_wanted};
 
     #[test]
-    fn the_grab_is_pulled_inside_a_smaller_picture_and_comes_back_whole_for_a_larger_one() {
+    fn the_grab_keeps_its_place_on_a_resized_picture_and_comes_back_whole_at_the_panes_own_size() {
         let grab = (500, 30);
-        assert_eq!(offset_within(grab, (250, 200)), (249, 30));
-        // From the original grab, not from the narrow slot's offset.
-        assert_eq!(offset_within(grab, (1200, 800)), (500, 30));
-        assert_eq!(offset_within((-5, 10), (100, 100)), (0, 10));
+        // Half the size: the cursor is on the same spot of the pane.
+        assert_eq!(offset_within(grab, (1000, 800), (500, 400)), (250, 15));
+        // From the original grab, not from the smaller picture's offset.
+        assert_eq!(offset_within(grab, (1000, 800), (1000, 800)), (500, 30));
+        // Kept inside the picture.
+        assert_eq!(offset_within((1200, -5), (1000, 800), (500, 400)), (499, 0));
     }
 
-    /// A 3 by 2 BGRA picture whose pixel (x, y) is (x, y, 7, 255), so a cut or a pad is read back by value.
+    /// A 4 by 2 BGRA picture whose pixel (x, y) is (10x, 100y, 7, 255), so a resize is read back by value.
     fn picture() -> Vec<u8> {
-        (0..2).flat_map(|y| (0..3).map(move |x| [x as u8, y as u8, 7, 255])).flatten().collect()
+        (0..2).flat_map(|y| (0..4).map(move |x| [10 * x as u8, 100 * y as u8, 7, 255])).flatten().collect()
     }
 
     #[test]
-    fn a_smaller_size_cuts_the_picture_at_its_right_and_bottom_without_scaling() {
-        let out = compose(&picture(), (3, 2), (2, 1));
-        assert_eq!(out, vec![0, 0, 7, 255, 1, 0, 7, 255]);
+    fn a_smaller_size_is_the_whole_picture_resized_not_its_top_left_corner() {
+        // Half the width, half the height: each pixel is the mean of the 2 by 2 it covers.
+        let out = compose(&picture(), (4, 2), (2, 1));
+        assert_eq!(out, vec![5, 50, 7, 255, 25, 50, 7, 255]);
     }
 
     #[test]
-    fn a_larger_size_pads_with_the_bottom_right_pixel_and_keeps_the_picture_top_left() {
-        let out = compose(&picture(), (3, 2), (4, 3));
-        assert_eq!(out.len(), 4 * 3 * 4);
-        // Row 0: the picture's first row, then the pad (2, 1, 7).
-        assert_eq!(&out[0..16], &[0, 0, 7, 255, 1, 0, 7, 255, 2, 0, 7, 255, 2, 1, 7, 255]);
-        // Row 2 is all pad.
-        assert_eq!(&out[32..48], &[2, 1, 7, 255].repeat(4)[..]);
+    fn the_panes_own_size_is_the_picture_as_it_is() {
+        assert_eq!(compose(&picture(), (4, 2), (4, 2)), picture());
     }
 
     #[test]
-    fn a_short_source_paints_as_padding_only() {
+    fn a_larger_size_repeats_pixels_and_fills_every_one() {
+        let out = compose(&picture(), (4, 2), (8, 4));
+        assert_eq!(out.len(), 8 * 4 * 4);
+        // Row 0: each source pixel of the first row, twice.
+        assert_eq!(&out[0..16], &[0, 0, 7, 255, 0, 0, 7, 255, 10, 0, 7, 255, 10, 0, 7, 255]);
+        // The last row is the source's last row.
+        assert_eq!(&out[3 * 8 * 4..3 * 8 * 4 + 4], &[0, 100, 7, 255]);
+    }
+
+    #[test]
+    fn a_short_source_paints_black() {
         let out = compose(&[1, 2, 3], (3, 2), (1, 1));
         assert_eq!(out, vec![0, 0, 0, 255]);
     }
