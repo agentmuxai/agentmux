@@ -90,7 +90,7 @@ pub(crate) fn on_failure(mstore: &Arc<Store>, bus: &Arc<EventBus>, block_id: &st
     if def_id.is_empty() {
         return None;
     }
-    let route = launch::choice_of(mstore, &def_id).map(|c| c.route);
+    let route = running_route(mstore, &def_id);
     let mut panes: Vec<Pane> = vec![(block_id.to_string(), def_id.clone())];
     for (other, other_def) in route.iter().flat_map(|r| panes_on(mstore, r)) {
         if other == block_id {
@@ -153,7 +153,14 @@ fn shows_credits(mstore: &Store, block_id: &str) -> bool {
         .is_some_and(|f| f.code == crate::agents::failure::FailureClass::UsageLimit && f.title == crate::agents::failure::ROUTE_CREDITS_TITLE)
 }
 
-/// The open panes (in a tab) of agents whose chosen route is `route`.
+/// The route the agent's harness is running on: the one it has just left while a turn is still on it (a model
+/// switch recorded during a turn names the destination as the choice, but the harness is relaunched only when the
+/// turn ends), else its chosen one.
+fn running_route(mstore: &Store, def_id: &str) -> Option<String> {
+    launch::leaving(mstore, def_id).or_else(|| launch::choice_of(mstore, def_id)).map(|c| c.route)
+}
+
+/// The open panes (in a tab) of agents whose harness is running on `route`.
 fn panes_on(mstore: &Store, route: &str) -> Vec<Pane> {
     let Ok(tabs) = mstore.get_all::<Tab>() else { return Vec::new() };
     tabs.iter()
@@ -161,7 +168,7 @@ fn panes_on(mstore: &Store, route: &str) -> Vec<Pane> {
         .filter_map(|id| {
             let block = mstore.get::<Block>(id).ok().flatten()?;
             let def_id = obj::meta_get_string(&block.meta, "agentId", "");
-            let on_it = !def_id.is_empty() && launch::choice_of(mstore, &def_id).is_some_and(|c| c.route == route);
+            let on_it = !def_id.is_empty() && running_route(mstore, &def_id).is_some_and(|r| r == route);
             on_it.then(|| (id.clone(), def_id))
         })
         .collect()
