@@ -183,7 +183,9 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                     <td>
                                         <span>{e.label}</span>
                                         <Show when={e.kind === "card" && e.fields.default === "yes"}>
-                                            <Pill tone="accent">Default</Pill>
+                                            <Pill tone="accent" class="vault-default-pill">
+                                                Default
+                                            </Pill>
                                         </Show>
                                         <span class="warden-manager-mono warden-manager-dim vault-id">{e.id}</span>
                                         <EntryGrants entry={e} revoke={(grant) => void revoke(e.id, grant)} />
@@ -192,7 +194,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                     <td class="warden-manager-dim">
                                         <EntryDetails entry={e} showVault={!props.vault} />
                                     </td>
-                                    <td class="warden-manager-mono">
+                                    <td class="warden-manager-mono vault-value">
                                         <Show when={e.kind === "card" && CARD_BRANDS[e.fields.brand ?? ""]}>
                                             {(brand) => <Pill>{brand()}</Pill>}
                                         </Show>{" "}

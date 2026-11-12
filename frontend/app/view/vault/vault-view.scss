@@ -183,8 +183,26 @@
 }
 
 // The card form: the brand badge beside the number, the month and year side by side, the Luhn note.
-.vault-card-number > .ui-pill {
-    flex: 0 0 auto;
+// The badge wraps below the number in a narrow pane instead of pushing past the form's edge.
+.vault-card-number {
+    flex-wrap: wrap;
+
+    > :first-child {
+        min-width: 10rem;
+    }
+
+    > .ui-pill {
+        flex: 0 0 auto;
+    }
+}
+
+// A card's brand badge stays with its last four; the Default pill keeps clear of the label.
+.vault-value {
+    white-space: nowrap;
+}
+
+.vault-default-pill {
+    margin-left: var(--space-2);
 }
 
 .vault-card-expiry > * {

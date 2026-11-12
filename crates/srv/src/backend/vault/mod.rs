@@ -226,18 +226,28 @@ fn drop_empty(parts: &mut Parts) {
 }
 
 /// A card saved as the default takes the flag from the Vault's other cards: at most one has it.
-fn keep_one_default(store: &Store, kind: &str, vault_id: &str, id: &str, fields: &BTreeMap<String, String>) {
+/// Runs after the save has committed, so a failure here is the caller's to log, not to fail the save
+/// with: the card is saved, and a card picker that finds two defaults takes the one saved last.
+fn keep_one_default(store: &Store, kind: &str, vault_id: &str, id: &str, fields: &BTreeMap<String, String>) -> Result<(), String> {
     if kind != card::KIND || fields.get(card::DEFAULT).map(String::as_str) != Some("yes") {
-        return;
+        return Ok(());
     }
-    let Ok(rows) = store.vault_list() else { return };
+    let rows = store.vault_list().map_err(|e| format!("couldn't list the cards: {e}"))?;
+    let mut failed = Vec::new();
     for row in rows.into_iter().filter(|r| r.id != id && r.kind == card::KIND && r.vault_id == vault_id) {
         let mut other: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
-        if other.remove(card::DEFAULT).is_some() {
-            if let Ok(json) = serde_json::to_string(&other) {
-                let _ = store.vault_set_fields(&row.id, &json);
-            }
+        if other.remove(card::DEFAULT).is_none() {
+            continue;
         }
+        let cleared = serde_json::to_string(&other).map_err(|e| e.to_string()).and_then(|json| store.vault_set_fields(&row.id, &json).map_err(|e| e.to_string()));
+        if let Err(e) = cleared {
+            failed.push(format!("{}: {e}", row.id));
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("couldn't clear the default flag of {}", failed.join("; ")))
     }
 }
 
@@ -393,7 +403,9 @@ fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Resu
         vault_id: vault_id.to_string(),
     };
     store.vault_insert(&row).map_err(|e| e.to_string())?;
-    keep_one_default(store, kind.name, vault_id, &id, &fields);
+    if let Err(e) = keep_one_default(store, kind.name, vault_id, &id, &fields) {
+        tracing::warn!(entry = %id, error = %e, "vault: the new default card is saved, but another card still has the default flag");
+    }
     Ok((id, label))
 }
 
@@ -513,7 +525,9 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     if !store.vault_update_kept(&changed, &was, kept.as_ref()).map_err(|e| e.to_string())? {
         return Err(format!("{label} changed while you were editing it, so nothing was saved: open it again"));
     }
-    keep_one_default(store, kind.name, &changed.vault_id, &changed.id, &fields);
+    if let Err(e) = keep_one_default(store, kind.name, &changed.vault_id, &changed.id, &fields) {
+        tracing::warn!(entry = %changed.id, error = %e, "vault: the new default card is saved, but another card still has the default flag");
+    }
     record(store, &changed.id, &label, PERSON, if replaced { "replaced" } else { "changed" }, &target, "done");
     Ok(())
 }
