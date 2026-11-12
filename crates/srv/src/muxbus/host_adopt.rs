@@ -11,6 +11,9 @@
 //!
 //! Only when the discovery document's client id is the one the sign-in was issued to; a different one is a user pool
 //! the cloud has left, which `discovery::client_id_superseded` already treats as needing a new sign-in.
+//!
+//! And only to a host that is AgentMux's own: the refresh token is never sent to a host `discovery` does not allow,
+//! whatever the document said (checked again here, at the point of use).
 
 use super::discovery::CloudSettings;
 use super::pkce::{refresh_token, RefreshTokenError};
@@ -21,12 +24,13 @@ fn trimmed(host: &str) -> &str {
 }
 
 /// The discovered host to refresh against first, if there is one: the cloud names a host that is not the stored one, for
-/// the client the sign-in was issued to.
+/// the client the sign-in was issued to, and it is one of AgentMux's own.
 pub fn host_to_adopt(discovered: Option<&CloudSettings>, current: &MuxBusCredentials) -> Option<String> {
     let published = discovered?;
     let (host, stored) = (trimmed(&published.cognito.domain), trimmed(&current.cognito_domain));
     let same_client = !current.client_id.is_empty() && published.cognito.client_id == current.client_id;
-    (same_client && !host.is_empty() && !host.eq_ignore_ascii_case(stored)).then(|| host.to_string())
+    let adopt = same_client && !host.is_empty() && !host.eq_ignore_ascii_case(stored) && published.allows_host_of(host);
+    adopt.then(|| host.to_string())
 }
 
 /// How long the discovered host has to answer before the stored one is tried. The client the subscriber refreshes with
@@ -105,6 +109,24 @@ mod tests {
             }
         });
         (url, hits)
+    }
+
+    #[tokio::test]
+    async fn a_refresh_token_is_never_sent_to_a_host_that_is_not_agentmuxs_own() {
+        let (old, old_hits) = host("200 OK").await;
+        let (other, other_hits) = host("200 OK").await;
+        let mut production = super::super::discovery::parse(
+            r#"{"version":1,"api":"https://muxbus.agentmux.ai","ws":"wss://muxbus-ws.agentmux.ai","cognito":{"domain":"https://auth.agentmux.ai","clientId":"client-a"}}"#,
+            "https://muxbus.agentmux.ai",
+        )
+        .unwrap();
+        assert_eq!(host_to_adopt(Some(&production), &creds(&old)), Some("https://auth.agentmux.ai".to_string()), "a listed host is adopted");
+        // Whatever `parse` let through, the host is checked again where the token would go.
+        production.cognito.domain = other.clone();
+        assert_eq!(host_to_adopt(Some(&production), &creds(&old)), None, "a host that is not on the list is never adopted");
+        let refreshed = refresh(&creds(&old), Some(&production), &reqwest::Client::new()).await.unwrap();
+        assert_eq!(refreshed.cognito_domain, old);
+        assert_eq!((old_hits.load(Ordering::SeqCst), other_hits.load(Ordering::SeqCst)), (1, 0), "the refresh token went to the stored host only");
     }
 
     #[test]
