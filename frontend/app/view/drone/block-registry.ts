@@ -62,6 +62,34 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],
     },
+    message: {
+        kind: "message",
+        emoji: "✉️",
+        label: "Message",
+        description: "Send an agent a note. Every {{...}} value is put in as quoted data.",
+        color: "#06b6d4", // colour: fixed (the block's identity colour)
+        defaultData: {
+            to: "",
+            body: "",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    task: {
+        kind: "task",
+        emoji: "📋",
+        label: "Task",
+        description: "File a Kanban task. Every {{...}} value is put in as quoted data.",
+        color: "#f59e0b", // colour: fixed (the block's identity colour)
+        defaultData: {
+            title: "",
+            body: "",
+            target: "",
+            dedupe: "",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     api: {
         kind: "api",
         emoji: "🌐",
@@ -110,6 +138,8 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
 export const BLOCK_KINDS: BlockKind[] = [
     "variables",
     "agent",
+    "message",
+    "task",
     "api",
     "condition",
     "response",

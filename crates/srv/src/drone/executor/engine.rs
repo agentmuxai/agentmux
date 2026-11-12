@@ -165,6 +165,8 @@ async fn execute(
                 BlockKind::Condition => blocks::condition::run(node, &scope).await,
                 BlockKind::Response => blocks::response::run(node, &scope).await,
                 BlockKind::Agent => blocks::agent::run(node, &scope).await,
+                BlockKind::Message => blocks::message::run(node, &scope).await,
+                BlockKind::Task => blocks::task::run(node, &scope).await,
             };
 
             match result {

@@ -36,6 +36,14 @@ impl ExecutionScope {
     /// tokens are left as-is (Phase 1 — Phase 2 will surface them as
     /// validation errors).
     pub fn resolve(&self, input: &str) -> String {
+        self.resolve_with(input, |v| v)
+    }
+
+    /// Like [`resolve`](Self::resolve), but each resolved value goes through
+    /// `wrap` before it is written, so a node can quote what came from outside
+    /// (an event, an API body, an agent's reply) while its own text stays as
+    /// the graph wrote it. An unresolved token is left as-is and not wrapped.
+    pub fn resolve_with(&self, input: &str, wrap: impl Fn(String) -> String) -> String {
         let mut out = String::with_capacity(input.len());
         let bytes = input.as_bytes();
         let mut i = 0;
@@ -52,7 +60,7 @@ impl ExecutionScope {
                     let token = &input[i + 2..i + 2 + end_rel];
                     let resolved = self.lookup(token.trim());
                     match resolved {
-                        Some(v) => out.push_str(&value_to_string(&v)),
+                        Some(v) => out.push_str(&wrap(value_to_string(&v))),
                         None => {
                             // Leave unresolved tokens visible — easier to debug.
                             out.push_str("{{");
