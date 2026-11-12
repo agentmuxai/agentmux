@@ -35,6 +35,8 @@ vi.mock("@/util/app-api", () => ({
 const openLink = vi.fn();
 const installAppUpdate = vi.fn();
 const storeUpdate = vi.fn();
+const storeUpdateRestart = vi.fn();
+const listeners: Record<string, (payload: unknown) => void> = {};
 const revealInFileExplorer = vi.fn();
 vi.mock("@/store/global", async (importOriginal) => {
     const { createSignal } = await import("solid-js");
@@ -42,7 +44,17 @@ vi.mock("@/store/global", async (importOriginal) => {
     const [version] = createSignal<string | null>(null);
     return {
         atoms: { updaterStatusAtom: status, updaterVersionAtom: version },
-        getApi: () => ({ installAppUpdate, revealInFileExplorer, approvals: { storeUpdate }, listen: () => Promise.resolve(() => {}) }),
+        getApi: () => ({
+            installAppUpdate,
+            revealInFileExplorer,
+            approvals: { storeUpdate, storeUpdateRestart },
+            listen: (event: string, cb: (payload: unknown) => void) => {
+                listeners[event] = cb;
+                return Promise.resolve(() => {
+                    delete listeners[event];
+                });
+            },
+        }),
         openLink: (u: string) => openLink(u),
         getSettingsKeyAtom: (key: string) => () => settings(key),
     };
@@ -93,6 +105,8 @@ beforeEach(() => {
     openLink.mockReset();
     installAppUpdate.mockReset();
     storeUpdate.mockReset().mockResolvedValue({ outcome: "fallback", message: "" });
+    storeUpdateRestart.mockReset().mockResolvedValue({ ok: true, message: "" });
+    for (const k of Object.keys(listeners)) delete listeners[k];
     storeCheck.mockReset().mockResolvedValue({ state: "available", message: "", version: "0.59.27" });
     settings.mockReset();
     cameBack.mockReset().mockResolvedValue({ state: "none", from: "", target: "" });
@@ -644,7 +658,7 @@ describe("Maintenance on a Microsoft Store install", () => {
             render(() => <MaintenanceSection />);
             expect(await screen.findByRole("button", { name: "Update in the Store" })).toBeTruthy();
             expect(screen.getByText("Update available")).toBeTruthy();
-            expect(screen.getByText("The Store closes AgentMux while it installs the update, then opens it again.")).toBeTruthy();
+            expect(screen.getByText("The Store downloads the update, then AgentMux has to be closed to finish installing it.")).toBeTruthy();
             // Never named after the installed version, and never called "not listed".
             expect(screen.queryByText(`v${version} is in the Microsoft Store`)).toBeNull();
             expect(screen.queryByText(/hasn't listed it/)).toBeNull();
@@ -795,7 +809,7 @@ describe("Maintenance on a Microsoft Store install", () => {
         updateStatus.mockResolvedValue(STORE);
         render(() => <MaintenanceSection />);
         await screen.findByRole("button", { name: "Update in the Store" });
-        expect(screen.getByText("The Store closes AgentMux while it installs v0.59.27, then opens it again.")).toBeTruthy();
+        expect(screen.getByText("The Store downloads v0.59.27, then AgentMux has to be closed to finish installing it.")).toBeTruthy();
     });
 
     it("passes the release being installed to the host, so a restart can tell what it came back from", async () => {
@@ -837,6 +851,67 @@ describe("Maintenance on a Microsoft Store install", () => {
         expect(await screen.findByText(/The Store installed the update/)).toBeTruthy();
         expect(storeUpdate).toHaveBeenCalledTimes(1);
         expect(openLink).not.toHaveBeenCalled();
+    });
+
+    it("shows the Store's progress in place of the fixed line, and says when it is installing", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        let finish: (r: unknown) => void = () => {};
+        storeUpdate.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        expect(await screen.findByText("Asking the Microsoft Store to install the update…")).toBeTruthy();
+        await vi.waitFor(() => expect(listeners["store-update-progress"]).toBeTypeOf("function"));
+        listeners["store-update-progress"]({ phase: "downloading", percent: 42, doneBytes: 88 * 1024 * 1024, totalBytes: 210 * 1024 * 1024 });
+        expect(await screen.findByText(/^Downloading .*: 42% \(88 of 210 MB\)$/)).toBeTruthy();
+        expect(screen.queryByText("Asking the Microsoft Store to install the update…")).toBeNull();
+        listeners["store-update-progress"]({ phase: "installing", percent: null, doneBytes: 0, totalBytes: 0 });
+        expect(await screen.findByText("Installing…")).toBeTruthy();
+        finish({ outcome: "installed", message: "The Store installed the update. Open AgentMux again to use it." });
+        expect(await screen.findByText(/The Store installed the update/)).toBeTruthy();
+        expect(listeners["store-update-progress"]).toBeUndefined();
+    });
+
+    it("keeps the plain line when the Store gives no numbers", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        storeUpdate.mockReturnValue(new Promise(() => {}));
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        await vi.waitFor(() => expect(listeners["store-update-progress"]).toBeTypeOf("function"));
+        listeners["store-update-progress"]({ phase: "downloading", percent: null, doneBytes: 0, totalBytes: 0 });
+        listeners["store-update-progress"]({ phase: "nonsense" });
+        expect(await screen.findByText("Asking the Microsoft Store to install the update…")).toBeTruthy();
+    });
+
+    it("a downloaded update waits for AgentMux to close: the row says so, and Restart now asks first, in the row", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        storeUpdate.mockResolvedValue({ outcome: "staged", message: "Downloaded. Close AgentMux to finish the update, or use Restart now." });
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        expect(await screen.findByText(/^Downloaded.*Close AgentMux to finish; it reopens on /)).toBeTruthy();
+        expect(screen.queryByText("Asking the Microsoft Store to install the update…")).toBeNull();
+        // One click asks; nothing is closed until the row's own confirm.
+        fireEvent.click(await screen.findByRole("button", { name: "Restart now" }));
+        expect(await screen.findByText(/Restart now closes AgentMux and every agent in it/)).toBeTruthy();
+        expect(storeUpdateRestart).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        await vi.waitFor(() => expect(screen.queryByText(/Restart now closes AgentMux/)).toBeNull());
+        expect(storeUpdateRestart).not.toHaveBeenCalled();
+        fireEvent.click(await screen.findByRole("button", { name: "Restart now" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Restart" }));
+        await vi.waitFor(() => expect(storeUpdateRestart).toHaveBeenCalledTimes(1));
+        expect(await screen.findByText(/Closing AgentMux; it opens again on the new version/)).toBeTruthy();
+    });
+
+    it("says why when the host would not restart, and offers the choice again", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        storeUpdate.mockResolvedValue({ outcome: "staged", message: "" });
+        storeUpdateRestart.mockResolvedValue({ ok: false, message: "Couldn't arrange for AgentMux to open again (scheduling it failed). Nothing was closed." });
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Restart now" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Restart" }));
+        expect(await screen.findByText(/Nothing was closed/)).toBeTruthy();
+        expect(await screen.findByRole("button", { name: "Restart now" })).toBeTruthy();
     });
 
     it("tells that the Store has no newer version after all, withdrawing the offer, without opening the page", async () => {

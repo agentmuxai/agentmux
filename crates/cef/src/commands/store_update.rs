@@ -16,15 +16,41 @@
 //! unit-tested, the WinRT calls are type-checked only.
 
 use serde::Serialize;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// How long the Store gets to list the updates before it counts as not answering. Only the listing is
-/// bounded: a download and install legitimately take minutes.
+use super::store_progress::{self, Progress};
+
+/// How long the Store gets to list the updates before it counts as not answering.
 const LIST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long a download may take at most: it legitimately takes minutes, and the Store reports as it goes,
+/// so this is only the end of a download that never finishes.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DOWNLOAD_LIMIT: Duration = Duration::from_secs(60 * 60);
+
+/// How long the install call gets to finish by itself once everything is downloaded. A packaged desktop app
+/// that is running is not closed by the Store: it stages the package, marks the install "blocked on the
+/// user" and waits for the app to be closed, so the call stays open. After this long that is the answer
+/// (`staged`), and the page stops saying it is asking the Store.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const INSTALL_GRACE: Duration = Duration::from_secs(20);
+
+/// Sends a progress report to every window.
+pub type Emit = Arc<dyn Fn(&Progress) + Send + Sync>;
 
 /// The reason a call gives when the Store never answered; `refused` and `decide_check` turn it into
 /// their own outcome rather than quoting it.
 pub const NO_ANSWER: &str = "the Microsoft Store did not answer";
+
+/// What the install call did in the time it was given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Install {
+    /// It finished, with this overall state.
+    Finished(StoreState),
+    /// It is still open: the Store has the package and is waiting for AgentMux to be closed.
+    WaitingForClose,
+}
 
 /// What the Store's overall result for the update was, apart from the WinRT type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,7 +67,8 @@ pub enum StoreState {
 /// What the page does next.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoreOutcome {
-    /// `installed`, `canceled`, `none` (the Store has no update yet), or `fallback` (open the Store page).
+    /// `installed`, `staged` (downloaded and waiting for AgentMux to be closed), `canceled`, `none` (the Store
+    /// has no update yet), or `fallback` (open the Store page).
     pub outcome: &'static str,
     /// A sentence for the person; empty when there is nothing to say.
     pub message: String,
@@ -76,6 +103,14 @@ pub fn decide(updates_listed: usize, installed: Option<StoreState>) -> StoreOutc
         Some(StoreState::WifiRequired) => StoreOutcome::new("canceled", "The Store needs Wi-Fi for this update. Connect and try again."),
         Some(StoreState::WifiRecommended) => StoreOutcome::new("canceled", "The Store recommends Wi-Fi for this update. Connect and try again."),
         Some(StoreState::Other) => refused("the Store reported an error"),
+    }
+}
+
+/// The decision for the install call, once it finished or was given up on waiting for.
+pub fn decide_install(updates_listed: usize, install: Install) -> StoreOutcome {
+    match install {
+        Install::Finished(state) => decide(updates_listed, Some(state)),
+        Install::WaitingForClose => StoreOutcome::new("staged", "Downloaded. Close AgentMux to finish the update, or use Restart now."),
     }
 }
 
@@ -150,7 +185,7 @@ pub fn check_update() -> StoreCheck {
 /// Run `f` on a thread that initialised WinRT (as for the Windows Hello prompt
 /// in vault.rs); a panic or a failed spawn comes back as an `Err` string.
 #[cfg(target_os = "windows")]
-fn on_winrt_thread<T: Send + 'static>(name: &str, f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+pub(super) fn on_winrt_thread<T: Send + 'static>(name: &str, f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
     use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
     let spawned = std::thread::Builder::new().name(name.into()).spawn(move || {
         let initialised = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.is_ok();
@@ -228,8 +263,9 @@ fn list_updates() -> Result<(windows::Services::Store::StoreContext, Vec<Option<
 }
 
 /// The IPC commands `store_update_install` (args `{ version }`: the release being installed) and
-/// `store_update_check`, and `store_update_came_back` (what the Store's last install left, see
-/// `store_restart`). The Store calls block, so they run on the blocking pool.
+/// `store_update_check`, `store_update_came_back` (what the Store's last install left, see
+/// `store_restart`) and `store_update_restart` (close AgentMux now and open it again on the new version,
+/// after an install that ended `staged`). The Store calls block, so they run on the blocking pool.
 pub async fn run(state: &std::sync::Arc<crate::state::AppState>, cmd: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     tracing::info!("[ipc] {cmd}");
     let gone = |e: tokio::task::JoinError| format!("store_update: {e}");
@@ -241,10 +277,20 @@ pub async fn run(state: &std::sync::Arc<crate::state::AppState>, cmd: &str, args
             json(check)
         }
         "store_update_came_back" => json(super::store_restart::came_back()),
+        "store_update_restart" => {
+            let state = state.clone();
+            json(tokio::task::spawn_blocking(move || super::store_restart::restart_now(&state)).await.map_err(gone)?)
+        }
         _ => {
             let target = args.get("version").and_then(|v| v.as_str()).unwrap_or_default().to_string();
             let (web_endpoint, auth_key) = (state.backend_endpoints.lock().web_endpoint.clone(), state.auth_key.lock().clone());
-            json(tokio::task::spawn_blocking(move || install_update(&target, &web_endpoint, &auth_key)).await.map_err(gone)?)
+            let sender = state.clone();
+            let emit: Emit = Arc::new(move |p| {
+                if let Ok(payload) = serde_json::to_value(p) {
+                    crate::events::emit_event_all_windows(&sender, store_progress::EVENT, &payload);
+                }
+            });
+            json(tokio::task::spawn_blocking(move || install_update(&target, &web_endpoint, &auth_key, emit)).await.map_err(gone)?)
         }
     }
 }
@@ -256,17 +302,19 @@ fn json<T: Serialize>(v: T) -> Result<serde_json::Value, String> {
 /// Ask the Store to install AgentMux's update. Blocks until the Store is done
 /// (minutes, for a download), so call it off the async workers.
 #[cfg(target_os = "windows")]
-pub fn install_update(target: &str, web_endpoint: &str, auth_key: &str) -> StoreOutcome {
+pub fn install_update(target: &str, web_endpoint: &str, auth_key: &str, emit: Emit) -> StoreOutcome {
     let (target, web_endpoint, auth_key) = (target.to_string(), web_endpoint.to_string(), auth_key.to_string());
     let (endpoint, key) = (web_endpoint.clone(), auth_key.clone());
-    let outcome = match on_winrt_thread("store-update", move || install_update_here(&target, &endpoint, &key).unwrap_or_else(|e| refused(&e))) {
+    let outcome = match on_winrt_thread("store-update", move || install_update_here(&target, &endpoint, &key, &emit).unwrap_or_else(|e| refused(&e))) {
         Ok(outcome) => outcome,
         Err(why) => refused(&why),
     };
+    tracing::info!("[store-install] outcome={} message={}", outcome.outcome, outcome.message);
     // Back here. If the Store installed it, it closes this app at its own pace and the next start says how it
-    // ended. Any other result closes nothing: there is nothing to come back from, and the record saved as a
+    // ended; if it staged it, it is waiting for this app to be closed, and the marker says how that ended.
+    // Any other result closes nothing: there is nothing to come back from, and the record saved as a
     // quit's is saved again as for no quit (a later crash restores by the usual rules).
-    if super::store_restart::install_returned(outcome.outcome == "installed") {
+    if super::store_restart::install_returned(matches!(outcome.outcome, "installed" | "staged")) {
         crate::client::backend_save_session_snapshot(&web_endpoint, &auth_key, false);
     }
     outcome
@@ -286,7 +334,57 @@ fn store_state(s: windows::Services::Store::StorePackageUpdateState) -> StoreSta
 }
 
 #[cfg(target_os = "windows")]
-fn install_update_here(target: &str, web_endpoint: &str, auth_key: &str) -> Result<StoreOutcome, String> {
+#[cfg(target_os = "windows")]
+fn update_state(s: windows::Services::Store::StorePackageUpdateState) -> store_progress::UpdateState {
+    use store_progress::UpdateState as U;
+    use windows::Services::Store::StorePackageUpdateState as S;
+    match s {
+        S::Pending => U::Pending,
+        S::Downloading => U::Downloading,
+        S::Deploying => U::Deploying,
+        _ => U::Finished,
+    }
+}
+
+/// An operation of the Store that reports progress.
+#[cfg(target_os = "windows")]
+type StoreOp = windows_future::IAsyncOperationWithProgress<windows::Services::Store::StorePackageUpdateResult, windows::Services::Store::StorePackageUpdateStatus>;
+
+/// Listens to an operation's progress and sends each change of what the page shows to `emit`.
+#[cfg(target_os = "windows")]
+fn report_progress(op: &StoreOp, emit: &Emit) {
+    use windows::Services::Store::{StorePackageUpdateResult, StorePackageUpdateStatus};
+    use windows_future::AsyncOperationProgressHandler;
+    let emit = emit.clone();
+    let mut throttle = store_progress::Throttle::default();
+    let handler = AsyncOperationProgressHandler::<StorePackageUpdateResult, StorePackageUpdateStatus>::new(move |_, status| {
+        if let Ok(s) = status.ok() {
+            let p = store_progress::from_status(update_state(s.PackageUpdateState), s.PackageBytesDownloaded, s.PackageDownloadSizeInBytes, s.TotalDownloadProgress);
+            if throttle.admits(&p) {
+                emit(&p);
+            }
+        }
+        Ok(())
+    });
+    if let Err(e) = op.SetProgress(&handler) {
+        tracing::warn!(error = %e, "[store-install] could not listen to the Store's progress");
+    }
+}
+
+/// The result of `op` once it has finished, or `None` when it is still open after `limit` (left open, not
+/// cancelled: an install the Store holds is the Store's to finish).
+#[cfg(target_os = "windows")]
+fn finished_within(op: &StoreOp, limit: Duration) -> Result<Option<windows::Services::Store::StorePackageUpdateResult>, String> {
+    use windows_future::AsyncStatus;
+    let started = || op.Status().map_or(false, |s| s == AsyncStatus::Started);
+    if wait_until(limit, Duration::from_millis(100), || !started()) {
+        return op.get().map(Some).map_err(|e| e.to_string());
+    }
+    Ok(None)
+}
+
+#[cfg(target_os = "windows")]
+fn install_update_here(target: &str, web_endpoint: &str, auth_key: &str, emit: &Emit) -> Result<StoreOutcome, String> {
     let (context, versions) = list_updates()?;
     let listed = versions.len();
     if listed == 0 {
@@ -295,30 +393,35 @@ fn install_update_here(target: &str, web_endpoint: &str, auth_key: &str) -> Resu
     // The calls below take the list itself, so ask for it again.
     let updates = context.GetAppAndOptionalStorePackageUpdatesAsync().map_err(|e| list_error(e.to_string()))?;
     let updates = answer_within(updates, LIST_TIMEOUT).map_err(list_error)?;
+    emit(&store_progress::starting());
     // Downloaded first (it takes minutes and the app is not touched): only the install closes this app.
-    let downloaded = context
-        .RequestDownloadStorePackageUpdatesAsync(&updates)
-        .and_then(|op| op.get())
-        .map_err(|e| format!("the download call failed: {e}"))?;
+    let op = context.RequestDownloadStorePackageUpdatesAsync(&updates).map_err(|e| format!("the download call failed: {e}"))?;
+    report_progress(&op, emit);
+    let Some(downloaded) = finished_within(&op, DOWNLOAD_LIMIT).map_err(|e| format!("the download call failed: {e}"))? else {
+        let _ = op.Cancel();
+        return Err("the Store stopped downloading".into());
+    };
     let state = store_state(downloaded.OverallState().map_err(|e| format!("no result state: {e}"))?);
     if state != StoreState::Completed {
         return Ok(decide(listed, Some(state)));
     }
-    // The Store now closes this app to swap the package: have it opened again after, and every window saved
-    // as a quit saves them (the closes that follow keep the record), without the quit's background-work record.
+    // The package is here and staged. Register the install for a reopen after, and save every window as a
+    // quit saves them (the closes that follow keep the record), without the quit's background-work record.
     super::store_restart::before_install(target);
     crate::client::save_session_snapshot_with(web_endpoint, auth_key, true, false);
-    let result = context
-        .RequestDownloadAndInstallStorePackageUpdatesAsync(&updates)
-        .and_then(|op| op.get())
-        .map_err(|e| format!("the install call failed: {e}"))?;
-    let state = store_state(result.OverallState().map_err(|e| format!("no result state: {e}"))?);
-    Ok(decide(listed, Some(state)))
+    emit(&store_progress::downloaded(0));
+    let op = context.RequestDownloadAndInstallStorePackageUpdatesAsync(&updates).map_err(|e| format!("the install call failed: {e}"))?;
+    report_progress(&op, emit);
+    let install = match finished_within(&op, INSTALL_GRACE).map_err(|e| format!("the install call failed: {e}"))? {
+        Some(result) => Install::Finished(store_state(result.OverallState().map_err(|e| format!("no result state: {e}"))?)),
+        None => Install::WaitingForClose,
+    };
+    Ok(decide_install(listed, install))
 }
 
 /// Only Windows has a Store: elsewhere the page opens the Store page (it never offers this).
 #[cfg(not(target_os = "windows"))]
-pub fn install_update(_target: &str, _web_endpoint: &str, _auth_key: &str) -> StoreOutcome {
+pub fn install_update(_target: &str, _web_endpoint: &str, _auth_key: &str, _emit: Emit) -> StoreOutcome {
     refused("the Microsoft Store is Windows only")
 }
 
@@ -352,6 +455,18 @@ mod tests {
     fn a_completed_install_is_installed() {
         assert_eq!(decide(1, Some(StoreState::Completed)).outcome, "installed");
         assert_eq!(decide(3, Some(StoreState::Completed)).outcome, "installed");
+    }
+
+    /// An install call that stays open is the Store waiting for AgentMux to be closed (the 2026-11-12 run on
+    /// Area54: the item went BlockedOnUser): told as that, not left as "asking the Store".
+    #[test]
+    fn an_install_that_waits_for_a_close_is_staged_and_a_finished_one_is_decided_as_before() {
+        let staged = decide_install(1, Install::WaitingForClose);
+        assert_eq!(staged.outcome, "staged");
+        assert!(staged.message.contains("Close AgentMux"), "{}", staged.message);
+        assert_eq!(decide_install(1, Install::Finished(StoreState::Completed)).outcome, "installed");
+        assert_eq!(decide_install(1, Install::Finished(StoreState::Canceled)).outcome, "canceled");
+        assert_eq!(decide_install(1, Install::Finished(StoreState::Other)).outcome, "fallback");
     }
 
     #[test]
@@ -450,6 +565,6 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn off_windows_it_falls_back_without_trying() {
-        assert_eq!(install_update("0.60.15", "", "").outcome, "fallback");
+        assert_eq!(install_update("0.60.15", "", "", Arc::new(|_| {})).outcome, "fallback");
     }
 }

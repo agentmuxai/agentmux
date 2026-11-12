@@ -119,9 +119,55 @@ fn after_return(dir: &Path, completed: bool) -> bool {
     !completed && std::fs::remove_file(dir.join(FILE)).is_ok()
 }
 
+/// What `store_update_restart` tells the page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Restart {
+    /// Whether AgentMux is closing now.
+    pub ok: bool,
+    /// A sentence for the person; when `ok` is false, why nothing was closed.
+    pub message: String,
+}
+
+/// Whether a restart may go ahead: an install that ended `staged` is waiting for this build to close. Its marker
+/// (written just before the install, kept when the install is staged) is the proof; with none, or one for another
+/// build, there is nothing to finish and nothing is closed.
+fn restart_wanted(marker: Option<&Marker>, running: &str) -> Result<(), &'static str> {
+    match marker {
+        Some(m) if m.from == running => Ok(()),
+        _ => Err("No Store update is waiting for AgentMux to close. Use Update in the Store first."),
+    }
+}
+
+/// "Restart now" on a staged Store update: arrange for AgentMux to be opened again once the Store has swapped the
+/// package, then quit the way the tray's Quit does (the windows are saved, every agent is told, srv and the launcher
+/// stop). Nothing is closed unless the reopen was arranged. It comes only from a click in this app's own window: no
+/// MuxAPI tool or route reaches it, so an agent can't restart the person's AgentMux.
+pub fn restart_now(state: &std::sync::Arc<crate::state::AppState>) -> Restart {
+    let refuse = |why: String| Restart { ok: false, message: why };
+    if let Err(why) = restart_wanted(DIR.get().and_then(|d| read(d)).as_ref(), current()) {
+        return refuse(why.into());
+    }
+    if let Err(why) = super::store_reopen::schedule(current()) {
+        tracing::warn!(error = %why, "[store-restart] could not arrange the reopen; nothing was closed");
+        return refuse(format!("Couldn't arrange for AgentMux to open again ({why}). Nothing was closed; close AgentMux yourself to finish the update."));
+    }
+    tracing::info!("[store-restart] reopen arranged; quitting for the Store's swap");
+    match super::window::quit_app(state) {
+        Ok(_) => Restart { ok: true, message: "Closing AgentMux; it opens again on the new version.".into() },
+        Err(why) => refuse(format!("Couldn't close AgentMux ({why}).")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_restart_goes_ahead_only_for_an_install_waiting_on_this_build() {
+        assert!(restart_wanted(Some(&marker(5)), "0.60.14").is_ok());
+        assert!(restart_wanted(None, "0.60.14").is_err(), "no install was under way");
+        assert!(restart_wanted(Some(&marker(5)), "0.60.15").is_err(), "the marker is for another build: that one already came back");
+    }
 
     fn marker(at_ms: u64) -> Marker {
         Marker { from: "0.60.14".into(), target: "0.60.15".into(), at_ms }

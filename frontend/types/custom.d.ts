@@ -183,8 +183,13 @@ declare global {
          *  and Cancel. Relayed by the host, which srv trusts and agents can't
          *  impersonate; answers srv's update status after the action. */
         appUpdate?(action: "download" | "restart" | "cancel", now?: boolean): Promise<unknown>;
-        /** A Microsoft Store install: ask the Store to install the update; `fallback` means open the Store page instead. */
-        storeUpdate?(version?: string): Promise<{ outcome: "installed" | "canceled" | "none" | "fallback"; message: string }>;
+        /** A Microsoft Store install: ask the Store to install the update; `fallback` means open the Store page instead;
+         *  `staged` means it is downloaded and the Store waits for AgentMux to be closed (see `storeUpdateRestart`).
+         *  While it runs the host sends `store-update-progress` events (`AppApi.listen`). */
+        storeUpdate?(version?: string): Promise<{ outcome: "installed" | "staged" | "canceled" | "none" | "fallback"; message: string }>;
+        /** A Microsoft Store install with a staged update: close AgentMux and open it again on the new version. Only a
+         *  click in this app's own window reaches it; `ok` false says why nothing was closed. */
+        storeUpdateRestart?(): Promise<{ ok: boolean; message: string }>;
         /** A Microsoft Store install: whether the Store itself lists an update (nothing is installed); `version` is the Store package's version when it does (empty if unreadable); `no_answer` means it never answered, `unknown` says why it couldn't be asked. */
         storeUpdateCheck?(): Promise<{ state: "available" | "none" | "no_answer" | "unknown"; message: string; version?: string }>;
         /** What the Store's last install left: the app came back `updated`, or `stayed` on the version the Store closed it on. */

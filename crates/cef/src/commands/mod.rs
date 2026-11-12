@@ -25,6 +25,8 @@ pub mod pane_pool;
 pub mod startup_pools;
 pub mod clipboard;
 pub mod vault;
+pub mod store_progress;
+pub mod store_reopen;
 pub mod store_restart;
 pub mod store_update;
 pub mod vault_files;

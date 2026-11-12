@@ -191,12 +191,76 @@ export type StoreCameBack = { state: "none" | "updated" | "stayed"; from: string
 const [storeStayed, setStoreStayed] = createSignal<StoreCameBack | null>(null);
 export { storeStayed, setStoreStayed };
 
+/**
+ * What the Store reports while it downloads and installs (the host's `store-update-progress` event). `percent` is
+ * null when the Store gave no numbers.
+ */
+export type StoreProgress = { phase: "pending" | "downloading" | "installing" | "downloaded"; percent: number | null; doneBytes: number; totalBytes: number };
+const [storeProgress, setStoreProgress] = createSignal<StoreProgress | null>(null);
+export { storeProgress, setStoreProgress };
+
+const PHASES = new Set(["pending", "downloading", "installing", "downloaded"]);
+
+/** Take a report from the host's event; anything malformed is ignored. */
+export function acceptStoreProgress(next: unknown): void {
+    const p = next as Partial<StoreProgress> | null | undefined;
+    if (typeof p?.phase !== "string" || !PHASES.has(p.phase)) return;
+    const percent = typeof p.percent === "number" && Number.isFinite(p.percent) ? Math.max(0, Math.min(100, Math.round(p.percent))) : null;
+    setStoreProgress({ phase: p.phase as StoreProgress["phase"], percent, doneBytes: Number(p.doneBytes) || 0, totalBytes: Number(p.totalBytes) || 0 });
+}
+
+const megabytes = (bytes: number): number => Math.round(bytes / (1024 * 1024));
+
+/**
+ * The line for the Store's progress, in place of the fixed "Asking the Microsoft Store…": "Downloading 0.60.25: 42%
+ * (88 of 210 MB)", then "Installing…". null when there is no report yet or the Store gave no numbers (the caller
+ * keeps its plain line); `version` is empty when it isn't known.
+ */
+export function storeProgressLine(p: StoreProgress | null, version: string): string | null {
+    if (!p) return null;
+    switch (p.phase) {
+        case "pending":
+            return null;
+        case "downloading": {
+            const what = version ? `Downloading ${version}` : "Downloading the update";
+            if (p.percent === null) return null;
+            const size = p.totalBytes > 0 ? ` (${megabytes(p.doneBytes)} of ${megabytes(p.totalBytes)} MB)` : "";
+            return `${what}: ${p.percent}%${size}`;
+        }
+        case "installing":
+            return "Installing…";
+        default:
+            return null;
+    }
+}
+
+/**
+ * The version a Store update will be, for the row's wording: only what the Store itself named (a version newer than
+ * this build), else "". GitHub's newest release is not used: the Store installs the version it has, which can be an
+ * older one, and no public Windows call names a staged package's version (the Store names its listed package only
+ * as the installed one). The row then says "the new version", and the next start reports the real one.
+ */
+export function storeTargetVersion(offer: StoreOffer | null = storeOffer()): string {
+    return offer?.version ?? "";
+}
+
+/** The Store has the update downloaded and staged and waits for AgentMux to be closed; `version` is "" when no one knows it. */
+const [storeStaged, setStoreStaged] = createSignal<{ version: string } | null>(null);
+export { storeStaged, setStoreStaged };
+
+/** Said once the update is downloaded: Windows swaps the package only when AgentMux is not running. */
+export const storeStagedLine = (version: string): string =>
+    `Downloaded${version ? ` ${version}` : ""}. Close AgentMux to finish; it reopens on ${version || "the new version"}.`;
+
+/** Said before Restart now closes anything: it is a restart of everything. */
+export const storeRestartAsk = "Restart now closes AgentMux and every agent in it, installs the update and opens AgentMux again.";
+
 /** Said when the install fell back to the Store page: `why` is the host's reason, when it gave one. */
 export const storeFallbackLine = (why?: string): string => `${why ? `${why} ` : ""}Opened the Microsoft Store page to finish the update.`;
 
-/** Said before the Store is asked to install: it closes the app to swap the package. */
+/** Said before the Store is asked to install: it downloads, then AgentMux has to be closed for Windows to swap the package. */
 export const storeClosesLine = (version: string): string =>
-    `The Store closes AgentMux while it installs ${version ? `v${version}` : "the update"}, then opens it again.`;
+    `The Store downloads ${version ? `v${version}` : "the update"}, then AgentMux has to be closed to finish installing it.`;
 
 /** Said when the app is back on the version the Store closed it on: the install did not happen. */
 export const storeStayedLine = (s: StoreCameBack): string =>

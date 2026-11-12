@@ -14,12 +14,9 @@ import {
     checkedAt,
     checkForUpdate,
     loadAppUpdate,
-    recordStoreNone,
     releaseDownload,
-    setStoreStayed,
     startAppUpdateDownload,
     storeAnswer,
-    storeFallbackLine,
     storePublishedNotListed,
     storeStandingLine,
     upgradeAndRestart,
@@ -28,8 +25,7 @@ import {
 } from "@/store/app-update";
 import { atoms, getApi, openLink } from "@/store/global";
 
-// The host opens exactly this link (`external_url_allowed` in the CEF host).
-const MS_STORE_PAGE_URL = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
+import { createStoreInstall, MS_STORE_PAGE_URL } from "./maintenance-store";
 
 /** The release on offer, its download, and what to say of it: from srv's check, else the host updater's own state. */
 function createUpdateView() {
@@ -109,10 +105,8 @@ export function createMaintenance() {
     const view = createUpdateView();
     const { release, installFirst, storeBelowFloor } = view;
     const [startError, setStartError] = createSignal<string | null>(null);
-    // What the Store said about an update asked of it, and whether it is working on one.
-    const [storeNote, setStoreNote] = createSignal<string | null>(null);
-    const [storeBusy, setStoreBusy] = createSignal(false);
     const check = createCheck();
+    const store = createStoreInstall(release, setStartError);
 
     // Opens a folder, or shows a file in its folder; a failure is shown, like the other actions here.
     const reveal = async (path: string) => {
@@ -129,29 +123,6 @@ export function createMaintenance() {
     };
     const cancelRestart = () => cancelUpgrade().catch((e) => setStartError(String(e?.message ?? e)));
 
-    // Ask the Store to install the update (the host calls its API, which only a
-    // packaged install can use); when it can't, or the host has no such call,
-    // open the Store page as before. A refusal says why, a cancel or "not there
-    // yet" is just told.
-    const updateInStore = async () => {
-        if (storeBusy()) return;
-        setStartError(null);
-        setStoreNote(null);
-        setStoreBusy(true);
-        try {
-            setStoreStayed(null);
-            const result = await getApi()?.approvals?.storeUpdate?.(release()?.version).catch(() => undefined);
-            if (result?.outcome === "none") recordStoreNone();
-            if (!result || result.outcome === "fallback") {
-                setStoreNote(storeFallbackLine(result?.message));
-                void openLink(MS_STORE_PAGE_URL);
-            } else {
-                setStoreNote(result.message);
-            }
-        } finally {
-            setStoreBusy(false);
-        }
-    };
     const handleInstallUpdate = () => {
         const r = release();
         const first = installFirst();
@@ -162,7 +133,7 @@ export function createMaintenance() {
         }
         if (r) {
             if (viaStore()) {
-                void updateInStore();
+                void store.updateInStore();
                 return;
             }
             // srv downloads, verifies and unpacks what it can (a Windows
@@ -179,7 +150,7 @@ export function createMaintenance() {
     };
 
     return {
-        ...view, ...check, startError, storeNote, storeBusy,
+        ...view, ...check, ...store, startError,
         reveal, runUpgrade, cancelRestart, handleInstallUpdate,
     };
 }

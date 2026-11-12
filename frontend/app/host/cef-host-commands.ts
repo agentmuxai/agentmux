@@ -270,6 +270,7 @@ export const cefApprovals: ApprovalHostApi = {
     storeUpdate: (version?: string) => invokeCommand("store_update_install", { version }),
     storeUpdateCheck: () => invokeCommand("store_update_check", {}),
     storeUpdateCameBack: () => invokeCommand("store_update_came_back", {}),
+    storeUpdateRestart: () => invokeCommand("store_update_restart", {}),
     decideUpgrade: async (id, version, accept) => {
         await invokeCommand("upgrade_request_decide", { id, version, accept });
     },

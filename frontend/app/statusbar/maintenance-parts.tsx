@@ -232,6 +232,12 @@ export function Notices(props: Part): JSX.Element {
                 closesFor={viaStore() && !m.storeBelowFloor() && m.storeOffers() && m.updaterStatus() === "available" ? (m.updaterVersion() ?? "") : null}
                 busy={m.storeBusy()}
                 note={m.storeNote()}
+                staged={m.storeStaged()}
+                restartAsking={m.restartAsking()}
+                restarting={m.restarting()}
+                onAskRestart={m.askRestart}
+                onCancelRestart={m.cancelAskRestart}
+                onRestart={() => void m.restartForStore()}
             />
         </>
     );
