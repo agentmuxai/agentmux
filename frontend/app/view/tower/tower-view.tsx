@@ -100,12 +100,13 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
     const tabs = createMemo(() => towerViewTabs(m));
     // The view tabs are icons with tooltips while the pane is too narrow for their labels (as in a TabbedPane).
     let root: HTMLDivElement | undefined;
-    const [iconTabs, setIconTabs] = createSignal(false);
+    const [paneWidth, setPaneWidth] = createSignal(Infinity);
+    // From the width and the tab count both: choosing another machine changes the count without a resize.
+    const iconTabs = () => tabbedPaneLayout(paneWidth(), tabs().length) === "top-icons";
     onMount(() => {
         if (!root || typeof ResizeObserver === "undefined") return;
         const observer = new ResizeObserver((entries) => {
-            const width = entries[entries.length - 1].contentRect.width;
-            setIconTabs(tabbedPaneLayout(width, tabs().length) === "top-icons");
+            setPaneWidth(entries[entries.length - 1].contentRect.width);
         });
         observer.observe(root);
         onCleanup(() => observer.disconnect());
