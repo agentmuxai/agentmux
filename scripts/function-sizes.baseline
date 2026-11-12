@@ -232,8 +232,8 @@
 105 crates/srv/src/migrations/m0025_agents_launch_state_backfill.rs::backfill_launch_state
 147 crates/srv/src/migrations/m0031_carry_skills_and_mcp_servers_to_identity_store.rs::carry_mcp_servers
 198 crates/srv/src/migrations/m0031_carry_skills_and_mcp_servers_to_identity_store.rs::carry_skills
-232 crates/srv/src/muxbus/cloud_subscriber.rs::connect_and_run
-280 crates/srv/src/muxbus/cloud_subscriber.rs::run_loop
+228 crates/srv/src/muxbus/cloud_subscriber.rs::connect_and_run
+277 crates/srv/src/muxbus/cloud_subscriber.rs::run_loop
 113 crates/srv/src/muxbus/cloud_subscriber.rs::sync_agent_reactive
 103 crates/srv/src/muxbus/cloud_subscriber.rs::sync_agents_batched
 177 crates/srv/src/muxbus/pkce.rs::run_pkce_login_inner

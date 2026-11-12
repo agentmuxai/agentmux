@@ -358,9 +358,22 @@ impl std::fmt::Display for RefreshTokenError {
     }
 }
 
+/// How long a token refresh may take, the answer's body included. The shared
+/// client sets no request timeout of its own, and a request that never
+/// answered held the refresh (and every caller queued behind it) for hours.
+pub const REFRESH_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 pub async fn refresh_token(
     creds: &MuxBusCredentials,
     http_client: &reqwest::Client,
+) -> Result<MuxBusCredentials, RefreshTokenError> {
+    refresh_token_within(creds, http_client, REFRESH_REQUEST_TIMEOUT).await
+}
+
+pub(crate) async fn refresh_token_within(
+    creds: &MuxBusCredentials,
+    http_client: &reqwest::Client,
+    timeout: std::time::Duration,
 ) -> Result<MuxBusCredentials, RefreshTokenError> {
     if creds.refresh_token.is_empty() {
         return Err(RefreshTokenError::NoRefreshToken);
@@ -371,7 +384,7 @@ pub async fn refresh_token(
         ("client_id", creds.client_id.as_str()),
         ("refresh_token", creds.refresh_token.as_str()),
     ];
-    let sent = http_client.post(&token_url).form(&params).send().await;
+    let sent = http_client.post(&token_url).form(&params).timeout(timeout).send().await;
     crate::connectivity::report_http(crate::connectivity::Service::Muxbus, &sent);
     let resp = sent.map_err(|e| RefreshTokenError::Network(e.to_string()))?;
     if !resp.status().is_success() {

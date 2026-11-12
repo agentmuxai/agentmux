@@ -494,4 +494,23 @@ mod tests {
         assert!(m.set_link(Link::Connected, None, T0 + 1).is_empty());
         assert!(m.saw_session(Some("a@b.c".into()), None, T0 + 2).is_empty());
     }
+    #[test]
+    fn a_socket_that_went_silent_is_paused_then_noted_once_and_resumed_once() {
+        let offline = CredentialState::Failed { consecutive_failures: 0, last_error: "dns".into(), offline: true };
+        let mut m = connected_machine();
+        // The watchdog closed the silent socket; the refresh cannot reach the server either.
+        let fx = m.set_link(Link::Unreachable("no word from the relay for 541s".into()), Some(&offline), T0 + 1_000);
+        assert_eq!(kinds(&fx), vec!["changed"]);
+        assert_eq!(m.status().state, Reconnecting);
+        assert!(m.status().sign_in_unreachable, "the sign-in cannot be refreshed");
+        assert!(m.tick(Some(&offline), T0 + PAUSE_NOTICE_MS - 1).is_empty(), "nothing before the pause is due");
+        let fx = m.tick(Some(&offline), T0 + 1_000 + PAUSE_NOTICE_MS);
+        assert_eq!(kinds(&fx), vec!["pause"], "the agents are told once the pause is two minutes old");
+        assert!(m.tick(Some(&offline), T0 + 10 * PAUSE_NOTICE_MS).is_empty(), "and only once");
+        // The network is back: the refresh worked and the socket is open again.
+        let fx = m.set_link(Link::Connected, Some(&CredentialState::Fresh), T0 + 11 * PAUSE_NOTICE_MS);
+        assert_eq!(kinds(&fx), vec!["changed", "resumed"]);
+        assert_eq!(m.status().state, Connected);
+        assert!(!m.status().sign_in_unreachable, "cleared by the first success");
+    }
 }
