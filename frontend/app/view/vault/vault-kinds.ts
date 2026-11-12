@@ -67,9 +67,9 @@ export const VAULT_KINDS: VaultKind[] = [
         parts: [
             { name: "number", label: "Card number", placeholder: "1234 5678 9012 3456" },
             // The form draws these two as a month and a year choice; srv keeps them apart (card.rs).
-            { name: "exp_month", label: "Expiry" },
+            { name: "exp_month", label: "Expiry month" },
             { name: "exp_year", label: "Expiry year" },
-            { name: "expiry", label: "Expiry", legacy: true },
+            { name: "expiry", label: "Expiry (as first saved)", legacy: true },
             { name: "cvc", label: "Security code" },
             { name: "name", label: "Name on card" },
             { name: "zip", label: "Billing ZIP or postal code" },

@@ -81,6 +81,32 @@ function EntryDetails(props: { entry: VaultEntryInfo; showVault: boolean }): JSX
     );
 }
 
+/** An entry's label, and a card's Default pill. */
+function EntryLabel(props: { entry: VaultEntryInfo }): JSX.Element {
+    return (
+        <>
+            <span>{props.entry.label}</span>
+            <Show when={props.entry.kind === "card" && props.entry.fields.default === "yes"}>
+                <Pill tone="accent" class="vault-default-pill">
+                    Default
+                </Pill>
+            </Show>
+        </>
+    );
+}
+
+/** The main value's last characters, and a card's brand before them. */
+function EntryValue(props: { entry: VaultEntryInfo }): JSX.Element {
+    return (
+        <td class="warden-manager-mono vault-value">
+            <Show when={props.entry.kind === "card" && CARD_BRANDS[props.entry.fields.brand ?? ""]}>
+                {(brand) => <Pill>{brand()}</Pill>}
+            </Show>{" "}
+            {props.entry.tail ? `•••• ${props.entry.tail}` : "••••"}
+        </td>
+    );
+}
+
 function DeleteEntryConfirm(props: { entry: VaultEntryInfo; onConfirm: () => Promise<void>; onCancel: () => void }): JSX.Element {
     return (
         <ConfirmModal
@@ -181,12 +207,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                             {(e) => (
                                 <tr data-entry={e.id}>
                                     <td>
-                                        <span>{e.label}</span>
-                                        <Show when={e.kind === "card" && e.fields.default === "yes"}>
-                                            <Pill tone="accent" class="vault-default-pill">
-                                                Default
-                                            </Pill>
-                                        </Show>
+                                        <EntryLabel entry={e} />
                                         <span class="warden-manager-mono warden-manager-dim vault-id">{e.id}</span>
                                         <EntryGrants entry={e} revoke={(grant) => void revoke(e.id, grant)} />
                                     </td>
@@ -194,12 +215,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                     <td class="warden-manager-dim">
                                         <EntryDetails entry={e} showVault={!props.vault} />
                                     </td>
-                                    <td class="warden-manager-mono vault-value">
-                                        <Show when={e.kind === "card" && CARD_BRANDS[e.fields.brand ?? ""]}>
-                                            {(brand) => <Pill>{brand()}</Pill>}
-                                        </Show>{" "}
-                                        {e.tail ? `•••• ${e.tail}` : "••••"}
-                                    </td>
+                                    <EntryValue entry={e} />
                                     <td class="warden-manager-dim">{formatWhen(e.updated_at)}</td>
                                     <td class="vault-actions">
                                         <IconButton icon="eye" label="Show or copy" density="compact" onClick={() => setRevealing(e)} />
