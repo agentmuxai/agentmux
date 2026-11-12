@@ -108,3 +108,12 @@ The task text assumed about 4 h each. The .98 move shows that is not realistic: 
 ## 7. After approval
 
 Task #46844 (build) starts: the fork branch and PR, `agentmux/156` in cef-rs, the three builds by message to the Linux and macOS builders (their time is a loan outside their seat), the pin PR with the look checks recorded in the body, and the record updated in this repo (`docs/cef-build/*` status lines).
+
+## 8. r2 (2026-11-12)
+
+The same Chromium 156.0.8078.88, rebuilt from `agentmuxai/cef` 8078 at `82cdb1cee` with two fork changes, tags `...-r2` / `...-codecs-r2`:
+
+- **`CefOverlayController::SetClipRects`** (cef#19, `added=15600`, cef-rs#4): limits an overlay to the union of rectangles (overlay-local DIP), neither drawn nor hit-tested outside them. Aura only (Windows, Linux); ignored on macOS. This replaces decision 1: the old `SetShape` is still not carried, but Views overlay panes on Windows need a clip where other UI covers a pane. Checked on a Windows build: the page behind shows through and clicks in the cut-out reach it. It is a `sys` field only: callers check `base.size` (a stock or r1 libcef allocates the 192-byte struct, r2 200).
+- **Chrome's browser autofill is not attached** (cef#20): `AttachTabHelpers(web_contents, /*enable_browser_autofill=*/false)` in the Alloy delegate. A host on CEF 154 died with a null read in libcef after a payment card form was saved; the 156 host did not. The attached autofill client has no Chrome window or prompts behind it in an embedder.
+
+Pins: Windows libcef SHA-256 `8277020ca6cad1fdf4c07686600d1acc365eff66cece9c6e3e66d7e5c11c3649`, Linux archive `c1f2b78b87341e8ba34a422e4c53f204aecae7f5ebe3944c8181dc98e846d877`, macOS archive `e8a04d208b8042fdf8ecfd90b300e316a56240ace8ba52102f1e7fa7648285c8`.

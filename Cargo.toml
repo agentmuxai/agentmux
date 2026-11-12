@@ -95,4 +95,4 @@ opt-level = 2       # Still optimized, but not as aggressive as "s"
 # docs/specs/SPEC_CEF_156_UPGRADE_2026_11_10.md,
 # docs/specs/SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md
 [patch.crates-io]
-cef-dll-sys = { git = "https://github.com/agentmuxai/cef-rs", rev = "0ff6f16215f5ceb16d2cf3bc75b9a4d1cc57c2a9" }
+cef-dll-sys = { git = "https://github.com/agentmuxai/cef-rs", rev = "070a3597d238e0b45c4f4c5150db324da168b7f2" }
