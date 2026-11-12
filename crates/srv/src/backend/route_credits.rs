@@ -40,6 +40,8 @@ static EPISODES: LazyLock<parking_lot::Mutex<HashMap<String, u64>>> = LazyLock::
 /// An episode that has just begun: who is on the route, for the notes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Opened {
+    /// The episode's key: the route's id, or `agent:<definition id>`. The person's note is taken down by it.
+    pub key: String,
     /// The route's label, or `None` for an agent on no route.
     pub route: Option<String>,
     /// The agents with an open pane there, as (definition id, name).
@@ -68,13 +70,15 @@ pub fn install(broker: Arc<Broker>, mstore: Arc<Store>, event_bus: Arc<EventBus>
             let _ = tx.send(found);
         }
     }));
+    let notify_broker = broker.clone();
     tokio::spawn(async move {
         while let Some((block_id, failure)) = rx.recv().await {
-            let (mstore, event_bus) = (mstore.clone(), event_bus.clone());
+            let (mstore, event_bus, broker) = (mstore.clone(), event_bus.clone(), notify_broker.clone());
             let _ = tokio::task::spawn_blocking(move || {
                 let now = agentmux_common::time::now_ms_u64();
                 if let Some(opened) = on_failure(&mstore, &event_bus, &block_id, &failure, now) {
                     tell_leaders(&mstore, &opened);
+                    tell_person(&broker, &opened);
                 }
             })
             .await;
@@ -115,15 +119,16 @@ pub(crate) fn on_failure(mstore: &Arc<Store>, bus: &Arc<EventBus>, block_id: &st
         })
         .collect();
     let route = route.map(|r| catalog::route(&r).map_or(r, |known| known.label.to_string()));
-    Some(Opened { route, agents })
+    Some(Opened { key, route, agents })
 }
 
 /// A response on `route` worked: its episode ends, and the failure goes off every pane that shows it.
 /// BLOCKING (store reads and writes), but only once per episode; any other call is a map lookup.
-pub(crate) fn cleared(mstore: &Arc<Store>, bus: &Arc<EventBus>, route: &str) {
+pub(crate) fn cleared(mstore: &Arc<Store>, bus: &Arc<EventBus>, broker: &Arc<Broker>, route: &str) {
     if EPISODES.lock().remove(route).is_none() {
         return;
     }
+    take_down_note(broker, route);
     for (block_id, _) in panes_on(mstore, route) {
         if shows_credits(mstore, &block_id) {
             crate::backend::blockcontroller::core::persist_last_failure(&block_id, None, &Some(mstore.clone()), &Some(bus.clone()));
@@ -220,6 +225,39 @@ pub(crate) fn notes_for(mstore: &Store, opened: &Opened) -> Vec<(String, String)
             (mine[0].0.clone(), body)
         })
         .collect()
+}
+
+/// What the person is told when an episode opens: the route and what to do, once, never an agent's name (a
+/// notification can show on a locked screen).
+pub(crate) fn person_note(opened: &Opened) -> String {
+    match &opened.route {
+        Some(route) => {
+            let n = opened.agents.len();
+            let agents = if n == 1 { "1 agent".to_string() } else { format!("{n} agents") };
+            format!("{route} is out of credits, so {agents} can't work. Add credits to the route's key in the provider's account; they start again by themselves.")
+        }
+        None => "An agent is out of credits on its model provider's account and can't work. Add credits there; it starts again by itself.".to_string(),
+    }
+}
+
+/// The note's key, which the notification is taken down by. Hashed, like an account's.
+fn note_key(episode_key: &str) -> String {
+    format!("credits:{}", crate::backend::notify::policy::tag_for(episode_key))
+}
+
+/// Tell the person once per episode (the notification router's account surface, as for a login that expired).
+fn tell_person(broker: &Arc<Broker>, opened: &Opened) {
+    match crate::backend::notify::router::get(broker) {
+        Some(router) => router.account_unavailable(&note_key(&opened.key), person_note(opened)),
+        None => tracing::info!("route credits: no notification router yet (no window connected)"),
+    }
+}
+
+/// The episode ended: its note comes down.
+fn take_down_note(broker: &Arc<Broker>, episode_key: &str) {
+    if let Some(router) = crate::backend::notify::router::get(broker) {
+        router.resolve(&note_key(episode_key), crate::backend::notify::policy::Family::Account);
+    }
 }
 
 /// Tell each lead (see [`notes_for`]). BLOCKING.

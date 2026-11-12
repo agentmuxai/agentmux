@@ -163,7 +163,7 @@ fn publish_today(state: &AppState, def_id: &str, agent: &str, cap: Option<f64>, 
 
 fn on_settled(state: &AppState, grant: &Grant, now: i64) {
     // A response that worked: a route that was out of credits is not.
-    crate::backend::route_credits::cleared(&state.mstore, &state.event_bus, &grant.route);
+    crate::backend::route_credits::cleared(&state.mstore, &state.event_bus, &state.broker, &grant.route);
     let (level, cap, spent) = cap::agent_level(&state.mstore, grant, now);
     let sent = spend::alerted(&grant.agent, now);
     publish_today(state, &grant.def_id, &grant.agent, cap, spent, now, level > sent);

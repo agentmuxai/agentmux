@@ -137,11 +137,11 @@ async fn the_first_402_marks_every_agent_on_the_route_and_the_first_success_clea
 
     assert_eq!(on_failure(&state.mstore, &state.event_bus, &pb, &failure, now + 1).map(|_| ()), None, "a second 402 is the same episode");
 
-    cleared(&state.mstore, &state.event_bus, "openrouter");
+    cleared(&state.mstore, &state.event_bus, &state.broker, "openrouter");
     assert!(!shows_credits(&state.mstore, &pb), "the first success takes it off");
-    cleared(&state.mstore, &state.event_bus, "openrouter");
+    cleared(&state.mstore, &state.event_bus, &state.broker, "openrouter");
     assert!(on_failure(&state.mstore, &state.event_bus, &pa, &failure, now + 2).is_some(), "the next 402 is news again");
-    cleared(&state.mstore, &state.event_bus, "openrouter");
+    cleared(&state.mstore, &state.event_bus, &state.broker, "openrouter");
 }
 
 /// A model switch is recorded for the agent at once, but each of its panes is relaunched on it when its own turn
@@ -188,7 +188,7 @@ async fn a_402_after_a_switch_marks_the_panes_still_on_the_route_left_and_not_th
     assert!(shows_credits(&state.mstore, &pb), "the agent still on the failing route is marked");
     assert!(!shows_credits(&state.mstore, &relaunched), "the pane of the same agent already relaunched on the new route is not");
     assert!(!shows_credits(&state.mstore, &pc), "the healthy destination is not");
-    cleared(&state.mstore, &state.event_bus, "left-route");
+    cleared(&state.mstore, &state.event_bus, &state.broker, "left-route");
 }
 
 /// An agent on its own key never passes the gateway, so a turn that works is what ends its episode: the next credits
@@ -243,13 +243,29 @@ async fn each_lead_is_told_once_about_its_own_agents_and_an_agent_with_no_lead_t
     serve(&state, &b, &lead);
     serve(&state, &c, &other_lead);
     let agents = [(&a, "Alpha"), (&b, "Bravo"), (&c, "Charlie"), (&loner, "Loner")].map(|(d, n)| (d.clone(), n.to_string()));
-    let opened = Opened { route: Some("OpenRouter".into()), agents: agents.to_vec() };
+    let opened = Opened { key: "openrouter".into(), route: Some("OpenRouter".into()), agents: agents.to_vec() };
     let notes = notes_for(&state.mstore, &opened);
     assert_eq!(notes.len(), 2, "one per lead; the agent with none is skipped: {notes:?}");
     let first = notes.iter().find(|(d, _)| *d == a).expect("the first lead's note goes through its first agent");
     assert!(first.1.contains("OpenRouter is out of credits (HTTP 402), so Alpha, Bravo can't work (4 on the route in all)"), "{}", first.1);
     assert!(!first.1.contains("Charlie"), "only its own agents");
     assert!(notes.iter().any(|(d, body)| *d == c && body.contains("Charlie can't work")));
-    let alone = notes_for(&state.mstore, &Opened { route: None, agents: vec![(a.clone(), "Alpha".into())] });
+    let alone = notes_for(&state.mstore, &Opened { key: format!("agent:{a}"), route: None, agents: vec![(a.clone(), "Alpha".into())] });
     assert!(alone[0].1.starts_with("Alpha is out of credits on its model provider's account"), "{}", alone[0].1);
+}
+
+/// The person is told once, in words that name the route and the fix but no agent and no key (#47476).
+#[test]
+fn the_person_is_told_the_route_and_what_to_do_and_no_agent_by_name() {
+    let on_route = Opened { key: "openrouter".into(), route: Some("OpenRouter".into()), agents: vec![("a".into(), "Alpha".into()), ("b".into(), "Bravo".into())] };
+    let note = person_note(&on_route);
+    assert!(note.starts_with("OpenRouter is out of credits, so 2 agents can't work. Add credits"), "{note}");
+    assert!(!note.contains("Alpha") && !note.contains("Bravo"), "{note}");
+    let alone = person_note(&Opened { key: "agent:a".into(), route: None, agents: vec![("a".into(), "Alpha".into())] });
+    assert!(alone.starts_with("An agent is out of credits on its model provider's account"), "{alone}");
+    assert!(!alone.contains("Alpha"), "{alone}");
+    let one = person_note(&Opened { key: "x".into(), route: Some("OpenRouter".into()), agents: vec![("a".into(), "Alpha".into())] });
+    assert!(one.contains("so 1 agent can't work"), "{one}");
+    assert_ne!(note_key("openrouter"), note_key("agent:a"));
+    assert!(!note_key("openrouter").contains("openrouter"), "hashed, like an account's key");
 }
