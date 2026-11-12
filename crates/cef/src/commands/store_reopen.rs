@@ -17,8 +17,10 @@
 //!   as its one fixed action, where only the person can change it;
 //! - waits up to two hours for a newer AgentMux package to be registered, looking every five seconds;
 //! - then opens AgentMux by its package identity (`shell:AppsFolder\<family>!AgentMux`), never by an exe path, but
-//!   only if the package changed AND no process of the new package is running at that moment (the person may have
-//!   opened it already); otherwise it ends without starting anything;
+//!   only if the package changed (judged by the package family, so a same-named package of another publisher does
+//!   not count) AND no process of the new package is running at that moment (the person may have opened it already);
+//!   otherwise it ends without starting anything. If no process of the new package appears within fifteen seconds
+//!   of the start, it starts once more: never more than two starts;
 //! - removes itself, and ends. Its limit is two hours ten minutes.
 //!
 //! NOT run against a packaged install by whoever wrote it: the script text and its checks are unit-tested, the
@@ -32,6 +34,8 @@ const APP_ID: &str = "AgentMux";
 const WAIT_MINUTES: u32 = 120;
 /// How often the task looks (seconds): no faster than this.
 const POLL_SECONDS: u32 = 5;
+/// How long the task looks for a process of the new package after it started AgentMux, before it starts it once more.
+const CONFIRM_SECONDS: u32 = 15;
 /// The task is stopped by the Task Scheduler after this long whatever it is doing.
 const LIMIT_MINUTES: u32 = 130;
 
@@ -51,6 +55,12 @@ fn valid_version(v: &str) -> bool {
 }
 
 /// What the task runs, outside the package.
+///
+/// The newer package is found by its family (`PackageFamilyName`), not by its name alone: a package of the same name
+/// from another publisher (a locally built or sideloaded test package) at a higher version must not count as the
+/// Store's swap having happened. After the one start it looks for a process of the new package for 15 seconds and
+/// starts once more if none appeared (a start in the moment the package is registered but not yet ready fails
+/// silently): at most two starts.
 fn wait_script(family: &str, from: &str) -> String {
     let name = family.split('_').next().unwrap_or_default();
     format!(
@@ -59,14 +69,19 @@ fn wait_script(family: &str, from: &str) -> String {
          $until = (Get-Date).AddMinutes({WAIT_MINUTES})\n\
          $p = $null\n\
          while ((Get-Date) -lt $until) {{\n\
-         \x20 $p = Get-AppxPackage -Name '{name}' | Where-Object {{ [version]$_.Version -gt $from }} | Select-Object -First 1\n\
+         \x20 $p = Get-AppxPackage -Name '{name}' | Where-Object {{ $_.PackageFamilyName -eq '{family}' -and [version]$_.Version -gt $from }} | Select-Object -First 1\n\
          \x20 if ($p) {{ break }}\n\
          \x20 Start-Sleep -Seconds {POLL_SECONDS}\n\
          }}\n\
          if ($p) {{\n\
          \x20 $loc = [string]$p.InstallLocation\n\
-         \x20 $open = @(Get-Process | Where-Object {{ $loc -and $_.Path -and $_.Path.StartsWith($loc, [StringComparison]::OrdinalIgnoreCase) }})\n\
-         \x20 if ($open.Count -eq 0) {{ Start-Process 'shell:AppsFolder\\{family}!{APP_ID}' }}\n\
+         \x20 function Test-Open {{ @(Get-Process | Where-Object {{ $loc -and $_.Path -and $_.Path.StartsWith($loc, [StringComparison]::OrdinalIgnoreCase) }}).Count -gt 0 }}\n\
+         \x20 if (-not (Test-Open)) {{\n\
+         \x20   Start-Process 'shell:AppsFolder\\{family}!{APP_ID}'\n\
+         \x20   $seen = $false\n\
+         \x20   for ($i = 0; $i -lt {CONFIRM_SECONDS} -and -not $seen; $i++) {{ Start-Sleep -Seconds 1; $seen = Test-Open }}\n\
+         \x20   if (-not $seen) {{ Start-Process 'shell:AppsFolder\\{family}!{APP_ID}' }}\n\
+         \x20 }}\n\
          }}\n\
          Unregister-ScheduledTask -TaskName '{TASK}' -Confirm:$false\n"
     )
@@ -262,9 +277,12 @@ mod tests {
     fn the_task_starts_only_for_a_changed_package_with_nothing_of_it_running() {
         let script = wait_script(FAMILY, "0.60.24");
         let guard = script.find("if ($p) {").expect("a start is behind a changed package");
-        let running = script.find("$open.Count -eq 0").expect("and behind no running process");
+        let running = script.find("if (-not (Test-Open))").expect("and behind no running process");
         let start = script.find("Start-Process").unwrap();
         assert!(guard < running && running < start, "{script}");
+        let again = script.rfind("Start-Process").unwrap();
+        assert!(script[start..again].contains("-not $seen"), "the second start is only for no process having appeared: {script}");
+        assert!(script.contains("$i -lt 15"), "{script}");
         assert!(script.contains("InstallLocation") && script.contains("Get-Process"), "{script}");
         let remove = script.find("Unregister-ScheduledTask").unwrap();
         assert!(remove > start, "it removes itself whichever way it ends: {script}");
@@ -277,7 +295,7 @@ mod tests {
         assert!(script.contains("Get-AppxPackage -Name 'AgentMux.AgentMux'"), "{script}");
         assert!(script.contains("AddMinutes(120)"), "{script}");
         assert!(script.contains("Start-Sleep -Seconds 5"), "no faster than every five seconds: {script}");
-        assert_eq!(script.matches("Start-Process").count(), 1, "one start at most");
+        assert_eq!(script.matches("Start-Process").count(), 2, "one start, and one more only if none appeared: never more than two");
         assert!(script.contains("Unregister-ScheduledTask -TaskName 'AgentMux Store reopen'"), "{script}");
     }
 
@@ -295,12 +313,43 @@ mod tests {
         assert_eq!(decode(wait), wait_script(FAMILY, "0.60.24"));
     }
 
+    /// A package of the same name from another publisher (a locally built or sideloaded test package) at a higher
+    /// version must not be taken for the Store's swap: the filter names the whole family, whose last part is the
+    /// publisher's id.
+    #[test]
+    fn a_same_named_package_of_another_publisher_is_not_the_swap() {
+        let decoy_family = "AgentMux.AgentMux_0000000000000";
+        assert!(valid_family(decoy_family) && decoy_family != FAMILY);
+        let script = wait_script(FAMILY, "0.60.24");
+        let find = script.lines().find(|l| l.contains("Get-AppxPackage")).expect("the lookup");
+        assert!(find.contains(&format!("$_.PackageFamilyName -eq '{FAMILY}'")), "{find}");
+        assert!(find.contains("-and [version]$_.Version -gt $from"), "the family and the newer version both: {find}");
+        assert!(!script.contains(decoy_family), "{script}");
+    }
+
     #[test]
     fn a_cancelled_install_removes_the_task_by_its_name_and_starts_nothing() {
         let script = cancel_script();
         assert!(script.contains("Stop-ScheduledTask -TaskName 'AgentMux Store reopen'"), "{script}");
         assert!(script.contains("Unregister-ScheduledTask -TaskName 'AgentMux Store reopen'"), "{script}");
         assert!(!script.contains("Start-"), "{script}");
+    }
+
+    /// Not a check: writes the two command lines (register, cancel) for this host's real package to the files named
+    /// by `STORE_REOPEN_OUT_DIR`, for a person (or agent) to run once by hand before a change to the task is merged.
+    /// `cargo test -p agentmux-cef --lib store_reopen -- --ignored --nocapture` with `STORE_REOPEN_FAMILY`,
+    /// `STORE_REOPEN_FROM` and `STORE_REOPEN_OUT_DIR` set.
+    #[test]
+    #[ignore]
+    fn write_the_commands_for_a_manual_registration() {
+        let (family, from, out) = (
+            std::env::var("STORE_REOPEN_FAMILY").unwrap(),
+            std::env::var("STORE_REOPEN_FROM").unwrap(),
+            std::env::var("STORE_REOPEN_OUT_DIR").unwrap(),
+        );
+        let register = registration(&family, &from, SYSTEM).unwrap();
+        std::fs::write(std::path::Path::new(&out).join("register.b64"), register).unwrap();
+        std::fs::write(std::path::Path::new(&out).join("cancel.b64"), encoded(&cancel_script())).unwrap();
     }
 
     #[test]
