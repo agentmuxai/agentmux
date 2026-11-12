@@ -93,8 +93,8 @@ export function restOverOwnPane(model: LayoutModel, nodeId: string, x: number, y
     if (!state) return;
     const rest = state.rest;
     if (rest?.nodeId === nodeId) {
-        // Back over the pane from outside the window: the tear-off stays, as one that rested here.
-        if (rest.outside) rest.outside = false;
+        // A sample the throttle held back past the pointer's exit: the window's `dragenter` is the way back in.
+        if (rest.outside) return;
         if (rest.committed || state.shown() === nodeId) return;
         if (Math.hypot(x - rest.x, y - rest.y) < TEAR_OFF_REST_PX) return;
     }

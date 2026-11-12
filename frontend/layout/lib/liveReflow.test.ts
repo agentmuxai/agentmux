@@ -691,7 +691,7 @@ describe("the tear-off a drag shows over its own pane (tearOffPreview.ts)", () =
         expect(m.tearOffLayout()).toBeUndefined();
     });
 
-    it("counts a pointer that comes back over its own pane as resting there, and shows nothing outside a drag", () => {
+    it("ignores an own-pane sample the throttle held back past the exit, and shows nothing outside a drag", () => {
         vi.useFakeTimers();
         const m = modelOf(three());
         leaveWindow(m, "a");
@@ -699,8 +699,17 @@ describe("the tear-off a drag shows over its own pane (tearOffPreview.ts)", () =
         m.activeDrag._set(true);
         leaveWindow(m, "a");
         restOverOwnPane(m, "a", 300, 300);
+        vi.advanceTimersByTime(TEAR_OFF_REST_MS);
         leaveOwnPane(m);
-        expect(m.tearOffLayout()).toBeUndefined();
+        // Still outside: only the window's dragenter brings the panes back.
+        expect(m.tearOffLayout()).toBeDefined();
+        expect(m.reflowFor("a")).toMatchObject({ leaving: true });
+        // A release now commits the tear-off, not a cancel.
+        m.activeDrag._set(false);
+        return Promise.resolve().then(() => {
+            vi.advanceTimersByTime(TEAR_OFF_COMMIT_WAIT_MS - 1);
+            expect(m.tearOffLayout()).toBeDefined();
+        });
     });
 
     it("shows nothing for the only pane of a layout, and nothing with the setting off", () => {
