@@ -247,3 +247,21 @@ async fn an_agent_left_off_a_boards_list_cannot_act_on_its_tasks() {
     let ok = act_as(&state, json!({ "action": "cancel", "id": again["id"] }), &Actor::operator()).await;
     assert!(ok.is_ok());
 }
+
+
+#[tokio::test]
+async fn an_agent_a_boards_list_names_by_uid_can_act_on_its_tasks() {
+    let state = test_state();
+    create(&state, "Team", &[ACTOR, "uid-naki"]);
+    let filed = file(&state, "t", Some("team")).await;
+    let id = filed["id"].as_str().unwrap().to_string();
+    // Without its UID the same agent is unlisted; with the UID its token proved, it is on the list.
+    let e = act_as(&state, json!({ "action": "edit", "id": "team#1", "title": "x" }), &Actor::agent("naki-2")).await.unwrap_err();
+    assert_eq!(e, "no such task");
+    act_as(&state, json!({ "action": "edit", "id": "team#1", "title": "Renamed" }), &Actor::agent("naki-2").with_uid("uid-naki")).await.unwrap();
+    assert_eq!(state.work_store.work_queue_get(&id).unwrap().unwrap().title, "Renamed");
+    // A move to another board checks the source board the same way.
+    state.work_store.work_board_create(&crate::backend::storage::work_boards::BoardEdit { name: Some("Work".into()), ..Default::default() }, "t", 1).unwrap();
+    let moved = act_as(&state, json!({ "action": "move", "id": "team#1", "board": "work" }), &Actor::agent("naki-2").with_uid("uid-naki")).await;
+    assert!(moved.is_ok(), "{moved:?}");
+}
