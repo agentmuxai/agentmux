@@ -376,8 +376,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     lan_v2::claim_uid(state, req, &claimed, &observed_key).await;
 }
 
-mod channel_v2;
-mod detached;
+mod channel_v2; mod detached;
 mod forward_tiers;
 pub(super) mod peer_hold;
 pub(crate) mod lan_signer;
