@@ -33,12 +33,12 @@ rpc AgentInputHistory agent=a2 before=undefined limit=200
           <th>
       <tbody>
         <tr data-entry="9">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1540000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="for a2" aria-description="for a2">
               "for a2"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
     <div class="warden-manager-footnote">
@@ -74,12 +74,12 @@ rpc AgentInputHistory agent=a2 before=undefined limit=200
           <th>
       <tbody>
         <tr data-entry="9">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1540000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="for a2" aria-description="for a2">
               "for a2"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
     <div class="warden-manager-footnote">

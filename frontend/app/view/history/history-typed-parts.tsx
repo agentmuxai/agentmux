@@ -71,8 +71,8 @@ function EntryRow(props: Part & { item: InputHistoryItem }): JSX.Element {
     const { t, item } = props;
     return (
         <tr data-entry={item.id}>
-            <td class="warden-history-typed-when">{formatWhen(item.sent_at_ms)}</td>
-            <td>
+            <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">{formatWhen(item.sent_at_ms)}</td>
+            <td class="warden-history-cell-wide">
                 <div class="warden-history-typed-text" {...tip(item.text)}>
                     {item.text}
                 </div>
@@ -80,7 +80,7 @@ function EntryRow(props: Part & { item: InputHistoryItem }): JSX.Element {
                     <div class="warden-manager-dim warden-history-typed-tags">{tags(item)}</div>
                 </Show>
             </td>
-            <td class="warden-history-actions">
+            <td class="warden-history-actions warden-history-cell-wide">
                 <Show
                     when={t.confirmId() === item.id}
                     fallback={

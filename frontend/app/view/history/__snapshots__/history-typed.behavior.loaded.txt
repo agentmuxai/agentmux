@@ -30,56 +30,56 @@ rpc AgentInputHistory agent=a1 before=undefined limit=200
           <th>
       <tbody>
         <tr data-entry="5">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1300000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="merge on approval" aria-description="merge on approval">
               "merge on approval"
             <div class="warden-manager-dim warden-history-typed-tags">
               "sent 3 times in a row"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
         <tr data-entry="4">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1240000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="/compact" aria-description="/compact">
               "/compact"
             <div class="warden-manager-dim warden-history-typed-tags">
               "slash command"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
         <tr data-entry="3">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1180000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="git status" aria-description="git status">
               "git status"
             <div class="warden-manager-dim warden-history-typed-tags">
               "shell command · from Swarm"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
         <tr data-entry="2">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1120000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="carry on" aria-description="carry on">
               "carry on"
             <div class="warden-manager-dim warden-history-typed-tags">
               "from an earlier conversation"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
         <tr data-entry="1">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1060000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="hello" aria-description="hello">
               "hello"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
     <div class="warden-history-typed-trash">

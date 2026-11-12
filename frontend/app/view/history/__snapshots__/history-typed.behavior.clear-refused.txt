@@ -28,12 +28,12 @@ rpc AgentInputHistory agent=0123456789abcdef before=undefined limit=200
           <th>
       <tbody>
         <tr data-entry="1">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1060000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="hello" aria-description="hello">
               "hello"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
     <div class="warden-manager-footnote">
@@ -69,12 +69,12 @@ cache clear agent=0123456789abcdef
           <th>
       <tbody>
         <tr data-entry="1">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1060000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="hello" aria-description="hello">
               "hello"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
     <div class="warden-manager-footnote">
