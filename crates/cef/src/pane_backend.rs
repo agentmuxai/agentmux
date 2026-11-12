@@ -3,13 +3,13 @@
 
 //! Which kind of browser pane this process creates.
 //!
-//! macOS and Linux panes are CEF Views overlays in the window's own compositor.
-//! Windows panes have been child HWNDs that DWM composes with the window, so a
-//! resize shows the chrome and the page a frame or more apart
+//! Panes are CEF Views overlays in the window's own compositor on every platform.
+//! Windows panes used to be child HWNDs that DWM composes with the window, so a
+//! resize showed the chrome and the page a frame or more apart
 //! (docs/reports/REPORT_RESIZE_LOCKSTEP_CHROME_AND_CEF_PANE_2026_11_03.md, option b).
-//! Windows can now create Views overlay panes too. The kind is chosen once, at
-//! startup, for the whole process: `AGENTMUX_PANE_BACKEND=views` selects them, and
-//! anything else (or nothing) keeps the HWND panes.
+//! Windows keeps that kind one switch away. The kind is chosen once, at startup,
+//! for the whole process: `AGENTMUX_PANE_BACKEND=hwnd` selects the child HWNDs, and
+//! anything else (or nothing) the Views overlays.
 //!
 //! In a Views process the kind then follows the window a pane is created in. An
 //! overlay needs a CEF Views window; a floating pane and a pane pool window on
@@ -19,8 +19,8 @@
 //! ([`pane_is_views`]) or the window ([`window_is_views`]), not the platform;
 //! [`views`] alone is only the process's choice.
 
-/// Whether panes are Views overlays: always off Windows; on Windows only when
-/// the process was started with `AGENTMUX_PANE_BACKEND=views`.
+/// Whether panes are Views overlays: always off Windows; on Windows unless the
+/// process was started with `AGENTMUX_PANE_BACKEND=hwnd`.
 #[cfg(not(target_os = "windows"))]
 pub const fn views() -> bool {
     true
@@ -109,11 +109,11 @@ pub fn pane_is_views(state: &crate::state::AppState, block_id: &str) -> bool {
     }
 }
 
-/// The setting's value as a choice: `views` (any case, spaces ignored) selects
-/// Views overlays; anything else, including no value, keeps the HWND panes.
+/// The setting's value as a choice: `hwnd` (any case, spaces ignored) selects
+/// the child HWND panes; anything else, including no value, the Views overlays.
 #[cfg(any(target_os = "windows", test))]
 fn from_setting(value: Option<&str>) -> bool {
-    value.is_some_and(|v| v.trim().eq_ignore_ascii_case("views"))
+    !value.is_some_and(|v| v.trim().eq_ignore_ascii_case("hwnd"))
 }
 
 /// Frames the window's compositor may wait for a pane's surface at the window's
@@ -169,11 +169,12 @@ mod tests {
     }
 
     #[test]
-    fn only_views_selects_the_views_panes() {
+    fn only_hwnd_selects_the_child_window_panes() {
+        assert!(from_setting(None));
+        assert!(from_setting(Some("")));
         assert!(from_setting(Some("views")));
-        assert!(from_setting(Some(" Views ")));
+        assert!(from_setting(Some("child")));
         assert!(!from_setting(Some("hwnd")));
-        assert!(!from_setting(Some("")));
-        assert!(!from_setting(None));
+        assert!(!from_setting(Some(" HWND ")));
     }
 }
