@@ -530,6 +530,27 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
         let outcome = crate::identity::key_validator::validate(&acct.provider, &token).await;
         return Ok(proven(account_id, IdentityAccountValidateResult::of(outcome, tail)));
     }
+    // A CLI sign-in keeps its tokens in its own credentials file, with no stored key to check at the
+    // provider: say what the file reads instead of failing on the missing key (#47468).
+    if let crate::backend::storage::identities::SecretRef::OAuthConfigDir { dir } = &acct.secret_ref {
+        let provider = crate::backend::providers::resolve_provider_alias(&acct.provider);
+        let Some(probe) = crate::identity::resolver::probe_oauth_status(provider, dir, agentmux_common::time::now_ms()) else {
+            return Ok(IdentityAccountValidateResult {
+                valid: false,
+                status: acct.status.clone(),
+                masked_tail: String::new(),
+                error: Some("validate does not apply: this is a CLI sign-in with no stored key, and its credentials cannot be read here".to_string()),
+            });
+        };
+        let valid = probe != crate::identity::resolver::OAuthProbeStatus::NeedsReauth;
+        let result = IdentityAccountValidateResult {
+            valid,
+            status: probe.as_str().to_string(),
+            masked_tail: String::new(),
+            error: (!valid).then(|| "this is a CLI sign-in with no stored key: its credentials file holds no token, so it needs a sign-in".to_string()),
+        };
+        return Ok(proven(account_id, result));
+    }
     let aid = account_id.to_string();
     let plaintext = tokio::task::spawn_blocking(move || crate::identity::secret_store::get(&aid))
         .await.map_err(|e| format!("identity.account.validate: keychain task: {e}"))?

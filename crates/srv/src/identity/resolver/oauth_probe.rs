@@ -51,6 +51,15 @@ impl OAuthProbeStatus {
     }
 }
 
+/// When the access token in a Claude config dir's `.credentials.json` expires (unix ms), or `None`
+/// when the file is missing, unreadable or has no expiry. A token that expired before a turn failed
+/// on "OAuth access token has expired" cannot be the one that is there now if this reads later.
+pub fn claude_token_expiry_ms(dir: &str) -> Option<i64> {
+    let contents = std::fs::read_to_string(Path::new(dir).join(".credentials.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&contents).ok()?;
+    json.get("claudeAiOauth").and_then(|o| o.get("expiresAt")).and_then(|v| v.as_i64())
+}
+
 /// Codex's sign-in, from `<dir>/auth.json` (what `codex login` writes under
 /// `CODEX_HOME`): a ChatGPT sign-in has `tokens.refresh_token`, an API-key
 /// sign-in a non-empty `OPENAI_API_KEY`. Either is `Valid`; expiry is left to

@@ -131,6 +131,8 @@ fn check_in(seen: &Mutex<HashMap<String, Seen>>, id_store: &Store, identity_stor
                     tracing::info!(target: "identity", account_id = %account.id, "credentials are back: this Claude account reads signed in again");
                     set_status(id_store, identity_store, broker, &account.id, status.as_str());
                 }
+                // The credentials came back: the agents it signed out are signed in again (#47468).
+                crate::server::account_episodes::after_sign_in(&account.id);
             }
         }
     }

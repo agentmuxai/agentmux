@@ -35,6 +35,7 @@
 mod accounts;
 pub mod failover;
 mod login_expiry;
+mod login_recheck;
 mod fresh;
 mod machine;
 mod moves;
@@ -218,6 +219,7 @@ fn refresh() {
     switch::apply_pending(&rt.state);
     failover::run(&rt.state, &panes);
     login_expiry::run(&rt.state, &panes);
+    login_recheck::run(&rt.state, &panes);
     crate::identity::credential_watch::check(&rt.state.id_store, &rt.state.identity_store, Some(&rt.state.broker));
 }
 

@@ -58,5 +58,5 @@ pub use inject::{
 };
 pub use effective_links::effective_identity_links;
 pub use cli_sign_in_files::signed_in as cli_file_signed_in;
-pub use oauth_probe::{oauth_status, probe_oauth_status, OAuthProbeStatus};
+pub use oauth_probe::{claude_token_expiry_ms, oauth_status, probe_oauth_status, OAuthProbeStatus};
 pub use provider::{provider_class, ProviderClass};
