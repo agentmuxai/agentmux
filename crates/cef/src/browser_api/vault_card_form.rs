@@ -47,6 +47,8 @@ pub struct CardField {
     pub fingerprint: String,
     pub slot: &'static str,
     pub select: bool,
+    /// The `type` of an `<input>` (`text`, `month`, `number`), lower-cased; empty for a `<select>`.
+    pub input_type: String,
     pub max_length: Option<usize>,
     pub placeholder: String,
     pub pattern: String,
@@ -132,6 +134,7 @@ async fn card_form(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req
             fingerprint: fingerprint(&facts),
             slot,
             select: is_select(&facts),
+            input_type: if is_select(&facts) { String::new() } else { facts.attr("type").trim().to_ascii_lowercase() },
             max_length: snapshot::max_length(&facts),
             placeholder: facts.attr("placeholder").trim().chars().take(40).collect(),
             pattern: facts.attr("pattern").trim().chars().take(120).collect(),

@@ -22,6 +22,8 @@ pub struct FormField {
     pub slot: String,
     /// A `<select>`: the host picks the option the text names.
     pub select: bool,
+    /// An `<input>`'s `type`, lower-cased (`month` takes `YYYY-MM`).
+    pub input_type: String,
     pub max_length: Option<usize>,
     pub placeholder: String,
     pub pattern: String,
@@ -124,6 +126,10 @@ fn by_pattern(pattern: &str) -> (bool, bool) {
 
 /// How a one-field expiry is written, from what the field says about itself.
 fn expiry_text(field: &FormField, month: u32, year: i32) -> String {
+    // A native month input takes its own format, whatever its placeholder or length say.
+    if field.input_type == "month" {
+        return format!("{year:04}-{}", card::month_text(month));
+    }
     let placeholder = field.placeholder.to_ascii_uppercase();
     let pattern = field.pattern.as_str();
     // What stands between the month and year tokens of a placeholder like "MM / YY"; a placeholder

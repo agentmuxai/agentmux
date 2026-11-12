@@ -696,6 +696,48 @@ pub(super) fn fail<T>(msg: impl Into<String>) -> (StatusCode, Json<ApiResponse<T
 /// or a file input apart from an ordinary one: value-bearing fields first
 /// (a field without facts has its value hidden, `snapshot::render`), then
 /// buttons (a file input's role).
+/// What the page says about the fields of `scope` (the whole page without one), by backend id: the
+/// markup that keeps a secret field's value, and a Vault-filled dropdown's choice, out of a snapshot.
+async fn describe_scope(cdp: &mut CdpSession, nodes: &[Value], scope: Option<i64>) -> HashMap<i64, DomFacts> {
+    let mut facts = HashMap::new();
+    let role_of = |n: &Value| n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    // A scoped snapshot renders only its subtree, so it looks up facts only there.
+    let in_scope: Vec<&Value> = match scope {
+        Some(b) => snapshot::subtree(nodes, b),
+        None => nodes.iter().collect(),
+    };
+    let wanted = in_scope
+        .iter()
+        .copied()
+        .filter(|n| snapshot::VALUE_ROLES.contains(&role_of(n).as_str()))
+        .chain(in_scope.iter().copied().filter(|n| role_of(n) == "button"));
+    for n in wanted {
+        if facts.len() >= MAX_DESCRIBES {
+            break;
+        }
+        if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
+            if let Some(f) = describe_markup(cdp, b).await {
+                let name = n.pointer("/name/value").and_then(|v| v.as_str()).unwrap_or("");
+                facts.insert(b, f.with_label(name));
+            }
+        }
+    }
+    // The dropdown an option is in says whether its choice was filled from the Vault.
+    add_option_owners(cdp, nodes, &in_scope, &mut facts, MAX_DESCRIBES).await;
+    facts
+}
+
+/// Adds the facts of the dropdowns that the options among `among` belong to, up to `cap` facts in all.
+async fn add_option_owners(cdp: &mut CdpSession, nodes: &[Value], among: &[&Value], facts: &mut HashMap<i64, DomFacts>, cap: usize) {
+    for b in snapshot::option_owners(nodes, among) {
+        if facts.len() < cap && !facts.contains_key(&b) {
+            if let Some(f) = describe_markup(cdp, b).await {
+                facts.insert(b, f);
+            }
+        }
+    }
+}
+
 pub(super) const MAX_DESCRIBES: usize = 600;
 
 /// The accessibility nodes of the page with its hidden choices added, and
@@ -779,37 +821,7 @@ pub async fn snapshot_route(
         },
         None => scope,
     };
-    let mut facts = HashMap::new();
-    let role_of = |n: &Value| n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    // A scoped snapshot renders only its subtree, so it looks up facts only there.
-    let in_scope: Vec<&Value> = match scope {
-        Some(b) => snapshot::subtree(&nodes, b),
-        None => nodes.iter().collect(),
-    };
-    let wanted = in_scope
-        .iter()
-        .copied()
-        .filter(|n| snapshot::VALUE_ROLES.contains(&role_of(n).as_str()))
-        .chain(in_scope.iter().copied().filter(|n| role_of(n) == "button"));
-    for n in wanted {
-        if facts.len() >= MAX_DESCRIBES {
-            break;
-        }
-        if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
-            if let Some(f) = describe_markup(&mut cdp, b).await {
-                let name = n.pointer("/name/value").and_then(|v| v.as_str()).unwrap_or("");
-                facts.insert(b, f.with_label(name));
-            }
-        }
-    }
-    // The dropdown an option is in says whether its choice was filled from the Vault.
-    for b in snapshot::option_owners(&nodes, &in_scope) {
-        if facts.len() < MAX_DESCRIBES && !facts.contains_key(&b) {
-            if let Some(f) = describe_markup(&mut cdp, b).await {
-                facts.insert(b, f);
-            }
-        }
-    }
+    let facts = describe_scope(&mut cdp, &nodes, scope).await;
     let url = page_url(&mut cdp).await;
     // A scope by name has no reference to prefix with: its references are
     // numbered like a find's, which can't clash with any other.
@@ -902,11 +914,7 @@ pub async fn find_route(
     };
     let mut facts = HashMap::new();
     let candidates = snapshot::find_candidates(&nodes, q);
-    for b in snapshot::option_owners(&nodes, &candidates).into_iter().take(MAX_FIND_DESCRIBES) {
-        if let Some(f) = describe_markup(&mut cdp, b).await {
-            facts.insert(b, f);
-        }
-    }
+    add_option_owners(&mut cdp, &nodes, &candidates, &mut facts, MAX_FIND_DESCRIBES).await;
     for n in candidates.into_iter().filter(needs_facts).take(MAX_FIND_DESCRIBES) {
         if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
             if let Some(f) = describe_markup(&mut cdp, b).await {

@@ -60,6 +60,12 @@ fn a_single_expiry_field_takes_the_shape_it_asks_for() {
 }
 
 #[test]
+fn a_native_month_input_takes_the_year_first() {
+    let f = FormField { slot: "card-expiry".into(), input_type: "month".into(), max_length: Some(5), placeholder: "MM/YY".into(), ..Default::default() };
+    assert_eq!(text(shape(&f, &visa())), "2027-03");
+}
+
+#[test]
 fn month_and_year_fields_take_text_or_a_choice() {
     assert_eq!(text(shape(&field("card-exp-month"), &visa())), "03");
     assert_eq!(text(shape(&field("card-exp-year"), &visa())), "2027");

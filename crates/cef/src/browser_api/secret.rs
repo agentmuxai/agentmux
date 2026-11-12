@@ -167,7 +167,7 @@ fn payment_or_id_reason(f: &DomFacts) -> Option<&'static str> {
             slot::CARD_NUMBER => return Some("its name or label says card number"),
             slot::CARD_CVC => return Some("its name or label says card security code"),
             // An expiry is a card's only when something says card: a passport or a coupon expires too.
-            slot::CARD_EXPIRY if card_word => return Some("its name or label says card expiry"),
+            slot::CARD_EXPIRY | slot::CARD_EXP_MONTH | slot::CARD_EXP_YEAR if card_word => return Some("its name or label says card expiry"),
             slot::BANK_ACCOUNT if !about_it => return Some("its name or label says bank account number"),
             slot::BANK_ROUTING if !about_it && numbery => return Some("its name or label says bank routing number"),
             slot::PASSPORT if !about_it => return Some("its name or label says passport number"),
@@ -354,6 +354,11 @@ mod tests {
             (&[("name", "f3")][..], "Security code (CVV)"),
             (&[("name", "f4"), ("aria-label", "Card expiry")][..], ""),
             (&[("name", "f5")][..], "Expiry date (card)"),
+            // A card's expiry split in two is as much the card's as one field: a month or a year alone.
+            (&[("name", "card_expiry_month")][..], ""),
+            (&[("name", "card_expiry_year")][..], ""),
+            (&[("name", "f5a")][..], "Card expiry month"),
+            (&[("name", "f5b"), ("placeholder", "Credit card expiration year")][..], ""),
             (&[("name", "f6")][..], "Routing number"),
             (&[("name", "f7")][..], "Bank account number"),
             (&[("name", "f8")][..], "Passport number"),

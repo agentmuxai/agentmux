@@ -42,6 +42,7 @@ fn parse_fields(form: &Value) -> Vec<CardField> {
         let shape = FormField {
             slot,
             select: f.get("select").and_then(Value::as_bool).unwrap_or(false),
+            input_type: text(f, "input_type"),
             max_length: f.get("max_length").and_then(Value::as_u64).map(|m| m as usize),
             placeholder: text(f, "placeholder"),
             pattern: text(f, "pattern"),
