@@ -186,7 +186,7 @@ declare global {
         /** A Microsoft Store install: ask the Store to download the update (nothing is installed or asked of the person);
          *  `fallback` means open the Store page instead; `downloaded` means it is here and `storeUpdateRestart` installs it.
          *  While it runs the host sends `store-update-progress` events (`AppApi.listen`). */
-        storeUpdate?(version?: string): Promise<{ outcome: "downloaded" | "installed" | "canceled" | "none" | "fallback"; message: string }>;
+        storeUpdate?(): Promise<{ outcome: "downloaded" | "installed" | "canceled" | "none" | "fallback"; message: string }>;
         /** A Microsoft Store install with a downloaded update: install it now. The host raises this window, arranges AgentMux
          *  to be opened again, then asks the Store (silently when the Store allows it, else through the Store's own window,
          *  while this call stays open and the host sends `store-update-progress` events with phase `asking`). Normally the
@@ -792,6 +792,8 @@ declare global {
         swatchColor?: string;
         /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
         icon?: string;
+        /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
+        iconColor?: string;
     };
 
     type ContextMenuItem = {
@@ -808,6 +810,8 @@ declare global {
         swatchColor?: string;
         /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
         icon?: string;
+        /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
+        iconColor?: string;
     };
 
     type KeyPressDecl = {

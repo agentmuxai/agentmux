@@ -22,6 +22,7 @@ import { ClosedPaneGhosts } from "../lib/tilelayout-shared";
 const passWith = (...ids: string[]): SettlingPass => ({
     moves: new Map(),
     ghosts: ids.map((id, i) => ({ id, rect: { left: 600.4 + i, top: 400, width: 599.6, height: 400 } })),
+    enters: [],
     gliding: false,
 });
 

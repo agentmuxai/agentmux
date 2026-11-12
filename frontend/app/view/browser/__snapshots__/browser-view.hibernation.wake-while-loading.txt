@@ -1,0 +1,14 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+diag [hibernate] wake-start why=intent visible=false
+-- the page starts loading and does not finish
+diag [hibernate] wake-abandoned loaded=false
+probe abandoned, still loading: rect.asleep=true drag.unavailable=true pane.visible=false pane.asleep=true pane.frozen=false hiddenSince=1793707200000
+-- shown: woken again while loading
+diag [hibernate] wake-start why=show visible=true
+diag [hibernate] card-shown
+-- the load ends
+diag [hibernate] wake-loaded ms=300 why=show visible=true
+model.endSleep 300
+diag [hibernate] card-hidden after=300
+probe loaded: rect.asleep=false drag.unavailable=false pane.visible=true pane.asleep=false pane.frozen=false hiddenSince=null

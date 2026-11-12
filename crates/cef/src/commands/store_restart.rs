@@ -40,7 +40,7 @@ struct InFlight;
 
 impl InFlight {
     fn enter() -> Option<Self> {
-        (!RESTARTING.swap(true, Ordering::SeqCst)).then_some(Self)
+        (!RESTARTING.swap(true, Ordering::SeqCst)).then(|| Self)
     }
 }
 
@@ -250,6 +250,8 @@ mod tests {
     fn only_one_restart_runs_at_a_time_and_the_next_can_start_when_it_ends() {
         let first = InFlight::enter().expect("nothing was under way");
         assert!(InFlight::enter().is_none(), "a second window's restart finds it taken");
+        // A refused request must not release the guard the first one holds.
+        assert!(InFlight::enter().is_none(), "a third is refused as well while the first runs");
         drop(first);
         assert!(InFlight::enter().is_some(), "free again once the first has ended");
     }

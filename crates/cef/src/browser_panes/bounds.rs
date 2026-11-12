@@ -230,6 +230,10 @@ pub(crate) fn window_resized(state: &Arc<AppState>, window_label: &str, window: 
         };
         let to = base.predict(&Rect { x, y, width: w, height: h }, width, height);
         crate::browser_pane::creation_views::place_overlay(&controller, Some(window), &to);
+        // An overlay's clip is not adjusted when the overlay is resized: with a menu over the pane
+        // its cut would be of the old size until the page's next rects (#7063).
+        let scale = crate::browser_pane::creation_views::views_scale(Some(window));
+        super::views_clip::apply_placed(state, &label, window_label, &controller, (x, y, w, h), (to.width, to.height), scale);
         moved += 1;
     }
     if moved > 0 {

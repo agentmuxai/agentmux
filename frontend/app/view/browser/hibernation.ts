@@ -145,6 +145,8 @@ export function sleepName(s: BrowserSleep): string {
 export const HOVER_WAKE_DWELL_MS = 100;
 /** A wake on hover with no switch goes back to sleep after this, unless loaded. */
 export const HOVER_WAKE_GIVE_UP_MS = 10_000;
+/** A shown pane's wake that has not ended this long after it began ends anyway: its card must never outlast it. */
+export const WAKE_STUCK_MS = 120_000;
 
 const [prewakeTab, setPrewakeTab] = createSignal<string | null>(null);
 /** The window tab whose sleeping browser panes should start waking. */

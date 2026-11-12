@@ -21,6 +21,7 @@
         "dev": "task dev",
         "build": "task build:frontend",
         "build:backend": "task build:backend",
+        "build:web": "node scripts/build-web.mjs",
         "package": "task package",
         "package:portable": "task package:portable",
         "test": "vitest",

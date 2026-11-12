@@ -558,6 +558,13 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // came apart, a gap beside every pane. A tile carries its edges at rest too, so the first glide starts
     // from them (docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md §3).
     const reflow = () => props.layoutModel.reflowFor(props.node.id);
+    // A pane that came or was restored fades in at its rect while its neighbours glide aside (settlingPass.ts;
+    // `.tile-entering` in tilelayout.scss), over the glide's own length. It is not drawn until the glide
+    // starts (`waiting`): a pass stands at its start while the first frames lay the panes out, its neighbours
+    // still cover its place for that time, and a fade that ran through it would be over before they moved.
+    const enters = createMemo(() => props.layoutModel.settlingPass()?.enters.includes(props.node.id) ?? false);
+    const entering = createMemo(() => enters() && !!props.layoutModel.settlingPass()?.gliding);
+    const waiting = createMemo(() => enters() && !entering());
     const tileStyle = createMemo<JSX.CSSProperties>(() => {
         const entry = reflow();
         const reduce = shouldReduceMotion("transition");
@@ -567,8 +574,10 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
             ...(tileTransform() as JSX.CSSProperties),
             ...(shown && reflowEdges(shown)),
             visibility: isRevealGated() ? "hidden" : undefined,
-            opacity: reduce ? undefined : isRevealGated() ? 0 : 1,
-            transition: reduce ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
+            opacity: waiting() ? 0 : reduce ? undefined : isRevealGated() ? 0 : 1,
+            // No transition out of the wait: the fade is the animation's, and the two would both run.
+            transition: reduce || enters() ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
+            "animation-duration": entering() && reduce ? "var(--duration-fast)" : undefined,
         };
         if (!entry) return style;
         // Essential spatial motion, so it glides under reduced motion too, shorter. The plain style takes over
@@ -588,11 +597,12 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
             // A pane being torn off has left the layout: its neighbours close over its slot. It fades over
             // the glide's own length (under reduced motion too), so its slot is never bare while they arrive.
             ...(entry.leaving && { opacity: 0 }),
-            transition: entry.leaving ? `${glide}, opacity ${timing}` : reduce ? glide : `${glide}, ${style.transition}`,
+            // The tile's own opacity transition rides along where it has one (none for a pane that is fading in).
+            transition: entry.leaving ? `${glide}, opacity ${timing}` : style.transition ? `${glide}, ${style.transition}` : glide,
         };
     });
 
-    return { skipsLayout, tileStyle };
+    return { skipsLayout, tileStyle, entering };
 }
 
 /**
@@ -656,7 +666,7 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
         );
     };
 
-    const { skipsLayout, tileStyle } = useTileStyle(props, nodeModel);
+    const { skipsLayout, tileStyle, entering } = useTileStyle(props, nodeModel);
 
     return (
         <div
@@ -668,6 +678,7 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
                 "tile-resize-skip": skipsLayout(),
+                "tile-entering": entering(),
             })}
             ref={tileNodeRef}
             id={props.node.id}

@@ -32,6 +32,23 @@
         &.block-no-padding {
             padding: 0;
         }
+
+        // The view's own place in the content box (PaneViewBoundary.tsx): it has no box, so the view is
+        // laid out as the content box's child, as it was before it had a place of its own.
+        > .pane-view-host {
+            display: contents;
+        }
+
+        // What shows while a read in the view is pending: over the view, which stays where it is and is
+        // not covered or dimmed. Nothing here takes a click.
+        > .pane-view-pending {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
     }
 
     .block-focuselem {

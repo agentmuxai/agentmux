@@ -107,6 +107,7 @@ import { createTileLayout, type TileLayoutPlatform } from "./TileLayout.core";
 import { DRAG_PREVIEW_HOVER_MS } from "./drag-preview-size";
 import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
 import { REFLOW_CLIP, REFLOW_TRANSFORM, type ReflowEntry } from "./liveReflow";
+import type { SettlingPass } from "./settlingPass";
 import { dragState } from "./tilelayout-drag-state";
 import { LayoutTreeActionType, type TileLayoutContents } from "./types";
 
@@ -122,9 +123,11 @@ function makeModel() {
     const [handles, setHandles] = createSignal<Array<{ id: string }>>([]);
     const [reflow, setReflow] = createSignal(new Map<string, ReflowEntry>());
     const [tearOffOffered, setTearOffOffered] = createSignal(false);
+    const [pass, setPass] = createSignal<SettlingPass | undefined>(undefined);
     return {
         activeDrag,
         tearOffOffered,
+        settlingPass: pass,
         reflowFor: (id: string) => reflow().get(id),
         liveReflowActive: () => reflow().size > 0,
         liveReflowExpected: () => activeDrag(),
@@ -140,7 +143,7 @@ function makeModel() {
         treeReducer: vi.fn(),
         renderContent: vi.fn((nm: { content?: () => HTMLElement }) => nm.content?.() ?? document.createElement("div")),
         renderPreview: vi.fn(() => document.createElement("span")),
-        set: { setActiveDrag, setOverlay, setGap, setAnimTime, setMagnifiedId, setMagnifyMount, setIsResizing, setHandles, setReflow, setTearOffOffered },
+        set: { setActiveDrag, setOverlay, setGap, setAnimTime, setMagnifiedId, setMagnifyMount, setIsResizing, setHandles, setReflow, setTearOffOffered, setPass },
     };
 }
 
@@ -375,13 +378,38 @@ describe("createTileLayout: a tile", () => {
         const nm = h.nodeModels.get("n1")!;
         expect(el.style.transform).toBe("translate(1px, 2px)");
         expect(el.style.width).toBe("10px");
-        for (const c of ["dragging", "tile-hidden", "tile-minimized", "tile-resize-skip"]) {
+        for (const c of ["dragging", "tile-hidden", "tile-minimized", "tile-resize-skip", "tile-entering"]) {
             expect(el.classList.contains(c)).toBe(false);
         }
         nm.set.setMinimized(true);
         expect(el.classList.contains("tile-minimized")).toBe(true);
         h.model.set.setMagnifiedId("other");
         expect(el.classList.contains("tile-hidden")).toBe(true);
+    });
+
+    it("fades in a pane that came or was restored, for as long as the settling pass names it", () => {
+        const { el } = mountWithTile(makePlatform());
+        const pass = (enters: string[], gliding: boolean): SettlingPass => ({ moves: new Map(), ghosts: [], enters, gliding });
+        h.model.set.setPass(pass(["other"], false));
+        expect(el.classList.contains("tile-entering")).toBe(false);
+        // While the pass stands at its start the pane is not drawn: its fade starts with the glide.
+        h.model.set.setPass(pass(["n1"], false));
+        expect(el.classList.contains("tile-entering")).toBe(false);
+        expect(el.style.opacity).toBe("0");
+        expect(el.style.transition).toBe("");
+        h.model.set.setPass(pass(["n1"], true));
+        expect(el.classList.contains("tile-entering")).toBe(true);
+        expect(el.style.opacity).toBe("1");
+        // A second pass that names it while it fades (another pane opened) is gliding too: not started again.
+        const sets = vi.spyOn(el.classList, "toggle");
+        h.model.set.setPass(pass(["n1", "other"], true));
+        expect(el.classList.contains("tile-entering")).toBe(true);
+        expect(sets).not.toHaveBeenCalled();
+        // The stylesheet's own length (the glide's), with nothing set on the tile.
+        expect(el.style.getPropertyValue("animation-duration")).toBe("");
+        h.model.set.setPass(undefined);
+        expect(el.classList.contains("tile-entering")).toBe(false);
+        expect(el.style.opacity).toBe("1");
     });
 
     it("skips laying out a minimized pane while the window resizes, and says it is behind", () => {
@@ -418,6 +446,20 @@ describe("createTileLayout: a tile", () => {
 
         /** The tile's four edges, as its style carries them: left, top, right, bottom. */
         const edgesOf = (el: HTMLElement) => ["l", "t", "r", "b"].map((edge) => el.style.getPropertyValue(`--reflow-${edge}`));
+
+        it("glides a tile that is still fading in: its edges' transition stands alone, with no opacity beside it", () => {
+            // A second pane opened while the first was fading in: the first is named by the pass and has a glide.
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setPass({ moves: new Map(), ghosts: [], enters: ["n1"], gliding: true });
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
+            expect(el.classList.contains("tile-entering")).toBe(true);
+            expect(el.style.transition).not.toContain("undefined");
+            expect(el.style.transition).not.toContain("opacity");
+            for (const edge of ["l", "t", "r", "b"]) {
+                expect(el.style.transition).toContain(`--reflow-${edge} var(--duration-base) ease-out`);
+            }
+            h.model.set.setPass(undefined);
+        });
 
         it("gives a tile its future rect: its four edges glide, its place and crop are read from them, its size is set at once", () => {
             const platform = makePlatform();

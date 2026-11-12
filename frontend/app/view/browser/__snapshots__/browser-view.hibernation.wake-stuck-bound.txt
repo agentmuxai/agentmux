@@ -1,0 +1,7 @@
+diag view-mount window_label=main initial-urlAtom="https://example.com/page"
+register pane
+diag [hibernate] wake-start why=show visible=true
+probe 119 s, still waking: rect.asleep=false drag.unavailable=true pane.visible=true pane.asleep=true pane.frozen=false hiddenSince=null
+diag [hibernate] wake-timeout after=120000
+model.endSleep undefined
+probe 121 s: rect.asleep=false drag.unavailable=false pane.visible=true pane.asleep=false pane.frozen=false hiddenSince=null
