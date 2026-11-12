@@ -54,8 +54,10 @@ pub fn window_is_views(state: &crate::state::AppState, label: &str) -> bool {
 static HWND_PANES: parking_lot::Mutex<std::collections::BTreeSet<String>> =
     parking_lot::Mutex::new(std::collections::BTreeSet::new());
 
-/// Pane `pane_label` is being created in window `window_label`: its kind is
-/// decided here, once, and returned (true for a Views overlay).
+/// Pane `pane_label` has just been given its entry, to be created in window
+/// `window_label`: its kind is decided here, once, and returned (true for a Views
+/// overlay). Called where the entry is made (`BrowserPaneManager::create`), not
+/// in the creation task, so no one asks for the kind before it is recorded.
 #[cfg(target_os = "windows")]
 pub fn note_pane_created(state: &crate::state::AppState, pane_label: &str, window_label: &str) -> bool {
     let is_views = window_is_views(state, window_label);
@@ -71,7 +73,8 @@ pub fn note_pane_created(_state: &crate::state::AppState, _pane_label: &str, _wi
     true
 }
 
-/// Pane `pane_label`'s browser is gone (its last callback has run): nothing asks for its kind again.
+/// Pane `pane_label`'s browser is gone (its last callback has run), or none was
+/// ever made and the pane is closed: nothing asks for its kind again.
 pub fn forget_pane(pane_label: &str) {
     #[cfg(target_os = "windows")]
     HWND_PANES.lock().remove(pane_label);

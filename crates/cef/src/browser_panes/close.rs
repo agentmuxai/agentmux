@@ -165,9 +165,14 @@ impl BrowserPaneManager {
     /// the FFI side-effects that follow.
     #[cfg(any(target_os = "windows", test))]
     fn close_with(label: &str, ops: &dyn BrowserPaneCloseOps) {
-        if let Some(hwnd) = ops.take_browser_hwnd(label) {
-            ops.destroy_hwnd(hwnd);
-            tracing::info!(label, "pane wrapper destroy dispatched");
+        match ops.take_browser_hwnd(label) {
+            Some(hwnd) => {
+                ops.destroy_hwnd(hwnd);
+                tracing::info!(label, "pane wrapper destroy dispatched");
+            }
+            // No window was made for the pane (its creation stopped early) or it is gone already:
+            // no close of a browser follows to forget the pane's kind (`drain_closed_label`).
+            None => crate::pane_backend::forget_pane(label),
         }
     }
 
@@ -224,8 +229,6 @@ impl BrowserPaneManager {
                 #[cfg(target_os = "windows")]
                 crate::input_owner::windows::pane_gone(state, &block_id);
             }
-            // The last place that asks which kind this pane was.
-            crate::pane_backend::forget_pane(label);
             // PR #6 H.7 kick — see `close()` for rationale. The
             // on_before_close path is the async drain; pool refill that
             // was deferred while the pane was Closing should now resume.
@@ -236,6 +239,9 @@ impl BrowserPaneManager {
             // block_id was Closing. Replay it (now Fresh).
             self.replay_pending_create(state, out.pending_browser_pane_create_to_replay);
         }
+        // The browser is gone and this was its last callback: nothing asks which kind the pane was
+        // again. Outside the block above, which an explicit `close()` has already emptied.
+        crate::pane_backend::forget_pane(label);
     }
 
     /// Replay a browser-pane create that the reducer deferred while `block_id`
