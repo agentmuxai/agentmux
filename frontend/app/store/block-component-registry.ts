@@ -254,7 +254,7 @@ export async function openOrFocusPaneIdByView(
                                     showBlockInPane(layoutModel, node, blockId);
                                     layoutModel.focusNode(node.id);
                                     giveBlockFocus(blockId);
-                                    emitPaneLocate(blockId);
+                                    emitPaneLocate(blockId, { again: true });
                                 },
                             },
                         };

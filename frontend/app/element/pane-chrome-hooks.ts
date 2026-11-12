@@ -98,8 +98,9 @@ export function usePaneStripReveal(isFocused: Accessor<boolean>, getRoot: () => 
  * The locate flash (pane-locate.ts): a reveal of one of this pane's blocks flashes the pane once it
  * is on screen. Any request for another block ends the one running or waiting here, so only the newest
  * pane flashes; a repeat request for the block already waiting, or flashed a moment ago, is the same
- * flash (one open can ask twice). Leaving the pane ends a flash that waited for focus; a flash for a
- * pane shown without taking focus (`focus: false`) does not depend on it.
+ * flash (one open can ask twice), unless it is the user's own click (`again`): that one replays the flash,
+ * the one on screen carrying on until the new one takes its place. Leaving the pane ends a flash that
+ * waited for focus; a flash for a pane shown without taking focus (`focus: false`) does not depend on it.
  */
 export function usePaneLocateFlash(
     nodeModel: NodeModel,
@@ -111,24 +112,37 @@ export function usePaneLocateFlash(
     let locateGate: ReadyGate | null = null;
     let locateDelay: ReturnType<typeof setTimeout> | undefined;
     let stopLocateFlash: (() => void) | null = null;
+    // A flash a click is replacing: it fades on until the new one starts, so the pane is not bare in between.
+    let retiringFlash: (() => void) | null = null;
     // The request this pane is serving: waiting for the pane to be seen, or drawn at `startedAt`.
     let serving: { blockId: string; focus: boolean; startedAt: number | null } | null = null;
-    const endLocate = () => {
+    const endLocate = (keepDrawn = false) => {
         locateGate?.cancel();
         locateGate = null;
         clearTimeout(locateDelay);
-        stopLocateFlash?.();
+        if (keepDrawn) {
+            retiringFlash?.();
+            retiringFlash = stopLocateFlash;
+        } else {
+            stopLocateFlash?.();
+            retiringFlash?.();
+            retiringFlash = null;
+        }
         stopLocateFlash = null;
         serving = null;
     };
     onMount(() => {
         const off = onPaneLocate((blockId, opts) => {
             const focus = opts.focus !== false;
+            let replay = false;
             if (serving?.blockId === blockId && untrack(stackIds).includes(blockId)) {
                 const drawnAgo = serving.startedAt === null ? null : performance.now() - serving.startedAt;
-                if (drawnAgo === null || drawnAgo < LOCATE_COALESCE_MS) return;
+                // Still waiting to be seen: that flash serves this request too.
+                if (drawnAgo === null) return;
+                if (drawnAgo < LOCATE_COALESCE_MS && !opts.again) return;
+                replay = true;
             }
-            endLocate();
+            endLocate(replay);
             if (!untrack(stackIds).includes(blockId)) return;
             const request = { blockId, focus, startedAt: null as number | null };
             serving = request;
@@ -152,6 +166,8 @@ export function usePaneLocateFlash(
                         serving = null;
                         return;
                     }
+                    retiringFlash?.();
+                    retiringFlash = null;
                     recordLocateStart(performance.now());
                     request.startedAt = performance.now();
                     stopLocateFlash = showLocateFlash(root, {

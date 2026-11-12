@@ -60,6 +60,13 @@ export interface LocateOptions {
     /** The reveal moved focus to the pane (default): the flash waits for it and ends when focus leaves.
      *  False for a pane shown without taking focus: it flashes where it is, focused or not. */
     focus?: boolean;
+    /**
+     * The user's own click on a way to this pane (a widget, a row, the palette). Every one is answered with a
+     * flash, even while the last is still on screen: the pane replays it, at the rate the slot allows
+     * (`LOCATE_MIN_GAP_MS`). Without it, a request just after a flash started is the same flash, since one open
+     * can ask twice (`LOCATE_COALESCE_MS`).
+     */
+    again?: boolean;
 }
 
 type BlockListener = (blockId: string, opts: LocateOptions) => void;

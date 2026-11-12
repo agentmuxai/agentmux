@@ -199,7 +199,7 @@ const liveDeps: SelectionDeps = {
         return { ok: true };
     },
     handoff: (blockId) => revealInOtherWindow(blockId),
-    flash: (blockId) => emitPaneLocate(blockId),
+    flash: (blockId) => emitPaneLocate(blockId, { again: true }),
     notify(intent: Intent, reason: string, detail?: string) {
         // A block that is not in this window, asked for in this window only, is not a failure to tell the
         // user about: the caller has the answer (false) and may look elsewhere.
