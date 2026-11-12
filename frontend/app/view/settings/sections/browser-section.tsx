@@ -129,11 +129,53 @@ function KeepAwakeSites(props: { sites: string[] }): JSX.Element {
     );
 }
 
+/**
+ * The Delete button of a profile row. It asks once more on the button itself: delete closes the profile's tabs
+ * and signs it out. Its saved passwords may exist nowhere else, so they move to Personal unless the person
+ * deletes them too (Vault spec §9.4).
+ */
+function DeleteProfile(props: { profile: BrowserProfile; run: (f: () => Promise<void>) => Promise<void> }): JSX.Element {
+    const [confirming, setConfirming] = createSignal(false);
+    let confirmTimer: ReturnType<typeof setTimeout> | undefined;
+    const saved = () => profileSignins(props.profile.id);
+    const remove = (deleteSignins = false) => {
+        if (!confirming()) {
+            setConfirming(true);
+            confirmTimer = setTimeout(() => setConfirming(false), saved() > 0 ? 10000 : 5000);
+            return;
+        }
+        clearTimeout(confirmTimer);
+        setConfirming(false);
+        void props.run(() => deleteBrowserProfile(props.profile.id, deleteSignins));
+    };
+    const signinsWord = () => t("settings.browser.profile.signins", { count: saved() });
+    const deleteLabel = () =>
+        confirming() ? t("settings.browser.profile.deleteConfirm", { name: props.profile.name }) : t("settings.browser.profile.delete");
+    return (
+        <Show
+            when={confirming() && saved() > 0}
+            fallback={
+                <Button tone={confirming() ? "danger" : "quiet"} icon="trash" onClick={() => remove()}>
+                    {deleteLabel()}
+                </Button>
+            }
+        >
+            <div class="browser-profile-delete" role="group" aria-label={t("settings.browser.profile.deleteGroup", { name: props.profile.name, signins: signinsWord() })}>
+                <span>{t("settings.browser.profile.deleteAsk", { name: props.profile.name, signins: signinsWord() })}</span>
+                <Button tone="danger" onClick={() => remove(false)}>
+                    {t("settings.browser.profile.moveToPersonal")}
+                </Button>
+                <Button tone="quiet" onClick={() => remove(true)}>
+                    {t("settings.browser.profile.deleteThemToo")}
+                </Button>
+            </div>
+        </Show>
+    );
+}
+
 function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
     const [name, setName] = createSignal(props.profile.name);
     const [error, setError] = createSignal<string | null>(null);
-    const [confirming, setConfirming] = createSignal(false);
-    let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 
     const run = async (f: () => Promise<void>) => {
         setError(null);
@@ -148,25 +190,8 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
         if (next && next !== props.profile.name) void run(() => updateBrowserProfile(props.profile.id, { name: next }));
         else setName(props.profile.name);
     };
-    // Delete asks once more on the button itself: it closes the profile's tabs
-    // and signs it out. Its saved passwords may exist nowhere else, so they move
-    // to Personal unless the person deletes them too (Vault spec §9.4).
-    const saved = () => profileSignins(props.profile.id);
-    const remove = (deleteSignins = false) => {
-        if (!confirming()) {
-            setConfirming(true);
-            confirmTimer = setTimeout(() => setConfirming(false), saved() > 0 ? 10000 : 5000);
-            return;
-        }
-        clearTimeout(confirmTimer);
-        setConfirming(false);
-        void run(() => deleteBrowserProfile(props.profile.id, deleteSignins));
-    };
-    const signinsWord = () => t("settings.browser.profile.signins", { count: saved() });
     const agentsUseLabel = () =>
         props.profile.owner_agent ? t("settings.browser.profile.otherAgentsMayUse") : t("settings.browser.profile.agentsMayUse");
-    const deleteLabel = () =>
-        confirming() ? t("settings.browser.profile.deleteConfirm", { name: props.profile.name }) : t("settings.browser.profile.delete");
 
     return (
         <div class="browser-profile-row">
@@ -205,24 +230,7 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
                 />
                 <span>{agentsUseLabel()}</span>
             </label>
-            <Show
-                when={confirming() && saved() > 0}
-                fallback={
-                    <Button tone={confirming() ? "danger" : "quiet"} icon="trash" onClick={() => remove()}>
-                        {deleteLabel()}
-                    </Button>
-                }
-            >
-                <div class="browser-profile-delete" role="group" aria-label={t("settings.browser.profile.deleteGroup", { name: props.profile.name, signins: signinsWord() })}>
-                    <span>{t("settings.browser.profile.deleteAsk", { name: props.profile.name, signins: signinsWord() })}</span>
-                    <Button tone="danger" onClick={() => remove(false)}>
-                        {t("settings.browser.profile.moveToPersonal")}
-                    </Button>
-                    <Button tone="quiet" onClick={() => remove(true)}>
-                        {t("settings.browser.profile.deleteThemToo")}
-                    </Button>
-                </div>
-            </Show>
+            <DeleteProfile profile={props.profile} run={run} />
             <Show when={error()}>
                 <div class="settings-config-error" role="alert">
                     {error()}
