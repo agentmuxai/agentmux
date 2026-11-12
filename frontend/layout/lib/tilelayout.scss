@@ -93,7 +93,7 @@
         &::before {
             content: "";
             display: block;
-            height: calc(var(--header-height) * var(--zoomfactor, 1));
+            height: calc(var(--header-height) * var(--zoomfactor));
             border-bottom: 1px solid var(--border-color);
         }
     }
