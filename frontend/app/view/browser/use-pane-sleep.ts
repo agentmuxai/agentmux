@@ -11,6 +11,7 @@ import {
     awakeReason,
     hibernationEnabled,
     HOVER_WAKE_GIVE_UP_MS,
+    WAKE_STUCK_MS,
     isCapturing,
     engineSupportsFreeze,
     freezeAwakeReason,
@@ -50,6 +51,8 @@ interface WakeVars {
     /** The wake finished without a load (a page that was alive): its "loaded" time is not a measurement. */
     noLoad: boolean;
     giveUp: ReturnType<typeof setTimeout> | undefined;
+    /** Ends a shown pane's wake that never finishes, whatever its load did (`WAKE_STUCK_MS`). */
+    stuck: ReturnType<typeof setTimeout> | undefined;
 }
 
 /** What the window knows that keeps the pane awake (spec §5.3). */
@@ -104,9 +107,13 @@ function createWake(p: { model: BrowserViewModel; visible: Accessor<boolean>; sl
     // before the pane is shown: the sleep record stays until it is, so a hover
     // with no switch puts it back to sleep instead of leaving it awake.
     const [wakeLoadedMs, setWakeLoadedMs] = createSignal(0);
-    const wk: WakeVars = { why: "", noLoad: false, giveUp: undefined };
-    onCleanup(() => clearTimeout(wk.giveUp));
+    const wk: WakeVars = { why: "", noLoad: false, giveUp: undefined, stuck: undefined };
+    onCleanup(() => {
+        clearTimeout(wk.giveUp);
+        clearTimeout(wk.stuck);
+    });
     const backToSleep = () => {
+        clearTimeout(wk.stuck);
         wk.noLoad = false;
         setWakeRequested(false);
         setWakeStartedAt(0);
@@ -124,6 +131,16 @@ function createWake(p: { model: BrowserViewModel; visible: Accessor<boolean>; sl
         }
         wk.noLoad = true;
         setWakeLoadedMs(1);
+    };
+    // A shown pane shows a card until its wake ends. If the load clock never sees the load end, end the
+    // wake here, so the card cannot stay for good.
+    const armStuck = () => {
+        clearTimeout(wk.stuck);
+        wk.stuck = setTimeout(() => {
+            if (!sleeping() || !visible() || wakeLoadedMs() > 0) return;
+            diag(`[hibernate] wake-timeout after=${WAKE_STUCK_MS}`);
+            void model.endSleep(undefined).catch(() => {});
+        }, WAKE_STUCK_MS);
     };
     const wake = (why: string) => {
         if (!sleeping()) return;
@@ -143,6 +160,7 @@ function createWake(p: { model: BrowserViewModel; visible: Accessor<boolean>; sl
         setWakeRequested(true);
         diag(`[hibernate] wake-start why=${why} visible=${visible()}`);
         clearTimeout(wk.giveUp);
+        armStuck();
         if (why === "intent") {
             // No switch followed: back to sleep, loaded or not.
             wk.giveUp = setTimeout(() => {
@@ -153,7 +171,7 @@ function createWake(p: { model: BrowserViewModel; visible: Accessor<boolean>; sl
             }, HOVER_WAKE_GIVE_UP_MS);
         }
     };
-    return { wake, wakeWithoutLoad, backToSleep, wakeRequested, wakeStartedAt, wakeLoadedMs, setWakeLoadedMs, wk };
+    return { wake, armStuck, wakeWithoutLoad, backToSleep, wakeRequested, wakeStartedAt, wakeLoadedMs, setWakeLoadedMs, wk };
 }
 
 /** What wakes a pane: being shown, a hover or press on its tab, an agent's call; what ends a wake. */
@@ -166,7 +184,7 @@ function useWakeTriggers(p: {
     w: ReturnType<typeof createWake>;
 }) {
     const { model, visible, sleeping, tabId, diag } = p;
-    const { wake, backToSleep, wakeRequested, wakeLoadedMs, wk } = p.w;
+    const { wake, armStuck, backToSleep, wakeRequested, wakeLoadedMs, wk } = p.w;
     createEffect(() => {
         if (!sleeping()) {
             clearTimeout(wk.giveUp);
@@ -176,7 +194,9 @@ function useWakeTriggers(p: {
     createEffect(() => {
         if (!sleeping() || !visible()) return;
         if (!wakeRequested()) wake("show");
-        else if (wakeLoadedMs() > 0) {
+        // A wake asked for while hidden, now shown and not loaded: it must not outlast the bound either.
+        else if (wakeLoadedMs() === 0) armStuck();
+        else {
             // Loaded while hidden, now shown: awake, with no card.
             clearTimeout(wk.giveUp);
             diag(`[hibernate] wake-shown-ready ms=${Math.round(wakeLoadedMs())}`);

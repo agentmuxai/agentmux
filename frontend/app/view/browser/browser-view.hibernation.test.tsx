@@ -472,6 +472,35 @@ describe("waking and sleeping", () => {
         await v.settle();
         await expect(out()).toMatchFileSnapshot(snap("card-diag"));
     });
+
+    it("a wake that begins while an earlier wake's load is still in flight ends when that load ends", async () => {
+        // The 2026-11-12 stuck card: a hover wake was abandoned before its page finished, which left loading
+        // true; showing the pane woke it again, loading was set true again (no change), and then went false.
+        const v = mount({ visible: false, sleep: {}, paneCreated: true });
+        pressTabPill("t1");
+        await v.settle(200);
+        v.step("the page starts loading and does not finish");
+        v.setLoading(true);
+        await v.settle(10_000);
+        v.probe("abandoned, still loading");
+        v.step("shown: woken again while loading");
+        v.setVisible(true);
+        await v.settle(300);
+        v.step("the load ends");
+        v.setLoading(false);
+        await v.settle();
+        v.probe("loaded");
+        await expect(out()).toMatchFileSnapshot(snap("wake-while-loading"));
+    });
+
+    it("a shown pane whose wake never sees its load end is woken after two minutes, card gone", async () => {
+        const v = mount({ visible: true, sleep: {}, paneCreated: true });
+        await v.settle(119_000);
+        v.probe("119 s, still waking");
+        await v.settle(2_000);
+        v.probe("121 s");
+        await expect(out()).toMatchFileSnapshot(snap("wake-stuck-bound"));
+    });
 });
 
 describe("hibernating", () => {
