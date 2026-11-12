@@ -63,8 +63,8 @@ vi.mock("@/store/global", () => ({
             if (h.revealError) throw new Error(h.revealError);
         },
         approvals: {
-            storeUpdate: (version: string) => {
-                h.log.push(`host storeUpdate ${version}`);
+            storeUpdate: () => {
+                h.log.push("host storeUpdate");
                 return h.storeResult instanceof Promise ? h.storeResult : h.storeResult === "reject" ? Promise.reject(new Error("no")) : Promise.resolve(h.storeResult);
             },
         },

@@ -104,9 +104,9 @@ export function createStoreInstall(setStartError: (e: string | null) => void) {
         const stopListening = await getApi()?.listen?.("store-update-progress", acceptStoreProgress).catch(() => undefined);
         try {
             setStoreStayed(null);
-            // For a Store install the offered release is the Store's own offer, the same source as the progress line.
+            // The release shown after the download is the Store's own offer, the same source as the progress line.
             const version = storeTargetVersion();
-            const result = await getApi()?.approvals?.storeUpdate?.(version).catch(() => undefined);
+            const result = await getApi()?.approvals?.storeUpdate?.().catch(() => undefined);
             if (result?.outcome === "none") recordStoreNone();
             if (result?.outcome === "downloaded") {
                 // Downloaded and nothing more: the row says so and offers Restart now.

@@ -1,6 +1,6 @@
 rpc AppUpdateStatus
 host storeUpdateCheck
-host storeUpdate 0.59.27
+host storeUpdate
 openLink ms-windows-store://pdp/?productid=9P9QCXNNCRK3
 -- fallback
 <div>
@@ -26,7 +26,7 @@ openLink ms-windows-store://pdp/?productid=9P9QCXNNCRK3
       "Checked <time>"
     <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
       "Check again"
-host storeUpdate 0.59.27
+host storeUpdate
 -- answered
 <div>
   <div class="instance-panel-section-title">
@@ -51,7 +51,7 @@ host storeUpdate 0.59.27
       "Checked <time>"
     <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
       "Check again"
-host storeUpdate 0.59.27
+host storeUpdate
 -- none: the Store has nothing yet
 <div>
   <div class="instance-panel-section-title">
