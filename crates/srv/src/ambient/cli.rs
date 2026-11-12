@@ -177,7 +177,7 @@ fn exit_error(status: &str, stderr_tail: &[u8]) -> String {
         return format!("ambient CLI exited with status {status}");
     }
     let shown: String = if count > STDERR_LOGGED_CHARS { format!("…{}", line.chars().skip(count - STDERR_LOGGED_CHARS).collect::<String>()) } else { line };
-    format!("ambient CLI exited with status {status}: {shown}")
+    format!("ambient CLI exited with status {status}{}{shown}", super::outcome::CHILD_OUTPUT_MARK)
 }
 
 /// Whether the agent in this block is on a model server of its own, for which no ambient call is made (`ambient_env`).
@@ -284,7 +284,7 @@ mod ambient_cli_failure_tests {
     #[test]
     fn a_failed_exit_carries_the_end_of_stderr_on_one_line() {
         let tail = b"Error: not logged in\n  run /login\n";
-        assert_eq!(exit_error("exit code: 1", tail), "ambient CLI exited with status exit code: 1: Error: not logged in run /login");
+        assert_eq!(exit_error("exit code: 1", tail), "ambient CLI exited with status exit code: 1 | stderr: Error: not logged in run /login");
         assert_eq!(exit_error("exit code: 1", b""), "ambient CLI exited with status exit code: 1");
         let long = "x ".repeat(500);
         let e = exit_error("1", long.as_bytes());

@@ -74,13 +74,18 @@ impl Outcome {
     }
 }
 
+/// Separates an error's own words from the end of the child's stderr that follows it.
+pub const CHILD_OUTPUT_MARK: &str = " | stderr: ";
+
 /// Classify a failed CLI call. `cancelled` is whether the gateway cancelled it
 /// because a newer request superseded it.
 pub fn classify_error(error: &str, cancelled: bool) -> Outcome {
     if cancelled {
         return Outcome::Superseded;
     }
-    let lower = error.to_ascii_lowercase();
+    // Only our own words decide: what the child wrote to stderr (after `CHILD_OUTPUT_MARK`) cannot change the label.
+    let ours = error.split(CHILD_OUTPUT_MARK).next().unwrap_or(error);
+    let lower = ours.to_ascii_lowercase();
     if lower.contains("timeout") || lower.contains("timed out") {
         Outcome::Timeout
     } else {
@@ -185,6 +190,14 @@ mod tests {
             classify_error("spawn failed: not found", false),
             Outcome::CliFailed
         );
+    }
+
+    #[test]
+    fn what_the_child_wrote_cannot_change_the_label() {
+        let failed = format!("ambient CLI exited with status 1{CHILD_OUTPUT_MARK}request timed out, connection timeout");
+        assert_eq!(classify_error(&failed, false), Outcome::CliFailed);
+        let slow = format!("ambient CLI timed out after 45s{CHILD_OUTPUT_MARK}x");
+        assert_eq!(classify_error(&slow, false), Outcome::Timeout);
     }
 
     #[test]
