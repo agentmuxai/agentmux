@@ -2,16 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The settling pass: how the panes take their places after a pane left the tree outside a drag (a close, or a
- * pane moved to another window). The others used to take their new rects in one frame. Now each pane that
+ * The settling pass: how the panes take their places after the arrangement changed outside a drag: a pane
+ * left (a close, or a pane moved to another window), a pane came (an open, a split), a pane was minimized or
+ * restored, or two were swapped. The panes used to take their new rects in one frame. Now each pane that
  * changed place or size glides there by the live reflow's own means (liveReflow.ts: four edges, a clip, the
- * size set once underneath), and the frame of the pane that left fades where it stood.
+ * size set once underneath), the frame of a pane that left fades where it stood, and a pane that came or was
+ * restored fades in at its own rect.
  *
  * The tree, the layout's rects, focus and what goes to srv are final before a pass opens: only the drawing
  * glides. A pass opens in the same batch as the new rects, with every tile still at the rect it showed, and
  * sends them to their own rects on the next frame, so the glide has a start. It ends when the glide is over
  * (`reflowSettleMs`), and the tiles' plain style, already final, takes over. Terminals keep their grid for the
- * pass and fit once at its end, by the reflow's own hold.
+ * pass and fit once at its end, by the reflow's own hold. A pane that shrinks (its neighbour opened) keeps its
+ * larger size under its closing clip and takes its real size at the end too (liveReflow.ts `envelope`).
+ *
+ * A change of size alone never opens a pass: a window or splitter resize, a zoom, a pane resized by a
+ * command. The trigger is the arrangement (which panes, in which order, which of them minimized).
  *
  * A pass never opens over a drag's reflow: a drop and a tear-off commit what the panes already show.
  * docs/specs/SPEC_PANE_REFLOW_GLIDE_2026_11_01.md §6.
@@ -21,6 +27,7 @@ import { createEffect, createSignal, on, untrack, type Accessor } from "solid-js
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { scaledMs } from "@/app/motion/motion";
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
+import { tabSwitching } from "@/app/store/tab-reveal";
 import type { LayoutModel } from "./layoutModel";
 import {
     liveReflowEnabled,
@@ -52,6 +59,8 @@ export interface SettlingPass {
     moves: Map<string, PaneMove>;
     /** The panes that left. */
     ghosts: PaneGhost[];
+    /** The panes that came or were restored, by node id: each fades in at its own rect. */
+    enters: string[];
     /** False for the frame the pass opens on (the tiles stand at `from`), true from the next. */
     gliding: boolean;
 }
@@ -119,6 +128,9 @@ function drawnRect(nodeId: string, fallback: Dimensions): Dimensions {
 function mayGlide(model: LayoutModel, state: State, paneCount: number): boolean {
     if (!liveReflowEnabled() || scaledMs(DURATION_BASE_MS) <= 0) return false;
     if (paneCount > REFLOW_MAX_PANES || paneCaptureInFlight()) return false;
+    // A tab that is being switched to or made is hidden until it has settled (tab-reveal.ts): the panes that
+    // open into it meanwhile are not seen arriving.
+    if (tabSwitching()) return false;
     if (state.dragShown || model.activeDrag() || model.tearOffLayout()) return false;
     // Magnified now, or as last published (the pane that closed was the magnified one): the tiles are hidden.
     if (model.isResizing() || model.treeState.magnifiedNodeId || model.magnifiedNodeIdAtom()) return false;
@@ -128,11 +140,75 @@ function mayGlide(model: LayoutModel, state: State, paneCount: number): boolean 
     return typeof document === "undefined" || document.visibilityState !== "hidden";
 }
 
+/** What changed in the arrangement between two layouts of `model`. */
+interface Change {
+    /** The panes that left, and those that came. */
+    gone: LayoutNode[];
+    came: LayoutNode[];
+    /** The panes minimized by this change, and those restored by it, by node id. */
+    minimized: Set<string>;
+    restored: Set<string>;
+    /** The same panes, in another order in the tree (a swap). */
+    reordered: boolean;
+}
+
+/**
+ * The change from `prevLeafs` to `nextLeafs`. What was minimized and the order the panes had are read from
+ * what `model` last published; the new order is the tree's (`updateTree` has set it by now).
+ */
+function changeOf(model: LayoutModel, prevLeafs: LayoutNode[], nextLeafs: LayoutNode[]): Change {
+    const prevIds = new Set(prevLeafs.map((leaf) => leaf.id));
+    const nextIds = new Set(nextLeafs.map((leaf) => leaf.id));
+    const wasMinimized = untrack(model.minimizedNodeIds);
+    const stayed = nextLeafs.filter((leaf) => prevIds.has(leaf.id));
+    const flipped = (to: boolean) =>
+        new Set(stayed.filter((leaf) => !!leaf.minimized === to && wasMinimized.has(leaf.id) !== to).map((leaf) => leaf.id));
+    const gone = prevLeafs.filter((leaf) => !nextIds.has(leaf.id));
+    const came = nextLeafs.filter((leaf) => !prevIds.has(leaf.id));
+    const before = untrack(model.leafOrder) ?? [];
+    const after = model.treeState.leafOrder ?? [];
+    const sameSet = gone.length === 0 && came.length === 0 && before.length === after.length;
+    const reordered = sameSet && before.some((entry, i) => entry.nodeid !== after[i].nodeid);
+    return { gone, came, minimized: flipped(true), restored: flipped(false), reordered };
+}
+
+/** Whether `change` is one the panes glide for: not none, and not panes leaving and coming at once (a layout replaced). */
+function glides(change: Change): boolean {
+    if (change.gone.length > 0 && change.came.length > 0) return false;
+    return change.gone.length + change.came.length + change.minimized.size + change.restored.size > 0 || change.reordered;
+}
+
+/** The glides of the panes that stayed where `change` did not touch them itself. */
+function movesOf(
+    open: SettlingPass | undefined,
+    change: Change,
+    prevProps: Props,
+    nextLeafs: LayoutNode[],
+    nextProps: Props
+): Map<string, PaneMove> {
+    const cameIds = new Set(change.came.map((leaf) => leaf.id));
+    const moves = new Map<string, PaneMove>();
+    for (const leaf of nextLeafs) {
+        const to = nextProps[leaf.id]?.rect;
+        if (!to || !movesWithReflow(leaf)) continue;
+        // A pane that came, was restored or was minimized takes its rect at once: the first two fade in.
+        if (cameIds.has(leaf.id) || change.restored.has(leaf.id) || change.minimized.has(leaf.id)) continue;
+        const gliding = open?.moves.get(leaf.id);
+        if (gliding) {
+            moves.set(leaf.id, open!.gliding ? { to } : { from: gliding.from, to });
+            continue;
+        }
+        const from = prevProps[leaf.id]?.rect;
+        if (from && !sameShown(from, to)) moves.set(leaf.id, { from, to });
+    }
+    return moves;
+}
+
 /**
  * The pass for a change of `model`'s layout from `prevLeafs` at `prevProps` to `nextLeafs` at `nextProps`, or
- * none when the change does not glide: no pane left or one came, the reflow is off or the animations are, a
- * drag's reflow is on screen, the layout is being resized or magnified, its tab or window is not shown, or
- * nothing a tile shows changed.
+ * none when the change does not glide: the arrangement is the same (a resize) or was replaced, the reflow is
+ * off or the animations are, a drag's reflow is on screen, the layout is being resized or magnified, its tab
+ * or window is not shown or is still being revealed, or nothing a tile shows changed.
  */
 export function planSettlingPass(
     model: LayoutModel,
@@ -143,26 +219,14 @@ export function planSettlingPass(
 ): SettlingPass | undefined {
     const state = states.get(model);
     if (!state || prevLeafs.length === 0) return undefined;
-    const nextIds = new Set(nextLeafs.map((leaf) => leaf.id));
-    const gone = prevLeafs.filter((leaf) => !nextIds.has(leaf.id));
-    if (gone.length === 0 || nextLeafs.length + gone.length !== prevLeafs.length) return undefined;
-    if (!untrack(() => mayGlide(model, state, prevLeafs.length))) return undefined;
+    const change = changeOf(model, prevLeafs, nextLeafs);
+    if (!glides(change)) return undefined;
+    if (!untrack(() => mayGlide(model, state, Math.max(prevLeafs.length, nextLeafs.length)))) return undefined;
 
     const open = untrack(state.pass);
-    const moves = new Map<string, PaneMove>();
-    for (const leaf of nextLeafs) {
-        const to = nextProps[leaf.id]?.rect;
-        if (!to || !movesWithReflow(leaf)) continue;
-        const gliding = open?.moves.get(leaf.id);
-        if (gliding) {
-            moves.set(leaf.id, open!.gliding ? { to } : { from: gliding.from, to });
-            continue;
-        }
-        const from = prevProps[leaf.id]?.rect;
-        if (from && !sameShown(from, to)) moves.set(leaf.id, { from, to });
-    }
+    const moves = movesOf(open, change, prevProps, nextLeafs, nextProps);
     const ghosts = [...(open?.ghosts ?? [])];
-    for (const leaf of gone) {
+    for (const leaf of change.gone) {
         const rect = prevProps[leaf.id]?.rect;
         if (!rect) continue;
         // A pane that was gliding itself is not at its layout rect yet: its ghost stands where the pane is
@@ -171,7 +235,11 @@ export function planSettlingPass(
         const stood = !own ? rect : own.from && !open!.gliding ? own.from : drawnRect(leaf.id, rect);
         ghosts.push({ id: leaf.id, rect: stood });
     }
-    return moves.size > 0 || ghosts.length > 0 ? { moves, ghosts, gliding: false } : undefined;
+    if (moves.size === 0 && ghosts.length === 0) return undefined;
+    // A pane still fading in from the open pass goes on fading.
+    const still = (open?.enters ?? []).filter((id) => nextProps[id] && !change.minimized.has(id));
+    const enters = [...new Set([...still, ...change.came.map((leaf) => leaf.id), ...change.restored])];
+    return { moves, ghosts, enters, gliding: false };
 }
 
 /** Open `pass` on `model`'s layout, in place of one that is open. Call it in the batch that writes the new rects. */
@@ -182,6 +250,8 @@ export function openSettlingPass(model: LayoutModel, pass: SettlingPass): void {
     state.setPass(pass);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const cancelFrame = onNextFrame(() => {
+        // A frame that outlived its pass (one that was replaced or ended) must not bring it back.
+        if (untrack(state.pass) !== pass) return;
         state.setPass({ ...pass, gliding: true });
         timer = setTimeout(() => closeSettlingPass(model), reflowSettleMs());
     });
@@ -202,8 +272,8 @@ export function closeSettlingPass(model: LayoutModel): void {
 
 /**
  * The layout pass of `model` is about to publish `nextLeafs` at `nextProps` (`updateTree`, inside its batch,
- * before the write): open a pass when a pane left, or end the open one when the rects it glides to are no
- * longer the layout's (a resize in the middle of a glide).
+ * before the write): open a pass when the arrangement changed, or end the open one when the rects it glides
+ * to are no longer the layout's (a resize in the middle of a glide).
  */
 export function settleTreeChange(model: LayoutModel, nextLeafs: LayoutNode[], nextProps: Props): void {
     const pass = planSettlingPass(model, untrack(model.leafs), untrack(model.additionalProps), nextLeafs, nextProps);

@@ -1,6 +1,6 @@
 # SPEC: Panes glide into place when the layout changes (close first), like the My agents rows
 
-**Status:** active. Approved by the operator on 2026-11-12 (D1 to D5 as recommended). PR 1 (the trigger, close and move-away) is #7036; PR 2 (open, split, minimize, restore, swap) is not built. Three points changed in the build, agreed with Agent2 from what the drag's reflow taught (§6.1, §6.2): a pass holds each tile at its old rectangle for one frame, terminals are held for the pass, and a pass never opens over what a drag shows
+**Status:** implemented. Approved by the operator on 2026-11-12 (D1 to D5 as recommended). PR 1 (the trigger, close and move-away) is #7036; PR 2 (open, split, minimize, restore, swap, the new pane's fade) is the PR that carries this revision. Three points changed in the build, agreed with Agent2 from what the drag's reflow taught (§6.1, §6.2): a pass holds each tile at its old rectangle for one frame, terminals are held for the pass, and a pass never opens over what a drag shows
 
 - **Date:** 2026-11-01, **revised 2026-11-11** against `origin/main` 63848b092 (v0.60.24 plus the day's merges)
 - **Author:** Camper@narko
@@ -93,9 +93,9 @@ The May 2026 build and the first reflow attempt. Rejected by the constraints and
 ### 6.1 The trigger
 `createLiveReflow`'s targets get a second source. Today: the armed drop's future layout, while a drag is live. New: a **settling pass**, opened when `updateTree` commits rectangles that differ from the last committed ones **and** the set or arrangement of leaves changed. The pass holds, per DOM leaf present before and after, its new rectangle; it lasts `reflowSettleMs()` and then ends. While it is open `reflowFor(nodeId)` answers as it does in a drag, so `tileStyle` and `innerRectOf` need no change.
 
-**The start of the glide.** `updateTree` has already written the new rectangles when a pass opens, so a tile's edges at rest would be the new ones and nothing would glide. The pass therefore opens in the same batch as the new rectangles with each entry at the **old** rectangle (kept from the last published layout), and moves the entries to the new one on the next frame. In PR 1 the trigger is narrower than "the arrangement changed": a pane left and none came.
+**The start of the glide.** `updateTree` has already written the new rectangles when a pass opens, so a tile's edges at rest would be the new ones and nothing would glide. The pass therefore opens in the same batch as the new rectangles with each entry at the **old** rectangle (kept from the last published layout), and moves the entries to the new one on the next frame. **The arrangement, as built.** It is which panes there are, the order they have in the tree, and which of them are minimized. A pass opens when panes left, panes came, a pane was minimized or restored, or the same panes took another order (a swap). Panes leaving and coming in one change is a layout replaced, and opens none. A change of size alone never opens one, whatever made it: a window or splitter resize, a zoom, a pane resized by a command.
 
-A pass does not open for: the first paint or the reveal gate, a window or splitter resize (`isResizing`), a chrome-zoom relayout, a tab that is not shown, a magnified layout, a floating pane sized by its own window, more than 24 panes, or the commit of a drop or a tear-off (the panes already show the result). A leaf that moved or resized by less than 1 px gets no entry.
+A pass does not open for: the first paint or the reveal gate, a window or splitter resize (`isResizing`), a chrome-zoom relayout, a tab that is not shown or is still being revealed (a new tab's first panes, a tab switched to: the tab reveal gate is held), a magnified layout, a floating pane sized by its own window, more than 24 panes, or the commit of a drop or a tear-off (the panes already show the result). A leaf that moved or resized by less than 1 px gets no entry.
 
 "The panes already show the result" is decided by what is on screen, not by whether a drag is live: the source's release ends the drag before the drop commits the tree, in the same task. So no pass opens while a drag is live, while a tear-off is shown (it is held through the release until the tree lets the pane go), or in the task in which a drag ended. A pane's picture being taken (a press on a pane header) opens no pass and ends an open one, so a fading frame is never in the picture. A layout pass that changes the rectangles under an open pass (a window resize in the middle of a glide) ends it.
 
@@ -108,7 +108,11 @@ As in a drag: growth is laid out at once and uncovered by the clip; a shrink kee
 Its tile leaves the DOM with the tree change. In the same batch a **ghost** is appended in a layer of the layout's root: an inert, `aria-hidden`, `pointer-events: none` box at the pane's last rectangle with its background, radius and header strip, which fades over the glide's length and removes itself. Not a clone of the pane: a clone of a terminal's canvas is blank and of a long transcript heavy. The neighbours' clips open over it.
 
 ### 6.4 A new pane (PR 2)
-It appears at its final rectangle and fades in (`enter`), while its neighbours' clips close to make room.
+It appears at its final rectangle and fades in, while its neighbours' clips close to make room. As built: the pass names the panes that came or were restored (`enters`), and each one's tile carries `tile-entering` for the pass: the shared `am-fade-in` keyframe over the glide's length (the shorter one under Reduce movement). A pane that came is never given a glide of its own, and neither is a browser pane (§6.6): it is at its rectangle from the first frame. A pane still fading in when a second pass opens goes on fading; the fade is not started again.
+
+**Minimize and restore.** The header's Minimize merges a pane's tabs into a neighbour where it has one and removes its tile: that is a pane leaving, and it glides as a close does (the ghost fades while the tab pills travel, by the merge's own motion). What follows is the pane minimized to its header strip ("Minimize to header", or a pane with no neighbour to merge into). A minimized pane takes its strip at once and its neighbours glide into the space it gave up; a restored pane takes its rectangle at once and fades in as a new pane does, while its neighbours glide aside. Neither gets a glide of its own: what a minimized tile shows (a strip with its content hidden) is not what it showed before, so there is no one picture to move.
+
+**Swap.** The two tiles glide across each other, each from its own rectangle to the other's. No pane comes or leaves, so nothing fades.
 
 ### 6.5 A change during a glide
 A second pass replaces the first: a pane already gliding has no start of its own, so each of its edges' transitions starts again from where it is drawn (the reports measured this for a change of candidate), `envelope` keeps a size large enough for both, and the first pass's ghost stays to the end of the second. A drag that starts during a pass takes over the same way.
@@ -123,11 +127,11 @@ Not in a pass, as they are not in a drag's reflow: the tile and its native view 
 | Close a pane (button, keyboard, an agent's close, close on exit, `Pane close`) | neighbours glide into the space, the ghost fades | 1 |
 | A pane moved to another window, or torn off by other means than a drag | the same | 1 |
 | Open or split | neighbours glide aside, the new pane fades in | 2 |
-| Minimize and restore | neighbours glide; the restored pane fades in | 2 |
+| Minimize and restore | neighbours glide; the minimized pane takes its strip at once, the restored pane fades in | 2 |
 | Swap | tiles glide across | 2 |
 | Drop-rearrange, tear-off by drag | already glide (live reflow) | done |
 | Pane-tab changes inside a pane, magnify | no tile rectangle changes; unchanged | n/a |
-| Window or splitter resize, zoom, tab switch, first paint | never animated | n/a |
+| Window or splitter resize, zoom, a pane resized by a command, tab switch, a new tab, first paint | never animated | n/a |
 
 ## 7. Animations Off, Reduce movement, the flag
 
@@ -150,7 +154,7 @@ Not in a pass, as they are not in a drag's reflow: the tile and its native view 
 
 **PR 1:** the settling pass in `liveReflow.ts` (with Agent2, who owns the file; the open follow-up #47354, a tree change during a drag, touches the same lines), the trigger in `updateTree` with the rules of §6.1, the ghost, close and move-away. Tests: targets from before and after rectangles (moved, grown, below the threshold, over the cap, a browser pane left out); the rules that open no pass; a second pass during a glide; under Off no ghost and the same DOM as today; a terminal is told its size once. Look checks on macOS and Linux at 100% and 150%, in a tab with and without a browser pane.
 
-**PR 2:** open and split, minimize and restore, swap, the new pane's fade.
+**PR 2 (as built):** open and split, minimize and restore, swap, the new pane's fade. The trigger became the arrangement (§6.1), read from what the model last published against the tree: the leaves, their order (`leafOrder`) and the minimized set. `settlingPass.ts` (Camper's) plans it (`changeOf`, `glides`, `movesOf`) and names the entering panes; `TileLayout.core.tsx` and `tilelayout.scss` give the entering tile its class and fade. `liveReflow.ts` (Agent2's) is used as it is: the pass's shrinking panes go through its `envelope`, its hold keeps the terminals' grids, and one line of its header comment names the wider list of changes. A frame callback that outlived its pass no longer brings it back. Tests: one glide per kind of change, the fade's panes, a pass that must not open (a resize by a command, a container size change, a tab being revealed, panes leaving and coming at once).
 
 **Files (as built, PR 1):** `frontend/layout/lib/settlingPass.ts` (the pass: its plan, its frame and its end; Camper's), `liveReflow.ts` (the second source of targets, about 30 lines; Agent2's file), `layoutGeometry.ts` (one call in `updateTree`), `layoutModel.ts` (the accessor), `tilelayout-shared.tsx`, `TileLayout.core.tsx` and `tilelayout.scss` (the ghost layer, tokens only), `settlingPass.test.ts`.
 

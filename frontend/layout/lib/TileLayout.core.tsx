@@ -599,6 +599,9 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // came apart, a gap beside every pane. A tile carries its edges at rest too, so the first glide starts
     // from them (docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md §3).
     const reflow = () => props.layoutModel.reflowFor(props.node.id);
+    // A pane that came or was restored fades in at its rect while its neighbours glide aside (settlingPass.ts;
+    // `.tile-entering` in tilelayout.scss), over the glide's own length.
+    const entering = createMemo(() => props.layoutModel.settlingPass()?.enters.includes(props.node.id) ?? false);
     const tileStyle = createMemo<JSX.CSSProperties>(() => {
         const entry = reflow();
         const reduce = shouldReduceMotion("transition");
@@ -610,6 +613,7 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
             visibility: isRevealGated() ? "hidden" : undefined,
             opacity: reduce ? undefined : isRevealGated() ? 0 : 1,
             transition: reduce ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
+            "animation-duration": entering() && reduce ? "var(--duration-fast)" : undefined,
         };
         if (!entry) return style;
         // Essential spatial motion, so it glides under reduced motion too, shorter. The plain style takes over
@@ -633,7 +637,7 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
         };
     });
 
-    return { skipsLayout, tileStyle };
+    return { skipsLayout, tileStyle, entering };
 }
 
 /**
@@ -697,7 +701,7 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
         );
     };
 
-    const { skipsLayout, tileStyle } = useTileStyle(props, nodeModel);
+    const { skipsLayout, tileStyle, entering } = useTileStyle(props, nodeModel);
 
     return (
         <div
@@ -707,6 +711,7 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
                 "tile-resize-skip": skipsLayout(),
+                "tile-entering": entering(),
             })}
             ref={tileNodeRef}
             id={props.node.id}

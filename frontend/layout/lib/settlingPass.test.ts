@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The settling pass (settlingPass.ts) on a real layout model: which panes glide after one closes, from where,
- * what stands in for the closed pane, when the pass ends, and every case in which the change must not glide.
+ * The settling pass (settlingPass.ts) on a real layout model: which panes glide after one closes, opens, is
+ * minimized or restored, or two are swapped, from where, what stands in for a closed pane and which panes fade
+ * in, when the pass ends, and every case in which the change must not glide.
  * SPEC_PANE_REFLOW_GLIDE_2026_11_01.md §6, §7.
  */
 
@@ -11,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, createSignal } from "solid-js";
 import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
 import { setAnimationSettings } from "@/app/motion/motion";
+import { holdRevealGate, scheduleRevealLift } from "@/app/store/tab-reveal";
 import { deferWhileSizesHeld, paneSizesHeld, resetPaneSizeHoldForTests } from "@/app/platform/pane-size-hold";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { REFLOW_MAX_PANES, reflowSettleMs, shownPx } from "@/layout/lib/liveReflow";
@@ -23,6 +25,10 @@ import {
     type LayoutNodeAdditionalProps,
     type LayoutTreeDeleteNodeAction,
     type LayoutTreeInsertNodeAction,
+    type LayoutTreeMinimizeNodeAction,
+    type LayoutTreeResizeNodeAction,
+    type LayoutTreeSplitHorizontalAction,
+    type LayoutTreeSwapNodeAction,
 } from "@/layout/lib/types";
 import type { SignalAtom } from "@/util/util";
 
@@ -93,6 +99,16 @@ const close = (m: LayoutModel, nodeId: string) =>
 /** The layout's own rect of `id`, as a tile shows it. */
 const own = (m: LayoutModel, id: string) => shownPx(m.additionalProps()[id].rect);
 const ghostIds = (m: LayoutModel) => (m.settlingPass()?.ghosts ?? []).map((ghost) => ghost.id);
+const open = (m: LayoutModel, id: string) =>
+    m.treeReducer({ type: LayoutTreeActionType.InsertNode, node: leaf(id), magnified: false, focused: false } as LayoutTreeInsertNodeAction);
+const minimize = (m: LayoutModel, nodeId: string) =>
+    m.treeReducer({ type: LayoutTreeActionType.Minimize, nodeId } as LayoutTreeMinimizeNodeAction);
+const restore = (m: LayoutModel, nodeId: string) =>
+    m.treeReducer({ type: LayoutTreeActionType.Restore, nodeId } as LayoutTreeMinimizeNodeAction);
+const swap = (m: LayoutModel, node1Id: string, node2Id: string) =>
+    m.treeReducer({ type: LayoutTreeActionType.Swap, node1Id, node2Id } as LayoutTreeSwapNodeAction);
+/** The glide's seed frame and its length: the pass is over after this. */
+const settle = () => vi.advanceTimersByTime(FRAME_MS + reflowSettleMs() + 1);
 
 beforeEach(() => {
     rows.clear();
@@ -345,16 +361,153 @@ describe("a change that does not glide", () => {
         snaps(m);
     });
 
-    it("when a pane opens (this build glides a close only)", () => {
+    it("while a tab is being revealed: the panes that open into it are not seen arriving", () => {
         const m = modelOf(three());
-        m.treeReducer({ type: LayoutTreeActionType.InsertNode, node: leaf("d"), magnified: false, focused: false } as LayoutTreeInsertNodeAction);
-        expect(m.leafs().some((l) => l.id === "d")).toBe(true);
+        holdRevealGate("tab-1");
+        open(m, "d");
         snaps(m);
+        scheduleRevealLift();
+        vi.advanceTimersByTime(5000);
+        open(m, "e");
+        expect(m.settlingPass()).toBeDefined();
+    });
+
+    it("when a pane is resized by a command: the arrangement is the same", () => {
+        const m = modelOf(three());
+        m.treeReducer({
+            type: LayoutTreeActionType.ResizeNode,
+            resizeOperations: [
+                { nodeId: "a", size: 4 },
+                { nodeId: "col", size: 16 },
+            ],
+        } as LayoutTreeResizeNodeAction);
+        expect(own(m, "a").width).not.toBe(600);
+        snaps(m);
+    });
+
+    it("when the layout's container changes size", () => {
+        const m = modelOf(three());
+        container = { top: 0, left: 0, width: 900, height: 600 };
+        m.updateTree();
+        expect(own(m, "a").width).toBe(450);
+        snaps(m);
+    });
+
+    it("when an open pane is alone in the pass: nothing else moved, so nothing fades", () => {
+        const m = modelOf(leaf("a"));
+        close(m, "a");
+        vi.advanceTimersByTime(1000);
+        open(m, "z");
+        expect(m.settlingPass()).toBeUndefined();
     });
 
     it("on the first layout of a tab", () => {
         const m = modelOf(three());
         expect(m.settlingPass()).toBeUndefined();
+    });
+});
+
+describe("a pane opens", () => {
+    it("moves the panes that make room from the rects they showed, and fades the new pane in", () => {
+        const m = modelOf(three());
+        const before = Object.fromEntries(["a", "b", "c"].map((id) => [id, own(m, id)]));
+        open(m, "d");
+        expect(m.leafs().some((l) => l.id === "d")).toBe(true);
+        const pass = m.settlingPass()!;
+        expect(pass.enters).toEqual(["d"]);
+        expect(pass.ghosts).toEqual([]);
+        // The new pane takes its rect at once: it is not one of the panes that glide.
+        expect(pass.moves.has("d")).toBe(false);
+        expect(m.reflowFor("d")).toBeUndefined();
+        const moved = [...pass.moves.keys()];
+        expect(moved.length).toBeGreaterThan(0);
+        for (const id of moved) {
+            expect(own(m, id)).not.toEqual(before[id]);
+            expect(m.reflowFor(id)!.rect).toEqual(before[id]);
+        }
+    });
+
+    it("keeps a pane that shrinks laid out at its larger size until the glide is over", () => {
+        const m = modelOf(row("r", 10, leaf("a"), leaf("b")));
+        m.treeReducer({
+            type: LayoutTreeActionType.SplitHorizontal,
+            targetNodeId: "b",
+            newNode: leaf("n"),
+            position: "after",
+        } as LayoutTreeSplitHorizontalAction);
+        const shrunk = [...m.settlingPass()!.moves.keys()].filter((id) => own(m, id).width < 600);
+        expect(shrunk.length).toBeGreaterThan(0);
+        vi.advanceTimersByTime(FRAME_MS);
+        // Gliding: the clip closes to the new rect over a tile still as wide as it was.
+        for (const id of shrunk) expect(m.reflowFor(id)).toMatchObject({ rect: own(m, id), box: { width: 600 } });
+        settle();
+        expect(m.settlingPass()).toBeUndefined();
+        for (const id of shrunk) expect(m.reflowFor(id)).toBeUndefined();
+    });
+
+    it("keeps the new pane fading when a second pane opens during its fade", () => {
+        const m = modelOf(three());
+        open(m, "d");
+        vi.advanceTimersByTime(FRAME_MS + 30);
+        open(m, "e");
+        expect([...m.settlingPass()!.enters].sort()).toEqual(["d", "e"]);
+        settle();
+        expect(m.settlingPass()).toBeUndefined();
+    });
+
+    it("lets a pane that opened and closes at once leave no fade behind", () => {
+        const m = modelOf(three());
+        open(m, "d");
+        close(m, "d");
+        expect(m.settlingPass()!.enters).toEqual([]);
+        expect(ghostIds(m)).toEqual(["d"]);
+    });
+});
+
+describe("a pane is minimized or restored", () => {
+    it("glides the neighbours, and the minimized pane takes its chip at once", () => {
+        const m = modelOf(three());
+        const before = own(m, "b");
+        minimize(m, "c");
+        expect(m.minimizedNodeIds().has("c")).toBe(true);
+        const pass = m.settlingPass()!;
+        expect(pass.moves.has("c")).toBe(false);
+        expect(pass.enters).toEqual([]);
+        expect(pass.ghosts).toEqual([]);
+        expect(own(m, "b").height).toBeGreaterThan(before.height);
+        expect(m.reflowFor("b")!.rect).toEqual(before);
+    });
+
+    it("fades the restored pane in at its rect while the neighbours glide back", () => {
+        const m = modelOf(three());
+        minimize(m, "c");
+        settle();
+        const grown = own(m, "b");
+        restore(m, "c");
+        expect(m.minimizedNodeIds().has("c")).toBe(false);
+        const pass = m.settlingPass()!;
+        expect(pass.enters).toEqual(["c"]);
+        expect(pass.moves.has("c")).toBe(false);
+        expect(m.reflowFor("b")!.rect).toEqual(grown);
+        settle();
+        expect(m.settlingPass()).toBeUndefined();
+    });
+});
+
+describe("two panes are swapped", () => {
+    it("glides each across to the other's place", () => {
+        const m = modelOf(three());
+        const before = { a: own(m, "a"), b: own(m, "b") };
+        swap(m, "a", "b");
+        expect(own(m, "a")).not.toEqual(before.a);
+        const pass = m.settlingPass()!;
+        expect([...pass.moves.keys()].sort()).toEqual(["a", "b"]);
+        expect(pass.enters).toEqual([]);
+        expect(pass.ghosts).toEqual([]);
+        expect(m.reflowFor("a")!.rect).toEqual(before.a);
+        expect(m.reflowFor("b")!.rect).toEqual(before.b);
+        vi.advanceTimersByTime(FRAME_MS);
+        expect(m.reflowFor("a")!.rect).toEqual(own(m, "a"));
     });
 });
 

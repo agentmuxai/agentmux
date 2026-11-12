@@ -282,6 +282,12 @@
         display: none;
     }
 
+    // A pane that came or was restored (settlingPass.ts): it fades in at its rect, over the length of its
+    // neighbours' glide (the shorter one under reduced motion, set on the tile).
+    .tile-node.tile-entering {
+        animation: am-fade-in var(--duration-base) ease-out both;
+    }
+
     &.animate {
         // `.placeholder-sizer` only changes transform during drag-move
         // (width/height are set once per zone change and snap instantly
