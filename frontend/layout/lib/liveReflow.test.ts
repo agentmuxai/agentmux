@@ -601,6 +601,9 @@ describe("the tear-off a drag shows over its own pane (tearOffPreview.ts)", () =
         commitTearOff(m, "a");
         vi.advanceTimersByTime(TEAR_OFF_COMMIT_WAIT_MS);
         expect(m.tearOffLayout()).toBeUndefined();
+        // They glide back from where the tear-off left them (settlingPass.ts), then the layout is all there is.
+        expect(m.settlingPass()).toBeDefined();
+        vi.advanceTimersByTime(reflowSettleMs());
         expect(entries(m, ["a", "b"])).toEqual({ a: undefined, b: undefined });
     });
 
@@ -612,6 +615,9 @@ describe("the tear-off a drag shows over its own pane (tearOffPreview.ts)", () =
         m.activeDrag._set(false);
         await Promise.resolve();
         expect(m.tearOffLayout()).toBeUndefined();
+        // The panes glide back from the close-up (settlingPass.ts); nothing is left of it once that is over.
+        expect(m.settlingPass()).toBeDefined();
+        vi.advanceTimersByTime(reflowSettleMs());
         expect(entries(m, ["a", "b"])).toEqual({ a: undefined, b: undefined });
         // A wait that was still running goes with the drag too.
         dragOverSelf(m, "a");
@@ -655,6 +661,23 @@ describe("the tear-off a drag shows over its own pane (tearOffPreview.ts)", () =
         m.treeReducer({ type: LayoutTreeActionType.DeleteNode, nodeId: "a" } as LayoutTreeDeleteNodeAction);
         expect(m.tearOffLayout()).toBeUndefined();
         expect(own(m, "b")).toMatchObject({ left: 0, width: 1200 });
+    });
+
+    it("keeps the tear-off when a placement sample the throttle held back arrives after the pointer left", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        leaveWindow(m, "a");
+        showPlacement(m, { targetId: "c", rect: m.additionalProps().c.rect, offset: { x: 900, y: 790 }, draggedId: "a" }, DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.tearOffLayout()).toBeDefined();
+        expect(m.reflowFor("a")).toMatchObject({ leaving: true });
+        // Back in the window, a sample is a placement again.
+        returnToWindow(m);
+        showPlacement(m, { targetId: "c", rect: m.additionalProps().c.rect, offset: { x: 900, y: 790 }, draggedId: "a" }, DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.tearOffLayout()).toBeUndefined();
+        expect(m.reflowFor("a")).toMatchObject({ moved: true, leaving: false });
     });
 
     it("takes a tear-off that is shown outside the window off when the drag is cancelled", async () => {

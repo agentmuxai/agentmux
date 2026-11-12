@@ -19,8 +19,9 @@
  * back in the window (`returnToWindow`) or the drag is cancelled.
  */
 
-import { createEffect, createSignal, on, type Accessor } from "solid-js";
+import { batch, createEffect, createSignal, on, untrack, type Accessor } from "solid-js";
 import type { LayoutModel } from "./layoutModel";
+import { settleBack } from "./settlingPass";
 
 /** How long the pointer rests over the dragged pane before the layout closes over its slot. */
 export const TEAR_OFF_REST_MS = 220;
@@ -70,7 +71,7 @@ export function createTearOffPreview(model: LayoutModel): Accessor<string | unde
                     if (state.rest !== rest || rest.committed) return;
                     // A release outside the window tears the pane off: the panes stay closed over its slot.
                     if (rest.outside) commitTearOff(model, rest.nodeId);
-                    else clearRest(state);
+                    else cancelRest(model, state);
                 });
             },
             { defer: true }
@@ -113,6 +114,20 @@ function clearRest(state: State): void {
 }
 
 /**
+ * Take the tear-off off with nothing committed. While the drag is live its reflow takes the panes back; after
+ * it (Escape, a drag that ended elsewhere) nothing would, so they glide back from where the tear-off left them
+ * (settlingPass.ts), in the batch that clears it.
+ */
+function cancelRest(model: LayoutModel, state: State): void {
+    if (!state.rest) return;
+    const shown = untrack(model.tearOffLayout)?.rects;
+    batch(() => {
+        clearRest(state);
+        if (shown) settleBack(model, shown);
+    });
+}
+
+/**
  * The pointer is no longer over the dragged pane, or the drag is over: nothing is torn off. A tear-off shown
  * for a pointer outside the window stays: leaving the pane's overlay is how the pointer gets out, and only
  * coming back (`returnToWindow`) or a cancelled drag takes it off.
@@ -120,7 +135,12 @@ function clearRest(state: State): void {
 export function leaveOwnPane(model: LayoutModel): void {
     const state = states.get(model);
     if (!state?.rest || state.rest.outside) return;
-    clearRest(state);
+    cancelRest(model, state);
+}
+
+/** Whether the tear-off is shown for a pointer outside the window. */
+export function pointerOutsideWindow(model: LayoutModel): boolean {
+    return !!states.get(model)?.rest?.outside;
 }
 
 /** The pointer of the drag of `nodeId` left the window: a release now tears the pane off, so the layout shows it. */
@@ -136,7 +156,7 @@ export function leaveWindow(model: LayoutModel, nodeId: string): void {
 /** The pointer is back in the window, or the drag was cancelled: nothing is torn off, whatever was shown. */
 export function returnToWindow(model: LayoutModel): void {
     const state = states.get(model);
-    if (state) clearRest(state);
+    if (state) cancelRest(model, state);
 }
 
 /**
