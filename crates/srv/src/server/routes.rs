@@ -794,6 +794,8 @@ fn agent_self_and_fleet_routes() -> Router<AppState> {
             "/api/v1/github/push-scan",
             post(app_api::push_scan::handle_push_scan).layer(axum::extract::DefaultBodyLimit::max(app_api::push_scan::MAX_BODY_BYTES)),
         )
+        // A container agent's `gh pr merge`, run by the host's gh-agent: the container's own token cannot write contents.
+        .route("/api/v1/github/pr-merge", post(app_api::pr_merge::handle_pr_merge))
         .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
         // An agent sets or clears seats, several at once; recorded under its name.
         .merge(agent_definition_routes())

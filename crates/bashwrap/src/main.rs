@@ -41,6 +41,9 @@
 //! - `git-credential <op>` and `github-token -- <gh args>` — GitHub tokens for an agent's `git`
 //!   and `gh`, from srv. See `github.rs`.
 //!
+//! - `github-container -- <gh args>` — a container's `gh pr merge` (srv does it) and the raw `gh api` writes its token
+//!   cannot make (refused, with the command that does the job). See `container_verbs.rs`.
+//!
 //! - `git-hook <name>`, `git-env -- <git args>` and `github-owner-tag -- <gh args>` — the guards
 //!   and attribution on an agent's pushes and commits. See `git_hooks.rs`, `secret_scan.rs`.
 //!
@@ -61,6 +64,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod askpass;
+mod container_verbs;
 mod bash_wrap;
 mod cwd_state;
 mod exec_args;
@@ -115,6 +119,13 @@ enum Command {
     /// Print a token for the repository a `gh` command is about, or say why there is none. The
     /// `gh` function this wrapper exports calls it.
     GithubToken {
+        /// The arguments `gh` was given.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        gh_args: Vec<String>,
+    },
+    /// A container's `gh pr merge` (done by srv) or a raw `gh api` write its token cannot make (refused, naming the
+    /// command that does the job); exit 3 for any other command. The `gh` function this wrapper exports calls it.
+    GithubContainer {
         /// The arguments `gh` was given.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         gh_args: Vec<String>,
@@ -186,6 +197,7 @@ fn main() -> Result<()> {
         Command::GitCredential { op } => std::process::exit(github::run_git_credential(op)),
         Command::GithubToken { gh_args } => std::process::exit(github::run_github_token(gh_args)),
         Command::GithubOwnerTag { gh_args } => std::process::exit(github::run_github_owner_tag(gh_args)),
+        Command::GithubContainer { gh_args } => std::process::exit(container_verbs::run_github_container(gh_args)),
         Command::GithubTextGuard { gh_args } => std::process::exit(github_text::run_github_text_guard(gh_args)),
         Command::GitHook { name, args } => std::process::exit(git_hooks::run_git_hook(name, args)),
         Command::AwsCredentials { profile } => std::process::exit(aws::run_aws_credentials(profile)),
@@ -207,7 +219,7 @@ fn main() -> Result<()> {
         Command::Precompact(args) => rt.block_on(precompact::run(args)),
         Command::Sessionstart(args) => rt.block_on(sessionstart::run(args)),
         // Handled above.
-        Command::GitCredential { .. } | Command::AwsCredentials { .. } | Command::GithubToken { .. } | Command::GithubOwnerTag { .. } | Command::GithubTextGuard { .. } | Command::GitHook { .. } | Command::GitEnv { .. } => Ok(()),
+        Command::GitCredential { .. } | Command::AwsCredentials { .. } | Command::GithubToken { .. } | Command::GithubOwnerTag { .. } | Command::GithubContainer { .. } | Command::GithubTextGuard { .. } | Command::GitHook { .. } | Command::GitEnv { .. } => Ok(()),
     }
 }
 

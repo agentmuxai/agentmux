@@ -67,6 +67,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// In a container, a command the `github-container` step does not handle (it answers 3) goes on to `gh` even in a
+    /// script run with `set -e`; one it handled (0) or refused (1) stops there with that answer.
+    #[test]
+    fn a_container_step_that_does_not_handle_a_command_lets_it_run_even_under_errexit() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(bash) = crate::bash_wrap::locate_bash() else { return };
+        let dir = std::env::temp_dir().join(format!("amx-gh-container-fn-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = |name: &str, body: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        };
+        script("gh", "echo \"gh args=$*\"");
+        script(
+            "agentmux-bashwrap",
+            "case \"$1\" in github-container) echo container-step; exit \"$FAKE_CONTAINER_EXIT\";; github-text-guard) shift; shift; for a in \"$@\"; do printf '%s\\0' \"$a\"; done; printf 'ok\\0';; github-token) printf 'ghs_X';; esac",
+        );
+        let posix_dir = {
+            let d = dir.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
+            match d.split_once(':') {
+                Some((drive, rest)) if drive.len() == 1 => format!("/{}{rest}", drive.to_ascii_lowercase()),
+                _ => d,
+            }
+        };
+        let run = |exit: &str| {
+            let mut cmd = std::process::Command::new(&bash);
+            cmd.args(["-c", &format!("set -e; PATH='{posix_dir}':\"$PATH\"; gh api repos/o/r/pulls; echo after")])
+                .env(agentmux_common::github_broker_shim::GH_FUNCTION_NAME, agentmux_common::github_broker_shim::GH_FUNCTION_BODY)
+                .env("AGENTMUX_GITHUB_BROKER", "1")
+                .env("AGENTMUX_IN_CONTAINER", "1")
+                .env("FAKE_CONTAINER_EXIT", exit);
+            cmd.no_window();
+            let out = cmd.output().unwrap();
+            (String::from_utf8_lossy(&out.stdout).replace('\r', ""), out.status.code())
+        };
+        let (out, code) = run("3");
+        assert!(out.contains("gh args=api repos/o/r/pulls") && out.contains("after"), "{out:?} {code:?}");
+        let (out, code) = run("0");
+        assert!(out.contains("container-step") && !out.contains("gh args="), "{out:?} {code:?}");
+        let (out, code) = run("1");
+        assert!(!out.contains("gh args=") && !out.contains("after"), "{out:?} {code:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The `git` function asks `git-env` before a push or a commit: a refusal stops git, what it
     /// prints becomes the command's environment, and every other git command is plain `git`. The
     /// `gh` function gives `gh pr create` the arguments `github-owner-tag` prints.
