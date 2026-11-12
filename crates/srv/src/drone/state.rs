@@ -12,7 +12,7 @@
 //!
 //! A variable declares how its writes combine. A name with no declaration is
 //! `replace`. The reducer decides the value, and [`merged_bits`] decides the
-//! taint bits of the result (the same rule for every reducer).
+//! taint bits of the result (the same rule for every reducer: none clears a bit).
 //!
 //! | Reducer | First write | Next write `w` onto current `c` | Type error when |
 //! |---|---|---|---|
@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::value::Tv;
+use super::value::{join, Tv};
 
 /// The state of a run is at most this many bytes of JSON (§3.2).
 pub const STATE_CAP_BYTES: usize = 256 * 1024;
@@ -61,14 +61,16 @@ pub struct StateSnapshot {
     pub reducers: BTreeMap<String, Reducer>,
 }
 
-/// The bits a write leaves on a variable: tainted if the write or the current
-/// value is (a reducer other than `replace` keeps what was there), derived if
-/// either is and the result is not tainted. For `replace` the new value's bits
-/// are the result: the old value is gone.
-pub fn merged_bits(reducer: Reducer, current: Option<&Tv>, write: &Tv) -> (bool, bool) {
-    match (reducer, current) {
-        (Reducer::Replace, _) | (_, None) => (write.tainted, write.derived),
-        (_, Some(c)) => super::value::join(&[c, write]),
+/// The bits a write leaves on a variable: **no reducer clears a bit** (spec
+/// 4.1 "a reducer cannot clear taint", 4.2 "tainted if any contributing write
+/// is tainted"). With nothing there yet they are the write's; after that they
+/// are [`join`] of the current value and the write, `replace` included: a clean
+/// write over a tainted value leaves it tainted, because a person cannot tell
+/// from the variable which text is still in it.
+pub fn merged_bits(current: Option<&Tv>, write: &Tv) -> (bool, bool) {
+    match current {
+        None => (write.tainted, write.derived),
+        Some(c) => join(&[c, write]),
     }
 }
 
@@ -134,19 +136,16 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn the_bits_a_write_leaves() {
+    fn the_bits_a_write_leaves_and_no_reducer_clears_one() {
         let (clean, tainted, derived) = (Tv::clean(json!(1)), Tv::tainted(json!("x")), Tv::derived(json!(2)));
-        // replace: the old value is gone, so only the new one counts.
-        assert_eq!(merged_bits(Reducer::Replace, Some(&tainted), &clean), (false, false));
-        assert_eq!(merged_bits(Reducer::Replace, None, &tainted), (true, false));
-        // the others keep what was there: tainted stays tainted.
-        for r in [Reducer::Append, Reducer::Merge, Reducer::Add] {
-            assert_eq!(merged_bits(r, Some(&tainted), &clean), (true, false), "{r:?}");
-            assert_eq!(merged_bits(r, Some(&clean), &tainted), (true, false), "{r:?}");
-            assert_eq!(merged_bits(r, Some(&clean), &derived), (false, true), "{r:?}");
-            assert_eq!(merged_bits(r, Some(&clean), &clean), (false, false), "{r:?}");
-            assert_eq!(merged_bits(r, None, &clean), (false, false), "{r:?}");
-        }
+        assert_eq!(merged_bits(None, &tainted), (true, false));
+        assert_eq!(merged_bits(None, &clean), (false, false));
+        assert_eq!(merged_bits(Some(&tainted), &clean), (true, false), "a clean write over a tainted value");
+        assert_eq!(merged_bits(Some(&clean), &tainted), (true, false));
+        assert_eq!(merged_bits(Some(&clean), &derived), (false, true));
+        assert_eq!(merged_bits(Some(&derived), &clean), (false, true), "a derived value stays derived");
+        assert_eq!(merged_bits(Some(&tainted), &derived), (true, false), "tainted is the stronger claim");
+        assert_eq!(merged_bits(Some(&clean), &clean), (false, false));
     }
 
     #[test]

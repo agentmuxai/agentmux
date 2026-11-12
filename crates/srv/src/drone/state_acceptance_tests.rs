@@ -97,11 +97,11 @@ fn a_variable_tainted_in_one_iteration_is_tainted_in_the_next() {
     s.write("items", Tv::clean(json!("from the design"))).unwrap();
     let v = s.get("items").unwrap();
     assert_eq!((v.tainted, v.derived), (true, false));
-    // replace forgets: a clean write over a tainted value is clean (the old text is gone).
+    // replace clears nothing either: a clean write over a tainted value stays tainted (spec 4.1).
     let mut r = RunState::new();
     r.write("x", Tv::tainted(json!("a"))).unwrap();
     r.write("x", Tv::clean(json!("b"))).unwrap();
-    assert_eq!(r.get("x"), Some(&Tv::clean(json!("b"))));
+    assert_eq!(r.get("x"), Some(&Tv::tainted(json!("b"))));
 }
 
 #[test]
