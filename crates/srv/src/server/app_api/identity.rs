@@ -530,6 +530,35 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
         let outcome = crate::identity::key_validator::validate(&acct.provider, &token).await;
         return Ok(proven(account_id, IdentityAccountValidateResult::of(outcome, tail)));
     }
+    // A CLI sign-in keeps its tokens in its own credentials file, with no stored key to check at the
+    // provider: say what the file reads instead of failing on the missing key (#47468).
+    if let crate::backend::storage::identities::SecretRef::OAuthConfigDir { dir } = &acct.secret_ref {
+        let provider = crate::backend::providers::resolve_provider_alias(&acct.provider);
+        let Some(probe) = crate::identity::resolver::probe_oauth_status(provider, dir, agentmux_common::time::now_ms()) else {
+            return Ok(IdentityAccountValidateResult {
+                valid: false,
+                status: acct.status.clone(),
+                masked_tail: String::new(),
+                error: Some("validate does not apply: this is a CLI sign-in with no stored key, and its credentials cannot be read here".to_string()),
+            });
+        };
+        use crate::identity::resolver::OAuthProbeStatus;
+        // Only an unexpired token proves the login: an expired access token is the very thing a pane
+        // was refused on, and a pass here clears its agents' signed-out state.
+        let valid = probe == OAuthProbeStatus::Valid;
+        let error = match probe {
+            OAuthProbeStatus::Valid => None,
+            OAuthProbeStatus::Expired => Some("this is a CLI sign-in with no stored key: its access token has expired and renews the next time the CLI uses it".to_string()),
+            OAuthProbeStatus::NeedsReauth => Some("this is a CLI sign-in with no stored key: its credentials file holds no token, so it needs a sign-in".to_string()),
+        };
+        let result = IdentityAccountValidateResult { valid, status: probe.as_str().to_string(), masked_tail: String::new(), error };
+        // Only Claude's probe reads the token's expiry; the others call a refresh token or key valid
+        // whatever its age, which does not prove a pane's refused login works.
+        if provider != "claude" {
+            return Ok(result);
+        }
+        return Ok(proven(account_id, result));
+    }
     let aid = account_id.to_string();
     let plaintext = tokio::task::spawn_blocking(move || crate::identity::secret_store::get(&aid))
         .await.map_err(|e| format!("identity.account.validate: keychain task: {e}"))?
