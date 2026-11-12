@@ -135,6 +135,46 @@ async fn the_first_402_marks_every_agent_on_the_route_and_the_first_success_clea
     cleared(&state.mstore, &state.event_bus, "openrouter");
 }
 
+/// A model switch recorded during a turn names the destination as the agent's choice while its harness still runs
+/// the route it left: a late 402 belongs to the route left, not to the healthy destination (Codex P2 on #7051).
+#[tokio::test]
+async fn a_402_after_a_switch_during_a_turn_is_the_route_left_not_the_destination() {
+    let state = crate::server::tests::test_state();
+    let tab = tab(&state).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let (a, b, c) = (format!("a-{id}"), format!("b-{id}"), format!("c-{id}"));
+    for (def, name) in [(&a, "Alpha"), (&b, "Bravo"), (&c, "Charlie")] {
+        agent(&state, def, name);
+    }
+    // Routes of its own, since the episodes are process-wide and another test opens openrouter's.
+    let left = launch::Choice { route: "left-route".into(), model: String::new() };
+    // set_choice only takes catalog routes, so the choices are written as stored.
+    let destination = launch::Choice { route: "destination-route".into(), model: String::new() };
+    let put = |def: &str, content_type: &str, choice: &launch::Choice| {
+        state
+            .mstore
+            .agent_content_set(&crate::backend::storage::store::AgentContent {
+                agent_id: def.to_string(),
+                content_type: content_type.to_string(),
+                content: serde_json::to_string(choice).unwrap(),
+                updated_at: 1,
+            })
+            .unwrap();
+    };
+    put(&a, launch::CONTENT_TYPE, &destination);
+    put(&a, launch::LEAVING_TYPE, &left);
+    put(&b, launch::CONTENT_TYPE, &left);
+    put(&c, launch::CONTENT_TYPE, &destination);
+    let (pa, pb, pc) = (pane(&state, &tab, &a).await, pane(&state, &tab, &b).await, pane(&state, &tab, &c).await);
+    let failure = classify(Some(1), None, NO_CREDITS, None);
+
+    let opened = on_failure(&state.mstore, &state.event_bus, &pa, &failure, agentmux_common::time::now_ms_u64()).expect("opens the route's episode");
+    assert_eq!(opened.route.as_deref(), Some("left-route"), "the route it was running");
+    assert!(shows_credits(&state.mstore, &pb), "the agent still on the failing route is marked");
+    assert!(!shows_credits(&state.mstore, &pc), "the healthy destination is not");
+    cleared(&state.mstore, &state.event_bus, "left-route");
+}
+
 #[tokio::test]
 async fn an_agent_on_no_route_has_an_episode_of_its_own_and_one_that_ran_long_enough_is_let_go() {
     let state = crate::server::tests::test_state();
