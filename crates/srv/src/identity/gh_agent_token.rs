@@ -386,6 +386,45 @@ pub async fn scan_push(slug: &str, repo: &str, material: &[u8]) -> ScanOutcome {
     }
 }
 
+/// A stand-in `gh-agent` on PATH for tests: it appends its arguments to a log, prints one line and exits with a code.
+#[cfg(test)]
+pub(crate) mod fake {
+    use std::path::{Path, PathBuf};
+
+    /// Tests that change PATH take this first.
+    pub(crate) static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Puts a `gh-agent` in `dir` that logs its arguments, prints `stdout` and exits `code`, and puts `dir` first on PATH.
+    /// Returns the PATH to put back.
+    pub(crate) fn install(dir: &Path, stdout: &str, code: i32) -> std::ffi::OsString {
+        let log = dir.join("calls.log");
+        #[cfg(windows)]
+        {
+            let script = format!("@echo off\r\necho %*>>\"{}\"\r\necho {}\r\nexit /b {}\r\n", log.display(), stdout, code);
+            std::fs::write(dir.join("gh-agent.cmd"), script).unwrap();
+        }
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let script = format!("#!/bin/sh\necho \"$@\" >> '{}'\nprintf '%s\\n' '{}'\nexit {}\n", log.display(), stdout, code);
+            let path = dir.join("gh-agent");
+            std::fs::write(&path, script).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let old = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![dir.to_path_buf()];
+        paths.extend(std::env::split_paths(&old));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        old
+    }
+
+    /// The argument lines the stand-in was called with, in order.
+    pub(crate) fn calls(dir: &Path) -> Vec<String> {
+        let log: PathBuf = dir.join("calls.log");
+        std::fs::read_to_string(log).unwrap_or_default().lines().map(|l| l.trim().to_string()).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,6 +522,22 @@ mod tests {
         assert_eq!(said, "! Pull request #42 will be added to the merge queue");
         assert!(bounded_lines(&vec![b'x'; 5000]).chars().count() <= 2000);
         assert_eq!(bounded_lines(b""), "");
+    }
+
+    #[tokio::test]
+    async fn a_token_call_names_its_scope_and_an_older_gh_agent_is_refused() {
+        let _guard = fake::PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let old = fake::install(dir.path(), r#"{"token":"ghs_NARROW","expires_at":1793224607,"acting_as":"muxagent[bot]","scope":"api","repositories":["hello"]}"#, 0);
+        let got = token_for("aria", "octo", "hello", Scope::Api, false).await;
+        assert_eq!(got.as_ref().map(|t| t.token.as_str()).ok(), Some("ghs_NARROW"), "{:?}", got.as_ref().err());
+        assert_eq!(fake::calls(dir.path()), ["token --repo octo/hello --scope api --json"]);
+        // An older gh-agent takes --scope for an unknown flag and prints the installation-wide token.
+        let dir2 = tempfile::tempdir().unwrap();
+        fake::install(dir2.path(), r#"{"token":"ghs_WIDE","expires_at":1793224607,"acting_as":"muxagent[bot]","tier":"shared"}"#, 0);
+        let refused = token_for("aria", "octo", "hello", Scope::Push, false).await;
+        std::env::set_var("PATH", old);
+        assert_eq!(refused.err().as_deref(), Some(GH_AGENT_TOO_OLD));
     }
 
     #[test]

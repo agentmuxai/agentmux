@@ -116,6 +116,12 @@ pub(crate) async fn handle_github_token(
             }
             // A gh-agent that cannot give a narrowed token is not a reason to give a container another one.
             Err(e) if crate::identity::gh_agent_token::is_too_old(&e) => return refuse(StatusCode::FORBIDDEN, e),
+            // Nor is a gh-agent that was only slow: a container that loads the machine must not be able to turn a slow answer
+            // into the connection's token (below), which is per repository but can write contents.
+            Err(e) if crate::identity::gh_agent_token::is_took_too_long(&e) => return refuse(StatusCode::SERVICE_UNAVAILABLE, e),
+            // Any other failure of gh-agent (a repository its App does not cover, no identity for the agent) falls through to
+            // the person's own GitHub connection, as it always did. That token is not narrowed by this change; it is the
+            // Cloud-connected path, which a machine without gh-agent uses throughout.
             Err(e) => host_error = Some(e),
         }
     }

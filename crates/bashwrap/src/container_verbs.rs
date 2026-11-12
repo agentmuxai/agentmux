@@ -139,6 +139,7 @@ fn refused_api(args: &[String]) -> Option<String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "-X" | "--method" => method = it.next().map(|v| v.to_ascii_uppercase()),
+            a if a.starts_with("-X") && a.len() > 2 => method = Some(a[2..].to_ascii_uppercase()),
             "-H" | "--header" | "-q" | "--jq" | "-t" | "--template" | "--hostname" | "--cache" | "-p" | "--preview" => {
                 it.next();
             }
@@ -196,8 +197,19 @@ fn refused_api(args: &[String]) -> Option<String> {
     None
 }
 
+/// Whether this container's machine narrows its GitHub tokens: it has a gh-agent (`AGENTMUX_PUBLISH_GUARD` is `1`, or
+/// `older-gh-agent` where it is installed but too old to narrow, which srv then says out loud). With `0`, no value or any
+/// other value there is no gh-agent on the machine, the container's token comes from the person's own GitHub connection,
+/// and its `gh` commands run as they always did.
+pub fn narrowing_machine(marker: Option<&str>) -> bool {
+    matches!(marker, Some("1" | "older-gh-agent"))
+}
+
 /// `github-container -- <gh args>`.
 pub fn run_github_container(gh_args: &[String]) -> i32 {
+    if !narrowing_machine(std::env::var("AGENTMUX_PUBLISH_GUARD").ok().as_deref()) {
+        return NOT_HANDLED;
+    }
     if let Some(why) = refused_command(gh_args) {
         eprintln!("agentmux: not run: {why}");
         return 1;
@@ -313,6 +325,39 @@ mod tests {
         assert!(said(&["api", "-X", "POST", "repos/o/r/releases", "-f", "tag_name=v1"]).unwrap().contains("release workflow"));
         assert!(said(&["release", "create", "v1"]).unwrap().contains("release workflow"));
         assert!(said(&["release", "upload", "v1", "a.zip"]).is_some());
+    }
+
+    #[test]
+    fn only_a_machine_with_gh_agent_gets_these_steps() {
+        assert!(narrowing_machine(Some("1")));
+        assert!(narrowing_machine(Some("older-gh-agent")));
+        for off in [None, Some("0"), Some(""), Some("true"), Some("yes")] {
+            assert!(!narrowing_machine(off), "{off:?}");
+        }
+    }
+
+    #[test]
+    fn without_the_marker_every_command_runs_as_before() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        for value in [None, Some("0")] {
+            match value {
+                Some(v) => std::env::set_var("AGENTMUX_PUBLISH_GUARD", v),
+                None => std::env::remove_var("AGENTMUX_PUBLISH_GUARD"),
+            }
+            for cmd in [&["pr", "merge", "7", "--admin"][..], &["release", "create", "v1"], &["api", "-X", "DELETE", "repos/o/r/git/refs/heads/x"]] {
+                assert_eq!(run_github_container(&args(cmd)), NOT_HANDLED, "{value:?} {cmd:?}");
+            }
+        }
+        std::env::set_var("AGENTMUX_PUBLISH_GUARD", "1");
+        assert_eq!(run_github_container(&args(&["release", "create", "v1"])), 1, "on a machine with gh-agent it is refused");
+        assert_eq!(run_github_container(&args(&["issue", "list"])), NOT_HANDLED);
+        std::env::remove_var("AGENTMUX_PUBLISH_GUARD");
+    }
+
+    #[test]
+    fn a_method_written_attached_to_the_flag_is_read() {
+        let a = args(&["api", "-XDELETE", "repos/o/r/git/refs/heads/x"]);
+        assert!(refused_command(&a).is_some());
     }
 
     #[test]

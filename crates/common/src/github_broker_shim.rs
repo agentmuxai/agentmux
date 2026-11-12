@@ -28,7 +28,7 @@ pub const GH_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}
       return 0;
     fi;
     if [ "${AGENTMUX_IN_CONTAINER:-}" = 1 ] && { [ "$1" = api ] || [ "$1" = release ] || { [ "$1" = pr ] && [ "$2" = merge ]; }; }; then
-      agentmux-bashwrap github-container -- "$@"; _amx_r=$?;
+      if agentmux-bashwrap github-container -- "$@"; then return 0; else _amx_r=$?; fi;
       [ "$_amx_r" -eq 3 ] || return "$_amx_r";
     fi;
     if [ "$1" = pr ] || [ "$1" = issue ] || [ "$1" = release ] || [ "$1" = api ]; then

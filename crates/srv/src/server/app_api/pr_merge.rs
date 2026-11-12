@@ -86,6 +86,61 @@ mod tests {
         assert_eq!((m.method, m.auto, m.delete_branch), (None, false, false));
     }
 
+    use crate::identity::gh_agent_token::fake;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    async fn merge_through_the_route(stdout: &str, code: i32, body: &str) -> (StatusCode, serde_json::Value, Vec<String>) {
+        let _guard = fake::PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let old = fake::install(dir.path(), stdout, code);
+        let state = crate::server::tests::test_state();
+        let token = crate::server::tests::token_for(&state, "aria");
+        let app = crate::server::build_router(state);
+        let req = Request::builder()
+            .uri("/api/v1/github/pr-merge")
+            .method("POST")
+            .header("X-AuthKey", "test-secret-key")
+            .header("X-Agent-Token", token)
+            .header("Content-Type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        std::env::set_var("PATH", old);
+        (status, serde_json::from_slice(&bytes).unwrap_or_default(), fake::calls(dir.path()))
+    }
+
+    #[tokio::test]
+    async fn the_host_runs_the_merge_with_arguments_srv_built() {
+        let (status, answer, calls) =
+            merge_through_the_route("! Pull request #7 will be added to the merge queue", 0, r#"{"owner":"octo","repo":"hello","number":7,"method":"squash","delete_branch":true}"#).await;
+        assert_eq!(status, StatusCode::OK, "{answer}");
+        assert_eq!(answer["ok"], true);
+        assert!(answer["message"].as_str().unwrap().contains("merge queue"), "{answer}");
+        assert_eq!(calls, ["pr merge 7 --repo octo/hello --squash --delete-branch"]);
+    }
+
+    #[tokio::test]
+    async fn what_github_refused_is_said_and_nothing_else_is_run() {
+        let (status, answer, calls) = merge_through_the_route("Pull request is not mergeable: required reviews are missing", 1, r#"{"owner":"octo","repo":"hello","number":7}"#).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(answer["error"].as_str().unwrap().contains("not mergeable"), "{answer}");
+        assert_eq!(calls, ["pr merge 7 --repo octo/hello"]);
+    }
+
+    #[tokio::test]
+    async fn a_request_with_an_option_srv_does_not_have_never_reaches_the_host() {
+        let (status, _, calls) = merge_through_the_route("ok", 0, r#"{"owner":"octo","repo":"hello","number":7,"admin":true}"#).await;
+        assert!(status.is_client_error(), "{status}");
+        assert!(calls.is_empty(), "{calls:?}");
+        let (status, _, calls) = merge_through_the_route("ok", 0, r#"{"owner":"--admin","repo":"hello","number":7}"#).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(calls.is_empty(), "{calls:?}");
+    }
+
     #[test]
     fn an_option_that_is_not_one_of_the_few_is_refused_not_ignored() {
         for body in [
