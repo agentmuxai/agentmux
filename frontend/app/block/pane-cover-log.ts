@@ -193,6 +193,11 @@ export function shownLine(blockId: string, thing: string, state: "shown" | "stil
     return `${head(blockId, agent)} ${thing} ${state}${time}`;
 }
 
+/** The line for a show-cover that lifted before the layout was seen to hold still (`cap`, `ceiling`): after how many frames and ms. */
+export function liftedEarlyLine(blockId: string, why: string, frames: number, ms: number, agent?: string): string {
+    return `${head(blockId, agent)} show-cover lifted-early by=${why} frames=${frames} after=${Math.round(ms)}ms`;
+}
+
 /**
  * Logs how long something in front of a pane stays up: `shown` now, `still-shown` once a second (at most
  * `STILL_COVERED_MAX` lines), `cleared` when this scope is cleaned up. Call during setup of the covering component,

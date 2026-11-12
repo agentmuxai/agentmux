@@ -290,6 +290,25 @@ pub(crate) fn held_until_active(result: &Value) -> Option<&'static str> {
     }
 }
 
+/// How long a send waits for srv's answer. srv's own tiers for an agent it does not run (a LAN peer, the cloud
+/// relay, then the hold) can add up to more than the client's default 10 s, and srv finishes the delivery anyway.
+pub(crate) const INJECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// What a send tells the sender when srv's answer did not arrive, in place of the transport's own words
+/// ("error sending request for url ..."), which say nothing about whether the message was kept.
+pub(crate) fn inject_transport_error(e: &reqwest::Error) -> String {
+    if e.is_connect() {
+        format!("srv could not be reached, so nothing was sent ({e})")
+    } else if e.is_timeout() {
+        format!(
+            "srv gave no answer within {} s. It carries on with the message (delivers it or holds it for the agent), so look at Agents conversations before sending it again",
+            INJECT_TIMEOUT.as_secs()
+        )
+    } else {
+        format!("the answer from srv was lost ({e}). The message may have been delivered or held: look at Agents conversations before sending it again")
+    }
+}
+
 /// What `SendMessage` tells the sender, from srv's `/agentmux/reactive/inject`
 /// body. Each answer keeps its first word (`Delivered`, `QUEUED`, `HELD`) so
 /// existing prompts keep working, and adds the message id and the receiver's
