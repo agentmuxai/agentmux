@@ -22,7 +22,7 @@ import { openAgentInActiveTab, sharedAgentRuntime } from "@/app/store/agent-runt
 import { pushNotification } from "@/app/store/flash-notifications";
 import * as services from "@/store/services";
 import * as MOS from "@/store/mos";
-import { quitNoticeMessage, type QuitSummary } from "../commands/global/quit";
+import { quitNoticeDetails, quitNoticeMessage, type QuitSummary } from "../commands/global/quit";
 import { needsConfirm, shutdownConfirmText, type ShutdownPreview } from "./shut-down-agent";
 import {
     KEEPS_RUNNING_NOTE,
@@ -67,13 +67,19 @@ function rowOf(agentId: string) {
     return sharedAgentRuntime().rows().find((r) => r.agent_id === agentId);
 }
 
-/** What the click finds: who can be shut down, and who cannot and why. */
-function sortOut(agents: ParkedAgent[]): { targets: Target[]; left: string[] } {
+/** The block's meta, loaded when this window does not have it (a closed pane's block is evicted from the cache in time). */
+async function metaOf(blockId: string): Promise<Record<string, unknown> | undefined> {
+    const oref = MOS.makeORef("block", blockId);
+    return (MOS.getObjectValue<MuxObj>(oref) ?? (await MOS.reloadMuxObject<MuxObj>(oref)))?.meta;
+}
+
+/** What a click finds, as the window has it now: who can be shut down, and who cannot and why. */
+async function sortOut(agents: ParkedAgent[]): Promise<{ targets: Target[]; left: string[] }> {
     const targets: Target[] = [];
     const left: string[] = [];
     for (const a of agents) {
         const row = rowOf(a.agentId);
-        const meta = row?.block_id ? MOS.getObjectValue<MuxObj>(MOS.makeORef("block", row.block_id))?.meta : undefined;
+        const meta = row?.block_id ? await metaOf(row.block_id).catch(() => undefined) : undefined;
         if (!row?.block_id || row.state === "stopped") left.push(`${a.name} is already stopped.`);
         else if (!isParkedMeta(meta)) left.push(`${a.name} was opened again; shut it down from its pane.`);
         else targets.push({ ...a, blockId: row.block_id });
@@ -100,6 +106,12 @@ function working(all: ParkedAgent[], targets: Target[], finished: number): void 
     });
 }
 
+/** One agent's leftovers from a quit, each sentence led by its name: `Ann: Stopped 1 shell.` */
+function namedDetails(name: string, summary: QuitSummary): string[] {
+    const details = quitNoticeDetails(summary);
+    return details.length ? [`${name}: ${details.join(" ")}`] : [];
+}
+
 /** Shut down every target at once, counting them in the toast as each finishes, then say how it went. */
 async function shutDown(all: ParkedAgent[], targets: Target[], left: string[]): Promise<void> {
     const names = targets.map((t) => t.name);
@@ -122,7 +134,11 @@ async function shutDown(all: ParkedAgent[], targets: Target[], left: string[]): 
     const ok = outcomes.filter((o) => "summary" in o);
     if (failed.length === 0) {
         const crons = ok.some((o) => (o.summary?.crons_targeting?.length ?? 0) > 0);
-        const detail = ok.length === 1 && ok[0].summary ? quitNoticeMessage(ok[0].summary) : "Conversations kept — reopen an agent to resume it.";
+        // What each quit left behind (processes, containers, crons) is said for the agent it belongs to.
+        const detail =
+            ok.length === 1 && ok[0].summary
+                ? quitNoticeMessage(ok[0].summary)
+                : ["Conversations kept — reopen an agent to resume them.", ...ok.flatMap((o) => (o.summary ? namedDetails(o.target.name, o.summary) : []))].join(" ");
         show(all, {
             icon: "fa-power-off",
             title: shutDownTitle(names),
@@ -140,7 +156,7 @@ async function shutDown(all: ParkedAgent[], targets: Target[], left: string[]): 
         title: notShutDownTitle(retry.map((t) => t.name), targets.length),
         message: [...failed.map((o) => sentence(why(o))), ...(ok.length ? [`${ok.map((o) => o.target.name).join(", ")} ${ok.length === 1 ? "was" : "were"} shut down.`] : []), ...left].join(" "),
         type: "error",
-        actions: [button(all, "retry", "Retry", () => void ask(all, retry, left))],
+        actions: [button(all, "retry", "Retry", () => void recheck(all, retry, left, ask))],
         debug: { blockId: first.target.blockId, agentName: first.target.name, code: "agent-shutdown", detail: { stopBackground: false, ...errorDetail(first.error) } },
     });
 }
@@ -158,24 +174,33 @@ async function ask(all: ParkedAgent[], targets: Target[], left: string[]): Promi
         title: targets.length === 1 ? shutdownConfirmText(targets[0].name, previews[0]).title : `Shut down ${targets.map((t) => t.name).join(", ")}?`,
         message: lines.join(" "),
         type: "warning",
-        actions: [button(all, "confirm", "Shutdown", () => void shutDown(all, targets, left)), button(all, "keep", "Keep running", () => {})],
+        actions: [button(all, "confirm", "Shutdown", () => void recheck(all, targets, left, shutDown)), button(all, "keep", "Keep running", () => {})],
     });
 }
 
-/** The Shutdown click: see who is still parked, then ask or shut down. */
-function onShutdown(all: ParkedAgent[]): void {
-    const { targets, left } = sortOut(all);
-    if (targets.length === 0) {
-        show(all, {
-            icon: "fa-power-off",
-            title: left.length === 1 ? left[0] : "Nothing to shut down",
-            message: left.length === 1 ? "" : left.join(" "),
-            type: "info",
-            expiration: Date.now() + RESULT_MS,
-        });
-        return;
-    }
-    void ask(all, targets, left);
+/** Nothing is left to shut down: say so, with why. */
+function nothingToDo(all: ParkedAgent[], left: string[]): void {
+    show(all, {
+        icon: "fa-power-off",
+        title: left.length === 1 ? left[0] : "Nothing to shut down",
+        message: left.length === 1 ? "" : left.join(" "),
+        type: "info",
+        expiration: Date.now() + RESULT_MS,
+    });
+}
+
+/**
+ * Look again at who is still parked, and go on with those. Every click that would end an agent starts here, not only
+ * the first: the agent may have been opened again (My Agents, another window) since the toast showed its question
+ * or its failure, and a visible agent must not be ended by a button meant for a parked one.
+ */
+async function recheck(all: ParkedAgent[], agents: ParkedAgent[], left: string[], go: (all: ParkedAgent[], targets: Target[], left: string[]) => Promise<void>): Promise<void> {
+    // The click removed the toast: say at once that it is working.
+    show(all, { icon: "fa-power-off", title: shuttingDownTitle(agents.map((a) => a.name)), message: "", type: "info" });
+    const now = await sortOut(agents);
+    const rest = [...left, ...now.left];
+    if (now.targets.length === 0) return nothingToDo(all, rest);
+    return go(all, now.targets, rest);
 }
 
 /** The note after a close that parked these agents. The Open brings back the first one; Shutdown ends all of them. */
@@ -192,6 +217,6 @@ export function noteKeepsRunning(agents: ParkedAgent[]): void {
         timestamp: new Date().toISOString(),
         type: "info",
         expiration: Date.now() + 8000,
-        actions: [{ label: "Open", actionKey }, button(agents, "shutdown", "Shutdown", () => onShutdown(agents))],
+        actions: [{ label: "Open", actionKey }, button(agents, "shutdown", "Shutdown", () => void recheck(agents, agents, [], ask))],
     });
 }

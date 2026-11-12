@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
     actions: new Map<string, () => void>(),
     rows: [] as any[],
     blockMeta: {} as Record<string, Record<string, unknown>>,
+    /** Block ids the window's cache has dropped: read as nothing until reloaded. */
+    evicted: new Set<string>(),
 }));
 
 vi.mock("@/store/services", () => ({ ObjectService: { ShutdownAgent: h.shutdownAgent, ShutdownPreview: h.shutdownPreview } }));
@@ -34,9 +36,13 @@ vi.mock("@/app/store/agent-runtime-live", () => ({
 vi.mock("@/app/store/agent-parked", () => ({ isParkedMeta: (m: Record<string, unknown> | undefined) => m?.["agent:parked"] === true }));
 vi.mock("@/store/mos", () => ({
     makeORef: (type: string, id: string) => `${type}:${id}`,
-    getObjectValue: (oref: string) => ({ meta: h.blockMeta[oref.split(":")[1]] }),
+    getObjectValue: (oref: string) => (h.evicted.has(oref.split(":")[1]) ? undefined : { meta: h.blockMeta[oref.split(":")[1]] }),
+    reloadMuxObject: async (oref: string) => ({ meta: h.blockMeta[oref.split(":")[1]] }),
 }));
-vi.mock("../commands/global/quit", () => ({ quitNoticeMessage: (s: { agent: string }) => `Conversation of ${s.agent} kept.` }));
+vi.mock("../commands/global/quit", () => ({
+    quitNoticeMessage: (s: { agent: string }) => `Conversation of ${s.agent} kept.`,
+    quitNoticeDetails: (s: { survivors?: string[] }) => (s.survivors?.length ? [`${s.survivors.join(", ")} still running.`] : []),
+}));
 
 import { noteKeepsRunning } from "./keeps-running-toast";
 
@@ -73,6 +79,7 @@ beforeEach(() => {
     h.actions.clear();
     h.rows.length = 0;
     for (const k of Object.keys(h.blockMeta)) delete h.blockMeta[k];
+    h.evicted.clear();
     h.shutdownAgent.mockReset();
     h.shutdownPreview.mockReset().mockResolvedValue(idle);
     h.openPaneModal.mockReset();
@@ -98,11 +105,11 @@ describe("the keeps-running toast", () => {
         await click("keeps-running:q", "Shutdown");
 
         expect(h.shutdownAgent).toHaveBeenCalledWith("b-q", false);
-        expect(titles()).toEqual(["Quen keeps running without a pane", "Shutting down Quen…", "Shutting down Quen…", "Quen was shut down"]);
+        expect(titles()).toEqual(["Quen keeps running without a pane", "Shutting down Quen…", "Shutting down Quen…", "Shutting down Quen…", "Quen was shut down"]);
         const working = h.pushed[1];
         expect(working.actions).toBeUndefined();
         expect(working.expiration, "no expiry while it works").toBeUndefined();
-        const done = h.pushed[3];
+        const done = h.pushed[4];
         expect(done.message).toBe("Conversation of Quen kept.");
         expect(done.actions).toBeUndefined();
         expect(done.expiration).toBeGreaterThan(Date.now() + 5000);
@@ -216,5 +223,51 @@ describe("the keeps-running toast", () => {
         const done = h.shown.get("keeps-running:a,b");
         expect(done.title).toBe("Ann was shut down");
         expect(done.message).toContain("Bob is already stopped.");
+    });
+
+    it("loads the block of a parked agent whose pane the window has dropped, and still shuts it down", async () => {
+        parkedRow("q", "Quen");
+        h.evicted.add("b-q");
+        h.shutdownAgent.mockResolvedValue(quit("Quen"));
+        noteKeepsRunning([agent("q", "Quen")]);
+        await click("keeps-running:q", "Shutdown");
+        expect(h.shutdownAgent).toHaveBeenCalledWith("b-q", false);
+        expect(h.shown.get("keeps-running:q").title).toBe("Quen was shut down");
+    });
+
+    it("does not end an agent opened again while the question was on screen", async () => {
+        parkedRow("q", "Quen");
+        h.shutdownPreview.mockResolvedValue({ ...idle, working: true });
+        noteKeepsRunning([agent("q", "Quen")]);
+        await click("keeps-running:q", "Shutdown");
+        expect(labels(h.shown.get("keeps-running:q"))).toEqual(["Shutdown", "Keep running"]);
+        h.blockMeta["b-q"] = {};
+        await click("keeps-running:q", "Shutdown");
+        expect(h.shutdownAgent).not.toHaveBeenCalled();
+        expect(h.shown.get("keeps-running:q").title).toBe("Quen was opened again; shut it down from its pane.");
+    });
+
+    it("does not retry an agent opened again after the failed attempt", async () => {
+        parkedRow("q", "Quen");
+        h.shutdownAgent.mockRejectedValue(new Error("busy"));
+        noteKeepsRunning([agent("q", "Quen")]);
+        await click("keeps-running:q", "Shutdown");
+        h.shutdownAgent.mockClear();
+        h.blockMeta["b-q"] = {};
+        await click("keeps-running:q", "Retry");
+        expect(h.shutdownAgent).not.toHaveBeenCalled();
+        expect(h.shown.get("keeps-running:q").title).toBe("Quen was opened again; shut it down from its pane.");
+    });
+
+    it("says, for each agent of a batch, what its shutdown left running", async () => {
+        parkedRow("a", "Ann");
+        parkedRow("b", "Bob");
+        h.shutdownAgent.mockImplementation(async (blockId: string) => (blockId === "b-a" ? quit("Ann", { survivors: ["node (pid 7)"] }) : quit("Bob")));
+        noteKeepsRunning([agent("a", "Ann"), agent("b", "Bob")]);
+        await click("keeps-running:a,b", "Shutdown");
+        const done = h.shown.get("keeps-running:a,b");
+        expect(done.title).toBe("2 agents were shut down");
+        expect(done.message).toContain("Ann: node (pid 7) still running.");
+        expect(done.message).not.toContain("Bob:");
     });
 });
