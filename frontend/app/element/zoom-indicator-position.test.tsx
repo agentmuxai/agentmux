@@ -48,6 +48,17 @@ describe("paneBodyBox", () => {
         expect(paneBodyBox("b1")).toEqual({ x: 100, y: 80, width: 600, height: 370 });
     });
 
+    it("ignores a bigger copy of the id parked outside the window (a small pane in a small window)", () => {
+        document.body.innerHTML = `
+            <div id="parked" data-blockid="b3"></div>
+            <div id="frame" data-blockid="b3"><div class="block-content" id="content"></div></div>`;
+        const byId = (id: string) => document.getElementById(id) as HTMLElement;
+        byId("parked").getBoundingClientRect = rect(0, 10033, 127, 274);
+        byId("frame").getBoundingClientRect = rect(0, 40, 122, 270);
+        byId("content").getBoundingClientRect = rect(0, 74, 122, 236);
+        expect(paneBodyBox("b3", document, { width: 380, height: 330 })).toEqual({ x: 0, y: 74, width: 122, height: 236 });
+    });
+
     it("is null for a pane with no box here", () => {
         document.body.innerHTML = `<div id="frame" data-blockid="b2"></div>`;
         (document.getElementById("frame") as HTMLElement).getBoundingClientRect = rect(0, 0, 0, 0);

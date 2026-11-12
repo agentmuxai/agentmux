@@ -49,19 +49,31 @@ export function zoomIndicatorCenter(pane: Box | null, size: Size, viewport: Size
     return x == null || y == null ? null : { x, y };
 }
 
+/** The area of `r` that is inside the window. */
+function visibleArea(r: DOMRect, viewport: Size): number {
+    const w = Math.min(r.right, viewport.width) - Math.max(r.left, 0);
+    const h = Math.min(r.bottom, viewport.height) - Math.max(r.top, 0);
+    return w > 0 && h > 0 ? w * h : 0;
+}
+
 /**
- * The body of a pane on screen, by its block id: the biggest element carrying the id (a pane's frame; the id
- * also sits on small parts and on copies in tabs that are not shown, which have no box), then its content area
- * so the header is not counted. Null when the pane has no box in this window.
+ * The body of a pane on screen, by its block id: the element carrying the id with the most of it inside the window
+ * (a pane's frame; the id also sits on small parts, on copies in tabs that are not shown, which have no box, and on
+ * parked copies far outside the window, which can be bigger than a small pane), then its content area so the
+ * header is not counted. Null when the pane has no place in this window.
  */
-export function paneBodyBox(blockId: string, root: ParentNode = document): Box | null {
+export function paneBodyBox(
+    blockId: string,
+    root: ParentNode = document,
+    viewport: Size = { width: window.innerWidth, height: window.innerHeight }
+): Box | null {
     let frame: Element | null = null;
     let frameArea = 0;
     for (const el of Array.from(root.querySelectorAll(`[data-blockid="${CSS.escape(blockId)}"]`))) {
-        const r = el.getBoundingClientRect();
-        if (r.width * r.height > frameArea) {
+        const area = visibleArea(el.getBoundingClientRect(), viewport);
+        if (area > frameArea) {
             frame = el;
-            frameArea = r.width * r.height;
+            frameArea = area;
         }
     }
     if (frame == null) return null;
