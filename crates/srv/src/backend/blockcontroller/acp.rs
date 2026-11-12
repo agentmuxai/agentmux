@@ -629,10 +629,27 @@ impl Controller for AcpController {
                 return Err("ACP process not running — message queued for next start()".to_string());
             }
 
-            let session_id = {
+            // The turn is reserved in the same lock hold that reads the session id, so `start_fresh_session`, which
+            // checks for an idle turn under this lock, either sees the turn as active and refuses, or runs first and
+            // leaves no session here, so the message below waits for the next launch (#47458).
+            let (session_id, prompt_id) = {
                 let mut inner = self.inner.lock().unwrap();
                 match inner.session_id.clone() {
-                    Some(sid) => sid,
+                    Some(sid) => {
+                        // Not built via make_request: the id must be captured so it can be tracked as outstanding
+                        // (see outstanding_prompt_ids's doc comment). Inserted before the turn is marked active
+                        // and before the enqueue below, so the prompt's answer always finds both.
+                        let prompt_id = self.next_id();
+                        self.outstanding_prompt_ids.lock().unwrap().insert(prompt_id);
+                        // `mark_turn_active_returning_was_active` (not the plain `set_active_turn(true)`) is atomic
+                        // across the read-and-write, so a mid-turn steering send racing this one can't both observe
+                        // "was idle" (see persistent/input.rs's identical guard). Established before the stdin
+                        // enqueue, not after: a fast-responding agent can have the stdout reader observe and
+                        // publish the resulting `stopReason` on another worker before this thread would otherwise
+                        // reach the mark (#2338).
+                        self.health_monitor.mark_turn_active_returning_was_active();
+                        (sid, prompt_id)
+                    }
                     None if inner.session_failed => {
                         return Err("The agent couldn't open a session (see the error above). Fix that, then restart the agent.".to_string());
                     }
@@ -650,38 +667,12 @@ impl Controller for AcpController {
                     }
                 }
             };
-            // Not built via make_request: the id must be captured so it can
-            // be tracked as outstanding (see outstanding_prompt_ids's doc
-            // comment) — make_request only returns the serialized string.
-            // Inserted BEFORE the enqueue below (not after), for the same
-            // happens-before reason mark_turn_active_returning_was_active
-            // is called before the enqueue — see that call's own comment.
-            let prompt_id = self.next_id();
-            self.outstanding_prompt_ids.lock().unwrap().insert(prompt_id);
             let req = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": prompt_id,
                 "method": "session/prompt",
                 "params": prompt_params(&session_id, &message),
             }).to_string();
-            // `mark_turn_active_returning_was_active` (not the plain
-            // `set_active_turn(true)` this used to call) is atomic across
-            // the read-and-write, so a mid-turn steering send racing this
-            // one can't both observe "was idle" — see persistent/input.rs's
-            // identical guard.
-            //
-            // Established BEFORE the stdin enqueue below (not after) — a
-            // fast-responding ACP agent can have the stdout reader task
-            // observe and publish the resulting `stopReason` (turn_active:
-            // false) on a DIFFERENT tokio worker before this thread would
-            // otherwise reach this point, if the enqueue ran first. Only
-            // ordering it this way guarantees this mark happens-before the
-            // request can possibly be enqueued, sent, and answered. codex
-            // P2 on PR #2338 (twenty-sixth re-review) — superseded the
-            // prior (twenty-fifth re-review) ordering, which fixed a
-            // different bug (see the rollback below) by moving this after
-            // the enqueue, reintroducing this race.
-            self.health_monitor.mark_turn_active_returning_was_active();
             // Publish the turn_active flip, mirroring persistent/queue.rs's
             // send_message and persistent/input.rs's send_user_message
             // (which both call self.publish_status() right after the same
