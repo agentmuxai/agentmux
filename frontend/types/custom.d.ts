@@ -183,12 +183,24 @@ declare global {
          *  and Cancel. Relayed by the host, which srv trusts and agents can't
          *  impersonate; answers srv's update status after the action. */
         appUpdate?(action: "download" | "restart" | "cancel", now?: boolean): Promise<unknown>;
-        /** A Microsoft Store install: ask the Store to install the update; `fallback` means open the Store page instead. */
-        storeUpdate?(version?: string): Promise<{ outcome: "installed" | "canceled" | "none" | "fallback"; message: string }>;
+        /** A Microsoft Store install: ask the Store to download the update (nothing is installed or asked of the person);
+         *  `fallback` means open the Store page instead; `downloaded` means it is here and `storeUpdateRestart` installs it.
+         *  While it runs the host sends `store-update-progress` events (`AppApi.listen`). */
+        storeUpdate?(version?: string): Promise<{ outcome: "downloaded" | "installed" | "canceled" | "none" | "fallback"; message: string }>;
+        /** A Microsoft Store install with a downloaded update: install it now. The host raises this window, arranges AgentMux
+         *  to be opened again, then asks the Store (silently when the Store allows it, else through the Store's own window,
+         *  while this call stays open and the host sends `store-update-progress` events with phase `asking`). Normally the
+         *  call never returns: Windows closes AgentMux for the swap. Only a click in this app's own window reaches it.
+         *  `ok` false says why nothing was closed; `canceled` means the person said no in the Store's window. */
+        storeUpdateRestart?(): Promise<{ ok: boolean; canceled?: boolean; message: string }>;
+        /** Who a Store restart interrupts: the agents in the middle of a turn (by name) and how many agents there are. */
+        storeUpdateWorking?(): Promise<{ working: string[]; agents: number }>;
+        /** Bring this window to the front, so the Store's own prompt (owned by it) comes forward with it. */
+        storeUpdateRaise?(): Promise<boolean>;
         /** A Microsoft Store install: whether the Store itself lists an update (nothing is installed); `version` is the Store package's version when it does (empty if unreadable); `no_answer` means it never answered, `unknown` says why it couldn't be asked. */
         storeUpdateCheck?(): Promise<{ state: "available" | "none" | "no_answer" | "unknown"; message: string; version?: string }>;
         /** What the Store's last install left: the app came back `updated`, or `stayed` on the version the Store closed it on. */
-        storeUpdateCameBack?(): Promise<{ state: "none" | "updated" | "stayed"; from: string; target: string }>;
+        storeUpdateCameBack?(): Promise<{ state: "none" | "updated" | "stayed"; from: string; target: string; reopen_failed?: boolean }>;
         /** Forget the key a widget publisher is pinned to (Settings → Widgets),
          *  relayed by the host like an approval: forgetting lets another key pin
          *  that publisher. SPEC_WIDGET_SHARING_2026_10_10.md §2.3. */

@@ -124,6 +124,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/cef/src/commands/cli_login.rs", "bin", 1,
      "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/cef/src/commands/store_reopen.rs", "exe", 1,
+     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/cef/src/commands/clipboard.rs", "\"pbpaste\"", 1,
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/cef/src/commands/clipboard.rs", "\"pbcopy\"", 1,

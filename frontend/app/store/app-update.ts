@@ -187,20 +187,142 @@ export function storeStandingLine(offer: StoreOffer | null, checked: string | nu
 }
 
 /** What the Store's last install left (host: store_restart): the app came back `updated`, or `stayed` on the version it was closed on. */
-export type StoreCameBack = { state: "none" | "updated" | "stayed"; from: string; target: string };
+export type StoreCameBack = { state: "none" | "updated" | "stayed"; from: string; target: string; reopen_failed?: boolean };
 const [storeStayed, setStoreStayed] = createSignal<StoreCameBack | null>(null);
 export { storeStayed, setStoreStayed };
+
+/**
+ * What the Store reports while it downloads and installs (the host's `store-update-progress` event). `percent` is
+ * null when the Store gave no numbers.
+ */
+export type StoreProgress = { phase: "pending" | "downloading" | "installing" | "asking"; percent: number | null; doneBytes: number; totalBytes: number };
+const [storeProgress, setProgress] = createSignal<StoreProgress | null>(null);
+export { storeProgress };
+
+const PHASES = new Set(["pending", "downloading", "installing", "asking"]);
+
+/**
+ * Whether the install call is open: the person pressed Restart now, confirmed, and the host is asking the Store. It
+ * lives here, not in the Maintenance section, so closing the panel and opening it again (or switching to another
+ * window and back) still finds the row saying what is going on.
+ */
+const [storeRestarting, setStoreRestarting] = createSignal(false);
+export { storeRestarting, setStoreRestarting };
+
+/** The Store's own window belongs to ours: coming back to ours while it asks brings that window forward again. */
+let raiseOnFocus: (() => void) | null = null;
+function keepAskingInFront(asking: boolean): void {
+    if (asking === (raiseOnFocus !== null) || typeof window === "undefined") return;
+    if (asking) {
+        raiseOnFocus = () => void getApi()?.approvals?.storeUpdateRaise?.().catch(() => undefined);
+        window.addEventListener("focus", raiseOnFocus);
+    } else if (raiseOnFocus) {
+        window.removeEventListener("focus", raiseOnFocus);
+        raiseOnFocus = null;
+    }
+}
+
+export function setStoreProgress(next: StoreProgress | null): void {
+    setProgress(next);
+    keepAskingInFront(next?.phase === "asking");
+}
+
+/** Take a report from the host's event; anything malformed is ignored. */
+export function acceptStoreProgress(next: unknown): void {
+    const p = next as Partial<StoreProgress> | null | undefined;
+    if (typeof p?.phase !== "string" || !PHASES.has(p.phase)) return;
+    // While the Store asks, its own earlier states (pending, a finished download) don't take the question off the row.
+    if (storeProgress()?.phase === "asking" && (p.phase === "pending" || p.phase === "downloading")) return;
+    const percent = typeof p.percent === "number" && Number.isFinite(p.percent) ? Math.max(0, Math.min(100, Math.round(p.percent))) : null;
+    setStoreProgress({ phase: p.phase as StoreProgress["phase"], percent, doneBytes: Number(p.doneBytes) || 0, totalBytes: Number(p.totalBytes) || 0 });
+}
+
+/** The row while the install call is open and the Store asks the person to confirm, in its own window. */
+export const STORE_ASKING_WINDOW_LINE = "The Microsoft Store is asking you to confirm: look for its window.";
+
+/** The row while the Store installs without asking. */
+export const STORE_INSTALLING_LINE = "Installing: AgentMux closes and opens again.";
+
+const megabytes = (bytes: number): number => Math.round(bytes / (1024 * 1024));
+
+/**
+ * The line for the Store's progress, in place of the fixed "Asking the Microsoft Store…": "Downloading 0.60.25: 42%
+ * (88 of 210 MB)", then "Installing…". null when there is no report yet or the Store gave no numbers (the caller
+ * keeps its plain line); `version` is empty when it isn't known.
+ */
+export function storeProgressLine(p: StoreProgress | null, version: string): string | null {
+    if (!p) return null;
+    switch (p.phase) {
+        case "pending":
+            return null;
+        case "downloading": {
+            const what = version ? `Downloading ${version}` : "Downloading the update";
+            if (p.percent === null) return null;
+            const size = p.totalBytes > 0 ? ` (${megabytes(p.doneBytes)} of ${megabytes(p.totalBytes)} MB)` : "";
+            return `${what}: ${p.percent}%${size}`;
+        }
+        case "installing":
+            return STORE_INSTALLING_LINE;
+        case "asking":
+            return STORE_ASKING_WINDOW_LINE;
+        default:
+            return null;
+    }
+}
+
+/**
+ * The version a Store update will be, for the row's wording: only what the Store itself named (a version newer than
+ * this build), else "". GitHub's newest release is not used: the Store installs the version it has, which can be an
+ * older one, and no public Windows call names a staged package's version (the Store names its listed package only
+ * as the installed one). The row then says "the new version", and the next start reports the real one.
+ */
+export function storeTargetVersion(offer: StoreOffer | null = storeOffer()): string {
+    return offer?.version ?? "";
+}
+
+/** The Store has the update downloaded here, ready for Restart now; `version` is "" when no one knows it. */
+const [storeDownloaded, setStoreDownloaded] = createSignal<{ version: string } | null>(null);
+export { storeDownloaded, setStoreDownloaded };
+
+/**
+ * Said once the update is downloaded. Nothing is installed yet, and closing AgentMux by hand does not install it
+ * (Windows swaps the package only when the Store is asked to, which Restart now does).
+ */
+export const storeDownloadedLine = (version: string): string =>
+    `Downloaded${version ? ` ${version}` : ""}. Restart now installs it: AgentMux closes and opens again. Closing AgentMux yourself does not install it.`;
+
+/** "Vmer", "Vmer and Deke", "Vmer, Deke and 2 more": the agents a restart interrupts, as the close warning names them. */
+function namesLine(names: readonly string[]): string {
+    const MAX = 3;
+    if (names.length <= 1) return names.join("");
+    if (names.length <= MAX) return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+    return `${names.slice(0, MAX).join(", ")} and ${names.length - MAX} more`;
+}
+
+/**
+ * Said before Restart now closes anything: it is a restart of everything, and it names the agents in the middle of
+ * a turn (`working`, from srv's quit question) that it interrupts. This confirm is the only question AgentMux asks;
+ * the Store may then ask once more in its own window.
+ */
+export const storeRestartAsk = (working: readonly string[] = [], agents = 0): string => {
+    const stops = agents > 0 ? `stops ${agents === 1 ? "its 1 agent" : `its ${agents} agents`}` : "stops every agent in it";
+    const who = working.length > 0 ? ` ${namesLine(working)} ${working.length === 1 ? "is" : "are"} in the middle of a turn and will be interrupted.` : "";
+    return `Restart now closes AgentMux, ${stops}, installs the update and opens AgentMux again.${who}`;
+};
 
 /** Said when the install fell back to the Store page: `why` is the host's reason, when it gave one. */
 export const storeFallbackLine = (why?: string): string => `${why ? `${why} ` : ""}Opened the Microsoft Store page to finish the update.`;
 
-/** Said before the Store is asked to install: it closes the app to swap the package. */
+/** Said before the Store is asked to download: Restart now installs it afterwards. */
 export const storeClosesLine = (version: string): string =>
-    `The Store closes AgentMux while it installs ${version ? `v${version}` : "the update"}, then opens it again.`;
+    `The Store downloads ${version ? `v${version}` : "the update"}. Restart now then installs it and opens AgentMux again.`;
+
+/** Added when the Scheduled Task that opens AgentMux again after the update could not be registered. */
+export const storeReopenFailedNote = "AgentMux could not arrange to open itself after the update, so it was opened by hand.";
 
 /** Said when the app is back on the version the Store closed it on: the install did not happen. */
 export const storeStayedLine = (s: StoreCameBack): string =>
-    `The Store closed AgentMux to install ${s.target ? `v${s.target}` : "an update"}, but this is still v${s.from}. Try Update in the Store again, or install it from the Microsoft Store app.`;
+    `The Store closed AgentMux to install ${s.target ? `v${s.target}` : "an update"}, but this is still v${s.from}. Try Update in the Store again, or install it from the Microsoft Store app.${s.reopen_failed ? ` ${storeReopenFailedNote}` : ""}`;
 
 /** At start: say how the Store's last install ended, when one was under way. */
 export async function loadStoreCameBack(): Promise<void> {
@@ -208,7 +330,7 @@ export async function loadStoreCameBack(): Promise<void> {
     if (!r || r.state === "none") return;
     const note = { id: "store-update-came-back", timestamp: new Date().toISOString() };
     if (r.state === "updated") {
-        pushNotification({ ...note, icon: "fa-circle-check", title: "AgentMux updated", message: `Updated to v${r.target} through the Microsoft Store.`, type: "update", expiration: Date.now() + 10000 });
+        pushNotification({ ...note, icon: "fa-circle-check", title: "AgentMux updated", message: `Updated to v${r.target} through the Microsoft Store.${r.reopen_failed ? ` ${storeReopenFailedNote}` : ""}`, type: "update", expiration: Date.now() + (r.reopen_failed ? 30000 : 10000) });
         return;
     }
     setStoreStayed(r);
