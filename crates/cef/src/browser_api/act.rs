@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
+use super::choice_facts::{add_option_owners, describe_scope};
 use super::combobox;
 pub(super) use super::hidden_choices::hidden_choices;
 use super::dates;
@@ -696,48 +697,6 @@ pub(super) fn fail<T>(msg: impl Into<String>) -> (StatusCode, Json<ApiResponse<T
 /// or a file input apart from an ordinary one: value-bearing fields first
 /// (a field without facts has its value hidden, `snapshot::render`), then
 /// buttons (a file input's role).
-/// What the page says about the fields of `scope` (the whole page without one), by backend id: the
-/// markup that keeps a secret field's value, and a Vault-filled dropdown's choice, out of a snapshot.
-async fn describe_scope(cdp: &mut CdpSession, nodes: &[Value], scope: Option<i64>) -> HashMap<i64, DomFacts> {
-    let mut facts = HashMap::new();
-    let role_of = |n: &Value| n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    // A scoped snapshot renders only its subtree, so it looks up facts only there.
-    let in_scope: Vec<&Value> = match scope {
-        Some(b) => snapshot::subtree(nodes, b),
-        None => nodes.iter().collect(),
-    };
-    let wanted = in_scope
-        .iter()
-        .copied()
-        .filter(|n| snapshot::VALUE_ROLES.contains(&role_of(n).as_str()))
-        .chain(in_scope.iter().copied().filter(|n| role_of(n) == "button"));
-    for n in wanted {
-        if facts.len() >= MAX_DESCRIBES {
-            break;
-        }
-        if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
-            if let Some(f) = describe_markup(cdp, b).await {
-                let name = n.pointer("/name/value").and_then(|v| v.as_str()).unwrap_or("");
-                facts.insert(b, f.with_label(name));
-            }
-        }
-    }
-    // The dropdown an option is in says whether its choice was filled from the Vault.
-    add_option_owners(cdp, nodes, &in_scope, &mut facts, MAX_DESCRIBES).await;
-    facts
-}
-
-/// Adds the facts of the dropdowns that the options among `among` belong to, up to `cap` facts in all.
-async fn add_option_owners(cdp: &mut CdpSession, nodes: &[Value], among: &[&Value], facts: &mut HashMap<i64, DomFacts>, cap: usize) {
-    for b in snapshot::option_owners(nodes, among) {
-        if facts.len() < cap && !facts.contains_key(&b) {
-            if let Some(f) = describe_markup(cdp, b).await {
-                facts.insert(b, f);
-            }
-        }
-    }
-}
-
 pub(super) const MAX_DESCRIBES: usize = 600;
 
 /// The accessibility nodes of the page with its hidden choices added, and

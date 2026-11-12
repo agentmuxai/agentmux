@@ -62,6 +62,7 @@ pub mod terminal;
 pub mod text_read;
 pub mod types;
 pub mod visibility;
+pub mod choice_facts;
 pub mod vault_card_form;
 pub mod vault_fill;
 pub mod vault_slots;

@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::select_lists;
+use super::choice_facts::choice_is_secret;
 use super::text_read::{self, ids_of, matchable_name};
 pub use super::text_read::with_text_limit;
 pub use super::hidden_choices::{add_hidden_choices, HiddenChoice};
@@ -439,45 +440,6 @@ fn takes_ref(role: &str, backend: Option<i64>, facts: &HashMap<i64, DomFacts>) -
     INTERACTIVE_ROLES.contains(&role) || facts.get(&b).is_some_and(DomFacts::is_file_input)
 }
 
-/// The dropdown (a combobox or listbox) an option belongs to.
-fn option_owner<'a>(by_id: &HashMap<&str, &'a Value>, node: &Value) -> Option<&'a Value> {
-    let mut at = node;
-    for _ in 0..6 {
-        let parent = at.get("parentId").and_then(Value::as_str).and_then(|id| by_id.get(id)).copied()?;
-        if matches!(str_of(parent, "role"), "combobox" | "listbox") {
-            return Some(parent);
-        }
-        at = parent;
-    }
-    None
-}
-
-/// The backend ids of the dropdowns the options among `among` belong to: their facts say whether
-/// the Vault filled the choice.
-pub(super) fn option_owners(all: &[Value], among: &[&Value]) -> Vec<i64> {
-    let by_id = ids_of(all);
-    let mut out: Vec<i64> = Vec::new();
-    for n in among.iter().filter(|n| str_of(n, "role") == "option") {
-        if let Some(b) = option_owner(&by_id, n).and_then(|o| o.get("backendDOMNodeId")?.as_i64()) {
-            if !out.contains(&b) {
-                out.push(b);
-            }
-        }
-    }
-    out
-}
-
-/// An option of a dropdown the Vault filled (its `<select>` is marked) shows no `[selected]`: that
-/// would tell the agent the choice, which is the card's expiry month or year.
-fn choice_is_secret(by_id: &HashMap<&str, &Value>, facts: &HashMap<i64, DomFacts>, node: &Value) -> bool {
-    str_of(node, "role") == "option"
-        && option_owner(by_id, node)
-            .and_then(|o| o.get("backendDOMNodeId")?.as_i64())
-            .and_then(|b| facts.get(&b))
-            .and_then(secret_reason)
-            .is_some()
-}
-
 /// Whether an agent can act on a node of this role.
 pub(super) fn is_actionable_role(role: &str) -> bool {
     INTERACTIVE_ROLES.contains(&role)
@@ -874,38 +836,6 @@ mod tests {
         let s = render(&nodes, &HashMap::new(), Some(2), "e4.");
         assert_eq!(s.text, "- form \"Login [ref=e1]\"\n  - button \"Go\" [ref=e4.e1]\n");
         assert_eq!(s.refs, vec![("e4.e1".to_string(), 3)]);
-    }
-
-    fn expiry_month_dropdown() -> Vec<Value> {
-        let mut march = n("4", Some("3"), "option", "March", Some(40), &[]);
-        march["properties"] = json!([{ "name": "selected", "value": { "type": "boolean", "value": true } }]);
-        vec![
-            n("1", None, "RootWebArea", "Page", Some(1), &["3"]),
-            n("3", Some("1"), "combobox", "Expiry month", Some(30), &["4", "5"]),
-            march,
-            n("5", Some("3"), "option", "April", Some(50), &[]),
-        ]
-    }
-
-    #[test]
-    fn a_dropdown_the_vault_filled_shows_no_selected_option() {
-        let nodes = expiry_month_dropdown();
-        // Not the Vault's: the choice shows, as it always has.
-        let plain_select = facts(&[(30, "select", &[("name", "exp_month")])]);
-        assert!(render(&nodes, &plain_select, Some(30), "").text.contains("[selected]"));
-        // Filled from the Vault (the select is marked): the choice is the card's expiry, so it is not shown.
-        let filled = facts(&[(30, "select", &[("name", "exp_month"), ("data-agentmux-vault", "1")])]);
-        let shown = render(&nodes, &filled, Some(30), "").text;
-        assert!(!shown.contains("[selected]"), "{shown}");
-        assert!(shown.contains("March") && shown.contains("April"), "the options are still there to act on: {shown}");
-        // Found by its own name, an option reads the same.
-        let by_id = ids_of(&nodes);
-        assert!(choice_is_secret(&by_id, &filled, &nodes[2]));
-        assert!(!choice_is_secret(&by_id, &plain_select, &nodes[2]));
-        assert!(!choice_is_secret(&by_id, &filled, &nodes[1]), "only an option's selection is hidden");
-        // The route fetches the dropdown's facts for every option it lists.
-        let options: Vec<&Value> = nodes.iter().filter(|x| str_of(x, "role") == "option").collect();
-        assert_eq!(option_owners(&nodes, &options), vec![30]);
     }
 
     #[test]
