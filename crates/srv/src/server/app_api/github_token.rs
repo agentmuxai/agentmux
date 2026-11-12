@@ -28,6 +28,19 @@ use crate::server::caller::Caller;
 pub(crate) struct GithubTokenRequest {
     owner: String,
     repo: String,
+    /// What the token is for, as the caller says: `git` from git's credential helper, anything else (or nothing) is a
+    /// `gh` call. It only ever narrows: a container that says `git` gets a token that writes contents and nothing
+    /// else, one that says anything else gets a token that cannot write contents. It is never the way to a wider token.
+    #[serde(default)]
+    purpose: Option<String>,
+}
+
+/// The scope of the token a container on a gh-agent host is given for `purpose`: only git's own asks for a push token.
+fn scope_for(purpose: Option<&str>) -> crate::identity::gh_agent_token::Scope {
+    match purpose {
+        Some("git") => crate::identity::gh_agent_token::Scope::Push,
+        _ => crate::identity::gh_agent_token::Scope::Api,
+    }
 }
 
 /// What an agent is told when the person isn't signed in to AgentMux Cloud (the Connect with GitHub design).
@@ -68,6 +81,7 @@ pub(crate) async fn handle_github_token(
     .ok()
     .flatten();
     let owner = account.as_ref().and_then(github_connect::owner_of);
+    let workflows = account.as_ref().is_some_and(|a| github_connect::workflows_allowed(a, &slug));
     // A container agent is given a token only where its git setup was switched on (the hooks mounted,
     // `github_tokens::container_git_hooks`), and from the host's `gh-agent` first.
     let mut host_error = None;
@@ -75,7 +89,13 @@ pub(crate) async fn handle_github_token(
         if crate::identity::github_tokens::container_git_hooks().is_none() {
             return refuse(StatusCode::FORBIDDEN, "no GitHub token for a container agent on this machine".to_string());
         }
-        match crate::identity::gh_agent_token::token_for(&slug, &req.owner, &req.repo).await {
+        let scope = scope_for(req.purpose.as_deref());
+        let mut asked = crate::identity::gh_agent_token::token_for(&slug, &req.owner, &req.repo, scope, workflows).await;
+        // An App without workflows write cannot give that: the push token without it still pushes everything else.
+        if workflows && scope == crate::identity::gh_agent_token::Scope::Push && asked.as_ref().err().is_some_and(|e| !crate::identity::gh_agent_token::is_too_old(e)) {
+            asked = crate::identity::gh_agent_token::token_for(&slug, &req.owner, &req.repo, scope, false).await;
+        }
+        match asked {
             Ok(host) => {
                 let now = chrono::Utc::now().timestamp();
                 tracing::info!(target: "identity", agent = %slug, owner = %req.owner, repo = %req.repo, "identity.github: a container agent's token from the host's gh-agent");
@@ -94,11 +114,12 @@ pub(crate) async fn handle_github_token(
                 }))
                 .into_response();
             }
+            // A gh-agent that cannot give a narrowed token is not a reason to give a container another one.
+            Err(e) if crate::identity::gh_agent_token::is_too_old(&e) => return refuse(StatusCode::FORBIDDEN, e),
             Err(e) => host_error = Some(e),
         }
     }
     let backend = github_tokens::Live { mstore: state.id_store.clone(), identity_store: state.identity_store.clone() };
-    let workflows = account.as_ref().is_some_and(|a| github_connect::workflows_allowed(a, &slug));
     let want = Want { agent: slug, owner: req.owner, repo: req.repo, workflows };
     match github_tokens::global().token_for(&backend, &want, chrono::Utc::now().timestamp()).await {
         Ok(minted) => Json(json!({
@@ -145,6 +166,23 @@ fn refusal_for(host_error: Option<String>, e: &TokenError) -> (StatusCode, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_git_asks_for_a_push_token_and_nothing_else_is_wider_than_api() {
+        use crate::identity::gh_agent_token::Scope;
+        assert_eq!(scope_for(Some("git")), Scope::Push);
+        for other in [None, Some("api"), Some(""), Some("push"), Some("GIT"), Some("admin"), Some("installation")] {
+            assert_eq!(scope_for(other), Scope::Api, "{other:?}");
+        }
+    }
+
+    #[test]
+    fn a_request_without_a_purpose_is_still_a_request() {
+        let r: GithubTokenRequest = serde_json::from_str(r#"{"owner":"o","repo":"r"}"#).unwrap();
+        assert_eq!(r.purpose, None);
+        let r: GithubTokenRequest = serde_json::from_str(r#"{"owner":"o","repo":"r","purpose":"git"}"#).unwrap();
+        assert_eq!(scope_for(r.purpose.as_deref()), crate::identity::gh_agent_token::Scope::Push);
+    }
 
     #[test]
     fn a_refusal_is_the_requests_fault_unless_it_was_only_a_bad_moment() {

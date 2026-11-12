@@ -17,13 +17,19 @@ pub const GH_FUNCTION_NAME: &str = "BASH_FUNC_gh%%";
 /// credentials first (`github-text-guard`: a hit refuses the command, a stdin body reaches `gh` as a
 /// file), and `gh pr create` and `gh pr edit` carry the owner tag in the PR's body. `gh auth status`
 /// says so, instead of "not logged into any GitHub hosts" (the bare command only: with flags such as
-/// `--json` it is gh's own output a caller parses). Without the variable it is plain `gh`.
+/// `--json` it is gh's own output a caller parses). A container's `gh pr merge`, `gh release` and `gh api` first go through
+/// `github-container`: srv does the merge for it, and the API writes its token cannot make are refused with what to do
+/// (`crates/bashwrap/src/container_verbs.rs`). Without the variable it is plain `gh`.
 pub const GH_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}" ]; then
-    local _amx_t _amx_x _amx_n _amx_a=();
+    local _amx_t _amx_x _amx_n _amx_r _amx_a=();
     if [ "$1" = auth ] && [ "$2" = status ] && [ "$#" -eq 2 ]; then
       printf '%s
 ' 'github.com' '  AgentMux signs gh in per repository: each gh command in a repository gets a short-lived token for it' '  (the AgentMux GitHub App, acting for your user). There is no stored login, so gh auth does not list one.';
       return 0;
+    fi;
+    if [ "${AGENTMUX_IN_CONTAINER:-}" = 1 ] && { [ "$1" = api ] || [ "$1" = release ] || { [ "$1" = pr ] && [ "$2" = merge ]; }; }; then
+      agentmux-bashwrap github-container -- "$@"; _amx_r=$?;
+      [ "$_amx_r" -eq 3 ] || return "$_amx_r";
     fi;
     if [ "$1" = pr ] || [ "$1" = issue ] || [ "$1" = release ] || [ "$1" = api ]; then
       while IFS= read -r -d '' _amx_x; do _amx_a+=("$_amx_x"); done < <(agentmux-bashwrap github-text-guard -- "$@");

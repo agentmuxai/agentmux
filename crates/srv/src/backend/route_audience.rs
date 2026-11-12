@@ -253,6 +253,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/fleet/bulk-stop"), Audience::Everyone),
     (Match::Route("/api/v1/github/token"), Audience::Everyone),
     (Match::Route("/api/v1/github/push-scan"), Audience::Everyone),
+    (Match::Route("/api/v1/github/pr-merge"), Audience::Everyone),
     (Match::Route("/api/v1/google/calendar"), Audience::Everyone),
     (Match::Route("/api/v1/google/connect"), Audience::Everyone),
     (Match::Route("/api/v1/google/connect/cancel"), Audience::Everyone),

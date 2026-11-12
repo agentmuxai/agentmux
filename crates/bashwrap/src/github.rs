@@ -183,8 +183,17 @@ pub enum Answer {
     Refused(String),
 }
 
-/// Ask srv for a token for `owner/repo`.
+/// Ask srv for the token a `gh` command uses for `owner/repo`.
 pub fn ask(owner: &str, repo: &str) -> Answer {
+    ask_for(owner, repo, None)
+}
+
+/// What git's credential helper says the token is for: a push. srv gives a container a token that writes contents only to
+/// this ask, and never believes it for more than that.
+const PURPOSE_GIT: &str = "git";
+
+/// Ask srv for a token for `owner/repo`; `purpose` says what it is for (`git` from the credential helper).
+pub fn ask_for(owner: &str, repo: &str, purpose: Option<&str>) -> Answer {
     let Some(client) = WpsClient::from_env() else {
         return Answer::Refused("AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY aren't set: run this from an agent's own shell".to_string());
     };
@@ -193,7 +202,10 @@ pub fn ask(owner: &str, repo: &str) -> Answer {
         Ok(rt) => rt,
         Err(e) => return Answer::Refused(format!("couldn't start: {e}")),
     };
-    let body = json!({ "owner": owner, "repo": repo });
+    let mut body = json!({ "owner": owner, "repo": repo });
+    if let Some(purpose) = purpose {
+        body["purpose"] = json!(purpose);
+    }
     match rt.block_on(client.post_json_status("/api/v1/github/token", agent_token.as_deref(), &body, ASK_TIMEOUT)) {
         Ok((status, answer)) if (200..300).contains(&status) => match answer.get("token").and_then(Value::as_str).filter(|t| !t.is_empty()) {
             Some(token) => Answer::Token(Granted {
@@ -229,7 +241,7 @@ pub fn run_git_credential(op: &str) -> i32 {
         eprintln!("agentmux: git asked for GitHub credentials without a repository, so there is no token to give (credential.useHttpPath is off?)");
         return 1;
     };
-    match ask(&owner, &repo) {
+    match ask_for(&owner, &repo, Some(PURPOSE_GIT)) {
         Answer::Token(granted) => {
             let mut out = std::io::stdout();
             let _ = out.write_all(credential_response(&granted.token).as_bytes());
@@ -429,6 +441,21 @@ pub(crate) mod tests {
         assert!(lower.contains("x-agent-token: agent-token-1"), "who is asking is the agent's own token: {seen}");
         assert!(seen.contains(r#""owner":"octo""#) && seen.contains(r#""repo":"hello""#), "{seen}");
         assert!(!seen.contains("agent_id"), "no name in the request: srv decides who is asking");
+    }
+
+    #[test]
+    fn git_says_what_its_token_is_for_and_gh_says_nothing() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("AGENTMUX_AUTH_KEY", "key");
+        std::env::set_var("AGENTMUX_AGENT_TOKEN", "agent-token-1");
+        let (url, srv) = stub_srv(200, r#"{"token":"ghs_A"}"#);
+        std::env::set_var("AGENTMUX_LOCAL_URL", &url);
+        let _ = ask_for("octo", "hello", Some(PURPOSE_GIT));
+        assert!(srv.join().unwrap().contains(r#""purpose":"git""#), "the credential helper asks for a push");
+        let (url, srv) = stub_srv(200, r#"{"token":"ghs_A"}"#);
+        std::env::set_var("AGENTMUX_LOCAL_URL", &url);
+        let _ = ask("octo", "hello");
+        assert!(!srv.join().unwrap().contains("purpose"), "a gh command states no purpose: srv reads that as api");
     }
 
     #[test]

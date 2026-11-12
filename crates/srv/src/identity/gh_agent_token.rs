@@ -34,6 +34,37 @@ struct Output {
     token: String,
     expires_at: Option<i64>,
     acting_as: Option<String>,
+    /// Which narrowed token this is, as a `gh-agent` that can give one says it; a token without it is the
+    /// installation-wide one.
+    scope: Option<String>,
+    repositories: Option<Vec<String>>,
+}
+
+/// What a container's token may do. `Api` reads contents and writes pull requests, issues and the rest; it cannot
+/// write contents. `Push` writes contents and nothing else (`gh-agent token --scope`). There is no third kind: a
+/// container is never handed the installation-wide token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    Api,
+    Push,
+}
+
+impl Scope {
+    fn name(self) -> &'static str {
+        match self {
+            Scope::Api => "api",
+            Scope::Push => "push",
+        }
+    }
+}
+
+/// What a container is told when this machine's `gh-agent` cannot give a narrowed token (it predates `--scope`, or it
+/// gave a wider one than asked): the refusal never falls back to the installation-wide token.
+pub const GH_AGENT_TOO_OLD: &str = "this machine's gh-agent cannot give a container a narrowed GitHub token: update gh-agent (npm i -g @a5af/gh-agent)";
+
+/// Whether `error` (a [`token_for`] error) is [`GH_AGENT_TOO_OLD`].
+pub fn is_too_old(error: &str) -> bool {
+    error == GH_AGENT_TOO_OLD
 }
 
 /// Set to `1` in a container's commands only while this machine has a publish guard (gh-agent installed); the
@@ -57,15 +88,21 @@ pub fn is_took_too_long(error: &str) -> bool {
 
 /// A GitHub account or repository name: what the request may name, and nothing that could be read as
 /// an option or a path.
-fn is_name(s: &str) -> bool {
+pub(crate) fn is_name(s: &str) -> bool {
     !s.is_empty() && s.len() <= 100 && !s.starts_with(['-', '.']) && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
 }
 
-/// The token in `gh-agent token --json`'s output.
-fn parse(stdout: &[u8]) -> Result<HostToken, String> {
+/// The token in `gh-agent token --json`'s output, if it is exactly the narrowed one asked for: the scope named, and
+/// the one repository. Anything else (no scope field: an older gh-agent that took `--scope` as an unknown flag and
+/// gave the installation-wide token) is refused and dropped, never passed on.
+fn parse(stdout: &[u8], scope: Scope, repo: &str) -> Result<HostToken, String> {
     let out: Output = serde_json::from_slice(stdout).map_err(|_| "gh-agent gave no token".to_string())?;
     if out.token.is_empty() {
         return Err("gh-agent gave no token".to_string());
+    }
+    let one_repo = out.repositories.as_deref().is_some_and(|r| r.len() == 1 && r[0].eq_ignore_ascii_case(repo));
+    if out.scope.as_deref() != Some(scope.name()) || !one_repo {
+        return Err(GH_AGENT_TOO_OLD.to_string());
     }
     let bot_slug = out.acting_as.map(|a| a.trim_end_matches("[bot]").to_string()).filter(|a| !a.is_empty());
     Ok(HostToken { token: Zeroizing::new(out.token), expires_at: out.expires_at.unwrap_or(0), bot_slug })
@@ -132,8 +169,19 @@ pub async fn bot_user_id(slug: &str) -> Option<u64> {
     id
 }
 
-/// A token for `owner/repo`, minted for the agent `slug`.
-pub async fn token_for(slug: &str, owner: &str, repo: &str) -> Result<HostToken, String> {
+/// The arguments of `gh-agent token` for a narrowed token: always with `--scope`, so no call can come back as the
+/// installation-wide token. `workflows` (push only) asks for workflows write as well.
+fn token_args(owner: &str, repo: &str, scope: Scope, workflows: bool) -> Vec<String> {
+    let mut args = vec!["token".to_string(), "--repo".to_string(), format!("{owner}/{repo}"), "--scope".to_string(), scope.name().to_string()];
+    if workflows && scope == Scope::Push {
+        args.push("--workflows".to_string());
+    }
+    args.push("--json".to_string());
+    args
+}
+
+/// A narrowed token for `owner/repo`, minted for the agent `slug`: one repository, and `scope`'s permissions only.
+pub async fn token_for(slug: &str, owner: &str, repo: &str, scope: Scope, workflows: bool) -> Result<HostToken, String> {
     if !is_name(owner) || !is_name(repo) {
         return Err("not a GitHub repository".to_string());
     }
@@ -141,7 +189,7 @@ pub async fn token_for(slug: &str, owner: &str, repo: &str) -> Result<HostToken,
     let mut cmd = tokio::process::Command::new(&exe);
     // No instance identity or key reaches it; the agent id below is the one thing it is told.
     crate::backend::pane_env::sanitize_external_command(&mut cmd);
-    cmd.args(["token", "--repo", &format!("{owner}/{repo}"), "--json"])
+    cmd.args(token_args(owner, repo, scope, workflows))
         .env("AGENTMUX_AGENT_ID", slug)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -156,7 +204,97 @@ pub async fn token_for(slug: &str, owner: &str, repo: &str) -> Result<HostToken,
     if !out.status.success() {
         return Err("gh-agent gave no token for that repository".to_string());
     }
-    parse(&out.stdout)
+    parse(&out.stdout, scope, repo)
+}
+
+/// How long `gh-agent pr merge` may take: a round trip or two to GitHub, and a merge queue's answer.
+const MERGE_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// How a pull request is merged; none lets the repository's own rule (a merge queue) choose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeMethod {
+    Squash,
+    Merge,
+    Rebase,
+}
+
+/// What a container asked srv to merge: one pull request, by number, with the few options a merge takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeRequest {
+    pub owner: String,
+    pub repo: String,
+    pub number: u64,
+    pub method: Option<MergeMethod>,
+    pub auto: bool,
+    pub delete_branch: bool,
+}
+
+/// The arguments of the host's `gh-agent pr merge`: fixed, built here from validated parts, never from the container's
+/// text. There is no `--admin` and no other flag, so GitHub's own rules (a review, a merge queue, the checks) decide.
+pub fn merge_args(r: &MergeRequest) -> Vec<String> {
+    let mut args = vec!["pr".to_string(), "merge".to_string(), r.number.to_string(), "--repo".to_string(), format!("{}/{}", r.owner, r.repo)];
+    match r.method {
+        Some(MergeMethod::Squash) => args.push("--squash".to_string()),
+        Some(MergeMethod::Merge) => args.push("--merge".to_string()),
+        Some(MergeMethod::Rebase) => args.push("--rebase".to_string()),
+        None => {}
+    }
+    if r.auto {
+        args.push("--auto".to_string());
+    }
+    if r.delete_branch {
+        args.push("--delete-branch".to_string());
+    }
+    args
+}
+
+/// Whether `r` can be run: names that cannot be read as an option or a path, and a real pull request number.
+pub fn merge_request_ok(r: &MergeRequest) -> Result<(), String> {
+    if !is_name(&r.owner) || !is_name(&r.repo) {
+        return Err("not a GitHub repository".to_string());
+    }
+    if r.number == 0 || r.number > 100_000_000 {
+        return Err("not a pull request number".to_string());
+    }
+    Ok(())
+}
+
+/// Merge `r` as the agent `slug` with the host's `gh-agent pr merge`. The token it uses stays on the host; the answer
+/// is what the command said, first lines, bounded. `Ok` when the merge was done or queued, `Err` with what GitHub said.
+pub async fn merge_pr(slug: &str, r: &MergeRequest) -> Result<String, String> {
+    merge_request_ok(r)?;
+    let exe = installed().ok_or_else(|| "gh-agent isn't installed on this machine".to_string())?;
+    let mut cmd = tokio::process::Command::new(&exe);
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
+    cmd.args(merge_args(r))
+        .env("AGENTMUX_AGENT_ID", slug)
+        .current_dir(std::env::temp_dir())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    cmd.no_window();
+    let out = match tokio::time::timeout(MERGE_TIMEOUT, cmd.output()).await {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => return Err(format!("couldn't run gh-agent: {e}")),
+        Err(_) => return Err(format!("the merge took too long: gh-agent didn't answer in {} s. Look at the pull request before trying again", MERGE_TIMEOUT.as_secs())),
+    };
+    let said = bounded_lines(&[out.stderr.as_slice(), out.stdout.as_slice()].concat());
+    if out.status.success() {
+        Ok(said)
+    } else if said.is_empty() {
+        Err("gh-agent could not merge the pull request and said nothing".to_string())
+    } else {
+        Err(said)
+    }
+}
+
+/// The first lines of a command's output, bounded, with the lines that only name the acting identity dropped.
+fn bounded_lines(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("gh-agent:")).take(12).collect();
+    lines.join("\n").chars().take(2000).collect()
 }
 
 /// How long `gh-agent scan-push` may take: the pattern list is cached for a day, but a first read, a visibility lookup and
@@ -283,11 +421,76 @@ mod tests {
 
     #[test]
     fn the_token_and_its_expiry_are_read_from_the_json() {
-        let got = parse(br#"{"token":"ghs_x","expires_at":1793224607,"acting_as":"muxagent[bot]","tier":"shared","owner":"o"}"#).unwrap();
+        let narrowed = |extra: &str| format!(r#"{{"token":"ghs_x","scope":"api","repositories":["hello"]{extra}}}"#);
+        let got = parse(narrowed(r#","expires_at":1793224607,"acting_as":"muxagent[bot]","tier":"shared","owner":"o""#).as_bytes(), Scope::Api, "hello").unwrap();
         assert_eq!((got.token.as_str(), got.expires_at, got.bot_slug.as_deref()), ("ghs_x", 1793224607, Some("muxagent")));
-        assert!(parse(b"not json").is_err());
-        assert!(parse(br#"{"token":""}"#).is_err());
-        assert_eq!(parse(br#"{"token":"t"}"#).unwrap().expires_at, 0);
+        assert!(parse(b"not json", Scope::Api, "hello").is_err());
+        assert!(parse(br#"{"token":""}"#, Scope::Api, "hello").is_err());
+        assert_eq!(parse(narrowed("").as_bytes(), Scope::Api, "HELLO").unwrap().expires_at, 0, "a repository name is not case sensitive");
+    }
+
+    #[test]
+    fn a_token_that_is_not_the_narrowed_one_asked_for_is_never_passed_on() {
+        // An older gh-agent takes --scope for an unknown flag and prints the installation-wide token: no scope field.
+        let wide = br#"{"token":"ghs_WIDE","expires_at":1793224607,"acting_as":"muxagent[bot]","tier":"shared","owner":"o"}"#;
+        assert_eq!(parse(wide, Scope::Api, "hello").err().as_deref(), Some(GH_AGENT_TOO_OLD));
+        assert!(is_too_old(GH_AGENT_TOO_OLD));
+        // The other scope, another repository, more than one repository, or none named.
+        let api = br#"{"token":"t","scope":"api","repositories":["hello"]}"#;
+        assert!(parse(api, Scope::Push, "hello").is_err(), "an api token is not a push token");
+        assert!(parse(api, Scope::Api, "other").is_err());
+        assert!(parse(br#"{"token":"t","scope":"api","repositories":["hello","other"]}"#, Scope::Api, "hello").is_err());
+        assert!(parse(br#"{"token":"t","scope":"api"}"#, Scope::Api, "hello").is_err());
+        assert!(parse(api, Scope::Api, "hello").is_ok());
+    }
+
+    fn merge(method: Option<MergeMethod>, auto: bool, delete_branch: bool) -> MergeRequest {
+        MergeRequest { owner: "agentmuxai".into(), repo: "agentmux".into(), number: 42, method, auto, delete_branch }
+    }
+
+    #[test]
+    fn a_merge_is_run_with_fixed_arguments_and_never_admin() {
+        assert_eq!(merge_args(&merge(None, false, false)), ["pr", "merge", "42", "--repo", "agentmuxai/agentmux"]);
+        assert_eq!(
+            merge_args(&merge(Some(MergeMethod::Squash), true, true)),
+            ["pr", "merge", "42", "--repo", "agentmuxai/agentmux", "--squash", "--auto", "--delete-branch"]
+        );
+        for m in [None, Some(MergeMethod::Merge), Some(MergeMethod::Rebase)] {
+            let args = merge_args(&merge(m, true, true));
+            assert!(!args.iter().any(|a| a == "--admin"), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn only_a_real_repository_and_number_are_merged() {
+        assert!(merge_request_ok(&merge(None, false, false)).is_ok());
+        let mut bad = merge(None, false, false);
+        bad.number = 0;
+        assert!(merge_request_ok(&bad).is_err());
+        for owner in ["", "-x", "a b", "a/b", "--admin"] {
+            let mut r = merge(None, false, false);
+            r.owner = owner.into();
+            assert!(merge_request_ok(&r).is_err(), "{owner:?}");
+        }
+        let mut r = merge(None, false, false);
+        r.repo = "..".into();
+        assert!(merge_request_ok(&r).is_err());
+    }
+
+    #[test]
+    fn what_a_merge_says_is_short_and_without_the_identity_line() {
+        let said = bounded_lines(b"gh-agent: agenta as muxagent[bot] (shared App) -> o [cached]\n\n! Pull request #42 will be added to the merge queue\n");
+        assert_eq!(said, "! Pull request #42 will be added to the merge queue");
+        assert!(bounded_lines(&vec![b'x'; 5000]).chars().count() <= 2000);
+        assert_eq!(bounded_lines(b""), "");
+    }
+
+    #[test]
+    fn every_call_names_its_scope_so_none_can_come_back_installation_wide() {
+        assert_eq!(token_args("o", "r", Scope::Api, false), ["token", "--repo", "o/r", "--scope", "api", "--json"]);
+        assert_eq!(token_args("o", "r", Scope::Push, false), ["token", "--repo", "o/r", "--scope", "push", "--json"]);
+        assert_eq!(token_args("o", "r", Scope::Push, true), ["token", "--repo", "o/r", "--scope", "push", "--workflows", "--json"]);
+        assert!(!token_args("o", "r", Scope::Api, true).contains(&"--workflows".to_string()), "workflows goes only with push");
     }
 
     #[test]
