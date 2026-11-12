@@ -5,14 +5,14 @@ rpc AgentInputHistoryTrash agent=a1
 <div>
   <div class="warden-history-typed">
     <div class="warden-history-bar">
-      <select class="ui-input ui-density-compact" aria-label="Agent">
+      <select class="ui-input ui-density-compact warden-history-select" aria-label="Agent">
         <option value="a1">
           "Alpha"
         <option value="a2">
           "Beta"
         <option value="zz23456789abcdef">
           "zz234567"
-      <span class="ui-filter">
+      <span class="ui-filter warden-history-filter">
         <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
         <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Search what was typed" aria-label="Search what was typed">
       <button type="button" class="ui-button ui-tone-quiet ui-density-compact">

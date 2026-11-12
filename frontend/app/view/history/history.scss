@@ -35,6 +35,13 @@
     min-width: 0;
 }
 
+// The agent picker takes a line of its own when the bar is too narrow to hold it and the search side by side.
+.warden-history-select {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+}
+
 .warden-history-table,
 .warden-history-sessions,
 .warden-history-stores {
@@ -223,6 +230,10 @@ tr[data-deleted] td {
 
     .warden-history-cwd {
         max-width: none;
+        white-space: normal;
+    }
+
+    .warden-history-typed-when {
         white-space: normal;
     }
 }

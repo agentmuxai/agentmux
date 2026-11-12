@@ -20,6 +20,7 @@ export function TypedBar(props: Part): JSX.Element {
     return (
         <div class="warden-history-bar">
             <Select
+                class="warden-history-select"
                 ariaLabel="Agent"
                 density="compact"
                 value={t.agentId()}
@@ -27,7 +28,7 @@ export function TypedBar(props: Part): JSX.Element {
                 disabled={t.list().length === 0}
                 options={t.list().map((a) => ({ value: a.id, label: a.name }))}
             />
-            <FilterInput value={t.query()} onInput={t.setQuery} placeholder="Search what was typed" />
+            <FilterInput class="warden-history-filter" value={t.query()} onInput={t.setQuery} placeholder="Search what was typed" />
             <Button
                 tone="quiet"
                 density="compact"
