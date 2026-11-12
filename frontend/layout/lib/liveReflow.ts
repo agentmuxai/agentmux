@@ -21,6 +21,9 @@
  * moves, so it is left where it is for now. On unless the `layout:livereflow` setting is false.
  * docs/specs/SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md §4, §5, §6;
  * docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md.
+ *
+ * Outside a drag the same entries have a second source: a settling pass (settlingPass.ts), which glides the
+ * panes to the rects a change of the tree has already given them, after a pane closed.
  */
 
 import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
@@ -31,6 +34,7 @@ import { holdPaneSizes } from "@/app/platform/pane-size-hold";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import type { LayoutModel } from "./layoutModel";
+import type { SettlingPass } from "./settlingPass";
 import type { LayoutNode } from "./types";
 
 /** A size in whole CSS px. */
@@ -87,6 +91,16 @@ function shownBlockId(leaf: LayoutNode): string | undefined {
 
 function isBrowserBlock(blockId: string | undefined): boolean {
     return !!blockId && getObjectValue<Block>(makeORef("block", blockId))?.meta?.view === "browser";
+}
+
+/** Whether the reflow can move `leaf`'s tile: every pane but a browser pane, a native window. */
+export function movesWithReflow(leaf: LayoutNode): boolean {
+    return !isBrowserBlock(shownBlockId(leaf));
+}
+
+/** Whether panes glide at all: unless the `layout:livereflow` setting is false. Reactive. */
+export function liveReflowEnabled(): boolean {
+    return getSettingsKeyAtom("layout:livereflow")() !== false;
 }
 
 /** `rect` in the whole px the layout's own transform uses: the corner rounded down, the size up (`setTransform`). */
@@ -177,8 +191,25 @@ function sameTargets(a: Targets | undefined, b: Targets | undefined): boolean {
     return true;
 }
 
+/**
+ * The targets of a settling pass: each pane that changed place stands at the rect it showed for the frame the
+ * pass opens on, so its glide has a start, and goes to its own rect from the next. A pane that was already
+ * gliding has no start of its own: it goes on from where it is drawn. Nothing is shown that the layout does
+ * not already hold, so `showing` stays false.
+ */
+function settlingTargets(pass: SettlingPass | undefined): Targets | undefined {
+    if (!pass) return undefined;
+    const byId: Targets["byId"] = new Map();
+    for (const [id, move] of pass.moves) {
+        const at = pass.gliding || !move.from ? move.to : move.from;
+        const { width, height } = wholePx(at);
+        byId.set(id, { rect: shownPx(at), size: { width, height }, moved: false, leaving: false });
+    }
+    return { byId, showing: false };
+}
+
 /** Run `fn` on the next frame, or at once where there are no frames (a test). Returns what cancels it. */
-function onNextFrame(fn: () => void): () => void {
+export function onNextFrame(fn: () => void): () => void {
     if (typeof requestAnimationFrame !== "function") {
         fn();
         return () => {};
@@ -189,9 +220,6 @@ function onNextFrame(fn: () => void): () => void {
 
 /** The reflow entries for a drag of `model`, kept in the model's reactive owner. */
 export function createLiveReflow(model: LayoutModel): LiveReflow {
-    const setting = getSettingsKeyAtom("layout:livereflow");
-    const enabled = () => setting() !== false;
-
     // Where each tile goes. While a drag is live every pane the reflow can move has a target, even when no
     // candidate is armed (then it is its own layout rect), so a tile's transition stays on from the drag's
     // start to its end and only the end takes it off, in the same batch as the drop's real rects. No drop is
@@ -201,9 +229,9 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
     // A tear-off is shown through the release, until the tree lets the pane go, so the drag being over does
     // not end it (tearOffPreview.ts).
     const targets = createMemo((): Targets | undefined => {
-        if (!enabled()) return undefined;
+        if (!liveReflowEnabled()) return undefined;
         const tearOff = model.tearOffLayout();
-        if (!model.activeDrag() && !tearOff) return undefined;
+        if (!model.activeDrag() && !tearOff) return settlingTargets(model.settlingPass());
         const leafs = model.leafs();
         if (leafs.length > REFLOW_MAX_PANES) return undefined;
         const future = paneCaptureInFlight() ? undefined : (model.futureLayout() ?? tearOff);
@@ -215,7 +243,7 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         }
         const byId: Targets["byId"] = new Map();
         for (const leaf of leafs) {
-            if (isBrowserBlock(shownBlockId(leaf))) continue;
+            if (!movesWithReflow(leaf)) continue;
             const from = current[leaf.id]?.rect;
             if (!from) continue;
             // The dragged pane keeps its node id through the preview: its future rect is the landing rect.
