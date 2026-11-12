@@ -125,7 +125,7 @@ export function AnimationsSection(): JSX.Element {
     const edit = (key: "speed" | "polish", raw: number) => {
         const next = clampPercent(raw, values()[key]);
         const moved = next !== raw;
-        setSnapped(moved ? t("settings.animations.snapped", { raw, next, min: SPEED_MIN, max: SPEED_MAX, step: SPEED_STEP }) : null);
+        setSnapped(moved ? t("settings.animations.snapped", { raw: String(raw), next: String(next), min: String(SPEED_MIN), max: String(SPEED_MAX), step: String(SPEED_STEP) }) : null);
         if (moved) setCorrected((n) => n + 1);
         editAnimation(s(), { [key]: next });
     };
@@ -155,7 +155,7 @@ export function AnimationsSection(): JSX.Element {
                             {helpOf(preset())}
                         </p>
                         <p class="animations-readout" data-testid="animations-readout">
-                            {menuMs() === 0 ? t("settings.animations.readout.instant") : t("settings.animations.readout.ms", { ms: menuMs() })}
+                            {menuMs() === 0 ? t("settings.animations.readout.instant") : t("settings.animations.readout.ms", { ms: String(menuMs()) })}
                         </p>
                     </div>
                 }

@@ -130,6 +130,8 @@ describe("the numbers", () => {
         vi.advanceTimersByTime(600);
         expect(written()[0]).toMatchObject({ "animation:preset": "custom", "animation:speed": 300 });
         expect(screen.getByTestId("animations-snap").textContent).toContain("using 300");
+        // The number the person typed is echoed as typed, with no thousands separator.
+        expect(screen.getByTestId("animations-snap").textContent).toContain("5000 is out of range");
         // The stored number did not change, yet the field no longer shows what was rejected.
         expect(field.value).toBe("300");
         // And it is the same box, still focused: the person can keep typing.
