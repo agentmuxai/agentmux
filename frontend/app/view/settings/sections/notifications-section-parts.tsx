@@ -4,6 +4,7 @@
 // The groups of Settings → Notifications & tray (notifications-section.tsx lays them out): the desktop notifications
 // and what they cover, the test button, the system tray rows and start at login. Each group is its rows, as a fragment.
 
+import { t } from "@/app/i18n/i18n";
 import { Button, Select, TextInput } from "@/app/element/ui";
 import { Show, type JSX } from "solid-js";
 
@@ -32,7 +33,7 @@ export function OsNotificationsGroup(): JSX.Element {
     const osOn = () => (s()["notify:os:enabled"] as boolean | undefined) ?? true;
     return (
         <>
-            <SectionHeader label="Notifications" />
+            <SectionHeader label={t("settings.notifications.group.notifications")} />
             <SettingRow
                 id={NOTIFICATIONS_SETTINGS.osEnabled.id}
                 label={NOTIFICATIONS_SETTINGS.osEnabled.label}
@@ -144,7 +145,7 @@ export function TrayGroup(): JSX.Element {
         <>
             {/* Desktop-only: a host without a tray or login entries doesn't show these. */}
             <Show when={hostHas("tray") || hostHas("autostart")}>
-                <SectionHeader label="System tray" />
+                <SectionHeader label={t("settings.notifications.group.systemTray")} />
             </Show>
             <Show when={hostHas("tray")}>
                 <SettingRow

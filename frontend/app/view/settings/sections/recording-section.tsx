@@ -7,6 +7,7 @@
  * settings.json-only. See docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md
  * for the full design this section implements.
  */
+import { t } from "@/app/i18n/i18n";
 import { Button, Select, TextInput } from "@/app/element/ui";
 import { authHeaders } from "@/app/store/auth-headers";
 import { createSignal, onCleanup, onMount, Show, For, type Accessor, type JSX, type Setter } from "solid-js";
@@ -18,64 +19,64 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createMicLevelMeter, type MicLevelMeter } from "@/app/hook/useMicLevelMeter";
 import { pickMime } from "@/app/hook/whisperVoiceEngine";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 import { MaskedKeyField, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const RECORDING_SETTINGS = {
-    enableVoiceInput: {
+    enableVoiceInput: settingEntry({
         id: "recording.enable_voice_input",
-        label: "Enable voice input",
-        description: "Show the microphone button on agent and terminal panes",
+        labelKey: "settings.recording.enableVoiceInput.label",
+        descriptionKey: "settings.recording.enableVoiceInput.description",
         section: "recording",
         keywords: ["microphone", "speech to text", "dictation", "voice:enabled"],
-    },
-    engine: {
+    }),
+    engine: settingEntry({
         id: "recording.engine",
-        label: "Engine",
-        description: "whisper.cpp runs fully offline; Groq sends audio to Groq's API",
+        labelKey: "settings.recording.engine.label",
+        descriptionKey: "settings.recording.engine.description",
         section: "recording",
-        group: "Transcription engine",
+        groupKey: "settings.recording.group.transcriptionEngine",
         keywords: ["transcription engine", "stt engine", "whisper", "groq", "voice:engine"],
-    },
-    groqApiKey: {
+    }),
+    groqApiKey: settingEntry({
         id: "recording.groq_api_key",
-        label: "Groq API key",
-        description: "Sent once, over HTTPS, from the AgentMux backend on this machine directly to api.groq.com — never to any other AgentMux service.",
+        labelKey: "settings.recording.groqApiKey.label",
+        descriptionKey: "settings.recording.groqApiKey.description",
         section: "recording",
-        group: "Transcription engine",
+        groupKey: "settings.recording.group.transcriptionEngine",
         keywords: ["groq key", "api key", "voice:groqApiKey"],
-    },
-    whisperCliPath: {
+    }),
+    whisperCliPath: settingEntry({
         id: "recording.whisper_cli_path",
-        label: "whisper-cli path",
+        labelKey: "settings.recording.whisperCliPath.label",
         section: "recording",
-        group: "Transcription engine",
+        groupKey: "settings.recording.group.transcriptionEngine",
         keywords: ["whisper path", "local transcription binary", "voice:whisperCliPath"],
-    },
-    model: {
+    }),
+    model: settingEntry({
         id: "recording.model",
-        label: "Model",
-        description: "Auto-downloaded on first use. Only one of Model or Model file path applies at a time — file path takes precedence if both are set.",
+        labelKey: "settings.recording.model.label",
+        descriptionKey: "settings.recording.model.description",
         section: "recording",
-        group: "Transcription engine",
+        groupKey: "settings.recording.group.transcriptionEngine",
         keywords: ["whisper model", "transcription model", "voice:whisperModel"],
-    },
-    modelFilePath: {
+    }),
+    modelFilePath: settingEntry({
         id: "recording.model_file_path",
-        label: "Model file path",
+        labelKey: "settings.recording.modelFilePath.label",
         section: "recording",
-        group: "Transcription engine",
+        groupKey: "settings.recording.group.transcriptionEngine",
         keywords: ["custom model path", "ggml model", "voice:whisperModelPath"],
-    },
-    inputDevice: {
+    }),
+    inputDevice: settingEntry({
         id: "recording.input_device",
-        label: "Input device",
+        labelKey: "settings.recording.inputDevice.label",
         section: "recording",
-        group: "Microphone",
+        groupKey: "settings.recording.group.microphone",
         keywords: ["microphone device", "audio input", "voice:inputDeviceId"],
-    },
+    }),
 } satisfies Record<string, SettingsIndexEntry>;
 
 type PathStatus = "idle" | "checking" | "found" | "not-found";
@@ -397,7 +398,7 @@ function EngineRows(p: {
 }): JSX.Element {
     return (
         <>
-            <SectionHeader label="Transcription engine" />
+            <SectionHeader label={t("settings.recording.group.transcriptionEngine")} />
             <SettingRow
                 id={RECORDING_SETTINGS.engine.id}
                 label={RECORDING_SETTINGS.engine.label}
@@ -438,7 +439,7 @@ function EngineRows(p: {
 function MicrophoneRows(p: { s: SettingsFn; devices: Accessor<MediaDeviceInfo[]> }): JSX.Element {
     return (
         <>
-            <SectionHeader label="Microphone" />
+            <SectionHeader label={t("settings.recording.group.microphone")} />
             <SettingRow
                 id={RECORDING_SETTINGS.inputDevice.id}
                 label={RECORDING_SETTINGS.inputDevice.label}
@@ -463,7 +464,7 @@ function MicTestRows(p: { t: MicTest }): JSX.Element {
     const listeningOrTranscribing = () => p.t.state() === "listening" || p.t.state() === "transcribing";
     return (
         <>
-            <SectionHeader label="Test your microphone" />
+            <SectionHeader label={t("settings.recording.group.testMicrophone")} />
             <div class="setting-mic-test">
                 <Button tone="accent" disabled={listeningOrTranscribing()} onClick={() => void runMicTest(p.t)}>
                     {p.t.state() === "listening" ? "Listening…" : p.t.state() === "transcribing" ? "Transcribing…" : "Start test"}

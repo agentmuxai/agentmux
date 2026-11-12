@@ -1,168 +1,165 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const NOTIFICATIONS_SETTINGS = {
-    showTray: {
+    showTray: settingEntry({
         id: "notifications.show_tray",
-        label: "Show icon in the system tray",
-        description:
-            "Show an AgentMux icon in the system tray (the menu bar on macOS) while AgentMux is running. Always shown while “Keep running after all windows are closed” is on. Applies at the next launch. On Windows 11 new tray icons start in the overflow (^) area — drag it onto the taskbar to keep it visible.",
+        labelKey: "settings.notifications.showTray.label",
+        descriptionKey: "settings.notifications.showTray.description",
         section: "notifications",
-        group: "System tray",
+        groupKey: "settings.notifications.group.systemTray",
         keywords: ["system tray", "tray icon", "menu bar", "notification area", "app:showtray"],
-    },
-    runInBackground: {
+    }),
+    runInBackground: settingEntry({
         id: "notifications.run_in_background",
-        label: "Keep running after all windows are closed",
-        description:
-            "When all windows are closed, AgentMux keeps running in the system tray instead of quitting. Quit it from the tray icon's menu. Applies at the next launch.",
+        labelKey: "settings.notifications.runInBackground.label",
+        descriptionKey: "settings.notifications.runInBackground.description",
         section: "notifications",
-        group: "System tray",
+        groupKey: "settings.notifications.group.systemTray",
         keywords: ["background", "minimize to tray", "close to tray", "keep running", "app:runinbackground"],
-    },
-    autostart: {
+    }),
+    autostart: settingEntry({
         id: "notifications.autostart",
-        label: "Start at login",
-        description:
-            "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch.",
+        labelKey: "settings.notifications.autostart.label",
+        descriptionKey: "settings.notifications.autostart.description",
         section: "notifications",
-        group: "System tray",
+        groupKey: "settings.notifications.group.systemTray",
         keywords: ["auto start", "autostart", "launch at login", "startup", "run at boot", "login items", "app:startatlogin"],
-    },
-    osEnabled: {
+    }),
+    osEnabled: settingEntry({
         id: "notifications.os_enabled",
-        label: "Desktop notifications",
-        description: "Show a system notification when an agent needs you or finishes while you're not looking at it.",
+        labelKey: "settings.notifications.osEnabled.label",
+        descriptionKey: "settings.notifications.osEnabled.description",
         section: "notifications",
-        group: "Notifications",
+        groupKey: "settings.notifications.group.notifications",
         keywords: ["toast", "os notification", "system notification", "alert", "action center", "notify:os:enabled"],
-    },
-    osWhen: {
+    }),
+    osWhen: settingEntry({
         id: "notifications.os_when",
-        label: "When to notify",
-        description: "\u201cWhen AgentMux isn't focused\u201d still alerts you if an agent needs input in a pane you aren't looking at.",
+        labelKey: "settings.notifications.osWhen.label",
+        descriptionKey: "settings.notifications.osWhen.description",
         section: "notifications",
-        group: "Notifications",
+        groupKey: "settings.notifications.group.notifications",
         keywords: ["focus", "background only", "always notify", "notify:os:when"],
-    },
-    osInputWaiting: {
+    }),
+    osInputWaiting: settingEntry({
         id: "notifications.os_input_waiting",
-        label: "Agent has a question",
-        description: "An agent asked a question and is waiting for your answer",
+        labelKey: "settings.notifications.osInputWaiting.label",
+        descriptionKey: "settings.notifications.osInputWaiting.description",
         section: "notifications",
         keywords: ["question", "waiting", "blocked", "notify:os:inputwaiting"],
-    },
-    osTurnCompleted: {
+    }),
+    osTurnCompleted: settingEntry({
         id: "notifications.os_turn_completed",
-        label: "Agent finished",
-        description: "An agent's turn completed",
+        labelKey: "settings.notifications.osTurnCompleted.label",
+        descriptionKey: "settings.notifications.osTurnCompleted.description",
         section: "notifications",
         keywords: ["done", "finished", "complete", "notify:os:turncompleted"],
-    },
-    osTurnCompletedExternal: {
+    }),
+    osTurnCompletedExternal: settingEntry({
         id: "notifications.os_turn_completed_external",
-        label: "Also for turns you didn't start",
-        description: "A turn another agent's message, a service notice, a scheduled run or a finished background task started. Off: it ends quietly unless it needs you",
+        labelKey: "settings.notifications.osTurnCompletedExternal.label",
+        descriptionKey: "settings.notifications.osTurnCompletedExternal.description",
         section: "notifications",
         keywords: ["jekt", "external", "background", "cron", "notify:os:turncompleted:external"],
-    },
-    osTurnErrored: {
+    }),
+    osTurnErrored: settingEntry({
         id: "notifications.os_turn_errored",
-        label: "Agent stopped with an error",
-        description: "An agent's turn ended with an error",
+        labelKey: "settings.notifications.osTurnErrored.label",
+        descriptionKey: "settings.notifications.osTurnErrored.description",
         section: "notifications",
         keywords: ["error", "failure", "crash", "notify:os:turnerrored"],
-    },
-    osAgentCrashed: {
+    }),
+    osAgentCrashed: settingEntry({
         id: "notifications.os_agent_crashed",
-        label: "Agent stopped unexpectedly",
-        description: "Sign-in expired, usage limit, crash — not when you stop it yourself",
+        labelKey: "settings.notifications.osAgentCrashed.label",
+        descriptionKey: "settings.notifications.osAgentCrashed.description",
         section: "notifications",
         keywords: ["crash", "auth expired", "usage limit", "notify:os:agentcrashed"],
-    },
-    osNeedsReview: {
+    }),
+    osNeedsReview: settingEntry({
         id: "notifications.os_needs_review",
-        label: "Message needs your review",
-        description: "An agent received a message it must not act on without you. The notification never shows the message.",
+        labelKey: "settings.notifications.osNeedsReview.label",
+        descriptionKey: "settings.notifications.osNeedsReview.description",
         section: "notifications",
         keywords: ["jekt", "sensitive", "escalate", "review", "notify:os:messageneedsreview"],
-    },
-    osCloudSignedOut: {
+    }),
+    osCloudSignedOut: settingEntry({
         id: "notifications.os_cloud_signed_out",
-        label: "Signed out of MuxBus",
-        description: "Once, when agents stop getting messages from other computers and GitHub until you sign in",
+        labelKey: "settings.notifications.osCloudSignedOut.label",
+        descriptionKey: "settings.notifications.osCloudSignedOut.description",
         section: "notifications",
         keywords: ["muxbus", "cloud", "sign in", "notify:os:cloudsignedout"],
-    },
-    osAccountUnavailable: {
+    }),
+    osAccountUnavailable: settingEntry({
         id: "notifications.os_account_unavailable",
-        label: "Agents out of quota or signed out",
-        description: "Once per account, when its agents hit a weekly limit or need you to sign in again (not for a session limit)",
+        labelKey: "settings.notifications.osAccountUnavailable.label",
+        descriptionKey: "settings.notifications.osAccountUnavailable.description",
         section: "notifications",
         keywords: ["quota", "usage limit", "account", "sign in", "notify:os:accountunavailable"],
-    },
-    osJobFailed: {
+    }),
+    osJobFailed: settingEntry({
         id: "notifications.os_job_failed",
-        label: "A job failed",
-        description: "Once when a scheduled job starts failing, not for every failed run; the job's Kanban task collects the rest",
+        labelKey: "settings.notifications.osJobFailed.label",
+        descriptionKey: "settings.notifications.osJobFailed.description",
         section: "notifications",
         keywords: ["job", "cron", "schedule", "failed", "incident", "notify:os:jobfailed"],
-    },
-    osVaultExpiring: {
+    }),
+    osVaultExpiring: settingEntry({
         id: "notifications.os_vault_expiring",
-        label: "A Vault entry is expiring",
-        description: "14 days before an entry's expiry date, 3 days before and on the day, once each",
+        labelKey: "settings.notifications.osVaultExpiring.label",
+        descriptionKey: "settings.notifications.osVaultExpiring.description",
         section: "notifications",
         keywords: ["vault", "expiry", "expires", "rotate", "key", "token", "notify:os:vaultexpiring"],
-    },
-    pauseAllowAttention: {
+    }),
+    pauseAllowAttention: settingEntry({
         id: "notifications.pause_allow_attention",
-        label: "While paused, still alert when an agent needs me",
-        description: "Pause from the tray icon's menu. Input requests and review requests still get through.",
+        labelKey: "settings.notifications.pauseAllowAttention.label",
+        descriptionKey: "settings.notifications.pauseAllowAttention.description",
         section: "notifications",
-        group: "Notifications",
+        groupKey: "settings.notifications.group.notifications",
         keywords: ["pause", "snooze", "do not disturb", "notify:pause:allowattention"],
-    },
-    taskbarAttention: {
+    }),
+    taskbarAttention: settingEntry({
         id: "notifications.taskbar_attention",
-        label: "Badge the taskbar button",
-        description: "Show a dot on AgentMux's taskbar button, and flash it once, while an agent needs you (Windows)",
+        labelKey: "settings.notifications.taskbarAttention.label",
+        descriptionKey: "settings.notifications.taskbarAttention.description",
         section: "notifications",
         keywords: ["taskbar", "badge", "flash", "overlay", "notify:taskbar:attention"],
-    },
-    quietHours: {
+    }),
+    quietHours: settingEntry({
         id: "notifications.quiet_hours",
-        label: "Quiet hours",
-        description: "Hold notifications back every day during these hours (local time), e.g. 22:00-08:00. Leave empty for none.",
+        labelKey: "settings.notifications.quietHours.label",
+        descriptionKey: "settings.notifications.quietHours.description",
         section: "notifications",
-        group: "Notifications",
+        groupKey: "settings.notifications.group.notifications",
         keywords: ["do not disturb", "night", "schedule", "sleep", "notify:quiethours"],
-    },
-    osSummary: {
+    }),
+    osSummary: settingEntry({
         id: "notifications.os_summary",
-        label: "Show what the agent is working on",
-        description: "Add the agent's current session summary as a small line under the notification",
+        labelKey: "settings.notifications.osSummary.label",
+        descriptionKey: "settings.notifications.osSummary.description",
         section: "notifications",
         keywords: ["summary", "subtext", "context", "task", "notify:os:summary"],
-    },
-    osPreview: {
+    }),
+    osPreview: settingEntry({
         id: "notifications.os_preview",
-        label: "Notification content",
-        description: "How much of an agent's question to show. Credentials and sensitive terms are always hidden.",
+        labelKey: "settings.notifications.osPreview.label",
+        descriptionKey: "settings.notifications.osPreview.description",
         section: "notifications",
-        group: "Notifications",
+        groupKey: "settings.notifications.group.notifications",
         keywords: ["privacy", "preview", "lock screen", "notify:os:preview"],
-    },
-    osTest: {
+    }),
+    osTest: settingEntry({
         id: "notifications.os_test",
-        label: "Send test notification",
-        description: "Check that notifications reach your desktop (Windows Focus / Do Not Disturb may hold it in the notification center).",
+        labelKey: "settings.notifications.osTest.label",
+        descriptionKey: "settings.notifications.osTest.description",
         section: "notifications",
-        group: "Notifications",
+        groupKey: "settings.notifications.group.notifications",
         keywords: ["test toast", "try notification"],
-    },
+    }),
 } satisfies Record<string, SettingsIndexEntry>;
