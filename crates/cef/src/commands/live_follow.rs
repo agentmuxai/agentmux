@@ -200,6 +200,8 @@ mod win {
         /// out of the monitor agentmux is running on, so it behaves like a typical edge of the screen").
         /// A window tab has none: it is torn off onto whichever monitor it is carried to.
         home: Option<(i32, i32, i32, i32)>,
+        /// Where the hook last saw the cursor, screen pixels: a new size is placed around it (`resize`).
+        cursor: Option<(i32, i32)>,
         shown: bool,
         /// Where the picture was last put (clamped to the work area).
         last: (i32, i32),
@@ -217,6 +219,9 @@ mod win {
     struct Repaint {
         bgra: Vec<u8>,
         size: (i32, i32),
+        /// Where the picture goes at this size, when it is on screen: put there in the same call that paints
+        /// it, so it never shows at its new size in its old place.
+        at: Option<(i32, i32)>,
     }
 
     fn wide(s: &str) -> Vec<u16> {
@@ -290,6 +295,7 @@ mod win {
             source_size: size,
             tear_line_y,
             home,
+            cursor: None,
             shown: false,
             last: (0, 0),
             landed: false,
@@ -325,7 +331,9 @@ mod win {
 
     /// Give the picture another size (`windowWidth`, `windowHeight`, DIP): the rect the drop would give the
     /// pane while one is armed, or the pane's own size again (pane-live-follow.ts). The picture is resized
-    /// from the one first shown, and the cursor keeps its place on the pane.
+    /// from the one first shown, and the cursor keeps its place on the pane: the picture takes its new size
+    /// around the cursor, where it last was. A drop arms while the pointer rests, so no move would bring a
+    /// picture that changed size around its own corner back under the pointer.
     /// Composed outside the follower's lock, which the hook thread takes on every move.
     pub fn resize(args: &serde_json::Value) -> Result<serde_json::Value, String> {
         let (hwnd, size, source, source_size) = {
@@ -347,7 +355,11 @@ mod win {
         let Some(f) = guard.as_mut().filter(|f| f.hwnd == hwnd) else { return Ok(serde_json::Value::Null) };
         f.size = size;
         f.offset = super::offset_within(f.grab, f.source_size, size);
-        *PENDING_REPAINT.lock().map_err(|_| "repaint state poisoned".to_string())? = Some(Repaint { bgra, size });
+        let at = if f.shown { f.cursor.map(|cursor| place(cursor, f.offset, size, f.home)) } else { None };
+        if let Some(at) = at {
+            f.last = at;
+        }
+        *PENDING_REPAINT.lock().map_err(|_| "repaint state poisoned".to_string())? = Some(Repaint { bgra, size, at });
         unsafe { PostMessageW(hwnd as HWND, WM_FOLLOW_RESIZE, 0, 0) };
         Ok(serde_json::Value::Null)
     }
@@ -357,6 +369,7 @@ mod win {
     pub fn on_cursor(x: i32, y: i32, over_other_window: bool) {
         let Ok(mut guard) = FOLLOWER.try_lock() else { return };
         let Some(f) = guard.as_mut() else { return };
+        f.cursor = Some((x, y));
         let hwnd = f.hwnd as HWND;
         if !super::picture_wanted(y, f.tear_line_y, over_other_window) {
             if f.shown {
@@ -518,7 +531,7 @@ mod win {
         if hwnd.is_null() {
             return Err(format!("CreateWindowExW failed: {}", GetLastError()));
         }
-        if let Err(e) = paint(hwnd, bgra, size) {
+        if let Err(e) = paint(hwnd, bgra, size, None) {
             DestroyWindow(hwnd);
             return Err(e);
         }
@@ -526,8 +539,9 @@ mod win {
         Ok(hwnd)
     }
 
-    /// Show `bgra` (`size`) in the layered window, at the size given: the window takes that size with it.
-    unsafe fn paint(hwnd: HWND, bgra: &[u8], size: (i32, i32)) -> Result<(), String> {
+    /// Show `bgra` (`size`) in the layered window, at the size given: the window takes that size with it, and
+    /// the place `at` in the same step when one is given (it stays where it is otherwise).
+    unsafe fn paint(hwnd: HWND, bgra: &[u8], size: (i32, i32), at: Option<(i32, i32)>) -> Result<(), String> {
         let (w, h) = size;
         let screen = GetDC(std::ptr::null_mut());
         let mem = CreateCompatibleDC(screen);
@@ -554,7 +568,9 @@ mod win {
             let dest_size = SIZE { cx: w, cy: h };
             let src = POINT { x: 0, y: 0 };
             let blend = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: 0 };
-            let ok = UpdateLayeredWindow(hwnd, screen, std::ptr::null(), &dest_size, mem, &src, 0, &blend, ULW_ALPHA);
+            let dest = at.map(|(x, y)| POINT { x, y });
+            let dest_ptr = dest.as_ref().map_or(std::ptr::null(), |p| p as *const POINT);
+            let ok = UpdateLayeredWindow(hwnd, screen, dest_ptr, &dest_size, mem, &src, 0, &blend, ULW_ALPHA);
             SelectObject(mem, old);
             result = if ok != 0 { Ok(()) } else { Err(format!("UpdateLayeredWindow failed: {}", GetLastError())) };
         }
@@ -584,7 +600,7 @@ mod win {
             WM_FOLLOW_RESIZE => {
                 let taken = PENDING_REPAINT.lock().ok().and_then(|mut g| g.take());
                 if let Some(repaint) = taken {
-                    if let Err(e) = paint(hwnd, &repaint.bgra, repaint.size) {
+                    if let Err(e) = paint(hwnd, &repaint.bgra, repaint.size, repaint.at) {
                         tracing::warn!(target: "dnd:tearoff", error = %e, "[live-follow] the picture could not be resized");
                     }
                 }
@@ -662,6 +678,20 @@ mod tests {
         assert_eq!(offset_within(grab, (1000, 800), (1000, 800)), (500, 30));
         // Kept inside the picture.
         assert_eq!(offset_within((1200, -5), (1000, 800), (500, 400)), (499, 0));
+    }
+
+    #[test]
+    fn a_resized_picture_is_placed_around_the_cursor_not_around_its_own_corner() {
+        // A 1000 by 800 pane pressed near its right end, on a monitor it is well inside.
+        let (cursor, grab, own, home) = ((1500, 600), (900, 40), (1000, 800), (0, 0, 3840, 2100));
+        let at_full = place_within(cursor, offset_within(grab, own, own), own, home);
+        assert_eq!(at_full, (600, 560));
+        // At half the size, with the cursor where it was, the corner moves toward the cursor: the spot that
+        // was pressed is still under it. Left at its old corner, the picture would be 450 px from the cursor.
+        let half = (500, 400);
+        let at_half = place_within(cursor, offset_within(grab, own, half), half, home);
+        assert_eq!(at_half, (1050, 580));
+        assert_eq!((cursor.0 - at_half.0, cursor.1 - at_half.1), (450, 20));
     }
 
     /// A 4 by 2 BGRA picture whose pixel (x, y) is (10x, 100y, 7, 255), so a resize is read back by value.
