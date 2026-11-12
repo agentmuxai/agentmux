@@ -50,10 +50,12 @@ pub struct RunHandle {
 
 /// Run the drone end-to-end. Returns a handle whose `events` channel
 /// surfaces per-block lifecycle, and a `final_states` mutex callers can
-/// snapshot for the run-history record.
+/// snapshot for the run-history record. `trigger` is what started the run
+/// (`{{trigger.*}}`); `Null` when nothing did.
 pub async fn run_drone(
     drone_id: String,
     graph: DroneGraph,
+    trigger: Value,
 ) -> Result<RunHandle, String> {
     let run_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::unbounded_channel();
@@ -69,7 +71,7 @@ pub async fn run_drone(
             run_id: run_id_for_task.clone(),
             drone_id: drone_id_for_evt,
         });
-        match execute(&run_id_for_task, &graph, &tx_for_task, &states_for_task).await {
+        match execute(&run_id_for_task, (&graph, trigger), &tx_for_task, &states_for_task).await {
             Ok(output) => {
                 let _ = tx_for_task.send(RunEvent::RunDone {
                     run_id: run_id_for_task,
@@ -94,7 +96,7 @@ pub async fn run_drone(
 
 async fn execute(
     run_id: &str,
-    graph: &DroneGraph,
+    (graph, trigger): (&DroneGraph, Value),
     tx: &mpsc::UnboundedSender<RunEvent>,
     final_states: &Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>,
 ) -> Result<Value, String> {
@@ -103,7 +105,7 @@ async fn execute(
     }
 
     let layers = topological_layers(graph)?;
-    let mut scope = ExecutionScope::new();
+    let mut scope = ExecutionScope::with_trigger(trigger);
     let mut response_output: Option<Value> = None;
     let nodes_by_id: HashMap<String, &FlowNode> =
         graph.nodes.iter().map(|n| (n.id.clone(), n)).collect();
@@ -626,7 +628,7 @@ mod tests {
             edges: vec![e("e1", "v1", "r1")],
         };
 
-        let handle = run_drone("wf1".to_string(), g).await.unwrap();
+        let handle = run_drone("wf1".to_string(), g, Value::Null).await.unwrap();
         let mut rx = handle.events;
         while let Some(ev) = rx.recv().await {
             if matches!(ev, RunEvent::RunDone { .. } | RunEvent::RunFailed { .. }) {
@@ -672,6 +674,25 @@ mod tests {
         assert_eq!(parsed.source_handle.as_deref(), Some("true"));
     }
 
+    /// `{{trigger.*}}` reads what started the run; with nothing it stays visible.
+    #[tokio::test]
+    async fn a_run_reads_its_trigger() {
+        let mut resp = n("r1", "response");
+        resp.data = json!({ "kind": "response", "template": "{{trigger.repo}}#{{trigger.pr.number}} {{trigger.none}}" });
+        let g = DroneGraph { nodes: vec![resp], edges: vec![] };
+        let input = json!({ "repo": "agentmux", "pr": { "number": 12 } });
+        let mut handle = run_drone("wf1".to_string(), g, input).await.unwrap();
+        let mut out = None;
+        while let Some(ev) = handle.events.recv().await {
+            match ev {
+                RunEvent::RunDone { output, .. } => out = Some(output),
+                RunEvent::RunFailed { error, .. } => panic!("run failed: {error}"),
+                _ => {}
+            }
+        }
+        assert_eq!(out, Some(json!("agentmux#12 {{trigger.none}}")));
+    }
+
     #[tokio::test]
     async fn execute_skips_pruned_branch_end_to_end() {
         // Variables(v=10) → Condition({{var.v}} < 5) → Response("hit_true")
@@ -713,7 +734,7 @@ mod tests {
             ],
         };
 
-        let handle = run_drone("wf1".to_string(), g).await.unwrap();
+        let handle = run_drone("wf1".to_string(), g, Value::Null).await.unwrap();
         // Drain events to completion.
         let mut rx = handle.events;
         let mut got_done_ids: Vec<String> = Vec::new();

@@ -77,13 +77,28 @@ fn defaults_fill_what_a_definition_leaves_out() {
 /// The kinds reserved for later phases validate as kinds and are refused
 /// with "available in a later version" (§6).
 #[test]
-fn event_triggers_drone_actions_and_approvals_are_for_later() {
+fn event_triggers_and_approvals_are_for_later() {
     let e = refused(with(example(), "/trigger", json!({ "kind": "event", "source": "github", "filter": {} })));
     assert_eq!(e, "trigger kind event is available in a later version");
-    let e = refused(with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" })));
-    assert_eq!(e, "action kind drone is available in a later version");
     let e = refused(with(example(), "/policy/approval", json!("operator")));
     assert!(e.contains("policy.approval") && e.contains(LATER), "{e}");
+}
+
+/// A `drone` action names its drone, and runs on any trigger.
+#[test]
+fn a_drone_action_needs_a_drone_and_takes_no_other_field() {
+    let mut ok = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" }));
+    ok["policy"] = json!({ "overlap": "skip" });
+    let def = JobDefinition::parse(&ok, create()).unwrap();
+    assert_eq!(def.action, Action::Drone { drone_id: "d-1".into() });
+    assert!(!def.action.starts_an_agent());
+    // The example's policy asks for retries and a timeout, which a drone run can't have yet.
+    let drone = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" }));
+    assert!(refused(drone).contains("timeout_minutes"));
+    let blank = with(example(), "/action", json!({ "kind": "drone", "drone_id": " " }));
+    assert_eq!(refused(blank), "action: drone needs a drone_id");
+    let extra = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1", "brief": "x" }));
+    assert!(refused(extra).contains("brief"));
 }
 
 /// The definition reads a template pin; whether the template exists and is

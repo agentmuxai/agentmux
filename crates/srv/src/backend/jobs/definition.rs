@@ -8,7 +8,7 @@
 //!
 //! [`JobDefinition::parse`] is the strict reading, for definitions a caller
 //! sends: unknown fields are refused, and so are the kinds reserved for later
-//! phases (§6): `trigger.kind: event`, `action.kind: drone`, and any
+//! phases (§6): `trigger.kind: event` and any
 //! `policy.approval` but `none`. A stored row is read leniently
 //! (`storage::cron`), so a newer build's extra field doesn't lose the row.
 
@@ -145,7 +145,8 @@ pub enum Action {
         #[serde(default)]
         keep_worker: bool,
     },
-    /// Reserved, P4: refused by [`JobDefinition::parse`].
+    /// Runs the Drone `drone_id`: the run's input is what fired the job
+    /// (`{{trigger.*}}`).
     Drone {
         #[serde(default)]
         drone_id: String,
@@ -297,6 +298,7 @@ fn action_keys(kind: &str) -> &'static [&'static str] {
         action_kind::MESSAGE => &["kind", "to", "brief"],
         action_kind::TASK => &["kind", "title", "payload", "target"],
         action_kind::SPAWN => &["kind", "leader", "brief", "model", "account", "keep_worker"],
+        action_kind::DRONE => &["kind", "drone_id"],
         _ => &["kind"],
     }
 }
@@ -334,9 +336,6 @@ impl JobDefinition {
         if trigger == trigger_kind::EVENT {
             return Err(format!("trigger kind event is {LATER}"));
         }
-        if action == action_kind::DRONE {
-            return Err(format!("action kind drone is {LATER}"));
-        }
         known_keys(value.get("trigger"), trigger_keys(trigger), "trigger.")?;
         known_keys(value.get("action"), action_keys(action), "action.")?;
         known_keys(value.get("policy"), POLICY_KEYS, "policy.")?;
@@ -370,8 +369,29 @@ impl JobDefinition {
         self.validate_trigger(check)?;
         self.validate_action()?;
         self.policy.validate()?;
+        self.validate_drone_policy()?;
         validate_outputs(&self.outputs)?;
         validate_secrets(&self.secrets)
+    }
+
+    /// A Drone run can't be stopped or run again yet, and each of those
+    /// would close the job's row while the drone goes on, so a drone job
+    /// can't ask for them until the engine can cancel a run.
+    fn validate_drone_policy(&self) -> Result<(), String> {
+        if !matches!(self.action, Action::Drone { .. }) {
+            return Ok(());
+        }
+        let p = &self.policy;
+        if p.timeout_minutes.is_some() {
+            return Err(format!("policy.timeout_minutes: a drone run can't be stopped yet, so a timeout can't end it; leave it unset (stopping runs is {LATER})"));
+        }
+        if p.overlap == Overlap::CancelOther {
+            return Err(format!("policy.overlap: cancel_other would have to stop the earlier drone run, which can't be stopped yet; use skip or buffer_one (stopping runs is {LATER})"));
+        }
+        if p.retries > 0 {
+            return Err(format!("policy.retries: a failed drone run is not run again yet; leave retries at 0 and run it again by hand (retries are {LATER})"));
+        }
+        Ok(())
     }
 
     fn validate_trigger(&self, check: Check) -> Result<(), String> {
@@ -413,7 +433,7 @@ impl JobDefinition {
             Action::Spawn { leader, brief, .. } if blank(leader) || blank(brief) => {
                 Err("action: spawn needs leader and brief".to_string())
             }
-            Action::Drone { .. } => Err(format!("action kind drone is {LATER}")),
+            Action::Drone { drone_id } if blank(drone_id) => Err("action: drone needs a drone_id".to_string()),
             _ => Ok(()),
         }
     }

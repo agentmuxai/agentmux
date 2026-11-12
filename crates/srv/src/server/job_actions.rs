@@ -4,7 +4,7 @@
 //! The job actions that need the server: `task` files a task on the Kanban
 //! as `kanban.act` does, `spawn` opens a worker through the spawn path
 //! (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.1 "Actions").
-//! `message` is the scheduler's own delivery.
+//! `drone` starts a Drone run. `message` is the scheduler's own delivery.
 
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ const FILED_BY: &str = "jobs";
 /// The task's `kind`.
 const TASK_KIND: &str = "job";
 
-/// Run `task` and `spawn` actions in this server from now on.
+/// Run `task`, `spawn` and `drone` actions in this server from now on.
 pub(crate) fn install(state: &AppState) {
     let st = state.clone();
     state.cron_scheduler.install_actions(Arc::new(move |job, run_id| {
@@ -61,9 +61,38 @@ pub(crate) async fn run_action(state: &AppState, job: CronJob, run_id: &str) -> 
                 Err(e) => ActionOutcome::Failed(e),
             }
         }
+        Ok(Action::Drone { drone_id }) => {
+            // A drone run can spend (its Agent blocks) and a timer repeats it. Until
+            // an agent's drone job gets a notice with a veto window and run limits,
+            // only the person's runs (a temporary gate, not a rule).
+            if !operator_made(&job) {
+                return ActionOutcome::Failed("a drone job made by an agent doesn't run yet (temporary: its Agent blocks spend, and agent-made drone jobs get a notice with a veto window and run limits in the next change). Ask the person to create it in the Jobs tab".to_string());
+            }
+            if run_id.is_empty() {
+                return ActionOutcome::Failed("a drone job runs only with a ledger row to follow it".to_string());
+            }
+            let trigger = drone_trigger(state, &job, run_id);
+            match super::drone_handlers::start_job_drone_run(state, &drone_id, trigger, run_id).await {
+                Ok(_) => ActionOutcome::Drone,
+                Err(e) => ActionOutcome::Failed(e),
+            }
+        }
         Ok(other) => ActionOutcome::Failed(format!("action kind {} has nothing to run here", other.kind())),
         Err(e) => ActionOutcome::Failed(format!("the job's action doesn't read: {e}")),
     }
+}
+
+/// What a job hands the drone it runs, read as `{{trigger.*}}`: how the run
+/// started (`schedule`, `manual`, `retry`), the job, and the slot it was due.
+fn drone_trigger(state: &AppState, job: &CronJob, run_id: &str) -> serde_json::Value {
+    let run = state.cron_scheduler.runs().and_then(|l| l.store().job_run_get(run_id).ok().flatten());
+    serde_json::json!({
+        "kind": run.as_ref().map_or(jobs::TRIGGER_MANUAL, |r| r.trigger.as_str()),
+        "job": { "id": job.id, "name": job.name },
+        "run_id": run_id,
+        "scheduled_for_ms": run.as_ref().and_then(|r| r.scheduled_for_ms),
+        "fired_at_ms": now_ms(),
+    })
 }
 
 /// Whether the operator created `job`: it carries no agent's UID.

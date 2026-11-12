@@ -709,6 +709,7 @@ partial list.
 | [`SPEC_DOCUMENT_PANES_MERGE_DOCUMENT_TABS_2026_10_30`](SPEC_DOCUMENT_PANES_MERGE_DOCUMENT_TABS_2026_10_30.md) | Two Editor panes that end up as tabs of one pane merge into one Editor |
 | [`SPEC_DOCUMENT_TABS_2026_10_02`](SPEC_DOCUMENT_TABS_2026_10_02.md) | SPEC: Document tabs: one shared tab system for the documents inside a pane |
 | [`SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13`](SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md) | Drag space in the window and pane headers: does it need a grip? |
+| [`SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11`](SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md) | SPEC: Drone for real-world jobs: triggers across tiers, cloud nodes, and Drone as a job action |
 | [`SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21`](SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md) | Spec: The drop target lands inverted — a pane tab dragged over another pane's tab bar flashes once and then stays in the negative until the drag ends |
 | [`SPEC_DROP_THE_AGENT_STASH_2026_10_24`](SPEC_DROP_THE_AGENT_STASH_2026_10_24.md) | Spec: drop the agent Stash, and give each of its tabs a home it already half has |
 | [`SPEC_DURABLE_BINDINGS_2026_09_10`](SPEC_DURABLE_BINDINGS_2026_09_10.md) | Spec: Durable Bindings |
