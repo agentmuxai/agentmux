@@ -23,6 +23,10 @@ export interface VaultInput {
     kept?: boolean;
     /** A browser profile, chosen from a list: whose tabs may use a login. */
     profile?: boolean;
+    /** Not typed or shown: srv still reads it (a card's older single expiry). */
+    legacy?: boolean;
+    /** An on/off switch, saved as "yes" or left out. */
+    toggle?: boolean;
 }
 
 export interface VaultKind {
@@ -61,12 +65,23 @@ export const VAULT_KINDS: VaultKind[] = [
         label: "Payment card",
         section: "cards",
         parts: [
-            { name: "number", label: "Card number" },
-            { name: "expiry", label: "Expiry", placeholder: "MM/YY" },
+            { name: "number", label: "Card number", placeholder: "1234 5678 9012 3456" },
+            // The form draws these two as a month and a year choice; srv keeps them apart (card.rs).
+            { name: "exp_month", label: "Expiry" },
+            { name: "exp_year", label: "Expiry year" },
+            { name: "expiry", label: "Expiry", legacy: true },
             { name: "cvc", label: "Security code" },
             { name: "name", label: "Name on card" },
+            { name: "zip", label: "Billing ZIP or postal code" },
         ],
-        fields: [OWNER, NOTES],
+        fields: [
+            OWNER,
+            // Worked out by srv from the number and the expiry on every save: shown, not typed.
+            { name: "brand", label: "Brand", kept: true },
+            { name: "default", label: "Default card", toggle: true },
+            { name: "expires", label: "Expires", kept: true },
+            NOTES,
+        ],
     },
     {
         name: "bank-account",

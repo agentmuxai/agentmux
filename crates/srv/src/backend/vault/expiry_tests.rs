@@ -308,16 +308,50 @@ fn an_expired_entry_stays_usable_and_its_uses_say_so() {
 }
 
 #[test]
-fn a_card_and_an_entry_without_a_date_get_no_reminder() {
+fn an_entry_without_a_date_gets_no_reminder() {
     let s = store();
-    let card = NewEntry {
-        kind: "card".into(),
-        label: "Visa".into(),
-        fields: Default::default(),
-        tags: vec![],
-        parts: seal::Parts([("number".to_string(), "4111111111111111".to_string()), ("expiry".to_string(), "11/26".to_string())].into()),
-    };
-    create(&s, card).unwrap();
     create(&s, NewEntry { fields: Default::default(), ..key("No date", "2026-01-01") }).unwrap();
     assert!(due(&s, day("2026-11-01")).unwrap().is_empty());
+}
+
+fn visa(label: &str, parts: &[(&str, &str)]) -> NewEntry {
+    let mut all = vec![("number", "4111111111111111")];
+    all.extend_from_slice(parts);
+    NewEntry {
+        kind: "card".into(),
+        label: label.into(),
+        fields: Default::default(),
+        tags: vec![],
+        parts: seal::Parts(all.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()),
+    }
+}
+
+#[test]
+fn a_card_is_reminded_of_its_last_day_but_no_rotation_task_is_filed_for_it() {
+    let (s, (work, _dir)) = (store(), work());
+    create(&s, visa("Visa", &[("exp_month", "11"), ("exp_year", "2026")])).unwrap();
+    create(&s, visa("Older Visa", &[("expiry", "11/26")])).unwrap();
+    assert!(send(&s, Some(&work), day("2026-10-01")).unwrap().notices.is_empty(), "a month out: nothing yet");
+
+    let sent = send(&s, Some(&work), day("2026-11-20")).unwrap();
+    assert_eq!(sent.notices.len(), 2, "the older single expiry is read too");
+    assert!(
+        sent.notices.iter().all(|(d, text)| !d.rotates && text == "Expires in 10 days, on 2026-11-30."),
+        "{:?}",
+        sent.notices.iter().map(|n| &n.1).collect::<Vec<_>>()
+    );
+    assert!(!sent.filed);
+    assert!(tasks(&work).is_empty(), "the person replaces a card with the bank, so no agent is asked to");
+
+    assert!(send(&s, Some(&work), day("2026-11-20")).unwrap().notices.is_empty(), "each reminder is sent once");
+    assert_eq!(send(&s, Some(&work), day("2026-11-30")).unwrap().notices.len(), 2, "and again on the day");
+}
+
+#[test]
+fn a_card_is_expired_from_the_first_day_of_the_month_after() {
+    let s = store();
+    let id = create(&s, visa("Visa", &[("exp_month", "03"), ("exp_year", "2027")])).unwrap();
+    let row = s.vault_get(&id).unwrap().unwrap();
+    assert!(!expired(&row, day("2027-03-31")));
+    assert!(expired(&row, day("2027-04-01")));
 }

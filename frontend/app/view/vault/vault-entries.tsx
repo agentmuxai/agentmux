@@ -7,7 +7,7 @@
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import { Button, FilterInput, IconButton } from "@/app/element/ui";
+import { Button, FilterInput, IconButton, Pill } from "@/app/element/ui";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
@@ -15,6 +15,7 @@ import { VaultHistoryDialog } from "./vault-history";
 import { VaultRevealDialog } from "./vault-reveal";
 import { VaultVersionsDialog } from "./vault-versions";
 import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
+import { CARD_BRANDS } from "./vault-card";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
 import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { EntryGrants } from "./vault-entry-grants";
@@ -67,6 +68,11 @@ function EntryDetails(props: { entry: VaultEntryInfo; showVault: boolean }): JSX
             <Show when={expiryOf(props.entry.fields.expires)}>
                 {(x) => (
                     <div class={x().warn ? "vault-expiry vault-expiry-warn" : "vault-expiry"} {...tip(props.entry.fields.expires)}>
+                        <Show when={props.entry.kind === "card" && x().days < 0}>
+                            <Pill tone="error" icon="triangle-exclamation">
+                                Expired
+                            </Pill>{" "}
+                        </Show>
                         {x().text}
                     </div>
                 )}
@@ -176,6 +182,9 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                 <tr data-entry={e.id}>
                                     <td>
                                         <span>{e.label}</span>
+                                        <Show when={e.kind === "card" && e.fields.default === "yes"}>
+                                            <Pill tone="accent">Default</Pill>
+                                        </Show>
                                         <span class="warden-manager-mono warden-manager-dim vault-id">{e.id}</span>
                                         <EntryGrants entry={e} revoke={(grant) => void revoke(e.id, grant)} />
                                     </td>
@@ -183,7 +192,12 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                     <td class="warden-manager-dim">
                                         <EntryDetails entry={e} showVault={!props.vault} />
                                     </td>
-                                    <td class="warden-manager-mono">{e.tail ? `•••• ${e.tail}` : "••••"}</td>
+                                    <td class="warden-manager-mono">
+                                        <Show when={e.kind === "card" && CARD_BRANDS[e.fields.brand ?? ""]}>
+                                            {(brand) => <Pill>{brand()}</Pill>}
+                                        </Show>{" "}
+                                        {e.tail ? `•••• ${e.tail}` : "••••"}
+                                    </td>
                                     <td class="warden-manager-dim">{formatWhen(e.updated_at)}</td>
                                     <td class="vault-actions">
                                         <IconButton icon="eye" label="Show or copy" density="compact" onClick={() => setRevealing(e)} />

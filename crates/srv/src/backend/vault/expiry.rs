@@ -165,6 +165,8 @@ pub struct Due {
     pub first: bool,
     /// The agent that made or last replaced the value, if one did.
     pub agent: Option<String>,
+    /// Whether a rotation task is filed: not for a card, which the person replaces with the bank.
+    pub rotates: bool,
 }
 
 /// The reminders due today that haven't been sent.
@@ -185,7 +187,8 @@ pub fn due(store: &Store, today: NaiveDate) -> Result<Vec<Due>, String> {
         // The latest line that made the value.
         let made = store.vault_activity_for_entry(&row.id, MADE, row.created_at, 1).map_err(|e| e.to_string())?;
         let agent = made.into_iter().next().map(|l| l.actor).filter(|a| a != PERSON && !a.is_empty());
-        out.push(Due { id: row.id, label: row.label, date, days_left, stage, first: !sent.iter().any(|t| t.contains(TASK_MARK)), agent });
+        let rotates = row.kind != super::card::KIND;
+        out.push(Due { id: row.id, label: row.label, date, days_left, stage, first: !sent.iter().any(|t| t.contains(TASK_MARK)), agent, rotates });
     }
     Ok(out)
 }
@@ -264,7 +267,7 @@ pub fn send(store: &Store, work: Option<&Store>, today: NaiveDate) -> Result<Sen
     let mut sent = Sent { notices: Vec::new(), filed: false };
     for d in due(store, today)? {
         let mut target = reminder_key(d.date, d.stage);
-        if d.first {
+        if d.first && d.rotates {
             if let Some(work) = work {
                 match file_task(work, &d, now_ms()) {
                     Ok(num) => {
