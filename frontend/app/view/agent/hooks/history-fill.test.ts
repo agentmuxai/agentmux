@@ -145,6 +145,21 @@ describe("runHistoryFill", () => {
         expect(reads).toHaveBeenCalledTimes(1);
     });
 
+    it("looks again, without counting a page, when a page found the hold conditions back at its turn", async () => {
+        let answers = 0;
+        const h = harness(3_000, {
+            page: vi.fn(async (maxLines: number) => {
+                if (++answers === 1) return { lines: 0, bytes: 0, held: true };
+                h.move(maxLines);
+                return { lines: maxLines, bytes: maxLines * 100 };
+            }),
+        });
+        const out = await runHistoryFill(h.deps);
+        expect(h.deps.page).toHaveBeenCalledTimes(3);
+        expect(out).toEqual({ outcome: "done", pages: 2, lines: 3_000, bytes: 300_000 });
+        expect(h.offset()).toBe(0);
+    });
+
     it("ends as stopped when the pane closes, between pages", async () => {
         let closed = false;
         const h = harness(10_000, { stopped: () => closed });

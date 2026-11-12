@@ -78,6 +78,8 @@ export interface FillPageResult {
     bytes: number;
     /** The page was cut by the byte budget, so nothing older is wanted. */
     last?: boolean;
+    /** Nothing was read: the conditions that make the fill hold had come back by the time the page's turn came. The loop looks again. */
+    held?: boolean;
 }
 
 export interface FillDeps {
@@ -130,6 +132,7 @@ export async function runHistoryFill(deps: FillDeps): Promise<FillOutcome> {
         if (deps.holding()) continue;
         const res = await deps.page(Math.min(deps.pageLines, room));
         if (res === null) return { ...out, outcome: deps.stopped() ? "stopped" : "failed" };
+        if (res.held) continue;
         // A page that moved nothing would repeat forever.
         if (deps.offset() >= room + deps.plan.floorLine) return { ...out, outcome: "failed" };
         out.pages++;
