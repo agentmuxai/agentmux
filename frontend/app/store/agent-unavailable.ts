@@ -15,8 +15,19 @@ import type { UnavailableReason } from "./agent-status";
 /** The block meta key srv stores the last classified failure under. */
 export const META_LAST_FAILURE = "agent:last_failure";
 
+/** The title srv gives a usage limit whose cause is a model route with no credits left (`agents/failure.rs`). */
+export const ROUTE_CREDITS_TITLE = "The model route is out of credits";
+
+/** Whether the pane's stored failure is the route-out-of-credits one, not a plan's quota. */
+export function isRouteCredits(meta: Record<string, unknown> | null | undefined): boolean {
+    const failure = meta?.[META_LAST_FAILURE] as { code?: unknown; title?: unknown } | null | undefined;
+    return failure?.code === "usage_limit" && failure.title === ROUTE_CREDITS_TITLE;
+}
+
 export interface AgentUnavailable {
     reason: UnavailableReason;
+    /** The route's balance stopped it, not a plan's quota: its time is only when a message may try again. */
+    routeCredits?: true;
     /** When the limit lifts (Unix ms), if the provider said. */
     resetsAtMs?: number;
     /** The provider's name for the limit's window, such as `five_hour` or `seven_day`. */
@@ -49,6 +60,7 @@ export function unavailableOfMeta(
     if (resets !== undefined && resets <= now) return null;
     return {
         reason: "limited",
+        ...(isRouteCredits(meta) ? { routeCredits: true as const } : {}),
         ...(resets !== undefined ? { resetsAtMs: resets } : {}),
         ...(typeof limitWindow === "string" && limitWindow ? { limitWindow } : {}),
     };
@@ -80,18 +92,23 @@ export function formatResetTime(resetsAtMs: number, now: number): string {
 /** The chip's words: `Out of quota · until Sun 7 PM`, `Out of quota`, `Signed out`. */
 export function unavailableChipText(u: AgentUnavailable, now: number): string {
     if (u.reason === "signed_out") return "Signed out";
+    if (u.routeCredits) return "Route out of credits";
     return u.resetsAtMs ? `Out of quota · until ${formatResetTime(u.resetsAtMs, now)}` : "Out of quota";
 }
 
 /** The row line's words: `Out of quota until Sun 7 PM`, `Needs sign-in`. */
 export function unavailableLineText(u: AgentUnavailable, now: number): string {
     if (u.reason === "signed_out") return "Needs sign-in";
+    if (u.routeCredits) return "Route out of credits";
     return u.resetsAtMs ? `Out of quota until ${formatResetTime(u.resetsAtMs, now)}` : "Out of quota";
 }
 
 /** The chip's tooltip: what the state means for what the agent can do. */
 export function unavailableTitle(u: AgentUnavailable): string {
     if (u.reason === "signed_out") return "Sign-in was refused. The agent can't run until it is signed in again.";
+    if (u.routeCredits) {
+        return "The model route this agent uses has no credits left (HTTP 402), so every agent on it waits. Add credits to the route's key in the provider's account; a message tries the route again every few minutes.";
+    }
     const window = u.limitWindow ? ` (${u.limitWindow.replace(/_/g, " ")} limit)` : "";
     return `This agent's plan is out of quota${window}. Messages to it are held until the limit lifts or it moves to another account.`;
 }

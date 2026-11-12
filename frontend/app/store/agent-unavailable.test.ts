@@ -3,7 +3,9 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    ROUTE_CREDITS_TITLE,
     formatResetTime,
+    isRouteCredits,
     unavailableChipText,
     unavailableLineText,
     unavailableOfMeta,
@@ -103,5 +105,31 @@ describe("the words", () => {
         expect(unavailableTitle(limited)).toContain("seven day limit");
         expect(unavailableTitle({ reason: "limited" })).not.toContain("limit)");
         expect(unavailableTitle({ reason: "signed_out" })).toContain("signed in again");
+    });
+});
+
+describe("a route out of credits (#47477)", () => {
+    const credits = failure({ code: "usage_limit", title: ROUTE_CREDITS_TITLE, resetsAtMs: at(24, 10, 10) });
+
+    it("is limited, marked as the route's balance, and never worded as a plan's quota", () => {
+        const u = unavailableOfMeta(credits, false, NOW)!;
+        expect(u).toEqual({ reason: "limited", routeCredits: true, resetsAtMs: at(24, 10, 10) });
+        expect(unavailableChipText(u, NOW)).toBe("Route out of credits");
+        expect(unavailableLineText(u, NOW)).toBe("Route out of credits");
+        expect(unavailableTitle(u)).toContain("no credits left");
+        expect(unavailableTitle(u)).not.toContain("plan");
+    });
+
+    it("leaves a plan's quota worded as before", () => {
+        const u = unavailableOfMeta(failure({ code: "usage_limit", title: "Usage limit reached", resetsAtMs: at(26, 19) }), false, NOW)!;
+        expect(u.routeCredits).toBeUndefined();
+        expect(unavailableChipText(u, NOW)).toContain("Out of quota");
+    });
+
+    it("is read from the stored failure's code and title only", () => {
+        expect(isRouteCredits(credits)).toBe(true);
+        expect(isRouteCredits(failure({ code: "auth", title: ROUTE_CREDITS_TITLE }))).toBe(false);
+        expect(isRouteCredits(failure({ code: "usage_limit" }))).toBe(false);
+        expect(isRouteCredits(undefined)).toBe(false);
     });
 });

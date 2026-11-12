@@ -12,6 +12,7 @@ import {
     readSpendToday,
     readSpendWarning,
     spendChipText,
+    spendChipTitle,
     spendChipTone,
     spendStoppedText,
 } from "./spend-stopped";
@@ -83,6 +84,14 @@ describe("the chip", () => {
         expect(spendChipText({ spent: 0, cap: 20 })).toBe("$0 of $20 today");
         expect(spendChipText({ spent: 3.5, cap: null })).toBe("$3.50 today");
         expect(spendChipText({ spent: 120.4, cap: 200 })).toBe("$120.40 of $200 today");
+    });
+
+    it("says the route's balance stopped the agent, not its cap, when it did", () => {
+        const today = { spent: 4.2, cap: 20 };
+        expect(spendChipTitle(today)).toContain("daily cap of $20");
+        const title = spendChipTitle(today, true);
+        expect(title).toContain("no credits left, not by a cap");
+        expect(title).not.toContain("$20");
     });
 
     it("warns from 80% and is an error at the cap", () => {

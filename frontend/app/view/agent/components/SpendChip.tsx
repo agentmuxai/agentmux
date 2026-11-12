@@ -6,6 +6,7 @@
  * row. Nothing for an agent that has none (a login agent, or one srv has not written a figure for today).
  */
 import { Show, type JSX } from "solid-js";
+import { isRouteCredits } from "@/app/store/agent-unavailable";
 import { Tag } from "../../../element/ui/Tag";
 import { readSpendToday, spendChipText, spendChipTitle, spendChipTone } from "../spend-stopped";
 
@@ -15,7 +16,7 @@ export function SpendChip(props: { meta: Record<string, any> | undefined | null;
         <Show when={today()}>
             {(t) => (
                 <div class="spend-chip-line">
-                    <Tag tone={spendChipTone(t())} title={spendChipTitle(t())}>
+                    <Tag tone={spendChipTone(t())} title={spendChipTitle(t(), isRouteCredits(props.meta))}>
                         <span data-testid="spend-chip">{spendChipText(t())}</span>
                     </Tag>
                 </div>
