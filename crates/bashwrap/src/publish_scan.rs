@@ -363,7 +363,7 @@ mod tests {
             ("rev-list", format!("{count}\n")),
             ("cat-file -e", String::new()),
             ("log --format=%H", "abc\0unrelated\n\x1e".to_string()),
-            ("-c core.quotePath=false log", "\x01abc\0\nA\0.changesets/c.md\0\nA\0docs/plans/PLAN_X.md\0".to_string()),
+            ("-c core.quotePath=false log", "\x01abc\0\nA\0.changesets/c.md\0\nA\0plans/PLAN_X.md\0".to_string()),
             ("show", "the changeset".to_string()),
             ("log --no-merges", "commit abc\n+line\n".to_string()),
             ("log --merges", String::new()),
@@ -383,7 +383,7 @@ mod tests {
         let p = &parts[0];
         assert_eq!((p.r#ref.as_str(), p.count, p.remote_named), ("refs/heads/x", 2, true));
         assert_eq!(p.messages, "abc\0unrelated\n\x1e");
-        assert!(p.name_status.contains("docs/plans/PLAN_X.md"));
+        assert!(p.name_status.contains("plans/PLAN_X.md"));
         assert_eq!(p.patch, "commit abc\n+line\n");
         assert_eq!(p.changesets, vec![Changeset { path: ".changesets/c.md".into(), text: "the changeset".into() }]);
         assert!(p.tag_message.is_none());
