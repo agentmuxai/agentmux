@@ -191,7 +191,7 @@ pub(crate) async fn identity_account_upsert(
 
     let account = account_to_store(state, &req, &account_id, &masked_tail, &status);
     store_account(state, &account, is_new).await?;
-    link_account(state, &def_id, &account_id, &req.provider, is_new).await?;
+    link_account(state, &def_id, (&account_id, valid), &req.provider, is_new).await?;
     announce_account(state, &req.agent_id, &account_id, valid);
 
     Ok(IdentityAccountUpsertResult {
@@ -285,7 +285,7 @@ async fn delete_secret(account_id: &str) {
 /// an unlink that succeeds followed by a link that fails would permanently drop
 /// the agent's existing provider link with no compensation (the
 /// failure branch below only cleans up for is_new accounts).
-async fn link_account(state: &AppState, def_id: &str, account_id: &str, provider: &str, is_new: bool) -> Result<(), String> {
+async fn link_account(state: &AppState, def_id: &str, (account_id, valid): (&str, bool), provider: &str, is_new: bool) -> Result<(), String> {
     // Read before the link changes (see COMMAND_LINK_AGENT_IDENTITY):
     // a pane left over from an earlier sign-in still carries that
     // account's usage limit, which must not outlive the move.
@@ -303,7 +303,8 @@ async fn link_account(state: &AppState, def_id: &str, account_id: &str, provider
         }
         return Err(format!("identity.account.upsert: link: {e}"));
     }
-    crate::server::account_episodes::after_rebind(&state.mstore, &state.event_bus, failed, account_id);
+    // An agent whose last turn failed on the old login is told it is signed in only if this key passed its check.
+    crate::server::account_episodes::after_rebind_telling(&state.mstore, &state.event_bus, failed, account_id, valid);
     Ok(())
 }
 

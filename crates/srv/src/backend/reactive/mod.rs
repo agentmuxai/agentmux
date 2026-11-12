@@ -23,6 +23,7 @@ mod rate_limiter;
 pub mod registry;
 pub mod sanitize;
 mod sensitive_audit;
+mod system_turn;
 pub mod sent_audit;
 pub mod transcript_request;
 pub mod types;

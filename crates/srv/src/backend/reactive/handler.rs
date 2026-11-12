@@ -46,7 +46,7 @@ pub struct Handler {
     /// Controller-aware delivery for non-PTY agents (persistent stream-json / ACP).
     /// When set, it is tried before the PTY keystroke path so messages reach (and
     /// steer) agents that have no terminal. See `set_message_sender`.
-    message_sender: Option<MessageSender>,
+    pub(super) message_sender: Option<MessageSender>,
     /// Queries a resolved delivery target's own live identity before
     /// delivering, as a check independent of this handler's own
     /// `uid_to_block` / `name_to_blocks` registry. See

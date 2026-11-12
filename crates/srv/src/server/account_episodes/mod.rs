@@ -38,6 +38,7 @@ mod login_expiry;
 mod fresh;
 mod machine;
 mod moves;
+mod resume;
 mod switch;
 
 use std::collections::HashMap;
@@ -57,6 +58,7 @@ use crate::backend::storage::store::Store;
 use crate::server::AppState;
 
 use machine::{BlockedPane, Effect, Episode, Episodes};
+use resume::Failed;
 
 pub use crate::backend::account_availability::{
     AccountAvailabilityEvent, AccountEpisodeAgent, AccountEpisodeTask,
@@ -526,10 +528,23 @@ pub fn failed_panes(mstore: &Store, identity: &Store, agent_id: &str, provider: 
 /// that account, then wake held messages and the episodes. Returns how many
 /// were cleared.
 pub fn after_rebind(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<(String, Vec<String>)>, account_id: &str) -> usize {
+    after_rebind_telling(mstore, event_bus, before, account_id, false)
+}
+
+/// [`after_rebind`], and with `tell` set the agents whose last turn failed on the old login are told they are
+/// signed in ([`resume::start`]). Set it only when the new login is known to work: a move to an account the
+/// choice found valid, or a key that just passed its check. Not for an unlink (no account at all) or a key
+/// nobody has checked, whose next turn could fail again.
+pub fn after_rebind_telling(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<(String, Vec<String>)>, account_id: &str, tell: bool) -> usize {
     let mut cleared = 0;
+    let mut signed_out = Vec::new();
     for (block_id, accounts) in before {
         if accounts.iter().any(|a| a == account_id) {
             continue;
+        }
+        // The agent now runs on a login that works: one whose last turn failed on the old login is told.
+        if let Some(failure) = mstore.get::<Block>(&block_id).ok().flatten().and_then(|b| failure_of_block(&b)).filter(|f| tell && !account_id.is_empty() && f.code == FailureClass::Auth) {
+            signed_out.push(Failed { block_id: block_id.clone(), failed_at_ms: failure.at_ms });
         }
         crate::backend::blockcontroller::core::persist_last_failure(&block_id, None, &Some(mstore.clone()), &Some(event_bus.clone()));
         cleared += 1;
@@ -538,6 +553,7 @@ pub fn after_rebind(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<
         tracing::info!(cleared, "account episode: a rebind cleared its old account's failures");
         after_clearing();
     }
+    resume::start(signed_out, agentmux_common::time::now_ms());
     cleared
 }
 
@@ -558,7 +574,7 @@ pub fn after_sign_in(account_id: &str) {
     let Some(rt) = RUNTIME.get() else { return };
     let account_id = account_id.to_string();
     let run = move || {
-        clear_signed_out(&rt.state.mstore, &rt.state.identity_store, &rt.state.event_bus, &account_id);
+        resume::start(clear_signed_out_panes(&rt.state.mstore, &rt.state.identity_store, &rt.state.event_bus, &account_id), agentmux_common::time::now_ms());
     };
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => drop(handle.spawn_blocking(run)),
@@ -571,17 +587,23 @@ pub fn after_sign_in(account_id: &str) {
 /// stays: it ends at the reset or a move. Returns how many were cleared.
 /// BLOCKING.
 pub(crate) fn clear_signed_out(mstore: &Arc<Store>, identity: &Store, event_bus: &Arc<EventBus>, account_id: &str) -> usize {
-    let mut cleared = 0;
+    clear_signed_out_panes(mstore, identity, event_bus, account_id).len()
+}
+
+/// [`clear_signed_out`], returning the panes it cleared with when their turn failed, for
+/// [`resume::start`], which tells those agents. BLOCKING.
+fn clear_signed_out_panes(mstore: &Arc<Store>, identity: &Store, event_bus: &Arc<EventBus>, account_id: &str) -> Vec<Failed> {
+    let mut cleared = Vec::new();
     for block in tab_blocks(mstore) {
-        let signed_out = failure_of_block(&block).is_some_and(|f| f.code == FailureClass::Auth);
-        if !signed_out || !run_accounts_of_block(identity, &block).iter().any(|a| a == account_id) {
+        let Some(failure) = failure_of_block(&block).filter(|f| f.code == FailureClass::Auth) else { continue };
+        if !run_accounts_of_block(identity, &block).iter().any(|a| a == account_id) {
             continue;
         }
         crate::backend::blockcontroller::core::persist_last_failure(&block.oid, None, &Some(mstore.clone()), &Some(event_bus.clone()));
-        cleared += 1;
+        cleared.push(Failed { block_id: block.oid.clone(), failed_at_ms: failure.at_ms });
     }
-    if cleared > 0 {
-        tracing::info!(cleared, "account episode: a sign-in cleared its account's signed-out panes");
+    if !cleared.is_empty() {
+        tracing::info!(cleared = cleared.len(), "account episode: a sign-in cleared its account's signed-out panes");
         after_clearing();
     }
     cleared
@@ -624,10 +646,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             if req.account_id.is_empty() {
                 return Err("identity.account.signed_in: account_id is required".to_string());
             }
-            let cleared = tokio::task::spawn_blocking(move || clear_signed_out(&s.mstore, &s.identity_store, &s.event_bus, &req.account_id))
+            let cleared = tokio::task::spawn_blocking(move || clear_signed_out_panes(&s.mstore, &s.identity_store, &s.event_bus, &req.account_id))
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(IdentityAccountSignedInResult { cleared: u32::try_from(cleared).unwrap_or(u32::MAX) })
+            let count = cleared.len();
+            resume::start(cleared, agentmux_common::time::now_ms());
+            Ok(IdentityAccountSignedInResult { cleared: u32::try_from(count).unwrap_or(u32::MAX) })
         }
     });
     // The mark is for the operator's window and for agents: it changes where agents are moved
