@@ -52,25 +52,6 @@ vi.mock("@/app/element/anchored-popover", () => ({
         </div>
     ),
 }));
-vi.mock("@/element/confirm-modal", () => ({
-    ConfirmModal: (props: Record<string, any>) => (
-        <div
-            data-stand="ConfirmModal"
-            data-open={String(props.open)}
-            data-title={props.title}
-            data-description={props.description}
-            data-confirm-label={props.confirmLabel}
-            data-destructive={String(props.destructive)}
-        >
-            <span data-cb="onConfirm" onClick={() => props.onConfirm()}>
-                confirm
-            </span>
-            <span data-cb="onCancel" onClick={() => props.onCancel()}>
-                cancel
-            </span>
-        </div>
-    ),
-}));
 vi.mock("./AmbientPurposes", () => ({ AmbientPurposes: () => <div data-stand="AmbientPurposes" /> }));
 // The time of day is local; the snapshots must not be.
 vi.spyOn(Date.prototype, "toLocaleTimeString").mockImplementation(function (this: Date) {
@@ -191,18 +172,20 @@ describe("TokenBreakdownPopover, pinned", () => {
         await snapshot("clicks");
     });
 
-    it("asks before resetting, and resets and closes only when confirmed", async () => {
+    it("asks inside the panel before resetting, and resets and closes only when confirmed", async () => {
         recordTurn("claude", claude(), { blockId: "b1", agentName: "Manoz", numTurns: 1 });
         mount();
         await flush();
         fireEvent.click(button("Reset counter"));
         await flush();
         look("asking");
-        fireEvent.click(cb("ConfirmModal", "onCancel"));
+        expect(host.querySelector('[role="group"][aria-label="Reset token counter?"]')).not.toBeNull();
+        expect(document.activeElement).toBe(button("Cancel"));
+        fireEvent.click(button("Cancel"));
         await flush();
         look("cancelled");
         fireEvent.click(button("Reset counter"));
-        fireEvent.click(cb("ConfirmModal", "onConfirm"));
+        fireEvent.click(button("Reset"));
         await flush();
         look("reset");
         await snapshot("reset");

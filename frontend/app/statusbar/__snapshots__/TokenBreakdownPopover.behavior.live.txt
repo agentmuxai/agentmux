@@ -60,11 +60,6 @@ same row element: true
     <div class="token-usage-breakdown-footer">
       <button type="button" class="ui-button ui-tone-danger ui-density-compact">
         "Reset counter"
-  <div data-stand="ConfirmModal" data-open="false" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
-    <span data-cb="onConfirm">
-      "confirm"
-    <span data-cb="onCancel">
-      "cancel"
 -- after a reset from elsewhere
 <div>
   <div data-stand="AnchoredPopover" data-placement="top-end" data-class="token-usage-breakdown" data-role="dialog" data-label="Token usage breakdown" data-style="{\"width\":\"320px\"}">
@@ -81,8 +76,3 @@ same row element: true
     <div class="token-usage-breakdown-footer">
       <button type="button" class="ui-button ui-tone-danger ui-density-compact" disabled="">
         "Reset counter"
-  <div data-stand="ConfirmModal" data-open="false" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
-    <span data-cb="onConfirm">
-      "confirm"
-    <span data-cb="onCancel">
-      "cancel"

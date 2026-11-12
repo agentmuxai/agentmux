@@ -65,6 +65,9 @@ export function createTokenBreakdown(props: TokenBreakdownPopoverProps) {
 
     const handleResetClick = () => setConfirmingReset(true);
 
+    // The confirm is drawn inside the popover (the footer), not as a window modal (the operator, 2026-11-12).
+    const handleCancelReset = () => setConfirmingReset(false);
+
     const handleConfirmReset = () => {
         resetSession();
         setConfirmingReset(false);
@@ -76,7 +79,7 @@ export function createTokenBreakdown(props: TokenBreakdownPopoverProps) {
         void revealBlock(row.blockId, { source: "tokens" });
         props.onClose();
     };
-    return { confirmingReset, setConfirmingReset, ambientExpanded, setAmbientExpanded, agentRows, realAgentIds, rowById, ambientRow, total, cacheHitRate, handleResetClick, handleConfirmReset, handleAgentClick };
+    return { confirmingReset, setConfirmingReset, ambientExpanded, setAmbientExpanded, agentRows, realAgentIds, rowById, ambientRow, total, cacheHitRate, handleResetClick, handleConfirmReset, handleCancelReset, handleAgentClick };
 }
 
 export type TokenBreakdownState = ReturnType<typeof createTokenBreakdown>;

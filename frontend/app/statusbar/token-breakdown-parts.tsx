@@ -206,17 +206,38 @@ export function BreakdownRows(part: { s: TokenBreakdownState }): JSX.Element {
 
 /** The reset button, off while there is nothing to reset. */
 export function BreakdownFooter(part: { s: TokenBreakdownState }): JSX.Element {
-    const { agentRows, handleResetClick } = part.s;
+    const { agentRows, confirmingReset, handleResetClick, handleConfirmReset, handleCancelReset } = part.s;
+    let cancelRef: HTMLButtonElement | undefined;
+    // The button that was pressed goes away with the question, so keyboard focus moves to the safe answer.
+    const ask = () => {
+        handleResetClick();
+        queueMicrotask(() => cancelRef?.focus());
+    };
     return (
-        <div class="token-usage-breakdown-footer">
-            <Button
-                tone="danger"
-                density="compact"
-                onClick={handleResetClick}
-                disabled={agentRows().length === 0}
+        <div class="token-usage-breakdown-footer" data-confirming={confirmingReset() ? "true" : undefined}>
+            <Show
+                when={confirmingReset()}
+                fallback={
+                    <Button tone="danger" density="compact" onClick={ask} disabled={agentRows().length === 0}>
+                        Reset counter
+                    </Button>
+                }
             >
-                Reset counter
-            </Button>
+                <div class="token-usage-breakdown-confirm" role="group" aria-label="Reset token counter?">
+                    <div class="token-usage-breakdown-confirm-text">
+                        <strong>Reset token counter?</strong> This clears the running total for the current session.
+                        Per-pane Worked stats stay unchanged.
+                    </div>
+                    <div class="token-usage-breakdown-confirm-actions">
+                        <Button ref={cancelRef} tone="quiet" density="compact" onClick={handleCancelReset}>
+                            Cancel
+                        </Button>
+                        <Button tone="danger" density="compact" onClick={handleConfirmReset}>
+                            Reset
+                        </Button>
+                    </div>
+                </div>
+            </Show>
         </div>
     );
 }
