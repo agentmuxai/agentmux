@@ -34,7 +34,4 @@ describe("visibleRight", () => {
         expect(visibleRight(pill)).toBeUndefined();
     });
 
-    it("is undefined when there is no pill", () => {
-        expect(visibleRight(undefined)).toBeUndefined();
-    });
 });

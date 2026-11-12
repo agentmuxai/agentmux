@@ -69,9 +69,9 @@ function pillRects(paneBlockId: string, blockIds: readonly string[]): Map<string
  * The right edge, in viewport px, of where `el` can be seen: the nearest right edge among the ancestors that
  * clip it (the tab strip's scroller, the header, the pane). Undefined when nothing clips it.
  */
-export function visibleRight(el: Element | undefined): number | undefined {
+export function visibleRight(el: Element): number | undefined {
     let right: number | undefined;
-    for (let up = el?.parentElement; up; up = up.parentElement) {
+    for (let up = el.parentElement; up; up = up.parentElement) {
         if (getComputedStyle(up).overflowX === "visible") continue;
         const r = up.getBoundingClientRect().right;
         right = right === undefined ? r : Math.min(right, r);
@@ -121,7 +121,7 @@ function travelPills(
             onCopy: (copy) => copy.classList.remove("pane-tab--landing", "pane-tab--active"),
             // A pill the strip has scrolled out of view flies toward its place and is cut off at the strip's edge, not
             // drawn across whatever lies beyond the pane.
-            clipRight: (pills) => visibleRight(pills.find((el) => el)),
+            clipRight: visibleRight,
         }
     );
     // A pane that is gone, or pills that were not drawn: nothing flew, but the bounce still belongs to the move.

@@ -450,16 +450,17 @@ describe("mergeInto", () => {
         expect((fake.calls[0].el as HTMLElement).className).toBe("pill");
     });
 
-    it("flies the copies in a layer cut off at the limit the caller gives, so a piece whose place is out of view does not cross what lies beyond it", async () => {
-        vi.stubGlobal("innerWidth", 1000);
-        const els = [at(300, 10), at(1400, 10)];
+    it("cuts off only the copies whose place reaches past the limit the caller gives, in a layer that draws nothing right of it", async () => {
+        const fits = at(300, 10); // right edge 400, inside the limit
+        const past = at(1400, 10); // a tab scrolled out of a full strip
         const clipRight = vi.fn(() => 640);
-        const handle = mergeInto([rectOf(0, 0), rectOf(0, 30)], els, { clipRight, land: () => {} });
-        expect(clipRight).toHaveBeenCalledWith(els);
-        const copies = fake.calls.map((c) => c.el);
-        const layer = copies[0].parentElement as HTMLElement;
+        const handle = mergeInto([rectOf(0, 0), rectOf(0, 30)], [fits, past], { clipRight, land: () => {} });
+        expect(clipRight).toHaveBeenCalledWith(fits);
+        expect(clipRight).toHaveBeenCalledWith(past);
+        const [fitsCopy, pastCopy] = fake.calls.map((c) => c.el);
+        expect(fitsCopy.parentElement).toBe(document.body);
+        const layer = pastCopy.parentElement as HTMLElement;
         expect(layer).not.toBe(document.body);
-        expect(copies[1].parentElement).toBe(layer);
         expect(layer.parentElement).toBe(document.body);
         expect(layer.style.position).toBe("fixed");
         expect(layer.style.getPropertyValue("clip-path")).toContain("640px");
@@ -470,15 +471,24 @@ describe("mergeInto", () => {
         expect(layer.isConnected).toBe(false);
     });
 
+    it("does not cut off a copy that starts right of the limit and flies to a place inside it", () => {
+        mergeInto([{ left: 900, top: 0, width: 100, height: 20 } as DOMRect], [at(300, 10)], {
+            clipRight: () => 640,
+            land: () => {},
+        });
+        expect(fake.calls[0].el.parentElement).toBe(document.body);
+    });
+
     it("takes the layer away when it is cancelled, and uses the page when there is no limit", () => {
-        const cancelled = mergeInto([rectOf(0, 0)], [at(300, 10)], { clipRight: () => 640 });
+        const cancelled = mergeInto([rectOf(0, 0)], [at(700, 10)], { clipRight: () => 640 });
         const layer = fake.calls[0].el.parentElement as HTMLElement;
+        expect(layer).not.toBe(document.body);
         expect(layer.isConnected).toBe(true);
         cancelled.cancel();
         expect(layer.isConnected).toBe(false);
 
         fake.calls.length = 0;
-        mergeInto([rectOf(0, 0)], [at(300, 10)], { clipRight: () => undefined });
+        mergeInto([rectOf(0, 0)], [at(700, 10)], { clipRight: () => undefined });
         expect(fake.calls[0].el.parentElement).toBe(document.body);
     });
 
