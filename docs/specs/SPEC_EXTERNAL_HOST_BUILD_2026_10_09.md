@@ -48,3 +48,11 @@ None at runtime. The module is chosen when the bundle is built; the desktop bund
 - `host-module-build.test.ts`: with nothing set, `@host-module` is left to `tsconfig.json`; with `AGENTMUX_HOST_MODULE` set, it is that module's absolute path.
 - `host-boundary.test.ts`: `bootstrap.ts` leaves the seam and `cef-host-module.ts` joins it.
 - Checked by hand: a build with an outside module contains that module and none of the desktop host's startup (no `report_first_paint`, no log pipe), and a default build still contains both.
+
+## 5. The browser host
+
+`frontend/web-host/` is a host module for a browser tab, and `npm run build:web` (`scripts/build-web.mjs`) builds the frontend with it into `dist/web`, setting `AGENTMUX_HOST_MODULE` as in section 2. The desktop bundle in `dist/frontend` is not touched.
+
+- `web-host-module.ts` points srv's endpoints at the page's own origin and installs `window.api`.
+- `web-api.ts` is the `AppApi` for a browser: every `HostCaps` entry off, so the UI hides what needs the desktop. It ends in `satisfies AppApi`, so a member added to `AppApi` fails the type check until the browser host answers it.
+- Serve the bundle from a headless srv (`agentmux-srv --headless --frontend-dir dist/web`) behind a proxy on the page's own origin that adds srv's key; the page holds none. Whoever can reach that proxy has srv's full access, so it stays on loopback: a development setup.
