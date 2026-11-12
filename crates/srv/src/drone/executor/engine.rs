@@ -51,11 +51,14 @@ pub struct RunHandle {
 /// Run the drone end-to-end. Returns a handle whose `events` channel
 /// surfaces per-block lifecycle, and a `final_states` mutex callers can
 /// snapshot for the run-history record. `trigger` is what started the run
-/// (`{{trigger.*}}`); `Null` when nothing did.
+/// (`{{trigger.*}}`); `Null` when nothing did. `run_cap_usd` ends the run
+/// before its next block once its Agent blocks have spent that much (a job's
+/// per-run cap); `None` is no cap, as for a run started by hand.
 pub async fn run_drone(
     drone_id: String,
     graph: DroneGraph,
     trigger: Value,
+    run_cap_usd: Option<f64>,
 ) -> Result<RunHandle, String> {
     let run_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::unbounded_channel();
@@ -71,7 +74,7 @@ pub async fn run_drone(
             run_id: run_id_for_task.clone(),
             drone_id: drone_id_for_evt,
         });
-        match execute(&run_id_for_task, (&graph, trigger), &tx_for_task, &states_for_task).await {
+        match execute(&run_id_for_task, (&graph, trigger, run_cap_usd), &tx_for_task, &states_for_task).await {
             Ok(output) => {
                 let _ = tx_for_task.send(RunEvent::RunDone {
                     run_id: run_id_for_task,
@@ -94,9 +97,17 @@ pub async fn run_drone(
     })
 }
 
+/// Why the run must not start another block: its Agent blocks have spent its
+/// cap (`caps::reached`: a run that spent nothing has not reached any cap).
+fn over_run_cap(scope: &ExecutionScope, cap: Option<f64>) -> Option<String> {
+    let cap = cap?;
+    let spent: f64 = scope.outputs.values().filter_map(|o| o.get("cost_usd").and_then(Value::as_f64)).sum();
+    crate::backend::jobs::caps::reached(spent, cap).then(|| format!("stopped: the run spent ${spent:.2}, its cap of ${cap:.2}"))
+}
+
 async fn execute(
     run_id: &str,
-    (graph, trigger): (&DroneGraph, Value),
+    (graph, trigger, run_cap_usd): (&DroneGraph, Value, Option<f64>),
     tx: &mpsc::UnboundedSender<RunEvent>,
     final_states: &Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>,
 ) -> Result<Value, String> {
@@ -140,6 +151,9 @@ async fn execute(
                 continue;
             }
 
+            if let Some(stopped) = over_run_cap(&scope, run_cap_usd) {
+                return Err(stopped);
+            }
             let _ = tx.send(RunEvent::BlockStarted {
                 run_id: run_id.to_string(),
                 block_id: block_id.clone(),
@@ -628,7 +642,7 @@ mod tests {
             edges: vec![e("e1", "v1", "r1")],
         };
 
-        let handle = run_drone("wf1".to_string(), g, Value::Null).await.unwrap();
+        let handle = run_drone("wf1".to_string(), g, Value::Null, None).await.unwrap();
         let mut rx = handle.events;
         while let Some(ev) = rx.recv().await {
             if matches!(ev, RunEvent::RunDone { .. } | RunEvent::RunFailed { .. }) {
@@ -674,6 +688,35 @@ mod tests {
         assert_eq!(parsed.source_handle.as_deref(), Some("true"));
     }
 
+    /// A cap ends the run before the next block once the Agent blocks before it
+    /// have spent it; a run with no cap, with room, or that spent nothing goes on.
+    #[tokio::test]
+    async fn a_run_is_held_to_its_cap_between_blocks() {
+        let mut scope = ExecutionScope::new();
+        scope.outputs.insert("a1".into(), json!({ "cost_usd": 1.25 }));
+        scope.outputs.insert("a2".into(), json!({ "cost_usd": 1.75 }));
+        scope.outputs.insert("v1".into(), json!({ "vars": { "cost_usd": 99 } }));
+        assert_eq!(over_run_cap(&scope, None), None);
+        assert_eq!(over_run_cap(&scope, Some(5.0)), None);
+        assert_eq!(over_run_cap(&scope, Some(3.0)), Some("stopped: the run spent $3.00, its cap of $3.00".to_string()));
+        assert_eq!(over_run_cap(&ExecutionScope::new(), Some(0.0)), None, "a run that spent nothing has not reached a cap of 0");
+
+        // The cap is passed through: a run with room, or none, finishes.
+        let mut resp = n("r1", "response");
+        resp.data = json!({ "kind": "response", "template": "done" });
+        for cap in [None, Some(5.0), Some(0.0)] {
+            let g = DroneGraph { nodes: vec![resp.clone()], edges: vec![] };
+            let mut handle = run_drone("wf1".to_string(), g, Value::Null, cap).await.unwrap();
+            let mut out = None;
+            while let Some(ev) = handle.events.recv().await {
+                if let RunEvent::RunDone { output, .. } = ev {
+                    out = Some(output);
+                }
+            }
+            assert_eq!(out, Some(json!("done")), "{cap:?}");
+        }
+    }
+
     /// `{{trigger.*}}` reads what started the run; with nothing it stays visible.
     #[tokio::test]
     async fn a_run_reads_its_trigger() {
@@ -681,7 +724,7 @@ mod tests {
         resp.data = json!({ "kind": "response", "template": "{{trigger.repo}}#{{trigger.pr.number}} {{trigger.none}}" });
         let g = DroneGraph { nodes: vec![resp], edges: vec![] };
         let input = json!({ "repo": "agentmux", "pr": { "number": 12 } });
-        let mut handle = run_drone("wf1".to_string(), g, input).await.unwrap();
+        let mut handle = run_drone("wf1".to_string(), g, input, None).await.unwrap();
         let mut out = None;
         while let Some(ev) = handle.events.recv().await {
             match ev {
@@ -734,7 +777,7 @@ mod tests {
             ],
         };
 
-        let handle = run_drone("wf1".to_string(), g, Value::Null).await.unwrap();
+        let handle = run_drone("wf1".to_string(), g, Value::Null, None).await.unwrap();
         // Drain events to completion.
         let mut rx = handle.events;
         let mut got_done_ids: Vec<String> = Vec::new();

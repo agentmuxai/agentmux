@@ -72,7 +72,8 @@ pub(crate) async fn run_action(state: &AppState, job: CronJob, run_id: &str) -> 
                 return ActionOutcome::Failed("a drone job runs only with a ledger row to follow it".to_string());
             }
             let trigger = drone_trigger(state, &job, run_id);
-            match super::drone_handlers::start_job_drone_run(state, &drone_id, trigger, run_id).await {
+            let cap = state.cron_scheduler.runs().map(|l| l.run_cap_usd(&job));
+            match super::drone_handlers::start_job_drone_run(state, &drone_id, trigger, (run_id, cap)).await {
                 Ok(_) => ActionOutcome::Drone,
                 Err(e) => ActionOutcome::Failed(e),
             }

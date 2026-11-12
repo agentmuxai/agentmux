@@ -293,21 +293,33 @@ pub(crate) const MAX_INPUT_BYTES: usize = 64 * 1024;
 /// `rundrone`: reads the drone definition from id_store (global), writes the
 /// run rows to mstore (per-channel).
 pub(crate) async fn start_drone_run(state: &AppState, cmd: RunDroneReq) -> Result<RunResp, String> {
-    let run_id = launch_run(state, &cmd.drone_id, cmd.input.unwrap_or_default(), None).await?;
+    let run_id = launch_run(state, &cmd.drone_id, cmd.input.unwrap_or_default(), None, None).await?;
     Ok(RunResp { run_id })
 }
 
 /// Start the run a job's `drone` action asks for. `job_run_id` is the job
-/// run's row in the ledger, which runs until the drone does. Returns the
-/// Drone run's id.
-pub(crate) async fn start_job_drone_run(state: &AppState, drone_id: &str, trigger: serde_json::Value, job_run_id: &str) -> Result<String, String> {
-    launch_run(state, drone_id, trigger, Some(job_run_id)).await
+/// run's row in the ledger, which runs until the drone does; `run_cap_usd` is
+/// the job's per-run cap, which ends the run before its next block once its
+/// Agent blocks have spent it. Returns the Drone run's id.
+pub(crate) async fn start_job_drone_run(
+    state: &AppState,
+    drone_id: &str,
+    trigger: serde_json::Value,
+    (job_run_id, run_cap_usd): (&str, Option<f64>),
+) -> Result<String, String> {
+    launch_run(state, drone_id, trigger, Some(job_run_id), run_cap_usd).await
 }
 
 /// Start a run of `drone_id` with `trigger` as its input. With a
 /// `job_run_id` the ledger row is that job run's; without one the run
 /// gets a `manual` row of its own.
-async fn launch_run(state: &AppState, drone_id: &str, trigger: serde_json::Value, job_run_id: Option<&str>) -> Result<String, String> {
+async fn launch_run(
+    state: &AppState,
+    drone_id: &str,
+    trigger: serde_json::Value,
+    job_run_id: Option<&str>,
+    run_cap_usd: Option<f64>,
+) -> Result<String, String> {
     let size = trigger.to_string().len();
     if size > MAX_INPUT_BYTES {
         return Err(format!("rundrone: the input is {size} bytes; at most {MAX_INPUT_BYTES}"));
@@ -321,7 +333,7 @@ async fn launch_run(state: &AppState, drone_id: &str, trigger: serde_json::Value
             format!("rundrone: drone {drone_id} not found")
         })?;
     let started_at = now_ms();
-    let handle = run_drone(wf.id.clone(), wf.graph.clone(), trigger.clone())
+    let handle = run_drone(wf.id.clone(), wf.graph.clone(), trigger.clone(), run_cap_usd)
         .await
         .map_err(|e| format!("rundrone: {e}"))?;
     let run_id = handle.run_id.clone();
