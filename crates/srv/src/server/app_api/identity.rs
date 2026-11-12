@@ -542,13 +542,16 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
                 error: Some("validate does not apply: this is a CLI sign-in with no stored key, and its credentials cannot be read here".to_string()),
             });
         };
-        let valid = probe != crate::identity::resolver::OAuthProbeStatus::NeedsReauth;
-        let result = IdentityAccountValidateResult {
-            valid,
-            status: probe.as_str().to_string(),
-            masked_tail: String::new(),
-            error: (!valid).then(|| "this is a CLI sign-in with no stored key: its credentials file holds no token, so it needs a sign-in".to_string()),
+        use crate::identity::resolver::OAuthProbeStatus;
+        // Only an unexpired token proves the login: an expired access token is the very thing a pane
+        // was refused on, and a pass here clears its agents' signed-out state.
+        let valid = probe == OAuthProbeStatus::Valid;
+        let error = match probe {
+            OAuthProbeStatus::Valid => None,
+            OAuthProbeStatus::Expired => Some("this is a CLI sign-in with no stored key: its access token has expired and renews the next time the CLI uses it".to_string()),
+            OAuthProbeStatus::NeedsReauth => Some("this is a CLI sign-in with no stored key: its credentials file holds no token, so it needs a sign-in".to_string()),
         };
+        let result = IdentityAccountValidateResult { valid, status: probe.as_str().to_string(), masked_tail: String::new(), error };
         return Ok(proven(account_id, result));
     }
     let aid = account_id.to_string();
