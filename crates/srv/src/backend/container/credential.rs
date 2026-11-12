@@ -186,12 +186,12 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // gateway that is where the container is pointed.
     crate::backend::container::listener::point_env_at_listener(&mut out);
     point_gateway_at_srv(&mut out);
-    // Whether this machine has a publish guard for the container's pre-push hook to ask: said only here, so a
-    // machine without one is never asked (and never refuses a push for want of an answer).
+    // Whether this machine has a publish guard for the container's pre-push hook to ask, said only here: `1` when it
+    // has, `0` when it has none (the hook then does nothing and says nothing, and never refuses a push for want of an
+    // answer). An AgentMux that predates the check sets neither, which the hook says out loud.
     out.retain(|(k, _)| k != crate::identity::gh_agent_token::PUBLISH_GUARD_ENV);
-    if crate::identity::gh_agent_token::installed().is_some() {
-        out.push((crate::identity::gh_agent_token::PUBLISH_GUARD_ENV.to_string(), "1".to_string()));
-    }
+    let guarded = crate::identity::gh_agent_token::installed().is_some() && crate::backend::publish_guard::container_scan_ready();
+    out.push((crate::identity::gh_agent_token::PUBLISH_GUARD_ENV.to_string(), if guarded { "1" } else { "0" }.to_string()));
     out
 }
 
@@ -350,11 +350,15 @@ mod tests {
     }
 
     #[test]
-    fn the_publish_guard_marker_is_srvs_to_say_and_only_where_gh_agent_is_installed() {
-        let env: HashMap<String, String> = [("AGENTMUX_PUBLISH_GUARD".to_string(), "1".to_string())].into_iter().collect();
-        let out: Vec<_> = container_exec_env("cc-block-guard", &env).into_iter().filter(|(k, _)| k == "AGENTMUX_PUBLISH_GUARD").collect();
-        let installed = crate::identity::gh_agent_token::installed().is_some();
-        assert_eq!(out, if installed { vec![("AGENTMUX_PUBLISH_GUARD".to_string(), "1".to_string())] } else { vec![] }, "once, and not carried in from the agent's own environment");
+    fn the_publish_guard_marker_is_srvs_to_say_once_and_is_one_only_where_the_guard_can_judge() {
+        let ask = |own: &str| {
+            let env: HashMap<String, String> = [("AGENTMUX_PUBLISH_GUARD".to_string(), own.to_string())].into_iter().collect();
+            container_exec_env("cc-block-guard", &env).into_iter().filter(|(k, _)| k == "AGENTMUX_PUBLISH_GUARD").map(|(_, v)| v).collect::<Vec<_>>()
+        };
+        let ready = crate::identity::gh_agent_token::installed().is_some() && crate::backend::publish_guard::container_scan_ready();
+        let want = vec![if ready { "1" } else { "0" }.to_string()];
+        assert_eq!(ask("1"), want, "once, and not carried in from the agent's own environment");
+        assert_eq!(ask("0"), want);
     }
 
     #[test]
