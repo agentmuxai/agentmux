@@ -135,7 +135,7 @@ So the polish on #26698 is kept small: the stand-in size fix and the visibility 
 | 2 | 2 | the DOM-pane transform reflow behind `layout:livereflow`, the source gliding into its slot, the pane in hand sized to the landing, cleanup contract, zero-counters test |
 | 2b | 2 | real sizes for every pane (the report of 2026-11-10): one layout per candidate, the clip glide, terminals hold their size, the capture gate, the picture cut and never padded, #47354 |
 | 2c | 2, part of 4 | the tear-off result shown when a pane rests over its own slot; flag default on |
-| 3 | 3 | browser panes in lockstep (with the browser seat) |
+| 3 | 3 | browser panes: for a drag each page is cut away behind its picture and held where it was (`use-pane-rect-sync.ts` `held`, the hole is the page's own rect), so its tile moves with the rest once every cut has landed (`page-cut-gate.ts`); the pane in hand is the window's crop with the page drawn in (`tearoff-snapshot.ts`). A glide outside a drag still leaves browser panes where they are |
 | 4 | 4 | the tear-off result shown in the source when the pointer leaves the window (whole-pane drags: `tearOffPreview.ts` `leaveWindow`, watched in `tile-drag.ts`), the pill hole (not yet) |
 | 5 | zones | the simplified zone model (Camper's `determineDropDirection`), with Camper's review |
 

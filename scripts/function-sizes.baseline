@@ -47,7 +47,7 @@
 124 crates/cef/src/commands/cli_login.rs::spawn_login_pty_unix
 101 crates/cef/src/commands/drag.rs::open_window_at_position
 181 crates/cef/src/commands/drag.rs::tear_off_sc_move_handshake
-257 crates/cef/src/commands/floating_pane.rs::open_floating_pane_window
+213 crates/cef/src/commands/floating_pane.rs::open_floating_pane_window
 195 crates/cef/src/commands/orphan_reconcile.rs::ui_thread_reconcile
 212 crates/cef/src/commands/pane_pool.rs::promote_pane_pool_window
 160 crates/cef/src/commands/tear_off_hook/macos.rs::start_tab_drag_tracking
@@ -323,9 +323,9 @@
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance
 202 frontend/app/block/widget-bridge.ts::answer
 106 frontend/app/drag/CrossWindowDragMonitor.darwin.tsx::performTearOff
-159 frontend/app/drag/CrossWindowDragMonitor.linux.tsx::performTearOff
+145 frontend/app/drag/CrossWindowDragMonitor.linux.tsx::performTearOff
 151 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::CrossWindowDragMonitor
-219 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::performTearOff
+203 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::performTearOff
 119 frontend/app/drag/CrossWindowDropOverlay.tsx::CrossWindowDropOverlay
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
@@ -405,7 +405,7 @@
 115 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
-394 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
+367 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
 285 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
@@ -450,6 +450,6 @@
 232 frontend/layout/lib/layoutPersistence.ts::handleBackendAction
 138 frontend/layout/lib/layoutResize.ts::onResizeMove
 201 frontend/layout/lib/layoutTree.ts::computeMoveNode
-201 frontend/layout/lib/tilelayout-shared.tsx::OverlayNodeWrapper
+153 frontend/layout/lib/tilelayout-shared.tsx::OverlayNodeWrapper
 105 frontend/perf/hud.tsx::PerfHud
 130 frontend/util/event-buffer.ts::PerSourceTracker::deliver

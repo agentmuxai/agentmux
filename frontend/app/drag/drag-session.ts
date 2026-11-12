@@ -22,6 +22,12 @@ import { resetHostEscape } from "./host-escape";
 export type DragKind = "files" | "tile" | "window-tab" | "pane-tab" | "doc-tab" | "drone-kind" | "list-item";
 /** Every kind, for "is any drag underway at all". */
 export const ALL_DRAG_KINDS: readonly DragKind[] = ["files", "tile", "window-tab", "pane-tab", "doc-tab", "drone-kind", "list-item"];
+/**
+ * The in-app (pragmatic) drags of a pane or a tab: a whole pane, a Window Tab, a Pane Tab, an Editor or Media
+ * document tab. They are the drags a layout shows a drop for, and the ones a browser page (a native window
+ * drawn above the DOM) cannot see.
+ */
+export const ELEMENT_DRAG_KINDS: readonly DragKind[] = ["tile", "window-tab", "pane-tab", "doc-tab"];
 /** "unobserved": the safety net saw a pointerdown with the drag still open. */
 export type DragEndReason = "drop" | "cancel" | "dragend" | "button-up" | "files-idle" | "unobserved";
 

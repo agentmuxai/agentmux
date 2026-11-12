@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, createSignal } from "solid-js";
+import { beginPageCut, PAGE_CUT_MAX_MS, resetPageCutGateForTests } from "@/app/drag/page-cut-gate";
 import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
 import { setAnimationSettings } from "@/app/motion/motion";
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
@@ -28,7 +29,7 @@ import {
     wholePx,
     type ReflowEntry,
 } from "@/layout/lib/liveReflow";
-import { showPlacement } from "@/layout/lib/placementPreview";
+import { showPlacement, showStay } from "@/layout/lib/placementPreview";
 import {
     commitTearOff,
     leaveOwnPane,
@@ -47,6 +48,7 @@ import {
     type LayoutTreeComputeMoveNodeAction,
     type LayoutTreeDeleteNodeAction,
 } from "@/layout/lib/types";
+import { setPlatform } from "@/util/platformutil";
 import type { SignalAtom } from "@/util/util";
 
 const rows = new Map<string, SignalAtom<LayoutState>>();
@@ -74,7 +76,7 @@ vi.mock("@/app/store/global", () => ({
 vi.mock("@/app/store/block-atom-cache", () => ({
     getSettingsKeyAtom: (key: string) => (key === "layout:livereflow" ? flag : () => undefined),
 }));
-// A block whose id starts with "browser" is a browser pane: a native window a transform cannot move.
+// A block whose id starts with "browser" is a browser pane: its page is a native window, cut away for a drag.
 vi.mock("@/app/store/mos", () => ({
     makeORef: (_otype: string, oid: string) => oid,
     getObjectValue: (oid: string) => (oid.startsWith("browser") ? { meta: { view: "browser" } } : { meta: { view: "term" } }),
@@ -145,7 +147,10 @@ const futureSize = (m: LayoutModel, id: string) => laidOutAt(rawFutureOf(m, id))
 beforeEach(() => {
     rows.clear();
     setFlag(true);
+    // Windows, where every pane moves with a drag's reflow; a test of the other platforms sets its own.
+    setPlatform("win32");
     resetPaneCaptureGateForTests();
+    resetPageCutGateForTests();
     resetPaneSizeHoldForTests();
 });
 
@@ -216,6 +221,110 @@ describe("landingRectOf", () => {
     });
 });
 
+describe("tearOffOffered", () => {
+    it("is on from the drag's start until the layout first shows a drop, and does not come back in that drag", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        expect(m.tearOffOffered()).toBe(false);
+        m.activeDrag._set(true);
+        expect(m.tearOffOffered()).toBe(true);
+        preview(m, "a", "c", DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.tearOffOffered()).toBe(false);
+        // No drop shown again (the pointer is back over the pane's own place): still off.
+        m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        vi.advanceTimersByTime(20);
+        expect(m.futureLayout()).toBeUndefined();
+        expect(m.tearOffOffered()).toBe(false);
+        // The next drag starts with it on again.
+        m.activeDrag._set(false);
+        expect(m.tearOffOffered()).toBe(false);
+        m.activeDrag._set(true);
+        expect(m.tearOffOffered()).toBe(true);
+    });
+
+    it("goes when the layout closes over the pane's place: the pointer left the window, and came back", () => {
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        leaveWindow(m, "a");
+        expect(m.tearOffLayout()).toBeDefined();
+        expect(m.tearOffOffered()).toBe(false);
+        returnToWindow(m);
+        expect(m.tearOffLayout()).toBeUndefined();
+        expect(m.tearOffOffered()).toBe(false);
+    });
+});
+
+describe("the dragged pane's own place", () => {
+    it("tears the pane off until the drag has shown a drop, and is a drop like any other from then on", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        expect(m.ownPlaceDrops()).toBe(false);
+        preview(m, "a", "c", DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.ownPlaceDrops()).toBe(true);
+        // Back over its own place: the pane is shown there, where it was, under the landing zone.
+        showStay(m, "a");
+        vi.advanceTimersByTime(20);
+        expect(m.futureLayout()!.movedId).toBe("a");
+        expect(shownPx(landingRectOf(m)!)).toEqual(own(m, "a"));
+        expect(m.reflowFor("a")).toMatchObject({ rect: own(m, "a"), moved: true });
+        expect(m.reflowFor("b")).toMatchObject({ rect: own(m, "b"), moved: false });
+        expect(m.placeholderTransform()).toBeDefined();
+        // Committed, it leaves the tree as it was, sends srv nothing, and nothing is pending.
+        const before = JSON.stringify(m.treeState.rootNode);
+        m.onDrop();
+        expect(JSON.stringify(m.treeState.rootNode)).toBe(before);
+        expect(m.layoutOutbox).toEqual([]);
+        expect(m.pendingTreeAction.currentValueAtom()).toBeUndefined();
+        // The release is handled after the source ended the drag, and still knows the place was a drop.
+        m.activeDrag._set(false);
+        expect(m.ownPlaceDrops()).toBe(true);
+        // The next drag starts over a place that tears the pane off again.
+        m.activeDrag._set(true);
+        expect(m.ownPlaceDrops()).toBe(false);
+    });
+
+    it("still tears the pane off while the layout shows the tear-off, and is a drop once the pointer has gone on", () => {
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        // The pointer left the window: the tear-off is shown, and a release tears the pane off.
+        leaveWindow(m, "a");
+        expect(m.tearOffLayout()).toBeDefined();
+        expect(m.ownPlaceDrops()).toBe(false);
+        // Back in the window: the user changed their mind, and the pane is any pane now.
+        returnToWindow(m);
+        expect(m.ownPlaceDrops()).toBe(true);
+    });
+});
+
+describe("landingSettled", () => {
+    it("is the landing rect once the glide to the drop is over, and a new one for each drop the panes rest on", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        expect(m.landingSettled()).toBeUndefined();
+        drag(m, "a", "c", DropDirection.Bottom);
+        // The panes are on their way.
+        vi.advanceTimersByTime(REFLOW_SETTLE_MS - 1);
+        expect(m.landingSettled()).toBeUndefined();
+        vi.advanceTimersByTime(1);
+        const first = m.landingSettled();
+        expect(first).toEqual(futureOf(m, "a"));
+        // Another drop: on their way again, then at rest in the new rect.
+        preview(m, "a", "b", DropDirection.Top);
+        vi.advanceTimersByTime(20);
+        expect(m.landingSettled()).toBeUndefined();
+        vi.advanceTimersByTime(REFLOW_SETTLE_MS);
+        expect(m.landingSettled()).toEqual(futureOf(m, "a"));
+        expect(m.landingSettled()).not.toEqual(first);
+        // No drop shown: no landing.
+        m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        vi.advanceTimersByTime(REFLOW_SETTLE_MS + 20);
+        expect(m.landingSettled()).toBeUndefined();
+    });
+});
+
 describe("the live reflow of a pane drag", () => {
     it("shows nothing with the setting off", () => {
         setFlag(false);
@@ -236,6 +345,30 @@ describe("the live reflow of a pane drag", () => {
         const m = modelOf(three());
         preview(m, "a", "c", DropDirection.Bottom);
         expect(m.liveReflowActive()).toBe(false);
+        expect(m.liveReflowExpected()).toBe(false);
+    });
+
+    it("is how the drag shows its drops from its start to its end, between two drops too", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        // No drop is shown yet, and none is for a moment between two: the reflow is still the drag's look.
+        expect(m.liveReflowActive()).toBe(false);
+        expect(m.liveReflowExpected()).toBe(true);
+        preview(m, "a", "c", DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.liveReflowActive()).toBe(true);
+        expect(m.liveReflowExpected()).toBe(true);
+        m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        vi.advanceTimersByTime(20);
+        expect(m.liveReflowActive()).toBe(false);
+        expect(m.liveReflowExpected()).toBe(true);
+        m.activeDrag._set(false);
+        expect(m.liveReflowExpected()).toBe(false);
+        // Not with the setting off.
+        setFlag(false);
+        m.activeDrag._set(true);
+        expect(m.liveReflowExpected()).toBe(false);
     });
 
     it("gives every pane the rect the drop leaves it, the dragged one its landing rect, so the layout is covered", () => {
@@ -381,20 +514,74 @@ describe("the live reflow of a pane drag", () => {
         for (const id of ["a", "b", "c", "d"]) expect(m.reflowFor(id)).toMatchObject({ rect: own(m, id), moved: false });
     });
 
-    it("never moves a browser pane, dragged or not: a native window does not follow CSS", () => {
+    it("leaves a browser pane where it is while another pane is dragged, off Windows: the host has no cut for its page", () => {
+        for (const platform of ["linux", "darwin"] as const) {
+            setPlatform(platform);
+            const m = modelOf(row("r", 10, leaf("browser-x"), col("col", 10, leaf("b"), leaf("c"))));
+            drag(m, "b", "browser-x", DropDirection.Left);
+            // The drop is shown and the other panes go to it; the browser pane keeps its own rect.
+            expect(m.liveReflowActive()).toBe(true);
+            expect(m.reflowFor("b")).toMatchObject({ moved: true });
+            expect(m.reflowFor("browser-x")).toMatchObject({ rect: own(m, "browser-x"), moved: false, leaving: false });
+            // The browser pane as the dragged one goes to its landing rect, as on Windows.
+            const m2 = modelOf(three());
+            m2.treeState.rootNode!.children![0].data!.blockId = "browser-a";
+            m2.updateTree();
+            drag(m2, "a", "c", DropDirection.Bottom);
+            expect(m2.reflowFor("a")).toMatchObject({ rect: shownPx(landingRectOf(m2)!), moved: true });
+        }
+    });
+
+    it("moves a browser pane like any other, dragged or not: its page is cut away for the drag, its tile is DOM", () => {
         const m = modelOf(row("r", 10, leaf("browser-x"), col("col", 10, leaf("b"), leaf("c"))));
         drag(m, "b", "browser-x", DropDirection.Left);
         const got = entries(m, ["browser-x", "b", "c"]);
-        expect(got["browser-x"]).toBeUndefined();
+        expect(got["browser-x"]).toMatchObject({ rect: futureOf(m, "browser-x"), moved: false, leaving: false });
+        expect(got["browser-x"]!.rect).not.toEqual(own(m, "browser-x"));
         expect(got.b).toMatchObject({ moved: true });
         expect(got.c).toBeDefined();
-        // The browser pane as the dragged one: it is left where it is too.
+        // The browser pane as the dragged one: it goes to its landing rect too.
         const m2 = modelOf(three());
         m2.treeState.rootNode!.children![0].data!.blockId = "browser-a";
         m2.updateTree();
         drag(m2, "a", "c", DropDirection.Bottom);
-        expect(m2.reflowFor("a")).toBeUndefined();
+        expect(m2.reflowFor("a")).toMatchObject({ rect: shownPx(landingRectOf(m2)!), moved: true });
         expect(m2.reflowFor("b")).toBeDefined();
+    });
+
+    it("shows no drop while a browser page is still on screen at the drag's start, and never waits for one for long", () => {
+        vi.useFakeTimers();
+        const m = modelOf(row("r", 10, leaf("browser-x"), col("col", 10, leaf("b"), leaf("c"))));
+        const cutOne = beginPageCut();
+        const cutTwo = beginPageCut();
+        drag(m, "b", "browser-x", DropDirection.Left);
+        expect(m.liveReflowActive()).toBe(false);
+        for (const id of ["browser-x", "b", "c"]) expect(m.reflowFor(id)).toMatchObject({ rect: own(m, id), moved: false });
+        // Every page has to be cut, not the first one only; a cut reported twice counts once.
+        cutOne();
+        cutOne();
+        expect(m.liveReflowActive()).toBe(false);
+        cutTwo();
+        expect(m.liveReflowActive()).toBe(true);
+        expect(m.reflowFor("browser-x")!.rect).toEqual(futureOf(m, "browser-x"));
+        // A catcher that never reports stops holding the reflow back.
+        const m2 = modelOf(three());
+        beginPageCut();
+        drag(m2, "a", "c", DropDirection.Bottom);
+        expect(m2.liveReflowActive()).toBe(false);
+        vi.advanceTimersByTime(PAGE_CUT_MAX_MS);
+        expect(m2.liveReflowActive()).toBe(true);
+    });
+
+    it("does not wait for a page once the drag is over: a tear-off shown through the release has none to cut", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        m.activeDrag._set(false);
+        beginPageCut();
+        commitTearOff(m, "a");
+        vi.advanceTimersByTime(20);
+        expect(m.liveReflowActive()).toBe(true);
     });
 
     it("moves nothing while the dragged pane's picture is still being taken, with every tile's entry at rest for the first glide to start from", () => {
@@ -494,6 +681,21 @@ describe("the live reflow of a pane drag", () => {
         const m = modelOf(many);
         drag(m, "p0", `p${REFLOW_MAX_PANES}`, DropDirection.Right);
         expect(m.liveReflowActive()).toBe(false);
+    });
+});
+
+describe("the landing zone at the drop", () => {
+    it("is not placed by a move the drop has just committed: that move names panes of the layout it made", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        drag(m, "a", "c", DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.placeholderTransform()).toEqual(expect.objectContaining({ transform: expect.any(String) }));
+        // The drop: the tree is committed first, and the pending move is cleared after it.
+        m.treeReducer(m.pendingTreeAction.currentValueAtom());
+        expect(m.pendingTreeAction.throttledValueAtom()).toBeTruthy();
+        expect(m.futureLayout()).toBeUndefined();
+        expect(m.placeholderTransform()).toBeUndefined();
     });
 });
 

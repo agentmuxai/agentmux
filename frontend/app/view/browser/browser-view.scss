@@ -765,8 +765,7 @@ $browser-nav-stack-below: 388px;
 /* browser-view.tsx's BrowserDragCatcher: covers the page mid-drag (with a
    snapshot of it) so the drag reaches the DOM through the hole it opens in
    the native page. */
-.browser-drag-catcher,
-.browser-drag-hole {
+.browser-drag-catcher {
     @include mixins.abs-fill;
 }
 

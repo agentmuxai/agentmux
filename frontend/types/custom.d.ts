@@ -751,8 +751,20 @@ declare global {
         }) => Promise<void>;
         /** Drop the picture now. Idempotent. */
         liveFollowEnd: () => Promise<void>;
-        /** Give the picture another size (DIP): cut or padded from the one first shown, never scaled. A no-op with no picture. */
-        liveFollowResize: (args: { windowWidth: number; windowHeight: number }) => Promise<void>;
+        /** Give the picture another size (DIP). For a landing rect (`landingKey`) whose own picture the host keeps, it
+         *  shows that one (`adopt` keeps the one just taken); otherwise the first picture is resized. A no-op with no picture. */
+        liveFollowResize: (args: { windowWidth: number; windowHeight: number; landingKey?: string; adopt?: boolean }) => Promise<void>;
+        /** Take a pane's picture again where it stands in its window now (`rect`, CSS px of a viewport `viewportWidth`
+         *  wide), at the size it is shown at for the landing rect `landingKey` (DIP), with a flat `wash` drawn over
+         *  it taken back out. `staged` says one was taken and waits for `liveFollowResize` with `adopt`. */
+        liveFollowCapture: (args: {
+            landingKey: string;
+            windowWidth: number;
+            windowHeight: number;
+            rect: { left: number; top: number; width: number; height: number };
+            viewportWidth: number;
+            wash?: { r: number; g: number; b: number; a: number };
+        }) => Promise<{ staged: boolean }>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;

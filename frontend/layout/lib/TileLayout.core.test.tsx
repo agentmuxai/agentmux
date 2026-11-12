@@ -29,7 +29,7 @@ interface DisplayNodesProps {
     DisplayNode: (p: { layoutModel: unknown; node: unknown }) => JSX.Element;
 }
 interface OverlayProps {
-    effectiveOverlayTransform: () => JSX.CSSProperties | undefined;
+    layoutModel: unknown;
 }
 interface PlaceholderProps {
     style: JSX.CSSProperties;
@@ -102,7 +102,6 @@ vi.mock("./tile-drag", () => ({
     releaseTileDrag: (...a: unknown[]) => h.releaseTileDrag(...a),
 }));
 
-import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { tileItemType } from "@/app/drag/drag-types";
 import { createTileLayout, type TileLayoutPlatform } from "./TileLayout.core";
 import { DRAG_PREVIEW_HOVER_MS } from "./drag-preview-size";
@@ -123,12 +122,15 @@ function makeModel() {
     const [ready, setReady] = createSignal(false);
     const [handles, setHandles] = createSignal<Array<{ id: string }>>([]);
     const [reflow, setReflow] = createSignal(new Map<string, ReflowEntry>());
+    const [tearOffOffered, setTearOffOffered] = createSignal(false);
     const [pass, setPass] = createSignal<SettlingPass | undefined>(undefined);
     return {
         activeDrag,
+        tearOffOffered,
         settlingPass: pass,
         reflowFor: (id: string) => reflow().get(id),
         liveReflowActive: () => reflow().size > 0,
+        liveReflowExpected: () => activeDrag(),
         overlayTransform: overlay,
         gapSizePx: gap,
         animationTimeS: animTime,
@@ -141,7 +143,7 @@ function makeModel() {
         treeReducer: vi.fn(),
         renderContent: vi.fn((nm: { content?: () => HTMLElement }) => nm.content?.() ?? document.createElement("div")),
         renderPreview: vi.fn(() => document.createElement("span")),
-        set: { setActiveDrag, setOverlay, setGap, setAnimTime, setMagnifiedId, setMagnifyMount, setIsResizing, setHandles, setReflow, setPass },
+        set: { setActiveDrag, setOverlay, setGap, setAnimTime, setMagnifiedId, setMagnifyMount, setIsResizing, setHandles, setReflow, setTearOffOffered, setPass },
     };
 }
 
@@ -276,11 +278,11 @@ describe("createTileLayout: the layout", () => {
         expect([...container.querySelectorAll<HTMLElement>(".rh")].map((e) => e.dataset.id)).toEqual(["h2"]);
     });
 
-    it("gives the display nodes wrapper a DisplayNode, and the overlay wrapper the effective transform", () => {
+    it("gives the display nodes wrapper a DisplayNode, and the overlay wrapper the model", () => {
         mount(makePlatform());
         expect(typeof h.displayNodes!.DisplayNode).toBe("function");
         expect(h.displayNodes!.layoutModel).toBe(h.model);
-        expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "a" });
+        expect(h.overlay!.layoutModel).toBe(h.model);
     });
 
     describe("the overlay transform around a drag", () => {
@@ -291,40 +293,13 @@ describe("createTileLayout: the layout", () => {
             expect(h.placeholder!.style).toEqual({ top: "10000px", transform: "b" });
         });
 
-        it("holds the last in-drag transform for the exit fade after the drag ends, then lets go", () => {
-            vi.useFakeTimers();
+        it("lets the overlay go with the drag: nothing holds it in place after the release", () => {
             mount(makePlatform());
             h.model.set.setActiveDrag(true);
             h.model.set.setOverlay({ transform: "b" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "b" });
             h.model.set.setActiveDrag(false);
             h.model.set.setOverlay({ transform: "c" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "b" });
-            expect(h.placeholder!.style).toEqual({ top: "10000px", transform: "b" });
-            vi.advanceTimersByTime(DURATION_BASE_MS - 1);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "b" });
-            vi.advanceTimersByTime(1);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "c" });
-        });
-
-        it("a new drag during the hold takes the live transform again", () => {
-            vi.useFakeTimers();
-            mount(makePlatform());
-            h.model.set.setActiveDrag(true);
-            h.model.set.setActiveDrag(false);
-            h.model.set.setOverlay({ transform: "c" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "a" });
-            h.model.set.setActiveDrag(true);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "c" });
-            vi.advanceTimersByTime(DURATION_BASE_MS * 2);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "c" });
-        });
-
-        it("holds nothing when no drag came before", () => {
-            vi.useFakeTimers();
-            mount(makePlatform());
-            h.model.set.setOverlay({ transform: "z" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "z" });
+            expect(h.placeholder!.style).toEqual({ top: "10000px", transform: "c" });
         });
     });
 
@@ -682,6 +657,23 @@ describe("createTileLayout: a tile", () => {
             expect(el.classList.contains("dragging")).toBe(false);
             expect(h.releaseTileDrag).toHaveBeenCalledWith(h.model);
             expect(order).toEqual(["beforeStart", "start", "afterStart", "beforeDrop", "release", "afterDrop"]);
+        });
+
+        it("marks the dragged tile's place as a tear-off while that is all the drag offers, and never in the pane's picture", () => {
+            const { cfg, el } = start();
+            h.model.set.setTearOffOffered(true);
+            expect(el.classList.contains("tear-off-offered")).toBe(false);
+            const captured = beginPaneCapture();
+            cfg.onDragStart();
+            // The picture is still being taken: the red would be in it.
+            expect(el.classList.contains("tear-off-offered")).toBe(false);
+            captured();
+            expect(el.classList.contains("tear-off-offered")).toBe(true);
+            // The layout showed a drop: the place is a dragged pane's again, for good.
+            h.model.set.setTearOffOffered(false);
+            expect(el.classList.contains("tear-off-offered")).toBe(false);
+            expect(el.classList.contains("dragging")).toBe(true);
+            cfg.onDrop();
         });
 
         it("blurs the dragged tile only once the pane's picture has been taken, so the picture is of the pane as it stood", () => {

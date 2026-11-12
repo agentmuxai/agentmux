@@ -1,7 +1,7 @@
 # Pane Tear-Off — Mother Window Resize
 
 **Date:** 2026-06-20
-**Status:** Proposed
+**Status:** historical. It shipped in June 2026 and was removed on 2026-11-12 (#27341): with the live reflow the other panes close over a torn-off pane's place, and the window changing size under them no longer looked right (the operator: "it doesnt look right anymore, and no longer needed").
 **Issue:** TBD
 **Extends:** `SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` (Windows), `SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md` (macOS/Linux)
 

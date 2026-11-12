@@ -282,12 +282,20 @@ export class LayoutModel {
     futureLayout: () => FutureLayout | undefined;
     /** The layout a tear-off of the dragged pane leaves, while the drag shows one (tearOffPreview.ts). */
     tearOffLayout: () => FutureLayout | undefined;
+    /** Whether a release where the drag stands is all the drag has offered so far: the dragged pane's place says TEAR OFF (futureLayout.ts). */
+    tearOffOffered: () => boolean;
+    /** Whether the dragged pane's own place is a drop like any other now, where a release puts the pane back (futureLayout.ts). */
+    ownPlaceDrops: () => boolean;
     /** Outlines of every other pane's rect in that layout, while a drop is previewed. */
     placementWireframe: () => { id: string; style: CSSProperties }[];
     /** The live reflow of a pane drag (liveReflow.ts): how a tile stands in for its future rect, or nothing. */
     reflowFor: (nodeId: string) => ReflowEntry | undefined;
-    /** Whether the live reflow is showing a drop now: the panes are the outline, so no wireframe and no dim. */
+    /** Whether the live reflow is showing a drop now. */
     liveReflowActive: () => boolean;
+    /** Whether the live reflow is how the drag that is on shows its drops: the panes are the outline, so no wireframe and no dim. */
+    liveReflowExpected: () => boolean;
+    /** The dragged pane's landing rect once the panes stand in the drop being shown (liveReflow.ts). */
+    landingSettled: () => Dimensions | undefined;
     /** The glide of the panes after one left outside a drag, while it runs (settlingPass.ts). */
     settlingPass: () => SettlingPass | undefined;
     /**
@@ -683,6 +691,9 @@ export class LayoutModel {
             case LayoutTreeActionType.ClearPendingAction:
                 this.pendingTreeAction.throttledValueAtom._set(undefined);
                 break;
+            // The drop that leaves the pane where it was, committed (placementPreview.ts `showStay`): nothing to do.
+            case LayoutTreeActionType.Stay:
+                break;
             case LayoutTreeActionType.CommitPendingAction: {
                 const pendingAction = this.pendingTreeAction.currentValueAtom();
                 if (!pendingAction) {
@@ -787,16 +798,24 @@ export class LayoutModel {
      * settling pass (settlingPass.ts).
      */
     private createDropPreview(): void {
+        const preview = createPlacementPreview(this);
         ({
             futureLayout: this.futureLayout,
             placementWireframe: this.placementWireframe,
             tearOffLayout: this.tearOffLayout,
-        } = createPlacementPreview(this));
-        this.placeholderTransform = createMemo<CSSProperties>(() =>
-            this.getPlaceholderTransform(this.pendingTreeAction.throttledValueAtom())
-        );
+            tearOffOffered: this.tearOffOffered,
+            ownPlaceDrops: this.ownPlaceDrops,
+        } = preview);
+        // From the action as long as the layout is the one it was armed on, never from one the drop has just
+        // committed (futureLayout.ts `placementAction`).
+        this.placeholderTransform = createMemo<CSSProperties>(() => this.getPlaceholderTransform(preview.placementAction()));
         this.settlingPass = createSettlingPass(this);
-        ({ reflowFor: this.reflowFor, liveReflowActive: this.liveReflowActive } = createLiveReflow(this));
+        ({
+            reflowFor: this.reflowFor,
+            liveReflowActive: this.liveReflowActive,
+            liveReflowExpected: this.liveReflowExpected,
+            landingSettled: this.landingSettled,
+        } = createLiveReflow(this));
     }
 
     /**

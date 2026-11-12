@@ -15,7 +15,7 @@ import { getNodeRectById } from "./layoutNodeModels";
 import { effectiveStack, splitOutStackMember } from "./layoutStack";
 import { computeMoveNode } from "./layoutTree";
 import type { LayoutModel } from "./layoutModel";
-import { placementDirection, showPlacement, sideOfDirection, type PlacementSide } from "./placementPreview";
+import { clearPlacement, placementDirection, showPlacement, sideOfDirection, type PlacementSide } from "./placementPreview";
 import {
     DefaultNodeSize,
     DropDirection,
@@ -141,5 +141,5 @@ export function placePill(model: LayoutModel, blockId: string, targetNodeId: str
 
 /** Take the ghost down. */
 export function clearPillGhost(model: LayoutModel): void {
-    model.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+    clearPlacement(model);
 }

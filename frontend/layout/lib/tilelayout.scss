@@ -166,6 +166,44 @@
             filter: blur(8px);
         }
 
+        // The dragged pane's own place at the start of its drag, behind the pane in hand: a release there
+        // tears the pane off, and the place says so, in the error red with nothing of the pane showing
+        // through. It is over, for the rest of the drag, the first time the layout shows a drop or closes
+        // over the place (`tearOffOffered`, futureLayout.ts); from then on the place is the blurred pane
+        // above, as before. The words scale with the place: `cq` units of the leaf, which is a size
+        // container only while this is shown (its size is the tile's either way).
+        &.tear-off-offered {
+            filter: none;
+
+            .tile-leaf {
+                container-type: size;
+            }
+
+            .tile-leaf::after {
+                content: "TEAR OFF";
+                position: absolute;
+                inset: 0;
+                z-index: var(--z-drag-overlay);
+                display: grid;
+                place-items: center;
+                overflow: hidden;
+                background: var(--error-color);
+                color: var(--button-color);
+                font-weight: 800;
+                font-size: clamp(12px, min(14cqw, 50cqh), 160px);
+                line-height: 1;
+                letter-spacing: 0.06em;
+                white-space: nowrap;
+                pointer-events: none;
+            }
+
+            // Inside the gap a split pane keeps around itself, as the pane's own frame is (below).
+            &:not(:only-child) .tile-leaf::after {
+                $half: calc(var(--gap-size-px) / 2);
+                inset: round(down, $half, 1px) round(up, $half, 1px) round(up, $half, 1px) round(down, $half, 1px);
+            }
+        }
+
         // A minimized pane is its whole block squeezed to a header-sized chip,
         // so nothing but the clip above keeps its content out of sight. Hide
         // it outright, so a chip that is a fraction of a pixel off the header's

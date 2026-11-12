@@ -19,6 +19,7 @@ vi.mock("@/app/store/global", () => ({ getSettingsKeyAtom: () => () => undefined
 vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({ setCurrentDragPayload: () => {} }));
 vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({ dropTargetForElements: () => () => {} }));
 
+import { beginDrag, endDrag, markReleased } from "@/app/drag/drag-session";
 import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
 import { Placeholder } from "../lib/tilelayout-shared";
 
@@ -27,7 +28,7 @@ const ghost = { transform: "translate(10px, 20px)", width: "300px", height: "200
 describe("Placeholder (the drag drop-target ghost)", () => {
     it("takes part in pane-overlay clipping on the element that moves", () => {
         const [xf, setXf] = createSignal<Record<string, string> | null>(null);
-        const model = { placeholderTransform: xf, placementWireframe: () => [], liveReflowActive: () => false };
+        const model = { placeholderTransform: xf, placementWireframe: () => [], liveReflowExpected: () => false };
         const { container } = render(() => <Placeholder layoutModel={model as any} style={{}} />);
         expect(container.querySelector(".placeholder-sizer")).toBeNull();
 
@@ -38,14 +39,15 @@ describe("Placeholder (the drag drop-target ghost)", () => {
         expect(sizer.style.transform).toBe("translate(10px, 20px)");
     });
 
-    it("draws the other panes' wireframe, unless the live reflow is moving the panes themselves (liveReflow.ts)", () => {
+    it("draws the other panes' wireframe and dims the layout, unless the drag is one the live reflow shows (liveReflow.ts)", () => {
         const [reflowing, setReflowing] = createSignal(false);
         const model = {
             placeholderTransform: () => ghost,
             placementWireframe: () => [{ id: "b", style: { transform: "translate(0px, 0px)" } }],
-            liveReflowActive: reflowing,
+            liveReflowExpected: reflowing,
         };
         const { container } = render(() => <Placeholder layoutModel={model as any} style={{}} />);
+        beginDrag("tile");
         expect(container.querySelectorAll(".placement-wireframe").length).toBe(1);
         expect(container.querySelector(".placeholder-container")!.classList.contains("live-reflow")).toBe(false);
 
@@ -53,12 +55,54 @@ describe("Placeholder (the drag drop-target ghost)", () => {
         expect(container.querySelectorAll(".placement-wireframe").length).toBe(0);
         expect(container.querySelector(".placeholder-container")!.classList.contains("live-reflow")).toBe(true);
         expect(container.querySelector(".placeholder-sizer")).not.toBeNull();
+        // The drag is released: the layout no longer says (its drag is over), and the look stays as it was,
+        // so no dim comes back over the whole layout for the zone's last moment.
+        markReleased();
+        setReflowing(false);
+        expect(container.querySelector(".placeholder-container")!.classList.contains("live-reflow")).toBe(true);
+        expect(container.querySelectorAll(".placement-wireframe").length).toBe(0);
+        endDrag("drop");
+    });
+
+    it("plays its exit for a zone left while the drag goes on, and goes at once when the drag is released", () => {
+        vi.useFakeTimers();
+        try {
+            const [xf, setXf] = createSignal<Record<string, string> | null>(ghost);
+            const model = { placeholderTransform: xf, placementWireframe: () => [], liveReflowExpected: () => true };
+            const { container } = render(() => <Placeholder layoutModel={model as any} style={{}} />);
+            const zone = () => container.querySelector(".placeholder");
+            beginDrag("tile");
+            // The pointer leaves the zone in the middle of the drag: the zone fades where it was.
+            setXf(null);
+            expect(zone()?.classList.contains("exiting")).toBe(true);
+            // Another zone arms before the exit is over: it is the zone again.
+            setXf(ghost);
+            expect(zone()?.classList.contains("exiting")).toBe(false);
+            // The drop: the source releases the drag, then the commit clears the zone. No exit: it is gone.
+            markReleased();
+            expect(zone()).not.toBeNull();
+            setXf(null);
+            expect(zone()).toBeNull();
+            // A release in the middle of an exit ends the exit too.
+            endDrag("drop");
+            beginDrag("tile");
+            setXf(ghost);
+            setXf(null);
+            expect(zone()?.classList.contains("exiting")).toBe(true);
+            markReleased();
+            expect(zone()).toBeNull();
+            vi.advanceTimersByTime(500);
+            expect(zone()).toBeNull();
+        } finally {
+            endDrag("cancel");
+            vi.useRealTimers();
+        }
     });
 
     it("stays away while the dragged pane's picture is being taken: its tint would be in the picture", () => {
         resetPaneCaptureGateForTests();
         const captured = beginPaneCapture();
-        const model = { placeholderTransform: () => ghost, placementWireframe: () => [], liveReflowActive: () => false };
+        const model = { placeholderTransform: () => ghost, placementWireframe: () => [], liveReflowExpected: () => false };
         const { container } = render(() => <Placeholder layoutModel={model as any} style={{}} />);
         expect(container.querySelector(".placeholder-sizer")).toBeNull();
         captured();
