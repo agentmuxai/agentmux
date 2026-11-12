@@ -214,6 +214,27 @@ describe("a second change during a glide", () => {
         expect(m.reflowFor("d")!.rect).toEqual(own(m, "d"));
     });
 
+    it("puts the ghost of a pane that closes before its own glide began where the pane still stood", () => {
+        const m = modelOf(row("r", 10, leaf("a"), leaf("b"), leaf("c"), leaf("d")));
+        const stood = m.additionalProps()["b"].rect;
+        close(m, "a");
+        expect(m.additionalProps()["b"].rect).not.toEqual(stood);
+        close(m, "b");
+        expect(m.settlingPass()!.ghosts[1]).toEqual({ id: "b", rect: stood });
+    });
+
+    it("puts the ghost of a pane that closes in the middle of its glide where its edges are drawn", () => {
+        const m = modelOf(row("r", 10, leaf("a"), leaf("b"), leaf("c"), leaf("d")));
+        close(m, "a");
+        vi.advanceTimersByTime(FRAME_MS + 60);
+        // The tile of b, part way from 300 to 0: its edges as the transition has them.
+        const edges: Record<string, string> = { "--reflow-l": "120px", "--reflow-t": "0px", "--reflow-r": "480.5px", "--reflow-b": "800px" };
+        vi.stubGlobal("document", { visibilityState: "visible", getElementById: (id: string) => (id === "b" ? { id } : null) });
+        vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: (name: string) => edges[name] }));
+        close(m, "b");
+        expect(m.settlingPass()!.ghosts[1]).toEqual({ id: "b", rect: { left: 120, top: 0, width: 360.5, height: 800 } });
+    });
+
     it("ends the pass when the layout is resized under it", () => {
         const m = modelOf(three());
         close(m, "c");

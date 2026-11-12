@@ -22,7 +22,15 @@ import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { scaledMs } from "@/app/motion/motion";
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import type { LayoutModel } from "./layoutModel";
-import { liveReflowEnabled, movesWithReflow, onNextFrame, REFLOW_MAX_PANES, reflowSettleMs, shownPx } from "./liveReflow";
+import {
+    liveReflowEnabled,
+    movesWithReflow,
+    onNextFrame,
+    REFLOW_EDGES,
+    REFLOW_MAX_PANES,
+    reflowSettleMs,
+    shownPx,
+} from "./liveReflow";
 import type { LayoutNode, LayoutNodeAdditionalProps } from "./types";
 
 /** One pane's glide. */
@@ -94,6 +102,19 @@ function sameShown(a: Dimensions, b: Dimensions): boolean {
     return p.left === q.left && p.top === q.top && p.width === q.width && p.height === q.height;
 }
 
+/**
+ * Where the tile of a pane in the middle of its glide stands now: its four edges as their transition has them
+ * (the tile's element carries the node's id), or `fallback` where they cannot be read.
+ */
+function drawnRect(nodeId: string, fallback: Dimensions): Dimensions {
+    const tile = typeof document === "undefined" ? null : document.getElementById(nodeId);
+    if (!tile) return fallback;
+    const style = getComputedStyle(tile);
+    const [left, top, right, bottom] = REFLOW_EDGES.map((edge) => parseFloat(style.getPropertyValue(edge)));
+    if (![left, top, right, bottom].every(Number.isFinite)) return fallback;
+    return { left, top, width: right - left, height: bottom - top };
+}
+
 /** Whether a change of `model`'s tree may glide now. */
 function mayGlide(model: LayoutModel, state: State, paneCount: number): boolean {
     if (!liveReflowEnabled() || scaledMs(DURATION_BASE_MS) <= 0) return false;
@@ -139,7 +160,12 @@ export function planSettlingPass(
     const ghosts = [...(open?.ghosts ?? [])];
     for (const leaf of gone) {
         const rect = prevProps[leaf.id]?.rect;
-        if (rect) ghosts.push({ id: leaf.id, rect });
+        if (!rect) continue;
+        // A pane that was gliding itself is not at its layout rect yet: its ghost stands where the pane is
+        // drawn, its start while its glide has not begun and its travelling edges after.
+        const own = open?.moves.get(leaf.id);
+        const stood = !own ? rect : own.from && !open!.gliding ? own.from : drawnRect(leaf.id, rect);
+        ghosts.push({ id: leaf.id, rect: stood });
     }
     return moves.size > 0 || ghosts.length > 0 ? { moves, ghosts, gliding: false } : undefined;
 }
