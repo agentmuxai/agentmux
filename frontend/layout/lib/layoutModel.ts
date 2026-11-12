@@ -284,6 +284,8 @@ export class LayoutModel {
     tearOffLayout: () => FutureLayout | undefined;
     /** Whether a release where the drag stands is all the drag has offered so far: the dragged pane's place says TEAR OFF (futureLayout.ts). */
     tearOffOffered: () => boolean;
+    /** Whether the dragged pane's own place is a drop like any other now, where a release puts the pane back (futureLayout.ts). */
+    ownPlaceDrops: () => boolean;
     /** Outlines of every other pane's rect in that layout, while a drop is previewed. */
     placementWireframe: () => { id: string; style: CSSProperties }[];
     /** The live reflow of a pane drag (liveReflow.ts): how a tile stands in for its future rect, or nothing. */
@@ -689,6 +691,9 @@ export class LayoutModel {
             case LayoutTreeActionType.ClearPendingAction:
                 this.pendingTreeAction.throttledValueAtom._set(undefined);
                 break;
+            // The drop that leaves the pane where it was, committed (placementPreview.ts `showStay`): nothing to do.
+            case LayoutTreeActionType.Stay:
+                break;
             case LayoutTreeActionType.CommitPendingAction: {
                 const pendingAction = this.pendingTreeAction.currentValueAtom();
                 if (!pendingAction) {
@@ -799,6 +804,7 @@ export class LayoutModel {
             placementWireframe: this.placementWireframe,
             tearOffLayout: this.tearOffLayout,
             tearOffOffered: this.tearOffOffered,
+            ownPlaceDrops: this.ownPlaceDrops,
         } = preview);
         // From the action as long as the layout is the one it was armed on, never from one the drop has just
         // committed (futureLayout.ts `placementAction`).

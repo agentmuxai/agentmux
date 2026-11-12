@@ -34,7 +34,7 @@ import {
 import { ELEMENT_DRAG_KINDS, isAnyUnderway } from "@/app/drag/drag-session";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { clearPlacement, leavePlacement, previewPlacement, ZONE_EXIT_MS, type PlacementInput } from "./placementPreview";
+import { clearPlacement, leavePlacement, previewPlacement, showStay, ZONE_EXIT_MS, type PlacementInput } from "./placementPreview";
 import { commitTearOff, leaveOwnPane, restOverOwnPane } from "./tearOffPreview";
 import {
     clampCrossTabDirection,
@@ -263,6 +263,30 @@ export const DisplayNodesWrapper = (props: DisplayNodesWrapperProps) => {
     );
 };
 
+/**
+ * A release over the pane being dragged, while its own place still tears it off (`ownPlaceDrops` is not yet
+ * so): mark the drag for the tear-off and show it. False when this release is not that, and for a drag whose
+ * own place has become a drop: that release commits what is shown, which leaves the pane where it was.
+ */
+function releaseOverOwnPane(model: LayoutModel, nodeId: unknown, innermost: boolean, input: { clientX: number; clientY: number }): boolean {
+    const container = model.displayContainerRef?.current;
+    if (!container || typeof nodeId !== "string" || model.ownPlaceDrops()) return false;
+    const box = container.getBoundingClientRect();
+    const marked = selfReleasePayload({
+        payload: getCurrentDragPayload(),
+        nodeId,
+        innermost,
+        own: model.getNodeRectById(nodeId),
+        x: input.clientX - box.x,
+        y: input.clientY - box.y,
+    });
+    if (!marked) return false;
+    clearPlacement(model, true);
+    setCurrentDragPayload(marked);
+    commitTearOff(model, nodeId);
+    return true;
+}
+
 export interface OverlayNodeWrapperProps {
     layoutModel: LayoutModel;
 }
@@ -315,6 +339,11 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         // payload (app/drag/pane-self-release.ts).
         const originRect = props.layoutModel.getNodeRectById(dragNodeId);
         if (pointerOverOwnPane(originRect, offset.x, offset.y)) {
+            // Once the drag has gone on to something else, the pane's own place is a drop like any other.
+            if (props.layoutModel.ownPlaceDrops()) {
+                showStay(props.layoutModel, dragNodeId);
+                return;
+            }
             clearPlacement(props.layoutModel, true);
             // A release here tears the pane off: once the pointer rests, the layout shows it (tearOffPreview.ts).
             if (!isCrossTabDrag(props.layoutModel)) restOverOwnPane(props.layoutModel, dragNodeId, offset.x, offset.y);
@@ -359,26 +388,6 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         samplePlacement(props.layoutModel, dragNodeId, { targetId: bestLeafId, rect: bestRect, offset: clampedOffset });
     });
 
-    /** The pointer is over the pane being dragged (no ghost there): mark its drag to tear off. */
-    const releaseOverOwnPane = (nodeId: unknown, innermost: boolean, input: { clientX: number; clientY: number }): boolean => {
-        const container = props.layoutModel.displayContainerRef?.current;
-        if (!container || typeof nodeId !== "string") return false;
-        const box = container.getBoundingClientRect();
-        const marked = selfReleasePayload({
-            payload: getCurrentDragPayload(),
-            nodeId,
-            innermost,
-            own: props.layoutModel.getNodeRectById(nodeId),
-            x: input.clientX - box.x,
-            y: input.clientY - box.y,
-        });
-        if (!marked) return false;
-        clearPlacement(props.layoutModel, true);
-        setCurrentDragPayload(marked);
-        commitTearOff(props.layoutModel, nodeId);
-        return true;
-    };
-
     onMount(() => {
         if (!overlayContainerRef) return;
         const cleanup = dropTargetForElements({
@@ -403,7 +412,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
                 // here, as a release outside the window does. The payload stays, marked, for the
                 // cross-window monitor (app/drag/pane-self-release.ts).
                 const innermost = location.current.dropTargets[0]?.element === overlayContainerRef;
-                if (releaseOverOwnPane(source.data.nodeId, innermost, location.current.input)) return;
+                if (releaseOverOwnPane(props.layoutModel, source.data.nodeId, innermost, location.current.input)) return;
                 // Catches drops that landed in a dead spot. Clearing the
                 // payload here is critical — without it, the cross-window
                 // dragend monitor (CrossWindowDragMonitor.win32.tsx) would

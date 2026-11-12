@@ -24,7 +24,14 @@ import { dragState } from "./tilelayout-drag-state";
 import { clampCrossTabDirection } from "./crossTabDrag";
 import type { LayoutModel } from "./layoutModel";
 import { leaveOwnPane, pointerOutsideWindow } from "./tearOffPreview";
-import { DropDirection, LayoutTreeActionType, type LayoutNode, type LayoutTreeComputeMoveNodeAction } from "./types";
+import {
+    DropDirection,
+    LayoutTreeActionType,
+    type LayoutNode,
+    type LayoutTreeComputeMoveNodeAction,
+    type LayoutTreeSetPendingAction,
+    type LayoutTreeStayAction,
+} from "./types";
 import { determineDropDirection } from "./utils";
 
 export interface PlacementInput {
@@ -87,6 +94,22 @@ export function showPlacement(
     cancelLeave(model);
     model.treeReducer(compute);
     return compute;
+}
+
+/**
+ * Show the dragged pane's own place as its drop: the layout as it is, with the pane where it was under the
+ * landing zone. For a drag whose own place has become a drop like any other (`ownPlaceDrops`, futureLayout.ts);
+ * before that the place tears the pane off and shows no drop (tearOffPreview.ts). It goes through the pending
+ * action as every drop does (`Stay`), so it is replaced, cleared and committed as one, and committed it
+ * changes nothing. No candidate is held from before: the next pane's zones arm at once.
+ */
+export function showStay(model: LayoutModel, nodeId: string): void {
+    if (pointerOutsideWindow(model)) return;
+    leaveOwnPane(model);
+    resetDropIntent(model);
+    cancelLeave(model);
+    const stay: LayoutTreeStayAction = { type: LayoutTreeActionType.Stay, nodeId };
+    model.treeReducer({ type: LayoutTreeActionType.SetPendingAction, action: stay } as LayoutTreeSetPendingAction);
 }
 
 /** What a model's drag is steadied by: its tracker, the latest input per hovered pane, and the dwell timer. */

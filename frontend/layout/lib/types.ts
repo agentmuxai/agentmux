@@ -53,6 +53,8 @@ export enum LayoutTreeActionType {
     SetPendingAction = "setpending",
     CommitPendingAction = "commitpending",
     ClearPendingAction = "clearpending",
+    /** A drop that leaves the dragged pane where it was. Only ever a pending action: it shows the pane's own place as the drop, and committed it changes nothing. */
+    Stay = "stay",
     ResizeNode = "resize",
     InsertNode = "insert",
     InsertNodeAtIndex = "insertatindex",
@@ -127,6 +129,12 @@ export interface LayoutTreeInsertNodeAtIndexAction extends LayoutTreeAction, Ins
 
 export interface LayoutTreeDeleteNodeAction extends LayoutTreeAction {
     type: LayoutTreeActionType.DeleteNode;
+    nodeId: string;
+}
+
+export interface LayoutTreeStayAction extends LayoutTreeAction {
+    type: LayoutTreeActionType.Stay;
+    /** The dragged pane. */
     nodeId: string;
 }
 

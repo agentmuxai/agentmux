@@ -21,6 +21,7 @@ import {
     type LayoutTreeAction,
     type LayoutTreeDeleteNodeAction,
     type LayoutTreeMoveNodeAction,
+    type LayoutTreeStayAction,
     type LayoutTreeSwapNodeAction,
 } from "./types";
 
@@ -49,16 +50,18 @@ function leavesOf(node: LayoutNode | undefined, out: LayoutNode[] = []): LayoutN
     return out;
 }
 
-/** The node a move or swap action carries, by its id, and none for any other action. */
+/** The node a move, swap or stay action carries, by its id, and none for any other action. */
 function movedIdOf(action: LayoutTreeAction): string | undefined {
     if (action.type === LayoutTreeActionType.Move) return (action as LayoutTreeMoveNodeAction).node?.id;
     if (action.type === LayoutTreeActionType.Swap) return (action as LayoutTreeSwapNodeAction).node2Id;
+    if (action.type === LayoutTreeActionType.Stay) return (action as LayoutTreeStayAction).nodeId;
     return undefined;
 }
 
 /**
- * The layout `action` (a pending Move or Swap) leaves, or undefined for anything else, for an empty
- * layout, or when the reducer refuses it. The model's own tree is not touched.
+ * The layout `action` (a pending Move, Swap or Stay) leaves, or undefined for anything else, for an empty
+ * layout, or when the reducer refuses it. A Stay leaves the layout as it is, with the pane in its own rect.
+ * The model's own tree is not touched.
  */
 export function futureLayoutOf(model: LayoutModel, action: LayoutTreeAction | undefined): FutureLayout | undefined {
     const movedId = action ? movedIdOf(action) : undefined;
@@ -81,8 +84,8 @@ export function futureLayoutOf(model: LayoutModel, action: LayoutTreeAction | un
 /** `action` run on a copy of the tree, and the copy laid out; none when it leaves no pane. */
 function laidOutAfter(model: LayoutModel, root: LayoutNode, action: LayoutTreeAction): Omit<FutureLayout, "movedId"> | undefined {
     const state = { ...model.treeState, rootNode: copyLayoutNode(root) };
-    // Names the branches the action creates, as a drop does (they do not change any rect).
-    withDerivedNodeIds("preview", () => applyLayoutAction(state, action));
+    // Names the branches the action creates, as a drop does (they do not change any rect). A Stay edits nothing.
+    if (action.type !== LayoutTreeActionType.Stay) withDerivedNodeIds("preview", () => applyLayoutAction(state, action));
     if (!state.rootNode) return undefined;
     const leaves = leavesOf(state.rootNode);
     return {
@@ -188,5 +191,32 @@ export function createPlacementPreview(model: LayoutModel) {
     // operator, 2026-11-12: "the red goes away once the user drags, when it comes back, red should not").
     const shownSomething = createMemo<boolean>((was) => (model.activeDrag() ? was || !!futureLayout() || !!tearOffLayout() : false), false);
     const tearOffOffered = () => model.activeDrag() && !shownSomething();
-    return { placementAction, futureLayout, placementWireframe, tearOffLayout, tearOffOffered };
+    const ownPlaceDrops = createOwnPlace(model, futureLayout, tearOffLayout);
+    return { placementAction, futureLayout, placementWireframe, tearOffLayout, tearOffOffered, ownPlaceDrops };
+}
+
+/**
+ * Whether the dragged pane's own place is a drop like any other: the layout shows the pane there under the
+ * landing zone, and a release puts it back. It starts as the place a release tears the pane off, since every
+ * drag starts over it, and stays that through a tear-off the layout is showing (the pointer rested there). It
+ * becomes an ordinary drop once the user has gone on to something else: a drop was shown, or a tear-off was
+ * and is no longer (the pointer went on to another pane, or left the window and came back). From then on the
+ * pane is torn off by a release outside the window, as any pane is (the operator, 2026-11-12: "it is suppose
+ * to behave exactly like an ordinary pane, once they decide not to tear off and it rearranges").
+ *
+ * Kept as it was when the drag is released, until the next one starts: the release is handled after the
+ * source has ended the drag (the source's onDrop comes first), and must still know which it was.
+ */
+function createOwnPlace(model: LayoutModel, futureLayout: () => unknown, tearOffLayout: () => unknown): () => boolean {
+    const state = createMemo<{ active: boolean; tornOff: boolean; drops: boolean }>(
+        (was) => {
+            if (!model.activeDrag()) return was.active ? { ...was, active: false } : was;
+            const from = was.active ? was : { tornOff: false, drops: false };
+            const tearOff = !!tearOffLayout();
+            const drops = from.drops || !!futureLayout() || (from.tornOff && !tearOff);
+            return { active: true, tornOff: from.tornOff || tearOff, drops };
+        },
+        { active: false, tornOff: false, drops: false }
+    );
+    return () => state().drops;
 }

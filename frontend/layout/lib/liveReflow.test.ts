@@ -29,7 +29,7 @@ import {
     wholePx,
     type ReflowEntry,
 } from "@/layout/lib/liveReflow";
-import { showPlacement } from "@/layout/lib/placementPreview";
+import { showPlacement, showStay } from "@/layout/lib/placementPreview";
 import {
     commitTearOff,
     leaveOwnPane,
@@ -249,6 +249,50 @@ describe("tearOffOffered", () => {
         returnToWindow(m);
         expect(m.tearOffLayout()).toBeUndefined();
         expect(m.tearOffOffered()).toBe(false);
+    });
+});
+
+describe("the dragged pane's own place", () => {
+    it("tears the pane off until the drag has shown a drop, and is a drop like any other from then on", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        expect(m.ownPlaceDrops()).toBe(false);
+        preview(m, "a", "c", DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.ownPlaceDrops()).toBe(true);
+        // Back over its own place: the pane is shown there, where it was, under the landing zone.
+        showStay(m, "a");
+        vi.advanceTimersByTime(20);
+        expect(m.futureLayout()!.movedId).toBe("a");
+        expect(shownPx(landingRectOf(m)!)).toEqual(own(m, "a"));
+        expect(m.reflowFor("a")).toMatchObject({ rect: own(m, "a"), moved: true });
+        expect(m.reflowFor("b")).toMatchObject({ rect: own(m, "b"), moved: false });
+        expect(m.placeholderTransform()).toBeDefined();
+        // Committed, it leaves the tree as it was, sends srv nothing, and nothing is pending.
+        const before = JSON.stringify(m.treeState.rootNode);
+        m.onDrop();
+        expect(JSON.stringify(m.treeState.rootNode)).toBe(before);
+        expect(m.layoutOutbox).toEqual([]);
+        expect(m.pendingTreeAction.currentValueAtom()).toBeUndefined();
+        // The release is handled after the source ended the drag, and still knows the place was a drop.
+        m.activeDrag._set(false);
+        expect(m.ownPlaceDrops()).toBe(true);
+        // The next drag starts over a place that tears the pane off again.
+        m.activeDrag._set(true);
+        expect(m.ownPlaceDrops()).toBe(false);
+    });
+
+    it("still tears the pane off while the layout shows the tear-off, and is a drop once the pointer has gone on", () => {
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        // The pointer left the window: the tear-off is shown, and a release tears the pane off.
+        leaveWindow(m, "a");
+        expect(m.tearOffLayout()).toBeDefined();
+        expect(m.ownPlaceDrops()).toBe(false);
+        // Back in the window: the user changed their mind, and the pane is any pane now.
+        returnToWindow(m);
+        expect(m.ownPlaceDrops()).toBe(true);
     });
 });
 
