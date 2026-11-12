@@ -14,6 +14,7 @@ import { PROVIDER_LABELS, refreshAccountCache } from "./identity-model";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { OAuthConnectPanel } from "@/app/view/accounts/OAuthConnectPanel";
+import { GITHUB_APP_KIND_LABEL, GITHUB_TOKEN_KIND_LABEL } from "@/app/view/accounts/github-account-copy";
 import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
 import { isServiceOAuthAccount, reconnectScopes } from "@/app/view/accounts/oauth-account-state";
 import "./identity-view.scss";
@@ -386,14 +387,20 @@ function ProviderField({ f }: { f: FormFields }): JSX.Element {
 function KindField({ f }: { f: FormFields }): JSX.Element {
     return (
         <FormField label="Kind">
-            <select class="identity-select" value={f.kind()} onChange={(e) => f.setKind(e.currentTarget.value as AccountKind)}>
+            <select
+                class="identity-select"
+                value={f.provider() === "github" && f.kind() === "api_key" ? "pat" : f.kind()}
+                onChange={(e) => f.setKind(e.currentTarget.value as AccountKind)}
+            >
                 {/* Browser-login path for OAuth-capable providers. */}
                 <Show when={supportsOAuth(f.provider())}>
-                    <option value="oauth">Connect with OAuth (browser login)</option>
+                    <option value="oauth">
+                        {f.provider() === "github" ? GITHUB_APP_KIND_LABEL : "Connect with OAuth (browser login)"}
+                    </option>
                 </Show>
+                {/* GitHub has no API key apart from a token: an account saved as one shows as the token. */}
                 <Show when={f.provider() === "github"}>
-                    <option value="pat">Personal Access Token</option>
-                    <option value="api_key">API Key</option>
+                    <option value="pat">{GITHUB_TOKEN_KIND_LABEL}</option>
                 </Show>
                 <Show when={f.provider() === "aws"}>
                     <option value="role">IAM Role</option>
