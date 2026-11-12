@@ -130,6 +130,42 @@
     text-align: right;
 }
 
+// In a narrow pane the six columns (about 530px) cannot all show, so a row stacks instead: the
+// label across the top, then kind, details, value and date wrapping together, the row's buttons last.
+@container vault (max-width: 600px) {
+    .vault-table {
+        display: block;
+
+        thead {
+            display: none;
+        }
+
+        tbody {
+            display: block;
+        }
+
+        tr {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: var(--space-1) var(--space-3);
+            padding: var(--space-2) var(--space-2);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 0;
+            border-bottom: 0;
+            min-width: 0;
+        }
+
+        td:first-child,
+        td.vault-actions {
+            flex: 1 1 100%;
+        }
+    }
+}
+
 .vault-form-fields {
     display: flex;
     flex-direction: column;
