@@ -296,6 +296,15 @@ describe("a change that does not glide", () => {
         snaps(m);
     });
 
+    it("in a window tab that is not shown, whose layout stays mounted", () => {
+        const m = modelOf(three());
+        const hidden = { closest: (selector: string) => (selector === "[data-window-tab-hidden]" ? {} : null) };
+        m.displayContainerRef.current = { getBoundingClientRect: () => container, ...hidden } as any;
+        close(m, "c");
+        snaps(m);
+        expect(paneSizesHeld()).toBe(false);
+    });
+
     it("while a pane's picture is being taken, and a picture that starts during a pass ends it", () => {
         const m = modelOf(row("r", 10, leaf("a"), leaf("b"), leaf("c"), leaf("d")));
         const done = beginPaneCapture();

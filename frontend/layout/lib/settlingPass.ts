@@ -122,13 +122,17 @@ function mayGlide(model: LayoutModel, state: State, paneCount: number): boolean 
     if (state.dragShown || model.activeDrag() || model.tearOffLayout()) return false;
     // Magnified now, or as last published (the pane that closed was the magnified one): the tiles are hidden.
     if (model.isResizing() || model.treeState.magnifiedNodeId || model.magnifiedNodeIdAtom()) return false;
+    // A window tab that is not shown keeps its layout mounted (workspace.tsx marks it, pane-overlay.ts
+    // `HIDDEN_TAB_ATTR`): nothing of it is drawn, and a pass would hold the shown tab's terminals too.
+    if (model.displayContainerRef.current?.closest?.("[data-window-tab-hidden]")) return false;
     return typeof document === "undefined" || document.visibilityState !== "hidden";
 }
 
 /**
  * The pass for a change of `model`'s layout from `prevLeafs` at `prevProps` to `nextLeafs` at `nextProps`, or
  * none when the change does not glide: no pane left or one came, the reflow is off or the animations are, a
- * drag's reflow is on screen, the layout is being resized or magnified, or nothing a tile shows changed.
+ * drag's reflow is on screen, the layout is being resized or magnified, its tab or window is not shown, or
+ * nothing a tile shows changed.
  */
 export function planSettlingPass(
     model: LayoutModel,

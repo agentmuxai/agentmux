@@ -1,6 +1,6 @@
 # SPEC: Panes glide into place when the layout changes (close first), like the My agents rows
 
-**Status:** active. Approved by the operator on 2026-11-12 (D1 to D5 as recommended). PR 1 (the trigger, close and move-away) is built; PR 2 is not. Three points changed in the build, agreed with Agent2 from what the drag's reflow taught (§6.1, §6.2): a pass holds each tile at its old rectangle for one frame, terminals are held for the pass, and a pass never opens over what a drag shows
+**Status:** active. Approved by the operator on 2026-11-12 (D1 to D5 as recommended). PR 1 (the trigger, close and move-away) is #7036; PR 2 (open, split, minimize, restore, swap) is not built. Three points changed in the build, agreed with Agent2 from what the drag's reflow taught (§6.1, §6.2): a pass holds each tile at its old rectangle for one frame, terminals are held for the pass, and a pass never opens over what a drag shows
 
 - **Date:** 2026-11-01, **revised 2026-11-11** against `origin/main` 63848b092 (v0.60.24 plus the day's merges)
 - **Author:** Camper@narko

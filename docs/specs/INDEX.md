@@ -792,6 +792,7 @@ partial list.
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
 | [`SPEC_PANE_LOCATE_FLASH_ONE_FRAMEWORK_2026_11_08`](SPEC_PANE_LOCATE_FLASH_ONE_FRAMEWORK_2026_11_08.md) | Spec: the pane locate flash, one framework for every path that surfaces an existing pane |
 | [`SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02`](SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md) | Spec: pane modals, not window modals, for sign-in and OAuth; an audit of every window modal (2026-11-02) |
+| [`SPEC_PANE_REFLOW_GLIDE_2026_11_01`](SPEC_PANE_REFLOW_GLIDE_2026_11_01.md) | SPEC: Panes glide into place when the layout changes (close first), like the My agents rows |
 | [`SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18`](SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18.md) | Spec: Selecting a pane from Swarm — the lost click, and one state machine for "show this pane" |
 | [`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) | SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign) |
 | [`SPEC_PANE_TAB_CONTRACT_V1_2026_09_24`](SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md) | SPEC: Pane Tab contract v1 — one general interface for every pane tab (and future user-loaded widgets), starting with the Help "ghost" fix |
