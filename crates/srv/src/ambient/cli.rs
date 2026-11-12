@@ -185,6 +185,18 @@ pub(crate) fn has_own_model_server(meta: &obj::MetaMapType) -> bool {
     ambient_env(meta).is_err()
 }
 
+/// Whether the agent in this block runs on one of AgentMux's model routes. The route's variables are set at each spawn,
+/// not kept in the pane's saved environment, so the pane's record of the route it really runs on is what says so.
+pub(crate) fn on_model_route(meta: &obj::MetaMapType) -> bool {
+    meta.get(crate::backend::model_gateway::launch::BLOCK_META_KEY).is_some_and(|v| !v.is_null())
+}
+
+/// Whether the background title recovery leaves this agent alone: it is on a model server of its own or on a model
+/// route, and a recovery call would use the person's own sign-in, and send the conversation to Anthropic, instead.
+pub(crate) fn recovery_skips(meta: &obj::MetaMapType) -> bool {
+    has_own_model_server(meta) || on_model_route(meta)
+}
+
 /// The last assistant text block (sanitized) and the usage from a `claude -p
 /// --output-format stream-json` transcript. Text is empty when the model said
 /// nothing, or only wrapped nothing in a fence.
@@ -298,6 +310,16 @@ mod ambient_cli_failure_tests {
         assert!(!has_own_model_server(&meta));
         meta.insert("cmd:env".to_string(), serde_json::json!({ "ANTHROPIC_BASE_URL": "http://192.0.2.68:11434" }));
         assert!(has_own_model_server(&meta));
+    }
+
+    #[test]
+    fn an_agent_on_a_model_route_is_known_from_the_route_its_pane_records() {
+        let mut meta = obj::MetaMapType::new();
+        assert!(!on_model_route(&meta) && !recovery_skips(&meta));
+        meta.insert("agent:route_model".to_string(), serde_json::json!(null));
+        assert!(!on_model_route(&meta), "a route left is recorded as null");
+        meta.insert("agent:route_model".to_string(), serde_json::json!({ "route": "openrouter", "model": "m" }));
+        assert!(on_model_route(&meta) && recovery_skips(&meta));
     }
 }
 
