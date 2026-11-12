@@ -671,8 +671,8 @@ pub(crate) fn resize_browser_pane_view_inner(
         // (#881). The cut is in the overlay's own coordinates, so
         // it is sent again now that the overlay has its new size.
         let scale = views_scale(window.as_ref());
-        let visible =
-            crate::browser_panes::views_clip::apply(state, label, &window_label, &controller, pane_rect, scale, true);
+        let placed = (rect.width, rect.height);
+        let visible = crate::browser_panes::views_clip::apply_placed(state, label, &window_label, &controller, pane_rect, placed, scale);
         // Linux lays the window out for the move to show; on Windows setting the
         // overlay's bounds is enough.
         if layout && cfg!(target_os = "linux") {

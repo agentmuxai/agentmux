@@ -225,6 +225,28 @@ pub(crate) fn apply(
     shown
 }
 
+/// `apply` after pane `label`'s overlay was placed for the page's rect `pane` at the size `placed`. The cut
+/// is of the size the overlay was given (on Linux a rect that followed a window resize is larger or
+/// smaller than the page's last one), from the page's own origin, which the overlay rects share. A pane
+/// the page gave no area stays hidden whatever was placed. UI thread.
+pub(crate) fn apply_placed(
+    state: &Arc<AppState>,
+    label: &str,
+    window_label: &str,
+    controller: &cef::OverlayController,
+    pane: Rect,
+    placed: (i32, i32),
+    scale: f64,
+) -> bool {
+    apply(state, label, window_label, controller, cut_extent(pane, placed), scale, true)
+}
+
+/// The rect a placed pane is cut from: the page's origin with the placed size, or the page's own rect
+/// when that has no area.
+fn cut_extent(pane: Rect, placed: (i32, i32)) -> Rect {
+    if pane.2 > 0 && pane.3 > 0 { (pane.0, pane.1, placed.0, placed.1) } else { pane }
+}
+
 /// `apply` where the caller has neither the pane's rect nor its window: when the window's overlays
 /// change (`pane` none: the page's last rect for it, not `bounds()`, which is full-size for an
 /// inactive stack tab whose rect is 0×0, see `AppState::browser_pane_physical_rects`), and when a new
@@ -347,6 +369,18 @@ mod tests {
         // One that ends at the pane's own edge leaves the DIP past it.
         let cut = pane_cut((0, 0, 400, 300), &[(0, 270, 400, 30)], 1.0);
         assert_eq!(cut, PaneCut::Rects(vec![(0, 0, 401, 270), (400, 270, 1, 30), (0, 300, 401, 1)]));
+    }
+
+    #[test]
+    fn a_pane_placed_larger_than_the_page_said_is_cut_at_its_placed_size() {
+        // Linux, a window that grew before the page laid out again: the overlay is 500 wide where the
+        // page's last rect is 400. The menu keeps its place in the pane, and the new 100 are shown.
+        let at = cut_extent((100, 50, 400, 300), (500, 300));
+        assert_eq!(at, (100, 50, 500, 300));
+        let cut = pane_cut(at, &[(200, 50, 100, 80)], 1.0);
+        assert_eq!(cut, PaneCut::Rects(vec![(0, 0, 100, 80), (200, 0, 301, 80), (0, 80, 501, 221)]));
+        // An inactive tab's pane has no area for the page, whatever Views placed.
+        assert_eq!(cut_extent((0, 0, 0, 0), (500, 300)), (0, 0, 0, 0));
     }
 
     #[test]
