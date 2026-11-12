@@ -14,12 +14,17 @@ import { isBrokeredGithub } from "./oauth-account-state";
 /** The two choices under the GitHub tile. */
 export const GITHUB_APP_CHOICE = {
     title: "Use AgentMux's GitHub App",
-    sub: "muxagent acts on GitHub for your agents, only on the repositories you install it on. No token to manage.",
+    sub: "No GitHub credentials needed on this computer. You choose the repositories; agents push and open PRs and issues there as muxagent[bot]. Needs an AgentMux Cloud sign-in.",
 };
 export const GITHUB_TOKEN_CHOICE = {
     title: "Add a personal access token",
-    sub: "Your own token, stored in your OS keychain. Agents act as you.",
+    sub: "Your own token, kept in your OS keychain. Agents you link it to act as you.",
 };
+
+/** What agents can and can't do through the App (the permissions `github_tokens::permissions_for` asks for). */
+export const GITHUB_APP_CAN =
+    "Agents can clone, push and open pull requests and issues on the repositories you installed it on, and change CI workflows only if you allow that agent.";
+export const GITHUB_APP_CANNOT = "They can't reach other repositories, create repositories or change settings.";
 
 /** The Kind select's two GitHub options. */
 export const GITHUB_APP_KIND_LABEL = "AgentMux's GitHub App (muxagent)";
@@ -41,6 +46,34 @@ export function githubKindShort(a: Pick<Account, "provider" | "kind" | "context"
     if (isBrokeredGithub(a)) return "GitHub App";
     return isGithubToken(a) ? "Token" : null;
 }
+
+/** Whether a GitHub account is the App's and still works (srv gives agents the App's tokens only then). */
+function appInUse(a: Pick<Account, "provider" | "kind" | "context" | "status">): boolean {
+    return isBrokeredGithub(a) && a.status !== "needs_reauth";
+}
+
+/**
+ * The one sentence at the top of the GitHub section: which way agents reach GitHub now. The App wins
+ * when it works (srv routes git and gh through it and keeps the person's login from agents); a token
+ * reaches only the agents it is linked to; with neither, an agent has the person's own login unless
+ * this computer has gh-agent (GITHUB_GH_AGENT_NOTE says so under it).
+ */
+export function githubStatusLine(accounts: readonly Pick<Account, "provider" | "kind" | "context" | "status">[]): string {
+    const github = accounts.filter((a) => a.provider === "github");
+    if (github.some(appInUse)) {
+        return "Connected through AgentMux's GitHub App. Agents act as muxagent[bot], only on the repositories you installed it on.";
+    }
+    if (github.some(isBrokeredGithub)) {
+        return "AgentMux's GitHub App needs to be reconnected. Until then agents don't use it.";
+    }
+    if (github.some(isGithubToken)) {
+        return "Using your personal access token. The agents you link it to act as you, with whatever the token allows.";
+    }
+    return "Not connected. Agents use your own GitHub login on this computer, if there is one, and act as you.";
+}
+
+/** The line under the status: a computer with gh-agent installed gives agents their identity itself, whichever is connected. */
+export const GITHUB_GH_AGENT_NOTE = "On a computer with gh-agent, gh-agent gives agents their GitHub identity instead.";
 
 /** One sentence on who agents act as through this account, or null when it isn't one of the two. */
 export function githubActsAs(a: Pick<Account, "provider" | "kind" | "context">): string | null {
