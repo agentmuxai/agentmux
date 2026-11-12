@@ -190,6 +190,7 @@ vi.mock("@/app/init/pool", () => ({
 vi.mock("@/app/init/startup-splash", () => h.stub("onStartupReveal", "fadeOutStartupSplash"));
 vi.mock("@/app/store/zoom", () => h.stub("initChromeZoom"));
 vi.mock("@/app/store/recycle", () => h.stub("showReloadCover", "installRecycleRequests"));
+vi.mock("@/app/window/os-close", () => h.stub("installOsCloseRequests"));
 vi.mock("@/app/block/widget-loader", () => h.stub("startWidgetLoader"));
 vi.mock("@/app/init/background-audit", () => ({ surfaceBackgroundAudit: h.surfaceBackgroundAudit }));
 vi.mock("@/app/init/incidents", () => ({ surfaceIncidents: h.surfaceIncidents }));

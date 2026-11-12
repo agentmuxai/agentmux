@@ -627,13 +627,13 @@ async function initAppInner() {
         void showReloadCover();
         installRecycleRequests();
     });
+    // An OS close of this window (Alt+F4, the taskbar) is asked about here first.
+    void import("@/app/window/os-close").then(({ installOsCloseRequests }) => installOsCloseRequests());
 
     // Use Promise.race to add a timeout fallback for fonts.ready
-    const fontsPromise = document.fonts.ready;
-    const timeoutPromise = new Promise(resolve => setTimeout(resolve, 2000));
 
     try {
-        await Promise.race([fontsPromise, timeoutPromise]);
+        await Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, 2000))]);
     } catch (fontErr) {
         getApi().sendLog(`initApp: font wait error (non-fatal): ${fontErr}`);
     }

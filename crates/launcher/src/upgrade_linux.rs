@@ -106,7 +106,7 @@ pub fn check_target(
 /// `text` for zenity's `--text`, which reads Pango markup: a path's `&`, `<`
 /// or `>` shown as they are.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn pango_escape(text: &str) -> String {
+pub(crate) fn pango_escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 

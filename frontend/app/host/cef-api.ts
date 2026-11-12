@@ -307,6 +307,10 @@ function windowLifecycleApi() {
             const resolved = label ?? new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
             await invokeCommand("close_window", { label: resolved });
         },
+        closeRequestSeen: async (seq: number) => {
+            const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            await invokeCommand("close_request_seen", { label, seq });
+        },
         minimizeWindow: () => {
             const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
             invokeCommand("minimize_window", { label }).catch(console.error);
