@@ -20,6 +20,9 @@ pub const PASSPORT: &str = "passport";
 pub const DRIVERS_LICENCE: &str = "drivers-licence";
 pub const CARD_NUMBER: &str = "card-number";
 pub const CARD_EXPIRY: &str = "card-expiry";
+pub const CARD_EXP_MONTH: &str = "card-exp-month";
+pub const CARD_EXP_YEAR: &str = "card-exp-year";
+pub const CARD_ZIP: &str = "card-zip";
 pub const CARD_CVC: &str = "card-cvc";
 pub const CARD_NAME: &str = "card-name";
 pub const BANK_ACCOUNT: &str = "bank-account";
@@ -61,7 +64,15 @@ pub fn slots(f: &DomFacts) -> Vec<&'static str> {
     if token("cc-number") || contains("cardnumber") || contains("ccnumber") || contains("ccnum") || contains("creditcardnumber") {
         out.push(CARD_NUMBER);
     }
-    if tokens.iter().any(|t| t.starts_with("cc-exp")) || contains("expir") || contains("ccexp") || contains("cardexp") {
+    let month = token("cc-exp-month") || contains("expmonth") || contains("expirymonth") || contains("expirationmonth") || contains("expiremonth");
+    let year = token("cc-exp-year") || contains("expyear") || contains("expiryyear") || contains("expirationyear") || contains("expireyear");
+    if month {
+        out.push(CARD_EXP_MONTH);
+    }
+    if year {
+        out.push(CARD_EXP_YEAR);
+    }
+    if !month && !year && (token("cc-exp") || contains("expir") || contains("ccexp") || contains("cardexp")) {
         out.push(CARD_EXPIRY);
     }
     if token("cc-csc") || has("cvc") || has("cvv") || has("csc") || contains("securitycode") {
@@ -69,6 +80,11 @@ pub fn slots(f: &DomFacts) -> Vec<&'static str> {
     }
     if token("cc-name") || contains("nameoncard") || contains("cardholder") || contains("ccname") {
         out.push(CARD_NAME);
+    }
+    // The card's billing ZIP: not a shipping or delivery one.
+    let zipish = (token("postal-code") && !token("shipping")) || has("zip") || has("postal") || contains("zipcode") || contains("postalcode") || contains("postcode");
+    if zipish && !has("shipping") && !has("delivery") && !token("shipping") {
+        out.push(CARD_ZIP);
     }
     if contains("accountnumber") || contains("bankaccount") || contains("acctnumber") || contains("accountno") || has("iban") {
         out.push(BANK_ACCOUNT);
@@ -129,6 +145,14 @@ mod tests {
         assert_eq!(slots(&field(&[("autocomplete", "cc-number")], "")), [CARD_NUMBER]);
         assert_eq!(slots(&field(&[("name", "card_number")], "")), [CARD_NUMBER]);
         assert_eq!(slots(&field(&[("autocomplete", "cc-exp")], "")), [CARD_EXPIRY]);
+        assert_eq!(slots(&field(&[("autocomplete", "cc-exp-month")], "")), [CARD_EXP_MONTH]);
+        assert_eq!(slots(&field(&[("autocomplete", "cc-exp-year")], "")), [CARD_EXP_YEAR]);
+        assert_eq!(slots(&field(&[("name", "expiry_month")], "")), [CARD_EXP_MONTH]);
+        assert_eq!(slots(&field(&[("name", "exp-year")], "")), [CARD_EXP_YEAR]);
+        assert_eq!(slots(&field(&[("autocomplete", "billing postal-code")], "")), [CARD_ZIP]);
+        assert_eq!(slots(&field(&[("name", "zip")], "ZIP code")), [CARD_ZIP]);
+        assert!(slots(&field(&[("autocomplete", "shipping postal-code")], "")).is_empty());
+        assert!(slots(&field(&[("name", "shipping_zip")], "")).is_empty());
         assert_eq!(slots(&field(&[("name", "cvv")], "")), [CARD_CVC]);
         assert_eq!(slots(&field(&[("autocomplete", "cc-csc")], "")), [CARD_CVC]);
         assert_eq!(slots(&field(&[("autocomplete", "cc-name")], "")), [CARD_NAME]);

@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
+use super::choice_facts::{add_option_owners, describe_scope};
 use super::combobox;
 pub(super) use super::hidden_choices::hidden_choices;
 use super::dates;
@@ -779,29 +780,7 @@ pub async fn snapshot_route(
         },
         None => scope,
     };
-    let mut facts = HashMap::new();
-    let role_of = |n: &Value| n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    // A scoped snapshot renders only its subtree, so it looks up facts only there.
-    let in_scope: Vec<&Value> = match scope {
-        Some(b) => snapshot::subtree(&nodes, b),
-        None => nodes.iter().collect(),
-    };
-    let wanted = in_scope
-        .iter()
-        .copied()
-        .filter(|n| snapshot::VALUE_ROLES.contains(&role_of(n).as_str()))
-        .chain(in_scope.iter().copied().filter(|n| role_of(n) == "button"));
-    for n in wanted {
-        if facts.len() >= MAX_DESCRIBES {
-            break;
-        }
-        if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
-            if let Some(f) = describe_markup(&mut cdp, b).await {
-                let name = n.pointer("/name/value").and_then(|v| v.as_str()).unwrap_or("");
-                facts.insert(b, f.with_label(name));
-            }
-        }
-    }
+    let facts = describe_scope(&mut cdp, &nodes, scope).await;
     let url = page_url(&mut cdp).await;
     // A scope by name has no reference to prefix with: its references are
     // numbered like a find's, which can't clash with any other.
@@ -893,7 +872,9 @@ pub async fn find_route(
         snapshot::VALUE_ROLES.contains(&role) || role == "button"
     };
     let mut facts = HashMap::new();
-    for n in snapshot::find_candidates(&nodes, q).into_iter().filter(needs_facts).take(MAX_FIND_DESCRIBES) {
+    let candidates = snapshot::find_candidates(&nodes, q);
+    add_option_owners(&mut cdp, &nodes, &candidates, &mut facts, MAX_FIND_DESCRIBES).await;
+    for n in candidates.into_iter().filter(needs_facts).take(MAX_FIND_DESCRIBES) {
         if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
             if let Some(f) = describe_markup(&mut cdp, b).await {
                 let name = n.pointer("/name/value").and_then(|v| v.as_str()).unwrap_or("");

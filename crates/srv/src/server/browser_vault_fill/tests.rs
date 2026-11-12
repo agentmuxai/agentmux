@@ -34,12 +34,15 @@ fn the_decision_table_asks_unless_the_site_is_granted_and_the_field_fits() {
 struct Host {
     seen: Mutex<Vec<(String, Value)>>,
     field: Mutex<Value>,
+    /// What the host says the form's card fields are.
+    card: Mutex<Value>,
 }
 
 async fn host_route(AxState(h): AxState<Arc<Host>>, Path(route): Path<String>, Json(body): Json<Value>) -> Json<Value> {
     h.seen.lock().unwrap().push((route.clone(), body));
     match route.as_str() {
         "field_info" => Json(json!({ "ok": true, "data": h.field.lock().unwrap().clone() })),
+        "card_form" => Json(json!({ "ok": true, "data": h.card.lock().unwrap().clone() })),
         "vault_fill" => Json(json!({ "ok": true, "data": { "filled": true, "validation": "", "changed_by_page": false } })),
         _ => Json(json!({ "ok": false, "error": "unknown" })),
     }
@@ -534,4 +537,145 @@ fn every_kind_of_success_reads_as_allowed_in_the_pane_log() {
     assert_eq!(how_of("denied"), How::Declined);
     assert_eq!(how_of("timed out"), How::TimedOut);
     assert_eq!(how_of("failed"), How::Refused("failed".into()));
+}
+
+// A whole card: one question, then every card field of the form.
+
+const CARD_NUMBER: &str = "4111111111111111";
+
+fn card_field(slot: &str, select: bool) -> Value {
+    json!({ "ref": format!("e-{slot}"), "label": slot, "fingerprint": format!("fp-{slot}"), "slot": slot, "select": select, "max_length": null, "placeholder": "", "pattern": "" })
+}
+
+fn card_form(origin: &str, fields: Vec<Value>) -> Value {
+    json!({ "origin": origin, "page": format!("{origin}/pay"), "fields": fields })
+}
+
+fn make_card(s: &Setup, year: &str, with_zip: bool) -> String {
+    let mut parts = vec![("number", CARD_NUMBER), ("exp_month", "03"), ("exp_year", year), ("cvc", "123"), ("name", "Alex Doe")];
+    if with_zip {
+        parts.push(("zip", "94107"));
+    }
+    create(
+        &s.state.identity_store,
+        NewEntry {
+            kind: "card".into(),
+            label: "Probe Visa".into(),
+            fields: Default::default(),
+            tags: vec![],
+            parts: crate::backend::vault::seal::Parts(parts.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()),
+        },
+    )
+    .unwrap()
+}
+
+fn typed_all(s: &Setup) -> Vec<Value> {
+    s.host.seen.lock().unwrap().iter().filter(|(r, _)| r == "vault_fill").map(|(_, b)| b.clone()).collect()
+}
+
+#[tokio::test]
+async fn a_whole_card_is_filled_after_one_question_and_no_value_reaches_the_agent() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = card_form(
+        "https://shop.example",
+        vec![card_field("card-number", false), card_field("card-exp-month", true), card_field("card-exp-year", true), card_field("card-cvc", false), card_field("card-name", false), card_field("card-zip", false)],
+    );
+    let card = make_card(&s, "2099", true);
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let (status, body) = fill(&s, &card).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let asked = ask.await.unwrap();
+    assert!(asked.what.starts_with("Visa •••• 1111, expires 03/99"), "{}", asked.what);
+    assert!(asked.field.contains("number") && asked.field.contains("security code") && asked.field.contains("ZIP"), "{}", asked.field);
+    assert!(asked.offer_always, "every field looks like the card's");
+
+    let sent = typed_all(&s);
+    assert_eq!(sent.len(), 6, "{sent:?}");
+    let by = |slot: &str| sent.iter().find(|b| b["ref"] == format!("e-{slot}")).unwrap().clone();
+    assert_eq!(by("card-number")["text"], CARD_NUMBER);
+    assert_eq!((by("card-exp-month")["text"].as_str(), by("card-exp-month")["choose"].as_str()), (Some("03"), Some("month")));
+    assert_eq!((by("card-exp-year")["text"].as_str(), by("card-exp-year")["choose"].as_str()), (Some("2099"), Some("year")));
+    assert_eq!((by("card-cvc")["text"].as_str(), by("card-cvc")["choose"].as_str()), (Some("123"), None));
+    assert_eq!(by("card-zip")["text"], "94107");
+    assert_eq!(by("card-number")["expect_fingerprint"], "fp-card-number");
+
+    assert_eq!(body["data"]["parts_filled"], json!(["number", "expiry", "security code", "name", "ZIP"]));
+    for secret in [CARD_NUMBER, "94107", "Alex Doe"] {
+        assert!(!body.to_string().contains(secret), "{body}");
+        assert!(!activity_text(&s).contains(secret), "{}", activity_text(&s));
+    }
+    assert_eq!(body["data"]["value"], "[secret: hidden]");
+    // The brand, last four and expiry are in the person's approval only, never in what the agent gets.
+    for shown_to_the_person in ["1111", "Visa", "expires", "03/99"] {
+        assert!(!body.to_string().contains(shown_to_the_person), "{shown_to_the_person}: {body}");
+    }
+    assert!(!s.state.identity_store.vault_grant_check(&card, "https://shop.example").unwrap(), "once is once");
+}
+
+#[tokio::test]
+async fn a_part_the_card_lacks_is_listed_by_name_and_the_rest_is_filled() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = card_form("https://shop.example", vec![card_field("card-number", false), card_field("card-cvc", false), card_field("card-zip", false)]);
+    let card = make_card(&s, "2099", false);
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let (status, body) = fill(&s, &card).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    ask.await.unwrap();
+    assert_eq!(body["data"]["parts_filled"], json!(["number", "security code"]));
+    assert_eq!(body["data"]["parts_left"][0]["part"], "ZIP");
+    assert_eq!(body["data"]["parts_left"][0]["why"], "the card has no billing ZIP saved");
+    assert_eq!(typed_all(&s).len(), 2);
+}
+
+#[tokio::test]
+async fn an_expired_card_asks_every_time_with_no_always_even_after_one_was_given() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = card_form("https://shop.example", vec![card_field("card-number", false), card_field("card-cvc", false)]);
+    let card = make_card(&s, "2020", true);
+    let created = s.state.identity_store.vault_get(&card).unwrap().unwrap().created_at;
+    s.state.identity_store.vault_grant_add(&card, "https://shop.example", agentmux_common::time::now_ms(), created).unwrap();
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let (status, body) = fill(&s, &card).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let asked = ask.await.unwrap();
+    assert!(!asked.offer_always, "no Always for an expired card");
+    assert!(asked.what.contains("expired 03/2020"), "{}", asked.what);
+    assert_eq!(asked.reason, "the card has expired");
+}
+
+#[tokio::test]
+async fn a_granted_card_that_is_current_fills_without_asking() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = card_form("https://shop.example", vec![card_field("card-number", false)]);
+    let card = make_card(&s, "2099", true);
+    let created = s.state.identity_store.vault_get(&card).unwrap().unwrap().created_at;
+    s.state.identity_store.vault_grant_add(&card, "https://shop.example", agentmux_common::time::now_ms(), created).unwrap();
+    let (status, body) = fill(&s, &card).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
+    assert_eq!(typed_all(&s).len(), 1);
+}
+
+#[tokio::test]
+async fn a_form_with_no_card_number_expiry_or_code_is_refused_before_anyone_is_asked() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = card_form("https://shop.example", vec![card_field("card-zip", false), card_field("card-name", false)]);
+    let card = make_card(&s, "2099", true);
+    let (status, body) = fill(&s, &card).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains(&format!("{card}.<part>")), "{body}");
+    assert!(typed_all(&s).is_empty());
+    assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
+}
+
+#[tokio::test]
+async fn a_card_named_with_a_part_still_fills_one_field() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    let card = make_card(&s, "2099", true);
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let (status, body) = fill(&s, &format!("{card}.cvc")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    ask.await.unwrap();
+    assert_eq!(routes(&s), ["field_info", "vault_fill"]);
+    assert_eq!(body["data"]["part"], "cvc");
 }

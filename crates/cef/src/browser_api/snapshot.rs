@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::select_lists;
+use super::choice_facts::choice_is_secret;
 use super::text_read::{self, ids_of, matchable_name};
 pub use super::text_read::with_text_limit;
 pub use super::hidden_choices::{add_hidden_choices, HiddenChoice};
@@ -342,7 +343,8 @@ fn walk(
         // never sees.
         let r = (!frame_blocked && (takes_ref(role, backend, facts) || (backend.is_some() && masks_shown_once(node, role, name, in_zone))))
             .then(|| next_ref(out, ref_prefix, frame));
-        let line = line_for(node, role, name, backend, facts, r.as_deref(), frame, frames, in_zone);
+        let hide_selection = choice_is_secret(by_id, facts, node);
+        let line = line_for(node, role, name, backend, facts, r.as_deref(), frame, frames, in_zone, hide_selection);
         let line = match collapsed {
             Some(n) => format!("{line} [{n} options]"),
             None => line,
@@ -480,6 +482,7 @@ fn line_for(
     frame: usize,
     frames: &[FrameTree],
     in_zone: bool,
+    hide_selection: bool,
 ) -> String {
     let fact = backend.and_then(|b| facts.get(&b));
     let secret = fact.and_then(secret_reason);
@@ -528,7 +531,7 @@ fn line_for(
     if let Some(v) = prop(node, "expanded") {
         line.push_str(if truthy(Some(v)) { " [expanded]" } else { " [expanded=false]" });
     }
-    if truthy(prop(node, "selected")) {
+    if truthy(prop(node, "selected")) && !hide_selection {
         line.push_str(" [selected]");
     }
     for (p, label) in [("required", "required"), ("invalid", "invalid"), ("disabled", "disabled"), ("readonly", "readonly")] {
@@ -721,7 +724,7 @@ pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, r
         }
         let r = (takes_ref(role, backend, facts) || (backend.is_some() && masks_shown_once(node, role, name, in_zone)))
             .then(|| format!("{ref_prefix}e{}", found.refs.len() + 1));
-        let mut line = line_for(node, role, name, backend, facts, r.as_deref(), 0, &[], in_zone);
+        let mut line = line_for(node, role, name, backend, facts, r.as_deref(), 0, &[], in_zone, choice_is_secret(&by_id, facts, node));
         if let Some((in_role, in_name)) = context {
             line.push_str(&format!(" (in {in_role} {})", quote(&super::shown_once::mask_where(in_name, in_zone))));
         }

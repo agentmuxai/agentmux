@@ -130,6 +130,42 @@
     text-align: right;
 }
 
+// In a narrow pane the six columns (about 530px) cannot all show, so a row stacks instead: the
+// label across the top, then kind, details, value and date wrapping together, the row's buttons last.
+@container vault (max-width: 600px) {
+    .vault-table {
+        display: block;
+
+        thead {
+            display: none;
+        }
+
+        tbody {
+            display: block;
+        }
+
+        tr {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: var(--space-1) var(--space-3);
+            padding: var(--space-2) var(--space-2);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 0;
+            border-bottom: 0;
+            min-width: 0;
+        }
+
+        td:first-child,
+        td.vault-actions {
+            flex: 1 1 100%;
+        }
+    }
+}
+
 .vault-form-fields {
     display: flex;
     flex-direction: column;
@@ -196,8 +232,8 @@
     }
 }
 
-// A card's brand badge stays with its last four; the Default pill keeps clear of the label.
-.vault-value {
+// A card's last four stay whole; the brand badge may wrap above them in a narrow pane, so the table doesn't outgrow it.
+.vault-last-four {
     white-space: nowrap;
 }
 
@@ -207,6 +243,11 @@
 
 .vault-card-expiry > * {
     flex: 1 1 0;
+}
+
+// Clear keeps its own width, so it lines up with the Clear buttons under it.
+.vault-card-expiry > .ui-button {
+    flex: 0 0 auto;
 }
 
 .vault-card-warn {

@@ -15,7 +15,7 @@
 114 crates/cef/src/app/mod.rs::AgentMuxBrowserProcessHandler::BrowserProcessHandler::on_context_initialized
 148 crates/cef/src/app/mod.rs::AgentMuxWindowDelegate::WindowDelegate::on_window_created
 157 crates/cef/src/browser_api/act.rs::act
-140 crates/cef/src/browser_api/act.rs::snapshot_route
+118 crates/cef/src/browser_api/act.rs::snapshot_route
 108 crates/cef/src/browser_api/routes.rs::click_element
 183 crates/cef/src/browser_api/routes.rs::dispatch_key
 101 crates/cef/src/browser_api/routes.rs::query
@@ -271,7 +271,7 @@
 116 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 118 crates/srv/src/server/browser_capture.rs::handle_browser_capture
 216 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
-184 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
+183 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
 722 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
 107 crates/srv/src/server/files.rs::handle_stream_local_file
 122 crates/srv/src/server/http_health.rs::handle_discovery
