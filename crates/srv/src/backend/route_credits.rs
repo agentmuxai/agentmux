@@ -90,7 +90,7 @@ pub(crate) fn on_failure(mstore: &Arc<Store>, bus: &Arc<EventBus>, block_id: &st
     if def_id.is_empty() {
         return None;
     }
-    let route = running_route(mstore, &def_id);
+    let route = running_route(&block);
     let mut panes: Vec<Pane> = vec![(block_id.to_string(), def_id.clone())];
     for (other, other_def) in route.iter().flat_map(|r| panes_on(mstore, r)) {
         if other == block_id {
@@ -167,11 +167,11 @@ fn shows_credits(mstore: &Store, block_id: &str) -> bool {
         .is_some_and(|f| f.code == crate::agents::failure::FailureClass::UsageLimit && f.title == crate::agents::failure::ROUTE_CREDITS_TITLE)
 }
 
-/// The route the agent's harness is running on: the one it has just left while a turn is still on it (a model
-/// switch recorded during a turn names the destination as the choice, but the harness is relaunched only when the
-/// turn ends), else its chosen one.
-fn running_route(mstore: &Store, def_id: &str) -> Option<String> {
-    launch::leaving(mstore, def_id).or_else(|| launch::choice_of(mstore, def_id)).map(|c| c.route)
+/// The route the harness in `block` was launched on, as the launch recorded it on the pane. Not the agent's chosen
+/// route and not its left-route mark, which are the agent's as a whole: a model switch is recorded at once, but each
+/// pane is relaunched on it only when its own turn ends, so two panes of one agent can be on different routes (#47474).
+fn running_route(block: &Block) -> Option<String> {
+    block.meta.get(launch::BLOCK_META_KEY)?.get("route")?.as_str().map(str::to_string)
 }
 
 /// The open panes (in a tab) of agents whose harness is running on `route`.
@@ -182,7 +182,7 @@ fn panes_on(mstore: &Store, route: &str) -> Vec<Pane> {
         .filter_map(|id| {
             let block = mstore.get::<Block>(id).ok().flatten()?;
             let def_id = obj::meta_get_string(&block.meta, "agentId", "");
-            let on_it = !def_id.is_empty() && running_route(mstore, &def_id).is_some_and(|r| r == route);
+            let on_it = !def_id.is_empty() && running_route(&block).is_some_and(|r| r == route);
             on_it.then(|| (id.clone(), def_id))
         })
         .collect()

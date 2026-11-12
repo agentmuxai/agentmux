@@ -68,6 +68,13 @@ fn serve(state: &AppState, worker_id: &str, lead_id: &str) {
         .unwrap();
 }
 
+/// What the launch of the pane's harness records on it: the route it was started on.
+fn launched_on(state: &AppState, block_id: &str, route: &str) {
+    let mut update = crate::backend::obj::MetaMapType::new();
+    update.insert(launch::BLOCK_META_KEY.to_string(), json!({ "route": route }));
+    crate::backend::wcore::object_meta::update_object_meta(&state.mstore, &format!("block:{block_id}"), &update).unwrap();
+}
+
 #[test]
 fn the_402_texts_routes_print_are_the_credits_failure_and_a_plan_limit_is_not() {
     let deke = classify(Some(1), None, NO_CREDITS, None);
@@ -115,6 +122,8 @@ async fn the_first_402_marks_every_agent_on_the_route_and_the_first_success_clea
     let (pa, pb, pc) = (pane(&state, &tab, &a).await, pane(&state, &tab, &b).await, pane(&state, &tab, &c).await);
     let failure = classify(Some(1), None, NO_CREDITS, None);
     let now = agentmux_common::time::now_ms_u64();
+    launched_on(&state, &pa, "openrouter");
+    launched_on(&state, &pb, "openrouter");
 
     let opened = on_failure(&state.mstore, &state.event_bus, &pa, &failure, now).expect("the first 402 opens the episode");
     assert_eq!(opened.route.as_deref(), Some(catalog::route("openrouter").unwrap().label));
@@ -135,10 +144,10 @@ async fn the_first_402_marks_every_agent_on_the_route_and_the_first_success_clea
     cleared(&state.mstore, &state.event_bus, "openrouter");
 }
 
-/// A model switch recorded during a turn names the destination as the agent's choice while its harness still runs
-/// the route it left: a late 402 belongs to the route left, not to the healthy destination (#47472).
+/// A model switch is recorded for the agent at once, but each of its panes is relaunched on it when its own turn
+/// ends. A 402 on the route left marks the panes still on it, wherever the agent's saved choice points (#47474).
 #[tokio::test]
-async fn a_402_after_a_switch_during_a_turn_is_the_route_left_not_the_destination() {
+async fn a_402_after_a_switch_marks_the_panes_still_on_the_route_left_and_not_the_ones_relaunched() {
     let state = crate::server::tests::test_state();
     let tab = tab(&state).await;
     let id = uuid::Uuid::new_v4().to_string();
@@ -146,7 +155,7 @@ async fn a_402_after_a_switch_during_a_turn_is_the_route_left_not_the_destinatio
     for (def, name) in [(&a, "Alpha"), (&b, "Bravo"), (&c, "Charlie")] {
         agent(&state, def, name);
     }
-    // Routes of its own, since the episodes are process-wide and another test opens openrouter's.
+    // Routes of their own, since the episodes are process-wide and another test opens openrouter's.
     let left = launch::Choice { route: "left-route".into(), model: String::new() };
     // set_choice only takes catalog routes, so the choices are written as stored.
     let destination = launch::Choice { route: "destination-route".into(), model: String::new() };
@@ -161,16 +170,23 @@ async fn a_402_after_a_switch_during_a_turn_is_the_route_left_not_the_destinatio
             })
             .unwrap();
     };
+    // Alpha has switched, and still holds the mark of the route it left because one of its panes is mid-turn.
     put(&a, launch::CONTENT_TYPE, &destination);
     put(&a, launch::LEAVING_TYPE, &left);
     put(&b, launch::CONTENT_TYPE, &left);
     put(&c, launch::CONTENT_TYPE, &destination);
-    let (pa, pb, pc) = (pane(&state, &tab, &a).await, pane(&state, &tab, &b).await, pane(&state, &tab, &c).await);
+    let (busy, relaunched) = (pane(&state, &tab, &a).await, pane(&state, &tab, &a).await);
+    let (pb, pc) = (pane(&state, &tab, &b).await, pane(&state, &tab, &c).await);
+    launched_on(&state, &busy, "left-route");
+    launched_on(&state, &relaunched, "destination-route");
+    launched_on(&state, &pb, "left-route");
+    launched_on(&state, &pc, "destination-route");
     let failure = classify(Some(1), None, NO_CREDITS, None);
 
-    let opened = on_failure(&state.mstore, &state.event_bus, &pa, &failure, agentmux_common::time::now_ms_u64()).expect("opens the route's episode");
-    assert_eq!(opened.route.as_deref(), Some("left-route"), "the route it was running");
+    let opened = on_failure(&state.mstore, &state.event_bus, &busy, &failure, agentmux_common::time::now_ms_u64()).expect("opens the route's episode");
+    assert_eq!(opened.route.as_deref(), Some("left-route"), "the route its harness was launched on");
     assert!(shows_credits(&state.mstore, &pb), "the agent still on the failing route is marked");
+    assert!(!shows_credits(&state.mstore, &relaunched), "the pane of the same agent already relaunched on the new route is not");
     assert!(!shows_credits(&state.mstore, &pc), "the healthy destination is not");
     cleared(&state.mstore, &state.event_bus, "left-route");
 }
