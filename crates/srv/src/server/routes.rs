@@ -763,6 +763,7 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/agent/remote/op", post(super::remote_ops::send::handle_agent_remote_op))
         .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
         .route("/api/v1/app/health", get(super::remote_ops::app_ops::handle_health))
+        .route("/api/v1/app/logs", get(super::remote_ops::log_ops::handle_local_logs))
         .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
 }
 
