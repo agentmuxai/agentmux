@@ -20,7 +20,9 @@
  * drag ends (pane-size-hold.ts). A browser pane's page is a native window that neither a transform nor a clip
  * moves; for the length of a drag it is cut away behind a picture of itself and held where it was
  * (browser-view.tsx, use-pane-rect-sync.ts), so its tile is plain DOM and moves with the rest, once every
- * page's cut has landed (page-cut-gate.ts). On unless the `layout:livereflow` setting is false.
+ * page's cut has landed (page-cut-gate.ts). That is Windows, where the host cuts a page to a region; elsewhere
+ * a browser pane that is not the dragged one stays where it is (`movesWithDrag`). On unless the
+ * `layout:livereflow` setting is false.
  * docs/specs/SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md §4, §5, §6;
  * docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md.
  *
@@ -38,6 +40,7 @@ import { notifyPaneReflow } from "@/app/platform/pane-anim";
 import { holdPaneSizes } from "@/app/platform/pane-size-hold";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { getObjectValue, makeORef } from "@/app/store/mos";
+import { isWindows } from "@/util/platformutil";
 import type { LayoutModel } from "./layoutModel";
 import type { SettlingPass } from "./settlingPass";
 import type { LayoutNode } from "./types";
@@ -117,6 +120,17 @@ function isBrowserBlock(blockId: string | undefined): boolean {
  */
 export function movesWithReflow(leaf: LayoutNode): boolean {
     return !isBrowserBlock(shownBlockId(leaf));
+}
+
+/**
+ * Whether a drag's reflow can move `leaf`'s tile while another pane is the dragged one. Every pane on Windows,
+ * where the host cuts a browser page away behind its picture for the drag. Elsewhere the host has no such cut
+ * (it hides a whole page or shows it, pane-overlay.ts): a page whose tile moved was drawn at its old size in
+ * the tile's new place, over its own picture (the Linux look check of #7081). So there a browser pane stays
+ * where it is while another pane is dragged, as it did before browser panes joined the reflow.
+ */
+function movesWithDrag(leaf: LayoutNode): boolean {
+    return isWindows() || movesWithReflow(leaf);
 }
 
 /** Whether panes glide at all: unless the `layout:livereflow` setting is false. Reactive. */
@@ -293,7 +307,8 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
             if (!from) continue;
             // The dragged pane keeps its node id through the preview: its future rect is the landing rect.
             const moved = !!future && leaf.id === future.movedId;
-            const to = moved ? future!.rects[leaf.id] : leaf.data?.blockId ? futureRectOfBlock.get(leaf.data.blockId) : undefined;
+            const follows = leaf.data?.blockId && movesWithDrag(leaf);
+            const to = moved ? future!.rects[leaf.id] : follows ? futureRectOfBlock.get(leaf.data!.blockId!) : undefined;
             const { width, height } = wholePx(to ?? from);
             const leaving = moved && !!future!.leaves;
             byId.set(leaf.id, { rect: shownPx(to ?? from), size: { width, height }, moved: moved && !!to, leaving });

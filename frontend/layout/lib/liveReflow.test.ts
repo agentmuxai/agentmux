@@ -48,6 +48,7 @@ import {
     type LayoutTreeComputeMoveNodeAction,
     type LayoutTreeDeleteNodeAction,
 } from "@/layout/lib/types";
+import { setPlatform } from "@/util/platformutil";
 import type { SignalAtom } from "@/util/util";
 
 const rows = new Map<string, SignalAtom<LayoutState>>();
@@ -146,6 +147,8 @@ const futureSize = (m: LayoutModel, id: string) => laidOutAt(rawFutureOf(m, id))
 beforeEach(() => {
     rows.clear();
     setFlag(true);
+    // Windows, where every pane moves with a drag's reflow; a test of the other platforms sets its own.
+    setPlatform("win32");
     resetPaneCaptureGateForTests();
     resetPageCutGateForTests();
     resetPaneSizeHoldForTests();
@@ -509,6 +512,24 @@ describe("the live reflow of a pane drag", () => {
         vi.advanceTimersByTime(20);
         expect(m.liveReflowActive()).toBe(false);
         for (const id of ["a", "b", "c", "d"]) expect(m.reflowFor(id)).toMatchObject({ rect: own(m, id), moved: false });
+    });
+
+    it("leaves a browser pane where it is while another pane is dragged, off Windows: the host has no cut for its page", () => {
+        for (const platform of ["linux", "darwin"] as const) {
+            setPlatform(platform);
+            const m = modelOf(row("r", 10, leaf("browser-x"), col("col", 10, leaf("b"), leaf("c"))));
+            drag(m, "b", "browser-x", DropDirection.Left);
+            // The drop is shown and the other panes go to it; the browser pane keeps its own rect.
+            expect(m.liveReflowActive()).toBe(true);
+            expect(m.reflowFor("b")).toMatchObject({ moved: true });
+            expect(m.reflowFor("browser-x")).toMatchObject({ rect: own(m, "browser-x"), moved: false, leaving: false });
+            // The browser pane as the dragged one goes to its landing rect, as on Windows.
+            const m2 = modelOf(three());
+            m2.treeState.rootNode!.children![0].data!.blockId = "browser-a";
+            m2.updateTree();
+            drag(m2, "a", "c", DropDirection.Bottom);
+            expect(m2.reflowFor("a")).toMatchObject({ rect: shownPx(landingRectOf(m2)!), moved: true });
+        }
     });
 
     it("moves a browser pane like any other, dragged or not: its page is cut away for the drag, its tile is DOM", () => {
