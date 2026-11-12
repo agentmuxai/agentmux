@@ -216,6 +216,13 @@ pub fn restart_now(state: &std::sync::Arc<crate::state::AppState>) -> Restart {
         crate::client::backend_save_session_snapshot(&web_endpoint, &auth_key, false);
     }
     if !installed {
+        // Nothing was installed, so there is nothing to reopen after: the task must not wait on and open AgentMux
+        // on some later update.
+        if reopen.is_ok() {
+            if let Err(why) = super::store_reopen::cancel() {
+                tracing::warn!(error = %why, "[store-restart] could not remove the reopen task");
+            }
+        }
         return Restart { ok: false, canceled: outcome.outcome == "canceled", message: outcome.message };
     }
     tracing::info!("[store-restart] installed; quitting for the Store's swap");

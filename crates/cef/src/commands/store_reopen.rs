@@ -144,17 +144,15 @@ fn family_name() -> Result<String, String> {
     Ok(family.to_string())
 }
 
-/// Register the reopen. Blocking (a PowerShell runs for a moment): call it off the async workers.
+/// Run an encoded script in a hidden Windows PowerShell and wait for it (at most 30 s). The one place this module
+/// starts a process.
 #[cfg(target_os = "windows")]
-pub fn schedule(from: &str) -> Result<(), String> {
+fn run_script(system: &str, encoded_script: &str, what: &str) -> Result<(), String> {
     use agentmux_common::win32::NoWindow;
     use std::time::{Duration, Instant};
-    let family = super::store_update::on_winrt_thread("store-family", family_name)??;
-    let system = system_dir()?;
-    let command = registration(&family, from, &system)?;
-    let exe = powershell_path(&system);
+    let exe = powershell_path(system);
     let mut child = std::process::Command::new(exe)
-        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &command])
+        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded_script])
         .no_window()
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -165,15 +163,50 @@ pub fn schedule(from: &str) -> Result<(), String> {
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(status)) => return Err(format!("scheduling it failed (exit {})", status.code().unwrap_or(-1))),
+            Ok(Some(status)) => return Err(format!("{what} failed (exit {})", status.code().unwrap_or(-1))),
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(100)),
             Ok(None) => {
                 let _ = child.kill();
-                return Err("scheduling it took too long".into());
+                return Err(format!("{what} took too long"));
             }
             Err(e) => return Err(format!("couldn't wait for PowerShell: {e}")),
         }
     }
+}
+
+/// Register the reopen. Blocking (a PowerShell runs for a moment): call it off the async workers.
+#[cfg(target_os = "windows")]
+pub fn schedule(from: &str) -> Result<(), String> {
+    let family = super::store_update::on_winrt_thread("store-family", family_name)??;
+    let system = system_dir()?;
+    let command = registration(&family, from, &system)?;
+    run_script(&system, &command, "scheduling it")
+}
+
+/// What stops and removes the task, for an install that came back without installing.
+fn cancel_script() -> String {
+    format!(
+        "$ErrorActionPreference = 'SilentlyContinue'\n\
+         Stop-ScheduledTask -TaskName '{TASK}'\n\
+         Unregister-ScheduledTask -TaskName '{TASK}' -Confirm:$false\n"
+    )
+}
+
+/// Remove the reopen task: the install came back without installing ("Maybe later", an error, no answer), so there
+/// is nothing to reopen after, and a task left waiting would open AgentMux on some later update. Best effort.
+#[cfg(target_os = "windows")]
+pub fn cancel() -> Result<(), String> {
+    let system = system_dir()?;
+    if !valid_system_dir(&system) {
+        return Err("the system folder is not one Windows gives".into());
+    }
+    run_script(&system, &encoded(&cancel_script()), "removing it")
+}
+
+/// Only Windows has a Store.
+#[cfg(not(target_os = "windows"))]
+pub fn cancel() -> Result<(), String> {
+    Ok(())
 }
 
 /// Only Windows has a Store.
@@ -260,6 +293,14 @@ mod tests {
         assert!(!register.contains("SystemRoot") && !register.contains("ExecutionPolicy"), "no environment variable, no policy flag: {register}");
         let wait = register.split("-EncodedCommand ").nth(1).and_then(|r| r.split('\'').next()).unwrap();
         assert_eq!(decode(wait), wait_script(FAMILY, "0.60.24"));
+    }
+
+    #[test]
+    fn a_cancelled_install_removes_the_task_by_its_name_and_starts_nothing() {
+        let script = cancel_script();
+        assert!(script.contains("Stop-ScheduledTask -TaskName 'AgentMux Store reopen'"), "{script}");
+        assert!(script.contains("Unregister-ScheduledTask -TaskName 'AgentMux Store reopen'"), "{script}");
+        assert!(!script.contains("Start-"), "{script}");
     }
 
     #[test]
