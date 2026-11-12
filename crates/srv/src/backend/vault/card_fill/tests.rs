@@ -40,6 +40,9 @@ fn a_single_expiry_field_takes_the_shape_it_asks_for() {
     assert_eq!(expiry(Some(7), "", ""), "03/2027");
     assert_eq!(expiry(Some(4), "", ""), "0327");
     assert_eq!(expiry(Some(6), "", ""), "032027");
+    // A field's length decides before a pattern: four characters never get a four-digit year.
+    assert_eq!(expiry(Some(4), "", r"[0-9]{4}"), "0327");
+    assert_eq!(expiry(Some(5), "MM/YYYY", ""), "03/27");
     assert_eq!(expiry(None, "MMYY", ""), "0327");
     assert_eq!(expiry(None, "MM-YY", ""), "03-27");
     assert_eq!(expiry(None, "MM YY", ""), "03 27");

@@ -114,11 +114,18 @@ fn expiry_text(field: &FormField, month: u32, year: i32) -> String {
     // that is words ("Expiration date", "Exp. date") says nothing about the separator.
     let between = placeholder.find("MM").zip(placeholder.find("YY")).filter(|(m, y)| m + 2 <= *y).map(|(m, y)| &placeholder[m + 2..y]);
     let separator = between.and_then(|b| b.chars().find(|c| matches!(c, '/' | '-' | '.')).or_else(|| b.contains(' ').then_some(' ')));
-    let long = placeholder.contains("YYYY")
-        || matches!(field.max_length, Some(6 | 7))
-        || (pattern.contains("{4}") && !pattern.contains("{2}{4}") && !pattern.contains(")?"));
-    // Four or six characters hold no separator; so does a placeholder that has none ("MMYY").
-    let compact = matches!(field.max_length, Some(4 | 6)) || (between.is_some() && separator.is_none());
+    // The field's own length decides first (4 is MMYY, 5 MM/YY, 6 MMYYYY, 7 MM/YYYY); without one the
+    // placeholder does ("MMYY" has no separator), and a pattern that asks for four digits.
+    let (long, compact) = match field.max_length {
+        Some(4) => (false, true),
+        Some(5) => (false, false),
+        Some(6) => (true, true),
+        Some(7) => (true, false),
+        _ => (
+            placeholder.contains("YYYY") || (pattern.contains("{4}") && !pattern.contains("{2}{4}") && !pattern.contains(")?")),
+            between.is_some() && separator.is_none(),
+        ),
+    };
     let y = if long { format!("{year:04}") } else { format!("{:02}", year % 100) };
     let m = card::month_text(month);
     if compact {
