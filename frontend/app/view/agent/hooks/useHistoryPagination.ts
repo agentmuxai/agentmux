@@ -642,6 +642,7 @@ async function fillRest(opts: UseHistoryPaginationOptions, s: HistoryState, gen:
         return;
     }
     let fillBytes = 0;
+    const holding = () => opts.fillPaused?.() === true || msSinceLastInput() < FILL_QUIET_MS;
     const out = await runHistoryFill({
         plan,
         pageLines: OLDER_PAGE_LINES,
@@ -650,7 +651,17 @@ async function fillRest(opts: UseHistoryPaginationOptions, s: HistoryState, gen:
             try {
                 const budget = Number.isFinite(plan.budgetBytes) ? Math.max(1, plan.budgetBytes - fillBytes) : undefined;
                 const read = () => exclusive(s, () => fetchOlderPage(opts, s, maxLines, { expectGen: gen, tailBytes: budget, alignFloor: plan.floorLine }));
-                const page = await (opts.fillHidden?.() ? hiddenFill.run(read) : read());
+                // A hidden pane's page can wait behind other panes' pages: by its turn the pane may have been shown and scrolled
+                // up, or the person may be typing, and a prepend then would move what they read. The loop looks again instead.
+                let held = false;
+                const page = await (opts.fillHidden?.()
+                    ? hiddenFill.run(async () => {
+                          if (!s.mounted) return null;
+                          held = holding();
+                          return held ? null : read();
+                      })
+                    : read());
+                if (held) return { lines: 0, bytes: 0, held: true };
                 if (!page) return null;
                 fillBytes += page.bytes;
                 return { lines: page.lines, bytes: page.bytes, last: page.trimmed };
@@ -660,7 +671,7 @@ async function fillRest(opts: UseHistoryPaginationOptions, s: HistoryState, gen:
             }
         },
         stopped: () => !s.mounted,
-        holding: () => opts.fillPaused?.() === true || msSinceLastInput() < FILL_QUIET_MS,
+        holding,
         idle: whenIdle,
         wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     });
