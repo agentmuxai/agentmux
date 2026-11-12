@@ -15,7 +15,7 @@ import { deferWhileSizesHeld, paneSizesHeld, resetPaneSizeHoldForTests } from "@
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { REFLOW_MAX_PANES, reflowSettleMs, shownPx } from "@/layout/lib/liveReflow";
 import { planSettlingPass } from "@/layout/lib/settlingPass";
-import { commitTearOff } from "@/layout/lib/tearOffPreview";
+import { commitTearOff, leaveWindow, returnToWindow } from "@/layout/lib/tearOffPreview";
 import {
     FlexDirection,
     LayoutTreeActionType,
@@ -354,6 +354,59 @@ describe("a change that does not glide", () => {
 
     it("on the first layout of a tab", () => {
         const m = modelOf(three());
+        expect(m.settlingPass()).toBeUndefined();
+    });
+});
+
+describe("a tear-off taken off after its drag ended", () => {
+    /** A drag of "a" that left the window and was released there, its tear-off committed. */
+    function releasedOutside(): LayoutModel {
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        leaveWindow(m, "a");
+        m.activeDrag._set(false);
+        return m;
+    }
+
+    it("glides the panes back from where it left them to their own rects (Escape outside the window)", async () => {
+        const m = releasedOutside();
+        await Promise.resolve();
+        const closed = shownPx(m.tearOffLayout()!.rects.b);
+        expect(closed).toMatchObject({ left: 0, width: 1200 });
+        returnToWindow(m);
+        expect(m.tearOffLayout()).toBeUndefined();
+        // The frame it opens on: still closed over the slot, laid out at the size it will have.
+        expect(m.reflowFor("b")).toMatchObject({ rect: closed, leaving: false });
+        vi.advanceTimersByTime(FRAME_MS);
+        expect(m.reflowFor("b")).toMatchObject({ rect: own(m, "b") });
+        vi.advanceTimersByTime(reflowSettleMs());
+        expect(m.reflowFor("b")).toBeUndefined();
+        expect(m.settlingPass()).toBeUndefined();
+    });
+
+    it("snaps back with the animations off", async () => {
+        setAnimationSettings({ "animation:preset": "off" });
+        const m = releasedOutside();
+        await Promise.resolve();
+        returnToWindow(m);
+        expect(m.settlingPass()).toBeUndefined();
+        expect(m.reflowFor("b")).toBeUndefined();
+    });
+
+    it("opens no pass while the drag is live: its own reflow takes the panes back", () => {
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        leaveWindow(m, "a");
+        returnToWindow(m);
+        expect(m.settlingPass()).toBeUndefined();
+        expect(m.reflowFor("b")).toMatchObject({ rect: own(m, "b") });
+    });
+
+    it("opens none when the tree let the pane go: the panes already show the layout", async () => {
+        const m = releasedOutside();
+        await Promise.resolve();
+        close(m, "a");
+        expect(m.tearOffLayout()).toBeUndefined();
         expect(m.settlingPass()).toBeUndefined();
     });
 });

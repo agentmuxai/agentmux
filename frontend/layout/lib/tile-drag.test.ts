@@ -9,7 +9,18 @@
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const hub = vi.hoisted(() => ({ payloads: [] as unknown[], crossTabCleared: 0, dragsEnded: [] as unknown[] }));
+const hub = vi.hoisted(() => ({
+    payloads: [] as unknown[],
+    crossTabCleared: 0,
+    dragsEnded: [] as unknown[],
+    window: [] as string[],
+    escaped: false,
+}));
+vi.mock("@/app/drag/native-cancel", () => ({ endedByEscape: async () => hub.escaped }));
+vi.mock("./tearOffPreview", () => ({
+    leaveWindow: (_m: unknown, id: string) => hub.window.push(`out:${id}`),
+    returnToWindow: () => hub.window.push("in"),
+}));
 vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({
     setCurrentDragPayload: (p: unknown) => hub.payloads.push(p),
 }));
@@ -28,6 +39,8 @@ const node = { id: "node-1", data: { blockId: "b1" } } as any;
 
 afterEach(() => {
     endDrag("cancel");
+    hub.window = [];
+    hub.escaped = false;
     hub.payloads = [];
     hub.crossTabCleared = 0;
 });
@@ -84,5 +97,54 @@ describe("tile drag", () => {
         endTileDrag("dragend");
         expect(session()?.kind).toBe("pane-tab");
         expect(isUnderway("tile")).toBe(false);
+    });
+
+    describe("the pointer leaving the window", () => {
+        /** A drag event as the document gets it; `relatedTarget` null is the pointer crossing the window's edge. */
+        function dragEvent(type: string, relatedTarget: EventTarget | null, dropEffect?: string) {
+            const e = new Event(type, { bubbles: true }) as any;
+            e.relatedTarget = relatedTarget;
+            if (dropEffect) e.dataTransfer = { dropEffect };
+            return e;
+        }
+
+        it("shows the tear-off when the pointer leaves the window, and takes it off when it is back", () => {
+            startTileDrag(node, fakeModel());
+            document.dispatchEvent(dragEvent("dragleave", null));
+            document.dispatchEvent(dragEvent("dragenter", null));
+            expect(hub.window).toEqual(["out:node-1", "in"]);
+        });
+
+        it("ignores a pointer that only moves from one element to another", () => {
+            startTileDrag(node, fakeModel());
+            document.dispatchEvent(dragEvent("dragleave", document.body));
+            document.dispatchEvent(dragEvent("dragenter", document.body));
+            expect(hub.window).toEqual([]);
+        });
+
+        it("watches nothing once the drag has ended with its own dragend, and one drag at a time", () => {
+            startTileDrag(node, fakeModel());
+            document.dispatchEvent(dragEvent("dragend", null, "move"));
+            document.dispatchEvent(dragEvent("dragleave", null));
+            expect(hub.window).toEqual([]);
+            startTileDrag(node, fakeModel());
+            startTileDrag(node, fakeModel());
+            document.dispatchEvent(dragEvent("dragleave", null));
+            expect(hub.window).toEqual(["out:node-1"]);
+        });
+
+        it("takes the tear-off off when the drag ended in Escape, and keeps it for a release", async () => {
+            startTileDrag(node, fakeModel());
+            document.dispatchEvent(dragEvent("dragend", null, "none"));
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(hub.window).toEqual([]);
+            hub.escaped = true;
+            startTileDrag(node, fakeModel());
+            document.dispatchEvent(dragEvent("dragend", null, "none"));
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(hub.window).toEqual(["in"]);
+        });
     });
 });
