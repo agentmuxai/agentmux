@@ -49,7 +49,10 @@ pub struct Companion {
 
 pub const COMPANIONS: &[Companion] = &[
     Companion { kind: "card", part: "expiry", title: "Expiry", aliases: &["expiry", "expiry date", "expires"] },
+    Companion { kind: "card", part: "exp_month", title: "Expiry month", aliases: &["expiry month", "expiration month"] },
+    Companion { kind: "card", part: "exp_year", title: "Expiry year", aliases: &["expiry year", "expiration year"] },
     Companion { kind: "card", part: "cvc", title: "CVC", aliases: &["cvc", "cvv", "security code"] },
+    Companion { kind: "card", part: "zip", title: "Billing ZIP", aliases: &["billing zip", "zip", "zip code", "postal code", "billing postal code"] },
     Companion { kind: "card", part: "name", title: "Cardholder", aliases: &["cardholder", "cardholder name", "name on card"] },
     Companion { kind: "bank-account", part: "routing", title: "Routing number", aliases: &["routing number", "routing"] },
 ];

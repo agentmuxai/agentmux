@@ -44,7 +44,14 @@ pub const KINDS: &[Kind] = &[
     Kind { name: "passport", section: VaultSection::Personal, parts: &["value"], fields: ID_FIELDS, shows_tail: true },
     Kind { name: "drivers-licence", section: VaultSection::Personal, parts: &["value"], fields: ID_FIELDS, shows_tail: true },
     Kind { name: "other-id", section: VaultSection::Personal, parts: &["value"], fields: ID_FIELDS, shows_tail: true },
-    Kind { name: "card", section: VaultSection::Cards, parts: &["number", "expiry", "cvc", "name"], fields: &["owner", "notes"], shows_tail: true },
+    // `expiry` is the older single-part expiry, still read (card.rs). `expires`, `brand` and `default` are kept by card::settle.
+    Kind {
+        name: "card",
+        section: VaultSection::Cards,
+        parts: &["number", "exp_month", "exp_year", "expiry", "cvc", "name", "zip"],
+        fields: &["owner", "brand", "default", "expires", "notes"],
+        shows_tail: true,
+    },
     Kind { name: "bank-account", section: VaultSection::Cards, parts: &["account", "routing"], fields: &["owner", "bank", "notes"], shows_tail: true },
     Kind {
         name: "api-key",

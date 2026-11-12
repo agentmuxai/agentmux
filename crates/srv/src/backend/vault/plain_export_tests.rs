@@ -47,7 +47,8 @@ fn a_login_is_a_row_with_its_columns_and_everything_else_is_a_secure_note() {
     let ssn = by("Alex SSN");
     assert_eq!((&ssn[2], &ssn[9]), ("note", ""), "nothing in the login columns");
     assert_eq!(&ssn[4], "SSN: 123-45-6789\nOwner: Alex Doe\n\nfrom the card");
-    assert_eq!(&by("Company card")[4], "Card number: 4111111111111111\nExpiry: 12/30\nCVC: 123\nCardholder: A DOE");
+    // The older "12/30" was read into a month and a year when the card was saved.
+    assert_eq!(&by("Company card")[4], "Card number: 4111111111111111\nExpiry month: 12\nExpiry year: 2030\nCVC: 123\nCardholder: A DOE\nExpires: 2030-12-31");
     assert_eq!(&by("Router")[4], "admin / correct-horse\nsecond line");
 }
 

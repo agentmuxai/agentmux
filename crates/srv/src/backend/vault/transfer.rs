@@ -329,8 +329,8 @@ pub fn inspect_keyed(store: &Store, path: &Path, passphrase: Option<&str>, mappi
         let mut parts = Parts(e.parts);
         parts.0.retain(|_, v| !v.is_empty());
         let mut fields: BTreeMap<String, String> = e.fields.into_iter().map(|(k, v)| (k, v.trim().to_string())).filter(|(_, v)| !v.is_empty()).collect();
-        super::expiry::settle_imported(kind, &mut fields);
-        if let Err(why) = validate(kind, &e.label, &fields, &e.tags, &parts) {
+        let settled = settle_incoming(kind, &mut fields, &mut parts).and_then(|()| validate(kind, &e.label, &fields, &e.tags, &parts));
+        if let Err(why) = settled {
             skipped.push(Skipped { label: e.label, reason: why });
             continue;
         }
@@ -467,6 +467,12 @@ pub fn commit(store: &Store, token: &str, duplicates: Duplicates, vault_id: &str
             Err(e)
         }
     }
+}
+
+/// An incoming entry's expiry date and, for a card, its parts and plain fields, made what the Vault keeps.
+fn settle_incoming(kind: &kinds::Kind, fields: &mut BTreeMap<String, String>, parts: &mut Parts) -> Result<(), String> {
+    super::expiry::settle_imported(kind, fields);
+    super::card::settle(kind.name, fields, parts)
 }
 
 /// Writes `incoming`, all of it or none of it.
