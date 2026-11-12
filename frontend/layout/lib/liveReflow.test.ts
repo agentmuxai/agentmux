@@ -218,6 +218,40 @@ describe("landingRectOf", () => {
     });
 });
 
+describe("tearOffOffered", () => {
+    it("is on from the drag's start until the layout first shows a drop, and does not come back in that drag", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        expect(m.tearOffOffered()).toBe(false);
+        m.activeDrag._set(true);
+        expect(m.tearOffOffered()).toBe(true);
+        preview(m, "a", "c", DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.tearOffOffered()).toBe(false);
+        // No drop shown again (the pointer is back over the pane's own place): still off.
+        m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        vi.advanceTimersByTime(20);
+        expect(m.futureLayout()).toBeUndefined();
+        expect(m.tearOffOffered()).toBe(false);
+        // The next drag starts with it on again.
+        m.activeDrag._set(false);
+        expect(m.tearOffOffered()).toBe(false);
+        m.activeDrag._set(true);
+        expect(m.tearOffOffered()).toBe(true);
+    });
+
+    it("goes when the layout closes over the pane's place: the pointer left the window, and came back", () => {
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        leaveWindow(m, "a");
+        expect(m.tearOffLayout()).toBeDefined();
+        expect(m.tearOffOffered()).toBe(false);
+        returnToWindow(m);
+        expect(m.tearOffLayout()).toBeUndefined();
+        expect(m.tearOffOffered()).toBe(false);
+    });
+});
+
 describe("landingSettled", () => {
     it("is the landing rect once the glide to the drop is over, and a new one for each drop the panes rest on", () => {
         vi.useFakeTimers();

@@ -282,6 +282,8 @@ export class LayoutModel {
     futureLayout: () => FutureLayout | undefined;
     /** The layout a tear-off of the dragged pane leaves, while the drag shows one (tearOffPreview.ts). */
     tearOffLayout: () => FutureLayout | undefined;
+    /** Whether a release where the drag stands is all the drag has offered so far: the dragged pane's place says TEAR OFF (futureLayout.ts). */
+    tearOffOffered: () => boolean;
     /** Outlines of every other pane's rect in that layout, while a drop is previewed. */
     placementWireframe: () => { id: string; style: CSSProperties }[];
     /** The live reflow of a pane drag (liveReflow.ts): how a tile stands in for its future rect, or nothing. */
@@ -796,6 +798,7 @@ export class LayoutModel {
             futureLayout: this.futureLayout,
             placementWireframe: this.placementWireframe,
             tearOffLayout: this.tearOffLayout,
+            tearOffOffered: this.tearOffOffered,
         } = preview);
         // From the action as long as the layout is the one it was armed on, never from one the drop has just
         // committed (futureLayout.ts `placementAction`).

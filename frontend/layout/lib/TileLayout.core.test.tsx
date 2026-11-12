@@ -121,8 +121,10 @@ function makeModel() {
     const [ready, setReady] = createSignal(false);
     const [handles, setHandles] = createSignal<Array<{ id: string }>>([]);
     const [reflow, setReflow] = createSignal(new Map<string, ReflowEntry>());
+    const [tearOffOffered, setTearOffOffered] = createSignal(false);
     return {
         activeDrag,
+        tearOffOffered,
         reflowFor: (id: string) => reflow().get(id),
         liveReflowActive: () => reflow().size > 0,
         liveReflowExpected: () => activeDrag(),
@@ -138,7 +140,7 @@ function makeModel() {
         treeReducer: vi.fn(),
         renderContent: vi.fn((nm: { content?: () => HTMLElement }) => nm.content?.() ?? document.createElement("div")),
         renderPreview: vi.fn(() => document.createElement("span")),
-        set: { setActiveDrag, setOverlay, setGap, setAnimTime, setMagnifiedId, setMagnifyMount, setIsResizing, setHandles, setReflow },
+        set: { setActiveDrag, setOverlay, setGap, setAnimTime, setMagnifiedId, setMagnifyMount, setIsResizing, setHandles, setReflow, setTearOffOffered },
     };
 }
 
@@ -613,6 +615,23 @@ describe("createTileLayout: a tile", () => {
             expect(el.classList.contains("dragging")).toBe(false);
             expect(h.releaseTileDrag).toHaveBeenCalledWith(h.model);
             expect(order).toEqual(["beforeStart", "start", "afterStart", "beforeDrop", "release", "afterDrop"]);
+        });
+
+        it("marks the dragged tile's place as a tear-off while that is all the drag offers, and never in the pane's picture", () => {
+            const { cfg, el } = start();
+            h.model.set.setTearOffOffered(true);
+            expect(el.classList.contains("tear-off-offered")).toBe(false);
+            const captured = beginPaneCapture();
+            cfg.onDragStart();
+            // The picture is still being taken: the red would be in it.
+            expect(el.classList.contains("tear-off-offered")).toBe(false);
+            captured();
+            expect(el.classList.contains("tear-off-offered")).toBe(true);
+            // The layout showed a drop: the place is a dragged pane's again, for good.
+            h.model.set.setTearOffOffered(false);
+            expect(el.classList.contains("tear-off-offered")).toBe(false);
+            expect(el.classList.contains("dragging")).toBe(true);
+            cfg.onDrop();
         });
 
         it("blurs the dragged tile only once the pane's picture has been taken, so the picture is of the pane as it stood", () => {

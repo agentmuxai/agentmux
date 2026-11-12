@@ -180,5 +180,13 @@ export function createPlacementPreview(model: LayoutModel) {
         // Read again when the layout changes under it.
         return nodeId && shape() !== undefined ? layoutWithoutOf(model, nodeId) : undefined;
     });
-    return { placementAction, futureLayout, placementWireframe, tearOffLayout };
+    // Whether the drag that is on has shown yet where a release leaves the pane: a drop, or the tear-off
+    // (the pointer rested over the pane's own place, or left the window). Until it has, the one thing a
+    // release does is tear the pane off where it stands, and the pane's own place says so (tilelayout.scss
+    // `.tear-off-offered`). Once the layout has shown anything else, that sign is over for the drag: it does
+    // not come back when the pointer does, and the pane's place is drawn as any dragged pane's is (the
+    // operator, 2026-11-12: "the red goes away once the user drags, when it comes back, red should not").
+    const shownSomething = createMemo<boolean>((was) => (model.activeDrag() ? was || !!futureLayout() || !!tearOffLayout() : false), false);
+    const tearOffOffered = () => model.activeDrag() && !shownSomething();
+    return { placementAction, futureLayout, placementWireframe, tearOffLayout, tearOffOffered };
 }

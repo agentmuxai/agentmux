@@ -663,6 +663,8 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
             class={clsx("tile-node", {
                 // Not while the pane's picture is still being taken: the picture would show the blur.
                 dragging: isDragging() && !paneCaptureInFlight(),
+                // The pane's own place until the layout first shows a drop or the tear-off: a release tears it off.
+                "tear-off-offered": isDragging() && !paneCaptureInFlight() && props.layoutModel.tearOffOffered(),
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
                 "tile-resize-skip": skipsLayout(),
