@@ -198,7 +198,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/host_spawn.rs", "\"agentmux-host\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
-    ("crates/launcher/src/quit_ask.rs", "\"/usr/bin/osascript\"", 1,
+    ("crates/common/src/quit_question.rs", "\"/usr/bin/osascript\"", 1,
      "not-windows: macOS-only (osascript quit dialog)"),
     ("crates/launcher/src/quit_ask.rs", "program", 1,
      "not-windows: Linux-only (zenity/kdialog quit dialog)"),

@@ -38,6 +38,7 @@ pub mod popup_rules;
 pub mod process;
 pub mod process_hardening;
 pub mod pii_mask;
+pub mod quit_question;
 pub mod redact;
 pub mod runtime_mode;
 pub mod shown_once;

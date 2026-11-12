@@ -21,7 +21,10 @@
 #![cfg(target_os = "macos")]
 
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
+
+use agentmux_common::quit_question;
 
 use crate::state::AppState;
 
@@ -99,6 +102,65 @@ unsafe extern "C" fn menu_invoke(_self: Id, _cmd: Sel, sender: Id) {
     }
 }
 
+/// `[NSApp terminate:nil]`, which the Quit item sent before it asked. Main thread only.
+unsafe fn terminate_app() {
+    let app = msg(class(b"NSApplication\0") as Id, sel(b"sharedApplication\0"));
+    msg_id(app, sel(b"terminate:\0"), std::ptr::null_mut());
+}
+
+/// The same from another thread: AppKit only quits from the main thread.
+unsafe fn terminate_app_on_main_thread() {
+    let app = msg(class(b"NSApplication\0") as Id, sel(b"sharedApplication\0"));
+    let perform: extern "C" fn(Id, Sel, Sel, Id, u8) = std::mem::transmute(objc_msgSend as *const c_void);
+    perform(app, sel(b"performSelectorOnMainThread:withObject:waitUntilDone:\0"), sel(b"terminate:\0"), std::ptr::null_mut(), 0);
+}
+
+/// `agentmuxMenuQuit:` — the app menu's Quit and ⌘Q. They stop every agent, and used to go straight
+/// to `terminate:`; now they ask first, as the tray's Quit does, when an agent is in the middle of a
+/// turn and the close warning is on (srv decides: `GET /agentmux/quit-question`). The question is
+/// asked off the main thread, so the windows keep painting while the dialog is open; a second Quit
+/// meanwhile is dropped. A quit already under way (an agreed upgrade restart, the tray's Quit) is
+/// not asked again, and any failure to ask quits as before.
+unsafe extern "C" fn menu_quit(_self: Id, _cmd: Sel, _sender: Id) {
+    static ASKING: AtomicBool = AtomicBool::new(false);
+    let Some(state) = MENU_STATE.get().cloned() else {
+        terminate_app();
+        return;
+    };
+    if state.is_quitting() {
+        terminate_app();
+        return;
+    }
+    if ASKING.swap(true, Ordering::SeqCst) {
+        tracing::info!("quit: already asking about a quit");
+        return;
+    }
+    let (endpoint, key) = (state.backend_endpoints.lock().web_endpoint.clone(), state.auth_key.lock().clone());
+    let spawned = std::thread::Builder::new().name("agentmux-quit-ask".into()).spawn(move || {
+        let question = quit_question::ask_srv(&endpoint, &key);
+        if let Some(q) = &question {
+            tracing::info!("quit: {} of {} agents working; asking", q.working.len(), q.agents);
+        }
+        let go = quit_question::goes_ahead(question.as_ref(), |body| match quit_question::confirm_macos(body) {
+            Ok(answer) => Some(answer),
+            Err(why) => {
+                tracing::warn!("quit: {why}; quitting");
+                None
+            }
+        });
+        ASKING.store(false, Ordering::SeqCst);
+        if go {
+            terminate_app_on_main_thread();
+        } else {
+            tracing::info!("quit: the person chose to keep running");
+        }
+    });
+    if spawned.is_err() {
+        ASKING.store(false, Ordering::SeqCst);
+        terminate_app();
+    }
+}
+
 /// Build (once) the shared target object that owns `agentmuxMenuInvoke:`.
 /// Leaked on purpose — it lives for the process lifetime.
 unsafe fn make_target() -> Id {
@@ -112,6 +174,14 @@ unsafe fn make_target() -> Id {
             cls,
             sel(b"agentmuxMenuInvoke:\0"),
             imp as usize,
+            b"v@:@\0".as_ptr() as *const c_char,
+        );
+        // -(void)agentmuxMenuQuit:(id)sender  →  "v@:@"
+        let quit_imp: unsafe extern "C" fn(Id, Sel, Id) = menu_quit;
+        class_addMethod(
+            cls,
+            sel(b"agentmuxMenuQuit:\0"),
+            quit_imp as usize,
             b"v@:@\0".as_ptr() as *const c_char,
         );
         objc_registerClassPair(cls);
@@ -291,6 +361,16 @@ unsafe fn add_cmd(menu: Id, target: Id, title: &str, command_id: &str, key: &str
     msg_id(menu, sel(b"addItem:\0"), item);
 }
 
+/// The Quit item: `agentmuxMenuQuit:` on our own target, so the question can come first.
+unsafe fn add_quit(menu: Id, target: Id, title: &str, key: &str, mask: u64) {
+    let item = new_item(title, key, mask);
+    let set_action: extern "C" fn(Id, Sel, Sel) =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    set_action(item, sel(b"setAction:\0"), sel(b"agentmuxMenuQuit:\0"));
+    msg_id(item, sel(b"setTarget:\0"), target);
+    msg_id(menu, sel(b"addItem:\0"), item);
+}
+
 unsafe fn add_sep(menu: Id) {
     let sep = msg(class(b"NSMenuItem\0") as Id, sel(b"separatorItem\0"));
     msg_id(menu, sel(b"addItem:\0"), sep);
@@ -323,7 +403,8 @@ unsafe fn install_inner(state: Arc<AppState>) {
     add_std(app_menu, "Hide Others", b"hideOtherApplications:\0", "h", MOD_CMD | MOD_OPT);
     add_std(app_menu, "Show All", b"unhideAllApplications:\0", "", 0);
     add_sep(app_menu);
-    add_std(app_menu, &format!("Quit {name}"), b"terminate:\0", "q", MOD_CMD);
+    // Not `terminate:` straight: Quit and ⌘Q ask first when an agent is mid-turn (`menu_quit`).
+    add_quit(app_menu, target, &format!("Quit {name}"), "q", MOD_CMD);
 
     // ── File ──
     let file = add_submenu(main, "File");
