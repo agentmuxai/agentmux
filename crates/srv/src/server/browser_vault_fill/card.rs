@@ -155,7 +155,7 @@ async fn fill_all(state: &AppState, block_id: &str, origin: &str, fields: &[Card
     done
 }
 
-fn answer(card: &CardTarget, origin: &str, done: &Outcome) -> Value {
+fn answer(card: &CardTarget, origin: &str, done: &Outcome, went_ahead: bool) -> Value {
     let mut out = json!({
         // The entry's id and part names only: the brand, last four and expiry are the person's to see.
         "filled_from_vault": card.fill.id,
@@ -169,6 +169,9 @@ fn answer(card: &CardTarget, origin: &str, done: &Outcome) -> Value {
         }
         if !done.failed.is_empty() {
             o.insert("parts_failed".into(), json!(done.failed));
+        }
+        if went_ahead {
+            o.insert("approval".into(), json!(uses::WENT_AHEAD));
         }
         if done.flagged {
             o.insert("validation".into(), json!("the page flagged a value as invalid (its message isn't shown, since a page can put the value in it)"));
@@ -200,7 +203,7 @@ async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillReq
     let store = state.identity_store.clone();
     let (entry, grant_origin) = (card.fill.id.clone(), origin.clone());
     let granted = !card.expired && tokio::task::spawn_blocking(move || store.vault_grant_check(&entry, &grant_origin).unwrap_or(false)).await.unwrap_or(false);
-    let mut always = false;
+    let (mut always, mut went_ahead) = (false, false);
     match plan(!origin.is_empty(), false, true, granted, true) {
         Plan::Refuse(why) => {
             record(state, block_id, &card.fill, agent, &site, "refused", reason);
@@ -222,6 +225,7 @@ async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillReq
                 return err_response(code, ended.refusal("nothing was typed"));
             }
             always = ended == Ended::Always && !card.expired;
+            went_ahead = ended == Ended::WentAhead;
         }
     }
     if always {
@@ -252,5 +256,25 @@ async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillReq
     record(state, block_id, &card.fill, agent, &site, "done", reason);
     let (store, entry) = (state.identity_store.clone(), card.fill.id.clone());
     let _ = tokio::task::spawn_blocking(move || store.vault_touch(&entry, agentmux_common::time::now_ms())).await;
-    (StatusCode::OK, Json(json!({ "ok": true, "data": answer(&card, &origin, &done) }))).into_response()
+    (StatusCode::OK, Json(json!({ "ok": true, "data": answer(&card, &origin, &done, went_ahead) }))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::vault::{kinds, FillTarget};
+
+    fn a_card() -> CardTarget {
+        let kind = kinds::kind("card").expect("the card kind");
+        let fill = FillTarget { id: "card-a".into(), kind: kind.name, typed: false, kind_info: kind, label: "A".into(), part: "number", slot: None, what: "card".into(), created_at: 1, version: None };
+        CardTarget { fill, brand: "visa", last_four: "4242".into(), expiry: Some((3, 2027)), expired: false, sealed: vec![] }
+    }
+
+    #[test]
+    fn a_card_never_goes_ahead_on_silence_so_the_answer_carries_no_approval_note_unless_one_did() {
+        let done = Outcome { filled: vec!["number"], ..Default::default() };
+        assert!(answer(&a_card(), "https://shop.example", &done, false).get("approval").is_none());
+        assert_eq!(answer(&a_card(), "https://shop.example", &done, true)["approval"], uses::WENT_AHEAD);
+        assert!(!uses::goes_ahead(&card_question("a", String::new(), &a_card(), "https://shop.example", &["number"], (false, "x"), "")), "silence denies a card");
+    }
 }
