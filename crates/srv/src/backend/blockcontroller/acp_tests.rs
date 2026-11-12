@@ -685,3 +685,49 @@ async fn spawn_process_runs_the_handshake_and_flushes_the_queued_prompt() {
     assert!(inner.pending_prompt.is_none(), "the queued prompt was sent once the session was ready");
     assert!(inner.stdin_tx.is_none(), "stdin is closed after the exit");
 }
+
+/// A message that reached the agent keeps the turn it started: a fresh start asked for right after is refused and
+/// stops nothing, so the prompt already enqueued is not killed with the process (#47458).
+#[tokio::test]
+async fn a_fresh_start_after_a_message_was_accepted_waits_for_its_turn() {
+    let c = controller();
+    let (tx, mut rx) = mpsc::channel::<String>(8);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+        inner.session_id = Some("old-sid".to_string());
+    }
+    assert!(c.send_input(BlockInputUnion::data(b"hello".to_vec()), None).is_ok());
+    assert!(rx.try_recv().unwrap().contains("session/prompt"), "the prompt was enqueued");
+
+    assert_eq!(c.start_fresh_session(), Err("a turn is running"));
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.session_id.as_deref(), Some("old-sid"), "the session was not cleared");
+    assert!(inner.stdin_tx.is_some(), "the process was not stopped");
+}
+
+/// A fresh start that wins the race leaves no session for a message to take: it waits for the next launch instead of
+/// being enqueued on the process about to be killed (#47458).
+#[tokio::test]
+async fn a_message_after_a_fresh_start_waits_for_the_next_launch() {
+    let c = controller();
+    let (tx, mut rx) = mpsc::channel::<String>(8);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+        inner.session_id = Some("old-sid".to_string());
+    }
+    // The state start_fresh_session leaves between taking the session id and stopping the process.
+    let old = {
+        let mut inner = c.inner.lock().unwrap();
+        inner.resume_session_id = None;
+        inner.session_id.take()
+    };
+    assert_eq!(old.as_deref(), Some("old-sid"));
+
+    assert!(c.send_input(BlockInputUnion::data(b"hello".to_vec()), None).is_ok(), "accepted, to be sent on the next launch");
+    assert!(rx.try_recv().is_err(), "nothing went to the old process");
+    assert!(!c.health_monitor.is_active_turn(), "no turn was started on it");
+    assert!(c.outstanding_prompt_ids.lock().unwrap().is_empty());
+    assert_eq!(c.inner.lock().unwrap().pending_prompt.as_deref(), Some("hello"));
+}
