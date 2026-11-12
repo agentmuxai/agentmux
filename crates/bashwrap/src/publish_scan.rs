@@ -9,9 +9,11 @@
 //! the container's clone; the material is all it sees.
 //!
 //! - A machine with no publish guard, and a native agent's shell, never reach srv: srv says
-//!   `AGENTMUX_PUBLISH_GUARD=1` in a container's commands on a machine that has the guard and `=0` on one that has
-//!   none, and the hook does nothing and says nothing for `0`. Where srv says neither (an AgentMux older than the
-//!   check) the hook says once per push that it was checked for credentials only.
+//!   `AGENTMUX_PUBLISH_GUARD=1` in a container's commands on a machine whose guard can judge a container's push,
+//!   `=0` on one that has no guard, and `=older-gh-agent` on one whose gh-agent is too old to judge it. The hook
+//!   does nothing and says nothing for `0`. For `older-gh-agent`, and where srv says nothing (an AgentMux older than
+//!   the check), the hook says once per push that it was checked for credentials only, and lets it go on.
+//! - With `1`, an AgentMux that has no route to ask (404 or 405) refuses the push, and says to update AgentMux.
 //! - A push to a repository the guard finds private is not collected at all.
 //! - On a machine that has the guard, a public repository's push whose check cannot run (srv unreachable, too slow,
 //!   too large, refused) is refused, with what to do.
@@ -202,6 +204,8 @@ pub enum Answer {
     Judged { public: bool, code: i64, lines: Vec<String> },
     /// The check could not run: what to tell the agent.
     Unavailable(String),
+    /// The machine said it has the guard, but its AgentMux has no route to ask: waiting does not help.
+    NoRoute,
 }
 
 /// Read srv's answer: its status and body.
@@ -220,8 +224,8 @@ pub fn read_answer(status: u16, body: &Value) -> Answer {
             let public = body.get("public").and_then(Value::as_bool).unwrap_or(true);
             Answer::Judged { public, code, lines }
         }
-        // An AgentMux without the route cannot judge the push: said out loud, never silently.
-        404 | 405 => Answer::Unavailable("the AgentMux on this host is older than the publish check, so this push was not scanned".to_string()),
+        // A machine that said it has the guard, and an AgentMux that does not know the route: the push is not sent.
+        404 | 405 => Answer::NoRoute,
         413 => Answer::Unavailable(error().unwrap_or_else(|| "this push is too large to check: split it into smaller pushes".to_string())),
         429 => Answer::Unavailable(error().unwrap_or_else(|| "too many pushes are being checked: wait a minute and push again".to_string())),
         _ => Answer::Unavailable(error().unwrap_or_else(|| format!("AgentMux refused to check this push ({status}): try again in a minute"))),
@@ -259,6 +263,13 @@ fn refuse_unavailable(why: &str) -> i32 {
     1
 }
 
+/// What to do when the machine has the guard but its AgentMux cannot be asked: not a thing to try again.
+fn refuse_no_route() -> i32 {
+    eprintln!("agentmux: this push to a public repository was not checked, so it is not sent: the AgentMux on this host has no publish check to ask.");
+    eprintln!("agentmux: ask your leader to update AgentMux on this host.");
+    1
+}
+
 fn show(lines: &[String]) {
     for line in lines {
         eprintln!("{line}");
@@ -275,6 +286,9 @@ enum Guard {
     Nothing,
     /// A container's command where srv said nothing: an AgentMux older than the check. Said out loud.
     OlderAgentMux,
+    /// A container's command on a machine whose gh-agent cannot judge a container's push (`AGENTMUX_PUBLISH_GUARD=older-gh-agent`).
+    /// Said out loud, like [`Guard::OlderAgentMux`].
+    OlderGhAgent,
 }
 
 fn guard_here() -> Guard {
@@ -284,6 +298,7 @@ fn guard_here() -> Guard {
     match std::env::var("AGENTMUX_PUBLISH_GUARD").as_deref() {
         Ok("1") => Guard::Scan,
         Ok("0") => Guard::Nothing,
+        Ok("older-gh-agent") => Guard::OlderGhAgent,
         _ => Guard::OlderAgentMux,
     }
 }
@@ -308,10 +323,15 @@ fn check_with(remote: &str, url: &str, input: &str, guard: Guard, allow: bool, a
         eprintln!("agentmux: this push to a GitHub repository was checked for credentials only: the AgentMux on this host is older than the publish check, so the push itself was not scanned.");
         return 0;
     }
+    if guard == Guard::OlderGhAgent {
+        eprintln!("agentmux: this push to a GitHub repository was checked for credentials only: the gh-agent on this host is older than the publish check needs, so the push itself was not scanned.");
+        return 0;
+    }
     // First only whether this machine guards this repository, so a private one's push is not read.
     match ask(&repo, allow, &[]) {
         Answer::NotNeeded => return 0,
         Answer::Unavailable(why) => return refuse_unavailable(&why),
+        Answer::NoRoute => return refuse_no_route(),
         Answer::Judged { public: false, .. } => return 0,
         Answer::Judged { public: true, .. } => {}
     }
@@ -326,6 +346,7 @@ fn check_with(remote: &str, url: &str, input: &str, guard: Guard, allow: bool, a
     match ask(&repo, allow, &parts) {
         Answer::NotNeeded => 0,
         Answer::Unavailable(why) => refuse_unavailable(&why),
+        Answer::NoRoute => refuse_no_route(),
         Answer::Judged { code, lines, .. } => {
             show(&lines);
             i32::from(code != 0)
@@ -554,9 +575,46 @@ mod tests {
     }
 
     #[test]
-    fn a_route_an_older_srv_lacks_is_said_out_loud_and_not_taken_as_no_guard() {
+    fn a_gh_agent_too_old_to_judge_a_container_push_lets_it_go_and_says_so_without_asking() {
+        assert_eq!(check_guard(Guard::OlderGhAgent, "https://github.com/o/r.git", vec![]), (0, 0));
+        // Nothing to say about a remote that is not GitHub's, or a push that updates nothing.
+        assert_eq!(check_guard(Guard::OlderGhAgent, "https://gitlab.com/o/r.git", vec![]), (0, 0));
+    }
+
+    #[test]
+    fn a_route_the_host_lacks_while_it_says_it_has_the_guard_refuses_the_push() {
         for status in [404, 405] {
-            assert!(matches!(read_answer(status, &Value::Null), Answer::Unavailable(w) if w.contains("older than the publish check")), "{status}");
+            assert_eq!(read_answer(status, &Value::Null), Answer::NoRoute, "{status}");
         }
+        let url = "https://github.com/o/r.git";
+        assert_eq!(check(true, url, vec![Answer::NoRoute]), (1, 1), "the first question");
+        let public = || Answer::Judged { public: true, code: 0, lines: vec![] };
+        assert_eq!(check(true, url, vec![public(), Answer::NoRoute]), (1, 2), "the scan itself");
+    }
+
+    #[test]
+    fn the_marker_values_are_read_as_srv_says_them() {
+        let read = |value: Option<&str>| {
+            let was = std::env::var("AGENTMUX_PUBLISH_GUARD").ok();
+            let was_in = std::env::var("AGENTMUX_IN_CONTAINER").ok();
+            std::env::set_var("AGENTMUX_IN_CONTAINER", "1");
+            match value {
+                Some(v) => std::env::set_var("AGENTMUX_PUBLISH_GUARD", v),
+                None => std::env::remove_var("AGENTMUX_PUBLISH_GUARD"),
+            }
+            let guard = guard_here();
+            for (name, old) in [("AGENTMUX_PUBLISH_GUARD", was), ("AGENTMUX_IN_CONTAINER", was_in)] {
+                match old {
+                    Some(v) => std::env::set_var(name, v),
+                    None => std::env::remove_var(name),
+                }
+            }
+            guard
+        };
+        assert_eq!(read(Some("1")), Guard::Scan);
+        assert_eq!(read(Some("0")), Guard::Nothing);
+        assert_eq!(read(Some("older-gh-agent")), Guard::OlderGhAgent);
+        assert_eq!(read(None), Guard::OlderAgentMux);
+        assert_eq!(read(Some("anything else")), Guard::OlderAgentMux);
     }
 }

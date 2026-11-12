@@ -186,13 +186,25 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // gateway that is where the container is pointed.
     crate::backend::container::listener::point_env_at_listener(&mut out);
     point_gateway_at_srv(&mut out);
-    // Whether this machine has a publish guard for the container's pre-push hook to ask, said only here: `1` when it
-    // has, `0` when it has none (the hook then does nothing and says nothing, and never refuses a push for want of an
-    // answer). An AgentMux that predates the check sets neither, which the hook says out loud.
+    // What this machine has for the container's pre-push hook to ask, said only here (see [`publish_guard_marker`]).
+    // An AgentMux that predates the check sets none, which the hook says out loud.
     out.retain(|(k, _)| k != crate::identity::gh_agent_token::PUBLISH_GUARD_ENV);
-    let guarded = crate::identity::gh_agent_token::installed().is_some() && crate::backend::publish_guard::container_scan_ready();
-    out.push((crate::identity::gh_agent_token::PUBLISH_GUARD_ENV.to_string(), if guarded { "1" } else { "0" }.to_string()));
+    let installed = crate::identity::gh_agent_token::installed().is_some();
+    let marker = publish_guard_marker(installed, installed && crate::backend::publish_guard::container_scan_ready());
+    out.push((crate::identity::gh_agent_token::PUBLISH_GUARD_ENV.to_string(), marker.to_string()));
     out
+}
+
+/// The marker's value: `1` where gh-agent's own hooks can judge a container's push (the hook asks srv),
+/// `older-gh-agent` where gh-agent is installed but cannot (the hook says the push was not scanned and lets it go
+/// on), `0` where there is no gh-agent (the hook does nothing and says nothing, and never refuses a push for want
+/// of an answer).
+fn publish_guard_marker(gh_agent_installed: bool, can_judge: bool) -> &'static str {
+    match (gh_agent_installed, can_judge) {
+        (false, _) => "0",
+        (true, true) => "1",
+        (true, false) => "older-gh-agent",
+    }
 }
 
 /// A model-route agent's `ANTHROPIC_BASE_URL` names srv's gateway at the host's address; in a container it
@@ -355,10 +367,17 @@ mod tests {
             let env: HashMap<String, String> = [("AGENTMUX_PUBLISH_GUARD".to_string(), own.to_string())].into_iter().collect();
             container_exec_env("cc-block-guard", &env).into_iter().filter(|(k, _)| k == "AGENTMUX_PUBLISH_GUARD").map(|(_, v)| v).collect::<Vec<_>>()
         };
-        let ready = crate::identity::gh_agent_token::installed().is_some() && crate::backend::publish_guard::container_scan_ready();
-        let want = vec![if ready { "1" } else { "0" }.to_string()];
+        let installed = crate::identity::gh_agent_token::installed().is_some();
+        let want = vec![publish_guard_marker(installed, installed && crate::backend::publish_guard::container_scan_ready()).to_string()];
         assert_eq!(ask("1"), want, "once, and not carried in from the agent's own environment");
         assert_eq!(ask("0"), want);
+    }
+
+    #[test]
+    fn the_marker_says_which_of_three_a_machine_is() {
+        assert_eq!(publish_guard_marker(false, false), "0", "no gh-agent: nothing to ask");
+        assert_eq!(publish_guard_marker(true, true), "1", "gh-agent that can judge a push");
+        assert_eq!(publish_guard_marker(true, false), "older-gh-agent", "gh-agent that cannot: said out loud, not silent");
     }
 
     #[test]
