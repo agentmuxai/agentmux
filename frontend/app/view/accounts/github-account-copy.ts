@@ -55,7 +55,7 @@ function appInUse(a: Pick<Account, "provider" | "kind" | "context" | "status">):
 /**
  * The one sentence at the top of the GitHub section: which way agents reach GitHub now. The App wins
  * when it works (srv routes git and gh through it and keeps the person's login from agents); a token
- * reaches only the agents it is linked to; with neither, an agent has the person's own login unless
+ * or the person's own OAuth sign-in reaches only the agents it is linked to; with none of these, an agent has the person's own login unless
  * this computer has gh-agent (GITHUB_GH_AGENT_NOTE says so under it).
  */
 export function githubStatusLine(accounts: readonly Pick<Account, "provider" | "kind" | "context" | "status">[]): string {
@@ -68,6 +68,10 @@ export function githubStatusLine(accounts: readonly Pick<Account, "provider" | "
     }
     if (github.some(isGithubToken)) {
         return "Using your personal access token. The agents you link it to act as you, with whatever the token allows.";
+    }
+    // A sign-in made with the person's own OAuth client: its access token reaches the agents it is linked to.
+    if (github.some((a) => a.kind === "oauth")) {
+        return "Connected with your own GitHub sign-in. The agents you link it to act as you, with whatever it allows.";
     }
     return "Not connected. Agents use your own GitHub login on this computer, if there is one, and act as you.";
 }

@@ -68,6 +68,13 @@ describe("the GitHub section's status line", () => {
         expect(githubStatusLine([acc("pat"), stale])).toContain("needs to be reconnected");
     });
 
+    it("recognises a sign-in made with the person's own OAuth client", () => {
+        const own = acc("oauth", { oauth_client: { mode: "byo" } });
+        expect(githubStatusLine([own])).toContain("Connected with your own GitHub sign-in");
+        expect(githubStatusLine([own])).not.toContain("Not connected");
+        expect(githubStatusLine([acc("pat"), own])).toContain("personal access token");
+    });
+
     it("ignores other providers' accounts", () => {
         expect(githubStatusLine([{ provider: "openai", kind: "api_key", context: {}, status: "valid" } as never])).toContain("Not connected");
     });
