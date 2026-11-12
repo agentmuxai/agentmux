@@ -14,7 +14,7 @@ import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { endedByEscape } from "./native-cancel";
 import { maybeDroppedInAnotherWindow } from "./foreign-drop";
-import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
+import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
@@ -246,17 +246,6 @@ async function performTearOff(
         const { width: floaterWidth, height: floaterHeight } = measureSourcePaneSize(
             payload.blockId,
         );
-        // Compute mother window resize: if the pane spans the full height of
-        // the layout container (top-to-bottom column), the mother shrinks by
-        // the pane's width so remaining panes keep their sizes unchanged.
-        // Skip when a pane is magnified — layout container dimensions are
-        // misleading in that mode (spec §9).
-        // SPEC: SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md
-        const layoutModelForResize = getLayoutModelForStaticTab();
-        const motherResizeToWidth = layoutModelForResize?.treeState?.magnifiedNodeId
-            ? undefined
-            : measureMotherResize(payload.blockId);
-
         const newWsId = await WorkspaceService.TearOffBlock(
             payload.blockId,
             sourceTabId,
@@ -286,7 +275,6 @@ async function performTearOff(
                 width: floaterWidth,
                 height: floaterHeight,
                 source_window_label: sourceWindowLabel,
-                mother_resize_to_width: motherResizeToWidth,
             });
             Logger.info("dnd:cross", "floating pane spawned (linux)", {
                 blockId: payload.blockId,
@@ -296,7 +284,6 @@ async function performTearOff(
                 width: floaterWidth,
                 height: floaterHeight,
                 sourceWindowLabel,
-                motherResizeToWidth,
             });
         } catch (err) {
             const msg = String(err);
@@ -311,7 +298,6 @@ async function performTearOff(
                         width: floaterWidth,
                         height: floaterHeight,
                         source_window_label: sourceWindowLabel,
-                        mother_resize_to_width: motherResizeToWidth,
                     });
                 } catch (e2) {
                     Logger.error("dnd:cross", "open_floating_pane_window failed after retry", {

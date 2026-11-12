@@ -10,7 +10,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setPlatform } from "@/util/platformutil";
 
-const { svc, invokeCommand, removeMovedBlock, api, measureMotherResize, state } = vi.hoisted(() => ({
+const { svc, invokeCommand, removeMovedBlock, api, state } = vi.hoisted(() => ({
     svc: {
         TearOffBlock: vi.fn(),
         GetWorkspace: vi.fn(),
@@ -31,7 +31,6 @@ const { svc, invokeCommand, removeMovedBlock, api, measureMotherResize, state } 
             openFloatingPane: (args: Record<string, unknown>) => invokeCommand("open_floating_pane_window", args),
         },
     },
-    measureMotherResize: vi.fn(),
     state: { model: null as unknown },
 }));
 
@@ -46,7 +45,6 @@ vi.mock("@/store/global", () => ({
 vi.mock("./tear-off-pool-helper", () => ({
     floaterSizeFromRect: (r: { width: number; height: number }) => ({ width: Math.round(r.width), height: Math.round(r.height) }),
     measureSourcePaneSize: () => ({ width: 720, height: 480 }),
-    measureMotherResize: (...a: unknown[]) => measureMotherResize(...a),
 }));
 vi.mock("@/util/util", () => ({ sleep: () => Promise.resolve() }));
 
@@ -85,7 +83,6 @@ beforeEach(() => {
     svc.RedockFloatingPane.mockResolvedValue({ redocked: true });
     svc.DeleteWorkspace.mockResolvedValue("");
     invokeCommand.mockResolvedValue({ window_label: "floater-1" });
-    measureMotherResize.mockReturnValue(1000);
     api.startCrossDrag.mockResolvedValue("drag-1");
     api.updateCrossDrag.mockResolvedValue(null);
     state.model = modelWithPane(["a", "b"]);
@@ -144,31 +141,24 @@ describe("handlePaneTabDragEnd", () => {
 });
 
 describe("tearOffPaneTab", () => {
-    it("tears off one tab of a multi-tab pane: floater at the pane's size, window NOT shrunk, tab removed stack-safe", async () => {
+    it("tears off one tab of a multi-tab pane: floater at the pane's size, tab removed stack-safe", async () => {
         const result = await tearOffPaneTab(payload("b"), opts());
         expect(result).toBe("torn-off");
         expect(invokeCommand).toHaveBeenCalledWith(
             "open_floating_pane_window",
-            expect.objectContaining({ pane_id: "b", workspace_id: "ws-new", width: 600, height: 401, mother_resize_to_width: undefined })
+            expect.objectContaining({ pane_id: "b", workspace_id: "ws-new", width: 600, height: 401 })
         );
-        expect(measureMotherResize).not.toHaveBeenCalled();
         expect(removeMovedBlock).toHaveBeenCalledWith(state.model, "b");
     });
 
-    it("the pane's ONLY tab: the pane leaves, so the window shrinks like a whole-pane tear-off", async () => {
+    it("never resizes the window the pane leaves, on any platform, even when the tab was the pane's only one", async () => {
         state.model = modelWithPane(["a"]);
-        await tearOffPaneTab(payload("a"), opts("win32"));
-        expect(invokeCommand).toHaveBeenCalledWith(
-            "open_floating_pane_window",
-            expect.objectContaining({ mother_resize_to_width: 1000 })
-        );
-    });
-
-    it("macOS never passes a mother resize (same as its whole-pane path)", async () => {
-        state.model = modelWithPane(["a"]);
-        await tearOffPaneTab(payload("a"), opts("darwin"));
-        const args = invokeCommand.mock.calls[0][1] as Record<string, unknown>;
-        expect("mother_resize_to_width" in args).toBe(false);
+        for (const platform of ["win32", "linux", "darwin"] as const) {
+            invokeCommand.mockClear();
+            await tearOffPaneTab(payload("a"), opts(platform));
+            const args = invokeCommand.mock.calls[0][1] as Record<string, unknown>;
+            expect("mother_resize_to_width" in args).toBe(false);
+        }
     });
 
     it("skips a tab that's no longer in its pane", async () => {

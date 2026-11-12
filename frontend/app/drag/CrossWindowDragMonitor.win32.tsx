@@ -28,7 +28,7 @@ import { isSelfRelease } from "./pane-self-release";
 import { paneTearOffOf, removeTornOffPane, rollBackPaneTearOff } from "./pane-tearoff";
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import { Logger } from "@/util/logger";
-import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
+import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper";
 import { endLiveFollow } from "./live-follow";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
@@ -365,18 +365,6 @@ async function performTearOff(
         const { width: floaterWidth, height: floaterHeight } = measureSourcePaneSize(
             payload.blockId,
         );
-        // Compute the mother window's new width if the pane spans the full
-        // height of the layout container (top-to-bottom column). If so, the
-        // mother shrinks by exactly the pane's column width so remaining panes
-        // keep their sizes unchanged. Absent when the pane is in a horizontal
-        // split or the remaining width would be < MIN_MOTHER_WIDTH.
-        // Skip when a pane is magnified — the layout container dimensions are
-        // misleading in that mode (spec §9).
-        // SPEC: SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md
-        const layoutModelForResize = getLayoutModelForStaticTab();
-        const motherResizeToWidth = layoutModelForResize?.treeState?.magnifiedNodeId
-            ? undefined
-            : measureMotherResize(payload.blockId);
 
         // The pane's picture for the floater, taken before the drag; any wait
         // for it overlaps TearOffBlock. SPEC_TEAROFF_PAINT_LATENCY §4 3.1.
@@ -421,7 +409,6 @@ async function performTearOff(
                 width: floaterWidth,
                 height: floaterHeight,
                 source_window_label: sourceWindowLabel,
-                mother_resize_to_width: motherResizeToWidth,
                 snapshot,
             });
             Logger.info("dnd:cross", "floating pane spawned", {
@@ -429,7 +416,6 @@ async function performTearOff(
                 newWsId,
                 screenX,
                 screenY,
-                motherResizeToWidth,
             });
         } catch (e) {
             const msg = String(e);
@@ -448,7 +434,6 @@ async function performTearOff(
                         width: floaterWidth,
                         height: floaterHeight,
                         source_window_label: sourceWindowLabel,
-                        mother_resize_to_width: motherResizeToWidth,
                         snapshot,
                     });
                 } catch (e2) {
@@ -474,7 +459,6 @@ async function performTearOff(
                         width: floaterWidth,
                         height: floaterHeight,
                         source_window_label: sourceWindowLabel,
-                        mother_resize_to_width: motherResizeToWidth,
                     });
                 } catch (e2) {
                     Logger.error("dnd:cross", "open_floating_pane_window failed — rolling the pane back", {

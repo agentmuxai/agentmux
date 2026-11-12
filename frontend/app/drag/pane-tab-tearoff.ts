@@ -12,7 +12,6 @@
  * `open_floating_pane_window` shows it. What's specific to a single tab:
  * - an in-window drop never tears off (macOS/Linux have no host hit-test);
  * - the source pane keeps its other tabs (stack-safe removal);
- * - the window only shrinks when the pane itself leaves;
  * - a failed window open is rolled back, and the tab goes back where it was.
  *
  * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5.
@@ -27,7 +26,7 @@ import { atoms, getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
 import { sleep } from "@/util/util";
 import { endLiveFollow } from "./live-follow";
-import { floaterSizeFromRect, measureMotherResize, measureSourcePaneSize } from "./tear-off-pool-helper";
+import { floaterSizeFromRect, measureSourcePaneSize } from "./tear-off-pool-helper";
 import { takeTearOffSnapshot } from "./tearoff-snapshot";
 
 /** The cross-window drag payload a Pane Tab pill sets on drag start
@@ -158,14 +157,6 @@ export async function tearOffPaneTab(
 
     // Measure BEFORE TearOffBlock: the source DOM goes away with it.
     const { width, height } = payload.paneSize ? floaterSizeFromRect(payload.paneSize) : measureSourcePaneSize(blockId);
-    // The window shrinks by the pane's width only when the PANE leaves (the
-    // tab was its only one) — never for a pane that keeps other tabs. macOS
-    // doesn't resize the mother window at all (same as its whole-pane path).
-    const motherResizeToWidth =
-        opts.platform !== "darwin" && wasOnlyTab && !model.treeState.magnifiedNodeId
-            ? measureMotherResize(blockId)
-            : undefined;
-
     // The pane's picture for the floater (Windows), taken before the drag;
     // any wait for it overlaps TearOffBlock. SPEC_TEAROFF_PAINT_LATENCY §4 3.1.
     const snapshot = opts.platform === "win32" ? takeTearOffSnapshot(blockId) : Promise.resolve(undefined);
@@ -185,7 +176,7 @@ export async function tearOffPaneTab(
         height,
         ...(opts.platform === "darwin"
             ? {}
-            : { source_window_label: opts.sourceWindowLabel, mother_resize_to_width: motherResizeToWidth }),
+            : { source_window_label: opts.sourceWindowLabel }),
     });
     if (opened) {
         // The floater shows it now: drop it from the source pane, stack-safe.
