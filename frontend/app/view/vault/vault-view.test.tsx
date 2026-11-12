@@ -57,9 +57,22 @@ function ssn(over: Partial<VaultEntryInfo> = {}): VaultEntryInfo {
     };
 }
 
+// jsdom has no layout: the view's width observer is a stand-in a test fires with the pane's width.
+const sizeCallbacks: Array<(entries: unknown[]) => void> = [];
+class FakeResizeObserver {
+    constructor(cb: (entries: unknown[]) => void) {
+        sizeCallbacks.push(cb);
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
+const paneIsWide = (px: number) => sizeCallbacks.forEach((cb) => cb([{ contentRect: { width: px } }]));
+
+let model: VaultViewModel;
 function renderVault() {
     return render(() => {
-        const model = new VaultViewModel({ blockId: "vault-block", meta: blockMeta as any, setMeta, isFocused: () => false, visibility } as any);
+        model = new VaultViewModel({ blockId: "vault-block", meta: blockMeta as any, setMeta, isFocused: () => false, visibility } as any);
         return <VaultView model={model} />;
     });
 }
@@ -71,12 +84,15 @@ describe("the Vault pane", () => {
         entries = [ssn()];
         requests = [];
         vault.mockClear();
+        sizeCallbacks.length = 0;
+        vi.stubGlobal("ResizeObserver", FakeResizeObserver);
     });
     afterEach(() => {
         cleanup();
         setBlockMeta({});
         setVisibility("active");
         setPlatform("win32");
+        vi.unstubAllGlobals();
     });
 
     it("lists an entry by label and last characters, and marks itself hidden from agents", async () => {
@@ -97,6 +113,26 @@ describe("the Vault pane", () => {
             "Kept by AgentMux",
             "Activity",
         ]);
+    });
+
+    it("keeps Import, Export and the note in the pane when the pane is too narrow for them in its header", async () => {
+        renderVault();
+        await screen.findByText("Alex");
+        // Wide: they are the header's (vault-instance.tsx), not the pane's.
+        paneIsWide(900);
+        expect(screen.queryByRole("button", { name: "Export the Vault" })).toBeNull();
+        expect(model.narrow()).toBe(false);
+
+        paneIsWide(300);
+        expect(model.narrow()).toBe(true);
+        for (const name of ["Import into the Vault", "Export the Vault", "What the Vault may ask you"]) {
+            expect(screen.getByRole("button", { name })).toBeInTheDocument();
+        }
+        fireEvent.click(screen.getByRole("button", { name: "Export the Vault" }));
+        expect(model.transfer()).toBe("export");
+
+        paneIsWide(900);
+        expect(screen.queryByRole("button", { name: "Import into the Vault" })).toBeNull();
     });
 
     it("saves a new entry through the host, and the typed value doesn't stay in the page", async () => {

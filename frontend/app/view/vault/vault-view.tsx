@@ -7,6 +7,7 @@
 
 import { createEffect, createSignal, For, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
+import { useOnResize } from "@/app/hook/useDimensions";
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
@@ -14,6 +15,7 @@ import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntries } from "./vault-entries";
 import { VaultHistoryDialog, whoOf, whyOf } from "./vault-history";
 import { VaultManageDialog } from "./vault-manage";
+import { VaultNarrowActions } from "./vault-narrow-actions";
 import { ALL_VAULTS, VaultPicker } from "./vault-vaults";
 import { VaultRequestsList } from "./vault-requests-list";
 import { VaultShown } from "./vault-reveal";
@@ -101,7 +103,7 @@ function VaultKept(props: { visible: boolean }): JSX.Element {
                 <div class="warden-manager-error">⚠ {error()}</div>
             </Show>
             <Show when={(kept() ?? []).length > 0} fallback={<div class="warden-section-stub">{kept() === null ? "Loading…" : "None yet."}</div>}>
-                <table class="warden-manager-table">
+                <table class="warden-manager-table vault-table">
                     <thead>
                         <tr>
                             <th>Name</th>
@@ -178,7 +180,7 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
                 <div class="warden-manager-error">⚠ {error()}</div>
             </Show>
             <Show when={(rows() ?? []).length > 0} fallback={<div class="warden-section-stub">{rows() === null ? "Loading…" : "Nothing yet."}</div>}>
-                <table class="warden-manager-table">
+                <table class="warden-manager-table vault-table vault-table--wide">
                     <thead>
                         <tr>
                             <th>When</th>
@@ -260,6 +262,10 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
 
     keepOnScreenNoted(model);
 
+    // The pane's own width decides whether the header keeps its buttons, never the window's.
+    const container: { current: HTMLDivElement | null } = { current: null };
+    useOnResize(container, (rect) => model.setWidth(rect.width));
+
     const focused = focusedRequest(model);
 
     // Opened from an agent's request prompt: open its form once the request is known.
@@ -277,7 +283,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
         // data-agent-hidden: agents' UI captures and queries leave the Vault out. VaultShown
         // lets an open Reveal close when the Vault stops being shown.
         <VaultShown.Provider value={model.shown}>
-        <div class="vault-container" data-agent-hidden="vault">
+        <div class="vault-container" data-agent-hidden="vault" ref={(el) => (container.current = el)}>
             <div class="vault-view" style={{ zoom: model.zoomAtom() }}>
                 <Show
                     when={vaultAvailable()}
@@ -287,7 +293,12 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                         <VaultPromptsNote onClose={() => model.setMeta({ "vault:prompts-read": true })} />
                     </Show>
                     <VaultRequestsList onFill={fill} focused={focused} />
-                    <VaultPicker value={vault()} onChange={(id) => model.setMeta({ "vault:vault": id || null })} onManage={() => setManaging(true)} />
+                    <VaultPicker
+                        value={vault()}
+                        onChange={(id) => model.setMeta({ "vault:vault": id || null })}
+                        onManage={() => setManaging(true)}
+                        extra={<Show when={model.narrow()}><VaultNarrowActions model={model} /></Show>}
+                    />
                     <Show when={vaultError() ?? vaultProblem()}>
                         <div class="warden-manager-error vault-problem" role="alert">
                             ⚠ {vaultError() ?? vaultProblem()}

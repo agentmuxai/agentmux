@@ -21,4 +21,12 @@ describe("the Vault's stylesheets", () => {
             expect(css).not.toMatch(/\.vault-[\w-]+ \.vault-[\w-]+ \.vault-/);
         });
     }
+
+    it("stacks the pane's lists by the pane's width and a dialog's list by the dialog's", () => {
+        const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
+        expect(css).toContain("@container vault (max-width: 600px)");
+        expect(css).toContain("@container vault (max-width: 700px)");
+        expect(css).toContain("@container vault-dialog (max-width: 640px)");
+        expect(css).toMatch(/\.vault-dialog-scope\s*\{[^}]*container:\s*vault-dialog/);
+    });
 });
