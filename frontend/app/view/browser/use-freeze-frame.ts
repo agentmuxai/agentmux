@@ -3,7 +3,7 @@
 
 import { createSignal, onCleanup, onMount, type Accessor, type JSX, type Setter } from "solid-js";
 import { getApi } from "@/util/app-api";
-import { hidesPaneUnderOverlay } from "@/app/platform/pane-backend";
+import { hidesPaneUnderOverlay, watchPaneClip } from "@/app/platform/pane-backend";
 import type { BrowserViewModel } from "./browser-model";
 import type { PaneRect } from "./use-pane-rect-sync";
 
@@ -209,6 +209,7 @@ export function useFreezeFrame(params: FreezeParams): FreezeFrame {
 
     onMount(() => {
         window.addEventListener("pane-overlay-clip-changed", onOverlayClipChanged);
+        watchPaneClip();
         window.addEventListener("pane-freeze-prewarm", onFreezePrewarm);
         onCleanup(() => {
             window.removeEventListener("pane-overlay-clip-changed", onOverlayClipChanged);

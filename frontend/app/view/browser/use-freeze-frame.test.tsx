@@ -20,6 +20,7 @@ vi.mock("@/util/app-api", () => ({
     getApi: () => ({
         browserPanes: { screenshot: env.screenshot },
         getAboutModalDetails: () => ({ paneBackend: env.views.on ? "views" : "hwnd", paneClip: env.clip.on }),
+        listen: () => Promise.resolve(() => {}),
     }),
 }));
 

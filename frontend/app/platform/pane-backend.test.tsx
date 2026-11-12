@@ -3,9 +3,13 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const env = vi.hoisted(() => ({ backend: "views" as string | undefined, clip: undefined as boolean | undefined }));
+const env = vi.hoisted(() => ({
+    backend: "views" as string | undefined,
+    clip: undefined as boolean | undefined,
+    listen: vi.fn((_event: string, _handler: () => void) => Promise.resolve(() => {})),
+}));
 vi.mock("@/util/app-api", () => ({
-    getApi: () => ({ getAboutModalDetails: () => ({ paneBackend: env.backend, paneClip: env.clip }) }),
+    getApi: () => ({ getAboutModalDetails: () => ({ paneBackend: env.backend, paneClip: env.clip }), listen: env.listen }),
 }));
 
 import { hidesPaneUnderOverlay, isViewsPanesOnWindows } from "./pane-backend";
@@ -78,5 +82,28 @@ describe("hidesPaneUnderOverlay", () => {
         expect(hidesPaneUnderOverlay()).toBe(false);
         at(MAC, "");
         expect(hidesPaneUnderOverlay()).toBe(false);
+    });
+});
+
+describe("a host whose runtime turns out to have no clip", () => {
+    it("is heard once per window, and from then on the pane hides whole again", async () => {
+        vi.resetModules();
+        env.listen.mockClear();
+        const fresh = await import("./pane-backend");
+        env.clip = true;
+        at(LINUX, "");
+        fresh.watchPaneClip();
+        fresh.watchPaneClip();
+        expect(env.listen).toHaveBeenCalledTimes(1);
+        expect(env.listen.mock.calls[0][0]).toBe("pane-clip-unavailable");
+        expect(fresh.hidesPaneUnderOverlay()).toBe(false);
+
+        env.listen.mock.calls[0][1]();
+        expect(fresh.hidesPaneUnderOverlay()).toBe(true);
+        at(WINDOWS, "");
+        expect(fresh.hidesPaneUnderOverlay()).toBe(true);
+        // A pane that gets a hole by other means is not affected.
+        at(MAC, "");
+        expect(fresh.hidesPaneUnderOverlay()).toBe(false);
     });
 });

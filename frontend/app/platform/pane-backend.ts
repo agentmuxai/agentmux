@@ -19,17 +19,35 @@ export function isViewsPanesOnWindows(): boolean {
     return !label.startsWith("floating-") && getApi().getAboutModalDetails?.()?.paneBackend === "views";
 }
 
+/** The host found its runtime has no overlay clip after telling this page that it has (`paneClip`). */
+let clipUnavailable = false;
+let watching = false;
+
+/**
+ * Listen, once per window, for the host saying that its runtime cannot cut a pane after all. The host
+ * can only know when a pane exists, which is after the about details were read, and says so each time
+ * a pane is made in this window. A browser view calls this as it mounts, before its pane is made.
+ */
+export function watchPaneClip(): void {
+    if (watching) return;
+    watching = true;
+    void getApi().listen?.("pane-clip-unavailable", () => {
+        clipUnavailable = true;
+    });
+}
+
 /**
  * Whether the host hides a browser pane whole while a DOM overlay (a menu, a
  * tooltip, a modal) is over it, so the page shows a frozen frame of it instead
  * (use-freeze-frame.ts). Only a Views pane on Linux or Windows whose host does
- * not cut the pane around the overlay (`paneClip` in the about details:
- * AGENTMUX_PANE_CLIP=off). Everywhere else the pane stays live with a hole in
- * it: a clip on a Views pane, a window region on a Windows child window, a
- * layer mask on macOS.
+ * not cut the pane around the overlay: `paneClip` in the about details is off
+ * (AGENTMUX_PANE_CLIP=off), or the host said since that its runtime has no clip
+ * (`watchPaneClip`). Everywhere else the pane stays live with a hole in it: a
+ * clip on a Views pane, a window region on a Windows child window, a layer mask
+ * on macOS.
  */
 export function hidesPaneUnderOverlay(): boolean {
-    if (getApi().getAboutModalDetails?.()?.paneClip) return false;
+    if (getApi().getAboutModalDetails?.()?.paneClip && !clipUnavailable) return false;
     const ua = navigator.userAgent;
     return (ua.includes("Linux") && !ua.includes("Windows")) || isViewsPanesOnWindows();
 }

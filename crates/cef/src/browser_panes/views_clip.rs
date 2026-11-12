@@ -9,11 +9,14 @@
 //! picture of it (`use-freeze-frame.ts`).
 //!
 //! The pane is still hidden whole when nothing of it is left, when the runtime has no such field (an
-//! older libcef), and when `AGENTMUX_PANE_CLIP=off` asks for the old way. macOS masks its own overlay
-//! window (`ui_tasks/pane_hole_mask.rs`) and does not come here.
+//! older libcef), and when `AGENTMUX_PANE_CLIP=off` asks for the old way. The page has to know which,
+//! since it freezes a frame only for a pane that hides whole: `reported` is what it is told at startup,
+//! before any pane exists to ask, and a window is told when a pane is made in it and the runtime has
+//! turned out to lack the field (`UNAVAILABLE_EVENT`).
+//! macOS masks its own overlay window (`ui_tasks/pane_hole_mask.rs`) and does not come here.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, OnceLock};
 
 use cef::ImplOverlayController;
@@ -37,11 +40,36 @@ pub(crate) enum PaneCut {
 }
 
 /// Whether panes are cut around what is over them (the default) or hidden whole
-/// (`AGENTMUX_PANE_CLIP=off`). Read once: the page is told at startup (`paneClip` in the about details)
-/// and freezes a frame only for a pane that hides whole.
-pub(crate) fn enabled() -> bool {
+/// (`AGENTMUX_PANE_CLIP=off`). Read once.
+fn enabled() -> bool {
     static CHOSEN: OnceLock<bool> = OnceLock::new();
     *CHOSEN.get_or_init(|| !matches!(std::env::var("AGENTMUX_PANE_CLIP").as_deref(), Ok("off" | "0" | "hide")))
+}
+
+/// What is known of the runtime's clip: nothing until the first pane's overlay is looked at.
+const UNKNOWN: u8 = 0;
+const PRESENT: u8 = 1;
+const MISSING: u8 = 2;
+static RUNTIME: AtomicU8 = AtomicU8::new(UNKNOWN);
+
+/// The event a window's page gets when a pane is made in it and the runtime has no clip, although the
+/// page may have been told it has one (`reported`): from then on the page freezes a frame for a pane
+/// under an overlay, as it did before the clip.
+pub(crate) const UNAVAILABLE_EVENT: &str = "pane-clip-unavailable";
+
+/// Record what an overlay showed of the runtime; one warning when the clip is missing.
+fn note_runtime(found: bool) {
+    let now = if found { PRESENT } else { MISSING };
+    if RUNTIME.swap(now, Ordering::Relaxed) != now && !found {
+        tracing::warn!("[pane-airspace] views: this libcef has no overlay clip; a pane under a menu is hidden whole");
+    }
+}
+
+/// Whether a page is told that a Views pane under an overlay is cut and stays live (`paneClip` in the
+/// about details): the clip is on, and the runtime is not known to lack it. Before the first pane
+/// exists the runtime is not known at all, so a page told yes is corrected by `UNAVAILABLE_EVENT`.
+pub(crate) fn reported() -> bool {
+    enabled() && RUNTIME.load(Ordering::Relaxed) != MISSING
 }
 
 /// What is left of a `width` × `height` pane outside `holes` (`(left, top, right, bottom)`, inside the
@@ -128,18 +156,13 @@ type SetClipRects = unsafe extern "C" fn(*mut cef::sys::_cef_overlay_controller_
 fn clip_fn(controller: &cef::OverlayController) -> Option<SetClipRects> {
     let raw = ImplOverlayController::get_raw(controller);
     // SAFETY: `raw` is the live controller's own struct; `base.size` is the size libcef allocated.
-    let found = unsafe {
+    unsafe {
         if (*raw).base.size >= std::mem::size_of::<cef::sys::_cef_overlay_controller_t>() {
             (*raw).set_clip_rects
         } else {
             None
         }
-    };
-    static WARNED: AtomicBool = AtomicBool::new(false);
-    if found.is_none() && !WARNED.swap(true, Ordering::Relaxed) {
-        tracing::warn!("[pane-airspace] views: this libcef has no overlay clip; a pane under a menu is hidden whole");
     }
-    found
 }
 
 /// The clip each pane has now, by label. A pane with none has no entry.
@@ -183,6 +206,9 @@ pub(crate) fn apply(
 ) -> bool {
     let overlays = state.pane_overlay_rects.lock().get(window_label).cloned().unwrap_or_default();
     let set = if enabled() { clip_fn(controller) } else { None };
+    if enabled() {
+        note_runtime(set.is_some());
+    }
     let cut = match set {
         Some(_) => pane_cut(pane, &overlays, scale),
         None => whole_or_hidden(pane, &overlays),
@@ -216,7 +242,13 @@ pub(crate) fn refresh(
     });
     let window = state.windows.lock().get(window_label).cloned();
     let scale = crate::browser_pane::creation_views::views_scale(window.as_ref());
-    apply(state, label, window_label, controller, at, scale, pane.is_some())
+    let shown = apply(state, label, window_label, controller, at, scale, pane.is_some());
+    // A new pane in a window whose page may think panes are cut: say they are not, each time, since a
+    // page listens from when its first browser view mounts and that is before its pane is made.
+    if pane.is_some() && RUNTIME.load(Ordering::Relaxed) == MISSING {
+        crate::events::emit_event_to_window(state, window_label, UNAVAILABLE_EVENT, &serde_json::Value::Null);
+    }
+    shown
 }
 
 #[cfg(test)]
