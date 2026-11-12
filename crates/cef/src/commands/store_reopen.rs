@@ -24,8 +24,6 @@
 //! NOT run against a packaged install by whoever wrote it: the script text and its checks are unit-tested, the
 //! Windows calls are type-checked only.
 
-use std::time::Duration;
-
 /// The Scheduled Task's name.
 const TASK: &str = "AgentMux Store reopen";
 /// The application id in the package's manifest (`<Application Id="AgentMux">`).
@@ -74,13 +72,26 @@ fn encoded(script: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
+/// A system folder as Windows gives it (`GetSystemDirectory`): a drive path with nothing a script could read as code.
+fn valid_system_dir(dir: &str) -> bool {
+    let mut chars = dir.chars();
+    matches!((chars.next(), chars.next(), chars.next()), (Some(d), Some(':'), Some('\\')) if d.is_ascii_alphabetic())
+        && dir.len() <= 100
+        && dir.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '\\' | ' ' | '.' | '_' | '-'))
+}
+
+/// Windows PowerShell's path under the system folder.
+fn powershell_path(system_dir: &str) -> String {
+    format!("{}\\WindowsPowerShell\\v1.0\\powershell.exe", system_dir.trim_end_matches('\\'))
+}
+
 /// What registers the task and starts it now, run for a moment by AgentMux itself.
-fn register_script(family: &str, from: &str) -> String {
+fn register_script(family: &str, from: &str, system_dir: &str) -> String {
     let wait = encoded(&wait_script(family, from));
+    let ps = powershell_path(system_dir);
     format!(
         "$ErrorActionPreference = 'Stop'\n\
-         $ps = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'\n\
-         $act = New-ScheduledTaskAction -Execute $ps -Argument '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand {wait}'\n\
+         $act = New-ScheduledTaskAction -Execute '{ps}' -Argument '-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {wait}'\n\
          $who = [Security.Principal.WindowsIdentity]::GetCurrent().Name\n\
          $prin = New-ScheduledTaskPrincipal -UserId $who -LogonType Interactive -RunLevel Limited\n\
          $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes {LIMIT_MINUTES})\n\
@@ -89,16 +100,31 @@ fn register_script(family: &str, from: &str) -> String {
     )
 }
 
-/// The command line that registers and starts the task, for these two values; an error when either is not what
+/// The command line that registers and starts the task, for these three values; an error when any is not what
 /// Windows gives (nothing else reaches the script).
-pub fn registration(family: &str, from: &str) -> Result<String, String> {
+pub fn registration(family: &str, from: &str, system_dir: &str) -> Result<String, String> {
     if !valid_family(family) {
         return Err("the package's family name is not one Windows gives".into());
     }
     if !valid_version(from) {
         return Err("this build's version is not major.minor.build".into());
     }
-    Ok(encoded(&register_script(family, from)))
+    if !valid_system_dir(system_dir) {
+        return Err("the system folder is not one Windows gives".into());
+    }
+    Ok(encoded(&register_script(family, from, system_dir)))
+}
+
+/// The system folder, from Windows (`GetSystemDirectory`), not from an environment variable a process could set.
+#[cfg(target_os = "windows")]
+fn system_dir() -> Result<String, String> {
+    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
+    let mut buf = [0u16; 260];
+    let len = unsafe { GetSystemDirectoryW(buf.as_mut_ptr(), buf.len() as u32) } as usize;
+    if len == 0 || len >= buf.len() {
+        return Err("couldn't read the system folder".into());
+    }
+    Ok(String::from_utf16_lossy(&buf[..len]))
 }
 
 /// This package's family name, from Windows.
@@ -114,16 +140,15 @@ fn family_name() -> Result<String, String> {
 /// Register the reopen. Blocking (a PowerShell runs for a moment): call it off the async workers.
 #[cfg(target_os = "windows")]
 pub fn schedule(from: &str) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    use std::time::Instant;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    use agentmux_common::win32::NoWindow;
+    use std::time::{Duration, Instant};
     let family = super::store_update::on_winrt_thread("store-family", family_name)??;
-    let command = registration(&family, from)?;
-    let exe = std::path::Path::new(&std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
-        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let system = system_dir()?;
+    let command = registration(&family, from, &system)?;
+    let exe = powershell_path(&system);
     let mut child = std::process::Command::new(exe)
-        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", &command])
-        .creation_flags(CREATE_NO_WINDOW)
+        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &command])
+        .no_window()
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -155,6 +180,7 @@ mod tests {
     use super::*;
 
     const FAMILY: &str = "AgentMux.AgentMux_vqr1k32tkfk4y";
+    const SYSTEM: &str = r"C:\Windows\System32";
 
     fn decode(b64: &str) -> String {
         use base64::Engine;
@@ -169,11 +195,16 @@ mod tests {
         assert!(valid_version("0.60.24"));
         for bad in ["", "AgentMux", "AgentMux_short", "A'gent_vqr1k32tkfk4y", "Agent Mux_vqr1k32tkfk4y", "Agent;Mux_vqr1k32tkfk4y", "AgentMux_VQR1K32TKFK4Y", "AgentMux.AgentMux_vqr1k32tkfk4y'; calc; '"] {
             assert!(!valid_family(bad), "{bad}");
-            assert!(registration(bad, "0.60.24").is_err(), "{bad}");
+            assert!(registration(bad, "0.60.24", SYSTEM).is_err(), "{bad}");
         }
         for bad in ["", "0.60", "0.60.24.1", "0.60.x", "0.60.24'; calc; '", "0.60.-1"] {
             assert!(!valid_version(bad), "{bad}");
-            assert!(registration(FAMILY, bad).is_err(), "{bad}");
+            assert!(registration(FAMILY, bad, SYSTEM).is_err(), "{bad}");
+        }
+        assert!(valid_system_dir(SYSTEM));
+        for bad in ["", "System32", r"C:", r"\\server\share", r"C:\Windows'; calc; '", "C:\\Win$dows", "C:\\Windows\n", "C:\\`calc"] {
+            assert!(!valid_system_dir(bad), "{bad}");
+            assert!(registration(FAMILY, "0.60.24", bad).is_err(), "{bad}");
         }
     }
 
@@ -197,12 +228,14 @@ mod tests {
 
     #[test]
     fn the_registration_carries_the_wait_script_as_the_tasks_one_fixed_action() {
-        let command = registration(FAMILY, "0.60.24").unwrap();
+        let command = registration(FAMILY, "0.60.24", SYSTEM).unwrap();
         let register = decode(&command);
         assert!(register.contains("Register-ScheduledTask -TaskName 'AgentMux Store reopen'"), "{register}");
         assert!(register.contains("Start-ScheduledTask -TaskName 'AgentMux Store reopen'"), "{register}");
         assert!(register.contains("-LogonType Interactive -RunLevel Limited"), "the person's own session, no elevation: {register}");
         assert!(register.contains("New-TimeSpan -Minutes 15"), "{register}");
+        assert!(register.contains(r"-Execute 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'"), "the system folder comes from Windows: {register}");
+        assert!(!register.contains("SystemRoot") && !register.contains("ExecutionPolicy"), "no environment variable, no policy flag: {register}");
         let wait = register.split("-EncodedCommand ").nth(1).and_then(|r| r.split('\'').next()).unwrap();
         assert_eq!(decode(wait), wait_script(FAMILY, "0.60.24"));
     }

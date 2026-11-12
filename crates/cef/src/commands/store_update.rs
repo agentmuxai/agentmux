@@ -334,7 +334,6 @@ fn store_state(s: windows::Services::Store::StorePackageUpdateState) -> StoreSta
 }
 
 #[cfg(target_os = "windows")]
-#[cfg(target_os = "windows")]
 fn update_state(s: windows::Services::Store::StorePackageUpdateState) -> store_progress::UpdateState {
     use store_progress::UpdateState as U;
     use windows::Services::Store::StorePackageUpdateState as S;

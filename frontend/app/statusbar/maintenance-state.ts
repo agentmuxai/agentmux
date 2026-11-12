@@ -106,7 +106,7 @@ export function createMaintenance() {
     const { release, installFirst, storeBelowFloor } = view;
     const [startError, setStartError] = createSignal<string | null>(null);
     const check = createCheck();
-    const store = createStoreInstall(release, setStartError);
+    const store = createStoreInstall(setStartError);
 
     // Opens a folder, or shows a file in its folder; a failure is shown, like the other actions here.
     const reveal = async (path: string) => {

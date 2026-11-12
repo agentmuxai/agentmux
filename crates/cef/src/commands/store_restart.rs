@@ -149,7 +149,7 @@ pub fn restart_now(state: &std::sync::Arc<crate::state::AppState>) -> Restart {
     }
     if let Err(why) = super::store_reopen::schedule(current()) {
         tracing::warn!(error = %why, "[store-restart] could not arrange the reopen; nothing was closed");
-        return refuse(format!("Couldn't arrange for AgentMux to open again ({why}). Nothing was closed; close AgentMux yourself to finish the update."));
+        return refuse(format!("Couldn't arrange for AgentMux to open again ({why}). Nothing was closed. Quit AgentMux and open it again to finish the update."));
     }
     tracing::info!("[store-restart] reopen arranged; quitting for the Store's swap");
     match super::window::quit_app(state) {

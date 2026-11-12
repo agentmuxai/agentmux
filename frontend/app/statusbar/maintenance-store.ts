@@ -23,9 +23,9 @@ export const MS_STORE_PAGE_URL = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3
 
 /**
  * What the Store said about an update asked of it, whether it is working on one, and the Restart now that follows a
- * staged one. `release` is the update on offer; `setStartError` shows a failure in the row.
+ * staged one. `setStartError` shows a failure in the row.
  */
-export function createStoreInstall(release: () => { version: string } | null, setStartError: (e: string | null) => void) {
+export function createStoreInstall(setStartError: (e: string | null) => void) {
     const [storeNote, setStoreNote] = createSignal<string | null>(null);
     const [storeBusy, setStoreBusy] = createSignal(false);
     // Restart now after a staged update: whether the row is asking "are you sure", and whether it has started.
@@ -47,7 +47,8 @@ export function createStoreInstall(release: () => { version: string } | null, se
         const stopListening = await getApi()?.listen?.("store-update-progress", acceptStoreProgress).catch(() => undefined);
         try {
             setStoreStayed(null);
-            const version = release()?.version || storeTargetVersion();
+            // For a Store install the offered release is the Store's own offer, the same source as the progress line.
+            const version = storeTargetVersion();
             const result = await getApi()?.approvals?.storeUpdate?.(version).catch(() => undefined);
             if (result?.outcome === "none") recordStoreNone();
             if (result?.outcome === "staged") {
