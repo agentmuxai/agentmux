@@ -43,6 +43,11 @@ fn a_single_expiry_field_takes_the_shape_it_asks_for() {
     // A field's length decides before a pattern: four characters never get a four-digit year.
     assert_eq!(expiry(Some(4), "", r"[0-9]{4}"), "0327");
     assert_eq!(expiry(Some(5), "MM/YYYY", ""), "03/27");
+    // A pattern alone: a bare four digits is MMYY, six is MMYYYY, a separator before four is MM/YYYY.
+    assert_eq!(expiry(None, "", r"\d{4}"), "0327");
+    assert_eq!(expiry(None, "", "[0-9]{4}"), "0327");
+    assert_eq!(expiry(None, "", r"\d{6}"), "032027");
+    assert_eq!(expiry(None, "", r"\d{2}/\d{4}"), "03/2027");
     assert_eq!(expiry(None, "MMYY", ""), "0327");
     assert_eq!(expiry(None, "MM-YY", ""), "03-27");
     assert_eq!(expiry(None, "MM YY", ""), "03 27");
@@ -83,6 +88,11 @@ fn the_number_is_digits_unless_the_field_has_room_for_the_groups() {
     assert_eq!(text(shape(&roomy, &visa())), "4111 1111 1111 1111");
     let tight = FormField { slot: "card-number".into(), max_length: Some(16), placeholder: "1234 5678 9012 3456".into(), ..Default::default() };
     assert_eq!(text(shape(&tight, &visa())), "4111111111111111");
+    // Words in a placeholder are not digit groups, and a digits-only pattern takes no spaces.
+    let words = FormField { slot: "card-number".into(), max_length: Some(19), placeholder: "Card number".into(), ..Default::default() };
+    assert_eq!(text(shape(&words, &visa())), "4111111111111111");
+    let digits_only = FormField { slot: "card-number".into(), max_length: Some(19), placeholder: "1234 5678 9012 3456".into(), pattern: "[0-9]*".into(), ..Default::default() };
+    assert_eq!(text(shape(&digits_only, &visa())), "4111111111111111");
     let short = FormField { slot: "card-number".into(), max_length: Some(12), ..Default::default() };
     assert!(left_why(shape(&short, &visa())).starts_with("this field takes 12 characters"));
 }

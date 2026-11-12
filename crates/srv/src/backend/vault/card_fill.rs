@@ -97,12 +97,28 @@ fn number(field: &FormField, parts: &Parts) -> Shaped {
         return left("number");
     };
     let grouped = card::group(&digits);
-    // A field that has room for the spaces and shows them in its placeholder is given them.
-    let roomy = field.max_length.is_some_and(|m| m >= grouped.chars().count()) && field.placeholder.contains(' ');
+    // A field that has room for the spaces and shows them in its placeholder (digit groups like
+    // "1234 5678 9012 3456", not words like "Card number") is given them, unless its pattern is digits only.
+    let groups = field.placeholder.split(' ').filter(|g| !g.is_empty() && g.chars().all(|c| c.is_ascii_digit() || matches!(c, '•' | '*' | 'x' | 'X' | '#'))).count();
+    let spaces_allowed = field.pattern.is_empty() || field.pattern.contains(' ') || field.pattern.contains("\\s");
+    let roomy = field.max_length.is_some_and(|m| m >= grouped.chars().count()) && groups >= 2 && spaces_allowed;
     let text = if roomy { grouped } else { digits };
     match field.max_length {
         Some(m) if text.chars().count() > m => Shaped::Left(format!("this field takes {m} characters and the card's number has {}", text.chars().count())),
         _ => shaped(text),
+    }
+}
+
+/// The year and separator a field's `pattern` asks for, as (long year, no separator), when nothing else says: `\d{2}/\d{4}` is `MM/YYYY`, a bare
+/// `\d{4}` is `MMYY` and a bare `\d{6}` is `MMYYYY`; anything else is the default `MM/YY`.
+fn by_pattern(pattern: &str) -> (bool, bool) {
+    let separated = pattern.contains('/') || pattern.contains("\\-") || pattern.contains(' ');
+    let four = pattern.contains("{4}") && !pattern.contains("{2}{4}") && !pattern.contains(")?");
+    match (four, pattern.contains("{6}"), separated) {
+        (true, _, true) => (true, false),
+        (true, _, false) => (false, true),
+        (false, true, false) => (true, true),
+        _ => (false, false),
     }
 }
 
@@ -121,10 +137,8 @@ fn expiry_text(field: &FormField, month: u32, year: i32) -> String {
         Some(5) => (false, false),
         Some(6) => (true, true),
         Some(7) => (true, false),
-        _ => (
-            placeholder.contains("YYYY") || (pattern.contains("{4}") && !pattern.contains("{2}{4}") && !pattern.contains(")?")),
-            between.is_some() && separator.is_none(),
-        ),
+        _ if between.is_some() || placeholder.contains("YYYY") => (placeholder.contains("YYYY"), between.is_some() && separator.is_none()),
+        _ => by_pattern(pattern),
     };
     let y = if long { format!("{year:04}") } else { format!("{:02}", year % 100) };
     let m = card::month_text(month);

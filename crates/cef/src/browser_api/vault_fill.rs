@@ -70,10 +70,9 @@ pub struct FieldInfo {
     pub slots: Vec<&'static str>,
     /// A password or one-time-code field: never filled from the Vault.
     pub password_like: bool,
-    /// Whether it takes typed text, or is a `<select>` a card's month or year can be chosen in.
+    /// Whether it takes typed text at all. A `<select>` is chosen in by a whole-card fill, which
+    /// finds it through `card_form`, never by a single-field fill.
     pub fillable: bool,
-    /// A `<select>`: it is chosen in, not typed in.
-    pub select: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -179,8 +178,7 @@ pub async fn field_info_route(
                 fingerprint: fingerprint(&l.facts),
                 slots: vault_slots::slots(&l.facts),
                 password_like: vault_slots::password_like(&l.facts),
-                fillable: takes_text(&l.facts) || is_select(&l.facts),
-                select: is_select(&l.facts),
+                fillable: takes_text(&l.facts),
             })),
         ),
         Err(e) => fail(e),
