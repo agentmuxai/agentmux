@@ -3,7 +3,7 @@
 
 import { createSignal, onCleanup, onMount, type Accessor, type JSX, type Setter } from "solid-js";
 import { getApi } from "@/util/app-api";
-import { isViewsPanesOnWindows } from "@/app/platform/pane-backend";
+import { hidesPaneUnderOverlay } from "@/app/platform/pane-backend";
 import type { BrowserViewModel } from "./browser-model";
 import type { PaneRect } from "./use-pane-rect-sync";
 
@@ -14,28 +14,20 @@ export interface FreezeFrame {
     onOverlayClipChanged: (e: Event) => void;
 }
 
-// ── Freeze-frame while airspace-hidden (macOS/Linux only) ──────────
+// ── Freeze-frame while airspace-hidden ─────────────────────────────
 //
-// When a DOM overlay (AgentMux logo menu, modal, …) intersects this pane, the
-// host hides the ENTIRE native pane surface — there is no SetWindowRgn-style
-// hole punch off Windows — which exposes the bare placeholder and reads as
-// the pane "going black". Instead, capture the pane's last rendered frame
-// (CDP `Page.captureScreenshot` via the browser DOM API; the compositor
-// keeps producing frames even while the overlay NSWindow is ordered out,
-// verified empirically) and display it in the placeholder until the overlay
-// clears. The frame is static — acceptable for menu-open-scale durations.
+// Only for a pane the host hides whole while a DOM overlay (AgentMux logo menu,
+// modal, …) is over it (`hidesPaneUnderOverlay`: a Views pane on Linux or
+// Windows with the host's clip turned off). Hiding it exposes the bare
+// placeholder and reads as the pane "going black". Instead, capture the pane's
+// last rendered frame (CDP `Page.captureScreenshot` via the browser DOM API;
+// the compositor keeps producing frames while the pane is hidden, verified
+// empirically) and display it in the placeholder until the overlay clears. The
+// frame is static, which is acceptable for menu-open-scale durations.
 //
-// Linux, and Windows in Views pane mode (`paneBackend` "views",
-// AGENTMUX_PANE_BACKEND=views): those panes are hidden whole. Windows
-// child-window panes get a SetWindowRgn hole (the pane never hides, so there is
-// nothing to freeze over), and macOS punches a CALayer hole mask
-// (ui_tasks/pane_hole_mask.rs): the pane stays live there, so freezing would
-// be harmful (it forces a compositor frame, visible as a jerk, and defers the
-// clip IPC).
-function hidesWholePane(): boolean {
-    const ua = navigator.userAgent;
-    return (ua.includes("Linux") && !ua.includes("Windows")) || isViewsPanesOnWindows();
-}
+// Everywhere else the host cuts a hole in the pane and the pane stays live, so
+// freezing would be harmful: it forces a compositor frame, visible as a jerk,
+// and defers the clip IPC.
 
 // Offsets from the placeholder's edges, not a fixed size: the frame then
 // follows the placeholder while a splitter is dragged, stretched in step with
@@ -130,9 +122,9 @@ function captureFreezeFrame(f: FreezeState): Promise<void> {
     return p;
 }
 
-// Which panes hide whole under a menu, and so need this: `hidesWholePane`.
+// Which panes hide whole under a menu, and so need this: `hidesPaneUnderOverlay`.
 function freezeGatesOpen(f: FreezeState): boolean {
-    return hidesWholePane() && !!f.params.placeholderRef() && f.params.paneCreated() && !f.params.model.closed;
+    return hidesPaneUnderOverlay() && !!f.params.placeholderRef() && f.params.paneCreated() && !f.params.model.closed;
 }
 
 // Pre-warm: fired on pointer-down of menu anchors (see MenuTrigger and FlyoutMenu),

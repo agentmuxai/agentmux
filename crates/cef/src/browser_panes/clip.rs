@@ -5,8 +5,9 @@
 //! `BrowserPaneManager`: `focus`, `defocus_all`, the Windows `SetWindowRgn`
 //! clip workaround and its Linux/macOS Views-based equivalent
 //! (`set_pane_overlay_clip`), plus their shared helpers (`clip_sig_whole`,
-//! `clip_sig_clipped`, `rects_intersect`, `compute_pane_visible`). Split out
-//! of `browser_panes/mod.rs` — see that module's doc comment.
+//! `clip_sig_clipped`, `rects_intersect`). Split out of `browser_panes/mod.rs`
+//! — see that module's doc comment. What a Views pane shows under an overlay
+//! on Windows and Linux is `views_clip`.
 
 use std::sync::Arc;
 
@@ -499,9 +500,9 @@ fn clip_sig_clipped(
 }
 
 /// Two axis-aligned rects intersect iff neither is fully to one side of the
-/// other. Coordinates: (x, y, width, height). Used by the Linux/macOS
-/// pane-airspace logic to decide whether an overlay rect from the frontend
-/// covers any part of a pane's bounds.
+/// other. Coordinates: (x, y, width, height). Used by the macOS hole mask to
+/// pick the overlay rects that cover part of a pane.
+#[cfg(target_os = "macos")]
 fn rects_intersect(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
     let (ax, ay, aw, ah) = a;
     let (bx, by, bw, bh) = b;
@@ -512,47 +513,11 @@ fn rects_intersect(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
     !(a_right <= bx || b_right <= ax || a_bottom <= by || b_bottom <= ay)
 }
 
-/// Compute whether a pane with the given bounds should be visible, given
-/// the pane's parent window. Both pane-airspace (`SetPaneOverlayClipViewsTask`)
-/// and per-pane resize (`resize_browser_pane_view`) call this to converge on
-/// the same answer — without it, the two paths fight each other (Codex
-/// review on PR #881 caught the dragging-splitter-while-modal-open case
-/// where a positive resize re-exposed a pane that airspace had hidden).
-///
-/// A pane is visible iff BOTH conditions hold:
-/// - Its rect has non-zero width and height (frontend places it in a
-///   `display:none` placeholder when the tab is inactive → reports 0×0).
-/// - It does not intersect any registered overlay-clip rect for its window
-///   (e.g. the AgentMux logo menu, a tooltip, modal popover).
-// Linux-only since the macOS hole-punch mask (ui_tasks/pane_hole_mask.rs):
-// macOS paths use rect-only visibility and mask overlays instead of hiding.
-//
-// `pub(crate)`, not private: called from `browser_pane::creation_views`
-// (`resize_browser_pane_view`) via `crate::browser_panes::compute_pane_visible`
-// — re-exported from `browser_panes::mod` so that external path still resolves.
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn compute_pane_visible(
-    state: &Arc<AppState>,
-    window_label: &str,
-    pane_rect: (i32, i32, i32, i32),
-) -> bool {
-    let (_, _, w, h) = pane_rect;
-    if w <= 0 || h <= 0 {
-        return false;
-    }
-    let rects = state.pane_overlay_rects.lock();
-    let overlays = match rects.get(window_label) {
-        Some(v) => v.clone(),
-        None => return true,
-    };
-    drop(rects);
-    !overlays.iter().any(|or| rects_intersect(*or, pane_rect))
-}
-
 // Views pane-airspace task (Linux, macOS, and Windows in Views pane mode) —
-// fired by `set_pane_overlay_clip_views`. For each live OverlayController, hide
-// it when any overlay rect intersects its current bounds; show it otherwise.
-// It is the equivalent of the Windows SetWindowRgn airspace dance for HWND panes.
+// fired by `set_pane_overlay_clip_views`. For each live OverlayController of the
+// window, cut the overlay rects out of it (`views_clip` on Windows and Linux, the
+// hole mask on macOS). It is the equivalent of the Windows SetWindowRgn airspace
+// dance for HWND panes.
 wrap_task! {
     pub struct SetPaneOverlayClipViewsTask {
         state: Arc<AppState>,
@@ -581,6 +546,7 @@ wrap_task! {
                 return;
             }
             for (label, controller) in live {
+                #[cfg(target_os = "macos")]
                 use cef::ImplOverlayController;
                 // On macOS, `controller.bounds()` cannot be trusted here — CEF
                 // Views' own set_size/set_position are permanent no-ops on
@@ -670,32 +636,15 @@ wrap_task! {
                 }
                 #[cfg(not(target_os = "macos"))]
                 {
-                    // The frontend's last rect, not `bounds()`: an inactive
-                    // stack tab is 0×0 there but full-size in `bounds()` (see
-                    // `AppState::browser_pane_physical_rects`).
-                    let pane_rect = self
-                        .state
-                        .browser_pane_physical_rects
-                        .lock()
-                        .get(&label)
-                        .copied()
-                        .unwrap_or_else(|| {
-                            let pb = controller.bounds();
-                            (pb.x, pb.y, pb.width, pb.height)
-                        });
-                    // Shared visibility helper consults BOTH the pane's own rect
-                    // (zero → hidden because tab inactive) and the latest
-                    // overlay-clip rects published in AppState. Resize path uses
-                    // the same helper so both decisions converge.
-                    let visible = compute_pane_visible(&self.state, &self.window_label, pane_rect);
-                    controller.set_visible(if visible { 1 } else { 0 });
+                    // The same cut as the resize path makes (`resize_browser_pane_view`), from
+                    // the overlay rects just published in AppState, so the two agree.
+                    let visible = super::views_clip::refresh(&self.state, &label, &self.window_label, &controller, None);
                     tracing::debug!(
                         label = %label,
                         window_label = %self.window_label,
                         visible,
-                        pane_x = pane_rect.0, pane_y = pane_rect.1, pane_w = pane_rect.2, pane_h = pane_rect.3,
                         overlay_count = self.overlay_rects.len(),
-                        "[pane-airspace] views: applied visibility"
+                        "[pane-airspace] views: applied the cut"
                     );
                 }
             }
