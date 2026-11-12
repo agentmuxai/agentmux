@@ -188,7 +188,7 @@
                 place-items: center;
                 overflow: hidden;
                 background: var(--error-color);
-                color: #fff;
+                color: var(--button-color);
                 font-weight: 800;
                 font-size: clamp(12px, min(14cqw, 50cqh), 160px);
                 line-height: 1;
