@@ -94,6 +94,19 @@ export function setMinimizeMerger(merger: MinimizeMerger | undefined): void {
 }
 
 /**
+ * The header's "Merge into next pane": the pane's tabs go into its neighbour and the emptied pane is
+ * removed (layoutMinimizeMergeApply.ts). Never a chip: with no target it does nothing and returns
+ * false, where `minimizeNodeToggle` without `chip` falls back to the chip. A maximized pane that
+ * merges ends its maximize. `canMergeIntoNeighbour` (layoutNodeModels.ts) is the same finder, so a
+ * disabled button and a refused click cannot disagree.
+ */
+export function mergeNodeIntoNeighbour(model: LayoutModel, nodeId: string): boolean {
+    const node = findNode(model.treeState.rootNode, nodeId);
+    if (!node || node.children?.length) return false;
+    return minimizeMerger?.(model, nodeId) ?? false;
+}
+
+/**
  * Toggle minimize for a leaf node: the `minimize` / `restore` layout intent
  * (layoutTree.ts `minimizeNode`, computed again by srv). No sizes are read or
  * written.
@@ -130,7 +143,7 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string, opts?: { 
     // position" (maximize is a layer over the tree), with focus left where
     // minimizing a tiled pane leaves it.
     // Next to a minimized pane of its split, the person's minimize merges the tabs into it instead.
-    // `chip`: the person asked for today's header chip (Shift on the button, "Minimize to header").
+    // `chip`: the person asked for the header chip ("Minimize to header": the header's bottom button, the pane menu, the palette).
     if (!opts?.chip && minimizeMerger?.(model, nodeId)) return;
     commitToggle(model, LayoutTreeActionType.Minimize, nodeId);
 }

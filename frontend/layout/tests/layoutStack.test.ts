@@ -1848,6 +1848,30 @@ describe("minimizing next to a minimized pane (merge)", () => {
         expect(leaves(model)).toHaveLength(3);
     });
 
+    it("mergeNodeIntoNeighbour (the header's Merge button) moves every tab, keeps the target's active tab and makes no chip", () => {
+        const model = fourPanes();
+
+        expect(model.mergeNodeIntoNeighbour(idOf(model, "b1"))).toBe(true);
+
+        const target = getNodeByBlockId(model, "c1")!;
+        expect(effectiveStack(target.data!)).toEqual(["c1", "b1", "b2"]);
+        expect(target.data!.activeBlockId).toBe("c1");
+        expect(leaves(model).some((n) => n.minimized)).toBe(false);
+        expect(leaves(model)).toHaveLength(3);
+    });
+
+    it("mergeNodeIntoNeighbour with no neighbour returns false and touches nothing, where a plain minimize would make a chip", () => {
+        const model = createLayoutModel();
+        const only = insertRootBlock(model, "a1");
+        pushBlockOntoStack(model, only, "a2");
+        model.updateTree();
+
+        expect(model.mergeNodeIntoNeighbour(idOf(model, "a1"))).toBe(false);
+        expect(effectiveStack(getNodeByBlockId(model, "a1")!.data!)).toEqual(["a1", "a2"]);
+        expect(getNodeByBlockId(model, "a1")!.minimized).toBeFalsy();
+        expect(paneCommands()).toHaveLength(0);
+    });
+
     it("the last pane of a split merges into the expanded pane before it", () => {
         const model = fourPanes();
 

@@ -78,6 +78,7 @@ import {
 } from "./layoutMagnify";
 import {
     minimizeNodeToggle as minimizeNodeToggleImpl,
+    mergeNodeIntoNeighbour as mergeNodeIntoNeighbourImpl,
     collapseMaximizedNode as collapseMaximizedNodeImpl,
     restoreMaximizedNode as restoreMaximizedNodeImpl,
     rebuildMinimizedSet as rebuildMinimizedSetImpl,
@@ -953,6 +954,11 @@ export class LayoutModel {
 
     minimizeNodeToggle(nodeId: string, opts?: { chip?: boolean }) {
         minimizeNodeToggleImpl(this, nodeId, opts);
+    }
+
+    /** The header's "Merge into next pane": true when the pane's tabs were moved, false (nothing touched) when there is no target. */
+    mergeNodeIntoNeighbour(nodeId: string): boolean {
+        return mergeNodeIntoNeighbourImpl(this, nodeId);
     }
 
     rebuildMinimizedSet() {

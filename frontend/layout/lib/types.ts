@@ -480,8 +480,12 @@ export interface NodeModel {
     ready: Accessor<boolean>;
     disablePointerEvents: Accessor<boolean>;
     toggleMagnify: () => void;
-    /** `chip`: keep today's header chip instead of merging into a neighbour (Shift on the button). */
+    /** `chip`: keep the pane as a header chip ("Minimize to header"); without it a pane next to a target merges instead. The header's buttons are explicit: Minimize passes `chip`, Merge is `mergeIntoNeighbour`. A chip's Restore passes nothing. */
     toggleMinimize: (opts?: { chip?: boolean }) => void;
+    /** "Merge into next pane": moves the pane's tabs into its neighbour. False, touching nothing, when `canMergeIntoNeighbour` is false. Never makes a chip. */
+    mergeIntoNeighbour: () => boolean;
+    /** Whether the pane has a neighbour to merge into (a minimized one first, else the nearest expanded one in its split). */
+    canMergeIntoNeighbour: Accessor<boolean>;
     focusNode: () => void;
     onClose: () => void;
     // DOM refs in SolidJS are plain { current: T | null } objects
