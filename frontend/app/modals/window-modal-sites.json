@@ -27,9 +27,6 @@
   "statusbar/ConfigStatus.tsx": {
     "open-modal": 1
   },
-  "statusbar/TokenBreakdownPopover.tsx": {
-    "default-scope": 1
-  },
   "store/open-command-palette.ts": {
     "open-modal": 1
   },
