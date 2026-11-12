@@ -251,6 +251,25 @@ fn keep_one_default(store: &Store, kind: &str, vault_id: &str, id: &str, fields:
     }
 }
 
+/// A card whose sealed value was swapped for another (a restored version, a rotated number) gets its
+/// brand and expiry date worked out again from the parts it holds now. The parts themselves are not rewritten.
+pub(crate) fn resettle_card(store: &Store, id: &str) -> Result<(), String> {
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    if row.kind != card::KIND {
+        return Ok(());
+    }
+    let key = seal::key(false)?;
+    let mut parts = seal::open(&key, &row.id, &row.sealed)?;
+    let before: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    let mut fields = before.clone();
+    card::settle(card::KIND, &mut fields, &mut parts)?;
+    if fields != before {
+        let json = serde_json::to_string(&fields).map_err(|e| e.to_string())?;
+        store.vault_set_fields(&row.id, &json).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// A part as a fill or a command asks for it: a card's older `expiry` is read from its month and year when it has no such part.
 fn part_of(kind: &str, parts: &Parts, part: &str) -> Option<String> {
     if kind == card::KIND {

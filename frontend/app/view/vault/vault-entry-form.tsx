@@ -358,6 +358,8 @@ function CardCodeRow({ s, p }: { s: FormState; p: VaultInput }) {
 }
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
+/** The parts an expiry is kept in: the month, the year, and the older single one. */
+const EXPIRY_PARTS = ["exp_month", "exp_year", "expiry"];
 
 /** A month and a year to choose from. A saved card shows its own, read from the plain expiry date. */
 function CardExpiryRow({ s }: { s: FormState }) {
@@ -372,21 +374,35 @@ function CardExpiryRow({ s }: { s: FormState }) {
         s.setParts("exp_month", m);
         s.setParts("exp_year", y);
     };
+    // A saved expiry can be taken off: both parts and the older single one go, and with them the reminders.
+    const cleared = () => !!s.clear.exp_month;
+    const toggleClear = () => {
+        const on = !cleared();
+        for (const name of EXPIRY_PARTS) s.setClear(name, on);
+        if (on) choose("", "");
+    };
     return (
-        <Field label="Expiry" layout="stacked">
+        <Field label="Expiry" layout="stacked" hint={cleared() ? "Will be cleared." : undefined}>
             <div class="vault-part vault-card-expiry">
                 <Select
                     ariaLabel="Expiry month"
-                    value={month()}
+                    value={cleared() ? "" : month()}
+                    disabled={cleared()}
                     onChange={(m) => choose(m, year())}
                     options={[{ value: "", label: "Month" }, ...MONTHS.map((m) => ({ value: m, label: m }))]}
                 />
                 <Select
                     ariaLabel="Expiry year"
-                    value={year()}
+                    value={cleared() ? "" : year()}
+                    disabled={cleared()}
                     onChange={(y) => choose(month(), y)}
                     options={[{ value: "", label: "Year" }, ...years().map((y) => ({ value: y, label: y }))]}
                 />
+                <Show when={s.editing && EXPIRY_PARTS.some((name) => s.isSet(name))}>
+                    <Button density="compact" tone="quiet" pressed={cleared()} onClick={toggleClear}>
+                        Clear
+                    </Button>
+                </Show>
             </div>
         </Field>
     );

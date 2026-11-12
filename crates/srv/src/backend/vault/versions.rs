@@ -135,6 +135,9 @@ pub fn restore(store: &Store, id: &str, seq: i64) -> Result<(), String> {
     if !store.vault_version_swap(&row.id, chosen.seq, &current, now, kept_since).map_err(|e| e.to_string())? {
         return Err(format!("{} changed while restoring: nothing was changed", row.label));
     }
+    if let Err(e) = super::resettle_card(store, &row.id) {
+        tracing::warn!(entry = %row.id, error = %e, "vault: a restored card's brand and expiry date could not be worked out again");
+    }
     let when = chrono::DateTime::from_timestamp_millis(chosen.replaced_at)
         .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default();
@@ -198,6 +201,9 @@ pub fn finish_rotation(store: &Store, id: &str, r: &Rotation, outcome: Result<()
     if !store.vault_version_swap(&row.id, r.seq, &previous, now, now - KEEP_MS).map_err(|e| e.to_string())? {
         let _ = store.vault_version_mark(r.seq, OVERTAKEN);
         return Err(changed());
+    }
+    if let Err(e) = super::resettle_card(store, &row.id) {
+        tracing::warn!(entry = %row.id, error = %e, "vault: a rotated card's brand and expiry date could not be worked out again");
     }
     Ok(())
 }

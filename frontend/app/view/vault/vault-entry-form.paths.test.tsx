@@ -666,8 +666,9 @@ describe("saving a change", () => {
         type(field("Label"), "Visa 2");
         type(field("Card number"), "4222");
         type(field("Whose"), "Alexa");
+        // The expiry row's Clear comes first, then the security code's.
         const clears = screen.getAllByRole("button", { name: "Clear" });
-        fireEvent.click(clears[0]);
+        fireEvent.click(clears[1]);
         fireEvent.click(btn("Save changes"));
         await waitFor(() => expect(onClose).toHaveBeenCalledWith("e1"));
         expect(h.updateEntry).toHaveBeenCalledTimes(1);
@@ -947,6 +948,38 @@ describe("the card form", () => {
     it("offers a year that has already gone by when the saved card has one", () => {
         mountEdit({ kind: "card", section: "cards", parts_set: ["number"], fields: { expires: "2019-02-28" } });
         expect(selectOf("Expiry year").value).toBe("2019");
+    });
+
+    it("takes a saved expiry off with Clear: both parts and the older one are cleared, and nothing is sent for them", async () => {
+        mountEdit({
+            kind: "card",
+            section: "cards",
+            parts_set: ["number", "exp_month", "exp_year"],
+            fields: { expires: "2031-07-31" },
+        });
+        const clear = btn("Clear");
+        fireEvent.click(clear);
+        expect(clear.getAttribute("aria-pressed")).toBe("true");
+        expect(selectOf("Expiry month").disabled).toBe(true);
+        expect(selectOf("Expiry year").disabled).toBe(true);
+        expect(selectOf("Expiry month").value).toBe("");
+        fireEvent.click(btn("Save changes"));
+        await waitFor(() => expect(h.updateEntry).toHaveBeenCalled());
+        const sent = h.updateEntry.mock.calls[0][0];
+        expect(sent.clear).toEqual(["exp_month", "exp_year", "expiry"]);
+        expect(sent.parts).toEqual({});
+    });
+
+    it("offers no Clear on an expiry that isn't saved, and lets Clear be undone", () => {
+        mountNew("cards");
+        expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+        cleanup();
+        mountEdit({ kind: "card", section: "cards", parts_set: ["expiry"], fields: {} });
+        const clear = btn("Clear");
+        fireEvent.click(clear);
+        fireEvent.click(clear);
+        expect(clear.getAttribute("aria-pressed")).toBe("false");
+        expect(selectOf("Expiry month").disabled).toBe(false);
     });
 
     it("marks the default card with a switch that saves yes or nothing", async () => {
