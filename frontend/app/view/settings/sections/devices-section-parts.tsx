@@ -15,9 +15,9 @@ function DeviceRow(props: { s: DevicesState; device: ViewerDeviceInfo }): JSX.El
     return (
         <tr>
             <td class="setting-devices-name">{device.device_name}</td>
-            <td>{ago(device.created_ms, s.now())}</td>
-            <td>{device.last_seen_ms > 0 ? ago(device.last_seen_ms, s.now()) : "never"}</td>
-            <td>
+            <td data-label="Paired">{ago(device.created_ms, s.now())}</td>
+            <td data-label="Last seen">{device.last_seen_ms > 0 ? ago(device.last_seen_ms, s.now()) : "never"}</td>
+            <td data-label="Can send">
                 <Show
                     when={device.has_key}
                     fallback={

@@ -92,10 +92,13 @@
 
 .browser-profile-add {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-2);
     align-items: center;
 
     .ui-input {
+        flex: 1 1 140px;
+        min-width: 0;
         max-width: 220px;
     }
 }
