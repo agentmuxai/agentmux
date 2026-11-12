@@ -114,7 +114,6 @@ function namedDetails(name: string, summary: QuitSummary): string[] {
 
 /** Shut down every target at once, counting them in the toast as each finishes, then say how it went. */
 async function shutDown(all: ParkedAgent[], targets: Target[], left: string[]): Promise<void> {
-    const names = targets.map((t) => t.name);
     let finished = 0;
     working(all, targets, 0);
     const outcomes = await Promise.all(
@@ -131,7 +130,15 @@ async function shutDown(all: ParkedAgent[], targets: Target[], left: string[]): 
         })
     );
     const failed = outcomes.filter((o) => "error" in o);
-    const ok = outcomes.filter((o) => "summary" in o);
+    const answered = outcomes.filter((o) => "summary" in o);
+    // A shutdown another request already began has not finished, and may still fail: it is not a result of this one.
+    const underWay = answered.filter((o) => o.summary?.status === "already_quitting");
+    const ok = answered.filter((o) => o.summary?.status !== "already_quitting");
+    const underWayNote = underWay.length ? [`${underWay.map((o) => o.target.name).join(", ")} ${underWay.length === 1 ? "is" : "are"} already being shut down by another request.`] : [];
+    if (failed.length === 0 && ok.length === 0) {
+        show(all, { icon: "fa-power-off", title: "Already shutting down", message: [...underWayNote, ...left].join(" "), type: "info", expiration: Date.now() + RESULT_MS });
+        return;
+    }
     if (failed.length === 0) {
         const crons = ok.some((o) => (o.summary?.crons_targeting?.length ?? 0) > 0);
         // What each quit left behind (processes, containers, crons) is said for the agent it belongs to.
@@ -141,8 +148,8 @@ async function shutDown(all: ParkedAgent[], targets: Target[], left: string[]): 
                 : ["Conversations kept — reopen an agent to resume them.", ...ok.flatMap((o) => (o.summary ? namedDetails(o.target.name, o.summary) : []))].join(" ");
         show(all, {
             icon: "fa-power-off",
-            title: shutDownTitle(names),
-            message: [detail, ...left].join(" "),
+            title: shutDownTitle(ok.map((o) => o.target.name)),
+            message: [detail, ...underWayNote, ...left].join(" "),
             type: "info",
             expiration: Date.now() + (crons ? RESULT_WITH_CRONS_MS : RESULT_MS),
         });
@@ -154,7 +161,7 @@ async function shutDown(all: ParkedAgent[], targets: Target[], left: string[]): 
     show(all, {
         icon: "fa-triangle-exclamation",
         title: notShutDownTitle(retry.map((t) => t.name), targets.length),
-        message: [...failed.map((o) => sentence(why(o))), ...(ok.length ? [`${ok.map((o) => o.target.name).join(", ")} ${ok.length === 1 ? "was" : "were"} shut down.`] : []), ...left].join(" "),
+        message: [...failed.map((o) => sentence(why(o))), ...(ok.length ? [`${ok.map((o) => o.target.name).join(", ")} ${ok.length === 1 ? "was" : "were"} shut down.`] : []), ...underWayNote, ...left].join(" "),
         type: "error",
         actions: [button(all, "retry", "Retry", () => void recheck(all, retry, left, ask))],
         debug: { blockId: first.target.blockId, agentName: first.target.name, code: "agent-shutdown", detail: { stopBackground: false, ...errorDetail(first.error) } },

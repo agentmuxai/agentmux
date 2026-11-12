@@ -270,4 +270,25 @@ describe("the keeps-running toast", () => {
         expect(done.message).toContain("Ann: node (pid 7) still running.");
         expect(done.message).not.toContain("Bob:");
     });
+
+    it("does not call a shutdown that another request already began a finished one", async () => {
+        parkedRow("q", "Quen");
+        h.shutdownAgent.mockResolvedValue(quit("Quen", { status: "already_quitting" }));
+        noteKeepsRunning([agent("q", "Quen")]);
+        await click("keeps-running:q", "Shutdown");
+        const face = h.shown.get("keeps-running:q");
+        expect(face.title).toBe("Already shutting down");
+        expect(face.message).toContain("Quen is already being shut down by another request.");
+
+        h.rows.length = 0;
+        h.pushed.length = 0;
+        parkedRow("a", "Ann");
+        parkedRow("b", "Bob");
+        h.shutdownAgent.mockImplementation(async (blockId: string) => (blockId === "b-a" ? quit("Ann") : quit("Bob", { status: "already_quitting" })));
+        noteKeepsRunning([agent("a", "Ann"), agent("b", "Bob")]);
+        await click("keeps-running:a,b", "Shutdown");
+        const mixed = h.shown.get("keeps-running:a,b");
+        expect(mixed.title).toBe("Ann was shut down");
+        expect(mixed.message).toContain("Bob is already being shut down by another request.");
+    });
 });
