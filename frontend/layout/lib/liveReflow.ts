@@ -93,6 +93,12 @@ export interface LiveReflow {
      * dimmed around it, for that moment.
      */
     liveReflowExpected: () => boolean;
+    /**
+     * The dragged pane's landing rect once every tile stands in the drop being shown: the glide to it is over,
+     * and each tile is laid out at its own size there. None before that, and none with no drop shown. A new
+     * object each time the panes come to rest, so it also says when they did.
+     */
+    landingSettled: () => Dimensions | undefined;
 }
 
 /** The block a pane shows: its active tab's, or its own. */
@@ -232,6 +238,28 @@ export function onNextFrame(fn: () => void): () => void {
     return () => cancelAnimationFrame(id);
 }
 
+/**
+ * The targets whose glide is over: every tile then has exactly its rect's size. Timed from the frame the
+ * glide starts on, not from the arming: that frame lays the panes out and can be a long time coming.
+ */
+function settledOf(targets: () => Targets | undefined): () => Targets | undefined {
+    const [settled, setSettled] = createSignal<Targets | undefined>(undefined);
+    createEffect(
+        on(targets, (t) => {
+            if (!t) return;
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const cancelFrame = onNextFrame(() => {
+                timer = setTimeout(() => setSettled(t), reflowSettleMs());
+            });
+            onCleanup(() => {
+                cancelFrame();
+                clearTimeout(timer);
+            });
+        })
+    );
+    return settled;
+}
+
 /** The reflow entries for a drag of `model`, kept in the model's reactive owner. */
 export function createLiveReflow(model: LayoutModel): LiveReflow {
     // Where each tile goes. While a drag is live every pane the reflow can move has a target, even when no
@@ -287,22 +315,7 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         onCleanup(() => holdPaneSizes(model, false));
     });
 
-    // The targets whose glide is over: every tile then has exactly its rect's size. Timed from the frame the
-    // glide starts on, not from the arming: that frame lays the panes out and can be a long time coming.
-    const [settled, setSettled] = createSignal<Targets | undefined>(undefined);
-    createEffect(
-        on(targets, (t) => {
-            if (!t) return;
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            const cancelFrame = onNextFrame(() => {
-                timer = setTimeout(() => setSettled(t), reflowSettleMs());
-            });
-            onCleanup(() => {
-                cancelFrame();
-                clearTimeout(timer);
-            });
-        })
-    );
+    const settled = settledOf(targets);
 
     const entries = createMemo<Map<string, ReflowEntry>>((before) => {
         const t = targets();
@@ -320,9 +333,17 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         return out;
     }, new Map());
 
+    const landingSettled = createMemo(() => {
+        const t = targets();
+        if (!t?.showing || settled() !== t) return undefined;
+        for (const target of t.byId.values()) if (target.moved) return { ...target.rect };
+        return undefined;
+    });
+
     return {
         reflowFor: (nodeId) => entries().get(nodeId),
         liveReflowActive: () => !!targets()?.showing,
         liveReflowExpected: () => liveReflowEnabled() && model.activeDrag() && model.leafs().length <= REFLOW_MAX_PANES,
+        landingSettled,
     };
 }

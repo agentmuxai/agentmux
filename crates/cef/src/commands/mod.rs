@@ -18,6 +18,8 @@ pub mod tear_off_hook;
 pub mod window_pool;
 mod promote_front;
 pub mod live_follow;
+#[cfg(any(target_os = "windows", test))]
+mod live_follow_picture;
 #[cfg(target_os = "windows")]
 pub mod drop_source_wrap;
 pub mod replace_page;

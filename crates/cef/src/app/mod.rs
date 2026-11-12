@@ -42,7 +42,7 @@ pub(crate) use monitor::display_work_area_at;
 #[cfg(target_os = "linux")]
 pub(crate) use monitor::primary_work_area;
 #[cfg(target_os = "windows")]
-pub use monitor::{dpi_scale_at, get_monitor_work_area_physical};
+pub use monitor::{dpi_scale_at, get_monitor_work_area_physical, window_work_area_physical};
 #[cfg(target_os = "linux")]
 pub use window_settings::{install_linux_window_properties_override, SELECTED_OZONE_PLATFORM};
 pub(crate) use window_settings::read_window_transparent_setting;

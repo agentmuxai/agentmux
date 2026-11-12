@@ -290,6 +290,8 @@ export class LayoutModel {
     liveReflowActive: () => boolean;
     /** Whether the live reflow is how the drag that is on shows its drops: the panes are the outline, so no wireframe and no dim. */
     liveReflowExpected: () => boolean;
+    /** The dragged pane's landing rect once the panes stand in the drop being shown (liveReflow.ts). */
+    landingSettled: () => Dimensions | undefined;
     /** The glide of the panes after one left outside a drag, while it runs (settlingPass.ts). */
     settlingPass: () => SettlingPass | undefined;
     /**
@@ -803,6 +805,7 @@ export class LayoutModel {
             reflowFor: this.reflowFor,
             liveReflowActive: this.liveReflowActive,
             liveReflowExpected: this.liveReflowExpected,
+            landingSettled: this.landingSettled,
         } = createLiveReflow(this));
     }
 

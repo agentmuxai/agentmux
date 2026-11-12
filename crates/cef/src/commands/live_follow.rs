@@ -8,6 +8,12 @@
 // the real window opens at its last place (`landing`). The picture has its own thread and message loop
 // so the hook only calls `SetWindowPos` with `SWP_ASYNCWINDOWPOS` (Windows removes a slow hook). It
 // never touches the window pool, so a cancelled drag leaves nothing to restore.
+//
+// A pane's picture is also the pane in hand while it is dragged over its own layout. There it takes the
+// shape of the rect the armed drop would give the pane (`resize`), and, once the pane stands in that rect on
+// screen, its picture is taken again there (`capture`): a pane laid out for the rect, where the first
+// picture resized to another shape is a squashed one (the operator, 2026-11-12: "we have the shape but not
+// the aspect ratio"). The pixels themselves are live_follow_picture.rs.
 
 use std::sync::Arc;
 
@@ -45,7 +51,7 @@ pub(crate) fn picture_wanted(cursor_y: i32, tear_line_y: Option<i32>, over_other
 }
 
 #[cfg(target_os = "windows")]
-pub use win::{begin, end, landing, on_cursor, on_escape, on_session_end, picture_shown, resize};
+pub use win::{begin, capture, end, landing, on_cursor, on_escape, on_session_end, picture_shown, resize};
 
 #[cfg(not(target_os = "windows"))]
 pub fn begin(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -62,11 +68,18 @@ pub fn resize(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
     Ok(serde_json::Value::Null)
 }
 
-/// The picture's commands by name: `live_follow_begin`, `live_follow_resize`, and `live_follow_end` for any other.
+#[cfg(not(target_os = "windows"))]
+pub async fn capture(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({ "staged": false }))
+}
+
+/// The picture's commands by name: `live_follow_begin`, `live_follow_resize`, `live_follow_capture`, and
+/// `live_follow_end` for any other.
 pub async fn route(cmd: &str, state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     match cmd {
         "live_follow_begin" => begin_blocking(state, args).await,
         "live_follow_resize" => resize_blocking(args).await,
+        "live_follow_capture" => capture(state, args).await,
         _ => end(),
     }
 }
@@ -99,48 +112,6 @@ pub(crate) fn offset_within(grab: (i32, i32), source_size: (i32, i32), size: (i3
     (scaled(grab.0, source_size.0, size.0), scaled(grab.1, source_size.1, size.1))
 }
 
-/// The picture at `size`, from `source` (BGRA at `source_size`): the whole picture, resized. Each pixel is the
-/// mean of the source pixels it covers, so a pane made smaller stays readable. The page asks for a size of the
-/// pane's own proportions (pane-live-follow.ts), so nothing is stretched; before, a smaller size cut the
-/// picture at its right and bottom, and the pane in hand lost its close buttons and half its content. A source
-/// shorter than its size paints black.
-#[cfg(any(target_os = "windows", test))]
-pub(crate) fn compose(source: &[u8], source_size: (i32, i32), size: (i32, i32)) -> Vec<u8> {
-    let (sw, sh) = (source_size.0.max(0) as usize, source_size.1.max(0) as usize);
-    let (w, h) = (size.0.max(0) as usize, size.1.max(0) as usize);
-    if sw == 0 || sh == 0 || source.len() < sw * sh * 4 {
-        return [0, 0, 0, 255].repeat(w * h);
-    }
-    if (sw, sh) == (w, h) {
-        return source[..w * h * 4].to_vec();
-    }
-    // The source columns and rows each output pixel covers: at least one, so a larger size repeats pixels.
-    let span = |i: usize, from: usize, to: usize| {
-        let start = i * from / to;
-        let end = ((i + 1) * from).div_ceil(to).clamp(start + 1, from);
-        (start.min(from - 1), end)
-    };
-    let cols: Vec<(usize, usize)> = (0..w).map(|x| span(x, sw, w)).collect();
-    let mut out = Vec::with_capacity(w * h * 4);
-    for y in 0..h {
-        let (y0, y1) = span(y, sh, h);
-        for &(x0, x1) in &cols {
-            let mut sum = [0u32; 3];
-            for sy in y0..y1 {
-                let row = &source[(sy * sw + x0) * 4..(sy * sw + x1) * 4];
-                for px in row.chunks_exact(4) {
-                    sum[0] += px[0] as u32;
-                    sum[1] += px[1] as u32;
-                    sum[2] += px[2] as u32;
-                }
-            }
-            let n = ((y1 - y0) * (x1 - x0)) as u32;
-            out.extend_from_slice(&[(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8, 255]);
-        }
-    }
-    out
-}
-
 #[cfg(target_os = "windows")]
 mod win {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -148,9 +119,8 @@ mod win {
 
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
-        ClientToScreen, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, GetMonitorInfoW,
-        MonitorFromWindow, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, MONITORINFO,
-        MONITOR_DEFAULTTONEAREST,
+        ClientToScreen, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
+        BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
@@ -162,6 +132,7 @@ mod win {
         WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     };
 
+    use crate::commands::live_follow_picture::{compose, crop_bgra, crop_rect, Wash};
     use crate::state::AppState;
 
     const CLASS_NAME: &str = "AgentMuxLiveFollow";
@@ -179,9 +150,25 @@ mod win {
     /// The window sizes taken from the page, in physical pixels.
     const MIN_DIM: i32 = 100;
     const MAX_DIM: i32 = 8_000;
+    /// The JPEG quality a pane's window is pictured at for `capture`.
+    const CAPTURE_QUALITY: u8 = 80;
+    /// How many pictures of the pane in a landing rect are kept for a drag, and how many bytes of them: a
+    /// drag wanders between a handful of drops, and coming back to one shows its picture at once.
+    const KEPT_PICTURES: usize = 8;
+    const KEPT_BYTES: usize = 96 * 1024 * 1024;
+
+    /// A picture of the pane as it stands in a landing rect, at the size the hand shows it for that rect.
+    struct Landed {
+        /// The landing rect it was taken in, as the page names it.
+        key: String,
+        bgra: Arc<Vec<u8>>,
+        size: (i32, i32),
+    }
 
     struct Follower {
         hwnd: usize,
+        /// The source window's label: a pane's picture is taken again of it (`capture`).
+        label: String,
         size: (i32, i32),
         /// Cursor to the window's top-left, physical pixels: `grab` scaled to the current size (`offset_within`).
         offset: (i32, i32),
@@ -207,6 +194,30 @@ mod win {
         last: (i32, i32),
         /// `landing` has handed `last` to a promote.
         landed: bool,
+        /// The landing rect whose own picture is on show, or none while it is the first picture resized.
+        shows: Option<String>,
+        /// The pictures taken of the pane in a landing rect, oldest first (`KEPT_PICTURES`, `KEPT_BYTES`).
+        kept: Vec<Landed>,
+        /// One just taken, until the page says the pane stood still for it (`resize` with `adopt`).
+        staged: Option<Landed>,
+    }
+
+    impl Follower {
+        /// The picture kept for `key` at `size`, if there is one.
+        fn kept_for(&self, key: &str, size: (i32, i32)) -> Option<Arc<Vec<u8>>> {
+            self.kept.iter().find(|p| p.key == key && p.size == size).map(|p| p.bgra.clone())
+        }
+
+        /// Keep the staged picture, if it is `key`'s: the page saw the pane stand still while it was taken.
+        fn adopt(&mut self, key: &str) {
+            let Some(staged) = self.staged.take_if(|s| s.key == key) else { return };
+            self.kept.retain(|p| p.key != key);
+            self.kept.push(staged);
+            let bytes = |kept: &[Landed]| kept.iter().map(|p| p.bgra.len()).sum::<usize>();
+            while self.kept.len() > 1 && (self.kept.len() > KEPT_PICTURES || bytes(&self.kept) > KEPT_BYTES) {
+                self.kept.remove(0);
+            }
+        }
     }
 
     static FOLLOWER: Mutex<Option<Follower>> = Mutex::new(None);
@@ -217,7 +228,7 @@ mod win {
     static PENDING_REPAINT: Mutex<Option<Repaint>> = Mutex::new(None);
 
     struct Repaint {
-        bgra: Vec<u8>,
+        bgra: Arc<Vec<u8>>,
         size: (i32, i32),
         /// Where the picture goes at this size, when it is on screen: put there in the same call that paints
         /// it, so it never shows at its new size in its old place.
@@ -280,13 +291,14 @@ mod win {
         );
         let offset = (px(num(args, "offsetX")?), px(num(args, "offsetY")?));
         let tear_line_y = args.get("tearLineY").and_then(|v| v.as_f64()).map(|line| client_top + px(line));
-        let home = if tear_line_y.is_none() { unsafe { work_area_of(source) } } else { None };
+        let home = if tear_line_y.is_none() { crate::app::window_work_area_physical(source as isize) } else { None };
         let bgra = Arc::new(decode_bgra(&jpeg, size.0 as u32, size.1 as u32)?);
 
         end_now();
         let hwnd = spawn_overlay(bgra.clone(), size)?;
         *FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())? = Some(Follower {
             hwnd,
+            label: label.to_string(),
             size,
             offset: super::offset_within(offset, size, size),
             grab: offset,
@@ -299,6 +311,9 @@ mod win {
             shown: false,
             last: (0, 0),
             landed: false,
+            shows: None,
+            kept: Vec::new(),
+            staged: None,
         });
         tracing::info!(
             target: "dnd:tearoff",
@@ -329,31 +344,47 @@ mod win {
         }
     }
 
-    /// Give the picture another size (`windowWidth`, `windowHeight`, DIP): the rect the drop would give the
-    /// pane while one is armed, or the pane's own size again (pane-live-follow.ts). The picture is resized
-    /// from the one first shown, and the cursor keeps its place on the pane: the picture takes its new size
-    /// around the cursor, where it last was. A drop arms while the pointer rests, so no move would bring a
-    /// picture that changed size around its own corner back under the pointer.
-    /// Composed outside the follower's lock, which the hook thread takes on every move.
+    /// The size the page asks for (`windowWidth`, `windowHeight`, DIP), in the picture's physical pixels.
+    fn asked_size(args: &serde_json::Value, scale: f64) -> Result<(i32, i32), String> {
+        let px = |dip: f64| (dip * scale).round() as i32;
+        Ok((
+            px(num(args, "windowWidth")?).clamp(MIN_DIM, MAX_DIM),
+            px(num(args, "windowHeight")?).clamp(MIN_DIM, MAX_DIM),
+        ))
+    }
+
+    /// Give the picture another size (`windowWidth`, `windowHeight`, DIP): the shape of the rect the drop
+    /// would give the pane while one is armed (`landingKey` names the rect), or the pane's own size again
+    /// (pane-live-follow.ts). With a picture kept for that rect (`capture`; `adopt` keeps the one just
+    /// taken), it is that picture: the pane as it is laid out there. Without one, the first picture is
+    /// resized to the size, squashed where the shape differs, until the rect's own is taken. The cursor keeps
+    /// its place on the pane: the picture takes its new size around the cursor, where it last was. A drop
+    /// arms while the pointer rests, so no move would bring a picture that changed size around its own corner
+    /// back under the pointer. Composed outside the follower's lock, which the hook thread takes on every move.
     pub fn resize(args: &serde_json::Value) -> Result<serde_json::Value, String> {
-        let (hwnd, size, source, source_size) = {
-            let guard = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?;
-            let Some(f) = guard.as_ref() else { return Ok(serde_json::Value::Null) };
-            let px = |dip: f64| (dip * f.scale).round() as i32;
-            let size = (
-                px(num(args, "windowWidth")?).clamp(MIN_DIM, MAX_DIM),
-                px(num(args, "windowHeight")?).clamp(MIN_DIM, MAX_DIM),
-            );
-            if f.size == size {
+        let key = args.get("landingKey").and_then(|v| v.as_str());
+        let adopt = args.get("adopt").and_then(|v| v.as_bool()).unwrap_or(false);
+        let (hwnd, size, kept, source, source_size) = {
+            let mut guard = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?;
+            let Some(f) = guard.as_mut() else { return Ok(serde_json::Value::Null) };
+            let size = asked_size(args, f.scale)?;
+            if let Some(key) = key.filter(|_| adopt) {
+                f.adopt(key);
+            }
+            let kept = key.and_then(|key| f.kept_for(key, size));
+            let shows = kept.as_ref().and(key);
+            if f.size == size && f.shows.as_deref() == shows {
                 return Ok(serde_json::Value::Null);
             }
-            (f.hwnd, size, f.source.clone(), f.source_size)
+            (f.hwnd, size, kept, f.source.clone(), f.source_size)
         };
-        let bgra = super::compose(&source, source_size, size);
+        let shows = kept.as_ref().and(key).map(str::to_string);
+        let bgra = kept.unwrap_or_else(|| Arc::new(compose(&source, source_size, size)));
         let mut guard = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?;
         // The picture ended, or another began, while this one was composed.
         let Some(f) = guard.as_mut().filter(|f| f.hwnd == hwnd) else { return Ok(serde_json::Value::Null) };
         f.size = size;
+        f.shows = shows;
         f.offset = super::offset_within(f.grab, f.source_size, size);
         let at = if f.shown { f.cursor.map(|cursor| place(cursor, f.offset, size, f.home)) } else { None };
         if let Some(at) = at {
@@ -412,19 +443,92 @@ mod win {
         }
     }
 
-    /// The work area of the monitor `hwnd` is on, or is nearest to: left, top, width, height, physical pixels.
-    unsafe fn work_area_of(hwnd: HWND) -> Option<(i32, i32, i32, i32)> {
-        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        if monitor.is_null() {
-            return None;
+    /// What `capture` takes its picture for, read from the page's request and the follower.
+    struct CapturePlan {
+        hwnd: usize,
+        label: String,
+        key: String,
+        /// The size the hand shows the pane at for this rect, physical pixels.
+        size: (i32, i32),
+        /// The pane on screen: left, top, width, height, CSS px of the page.
+        rect: (f64, f64, f64, f64),
+        /// The page's viewport width, CSS px.
+        viewport_width: f64,
+        wash: Option<Wash>,
+    }
+
+    /// The plan for a request, or none when there is nothing to take: no picture is following, or the rect's
+    /// picture is already kept.
+    fn capture_plan(args: &serde_json::Value) -> Result<Option<CapturePlan>, String> {
+        let key = args.get("landingKey").and_then(|v| v.as_str()).ok_or_else(|| "missing landingKey".to_string())?;
+        let rect = args.get("rect").ok_or_else(|| "missing rect".to_string())?;
+        let wash = match args.get("wash").filter(|w| !w.is_null()) {
+            Some(w) => {
+                let channel = |k: &str| num(w, k).map(|v| v.round().clamp(0.0, 255.0) as u8);
+                Some(Wash { rgb: (channel("r")?, channel("g")?, channel("b")?), alpha: num(w, "a")? })
+            }
+            None => None,
+        };
+        let guard = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?;
+        let Some(f) = guard.as_ref() else { return Ok(None) };
+        let size = asked_size(args, f.scale)?;
+        if f.kept_for(key, size).is_some() {
+            return Ok(None);
         }
-        let mut info: MONITORINFO = std::mem::zeroed();
-        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-        if GetMonitorInfoW(monitor, &mut info) == 0 {
-            return None;
-        }
-        let rc = info.rcWork;
-        Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
+        Ok(Some(CapturePlan {
+            hwnd: f.hwnd,
+            label: f.label.clone(),
+            key: key.to_string(),
+            size,
+            rect: (num(rect, "left")?, num(rect, "top")?, num(rect, "width")?, num(rect, "height")?),
+            viewport_width: num(args, "viewportWidth")?,
+            wash,
+        }))
+    }
+
+    /// Take the pane's picture again, as it stands in its landing rect now: `landingKey` (the rect's name),
+    /// `rect` (the pane on screen, CSS px), `viewportWidth` (CSS px), `windowWidth` and `windowHeight` (the
+    /// size the hand shows it at for this rect, DIP), and `wash` (`r`, `g`, `b`, `a`: the landing zone's fill
+    /// over the pane, taken back out of the picture). The window's whole viewport is pictured, as for the
+    /// first picture (a clipped capture flickers the window), and the pane is cut out of it here, so the page
+    /// does none of the work. The picture is only staged: the page keeps it with its next `resize` (`adopt`)
+    /// if the pane stood still while it was taken. Answers `{ staged }`.
+    pub async fn capture(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let Some(plan) = capture_plan(args)? else { return Ok(serde_json::json!({ "staged": false })) };
+        let started = std::time::Instant::now();
+        let jpeg = crate::browser_api::routes::capture_window_viewport(state, &plan.label, CAPTURE_QUALITY).await?;
+        let pictured_ms = started.elapsed().as_millis() as u64;
+        let staged = tokio::task::spawn_blocking(move || stage(plan, &jpeg, pictured_ms, started))
+            .await
+            .map_err(|e| format!("live_follow_capture join error: {}", e))??;
+        Ok(serde_json::json!({ "staged": staged }))
+    }
+
+    /// Cut the pane out of the window's picture, at the hand's size, and stage it on the follower it was
+    /// taken for. False when that follower is gone.
+    fn stage(plan: CapturePlan, jpeg_base64: &str, pictured_ms: u64, started: std::time::Instant) -> Result<bool, String> {
+        use base64::Engine;
+        let jpeg = base64::engine::general_purpose::STANDARD
+            .decode(jpeg_base64)
+            .map_err(|e| format!("picture is not base64: {}", e))?;
+        let window = image::load_from_memory_with_format(&jpeg, image::ImageFormat::Jpeg)
+            .map_err(|e| format!("picture does not decode: {}", e))?
+            .into_rgb8();
+        let crop = crop_rect(plan.rect, plan.viewport_width, (window.width(), window.height()))
+            .ok_or_else(|| "the pane is not in the picture".to_string())?;
+        let pane = crop_bgra(window.as_raw(), window.width(), crop, plan.wash)
+            .ok_or_else(|| "the pane is not in the picture".to_string())?;
+        let bgra = Arc::new(compose(&pane, (crop.2 as i32, crop.3 as i32), plan.size));
+        let mut guard = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?;
+        let Some(f) = guard.as_mut().filter(|f| f.hwnd == plan.hwnd) else { return Ok(false) };
+        tracing::info!(
+            target: "dnd:tearoff",
+            key = %plan.key, width = plan.size.0, height = plan.size.1, pictured_ms,
+            total_ms = started.elapsed().as_millis() as u64,
+            "[live-follow] the pane was pictured in its landing rect"
+        );
+        f.staged = Some(Landed { key: plan.key, bgra, size: plan.size });
+        Ok(true)
     }
 
     /// Whether the window picture is on screen now. Asked from the drag's own thread on every cursor move, while
@@ -600,7 +704,7 @@ mod win {
             WM_FOLLOW_RESIZE => {
                 let taken = PENDING_REPAINT.lock().ok().and_then(|mut g| g.take());
                 if let Some(repaint) = taken {
-                    if let Err(e) = paint(hwnd, &repaint.bgra, repaint.size, repaint.at) {
+                    if let Err(e) = paint(hwnd, repaint.bgra.as_slice(), repaint.size, repaint.at) {
                         tracing::warn!(target: "dnd:tearoff", error = %e, "[live-follow] the picture could not be resized");
                     }
                 }
@@ -651,7 +755,7 @@ mod win {
 
 #[cfg(test)]
 mod tests {
-    use super::{compose, follow_origin, offset_within, picture_wanted, place_within};
+    use super::{follow_origin, offset_within, picture_wanted, place_within};
 
     #[test]
     fn a_panes_picture_stops_whole_at_the_edge_of_its_monitor_while_the_cursor_goes_on() {
@@ -692,39 +796,6 @@ mod tests {
         let at_half = place_within(cursor, offset_within(grab, own, half), half, home);
         assert_eq!(at_half, (1050, 580));
         assert_eq!((cursor.0 - at_half.0, cursor.1 - at_half.1), (450, 20));
-    }
-
-    /// A 4 by 2 BGRA picture whose pixel (x, y) is (10x, 100y, 7, 255), so a resize is read back by value.
-    fn picture() -> Vec<u8> {
-        (0..2).flat_map(|y| (0..4).map(move |x| [10 * x as u8, 100 * y as u8, 7, 255])).flatten().collect()
-    }
-
-    #[test]
-    fn a_smaller_size_is_the_whole_picture_resized_not_its_top_left_corner() {
-        // Half the width, half the height: each pixel is the mean of the 2 by 2 it covers.
-        let out = compose(&picture(), (4, 2), (2, 1));
-        assert_eq!(out, vec![5, 50, 7, 255, 25, 50, 7, 255]);
-    }
-
-    #[test]
-    fn the_panes_own_size_is_the_picture_as_it_is() {
-        assert_eq!(compose(&picture(), (4, 2), (4, 2)), picture());
-    }
-
-    #[test]
-    fn a_larger_size_repeats_pixels_and_fills_every_one() {
-        let out = compose(&picture(), (4, 2), (8, 4));
-        assert_eq!(out.len(), 8 * 4 * 4);
-        // Row 0: each source pixel of the first row, twice.
-        assert_eq!(&out[0..16], &[0, 0, 7, 255, 0, 0, 7, 255, 10, 0, 7, 255, 10, 0, 7, 255]);
-        // The last row is the source's last row.
-        assert_eq!(&out[3 * 8 * 4..3 * 8 * 4 + 4], &[0, 100, 7, 255]);
-    }
-
-    #[test]
-    fn a_short_source_paints_black() {
-        let out = compose(&[1, 2, 3], (3, 2), (1, 1));
-        assert_eq!(out, vec![0, 0, 0, 255]);
     }
 
     #[test]

@@ -18,14 +18,20 @@
  * operator, 2026-11-12: "we dont want the hard cutoff. Can it simply be resized instead of the edge cut off?").
  * Resized in the pane's own proportions it was a long pane held over an upright landing site, so it is resized
  * on each axis to the site's proportions (the operator, 2026-11-12: "We want some shrinkage, which makes it
- * easier to manage the pane, but the shape and aspect ratio should match the landing site"). The pane as it
- * will really be laid out is on screen anyway, in the landing rect itself. With no drop armed the picture is
- * the pane's own size and shape again.
+ * easier to manage the pane, but the shape and aspect ratio should match the landing site"). With no drop
+ * armed the picture is the pane's own size and shape again.
+ *
+ * A picture resized to another shape is a squashed pane (the operator, 2026-11-12: "we have the shape but not
+ * the aspect ratio"). The pane laid out for the landing rect is on screen, in the rect itself, once the panes
+ * have come to rest on the drop: the host takes its picture there (`liveFollowCapture`) and the pane in hand
+ * becomes that picture, the pane as it will land. Until it is taken (a quarter of a second after a drop arms,
+ * and never for a drop the pointer only passes) the first picture stands in, resized. A picture taken once is
+ * kept for the drag, so a drop the pointer comes back to has its own at once.
  */
 
-import { createEffect, createRoot } from "solid-js";
+import { createEffect, createRoot, onCleanup, untrack } from "solid-js";
 import { getApi } from "@/store/global";
-import { beginLiveFollow, resizeLiveFollow } from "./live-follow";
+import { beginLiveFollow, captureLiveFollow, resizeLiveFollow, type LandingCapture } from "./live-follow";
 import { peekTearOffSnapshot } from "./tearoff-snapshot";
 
 /** How long the drag waits for the pane's picture; without one the pane tears off as before. */
@@ -37,6 +43,13 @@ export interface LandingSource {
     rect: () => { width: number; height: number } | undefined;
     /** Whether the drag is still on; the picture stops following the landing when it ends. */
     active: () => boolean;
+    /**
+     * Set, and a new value each time, once the panes stand in the drop being shown; none before. Without it
+     * the picture is never taken again.
+     */
+    settled?: () => unknown;
+    /** The pane on screen in its landing rect, read now: where its picture is taken, and what is drawn over it. */
+    site?: () => Pick<LandingCapture, "rect" | "viewportWidth" | "wash"> | undefined;
 }
 
 /** Hand the host the pane's picture, once its drag hook is armed, and keep its size to the landing. Never throws. */
@@ -72,20 +85,70 @@ export function followSize(own: { width: number; height: number }, landing?: { w
     return { width: Math.round(Math.sqrt(area * shape)), height: Math.round(Math.sqrt(area / shape)) };
 }
 
-/** Resize the picture to the landing while it changes, from `own` (the pane's size), until the drag ends. */
+/**
+ * The name of a landing rect, for the picture taken of the pane in it: its size. The pane is laid out the same
+ * in two rects of one size, wherever they are.
+ */
+export function landingKey(rect: { width: number; height: number }): string {
+    return `${Math.round(rect.width)}x${Math.round(rect.height)}`;
+}
+
+/** How many frames after the panes come to rest the pane's picture is taken: content that lays itself out a frame late has. */
+const REST_FRAMES = 2;
+
+/** Run `fn` after `frames` frames, or at once where there are none (a test). Returns what cancels it. */
+function afterFrames(frames: number, fn: () => void): () => void {
+    if (typeof requestAnimationFrame !== "function") {
+        fn();
+        return () => {};
+    }
+    let id = 0;
+    const step = (left: number) => {
+        id = requestAnimationFrame(() => (left > 1 ? step(left - 1) : fn()));
+    };
+    step(frames);
+    return () => cancelAnimationFrame(id);
+}
+
+/**
+ * Keep the picture to the landing, from `own` (the pane's size), until the drag ends: its size while the
+ * landing changes, and the pane's own picture in the landing rect once the panes rest there.
+ */
 function followLanding(landing: LandingSource, own: { width: number; height: number }): void {
     createRoot((dispose) => {
-        let shown = { width: Math.round(own.width), height: Math.round(own.height) };
+        let shown = { width: Math.round(own.width), height: Math.round(own.height), key: undefined as string | undefined };
         createEffect(() => {
             const rect = landing.rect();
             if (!landing.active()) {
                 dispose();
                 return;
             }
-            const next = followSize(own, rect);
-            if (next.width === shown.width && next.height === shown.height) return;
+            const next = { ...followSize(own, rect), key: rect && landingKey(rect) };
+            if (next.width === shown.width && next.height === shown.height && next.key === shown.key) return;
             shown = next;
-            void resizeLiveFollow(getApi(), next);
+            const size = { width: next.width, height: next.height };
+            void resizeLiveFollow(getApi(), size, next.key === undefined ? undefined : { landingKey: next.key });
+        });
+        createEffect(() => {
+            if (!landing.settled?.() || !landing.active()) return;
+            // The panes moved on, or the drag ended, before the picture was taken or kept: it is of nothing now.
+            let rests = true;
+            const cancel = afterFrames(REST_FRAMES, () => void retake(landing, own, () => rests));
+            onCleanup(() => {
+                rests = false;
+                cancel();
+            });
         });
     });
+}
+
+/** Take the pane's picture where it stands in its landing rect, and show it if the pane stood still meanwhile. */
+async function retake(landing: LandingSource, own: { width: number; height: number }, rests: () => boolean): Promise<void> {
+    const rect = untrack(landing.rect);
+    const site = rect && landing.site?.();
+    if (!rect || !site || !rests()) return;
+    const key = landingKey(rect);
+    const size = followSize(own, rect);
+    const staged = await captureLiveFollow(getApi(), { landingKey: key, size, ...site }, rests);
+    if (staged && rests()) void resizeLiveFollow(getApi(), size, { landingKey: key, adopt: true });
 }

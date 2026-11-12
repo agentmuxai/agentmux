@@ -218,6 +218,32 @@ describe("landingRectOf", () => {
     });
 });
 
+describe("landingSettled", () => {
+    it("is the landing rect once the glide to the drop is over, and a new one for each drop the panes rest on", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        expect(m.landingSettled()).toBeUndefined();
+        drag(m, "a", "c", DropDirection.Bottom);
+        // The panes are on their way.
+        vi.advanceTimersByTime(REFLOW_SETTLE_MS - 1);
+        expect(m.landingSettled()).toBeUndefined();
+        vi.advanceTimersByTime(1);
+        const first = m.landingSettled();
+        expect(first).toEqual(futureOf(m, "a"));
+        // Another drop: on their way again, then at rest in the new rect.
+        preview(m, "a", "b", DropDirection.Top);
+        vi.advanceTimersByTime(20);
+        expect(m.landingSettled()).toBeUndefined();
+        vi.advanceTimersByTime(REFLOW_SETTLE_MS);
+        expect(m.landingSettled()).toEqual(futureOf(m, "a"));
+        expect(m.landingSettled()).not.toEqual(first);
+        // No drop shown: no landing.
+        m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        vi.advanceTimersByTime(REFLOW_SETTLE_MS + 20);
+        expect(m.landingSettled()).toBeUndefined();
+    });
+});
+
 describe("the live reflow of a pane drag", () => {
     it("shows nothing with the setting off", () => {
         setFlag(false);
