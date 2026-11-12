@@ -92,7 +92,7 @@ pub(super) fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str)
     if let Some(watcher) = crate::backend::subagent_watcher::global() {
         watcher.recheck_all_watched_agents();
     }
-    super::after_rebind(&state.mstore, &state.event_bus, before, to);
+    super::after_rebind_telling(&state.mstore, &state.event_bus, before, to, true);
     Ok(())
 }
 

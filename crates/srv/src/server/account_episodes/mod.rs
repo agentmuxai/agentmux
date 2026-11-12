@@ -528,6 +528,14 @@ pub fn failed_panes(mstore: &Store, identity: &Store, agent_id: &str, provider: 
 /// that account, then wake held messages and the episodes. Returns how many
 /// were cleared.
 pub fn after_rebind(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<(String, Vec<String>)>, account_id: &str) -> usize {
+    after_rebind_telling(mstore, event_bus, before, account_id, false)
+}
+
+/// [`after_rebind`], and with `tell` set the agents whose last turn failed on the old login are told they are
+/// signed in ([`resume::start`]). Set it only when the new login is known to work: a move to an account the
+/// choice found valid, or a key that just passed its check. Not for an unlink (no account at all) or a key
+/// nobody has checked, whose next turn could fail again.
+pub fn after_rebind_telling(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<(String, Vec<String>)>, account_id: &str, tell: bool) -> usize {
     let mut cleared = 0;
     let mut signed_out = Vec::new();
     for (block_id, accounts) in before {
@@ -535,7 +543,7 @@ pub fn after_rebind(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<
             continue;
         }
         // The agent now runs on a login that works: one whose last turn failed on the old login is told.
-        if let Some(failure) = mstore.get::<Block>(&block_id).ok().flatten().and_then(|b| failure_of_block(&b)).filter(|f| f.code == FailureClass::Auth) {
+        if let Some(failure) = mstore.get::<Block>(&block_id).ok().flatten().and_then(|b| failure_of_block(&b)).filter(|f| tell && !account_id.is_empty() && f.code == FailureClass::Auth) {
             signed_out.push(Failed { block_id: block_id.clone(), failed_at_ms: failure.at_ms });
         }
         crate::backend::blockcontroller::core::persist_last_failure(&block_id, None, &Some(mstore.clone()), &Some(event_bus.clone()));

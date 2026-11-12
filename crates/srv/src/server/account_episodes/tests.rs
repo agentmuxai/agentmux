@@ -324,6 +324,37 @@ async fn a_sign_in_names_only_the_panes_whose_turn_failed_on_the_login() {
     cleanup(&[&signed_out, &fine, &limited, &elsewhere]);
 }
 
+/// Only a move to a login known to work tells the agent it is signed in (task #2458): not an unlink (no account
+/// at all), not a key nobody has checked.
+#[tokio::test]
+async fn only_a_move_to_a_working_login_tells_the_agent_it_is_signed_in() {
+    let state = test_state();
+    let tab = new_tab(&state).await;
+    let moved = pane(&state, &tab, "t1", "Moved", "old", Some(failure("auth", None, None)), false).await;
+    let unlinked = pane(&state, &tab, "t2", "Unlinked", "old", Some(failure("auth", None, None)), false).await;
+    let unchecked = pane(&state, &tab, "t3", "Unchecked", "old", Some(failure("auth", None, None)), false).await;
+    let before = |agent: &str| failed_panes(&state.mstore, &state.identity_store, agent, "claude");
+
+    assert_eq!(after_rebind_telling(&state.mstore, &state.event_bus, before("t2"), "", true), 1, "an unlink clears the failure");
+    assert_eq!(after_rebind_telling(&state.mstore, &state.event_bus, before("t3"), "new", false), 1, "an unchecked key clears it too");
+    assert_eq!(after_rebind_telling(&state.mstore, &state.event_bus, before("t1"), "new", true), 1);
+    for _ in 0..50 {
+        if crate::backend::reactive::held_notes::attach(&moved, "x").0.contains("Signed in again at") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    // A pane with no controller keeps the note for its next turn; only the moved pane has one.
+    let (moved_next, _g1) = crate::backend::reactive::held_notes::attach(&moved, "x");
+    let (unlinked_next, _g2) = crate::backend::reactive::held_notes::attach(&unlinked, "x");
+    let (unchecked_next, _g3) = crate::backend::reactive::held_notes::attach(&unchecked, "x");
+    assert!(!unlinked_next.contains("Signed in again"), "{unlinked_next}");
+    assert!(!unchecked_next.contains("Signed in again"), "{unchecked_next}");
+    assert!(moved_next.contains("Signed in again at"), "{moved_next}");
+    assert!(stored_failure(&state, &moved).is_none() && stored_failure(&state, &unlinked).is_none() && stored_failure(&state, &unchecked).is_none());
+    cleanup(&[&moved, &unlinked, &unchecked]);
+}
+
 /// A sign-in to one account says nothing about another.
 #[tokio::test]
 async fn a_sign_in_leaves_another_accounts_panes_alone() {

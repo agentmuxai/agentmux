@@ -104,6 +104,11 @@ fn tell(block_id: &str, text: &str) -> Told {
     }
     let marked = crate::backend::reactive::sanitize::with_system_note_marker(text);
     match crate::backend::reactive::get_global_handler().send_system_turn(block_id, &marked) {
+        Ok(crate::backend::reactive::SenderDelivery::Pty) => {
+            // A terminal agent takes no message of ours: the note waits for its next turn.
+            crate::backend::blockcontroller::system_note_into_turn_or_hold(block_id, NOTE_KEY, text);
+            Told::Held
+        }
         Ok(_) => Told::Turn,
         Err(e) => {
             tracing::warn!(block_id = %block_id, error = %e, "sign-in: couldn't start the turn that tells an agent it is signed in; the note waits");
