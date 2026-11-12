@@ -549,7 +549,8 @@ mod req_shape_tests {
             r#"{"version":1,"api":"https://api.example.test","ws":"wss://ws.example.test","console":"https://console.example.test",
                 "cognito":{"domain":"https://auth.example.test","clientId":"abc123","region":"us-east-1","userPoolId":"us-east-1_X",
                 "identityProviders":["Google","SignInWithApple"]}}"#,
-            "https://relay.example.test",
+            // A local relay's document may name any host.
+            "http://localhost:3100",
         )
         .unwrap()
     }
