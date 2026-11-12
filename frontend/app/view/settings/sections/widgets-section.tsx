@@ -12,7 +12,7 @@
 import { type JSX, Show } from "solid-js";
 
 import { setWidgetPackages } from "@/app/store/widget-packages-store";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 import { SectionHeader } from "../settings-controls";
 import { WidgetCatalog } from "./widget-catalog";
 import { WidgetBarSettings } from "./widget-bar-settings";
@@ -20,14 +20,13 @@ import { Publishers, ReplacePrompt, WidgetList, WidgetsToolbar } from "./widgets
 import { createWidgetsSection } from "./widgets-section-state";
 
 export const WIDGETS_SETTINGS = {
-    installed: {
+    installed: settingEntry({
         id: "widgets.installed",
-        label: "Widgets",
-        description:
-            "Widgets add your own kinds of pane. A widget runs only after you approve it here, and asks again whenever its files change.",
+        labelKey: "settings.widgets.installed.label",
+        descriptionKey: "settings.widgets.installed.description",
         section: "widgets",
         keywords: ["widget", "plugin", "extension", "install", "approve", "ext:", "sandbox", "custom pane", "widget.json"],
-    },
+    }),
 } satisfies Record<string, SettingsIndexEntry>;
 
 export function WidgetsSection(): JSX.Element {
