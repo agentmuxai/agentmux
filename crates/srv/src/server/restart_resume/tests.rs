@@ -409,17 +409,25 @@ async fn an_idle_container_agent_is_up_at_exit_and_comes_back_past_its_idle_wind
     let container = resumable(&state, &tabs[0], "ag-container").await;
     set_meta(&state, &container, serde_json::json!({ "agentMode": "container" }));
     let native = resumable(&state, &tabs[0], "ag-native-idle").await;
-    let meta_of = |block: &str| state.mstore.get::<obj::Block>(block).unwrap().unwrap().meta;
+    let block_of = |block: &str| state.mstore.get::<obj::Block>(block).unwrap().unwrap();
 
     for status in [STATUS_INIT, STATUS_DONE] {
         register_stub(&container, BLOCK_CONTROLLER_SUBPROCESS, status, false);
         register_stub(&native, BLOCK_CONTROLLER_PERSISTENT, status, false);
-        assert!(is_up(&container, &meta_of(&container)), "a container agent's controller is up while it waits ({status})");
-        assert!(!is_up(&native, &meta_of(&native)), "a persistent agent with no running process is not ({status})");
+        assert!(is_up(&block_of(&container)), "a container agent's controller is up while it waits ({status})");
+        assert!(!is_up(&block_of(&native)), "a persistent agent with no running process is not ({status})");
     }
+    // A stop leaves the container agent's controller registered at `done`: stopped, not up.
+    register_stub(&container, BLOCK_CONTROLLER_SUBPROCESS, STATUS_DONE, false);
+    set_desired(&state.mstore, &container, DESIRED_STOPPED);
+    assert!(!is_up(&block_of(&container)), "a container agent stopped in this run is not up, whatever its controller says");
+    set_desired(&state.mstore, &container, DESIRED_RUNNING);
+    recorded_stopped(&state, &container);
+    assert!(!is_up(&block_of(&container)), "nor one recorded stopped, as a restart reads it");
+    set_desired(&state.mstore, &container, DESIRED_RUNNING);
     delete_controller(&container);
     delete_controller(&native);
-    assert!(!is_up(&container, &meta_of(&container)), "no controller: stopped");
+    assert!(!is_up(&block_of(&container)), "no controller: stopped");
 
     // Quiet past a tiny idle window: left stopped without the list, resumed with it.
     set_meta(&state, &container, serde_json::json!({ "agent:idle_stop_minutes": 0.0001 }));

@@ -68,7 +68,7 @@ pub(crate) async fn record_running_at_exit(state: &AppState, ids: &[String]) {
         let uids: Vec<String> = blocks
             .into_iter()
             .filter(|(block, tab)| tab.is_none() && ids.contains(&block.oid))
-            .filter(|(block, _)| is_up(&block.oid, &block.meta))
+            .filter(|(block, _)| is_up(block))
             .filter(|(block, _)| crate::sagas::park_agents::is_parkable(&st, &block.oid))
             .filter_map(|(block, _)| crate::sagas::park_agents::agent_of_block(&st, &block.oid, &block).map(|a| a.id))
             .collect();
@@ -81,15 +81,18 @@ pub(crate) async fn record_running_at_exit(state: &AppState, ids: &[String]) {
     }
 }
 
-/// Whether the agent of `block_id` is up, as the Agents list shows it: a persistent agent has a running process,
+/// Whether the agent in `block` is up, as the Agents list shows it: a persistent agent has a running process,
 /// and a container agent has its controller, which holds no process between turns (each turn is a `docker exec`,
 /// so its status stays `init` or `done` while the agent waits for its next message). Without the second half a
 /// restart left every idle container agent off the exit list, "wanted running" and stopped, with nothing to start
-/// it (task #2283).
-fn is_up(block_id: &str, meta: &obj::MetaMapType) -> bool {
-    let Some(controller) = blockcontroller::get_controller(block_id) else { return false };
+/// it (task #2283). A stop leaves the container agent's controller registered at `done` too, so the controller
+/// alone says nothing: it must also be wanted running, and not stopped in this run.
+fn is_up(block: &obj::Block) -> bool {
+    let Some(controller) = blockcontroller::get_controller(&block.oid) else { return false };
     controller.get_runtime_status().shellprocstatus == blockcontroller::STATUS_RUNNING
-        || crate::backend::runtime_adapter::RuntimeKind::of_block_meta(meta).is_container()
+        || (crate::backend::runtime_adapter::RuntimeKind::of_block_meta(&block.meta).is_container()
+            && desired_of(block).as_deref() == Some(DESIRED_RUNNING)
+            && !stopped_this_run(&block.oid))
 }
 
 /// The `pending` agents (definition ids) minus the ones stopped in this run: the stop is remembered in
