@@ -1872,6 +1872,20 @@ describe("minimizing next to a minimized pane (merge)", () => {
         expect(paneCommands()).toHaveLength(0);
     });
 
+    it("mergeNodeIntoNeighbour never merges the last expanded pane into a chip, nor a chip itself (the window keeps one expanded pane)", () => {
+        const model = fourPanes();
+        for (const id of ["a1", "c1", "d1"]) model.minimizeNodeToggle(idOf(model, id), { chip: true });
+
+        // b1 is the last expanded pane and a minimized neighbour is a target: still no merge.
+        expect(model.mergeNodeIntoNeighbour(idOf(model, "b1"))).toBe(false);
+        expect(getNodeByBlockId(model, "b1")!.minimized).toBeFalsy();
+        expect(leaves(model)).toHaveLength(4);
+        // And a chip has Restore, not a merge.
+        expect(model.mergeNodeIntoNeighbour(idOf(model, "a1"))).toBe(false);
+        expect(leaves(model)).toHaveLength(4);
+        expect(paneCommands()).toHaveLength(0);
+    });
+
     it("the last pane of a split merges into the expanded pane before it", () => {
         const model = fourPanes();
 

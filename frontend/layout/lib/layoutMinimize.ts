@@ -3,6 +3,7 @@
 
 import { findNode, walkNodes } from "./layoutNode";
 import { isNodeLocked, isEffectivelyMinimized, reportLayoutViolations } from "./layoutInvariants";
+import { findMergeTarget } from "./layoutMinimizeMerge";
 import type { LayoutModel } from "./layoutModel";
 import { LayoutTreeActionType, type LayoutNode, type LayoutTreeMinimizeNodeAction } from "./types";
 
@@ -101,9 +102,20 @@ export function setMinimizeMerger(merger: MinimizeMerger | undefined): void {
  * disabled button and a refused click cannot disagree.
  */
 export function mergeNodeIntoNeighbour(model: LayoutModel, nodeId: string): boolean {
-    const node = findNode(model.treeState.rootNode, nodeId);
-    if (!node || node.children?.length) return false;
+    if (!canMergeNode(model.treeState.rootNode, nodeId)) return false;
     return minimizeMerger?.(model, nodeId) ?? false;
+}
+
+/**
+ * Whether `nodeId` can merge into a neighbour: an expanded leaf with a target, and not the last expanded
+ * pane (the window keeps one, as `minimizeNodeToggle` guards), which a minimized sibling as the target
+ * would otherwise let through. A minimized pane has Restore, not a merge. Pure: this is what the header's
+ * Merge button shows as enabled and what every caller (header, menu, palette) checks before merging.
+ */
+export function canMergeNode(root: LayoutNode | undefined, nodeId: string): boolean {
+    const node = findNode(root, nodeId);
+    if (!node || node.children?.length || node.minimized) return false;
+    return countExpandedLeaves(root) > 1 && !!findMergeTarget(root, nodeId);
 }
 
 /**

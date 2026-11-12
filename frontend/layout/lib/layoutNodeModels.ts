@@ -4,7 +4,7 @@
 
 import { createSignalAtom, fireAndForget } from "@/util/util";
 import { findNode } from "./layoutNode";
-import { findMergeTarget } from "./layoutMinimizeMerge";
+import { canMergeNode } from "./layoutMinimize";
 import type { Properties as CSSProperties } from "csstype";
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
@@ -44,7 +44,7 @@ function withMergeApi(
         canMergeIntoNeighbour: createMemo(() => {
             model.localTreeStateAtom();
             model.minimizedNodeIds();
-            return !!findMergeTarget(model.treeState.rootNode, nodeid);
+            return canMergeNode(model.treeState.rootNode, nodeid);
         }),
         mergeIntoNeighbour: () => model.mergeNodeIntoNeighbour(nodeid),
     };
