@@ -139,14 +139,20 @@ pub(crate) fn cleared(mstore: &Arc<Store>, bus: &Arc<EventBus>, broker: &Arc<Bro
 /// A turn on `block_id` worked: the agent's own episode (the one an agent on no route has, [`on_failure`]) ends, so
 /// its next credits failure is news again. A route's episode ends in [`cleared`], on a gateway answer; an agent on
 /// its own key never passes the gateway. A map lookup unless an episode is open.
-pub(crate) fn turn_succeeded(mstore: &Store, block_id: &str) {
+pub(crate) fn turn_succeeded(mstore: &Store, broker: Option<&Arc<Broker>>, block_id: &str) {
     if EPISODES.lock().is_empty() {
         return;
     }
     let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else { return };
     let def_id = obj::meta_get_string(&block.meta, "agentId", "");
-    if !def_id.is_empty() {
-        EPISODES.lock().remove(&format!("agent:{def_id}"));
+    if def_id.is_empty() {
+        return;
+    }
+    let key = format!("agent:{def_id}");
+    if EPISODES.lock().remove(&key).is_some() {
+        if let Some(broker) = broker {
+            take_down_note(broker, &key);
+        }
     }
 }
 

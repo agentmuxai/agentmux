@@ -205,9 +205,9 @@ async fn a_standalone_agents_next_failure_is_news_again_after_a_turn_that_worked
 
     assert!(on_failure(&state.mstore, &state.event_bus, &block, &failure, now).is_some(), "the first failure opens the episode");
     assert!(on_failure(&state.mstore, &state.event_bus, &block, &failure, now + 1).is_none(), "a second is the same episode");
-    turn_succeeded(&state.mstore, &block);
+    turn_succeeded(&state.mstore, Some(&state.broker), &block);
     assert!(on_failure(&state.mstore, &state.event_bus, &block, &failure, now + 2).is_some(), "after a turn that worked it is news again");
-    turn_succeeded(&state.mstore, &block);
+    turn_succeeded(&state.mstore, Some(&state.broker), &block);
 }
 
 #[tokio::test]
