@@ -48,8 +48,7 @@ mod sign_in;
 mod supervisor;
 use delivery::{claim_and_deliver, PendingResp};
 use session::{SessionLimits, Watchdog};
-use sign_in::{refreshed_same_account, usable_or_refreshable, wait_for_sign_in};
-use supervisor::beat;
+use sign_in::{refreshed_same_account, token_for_loop, usable_or_refreshable, wait_for_sign_in};
 
 // The relay's WebSocket endpoint has its own domain, and the handshake is at
 // the domain root: no path suffix. The relay side is designed in the private
@@ -495,7 +494,7 @@ async fn run_loop(
             delay_secs = RECONNECT_DELAY_SECS;
             continue;
         }
-        let token = match load_valid_token(&mstore, &scheduler).await {
+        let token = match token_for_loop(&mstore, &scheduler).await {
             Some(t) => t,
             None if !has_stored_creds => {
                 // Nothing usable: the broker now knows (NeedsReauth), and the
@@ -1333,7 +1332,6 @@ pub(crate) async fn load_valid_token(
     mstore: &Arc<Store>,
     scheduler: &crate::broker::RefreshScheduler,
 ) -> Option<String> {
-    beat();
     if let Err(e) = scheduler.ensure_fresh(crate::muxbus::CREDENTIAL_ID).await {
         tracing::warn!(error = %e, "cloud_subscriber: token refresh failed");
     }

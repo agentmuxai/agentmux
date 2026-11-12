@@ -241,3 +241,13 @@ async fn a_loop_that_keeps_stamping_is_left_alone() {
     assert_eq!(starts.load(Ordering::SeqCst), 1, "a loop that is making progress is not restarted");
     supervisor.abort();
 }
+
+#[tokio::test]
+async fn the_loops_token_call_stamps_its_progress() {
+    let scheduler = crate::broker::RefreshScheduler::new();
+    scheduler.register(crate::muxbus::CREDENTIAL_ID, || Box::pin(async { true }), || Box::pin(async { Ok(()) })).await;
+    let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+    supervisor::LOOP_BEAT.store(0, Ordering::Relaxed);
+    sign_in::token_for_loop(&mstore, &scheduler).await;
+    assert!(supervisor::LOOP_BEAT.load(Ordering::Relaxed) > 0, "the loop stamped after its token call");
+}

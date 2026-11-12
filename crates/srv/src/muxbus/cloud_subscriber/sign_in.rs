@@ -5,12 +5,23 @@
 //! or refreshed, whether a refresh came back for the same account, and a wait for
 //! a new sign-in.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
 
 use super::supervisor::beat;
 use super::CtrlMsg;
+use crate::backend::storage::store::Store;
+
+/// [`super::load_valid_token`] for the subscriber's own loop, which stamps its progress once the
+/// call returns. Only code that runs in the loop may stamp: the helper is shared with callers
+/// elsewhere, and a stamp from them would hide a stalled loop.
+pub(super) async fn token_for_loop(mstore: &Arc<Store>, scheduler: &crate::broker::RefreshScheduler) -> Option<String> {
+    let token = super::load_valid_token(mstore, scheduler).await;
+    beat();
+    token
+}
 
 /// A loaded sign-in that can be used now or refreshed: a valid access token,
 /// or a refresh token (all a torn sign-in keeps, see `storage::muxbus`).
