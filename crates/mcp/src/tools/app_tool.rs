@@ -281,22 +281,80 @@ async fn remote_history_reclaim(arguments: &Value, cx: &ToolCtx<'_>, host: &str)
     Ok(format!("On {host}: {}", describe_reclaim(&answer["result"], &what)))
 }
 
-/// `logs`: the last lines of AgentMux's own srv or host log on another machine (`app.logs.tail`).
-/// Without a `host` there is nothing to fetch: your own logs are on this machine, readable with the muxlog tool.
+/// `logs`: the last lines of AgentMux's own srv or host log, on another machine (`app.logs.tail`) or, without a
+/// `host`, on this one (`GET /api/v1/app/logs`: through srv, so a container agent reads it too).
+/// `level` and `contains` are applied before the last `lines` are taken.
 async fn logs(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
-    let Some(host) = remote_op::host_arg(arguments) else {
-        anyhow::bail!("App logs reads another machine's AgentMux log: name it with host. Your own logs are on this machine (muxlog).");
-    };
     let which = str_arg(arguments, "log").unwrap_or_else(|| "srv".to_string());
     let mut params = json!({ "which": which });
     if let Some(n) = arguments.get("lines").and_then(Value::as_u64) {
         params["lines"] = json!(n);
     }
-    let answer = ask_with(arguments, cx, &host, "app.logs.tail", params).await?;
-    let r = &answer["result"];
+    for key in ["level", "contains"] {
+        if let Some(v) = str_arg(arguments, key).filter(|v| !v.trim().is_empty()) {
+            params[key] = json!(v);
+        }
+    }
+    let Some(host) = remote_op::host_arg(arguments) else {
+        let url = format!("{}/api/v1/app/logs", cx.local_url.trim_end_matches('/'));
+        let mut query = vec![("log", which.clone())];
+        if let Some(n) = params.get("lines").and_then(Value::as_u64) {
+            query.push(("lines", n.to_string()));
+        }
+        for key in ["level", "contains"] {
+            if let Some(v) = params.get(key).and_then(Value::as_str) {
+                query.push((key, v.to_string()));
+            }
+        }
+        let resp = cx
+            .client
+            .get(&url)
+            .header(AUTH_KEY_HEADER, cx.auth_key)
+            .query(&query)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+        let status = resp.status();
+        let body: Value = resp.json().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            anyhow::bail!("App logs: srv answered {status}: {}", s(&body, "error"));
+        }
+        return Ok(describe_logs("This machine's", &params, &body));
+    };
+    let answer = ask_with(arguments, cx, &host, "app.logs.tail", params.clone()).await?;
+    Ok(describe_logs(&format!("{host}'s"), &params, &answer["result"]))
+}
+
+/// A log read in words: which log, what was asked of it, how many lines passed and how many came back.
+fn describe_logs(whose: &str, asked: &Value, r: &Value) -> String {
     let note = if r["shortened"].as_bool() == Some(true) { " (shortened to fit)" } else { "" };
-    Ok(format!("{host}'s {} log, last {} lines{note}:
-{}", s(r, "which"), r["lines"], s(r, "text")))
+    let mut filters = Vec::new();
+    if let Some(level) = asked["level"].as_str() {
+        filters.push(format!("level {level} or above"));
+    }
+    if let Some(text) = asked["contains"].as_str() {
+        filters.push(format!("containing {text:?}"));
+    }
+    // An AgentMux from before the filters says nothing of what it searched.
+    let searched = match r["searched"].as_u64() {
+        Some(n) => {
+            let scope = if r["whole_file"].as_bool() == Some(true) { "the whole file".to_string() } else { format!("the last {:.1} MB of the file", r["searched_bytes"].as_u64().unwrap_or(0) as f64 / 1_048_576.0) };
+            format!(" {} of {n} lines in {scope} matched;", r["matched"].as_u64().unwrap_or(0))
+        }
+        None => String::new(),
+    };
+    // An AgentMux from before the filters ignores them and returns its plain last lines: do not say they were filtered.
+    if !filters.is_empty() && r["searched"].is_null() {
+        return format!(
+            "{whose} {} log, {} returned. That AgentMux is from before the filters and ignored {}: these are its last lines, unfiltered:\n{}",
+            s(r, "which"),
+            r["lines"],
+            filters.join(" and "),
+            s(r, "text")
+        );
+    }
+    let what = if filters.is_empty() { String::new() } else { format!(" ({})", filters.join(", ")) };
+    format!("{whose} {} log{what},{searched} {} returned{note}:\n{}", s(r, "which"), r["lines"], s(r, "text"))
 }
 
 /// `disk`: what AgentMux filled on another machine's disk (`app.disk.report`), measured there and deleting nothing.
@@ -609,6 +667,30 @@ mod tests {
         assert!(!text.contains("Nothing AgentMux has checked is down") && text.contains("may be the network"), "{text}");
 
         assert_eq!(describe_network(&json!({ "services": [] }), now), "AgentMux hasn't checked the network yet.");
+    }
+
+    #[test]
+    fn a_log_read_says_what_was_asked_how_much_was_searched_and_how_many_matched() {
+        let filtered = json!({ "which": "host", "lines": 2, "matched": 7, "searched": 30000, "searched_bytes": 4194304, "whole_file": false, "text": "a\nb" });
+        let asked = json!({ "level": "warn", "contains": "store" });
+        assert_eq!(
+            describe_logs("Area54's", &asked, &filtered),
+            "Area54's host log (level warn or above, containing \"store\"), 7 of 30000 lines in the last 4.0 MB of the file matched; 2 returned:\na\nb"
+        );
+        let plain = json!({ "which": "srv", "lines": 1, "matched": 1, "searched": 1, "searched_bytes": 90, "whole_file": true, "shortened": true, "text": "x" });
+        assert_eq!(
+            describe_logs("This machine's", &json!({}), &plain),
+            "This machine's srv log, 1 of 1 lines in the whole file matched; 1 returned (shortened to fit):\nx"
+        );
+        // An AgentMux from before the filters says nothing of what it searched.
+        let old = json!({ "which": "srv", "lines": 3, "text": "x" });
+        assert_eq!(describe_logs("Old's", &json!({}), &old), "Old's srv log, 3 returned:\nx");
+        // ...and when a filter was asked of it, the answer says the filter was not applied.
+        let asked = json!({ "level": "warn", "contains": "store" });
+        assert_eq!(
+            describe_logs("Old's", &asked, &old),
+            "Old's srv log, 3 returned. That AgentMux is from before the filters and ignored level warn or above and containing \"store\": these are its last lines, unfiltered:\nx"
+        );
     }
 
     #[test]

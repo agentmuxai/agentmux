@@ -244,6 +244,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/agent/routes"), Audience::Everyone),
     (Match::Route("/api/v1/app/connectivity"), Audience::Everyone),
     (Match::Route("/api/v1/app/health"), Audience::Everyone),
+    (Match::Route("/api/v1/app/logs"), Audience::Everyone),
     (Match::Route("/api/v1/app/update-status"), Audience::Everyone),
     (Match::Route("/api/v1/attachments/:id/:kind"), Audience::Everyone),
     (Match::Route("/api/v1/attachments/upload"), Audience::Everyone),
