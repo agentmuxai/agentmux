@@ -605,6 +605,10 @@ async fn a_whole_card_is_filled_after_one_question_and_no_value_reaches_the_agen
         assert!(!activity_text(&s).contains(secret), "{}", activity_text(&s));
     }
     assert_eq!(body["data"]["value"], "[secret: hidden]");
+    // The brand, last four and expiry are in the person's approval only, never in what the agent gets.
+    for shown_to_the_person in ["1111", "Visa", "expires", "03/99"] {
+        assert!(!body.to_string().contains(shown_to_the_person), "{shown_to_the_person}: {body}");
+    }
     assert!(!s.state.identity_store.vault_grant_check(&card, "https://shop.example").unwrap(), "once is once");
 }
 

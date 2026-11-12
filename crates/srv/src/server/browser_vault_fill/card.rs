@@ -156,8 +156,8 @@ async fn fill_all(state: &AppState, block_id: &str, origin: &str, fields: &[Card
 
 fn answer(card: &CardTarget, origin: &str, done: &Outcome) -> Value {
     let mut out = json!({
+        // The entry's id and part names only: the brand, last four and expiry are the person's to see.
         "filled_from_vault": card.fill.id,
-        "card": card.describe(),
         "parts_filled": done.filled,
         "value": "[secret: hidden]",
         "site": origin,
