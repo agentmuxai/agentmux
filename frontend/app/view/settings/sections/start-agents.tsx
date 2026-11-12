@@ -10,17 +10,16 @@ import type { JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
 import { SettingRow, ToggleControl, set } from "../settings-controls";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
-export const START_AGENTS_SETTING = {
+export const START_AGENTS_SETTING = settingEntry({
     id: "agents.may_start_agents",
-    label: "Agents may start agents",
-    description:
-        "Off by default. The first time an agent starts another agent, its pane shows a card with a 30 second countdown that goes ahead on its own: Stop it, Start now, or Always allow that agent. Turn this on to skip the card for every agent; its pane still shows a one-line notice.",
+    labelKey: "settings.agents.startAgents.label",
+    descriptionKey: "settings.agents.startAgents.description",
     section: "agents",
-    group: "Starting agents",
+    groupKey: "settings.agents.group.startingAgents",
     keywords: ["start agents", "spawn", "workers", "create agent", "countdown", "approval", "autonomy", "agent:maystartagents"],
-} satisfies SettingsIndexEntry;
+});
 
 export function StartAgents(): JSX.Element {
     const settings = () => settingsAtom() ?? ({} as Record<string, unknown>);

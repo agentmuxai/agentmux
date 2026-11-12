@@ -5,6 +5,7 @@
 // drive desktop apps (desktop-driving.tsx), whether starting agents shows a card (start-agents.tsx), what an agent pane shows by default (agent-view-setting.tsx), and their ids: forks whose id an older
 // build chained, and updating them (fork-slug-migration.tsx).
 
+import { t } from "@/app/i18n/i18n";
 import type { JSX } from "solid-js";
 
 import { SectionHeader } from "../settings-controls";
@@ -25,13 +26,13 @@ export const AGENTS_SETTINGS = {
 export function AgentsSection(): JSX.Element {
     return (
         <div class="settings-section-body">
-            <SectionHeader label="Desktop driving" />
+            <SectionHeader label={t("settings.agents.group.desktopDriving")} />
             <DesktopDriving />
-            <SectionHeader label="Starting agents" />
+            <SectionHeader label={t("settings.agents.group.startingAgents")} />
             <StartAgents />
-            <SectionHeader label="Agent view" />
+            <SectionHeader label={t("settings.agents.group.agentView")} />
             <AgentViewSetting />
-            <SectionHeader label="Agent ids" />
+            <SectionHeader label={t("settings.agents.group.agentIds")} />
             <ForkSlugMigration />
         </div>
     );

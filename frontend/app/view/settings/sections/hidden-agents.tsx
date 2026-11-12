@@ -12,17 +12,16 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { createDomainStore } from "@/app/store/domain-store";
 import { RpcApi, type AgentDefinition } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 import { sortByLastUsed } from "@/app/view/agent/agent-recency";
 
-export const HIDDEN_AGENTS_SETTING = {
+export const HIDDEN_AGENTS_SETTING = settingEntry({
     id: "devices.hidden_agents",
-    label: "Hidden from devices",
-    description:
-        "Agents kept off paired devices: they are left out of a device's list and can't be watched from one. Add an agent to hide it, or remove it to show it again.",
+    labelKey: "settings.devices.hiddenAgents.label",
+    descriptionKey: "settings.devices.hiddenAgents.description",
     section: "devices",
     keywords: ["hide", "hidden", "agent", "device", "mobile", "paired", "private", "watch", "viewer"],
-} satisfies SettingsIndexEntry;
+});
 
 const agentName = (agent: AgentDefinition) => agent.name || agent.slug || agent.id;
 
