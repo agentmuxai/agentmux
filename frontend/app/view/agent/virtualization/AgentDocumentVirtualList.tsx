@@ -65,7 +65,7 @@ import { useScrollMemo } from "./scroll-memo";
 import { useListZoomAnchor } from "./zoom-anchor-adapter";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import { blockAgentName } from "@/app/block/block-agent-name";
-import { logShowCover } from "@/app/block/pane-cover-log";
+import { liftedEarlyLine, logShowCover } from "@/app/block/pane-cover-log";
 import { useSearchPaint } from "../search/search-paint";
 import {
     initialStickyFrontierId,
@@ -1183,9 +1183,16 @@ function useOneWayFlow(props: AgentDocumentVirtualListProps, s: ListState): Acce
         note: (label) => noteOneWay(s.paneTag(), label),
     });
     onCleanup(() => s.oneWayFlow.dispose());
-    const showCovered = useSettleOnShow(s.oneWayFlow, props.viewState.stickToBottom, { changes: props.viewState.nodes, observe: () => [s.virtualContainerRef, s.streamingBufferRef] });
+    const agentName = blockAgentName(props.blockId);
+    const showCovered = useSettleOnShow(s.oneWayFlow, props.viewState.stickToBottom, {
+        changes: props.viewState.nodes,
+        observe: () => [s.virtualContainerRef, s.streamingBufferRef],
+        onLift: (why, frames, ms) => {
+            if (why !== "still" && props.blockId) console.info("[pane-cover]", liftedEarlyLine(props.blockId, why, frames, ms, agentName()));
+        },
+    });
     s.showCoveredNow = () => untrack(showCovered);
-    logShowCover(props.blockId, showCovered, blockAgentName(props.blockId));
+    logShowCover(props.blockId, showCovered, agentName);
     onMount(() => {
         if (s.scrollRef) {
             s.oneWayFlow.attach(s.scrollRef, [s.virtualContainerRef, s.streamingBufferRef]);
