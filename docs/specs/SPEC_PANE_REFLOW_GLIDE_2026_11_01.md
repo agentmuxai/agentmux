@@ -1,9 +1,10 @@
 # SPEC: Panes glide into place when the layout changes (close first), like the My agents rows
 
+**Status:** active. Approved by the operator on 2026-11-12 (D1 to D5 as recommended). PR 1 (the trigger, close and move-away) is built; PR 2 is not. Three points changed in the build, agreed with Agent2 from what the drag's reflow taught (§6.1, §6.2): a pass holds each tile at its old rectangle for one frame, terminals are held for the pass, and a pass never opens over what a drag shows
+
 - **Date:** 2026-11-01, **revised 2026-11-11** against `origin/main` 63848b092 (v0.60.24 plus the day's merges)
 - **Author:** Camper@narko
 - **Task:** #15458 (spec); the build (#15459) starts after approval
-- **Status:** approved by the operator on 2026-11-12 (D1 to D5 as recommended). PR 1 (the trigger, close and move-away) is built; PR 2 is not. Three points changed in the build, agreed with Agent2 from what the drag's reflow taught (§6.1, §6.2): a pass holds each tile at its old rectangle for one frame, terminals are held for the pass, and a pass never opens over what a drag shows
 - **Area:** `frontend/layout/` only. No Rust.
 - **Builds on:** the live reflow of a pane drag, [`SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md`](SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md) and [`REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md`](../reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md) (Agent2), which is on main and on by default since 2026-11-11. Its §4 names this task: a close, a drop, a minimize and a drag are to move panes the same way, through one helper.
 - **Research:** [`REPORT_PANE_CLOSE_ANIMATION_BEST_PRACTICE_2026_11_11.md`](../reports/REPORT_PANE_CLOSE_ANIMATION_BEST_PRACTICE_2026_11_11.md) (#29004): what should move on a close, how fast and with what curve.

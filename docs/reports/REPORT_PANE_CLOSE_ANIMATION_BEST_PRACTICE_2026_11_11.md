@@ -1,5 +1,7 @@
 # REPORT: Closing a pane: what should move, how fast, and with what curve
 
+**Status:** analysis. Research for #29004; its recommendation is built by `SPEC_PANE_REFLOW_GLIDE_2026_11_01.md`, where the closed pane's frame fades over the glide's own length (160 ms), not the 100 ms proposed here.
+
 - **Date:** 2026-11-11
 - **Author:** Camper@narko
 - **Task:** #29004 (research). The design it leads to is [`SPEC_PANE_REFLOW_GLIDE_2026_11_01.md`](../specs/SPEC_PANE_REFLOW_GLIDE_2026_11_01.md) (#15458, revised the same day); the build is #15459.
