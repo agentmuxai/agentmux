@@ -23,7 +23,7 @@
 //!
 //! Cost controls:
 //!   - only agents whose controller is running (`STATUS_RUNNING`) and that have no usable title;
-//!   - no agent on a model server of its own: no ambient call is made for it, so none is tried;
+//!   - no agent on a model server of its own or on a model route ([`crate::ambient::cli::recovery_skips`]);
 //!   - only agents whose `output` is in a shape the digest can read
 //!     (`digest::reads_output_format`); another provider's file holds no
 //!     conversation it can find;
@@ -161,9 +161,9 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                 attempts.lock().unwrap().remove(&block_id);
                 continue;
             }
-            // No ambient call is made for an agent on a model server of its own: nothing to try, nothing to count as failed.
+            // None for an agent on a model server of its own (no ambient call is made) or on a model route: nothing to try, nothing to count as failed.
             let readable = digest::reads_output_format(&obj::meta_get_string(&block.meta, "agentOutputFormat", ""));
-            if !readable || crate::ambient::cli::has_own_model_server(&block.meta) {
+            if !readable || crate::ambient::cli::recovery_skips(&block.meta) {
                 continue;
             }
             // The agent's own zone when it has content (the copy the pane reads),
