@@ -343,6 +343,16 @@ fn describe_logs(whose: &str, asked: &Value, r: &Value) -> String {
         }
         None => String::new(),
     };
+    // An AgentMux from before the filters ignores them and returns its plain last lines: do not say they were filtered.
+    if !filters.is_empty() && r["searched"].is_null() {
+        return format!(
+            "{whose} {} log, {} returned. That AgentMux is from before the filters and ignored {}: these are its last lines, unfiltered:\n{}",
+            s(r, "which"),
+            r["lines"],
+            filters.join(" and "),
+            s(r, "text")
+        );
+    }
     let what = if filters.is_empty() { String::new() } else { format!(" ({})", filters.join(", ")) };
     format!("{whose} {} log{what},{searched} {} returned{note}:\n{}", s(r, "which"), r["lines"], s(r, "text"))
 }
@@ -675,6 +685,12 @@ mod tests {
         // An AgentMux from before the filters says nothing of what it searched.
         let old = json!({ "which": "srv", "lines": 3, "text": "x" });
         assert_eq!(describe_logs("Old's", &json!({}), &old), "Old's srv log, 3 returned:\nx");
+        // ...and when a filter was asked of it, the answer says the filter was not applied.
+        let asked = json!({ "level": "warn", "contains": "store" });
+        assert_eq!(
+            describe_logs("Old's", &asked, &old),
+            "Old's srv log, 3 returned. That AgentMux is from before the filters and ignored level warn or above and containing \"store\": these are its last lines, unfiltered:\nx"
+        );
     }
 
     #[test]

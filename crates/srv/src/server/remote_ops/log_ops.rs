@@ -96,11 +96,13 @@ fn parse_level(name: &str) -> Option<Level> {
 /// The level a log line carries: the logs are JSON lines with `"level":"INFO"` near the start. A line
 /// that has none (a wrapped continuation, text from a child process) has no level.
 fn level_of(line: &str) -> Option<Level> {
-    const KEY: &str = "\"level\":\"";
-    let head = line.get(..line.len().min(160))?;
-    let from = head.find(KEY)? + KEY.len();
-    let name: String = head[from..].chars().take_while(|c| *c != '"').collect();
-    match name.to_ascii_uppercase().as_str() {
+    const KEY: &[u8] = b"\"level\":\"";
+    // Bytes, not a str slice: byte 160 may fall inside a multi-byte character of a long message.
+    let bytes = line.as_bytes();
+    let head = &bytes[..bytes.len().min(160)];
+    let from = head.windows(KEY.len()).position(|w| w == KEY)? + KEY.len();
+    let name: Vec<u8> = head[from..].iter().copied().take_while(|b| *b != b'"').collect();
+    match String::from_utf8_lossy(&name).to_ascii_uppercase().as_str() {
         "TRACE" => Some(Level::Trace),
         "DEBUG" => Some(Level::Debug),
         "INFO" => Some(Level::Info),
@@ -310,6 +312,16 @@ mod tests {
         assert_eq!(levels("info"), [Some(Level::Info), Some(Level::Warn), Some(Level::Error)]);
         assert_eq!(picked(&lines, Some("debug"), None, 10).1, 4, "a line with no level is not a debug line");
         assert_eq!(picked(&lines, None, None, 10).1, 5, "with no level asked for, it stays");
+    }
+
+    #[test]
+    fn a_long_line_with_non_ascii_text_still_has_its_level() {
+        // The level sits early; byte 160 falls inside a multi-byte character of the message after it.
+        let message = format!("{}é{}", "x".repeat(87), "y".repeat(40));
+        let text = line("WARN", &message);
+        assert!(!text.is_char_boundary(160), "the test line must have a character straddling byte 160");
+        assert_eq!(level_of(&text), Some(Level::Warn));
+        assert_eq!(picked(&[text], Some("warn"), None, 10).1, 1);
     }
 
     #[test]
