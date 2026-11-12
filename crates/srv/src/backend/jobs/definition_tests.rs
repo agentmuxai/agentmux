@@ -91,13 +91,10 @@ fn a_drone_action_needs_a_drone_and_takes_no_other_field() {
     ok["policy"] = json!({ "overlap": "skip" });
     let def = JobDefinition::parse(&ok, create()).unwrap();
     assert_eq!(def.action, Action::Drone { drone_id: "d-1".into() });
-    assert!(!def.action.starts_an_agent());
+    assert!(def.action.starts_an_agent(), "a drone can run Agent blocks: the caps and the 15-minute floor apply");
     // The example's policy asks for retries and a timeout, which a drone run can't have yet.
     let drone = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" }));
     assert!(refused(drone).contains("timeout_minutes"));
-    let mut capped = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" }));
-    capped["policy"] = json!({ "overlap": "skip", "caps": { "day_usd": 0 } });
-    assert!(refused(capped).contains("can't be capped yet"));
     let blank = with(example(), "/action", json!({ "kind": "drone", "drone_id": " " }));
     assert_eq!(refused(blank), "action: drone needs a drone_id");
     let extra = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1", "brief": "x" }));

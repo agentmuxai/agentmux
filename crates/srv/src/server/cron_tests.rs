@@ -574,8 +574,6 @@ async fn a_drone_job_refuses_policies_that_need_a_stoppable_run() {
         json!({ "timeout_minutes": 5 }),
         json!({ "retries": 1 }),
         json!({ "overlap": "cancel_other" }),
-        json!({ "caps": { "day_usd": 0 } }),
-        json!({ "caps": { "run_usd": 5 } }),
     ] {
         let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(policy.clone()))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{policy}: {v}");

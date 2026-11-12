@@ -32,9 +32,11 @@ pub fn group_of(job: &CronJob) -> Option<String> {
 }
 
 /// Whether a run of the job is an agent working unattended: a message starts
-/// a turn, a spawn starts a worker. Filing a task starts nothing.
+/// a turn, a spawn starts a worker, a drone can run Agent blocks. Filing a
+/// task starts nothing. A job for which this holds is under the spending
+/// caps and the limit on agents running at once.
 pub fn starts_an_agent(job: &CronJob) -> bool {
-    matches!(job.action_kind.as_str(), "" | "message" | "spawn")
+    matches!(job.action_kind.as_str(), "" | "message" | "spawn" | "drone")
 }
 
 /// Who is running, as the ledger found it, for one job's next run.

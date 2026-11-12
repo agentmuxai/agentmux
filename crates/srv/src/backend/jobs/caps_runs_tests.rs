@@ -410,6 +410,19 @@ async fn a_task_spends_nothing_so_no_cap_holds_it() {
     assert!(matches!(fired.outcome, Some(FireOutcome::Delivered { .. })), "{fired:?}");
 }
 
+/// A drone can run Agent blocks, so its job is held by the caps as an agent
+/// job is: no room left today, no run.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_job_is_held_by_the_daily_cap_like_an_agent_job() {
+    let rig = rig();
+    rig.sched.install_actions(Arc::new(|_, _| Box::pin(async { ActionOutcome::Drone })));
+    let none = make(&rig, "j-drone-0", 5.0, 0.0, |j| j.action_kind = "drone".into());
+    assert_eq!(rig.sched.fire(&none, slot(0)).await.run_id, None, "a zero daily cap leaves no room");
+    let roomy = make(&rig, "j-drone-1", 5.0, 20.0, |j| j.action_kind = "drone".into());
+    let fired = rig.sched.fire(&roomy, slot(0)).await;
+    assert!(matches!(fired.outcome, Some(FireOutcome::Delivered { .. })), "{fired:?}");
+}
+
 // ── a pending fire ──────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
