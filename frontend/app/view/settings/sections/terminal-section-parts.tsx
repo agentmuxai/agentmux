@@ -7,6 +7,7 @@
 import { Select, TextInput } from "@/app/element/ui";
 import { For, Show, type JSX } from "solid-js";
 
+import { t } from "@/app/i18n/i18n";
 import { fullConfigAtom, settingsAtom } from "@/app/store/global";
 import { NumberControl, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
 import { DefaultShellSetting } from "./default-shell";
@@ -49,7 +50,7 @@ export function ShellAndTextGroup(): JSX.Element {
                         class="setting-text"
                         type="text"
                         value={(s()["term:fontfamily"] as string) ?? ""}
-                        placeholder="Hack, Consolas, monospace"
+                        placeholder={"Hack, Consolas, monospace"}
                         onBlur={(e) => set("term:fontfamily", e.currentTarget.value)}
                     />
                 }
@@ -64,7 +65,7 @@ export function ShellAndTextGroup(): JSX.Element {
                             value={(s()["term:theme"] as string) ?? ""}
                             onChange={(v) => set("term:theme", v || null)}
                         >
-                            <option value="">Default</option>
+                            <option value="">{t("settings.terminal.theme.default")}</option>
                             <For each={termThemes()}>
                                 {([key, theme]) => <option value={key}>{theme["display:name"] ?? key}</option>}
                             </For>
@@ -138,9 +139,9 @@ export function SshGroup(): JSX.Element {
                             set("term:durable", v === "on" ? true : v === "off" ? false : null);
                         }}
                     >
-                        <option value="auto">On, else a plain terminal</option>
-                        <option value="on">Always (needs the helper)</option>
-                        <option value="off">Never</option>
+                        <option value="auto">{t("settings.terminal.durable.auto")}</option>
+                        <option value="on">{t("settings.terminal.durable.on")}</option>
+                        <option value="off">{t("settings.terminal.durable.off")}</option>
                     </Select>
                 }
             />
@@ -157,9 +158,9 @@ export function SshGroup(): JSX.Element {
                             set("conn:helper", v === "ask" ? null : v);
                         }}
                     >
-                        <option value="ask">Ask first</option>
-                        <option value="always">Always</option>
-                        <option value="never">Never</option>
+                        <option value="ask">{t("settings.terminal.helper.ask")}</option>
+                        <option value="always">{t("settings.terminal.helper.always")}</option>
+                        <option value="never">{t("settings.terminal.helper.never")}</option>
                     </Select>
                 }
             />
