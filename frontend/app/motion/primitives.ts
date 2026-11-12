@@ -373,13 +373,17 @@ function cutRight(layer: HTMLElement, x: number | undefined): void {
  * place reaches past it, and not cut when it does not. `remove` ends the frames and takes the layers away.
  */
 function copyClipper(clipRight: MergeOptions["clipRight"]) {
-    const slots: { layer: HTMLElement; el: Element }[] = [];
+    const slots: { layer: HTMLElement; el: Element; limit?: number }[] = [];
     let frame: number | undefined;
     const apply = () => {
-        for (const { layer, el } of slots) {
-            const limit = clipRight?.(el);
-            const cut = limit !== undefined && Number.isFinite(limit) && el.getBoundingClientRect().right > limit;
-            cutRight(layer, cut ? limit : undefined);
+        for (const slot of slots) {
+            // The edge only moves out while the panes glide into their new sizes (the destination takes the space of
+            // the pane that left), so the furthest it has been is the one to keep: a frame that reads it short (the
+            // layout is in the middle of a change) must not cut a copy that fits.
+            const read = clipRight?.(slot.el);
+            if (read !== undefined && Number.isFinite(read)) slot.limit = Math.max(slot.limit ?? read, read);
+            const cut = slot.limit !== undefined && slot.el.getBoundingClientRect().right > slot.limit;
+            cutRight(slot.layer, cut ? slot.limit : undefined);
         }
     };
     const eachFrame = () => {

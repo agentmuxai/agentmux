@@ -501,6 +501,20 @@ describe("mergeInto", () => {
         expect(clipOf(copy)).toContain("1400px");
     });
 
+    it("keeps the furthest the edge has been: a frame that reads it short does not cut a copy that fits", async () => {
+        const rect = { left: 628, top: 10, width: 104, height: 20, right: 732, bottom: 30 };
+        const el = div();
+        el.getBoundingClientRect = () => rect as DOMRect;
+        let limit = 1044;
+        mergeInto([rectOf(0, 0)], [el], { clipRight: () => limit, land: () => {} });
+        const copy = fake.calls[0].el;
+        expect(clipOf(copy)).toBe("none");
+        // The destination's edge reads 649 for a frame while the layout moves: the place (right edge 732) would be past it.
+        limit = 649;
+        await new Promise((r) => setTimeout(r, 40));
+        expect(clipOf(copy)).toBe("none");
+    });
+
     it("takes the layers away when it is cancelled, and uses the page when there is no limit function", async () => {
         const cancelled = mergeInto([rectOf(0, 0)], [at(700, 10)], { clipRight: () => 640 });
         const layer = fake.calls[0].el.parentElement as HTMLElement;
