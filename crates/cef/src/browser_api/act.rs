@@ -802,6 +802,14 @@ pub async fn snapshot_route(
             }
         }
     }
+    // The dropdown an option is in says whether its choice was filled from the Vault.
+    for b in snapshot::option_owners(&nodes, &in_scope) {
+        if facts.len() < MAX_DESCRIBES && !facts.contains_key(&b) {
+            if let Some(f) = describe_markup(&mut cdp, b).await {
+                facts.insert(b, f);
+            }
+        }
+    }
     let url = page_url(&mut cdp).await;
     // A scope by name has no reference to prefix with: its references are
     // numbered like a find's, which can't clash with any other.
@@ -893,7 +901,13 @@ pub async fn find_route(
         snapshot::VALUE_ROLES.contains(&role) || role == "button"
     };
     let mut facts = HashMap::new();
-    for n in snapshot::find_candidates(&nodes, q).into_iter().filter(needs_facts).take(MAX_FIND_DESCRIBES) {
+    let candidates = snapshot::find_candidates(&nodes, q);
+    for b in snapshot::option_owners(&nodes, &candidates).into_iter().take(MAX_FIND_DESCRIBES) {
+        if let Some(f) = describe_markup(&mut cdp, b).await {
+            facts.insert(b, f);
+        }
+    }
+    for n in candidates.into_iter().filter(needs_facts).take(MAX_FIND_DESCRIBES) {
         if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
             if let Some(f) = describe_markup(&mut cdp, b).await {
                 let name = n.pointer("/name/value").and_then(|v| v.as_str()).unwrap_or("");

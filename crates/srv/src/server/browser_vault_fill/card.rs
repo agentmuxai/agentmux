@@ -230,8 +230,8 @@ async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillReq
 
     // The card leaves the sealed row only now.
     let store = state.identity_store.clone();
-    let (entry, created) = (card.fill.id.clone(), card.fill.created_at);
-    let parts = match tokio::task::spawn_blocking(move || card_target::parts_for_fill(&store, &entry, created)).await {
+    let (entry, created, sealed) = (card.fill.id.clone(), card.fill.created_at, card.sealed.clone());
+    let parts = match tokio::task::spawn_blocking(move || card_target::parts_for_fill(&store, &entry, created, &sealed)).await {
         Ok(Ok(p)) => p,
         Ok(Err(e)) => {
             record(state, block_id, &card.fill, agent, &site, "failed", reason);

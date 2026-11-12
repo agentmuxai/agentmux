@@ -22,6 +22,9 @@ pub struct CardTarget {
     pub expiry: Option<(u32, i32)>,
     /// Past its month: asks every time, and no "Always" covers it.
     pub expired: bool,
+    /// The card's sealed bytes as the approval described them: a card changed while the person
+    /// decides is not the card they said yes to.
+    pub sealed: Vec<u8>,
 }
 
 impl CardTarget {
@@ -75,11 +78,13 @@ pub fn card_target(store: &Store, vault: &str, agent: Option<&str>) -> Result<Op
     let last_four: String = number.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
     let expiry = card::expiry_of(&parts);
     let expired = expiry.is_some_and(|(m, y)| card::expired(m, y, super::expiry::today()));
+    let sealed = row.sealed.clone();
     Ok(Some(CardTarget {
         brand: card::brand(&number),
         last_four,
         expiry,
         expired,
+        sealed,
         fill: FillTarget {
             id: row.id,
             kind: kind.name,
@@ -115,11 +120,14 @@ fn default_card(store: &Store, agent: Option<&str>) -> Result<super::VaultRow, S
 }
 
 /// The card's parts for the host to type, opened only once the person has said yes; never
-/// returned to an agent. Refused if the entry was replaced while they decided.
-pub fn parts_for_fill(store: &Store, id: &str, created_at: i64) -> Result<seal::Parts, String> {
+/// returned to an agent. Refused if the entry was replaced, or its card changed, while they decided.
+pub fn parts_for_fill(store: &Store, id: &str, created_at: i64, sealed: &[u8]) -> Result<seal::Parts, String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
     if row.created_at != created_at {
         return Err(format!("{} was replaced while the person was deciding: nothing was typed", row.label));
+    }
+    if row.sealed != sealed {
+        return Err(format!("{} was changed while the person was deciding, so it isn't the card they approved: nothing was typed", row.label));
     }
     let key = seal::key(false)?;
     seal::open(&key, &row.id, &row.sealed)
@@ -137,7 +145,26 @@ mod tests {
             last_four: last_four.into(),
             expiry,
             expired,
+            sealed: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn a_card_changed_while_the_person_decides_is_not_filled() {
+        use super::super::{create, update, EntryChange, NewEntry};
+        seal::use_test_key();
+        let store = crate::server::tests::test_state().identity_store.clone();
+        let parts = |n: &str| seal::Parts([("number".to_string(), n.to_string()), ("exp_month".to_string(), "03".to_string()), ("exp_year".to_string(), "2099".to_string())].into());
+        let id = create(&store, NewEntry { kind: "card".into(), label: "Probe".into(), fields: Default::default(), tags: vec![], parts: parts("4111111111111111") }).unwrap();
+        let asked = card_target(&store, &id, None).unwrap().expect("a card");
+        assert_eq!(asked.last_four, "1111");
+        // Unchanged: the fill goes ahead with the card that was shown.
+        assert!(parts_for_fill(&store, &id, asked.fill.created_at, &asked.sealed).is_ok());
+        // The person changes the number while the prompt is open: what was approved is not what is there.
+        update(&store, EntryChange { id: id.clone(), label: "Probe".into(), fields: Default::default(), tags: vec![], parts: parts("5555555555554444"), clear: vec![] }).unwrap();
+        let why = parts_for_fill(&store, &id, asked.fill.created_at, &asked.sealed).err().expect("refused");
+        assert!(why.contains("changed while the person was deciding"), "{why}");
+        assert!(!why.contains("5555") && !why.contains("4111"), "{why}");
     }
 
     #[test]
