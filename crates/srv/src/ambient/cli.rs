@@ -79,7 +79,7 @@ pub async fn invoke_haiku(
     let mut child = agentmux_common::process::KillGroupOnDrop(cmd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("failed to spawn the ambient CLI: {e}"))?);
@@ -93,6 +93,10 @@ pub async fn invoke_haiku(
             .map_err(|e| format!("ambient CLI stdin shutdown: {e}"))?;
     }
 
+    // Drained to the end whatever it holds, so a chatty child can't block on a full pipe; only the end is kept, as the
+    // reason an exit that failed is logged with.
+    let stderr_task = child.stderr.take().map(|pipe| tokio::spawn(read_tail(pipe, STDERR_TAIL_BYTES)));
+
     // What the gate wait left of the call's time is all the child gets.
     let budget = timeout;
     let timeout = budget.saturating_sub(began.elapsed());
@@ -103,14 +107,9 @@ pub async fn invoke_haiku(
     // separate task — same rationale `wait_with_output()` itself uses
     // internally — so a chatty response can't fill the OS pipe buffer and
     // deadlock the child waiting to write while nothing is reading.
-    let mut stdout_pipe = child.stdout.take()
+    let stdout_pipe = child.stdout.take()
         .ok_or_else(|| "ambient CLI: no stdout pipe".to_string())?;
-    let stdout_task = tokio::spawn(async move {
-        use tokio::io::AsyncReadExt;
-        let mut buf = Vec::new();
-        let _ = stdout_pipe.read_to_end(&mut buf).await;
-        buf
-    });
+    let stdout_task = tokio::spawn(read_tail(stdout_pipe, usize::MAX));
 
     let status = tokio::select! {
         biased;
@@ -128,7 +127,7 @@ pub async fn invoke_haiku(
     };
 
     if !status.success() {
-        return Err(format!("ambient CLI exited with status {status}"));
+        return Err(exit_error(&status.to_string(), &stderr_tail_of(stderr_task).await));
     }
 
     let stdout_bytes = stdout_task.await
@@ -138,6 +137,52 @@ pub async fn invoke_haiku(
     // tokens, so it comes back as `Ok` with empty text rather than an error that
     // would drop the usage. Callers already treat empty text as "no result".
     Ok(parse_cli_stream(&stdout))
+}
+
+/// How much of the end of the CLI's stderr is kept for a failed exit.
+const STDERR_TAIL_BYTES: usize = 2048;
+/// The most characters of it that go into the error (and so the log).
+const STDERR_LOGGED_CHARS: usize = 200;
+
+/// Read `pipe` to its end, keeping only the last `cap` bytes.
+async fn read_tail(mut pipe: impl tokio::io::AsyncRead + Unpin, cap: usize) -> Vec<u8> {
+    use tokio::io::AsyncReadExt;
+    let mut tail: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        match pipe.read(&mut chunk).await {
+            Ok(0) | Err(_) => return tail,
+            Ok(n) => {
+                tail.extend_from_slice(&chunk[..n]);
+                if tail.len() > cap {
+                    tail.drain(..tail.len() - cap);
+                }
+            }
+        }
+    }
+}
+
+/// What the stderr reader task kept, waiting at most a second for it (the child has exited, so its pipe is closed).
+async fn stderr_tail_of(task: Option<tokio::task::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+    let Some(task) = task else { return Vec::new() };
+    tokio::time::timeout(std::time::Duration::from_secs(1), task).await.ok().and_then(Result::ok).unwrap_or_default()
+}
+
+/// The error for a CLI that exited unsuccessfully: its status, and the end of what it wrote to stderr on one line.
+fn exit_error(status: &str, stderr_tail: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr_tail);
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let count = line.chars().count();
+    if line.is_empty() {
+        return format!("ambient CLI exited with status {status}");
+    }
+    let shown: String = if count > STDERR_LOGGED_CHARS { format!("…{}", line.chars().skip(count - STDERR_LOGGED_CHARS).collect::<String>()) } else { line };
+    format!("ambient CLI exited with status {status}: {shown}")
+}
+
+/// Whether the agent in this block is on a model server of its own, for which no ambient call is made (`ambient_env`).
+pub(crate) fn has_own_model_server(meta: &obj::MetaMapType) -> bool {
+    ambient_env(meta).is_err()
 }
 
 /// The last assistant text block (sanitized) and the usage from a `claude -p
@@ -221,6 +266,38 @@ mod ambient_call_cwd_tests {
         assert!(dir.ends_with("ambient-calls"));
         assert!(dir.starts_with(crate::backend::base::get_mux_data_dir()));
         assert_ne!(Some(dir.as_path()), dirs::home_dir().as_deref());
+    }
+}
+
+#[cfg(test)]
+mod ambient_cli_failure_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn only_the_end_of_what_a_child_writes_is_kept() {
+        let long: Vec<u8> = (0..10_000u32).map(|i| b'a' + (i % 26) as u8).collect();
+        let tail = read_tail(&long[..], 100).await;
+        assert_eq!(tail, long[long.len() - 100..]);
+        assert_eq!(read_tail(&b"short"[..], 100).await, b"short");
+    }
+
+    #[test]
+    fn a_failed_exit_carries_the_end_of_stderr_on_one_line() {
+        let tail = b"Error: not logged in\n  run /login\n";
+        assert_eq!(exit_error("exit code: 1", tail), "ambient CLI exited with status exit code: 1: Error: not logged in run /login");
+        assert_eq!(exit_error("exit code: 1", b""), "ambient CLI exited with status exit code: 1");
+        let long = "x ".repeat(500);
+        let e = exit_error("1", long.as_bytes());
+        assert!(e.chars().count() < 260, "{}", e.chars().count());
+        assert!(e.contains("…"));
+    }
+
+    #[test]
+    fn an_agent_on_a_model_server_of_its_own_is_known_from_its_block() {
+        let mut meta = obj::MetaMapType::new();
+        assert!(!has_own_model_server(&meta));
+        meta.insert("cmd:env".to_string(), serde_json::json!({ "ANTHROPIC_BASE_URL": "http://192.0.2.68:11434" }));
+        assert!(has_own_model_server(&meta));
     }
 }
 

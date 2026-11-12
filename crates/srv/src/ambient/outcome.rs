@@ -106,6 +106,11 @@ fn truncated(text: &str) -> String {
     out.replace('\n', " ⏎ ")
 }
 
+/// Whether an outcome's line carries the text it was given.
+fn keeps_text(outcome: Outcome) -> bool {
+    matches!(outcome, Outcome::Rejected(_) | Outcome::Accepted | Outcome::CliFailed | Outcome::Timeout)
+}
+
 /// How long a call waited and ran, for the outcome line. Both in milliseconds.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Timing {
@@ -124,8 +129,9 @@ pub fn record(purpose: &'static str, entity: &str, outcome: Outcome, text: Optio
 /// Record one outcome: count it, and log it at info with the purpose, the entity
 /// and, when the call ran, how long it queued and ran. `text` is logged
 /// (truncated) for a rejected reply, which is the corpus the validators are tuned
-/// with, and for an accepted one, which is what the user is shown: without it, a
-/// bad answer that passed could not be found afterwards.
+/// with, for an accepted one, which is what the user is shown (without it, a
+/// bad answer that passed could not be found afterwards), and for a failed or
+/// timed-out call, where it is the reason.
 pub fn record_timed(purpose: &'static str, entity: &str, outcome: Outcome, text: Option<&str>, timing: Option<Timing>) {
     if let Ok(mut map) = counts().lock() {
         *map.entry(purpose)
@@ -133,10 +139,7 @@ pub fn record_timed(purpose: &'static str, entity: &str, outcome: Outcome, text:
             .entry(outcome.label())
             .or_default() += 1;
     }
-    let text = match outcome {
-        Outcome::Rejected(_) | Outcome::Accepted => text.map(truncated),
-        _ => None,
-    };
+    let text = if keeps_text(outcome) { text.map(truncated) } else { None };
     let queued_ms = timing.map(|t| t.queued_ms);
     let run_ms = timing.map(|t| t.run_ms);
     tracing::info!(
@@ -197,6 +200,12 @@ mod tests {
         assert_eq!(by["accepted"], 2);
         assert_eq!(by["rejected:format"], 1);
         assert_eq!(by["skipped"], 1);
+    }
+
+    #[test]
+    fn a_failed_call_is_logged_with_its_reason_and_a_skipped_one_without() {
+        assert!(keeps_text(Outcome::CliFailed) && keeps_text(Outcome::Timeout));
+        assert!(!keeps_text(Outcome::Skipped) && !keeps_text(Outcome::NotRun));
     }
 
     #[test]
