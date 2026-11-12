@@ -63,7 +63,7 @@ export function AddAccountSection(props: {
                     <div class="accounts-chooser-modes">
                         <For each={tile.authModes}>
                             {(m) => {
-                                const label = modeLabel(m);
+                                const label = modeLabel(m, tile.id);
                                 return (
                                     <Button tone="neutral" class="accounts-chooser-mode" onClick={() => pick(m)}>
                                         <span class="accounts-chooser-mode-title">{label.title}</span>

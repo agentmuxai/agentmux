@@ -254,7 +254,7 @@ describe("AccountForm: provider and kind", () => {
     });
 
     const kindOptions: [AccountProvider, string[]][] = [
-        ["github", ["oauth", "pat", "api_key"]],
+        ["github", ["oauth", "pat"]],
         ["google", ["oauth"]],
         ["slack", ["oauth"]],
         ["aws", ["role", "env_ref"]],
@@ -270,11 +270,22 @@ describe("AccountForm: provider and kind", () => {
     });
 
     it("keeps a hand-picked kind until the provider changes", () => {
-        renderForm();
-        choose(selectOf("Kind"), "api_key");
-        expect(selectOf("Kind").value).toBe("api_key");
+        renderForm({ preset: { provider: "custom", kind: "api_key" } });
+        choose(selectOf("Kind"), "env_ref");
+        expect(selectOf("Kind").value).toBe("env_ref");
         choose(selectOf("Provider"), "aws");
         expect(selectOf("Kind").value).toBe("role");
+    });
+
+    it("names GitHub's two kinds for what they are, with no separate API key", () => {
+        renderForm({ preset: { provider: "github", kind: "oauth" } });
+        const labels = [...selectOf("Kind").querySelectorAll("option")].map((o) => o.textContent);
+        expect(labels).toEqual(["AgentMux's GitHub App (muxagent)", "Personal access token"]);
+    });
+
+    it("shows a GitHub account saved as an API key as the personal access token", () => {
+        renderForm({ preset: { provider: "github", kind: "api_key" } });
+        expect(selectOf("Kind").value).toBe("pat");
     });
 
     it("shows the provider-specific fields only for their provider", () => {
