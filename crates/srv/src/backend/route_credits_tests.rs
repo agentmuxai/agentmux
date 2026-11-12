@@ -175,6 +175,25 @@ async fn a_402_after_a_switch_during_a_turn_is_the_route_left_not_the_destinatio
     cleared(&state.mstore, &state.event_bus, "left-route");
 }
 
+/// An agent on its own key never passes the gateway, so a turn that works is what ends its episode: the next credits
+/// failure inside the episode's six hours is news again (#47473).
+#[tokio::test]
+async fn a_standalone_agents_next_failure_is_news_again_after_a_turn_that_worked() {
+    let state = crate::server::tests::test_state();
+    let tab = tab(&state).await;
+    let def = format!("solo-{}", uuid::Uuid::new_v4());
+    agent(&state, &def, "Solo");
+    let block = pane(&state, &tab, &def).await;
+    let failure = classify(Some(1), None, NO_CREDITS, None);
+    let now = agentmux_common::time::now_ms_u64();
+
+    assert!(on_failure(&state.mstore, &state.event_bus, &block, &failure, now).is_some(), "the first failure opens the episode");
+    assert!(on_failure(&state.mstore, &state.event_bus, &block, &failure, now + 1).is_none(), "a second is the same episode");
+    turn_succeeded(&state.mstore, &block);
+    assert!(on_failure(&state.mstore, &state.event_bus, &block, &failure, now + 2).is_some(), "after a turn that worked it is news again");
+    turn_succeeded(&state.mstore, &block);
+}
+
 #[tokio::test]
 async fn an_agent_on_no_route_has_an_episode_of_its_own_and_one_that_ran_long_enough_is_let_go() {
     let state = crate::server::tests::test_state();
