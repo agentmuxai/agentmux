@@ -16,7 +16,7 @@ host storeUpdateCheck
     <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
       "Update in the Store"
   <div class="maintenance-row-text maintenance-row-text--dim">
-    "The Store downloads v0.59.27, then AgentMux has to be closed to finish installing it."
+    "The Store downloads v0.59.27. Restart now then installs it and opens AgentMux again."
   <div class="maintenance-row-text maintenance-row-text--error">
     "The Store closed AgentMux to install v0.59.26, but this is still v0.59.25. Try Update in the Store again, or install it from the Microsoft Store app."
   <div class="maintenance-update-row">

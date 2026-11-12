@@ -30,7 +30,7 @@ pub enum UpdateState {
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
     /// `pending` (the Store has not started), `downloading`, `installing` (the Store is deploying the
-    /// package, or waiting to) or `downloaded` (everything is here; only AgentMux being closed is left).
+    /// package, or waiting to) or `asking` (the Store is asking the person to confirm, in its own window).
     pub phase: &'static str,
     /// 0 to 100, or `None` when the Store gave no numbers (the page then keeps its plain line).
     pub percent: Option<u8>,
@@ -61,9 +61,15 @@ pub fn starting() -> Progress {
     Progress { phase: "pending", percent: None, done_bytes: 0, total_bytes: 0 }
 }
 
-/// The download is complete and the Store has the package staged: what is left is for AgentMux to close.
-pub fn downloaded(total_bytes: u64) -> Progress {
-    Progress { phase: "downloaded", percent: Some(100), done_bytes: total_bytes, total_bytes }
+/// The Store has been asked to install and is asking the person through its own window (the install call stays open
+/// until they answer it): the row says so for as long as the call is open.
+pub fn asking() -> Progress {
+    Progress { phase: "asking", percent: None, done_bytes: 0, total_bytes: 0 }
+}
+
+/// The install is under way without a question (the Store may install silently): AgentMux will close and open again.
+pub fn installing() -> Progress {
+    Progress { phase: "installing", percent: None, done_bytes: 0, total_bytes: 0 }
 }
 
 /// Lets a report through only when what the page shows would change: the Store reports many times a second.
@@ -128,10 +134,16 @@ mod tests {
 
     #[test]
     fn the_event_carries_camel_case_fields_for_the_page() {
-        let v = serde_json::to_value(downloaded(5)).unwrap();
-        assert_eq!(v["phase"], "downloaded");
-        assert_eq!(v["percent"], 100);
+        let v = serde_json::to_value(from_status(UpdateState::Downloading, 5, 10, 0.0)).unwrap();
+        assert_eq!(v["phase"], "downloading");
+        assert_eq!(v["percent"], 50);
         assert_eq!(v["doneBytes"], 5);
-        assert_eq!(v["totalBytes"], 5);
+        assert_eq!(v["totalBytes"], 10);
+    }
+
+    #[test]
+    fn asking_and_installing_are_phases_without_numbers() {
+        assert_eq!((asking().phase, asking().percent), ("asking", None));
+        assert_eq!((installing().phase, installing().percent), ("installing", None));
     }
 }

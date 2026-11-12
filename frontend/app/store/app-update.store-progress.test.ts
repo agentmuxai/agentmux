@@ -9,7 +9,19 @@ vi.mock("@/app/store/flash-notifications", () => ({ pushNotification: () => {} }
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { acceptStoreProgress, setStoreProgress, storeProgress, storeProgressLine, storeStagedLine, storeTargetVersion, type StoreOffer } from "./app-update";
+import {
+    acceptStoreProgress,
+    setStoreProgress,
+    STORE_ASKING_WINDOW_LINE,
+    STORE_INSTALLING_LINE,
+    storeDownloadedLine,
+    storeProgress,
+    storeProgressLine,
+    storeRestartAsk,
+    storeStayedLine,
+    storeTargetVersion,
+    type StoreOffer,
+} from "./app-update";
 
 const MB = 1024 * 1024;
 const downloading = (percent: number | null, done = 0, total = 0) => ({ phase: "downloading" as const, percent, doneBytes: done, totalBytes: total });
@@ -27,7 +39,13 @@ describe("the Store's progress line", () => {
     });
 
     it("says installing once the Store is deploying", () => {
-        expect(storeProgressLine({ phase: "installing", percent: null, doneBytes: 0, totalBytes: 0 }, "0.60.25")).toBe("Installing…");
+        expect(storeProgressLine({ phase: "installing", percent: null, doneBytes: 0, totalBytes: 0 }, "0.60.25")).toBe(STORE_INSTALLING_LINE);
+    });
+
+    it("says the Store is asking, and where to look, for as long as it is", () => {
+        const asking = { phase: "asking" as const, percent: null, doneBytes: 0, totalBytes: 0 };
+        expect(storeProgressLine(asking, "")).toBe("The Microsoft Store is asking you to confirm: look for its window.");
+        expect(storeProgressLine(asking, "")).toBe(STORE_ASKING_WINDOW_LINE);
     });
 
     it("gives no line, so the caller keeps its plain one, when there is no report or no numbers", () => {
@@ -43,6 +61,16 @@ describe("taking a report from the host", () => {
         expect(storeProgress()).toEqual({ phase: "downloading", percent: 100, doneBytes: 5, totalBytes: 9 });
         acceptStoreProgress({ phase: "installing", percent: null });
         expect(storeProgress()).toEqual({ phase: "installing", percent: null, doneBytes: 0, totalBytes: 0 });
+    });
+
+    it("keeps saying the Store is asking when its own earlier states arrive after the question", () => {
+        acceptStoreProgress({ phase: "asking", percent: null });
+        acceptStoreProgress({ phase: "pending", percent: null });
+        acceptStoreProgress({ phase: "downloading", percent: 100, doneBytes: 9, totalBytes: 9 });
+        expect(storeProgress()?.phase).toBe("asking");
+        // Once the person answers, the Store deploys: that replaces the question.
+        acceptStoreProgress({ phase: "installing", percent: null });
+        expect(storeProgress()?.phase).toBe("installing");
     });
 
     it("ignores anything malformed", () => {
@@ -62,7 +90,32 @@ describe("the version a Store update will be", () => {
     it("is empty when the Store named none (the 2026-11-12 run left the marker's target empty): GitHub's latest is not guessed", () => {
         expect(storeTargetVersion(offer(""))).toBe("");
         expect(storeTargetVersion(null)).toBe("");
-        expect(storeStagedLine("")).toBe("Downloaded. Close AgentMux to finish; it reopens on the new version.");
-        expect(storeStagedLine("0.60.25")).toBe("Downloaded 0.60.25. Close AgentMux to finish; it reopens on 0.60.25.");
+    });
+});
+
+describe("the downloaded row and the restart question", () => {
+    it("promises a reopen only for Restart now, never for closing AgentMux by hand", () => {
+        const line = storeDownloadedLine("0.60.25");
+        expect(line).toBe("Downloaded 0.60.25. Restart now installs it: AgentMux closes and opens again. Closing AgentMux yourself does not install it.");
+        expect(storeDownloadedLine("")).toContain("Downloaded. Restart now installs it");
+    });
+
+    it("names the agents in the middle of a turn that a restart interrupts", () => {
+        expect(storeRestartAsk(["Vmer"], 3)).toBe(
+            "Restart now closes AgentMux, stops its 3 agents, installs the update and opens AgentMux again. Vmer is in the middle of a turn and will be interrupted.",
+        );
+        expect(storeRestartAsk(["Vmer", "Deke"], 5)).toContain("Vmer and Deke are in the middle of a turn");
+        expect(storeRestartAsk(["A", "B", "C", "D", "E"], 5)).toContain("A, B, C and 2 more are in the middle of a turn");
+    });
+
+    it("still says what a restart closes when nobody is named", () => {
+        expect(storeRestartAsk([], 0)).toBe("Restart now closes AgentMux, stops every agent in it, installs the update and opens AgentMux again.");
+        expect(storeRestartAsk([], 2)).not.toContain("middle of a turn");
+    });
+
+    it("says at the next start that the reopen could not be arranged", () => {
+        const line = storeStayedLine({ state: "stayed", from: "0.60.24", target: "", reopen_failed: true });
+        expect(line).toContain("AgentMux could not arrange to open itself after the update");
+        expect(storeStayedLine({ state: "stayed", from: "0.60.24", target: "" })).not.toContain("could not arrange");
     });
 });

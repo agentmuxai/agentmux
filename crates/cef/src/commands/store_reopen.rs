@@ -1,25 +1,25 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! "Restart now" for a Microsoft Store update that is downloaded and staged (task #2514): close AgentMux and
-//! open it again on the new version.
+//! "Restart now" for a Microsoft Store update that is downloaded (task #2514): AgentMux is closed for the Store's
+//! swap and has to be opened again afterwards.
 //!
-//! The Store does not close a running packaged desktop app to swap its package: it stages the new package, marks
-//! the install "blocked on the user" and waits until nothing of the old package runs
-//! (Area54, 2026-11-12: `Working -> BlockedOnUser`, the old package still registered). Windows then registers the
-//! new package, but does not open the app again: `RegisterApplicationRestart` (the launcher's) only fires when
-//! Windows itself closes the app. So something outside the package has to open it, once the swap is done.
+//! What the first real run on Area54 (2026-11-12) showed: the Store asks through its own window, Windows then closes
+//! the running app for servicing (the session snapshot was flushed), swaps the package in about ten seconds, and does
+//! not open the app again: `RegisterApplicationRestart` (the launcher's) did not fire. So something outside the
+//! package has to open it, once the swap is done.
 //!
 //! That something is a one-shot Scheduled Task for the person, run by the Task Scheduler and so outside the
 //! package: a process started by AgentMux, wherever its exe lives, belongs to the package and would keep the old one
 //! in use, which is the one thing that must not happen. The task
-//! - takes nothing from anyone: the script is built here from two checked values (this package's family name,
-//!   which Windows gives the running app, and this build's version), and the task is registered with it as its
-//!   one fixed action, where only the person can change it;
-//! - waits up to ten minutes for a newer AgentMux package to be registered, then opens AgentMux by its package
-//!   identity (`shell:AppsFolder\<family>!AgentMux`), never by an exe path;
-//! - starts AgentMux exactly once, whether or not the package changed (a swap that did not happen is told at the
-//!   next start by the marker, `store_restart`), removes itself, and ends. Its limit is fifteen minutes.
+//! - takes nothing from anyone: the script is built here from checked values (this package's family name, which
+//!   Windows gives the running app, this build's version and the system folder), and the task is registered with it
+//!   as its one fixed action, where only the person can change it;
+//! - waits up to two hours for a newer AgentMux package to be registered, looking every five seconds;
+//! - then opens AgentMux by its package identity (`shell:AppsFolder\<family>!AgentMux`), never by an exe path, but
+//!   only if the package changed AND no process of the new package is running at that moment (the person may have
+//!   opened it already); otherwise it ends without starting anything;
+//! - removes itself, and ends. Its limit is two hours ten minutes.
 //!
 //! NOT run against a packaged install by whoever wrote it: the script text and its checks are unit-tested, the
 //! Windows calls are type-checked only.
@@ -29,9 +29,11 @@ const TASK: &str = "AgentMux Store reopen";
 /// The application id in the package's manifest (`<Application Id="AgentMux">`).
 const APP_ID: &str = "AgentMux";
 /// How long the task waits for the new package to be registered.
-const WAIT_MINUTES: u32 = 10;
+const WAIT_MINUTES: u32 = 120;
+/// How often the task looks (seconds): no faster than this.
+const POLL_SECONDS: u32 = 5;
 /// The task is stopped by the Task Scheduler after this long whatever it is doing.
-const LIMIT_MINUTES: u32 = 15;
+const LIMIT_MINUTES: u32 = 130;
 
 /// A package family name: `Name_<13 characters>`, where the name is the manifest's (`Publisher.App`).
 fn valid_family(family: &str) -> bool {
@@ -55,12 +57,17 @@ fn wait_script(family: &str, from: &str) -> String {
         "$ErrorActionPreference = 'SilentlyContinue'\n\
          $from = [version]'{from}.0'\n\
          $until = (Get-Date).AddMinutes({WAIT_MINUTES})\n\
+         $p = $null\n\
          while ((Get-Date) -lt $until) {{\n\
          \x20 $p = Get-AppxPackage -Name '{name}' | Where-Object {{ [version]$_.Version -gt $from }} | Select-Object -First 1\n\
          \x20 if ($p) {{ break }}\n\
-         \x20 Start-Sleep -Seconds 3\n\
+         \x20 Start-Sleep -Seconds {POLL_SECONDS}\n\
          }}\n\
-         Start-Process 'shell:AppsFolder\\{family}!{APP_ID}'\n\
+         if ($p) {{\n\
+         \x20 $loc = [string]$p.InstallLocation\n\
+         \x20 $open = @(Get-Process | Where-Object {{ $loc -and $_.Path -and $_.Path.StartsWith($loc, [StringComparison]::OrdinalIgnoreCase) }})\n\
+         \x20 if ($open.Count -eq 0) {{ Start-Process 'shell:AppsFolder\\{family}!{APP_ID}' }}\n\
+         }}\n\
          Unregister-ScheduledTask -TaskName '{TASK}' -Confirm:$false\n"
     )
 }
@@ -216,13 +223,28 @@ mod tests {
         assert!(!script.contains("WindowsApps"), "{script}");
     }
 
+    /// The task opens AgentMux only when the package changed and nothing of it runs: with no new package it
+    /// never reaches the start, and a running process of the new package stops it.
+    #[test]
+    fn the_task_starts_only_for_a_changed_package_with_nothing_of_it_running() {
+        let script = wait_script(FAMILY, "0.60.24");
+        let guard = script.find("if ($p) {").expect("a start is behind a changed package");
+        let running = script.find("$open.Count -eq 0").expect("and behind no running process");
+        let start = script.find("Start-Process").unwrap();
+        assert!(guard < running && running < start, "{script}");
+        assert!(script.contains("InstallLocation") && script.contains("Get-Process"), "{script}");
+        let remove = script.find("Unregister-ScheduledTask").unwrap();
+        assert!(remove > start, "it removes itself whichever way it ends: {script}");
+    }
+
     #[test]
     fn the_task_waits_for_a_newer_package_then_starts_once_and_removes_itself() {
         let script = wait_script(FAMILY, "0.60.24");
         assert!(script.contains("[version]'0.60.24.0'"), "{script}");
         assert!(script.contains("Get-AppxPackage -Name 'AgentMux.AgentMux'"), "{script}");
-        assert!(script.contains("AddMinutes(10)"), "{script}");
-        assert_eq!(script.matches("Start-Process").count(), 1, "one start, newer package or not");
+        assert!(script.contains("AddMinutes(120)"), "{script}");
+        assert!(script.contains("Start-Sleep -Seconds 5"), "no faster than every five seconds: {script}");
+        assert_eq!(script.matches("Start-Process").count(), 1, "one start at most");
         assert!(script.contains("Unregister-ScheduledTask -TaskName 'AgentMux Store reopen'"), "{script}");
     }
 
@@ -233,7 +255,7 @@ mod tests {
         assert!(register.contains("Register-ScheduledTask -TaskName 'AgentMux Store reopen'"), "{register}");
         assert!(register.contains("Start-ScheduledTask -TaskName 'AgentMux Store reopen'"), "{register}");
         assert!(register.contains("-LogonType Interactive -RunLevel Limited"), "the person's own session, no elevation: {register}");
-        assert!(register.contains("New-TimeSpan -Minutes 15"), "{register}");
+        assert!(register.contains("New-TimeSpan -Minutes 130"), "{register}");
         assert!(register.contains(r"-Execute 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'"), "the system folder comes from Windows: {register}");
         assert!(!register.contains("SystemRoot") && !register.contains("ExecutionPolicy"), "no environment variable, no policy flag: {register}");
         let wait = register.split("-EncodedCommand ").nth(1).and_then(|r| r.split('\'').next()).unwrap();

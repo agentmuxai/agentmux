@@ -124,6 +124,7 @@ windows-sys = { version = "0.59", features = [
 
 # Windows Hello (commands/vault.rs): Reveal and Copy confirm the person first.
 windows-future = "0.2"
+windows-collections = "0.2"
 windows = { version = "0.61", features = [
     "ApplicationModel",
     "Foundation",

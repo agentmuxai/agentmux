@@ -18,7 +18,7 @@ openLink ms-windows-store://pdp/?productid=9P9QCXNNCRK3
     <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
       "Update in the Store"
   <div class="maintenance-row-text maintenance-row-text--dim">
-    "The Store downloads v0.59.27, then AgentMux has to be closed to finish installing it."
+    "The Store downloads v0.59.27. Restart now then installs it and opens AgentMux again."
   <div class="maintenance-row-text maintenance-row-text--dim">
     "Couldn't start. Opened the Microsoft Store page to finish the update."
   <div class="maintenance-update-row">
@@ -43,7 +43,7 @@ host storeUpdate 0.59.27
     <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
       "Update in the Store"
   <div class="maintenance-row-text maintenance-row-text--dim">
-    "The Store downloads v0.59.27, then AgentMux has to be closed to finish installing it."
+    "The Store downloads v0.59.27. Restart now then installs it and opens AgentMux again."
   <div class="maintenance-row-text maintenance-row-text--dim">
     "The Store is installing it."
   <div class="maintenance-update-row">

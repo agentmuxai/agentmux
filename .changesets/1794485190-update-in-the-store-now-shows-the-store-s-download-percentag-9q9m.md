@@ -2,4 +2,4 @@
 type: patch
 ---
 
-Update in the Store now shows the Store's download percentage and size, then says when the update is downloaded and waiting for AgentMux to close, with a Restart now that closes AgentMux and opens it again on the new version (before, the row stayed on Asking the Microsoft Store forever and nothing closed the app).
+Update in the Store now shows the Store's download percentage and size, then says the update is downloaded; Restart now asks in the row (naming the agents in the middle of a turn), raises the window for the Store's own prompt or installs silently, and arranges for AgentMux to open again on the new version (before, the row stayed on Asking the Microsoft Store and the app was not reopened after the update).

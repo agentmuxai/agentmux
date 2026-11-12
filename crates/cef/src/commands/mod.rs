@@ -29,6 +29,7 @@ pub mod store_progress;
 pub mod store_reopen;
 pub mod store_restart;
 pub mod store_update;
+pub mod store_working;
 pub mod vault_files;
 pub mod stubs;
 pub mod palette;

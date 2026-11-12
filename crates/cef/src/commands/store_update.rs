@@ -2,9 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! "Update in the Store" for a Microsoft Store install: ask the Store itself to
-//! download and install AgentMux's update (task #88, phase 3f of
+//! download AgentMux's update (task #88, phase 3f of
 //! `SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md`), instead of only opening
-//! the Store page.
+//! the Store page, and, on "Restart now", to install it (task #2514).
+//!
+//! The install is a second step on purpose. The Store asks the person through a window of its own ("Update and
+//! restart AgentMux now?") as soon as it is asked to install, and then Windows closes the running app for servicing.
+//! So the download (which asks nothing) comes first, and the install is asked for only after the row has said what
+//! a restart interrupts and the person has confirmed: silently when the Store allows it
+//! (`CanSilentlyDownloadStorePackageUpdates`), else through the Store's own window, which our window is raised for.
 //!
 //! The Store API (`Windows.Services.Store`) works only for a packaged app, and
 //! the Store certifies a release after GitHub publishes it, so this has three
@@ -29,12 +35,11 @@ const LIST_TIMEOUT: Duration = Duration::from_secs(60);
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const DOWNLOAD_LIMIT: Duration = Duration::from_secs(60 * 60);
 
-/// How long the install call gets to finish by itself once everything is downloaded. A packaged desktop app
-/// that is running is not closed by the Store: it stages the package, marks the install "blocked on the
-/// user" and waits for the app to be closed, so the call stays open. After this long that is the answer
-/// (`staged`), and the page stops saying it is asking the Store.
+/// How long the install call may stay open: it is open for as long as the Store waits for the person's answer in its
+/// own window, and normally never comes back, because Windows closes the app for servicing when they answer. This is
+/// only the end of a prompt nobody answered.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-const INSTALL_GRACE: Duration = Duration::from_secs(20);
+const INSTALL_LIMIT: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// Sends a progress report to every window.
 pub type Emit = Arc<dyn Fn(&Progress) + Send + Sync>;
@@ -42,15 +47,6 @@ pub type Emit = Arc<dyn Fn(&Progress) + Send + Sync>;
 /// The reason a call gives when the Store never answered; `refused` and `decide_check` turn it into
 /// their own outcome rather than quoting it.
 pub const NO_ANSWER: &str = "the Microsoft Store did not answer";
-
-/// What the install call did in the time it was given.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Install {
-    /// It finished, with this overall state.
-    Finished(StoreState),
-    /// It is still open: the Store has the package and is waiting for AgentMux to be closed.
-    WaitingForClose,
-}
 
 /// What the Store's overall result for the update was, apart from the WinRT type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,7 +63,7 @@ pub enum StoreState {
 /// What the page does next.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoreOutcome {
-    /// `installed`, `staged` (downloaded and waiting for AgentMux to be closed), `canceled`, `none` (the Store
+    /// `installed`, `downloaded` (everything is here; Restart now installs it), `canceled`, `none` (the Store
     /// has no update yet), or `fallback` (open the Store page).
     pub outcome: &'static str,
     /// A sentence for the person; empty when there is nothing to say.
@@ -106,12 +102,12 @@ pub fn decide(updates_listed: usize, installed: Option<StoreState>) -> StoreOutc
     }
 }
 
-/// The decision for the install call, once it finished or was given up on waiting for.
-pub fn decide_install(updates_listed: usize, install: Install) -> StoreOutcome {
-    match install {
-        Install::Finished(state) => decide(updates_listed, Some(state)),
-        Install::WaitingForClose => StoreOutcome::new("staged", "Downloaded. Close AgentMux to finish the update, or use Restart now."),
+/// The decision for the download: a completed one is `downloaded`, which asks nothing and installs nothing yet.
+pub fn decide_download(updates_listed: usize, state: StoreState) -> StoreOutcome {
+    if updates_listed > 0 && state == StoreState::Completed {
+        return StoreOutcome::new("downloaded", "Downloaded. Restart now installs it: AgentMux closes and opens again.");
     }
+    decide(updates_listed, Some(state))
 }
 
 /// What the Store itself says about an update, without installing anything: the
@@ -129,11 +125,20 @@ pub struct StoreCheck {
     /// it can be the installed version and not the update's: the page names a version only when it is
     /// newer than this build, and offers the update either way.
     pub version: String,
+    /// Whether the Store would install silently (`CanSilentlyDownloadStorePackageUpdates`: "Update apps
+    /// automatically" on and the connection not metered); `None` when it was not asked. Restart now asks through
+    /// the Store's own window when this is false.
+    pub silent: Option<bool>,
 }
 
 impl StoreCheck {
     fn new(state: &'static str, message: String, version: String) -> Self {
-        Self { state, message, version }
+        Self { state, message, version, silent: None }
+    }
+
+    fn with_silent(mut self, silent: Option<bool>) -> Self {
+        self.silent = silent;
+        self
     }
 }
 
@@ -162,7 +167,8 @@ pub fn decide_check(listed: Result<Vec<Option<(u16, u16, u16)>>, String>) -> Sto
 /// says no newer version" can be checked against the log afterwards.
 pub fn check_log_line(check: &StoreCheck, took: Duration) -> String {
     let version = if check.version.is_empty() { "-" } else { &check.version };
-    let mut line = format!("[store-check] state={} version={version} took_ms={}", check.state, took.as_millis());
+    let silent = check.silent.map_or("-", |s| if s { "true" } else { "false" });
+    let mut line = format!("[store-check] state={} version={version} silent={silent} took_ms={}", check.state, took.as_millis());
     if !check.message.is_empty() {
         line.push_str(&format!(" why={}", check.message));
     }
@@ -173,7 +179,10 @@ pub fn check_log_line(check: &StoreCheck, took: Duration) -> String {
 /// Blocks on the Store's answer, so call it off the async workers.
 #[cfg(target_os = "windows")]
 pub fn check_update() -> StoreCheck {
-    decide_check(on_winrt_thread("store-check", || list_updates().map(|(_, versions)| versions)).and_then(|r| r))
+    match on_winrt_thread("store-check", || list_updates().map(|l| (l.versions, l.silent))).and_then(|r| r) {
+        Ok((versions, silent)) => decide_check(Ok(versions)).with_silent(Some(silent)),
+        Err(why) => decide_check(Err(why)),
+    }
 }
 
 /// Only Windows has a Store.
@@ -241,9 +250,19 @@ fn update_version(update: &windows::Services::Store::StorePackageUpdate) -> Opti
     Some((v.Major, v.Minor, v.Build))
 }
 
-/// The Store's context (our window attached) and the version of each update it lists for this app.
+/// What the Store listed for this app: its context (our window attached), the updates themselves (the install
+/// and download calls take them), the version of each, and whether it would install silently.
 #[cfg(target_os = "windows")]
-fn list_updates() -> Result<(windows::Services::Store::StoreContext, Vec<Option<(u16, u16, u16)>>), String> {
+struct Listed {
+    context: windows::Services::Store::StoreContext,
+    updates: windows_collections::IVectorView<windows::Services::Store::StorePackageUpdate>,
+    versions: Vec<Option<(u16, u16, u16)>>,
+    silent: bool,
+}
+
+/// Ask the Store for the updates it lists for this app.
+#[cfg(target_os = "windows")]
+fn list_updates() -> Result<Listed, String> {
     use windows::core::Interface;
     use windows::Services::Store::StoreContext;
     use windows::Win32::Foundation::HWND;
@@ -259,14 +278,26 @@ fn list_updates() -> Result<(windows::Services::Store::StoreContext, Vec<Option<
     let updates = answer_within(updates, LIST_TIMEOUT).map_err(list_error)?;
     let listed = updates.Size().map_err(|e| format!("couldn't count updates: {e}"))?;
     let versions = (0..listed).map(|i| updates.GetAt(i).ok().and_then(|u| update_version(&u))).collect();
-    Ok((context, versions))
+    let silent = context.CanSilentlyDownloadStorePackageUpdates().unwrap_or(false);
+    Ok(Listed { context, updates, versions, silent })
 }
 
-/// The IPC commands `store_update_install` (args `{ version }`: the release being installed) and
-/// `store_update_check`, `store_update_came_back` (what the Store's last install left, see
-/// `store_restart`) and `store_update_restart` (close AgentMux now and open it again on the new version,
-/// after an install that ended `staged`). The Store calls block, so they run on the blocking pool.
-pub async fn run(state: &std::sync::Arc<crate::state::AppState>, cmd: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+/// Sends each progress report to every window.
+pub fn emit_for(state: &Arc<crate::state::AppState>) -> Emit {
+    let sender = state.clone();
+    Arc::new(move |p| {
+        if let Ok(payload) = serde_json::to_value(p) {
+            crate::events::emit_event_all_windows(&sender, store_progress::EVENT, &payload);
+        }
+    })
+}
+
+/// The IPC commands `store_update_install` (download only), `store_update_check`, `store_update_came_back` (what
+/// the Store's last install left, see `store_restart`), `store_update_working` (who a restart interrupts, for the
+/// row's question), `store_update_restart` (install the downloaded update now: the Store closes AgentMux and it
+/// opens again) and `store_update_raise` (bring our window to the front while the Store asks). The Store calls
+/// block, so they run on the blocking pool.
+pub async fn run(state: &std::sync::Arc<crate::state::AppState>, cmd: &str, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
     tracing::info!("[ipc] {cmd}");
     let gone = |e: tokio::task::JoinError| format!("store_update: {e}");
     match cmd {
@@ -277,20 +308,21 @@ pub async fn run(state: &std::sync::Arc<crate::state::AppState>, cmd: &str, args
             json(check)
         }
         "store_update_came_back" => json(super::store_restart::came_back()),
+        "store_update_working" => {
+            let (web_endpoint, auth_key) = (state.backend_endpoints.lock().web_endpoint.clone(), state.auth_key.lock().clone());
+            json(tokio::task::spawn_blocking(move || super::store_working::fetch(&web_endpoint, &auth_key)).await.map_err(gone)?)
+        }
+        "store_update_raise" => {
+            raise_own_window();
+            json(true)
+        }
         "store_update_restart" => {
             let state = state.clone();
             json(tokio::task::spawn_blocking(move || super::store_restart::restart_now(&state)).await.map_err(gone)?)
         }
         _ => {
-            let target = args.get("version").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let (web_endpoint, auth_key) = (state.backend_endpoints.lock().web_endpoint.clone(), state.auth_key.lock().clone());
-            let sender = state.clone();
-            let emit: Emit = Arc::new(move |p| {
-                if let Ok(payload) = serde_json::to_value(p) {
-                    crate::events::emit_event_all_windows(&sender, store_progress::EVENT, &payload);
-                }
-            });
-            json(tokio::task::spawn_blocking(move || install_update(&target, &web_endpoint, &auth_key, emit)).await.map_err(gone)?)
+            let emit = emit_for(state);
+            json(tokio::task::spawn_blocking(move || install_update(emit)).await.map_err(gone)?)
         }
     }
 }
@@ -299,24 +331,31 @@ fn json<T: Serialize>(v: T) -> Result<serde_json::Value, String> {
     serde_json::to_value(v).map_err(|e| e.to_string())
 }
 
-/// Ask the Store to install AgentMux's update. Blocks until the Store is done
-/// (minutes, for a download), so call it off the async workers.
+/// Ask the Store to download AgentMux's update: it asks the person nothing and installs nothing. Blocks until the
+/// Store is done (minutes, for a download), so call it off the async workers.
 #[cfg(target_os = "windows")]
-pub fn install_update(target: &str, web_endpoint: &str, auth_key: &str, emit: Emit) -> StoreOutcome {
-    let (target, web_endpoint, auth_key) = (target.to_string(), web_endpoint.to_string(), auth_key.to_string());
-    let (endpoint, key) = (web_endpoint.clone(), auth_key.clone());
-    let outcome = match on_winrt_thread("store-update", move || install_update_here(&target, &endpoint, &key, &emit).unwrap_or_else(|e| refused(&e))) {
+pub fn install_update(emit: Emit) -> StoreOutcome {
+    let outcome = match on_winrt_thread("store-update", move || download_here(&emit).unwrap_or_else(|e| refused(&e))) {
         Ok(outcome) => outcome,
         Err(why) => refused(&why),
     };
     tracing::info!("[store-install] outcome={} message={}", outcome.outcome, outcome.message);
-    // Back here. If the Store installed it, it closes this app at its own pace and the next start says how it
-    // ended; if it staged it, it is waiting for this app to be closed, and the marker says how that ended.
-    // Any other result closes nothing: there is nothing to come back from, and the record saved as a
-    // quit's is saved again as for no quit (a later crash restores by the usual rules).
-    if super::store_restart::install_returned(matches!(outcome.outcome, "installed" | "staged")) {
-        crate::client::backend_save_session_snapshot(&web_endpoint, &auth_key, false);
-    }
+    // Restart now is offered only for an update this process downloaded.
+    super::store_restart::set_downloaded(outcome.outcome == "downloaded");
+    outcome
+}
+
+/// Install what `install_update` downloaded, now that the person confirmed in the row. Silent when the Store allows
+/// it, else through the Store's own window: the call stays open as long as that window waits, and the row says so.
+/// Blocks, so call it off the async workers. Comes back only when the Store finished, was told no, or failed: when
+/// the person says yes Windows closes the app for servicing and this call never returns.
+#[cfg(target_os = "windows")]
+pub fn install_downloaded(emit: Emit) -> StoreOutcome {
+    let outcome = match on_winrt_thread("store-install", move || install_here(&emit).unwrap_or_else(|e| refused(&e))) {
+        Ok(outcome) => outcome,
+        Err(why) => refused(&why),
+    };
+    tracing::info!("[store-install] install outcome={} message={}", outcome.outcome, outcome.message);
     outcome
 }
 
@@ -383,44 +422,75 @@ fn finished_within(op: &StoreOp, limit: Duration) -> Result<Option<windows::Serv
 }
 
 #[cfg(target_os = "windows")]
-fn install_update_here(target: &str, web_endpoint: &str, auth_key: &str, emit: &Emit) -> Result<StoreOutcome, String> {
-    let (context, versions) = list_updates()?;
-    let listed = versions.len();
-    if listed == 0 {
+fn download_here(emit: &Emit) -> Result<StoreOutcome, String> {
+    let listed = list_updates()?;
+    let count = listed.versions.len();
+    if count == 0 {
         return Ok(decide(0, None));
     }
-    // The calls below take the list itself, so ask for it again.
-    let updates = context.GetAppAndOptionalStorePackageUpdatesAsync().map_err(|e| list_error(e.to_string()))?;
-    let updates = answer_within(updates, LIST_TIMEOUT).map_err(list_error)?;
     emit(&store_progress::starting());
-    // Downloaded first (it takes minutes and the app is not touched): only the install closes this app.
-    let op = context.RequestDownloadStorePackageUpdatesAsync(&updates).map_err(|e| format!("the download call failed: {e}"))?;
+    let op = listed.context.RequestDownloadStorePackageUpdatesAsync(&listed.updates).map_err(|e| format!("the download call failed: {e}"))?;
     report_progress(&op, emit);
     let Some(downloaded) = finished_within(&op, DOWNLOAD_LIMIT).map_err(|e| format!("the download call failed: {e}"))? else {
         let _ = op.Cancel();
         return Err("the Store stopped downloading".into());
     };
     let state = store_state(downloaded.OverallState().map_err(|e| format!("no result state: {e}"))?);
-    if state != StoreState::Completed {
-        return Ok(decide(listed, Some(state)));
-    }
-    // The package is here and staged. Register the install for a reopen after, and save every window as a
-    // quit saves them (the closes that follow keep the record), without the quit's background-work record.
-    super::store_restart::before_install(target);
-    crate::client::save_session_snapshot_with(web_endpoint, auth_key, true, false);
-    emit(&store_progress::downloaded(0));
-    let op = context.RequestDownloadAndInstallStorePackageUpdatesAsync(&updates).map_err(|e| format!("the install call failed: {e}"))?;
-    report_progress(&op, emit);
-    let install = match finished_within(&op, INSTALL_GRACE).map_err(|e| format!("the install call failed: {e}"))? {
-        Some(result) => Install::Finished(store_state(result.OverallState().map_err(|e| format!("no result state: {e}"))?)),
-        None => Install::WaitingForClose,
-    };
-    Ok(decide_install(listed, install))
+    Ok(decide_download(count, state))
 }
+
+#[cfg(target_os = "windows")]
+fn install_here(emit: &Emit) -> Result<StoreOutcome, String> {
+    let listed = list_updates()?;
+    let count = listed.versions.len();
+    if count == 0 {
+        return Ok(decide(0, None));
+    }
+    // The row says what is going on for as long as the call is open: the Store asking (in its own window), or
+    // installing without asking.
+    emit(&if listed.silent { store_progress::installing() } else { store_progress::asking() });
+    tracing::info!("[store-install] installing silent={}", listed.silent);
+    let op = if listed.silent {
+        listed.context.TrySilentDownloadAndInstallStorePackageUpdatesAsync(&listed.updates)
+    } else {
+        listed.context.RequestDownloadAndInstallStorePackageUpdatesAsync(&listed.updates)
+    }
+    .map_err(|e| format!("the install call failed: {e}"))?;
+    report_progress(&op, emit);
+    let Some(result) = finished_within(&op, INSTALL_LIMIT).map_err(|e| format!("the install call failed: {e}"))? else {
+        return Ok(StoreOutcome::new("downloaded", "The Store hasn't finished. Try Restart now again."));
+    };
+    Ok(decide(count, Some(store_state(result.OverallState().map_err(|e| format!("no result state: {e}"))?))))
+}
+
+/// Bring our window to the front: the Store's own prompt is owned by it and comes forward with it.
+#[cfg(target_os = "windows")]
+pub fn raise_own_window() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE};
+    if let Some(hwnd) = super::vault::foreground_own_window() {
+        let hwnd = hwnd as *mut std::ffi::c_void;
+        unsafe {
+            if IsIconic(hwnd) != 0 {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            SetForegroundWindow(hwnd);
+        }
+    }
+}
+
+/// Only Windows has a Store.
+#[cfg(not(target_os = "windows"))]
+pub fn raise_own_window() {}
 
 /// Only Windows has a Store: elsewhere the page opens the Store page (it never offers this).
 #[cfg(not(target_os = "windows"))]
-pub fn install_update(_target: &str, _web_endpoint: &str, _auth_key: &str, _emit: Emit) -> StoreOutcome {
+pub fn install_update(_emit: Emit) -> StoreOutcome {
+    refused("the Microsoft Store is Windows only")
+}
+
+/// Only Windows has a Store.
+#[cfg(not(target_os = "windows"))]
+pub fn install_downloaded(_emit: Emit) -> StoreOutcome {
     refused("the Microsoft Store is Windows only")
 }
 
@@ -432,13 +502,15 @@ mod tests {
     fn each_check_leaves_one_line_with_the_answer_and_the_time() {
         let took = Duration::from_millis(5400);
         let none = decide_check(Ok(vec![]));
-        assert_eq!(check_log_line(&none, took), "[store-check] state=none version=- took_ms=5400");
-        let available = decide_check(Ok(vec![Some((0, 60, 22))]));
-        assert_eq!(check_log_line(&available, took), "[store-check] state=available version=0.60.22 took_ms=5400");
+        assert_eq!(check_log_line(&none, took), "[store-check] state=none version=- silent=- took_ms=5400");
+        let available = decide_check(Ok(vec![Some((0, 60, 22))])).with_silent(Some(true));
+        assert_eq!(check_log_line(&available, took), "[store-check] state=available version=0.60.22 silent=true took_ms=5400");
+        let asked = decide_check(Ok(vec![Some((0, 60, 22))])).with_silent(Some(false));
+        assert_eq!(check_log_line(&asked, took), "[store-check] state=available version=0.60.22 silent=false took_ms=5400");
         let unknown = decide_check(Err("the Microsoft Store is Windows only".into()));
-        assert_eq!(check_log_line(&unknown, took), "[store-check] state=unknown version=- took_ms=5400 why=the Microsoft Store is Windows only");
+        assert_eq!(check_log_line(&unknown, took), "[store-check] state=unknown version=- silent=- took_ms=5400 why=the Microsoft Store is Windows only");
         let silent = decide_check(Err(NO_ANSWER.into()));
-        assert_eq!(check_log_line(&silent, Duration::from_secs(60)), "[store-check] state=no_answer version=- took_ms=60000");
+        assert_eq!(check_log_line(&silent, Duration::from_secs(60)), "[store-check] state=no_answer version=- silent=- took_ms=60000");
     }
 
     #[test]
@@ -456,16 +528,16 @@ mod tests {
         assert_eq!(decide(3, Some(StoreState::Completed)).outcome, "installed");
     }
 
-    /// An install call that stays open is the Store waiting for AgentMux to be closed (the 2026-11-12 run on
-    /// Area54: the item went BlockedOnUser): told as that, not left as "asking the Store".
+    /// The download asks nothing and installs nothing: a completed one is only `downloaded`, and every other state
+    /// is decided as before.
     #[test]
-    fn an_install_that_waits_for_a_close_is_staged_and_a_finished_one_is_decided_as_before() {
-        let staged = decide_install(1, Install::WaitingForClose);
-        assert_eq!(staged.outcome, "staged");
-        assert!(staged.message.contains("Close AgentMux"), "{}", staged.message);
-        assert_eq!(decide_install(1, Install::Finished(StoreState::Completed)).outcome, "installed");
-        assert_eq!(decide_install(1, Install::Finished(StoreState::Canceled)).outcome, "canceled");
-        assert_eq!(decide_install(1, Install::Finished(StoreState::Other)).outcome, "fallback");
+    fn a_completed_download_is_downloaded_and_installs_nothing() {
+        let done = decide_download(1, StoreState::Completed);
+        assert_eq!(done.outcome, "downloaded");
+        assert!(done.message.contains("Restart now"), "{}", done.message);
+        assert_eq!(decide_download(0, StoreState::Completed).outcome, "none");
+        assert_eq!(decide_download(1, StoreState::Canceled).outcome, "canceled");
+        assert_eq!(decide_download(1, StoreState::Other).outcome, "fallback");
     }
 
     #[test]
@@ -564,6 +636,7 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn off_windows_it_falls_back_without_trying() {
-        assert_eq!(install_update("0.60.15", "", "", Arc::new(|_| {})).outcome, "fallback");
+        assert_eq!(install_update(Arc::new(|_| {})).outcome, "fallback");
+        assert_eq!(install_downloaded(Arc::new(|_| {})).outcome, "fallback");
     }
 }
