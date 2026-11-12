@@ -948,6 +948,17 @@ describe("the workflow that runs the gate", () => {
         expect(sweep).toMatch(/actions: write/);
     });
 
+    // A run that ends cancelled leaves a failed `evaluate` on the PR's head (pull_request_review runs belong to the
+    // head) that nothing re-runs, and the PR reads UNSTABLE. The PR's runs go one after another instead.
+    it("does not cancel a run that is working when the next event for the PR arrives", () => {
+        const group = /concurrency:\s*\n\s*group: codex-review-gate-\$\{\{[^\n]*\}\}\s*\n\s*cancel-in-progress: (true|false)/.exec(workflow);
+        expect(group, "the job's concurrency block").not.toBeNull();
+        expect(group[1]).toBe("false");
+        // job-level, not workflow-level (#3556): a run whose `if:` skips the job must not join the group
+        expect(workflow).toMatch(/^  evaluate:[\s\S]*?\n    concurrency:/m);
+        expect(workflow).not.toMatch(/^concurrency:/m);
+    });
+
     it("checks out the workflow's own commit on the default branch, and never PR code", () => {
         // A bare github.sha would be the PR's merge commit on pull_request_review.
         expect(workflow).toContain(
