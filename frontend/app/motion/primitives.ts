@@ -275,6 +275,8 @@ export interface TravelOptions {
     onCopy?: (copy: HTMLElement) => void;
     /** When the element is shown again at its place, also when motion is off; not when the travel is cancelled. */
     onArrive?: () => void;
+    /** Where the copy is put: a fixed layer on <body> by default. */
+    layer?: HTMLElement;
 }
 
 const flying = new WeakMap<Element, MotionHandle>();
@@ -306,7 +308,7 @@ export function travel(el: HTMLElement, from: DOMRect, opts: TravelOptions = {})
         zIndex: "10000",
     });
     const hiddenBefore = el.style.visibility;
-    document.body.append(copy);
+    (opts.layer ?? document.body).append(copy);
     el.style.visibility = "hidden";
     let handle: MotionHandle | undefined;
     handle = play(
@@ -343,6 +345,26 @@ export interface MergeOptions {
     pulse?: "bounce" | "flash" | false;
     /** Adjust each flying copy before it is shown (see `travel`). */
     onCopy?: (copy: HTMLElement) => void;
+    /**
+     * Called with the destinations once they are drawn: the x (viewport px) past which no copy is drawn, or
+     * undefined for no limit. A piece whose place is out of its container's view (a tab scrolled out of a
+     * full strip) flies toward that place and is cut off at the edge, instead of crossing what lies beyond it.
+     */
+    clipRight?: (dest: ReadonlyArray<Element | undefined>) => number | undefined;
+}
+
+/** A fixed layer on <body> that draws nothing right of `x`; the copies fly inside it. */
+function clippedLayer(x: number): HTMLElement {
+    const layer = document.createElement("div");
+    Object.assign(layer.style, {
+        position: "fixed",
+        inset: "0",
+        pointerEvents: "none",
+        zIndex: "10000",
+        clipPath: `inset(0 calc(100vw - ${x}px) 0 0)`,
+    });
+    document.body.append(layer);
+    return layer;
 }
 
 /**
@@ -361,6 +383,8 @@ export function mergeInto(
     const pulseKind = opts.pulse ?? (opts.land ? false : "bounce");
     const flights: MotionHandle[] = [];
     const pulses: MotionHandle[] = [];
+    const layers: HTMLElement[] = [];
+    const removeLayers = () => layers.splice(0).forEach((l) => l.remove());
     let cancelled = false;
     let frame: number | undefined;
     let settle!: () => void;
@@ -378,18 +402,24 @@ export function mergeInto(
     const run = () => {
         frame = undefined;
         const els = typeof dest === "function" ? dest() : dest;
+        const limit = typeof document === "undefined" ? undefined : opts.clipRight?.(els);
+        const layer = limit === undefined || !Number.isFinite(limit) ? undefined : clippedLayer(limit);
+        if (layer) layers.push(layer);
         sources.forEach((from, i) => {
             const el = els[i];
             if (!el) return;
             const onArrive = () => arrive(el, i);
             if (el instanceof HTMLElement)
-                flights.push(travel(el, from, { category, delay: i * stagger, onArrive, onCopy: opts.onCopy }));
+                flights.push(travel(el, from, { category, delay: i * stagger, onArrive, onCopy: opts.onCopy, layer }));
             else onArrive();
         });
         // Done when every piece has landed and its pulse has ended.
         void Promise.all(flights.map((f) => f.finished))
             .then(() => Promise.all(pulses.map((p) => p.finished)))
-            .then(settle);
+            .then(() => {
+                removeLayers();
+                settle();
+            });
     };
 
     if (typeof dest === "function") {
@@ -412,6 +442,7 @@ export function mergeInto(
             }
             flights.forEach((f) => f.cancel());
             pulses.forEach((p) => p.cancel());
+            removeLayers();
             settle();
         },
         finished,

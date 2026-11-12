@@ -450,6 +450,38 @@ describe("mergeInto", () => {
         expect((fake.calls[0].el as HTMLElement).className).toBe("pill");
     });
 
+    it("flies the copies in a layer cut off at the limit the caller gives, so a piece whose place is out of view does not cross what lies beyond it", async () => {
+        vi.stubGlobal("innerWidth", 1000);
+        const els = [at(300, 10), at(1400, 10)];
+        const clipRight = vi.fn(() => 640);
+        const handle = mergeInto([rectOf(0, 0), rectOf(0, 30)], els, { clipRight, land: () => {} });
+        expect(clipRight).toHaveBeenCalledWith(els);
+        const copies = fake.calls.map((c) => c.el);
+        const layer = copies[0].parentElement as HTMLElement;
+        expect(layer).not.toBe(document.body);
+        expect(copies[1].parentElement).toBe(layer);
+        expect(layer.parentElement).toBe(document.body);
+        expect(layer.style.position).toBe("fixed");
+        expect(layer.style.getPropertyValue("clip-path")).toContain("640px");
+        // The copy still goes to the piece's real place: the layer cuts it off.
+        expect(fake.calls[1].keyframes[1]).toEqual({ transform: "translate(1400px, -20px)" });
+        fake.calls.forEach((c) => c.finish());
+        await handle.finished;
+        expect(layer.isConnected).toBe(false);
+    });
+
+    it("takes the layer away when it is cancelled, and uses the page when there is no limit", () => {
+        const cancelled = mergeInto([rectOf(0, 0)], [at(300, 10)], { clipRight: () => 640 });
+        const layer = fake.calls[0].el.parentElement as HTMLElement;
+        expect(layer.isConnected).toBe(true);
+        cancelled.cancel();
+        expect(layer.isConnected).toBe(false);
+
+        fake.calls.length = 0;
+        mergeInto([rectOf(0, 0)], [at(300, 10)], { clipRight: () => undefined });
+        expect(fake.calls[0].el.parentElement).toBe(document.body);
+    });
+
     it("staggers the copies by index", () => {
         mergeInto([rectOf(0, 0), rectOf(0, 30), rectOf(0, 60)], [at(1, 1), at(1, 1), at(1, 1)], { stagger: 50 });
         expect(fake.calls.map((c) => c.options.delay)).toEqual([0, 50, 100]);
