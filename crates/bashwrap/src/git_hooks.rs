@@ -276,7 +276,8 @@ fn pre_push(args: &[String]) -> i32 {
         }
     }
     if findings.is_empty() {
-        return 0;
+        // Then the host's publish guard, where the machine has one (`publish_scan.rs`).
+        return crate::publish_scan::check_push(remote, args.get(1).map(String::as_str).unwrap_or(""), &String::from_utf8_lossy(&input));
     }
     eprint!("{}", refusal_text(&findings));
     1
