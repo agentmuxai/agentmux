@@ -11,6 +11,7 @@ import {
     logShowCover,
     logWhileShown,
     SETTLED_AFTER_MS,
+    liftedEarlyLine,
     shownLine,
     SLOW_COVER_MS,
     stillCoveredLine,
@@ -173,6 +174,7 @@ describe("what else can be in front of a pane", () => {
         expect(shownLine("0123456789", "suspense-fallback", "shown", 0, "Agent2")).toBe('block=0123456 agent="Agent2" suspense-fallback shown');
         expect(shownLine("0123456789", "show-cover", "still-shown", 2000.4)).toBe("block=0123456 show-cover still-shown for=2000ms");
         expect(shownLine("0123456789", "show-cover", "cleared", 3100)).toBe("block=0123456 show-cover cleared after=3100ms");
+        expect(liftedEarlyLine("0123456789", "cap", 9, 412.6, "Agent2")).toBe('block=0123456 agent="Agent2" show-cover lifted-early by=cap frames=9 after=413ms');
     });
 
     it("reads the agent's name from the block's meta, when it is a string", () => {

@@ -88,9 +88,15 @@ function mountCovered(following = true) {
         },
     };
     let covered!: () => boolean;
+    const lifts: [string, number, number][] = [];
     const el = document.createElement("div");
     const Probe = () => {
-        covered = useSettleOnShow({ settleOnShow: vi.fn() }, () => following, { changes, observe: () => [el, undefined] }, deps);
+        covered = useSettleOnShow(
+            { settleOnShow: vi.fn() },
+            () => following,
+            { changes, observe: () => [el, undefined], onLift: (why, n, ms) => lifts.push([why, n, ms]) },
+            deps,
+        );
         return null;
     };
     render(() => (
@@ -105,7 +111,7 @@ function mountCovered(following = true) {
         frames[ran++]?.();
         if (resized) onResize?.();
     };
-    return { covered: () => covered(), setDormant, setChanges, frame, observed, observing: () => onResize != null };
+    return { covered: () => covered(), setDormant, setChanges, frame, observed, lifts, observing: () => onResize != null };
 }
 
 // SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.7.
@@ -149,6 +155,26 @@ describe("useSettleOnShow's cover", () => {
         }
         expect(elapsed).toBeGreaterThanOrEqual(SHOW_COVER_MAX_MS);
         expect(elapsed).toBeLessThan(SHOW_COVER_MAX_MS + 16);
+    });
+
+    it("says which way a cover lifted: held still, or the cap", () => {
+        const p = mountCovered();
+        p.setDormant(true);
+        p.setChanges(1);
+        p.setDormant(false);
+        p.frame(0, true);
+        for (let i = 0; i < 40 && p.covered(); i++) p.frame(16, true);
+        expect(p.lifts.map((l) => l[0])).toEqual(["cap"]);
+
+        const q = mountCovered();
+        q.setDormant(true);
+        q.setChanges(1);
+        q.setDormant(false);
+        q.frame(0, true);
+        q.frame(16);
+        q.frame(16);
+        q.frame(16);
+        expect(q.lifts.map((l) => l[0])).toEqual(["still"]);
     });
 
     it("never covers a pane the user scrolled up", () => {

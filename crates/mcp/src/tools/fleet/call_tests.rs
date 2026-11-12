@@ -153,3 +153,19 @@ async fn a_bulk_stop_answers_pending_at_once_with_one_entry_per_window() {
     assert!(result["note"].as_str().unwrap().contains("one [AgentMux] note"), "{result}");
     assert!(result.get("kept_by_user").is_none(), "nothing is known to be kept yet: {result}");
 }
+
+/// A send srv gave no answer to says whether anything was sent, not the transport's own words (task #2485).
+#[tokio::test]
+async fn a_send_srv_gave_no_answer_to_says_whether_it_was_sent() {
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+    let refused = reqwest::Client::new().get(format!("http://{closed}/")).send().await.unwrap_err();
+    let said = crate::tool_helpers::inject_transport_error(&refused);
+    assert!(said.starts_with("srv could not be reached, so nothing was sent"), "{said}");
+
+    // Accepts the connection (the kernel does, from its backlog) and never answers.
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", silent.local_addr().unwrap());
+    let timed_out = reqwest::Client::new().get(url).timeout(std::time::Duration::from_millis(100)).send().await.unwrap_err();
+    let said = crate::tool_helpers::inject_transport_error(&timed_out);
+    assert!(said.contains("gave no answer within 45 s") && said.contains("before sending it again"), "{said}");
+}

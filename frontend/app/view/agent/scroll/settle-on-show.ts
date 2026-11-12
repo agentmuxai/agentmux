@@ -19,7 +19,12 @@ export interface ShowCover {
     changes: Accessor<unknown>;
     /** What to watch for size changes while covered (the transcript's containers). */
     observe: () => readonly (Element | undefined)[];
+    /** Why a cover lifted, for the log: `cap` means the layout had not been seen to hold still. */
+    onLift?: (why: ShowCoverLift, frames: number, ms: number) => void;
 }
+
+/** `still`: the size held for SHOW_COVER_QUIET_FRAMES frames; `cap`: SHOW_COVER_MAX_MS passed first. */
+export type ShowCoverLift = "still" | "cap";
 
 /** Timing primitives, injectable for tests. */
 export interface ShowCoverDeps {
@@ -71,6 +76,7 @@ export function useSettleOnShow(
     const coverUntilStill = (c: ShowCover): void => {
         let resized = false;
         let quiet = 0;
+        let frames = 0;
         let startedAt: number | undefined;
         let raf = 0;
         const ro = deps.observer(() => {
@@ -82,8 +88,13 @@ export function useSettleOnShow(
             startedAt ??= now;
             quiet = resized ? 0 : quiet + 1;
             resized = false;
-            if (quiet >= SHOW_COVER_QUIET_FRAMES || now - startedAt >= SHOW_COVER_MAX_MS) lift();
-            else raf = deps.frame(tick);
+            frames++;
+            const elapsed = now - startedAt;
+            const why: ShowCoverLift | null = quiet >= SHOW_COVER_QUIET_FRAMES ? "still" : elapsed >= SHOW_COVER_MAX_MS ? "cap" : null;
+            if (why) {
+                lift();
+                c.onLift?.(why, frames, elapsed);
+            } else raf = deps.frame(tick);
         };
         // The first check runs before the first layout: the observer's initial
         // report then counts as a change, so a cover never lifts unlaid out.

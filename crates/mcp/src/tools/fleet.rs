@@ -87,9 +87,10 @@ async fn run_send_message(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String>
         .post(&url)
         .header(AUTH_KEY_HEADER, auth_key)
         .json(&req)
+        .timeout(crate::tool_helpers::INJECT_TIMEOUT)
         .send()
         .await
-        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("{}", crate::tool_helpers::inject_transport_error(&e)))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -323,9 +324,10 @@ async fn post_jekt(client: &reqwest::Client, url: &str, auth_key: &str, req: &In
         .post(url)
         .header(AUTH_KEY_HEADER, auth_key)
         .json(req)
+        .timeout(crate::tool_helpers::INJECT_TIMEOUT)
         .send()
         .await
-        .map_err(|e| format!("request failed: {e}"))?;
+        .map_err(|e| crate::tool_helpers::inject_transport_error(&e))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
