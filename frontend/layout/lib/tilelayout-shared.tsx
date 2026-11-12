@@ -35,7 +35,7 @@ import {
 import { isAnyUnderway } from "@/app/drag/drag-session";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { clearPlacement, previewPlacement } from "./placementPreview";
+import { clearPlacement, GHOST_DRAG_KINDS, leavePlacement, previewPlacement } from "./placementPreview";
 import { commitTearOff, leaveOwnPane, restOverOwnPane } from "./tearOffPreview";
 import {
     clampCrossTabDirection,
@@ -384,7 +384,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
                 // Only clear when this container was the innermost match;
                 // a transition INTO an inner overlay-node should not
                 // clear (the inner's onDrag will set a fresh action).
-                clearPlacement(props.layoutModel);
+                leavePlacement(props.layoutModel);
                 leaveOwnPane(props.layoutModel);
             },
             onDrop: ({ source, location }) => {
@@ -499,7 +499,8 @@ const OverlayNode = (props: OverlayNodeProps) => {
                 computeDropDirection(cursor.clientX, cursor.clientY);
             },
             onDragLeave: () => {
-                clearPlacement(props.layoutModel);
+                // The next pane's zones show a drop within a frame, most often the same one (placementPreview.ts).
+                leavePlacement(props.layoutModel);
             },
             onDrop: () => {
                 // Valid in-window drop — clear cross-window payload so dragend monitor skips.
@@ -535,9 +536,6 @@ export interface PlaceholderProps {
     layoutModel: LayoutModel;
     style: JSX.CSSProperties;
 }
-
-/** The drags that show a landing zone: while one is underway, a zone the pointer leaves plays its exit. */
-const GHOST_DRAG_KINDS = ["tile", "window-tab", "pane-tab", "doc-tab"] as const;
 
 /**
  * An overlay to preview pending actions on the layout tree.
@@ -586,8 +584,14 @@ export const Placeholder = (props: PlaceholderProps) => {
     onCleanup(() => { if (exitTimer) clearTimeout(exitTimer); });
 
     // The live reflow (liveReflow.ts) moves the panes themselves to where the drop leaves them: they are the
-    // outline, so the wireframe stays away and the landing zone drops its dim (tilelayout.scss).
-    const reflowing = () => props.layoutModel.liveReflowActive();
+    // outline, so the wireframe stays away and the landing zone drops its dim (tilelayout.scss). For the whole
+    // of a drag the reflow shows, not only while a drop is on screen: between two drops, and while a zone
+    // exits, the dim came back for a frame or two, over the whole layout. Kept as it was once the drag is
+    // released, when the layout no longer says.
+    const reflowing = createMemo<boolean>(
+        (was) => (isAnyUnderway(GHOST_DRAG_KINDS) ? props.layoutModel.liveReflowExpected() : was),
+        false
+    );
 
     return (
         <div class={clsx("placeholder-container", reflowing() && "live-reflow")} style={props.style}>

@@ -9,6 +9,7 @@
  * docs/specs/SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.2.
  */
 
+import { isAnyUnderway, onSessionEnded } from "@/app/drag/drag-session";
 import { chipOverChipDirection } from "./chipPlaceholder";
 import { DEFAULT_TRACKER, DropIntentTracker } from "./dropIntentTracker";
 import { dragState } from "./tilelayout-drag-state";
@@ -74,6 +75,8 @@ export function showPlacement(
     if (pointerOutsideWindow(model)) return compute;
     // The pointer is over another pane: no tear-off is shown.
     leaveOwnPane(model);
+    // A drop is shown again: the zones the pointer left a moment ago clear nothing (`leavePlacement`).
+    cancelLeave(model);
     model.treeReducer(compute);
     return compute;
 }
@@ -138,8 +141,61 @@ export function resetDropIntent(model: LayoutModel): void {
 export function clearPlacement(model: LayoutModel, reset = false): void {
     if (reset) resetDropIntent(model);
     else clearTimeout(steadying.get(model)?.timer);
+    cancelLeave(model);
     model.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
 }
+
+/** The drags that show a drop in a layout. */
+export const GHOST_DRAG_KINDS = ["tile", "window-tab", "pane-tab", "doc-tab"] as const;
+
+/**
+ * How long a drop stays shown after the pointer left the zones it was armed from, ms. Crossing from one pane's
+ * zones to the next is a leave and then, a frame later, the next pane's first sample, which most often shows
+ * the same drop again (the tracker holds it). Cleared at the leave, the drop was gone for that frame: the panes
+ * started back to their own places, the pane in hand went back to its full size, the landing zone began its
+ * exit with the layout dimmed around it, and all of it came forward again (the operator, 2026-11-12: "it snaps
+ * in and snaps out really fast into a possible panel layout"; "a window-tab wide fade-in/out, very fast").
+ */
+export const LEAVE_GRACE_MS = 80;
+
+/** The layouts whose drop a leave is about to clear, with the timer that does it. */
+const leaves = new Map<LayoutModel, ReturnType<typeof setTimeout>>();
+
+function cancelLeave(model: LayoutModel): void {
+    const timer = leaves.get(model);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    leaves.delete(model);
+}
+
+/**
+ * The pointer left the zones a drop was shown from (a pane's overlay, or the layout itself). The drop is
+ * cleared once `LEAVE_GRACE_MS` has passed with no sample showing one again: a pointer that only crossed to
+ * the next pane's zones sends one within a frame, and one that has really left sends none. A candidate still
+ * waiting must not bring the ghost back, so its timer goes at once. With no drag underway (the leave that a
+ * cancelled drag ends with) there is nothing to wait for.
+ */
+export function leavePlacement(model: LayoutModel): void {
+    if (!isAnyUnderway(GHOST_DRAG_KINDS)) {
+        clearPlacement(model);
+        return;
+    }
+    clearTimeout(steadying.get(model)?.timer);
+    cancelLeave(model);
+    leaves.set(
+        model,
+        setTimeout(() => {
+            leaves.delete(model);
+            model.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        }, LEAVE_GRACE_MS)
+    );
+}
+
+// The drag is over. A drop has committed what was shown and cleared it; a cancelled drag left it to the grace,
+// and nothing shows a drop of a drag that is over.
+onSessionEnded(() => {
+    for (const model of [...leaves.keys()]) clearPlacement(model);
+});
 
 /** The drag is over, in whichever tab it was steadied (a pane dragged to another tab has two). */
 export function resetAllDropIntent(): void {

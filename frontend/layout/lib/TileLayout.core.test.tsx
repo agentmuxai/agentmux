@@ -126,6 +126,7 @@ function makeModel() {
         activeDrag,
         reflowFor: (id: string) => reflow().get(id),
         liveReflowActive: () => reflow().size > 0,
+        liveReflowExpected: () => activeDrag(),
         overlayTransform: overlay,
         gapSizePx: gap,
         animationTimeS: animTime,

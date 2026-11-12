@@ -86,6 +86,13 @@ export interface LiveReflow {
     reflowFor: (nodeId: string) => ReflowEntry | undefined;
     /** Whether the reflow is showing a drop now: the panes are the outline, so no wireframe and no dim. */
     liveReflowActive: () => boolean;
+    /**
+     * Whether the reflow is how this layout shows the drops of the drag that is on: it is on, the drag is this
+     * layout's own, and the panes are few enough. True between two drops too, when none is shown for a moment
+     * (`liveReflowActive` is false then): the landing zone must not fall back to its other look, the layout
+     * dimmed around it, for that moment.
+     */
+    liveReflowExpected: () => boolean;
 }
 
 /** The block a pane shows: its active tab's, or its own. */
@@ -316,5 +323,6 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
     return {
         reflowFor: (nodeId) => entries().get(nodeId),
         liveReflowActive: () => !!targets()?.showing,
+        liveReflowExpected: () => liveReflowEnabled() && model.activeDrag() && model.leafs().length <= REFLOW_MAX_PANES,
     };
 }

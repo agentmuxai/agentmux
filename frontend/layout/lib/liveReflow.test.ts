@@ -238,6 +238,30 @@ describe("the live reflow of a pane drag", () => {
         const m = modelOf(three());
         preview(m, "a", "c", DropDirection.Bottom);
         expect(m.liveReflowActive()).toBe(false);
+        expect(m.liveReflowExpected()).toBe(false);
+    });
+
+    it("is how the drag shows its drops from its start to its end, between two drops too", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        // No drop is shown yet, and none is for a moment between two: the reflow is still the drag's look.
+        expect(m.liveReflowActive()).toBe(false);
+        expect(m.liveReflowExpected()).toBe(true);
+        preview(m, "a", "c", DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.liveReflowActive()).toBe(true);
+        expect(m.liveReflowExpected()).toBe(true);
+        m.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        vi.advanceTimersByTime(20);
+        expect(m.liveReflowActive()).toBe(false);
+        expect(m.liveReflowExpected()).toBe(true);
+        m.activeDrag._set(false);
+        expect(m.liveReflowExpected()).toBe(false);
+        // Not with the setting off.
+        setFlag(false);
+        m.activeDrag._set(true);
+        expect(m.liveReflowExpected()).toBe(false);
     });
 
     it("gives every pane the rect the drop leaves it, the dragged one its landing rect, so the layout is covered", () => {

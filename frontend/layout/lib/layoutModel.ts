@@ -286,8 +286,10 @@ export class LayoutModel {
     placementWireframe: () => { id: string; style: CSSProperties }[];
     /** The live reflow of a pane drag (liveReflow.ts): how a tile stands in for its future rect, or nothing. */
     reflowFor: (nodeId: string) => ReflowEntry | undefined;
-    /** Whether the live reflow is showing a drop now: the panes are the outline, so no wireframe and no dim. */
+    /** Whether the live reflow is showing a drop now. */
     liveReflowActive: () => boolean;
+    /** Whether the live reflow is how the drag that is on shows its drops: the panes are the outline, so no wireframe and no dim. */
+    liveReflowExpected: () => boolean;
     /** The glide of the panes after one left outside a drag, while it runs (settlingPass.ts). */
     settlingPass: () => SettlingPass | undefined;
     /**
@@ -797,7 +799,11 @@ export class LayoutModel {
         // committed (futureLayout.ts `placementAction`).
         this.placeholderTransform = createMemo<CSSProperties>(() => this.getPlaceholderTransform(preview.placementAction()));
         this.settlingPass = createSettlingPass(this);
-        ({ reflowFor: this.reflowFor, liveReflowActive: this.liveReflowActive } = createLiveReflow(this));
+        ({
+            reflowFor: this.reflowFor,
+            liveReflowActive: this.liveReflowActive,
+            liveReflowExpected: this.liveReflowExpected,
+        } = createLiveReflow(this));
     }
 
     /**
