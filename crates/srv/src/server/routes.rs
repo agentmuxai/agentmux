@@ -788,6 +788,11 @@ fn agent_self_and_fleet_routes() -> Router<AppState> {
         // The GitHub App's installation token for an agent's git and gh, through
         // agentmux-bashwrap (identity::github_tokens).
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
+        // A container agent's push, judged as data by the host's publish guard (a container's pre-push hook).
+        .route(
+            "/api/v1/github/push-scan",
+            post(app_api::push_scan::handle_push_scan).layer(axum::extract::DefaultBodyLimit::max(app_api::push_scan::MAX_BODY_BYTES)),
+        )
         .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
         // An agent sets or clears seats, several at once; recorded under its name.
         .merge(agent_definition_routes())

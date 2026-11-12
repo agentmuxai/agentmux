@@ -73,6 +73,7 @@ mod idle_gate;
 mod hook;
 mod precompact;
 mod prefix;
+mod publish_scan;
 mod secret_scan;
 mod sessionstart;
 mod shim_functions;

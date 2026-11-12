@@ -134,6 +134,7 @@ mod attachments;
 pub(crate) mod connections;
 pub(crate) mod aws_credentials;
 pub(crate) mod github_token;
+pub(crate) mod push_scan;
 pub(crate) mod app_update;
 pub(crate) mod desktop;
 pub(crate) mod viewer;
