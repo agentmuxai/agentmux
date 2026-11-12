@@ -76,7 +76,7 @@ describe("openOrFocusPaneIdByView", () => {
         register("warden-1", "warden");
         layout.nodes.set("warden-1", { id: "node-w", minimized: true });
         expect(await openOrFocusPaneIdByView("warden")).toBe("warden-1");
-        expect(calls).toEqual(["show:node-w:warden-1", "focus:node-w", "give:warden-1", "flash:warden-1"]);
+        expect(calls).toEqual(["show:node-w:warden-1", "focus:node-w", "give:warden-1", `flash:warden-1:{"again":true}`]);
         expect(createBlock).not.toHaveBeenCalled();
     });
 
@@ -85,7 +85,7 @@ describe("openOrFocusPaneIdByView", () => {
         layout.nodes.set("settings-1", { id: "node-s" });
         expect(await openOrFocusPaneIdByView("settings")).toBe("settings-1");
         // A focus flash: the pane is focused by this path, so the flash waits for and follows that focus.
-        expect(calls.at(-1)).toBe("flash:settings-1");
+        expect(calls.at(-1)).toBe('flash:settings-1:{"again":true}');
     });
 
     it("shows a background member of a stack through the pane's node and its own block id", async () => {
@@ -156,6 +156,6 @@ describe("openOrFocusPaneIdByView", () => {
         expect(createBlock).toHaveBeenCalledTimes(1);
         expect(calls.filter((c) => c.startsWith("focus:"))).toEqual(["focus:node-s", "focus:node-s"]);
         // The new pane is not flashed from here (it is new, not located); the two shows are.
-        expect(calls.filter((c) => c.startsWith("flash:"))).toEqual(["flash:settings-1", "flash:settings-1"]);
+        expect(calls.filter((c) => c.startsWith("flash:"))).toEqual(['flash:settings-1:{"again":true}', 'flash:settings-1:{"again":true}']);
     });
 });

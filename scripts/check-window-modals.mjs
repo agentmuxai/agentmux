@@ -47,7 +47,6 @@ export const KEEP = new Map([
     ["frontend/app/window/logo-menu-state.ts", { openModal: 1, why: "the command palette entry of the logo menu" }],
     ["frontend/app/statusbar/ConfigStatus.tsx", { openModal: 1, why: "the config error: the status bar is the window's" }],
     ["frontend/app/store/ui-event-subs.ts", { openModal: 1, why: "srv's user-input request carries no pane or agent" }],
-    ["frontend/app/statusbar/TokenBreakdownPopover.tsx", { confirmModal: 1, why: "reset the token counter: the status bar is the window's" }],
     ["frontend/app/window/window-close-confirm.tsx", { confirmModal: 2, why: "the confirmations of closing or removing a window: the whole window" }],
     ["frontend/app/window/workspace-modals.tsx", { confirmModal: 2, why: "the workspace confirmations: the whole window" }],
 ]);

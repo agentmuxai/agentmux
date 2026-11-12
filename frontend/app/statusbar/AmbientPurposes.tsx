@@ -8,11 +8,48 @@
 
 import { createSignal, For, Index, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
-import { ambientAskFailed, ambientSummary } from "@/app/store/ambient-health";
-import type { AmbientPurposeRow } from "@/app/store/ambient-outcomes";
+import { ambientAskFailed, ambientFailures, ambientSummary } from "@/app/store/ambient-health";
+import {
+    describeFailure,
+    failureEntity,
+    failureStateLabel,
+    purposeWhat,
+    type AmbientFailure,
+    type AmbientPurposeRow,
+} from "@/app/store/ambient-outcomes";
 import { tip } from "@/app/element/tip";
 
 const BUCKETS = ["accepted", "kept", "refused", "skipped", "failed"] as const;
+
+/** The reason a failing purpose is failing, in plain words: which pane, what state, what it said. */
+function FailureLine(props: { failure: AmbientFailure }): JSX.Element {
+    const state = () => failureStateLabel(props.failure);
+    return (
+        <div class="ambient-purpose-failure" data-state={state() ?? "failing"} {...tip(describeFailure(props.failure))}>
+            <span class="ambient-purpose-failure-who">{failureEntity(props.failure)}</span>
+            <span class="ambient-purpose-failure-what">
+                {state() ?? (props.failure.outcome === "timeout" ? "timed out" : "failed")}
+                {` ${props.failure.count.toLocaleString("en-US")}×`}
+            </span>
+            <Show when={props.failure.retry_at != null && props.failure.retry_at > Date.now()}>
+                <span class="ambient-purpose-failure-retry">
+                    {`retrying ${new Date(props.failure.retry_at as number).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+                </span>
+            </Show>
+            <Show when={props.failure.reason}>
+                <span class="ambient-purpose-failure-reason">{props.failure.reason}</span>
+            </Show>
+        </div>
+    );
+}
+
+/** One plain sentence on what an unhealthy purpose cannot do, from the counts alone. */
+function whyLine(row: AmbientPurposeRow): string {
+    const parts: string[] = [];
+    if (row.counts.failed > 0) parts.push(`${row.counts.failed.toLocaleString("en-US")} failed`);
+    if (row.counts.refused > 0) parts.push(`${row.counts.refused.toLocaleString("en-US")} refused`);
+    return `AgentMux can't ${purposeWhat(row.purpose)}: ${parts.join(", ")} since start.`;
+}
 
 function PurposeLine(props: { row: AmbientPurposeRow; open: boolean; onToggle: () => void }): JSX.Element {
     return (
@@ -34,6 +71,14 @@ function PurposeLine(props: { row: AmbientPurposeRow; open: boolean; onToggle: (
                 <span class="ambient-purpose-total">{props.row.total}</span>
             </Button>
             <Show when={props.open}>
+                <Show when={props.row.unhealthy}>
+                    <div class="ambient-purpose-why" data-testid="ambient-purpose-why">
+                        <div>{whyLine(props.row)}</div>
+                        <For each={ambientFailures().filter((f) => f.purpose === props.row.purpose)}>
+                            {(f) => <FailureLine failure={f} />}
+                        </For>
+                    </div>
+                </Show>
                 <div class="ambient-purpose-counts">
                     <div class="ambient-purpose-count">
                         <span>Requests</span>

@@ -60,6 +60,14 @@ export interface LocateOptions {
     /** The reveal moved focus to the pane (default): the flash waits for it and ends when focus leaves.
      *  False for a pane shown without taking focus: it flashes where it is, focused or not. */
     focus?: boolean;
+    /**
+     * The user's own click on the way to a pane that is already in the shown tab (its widget, the More menu,
+     * the palette: `openOrFocusPaneIdByView`). Every one is answered with a flash, even while the last is still
+     * on screen: the pane replays it, at the rate the slot allows (`LOCATE_MIN_GAP_MS`). Without it, a request
+     * just after a flash started is the same flash, since one open can ask twice (`LOCATE_COALESCE_MS`); a
+     * reveal (`revealBlock`) is such a request, whoever asked for it.
+     */
+    again?: boolean;
 }
 
 type BlockListener = (blockId: string, opts: LocateOptions) => void;
@@ -211,24 +219,37 @@ export interface LocateFlashOptions {
     reduced: boolean;
 }
 
-/** The opacity envelope: rise, hold, then an ease-out fade. */
-export function locateKeyframes(): Keyframe[] {
+/** The opacity envelope: rise (from `from`, the strength a flash it replaces has now), hold, then an ease-out fade. */
+export function locateKeyframes(from = 0): Keyframe[] {
     const riseEnd = LOCATE_RISE_MS / LOCATE_TOTAL_MS;
     const holdEnd = (LOCATE_RISE_MS + LOCATE_HOLD_MS) / LOCATE_TOTAL_MS;
     return [
-        { offset: 0, opacity: 0, easing: "linear" },
+        { offset: 0, opacity: from, easing: "linear" },
         { offset: riseEnd, opacity: 1 },
         { offset: holdEnd, opacity: 1, easing: EASE_OUT },
         { offset: 1, opacity: 0 },
     ];
 }
 
+/** How strong the flash on `host` is now, 0 to 1: the new one starts from there, so a replay never dips to a bare pane. */
+function shownFlashOpacity(host: HTMLElement): number {
+    let shown = 0;
+    for (const old of host.querySelectorAll(":scope > .pane-locate-flash")) {
+        const opacity = Number(host.ownerDocument.defaultView?.getComputedStyle(old).opacity);
+        if (opacity > shown) shown = Math.min(1, opacity);
+    }
+    return shown;
+}
+
 /**
  * Add the flash overlay to `host` (the pane's root) and play it once. The
  * overlay is removed when it finishes. Returns a function that removes it
- * at once; calling it again, or after the end, does nothing.
+ * at once; calling it again, or after the end, does nothing. Over a flash
+ * still showing on `host` (a replay), it starts at that one's strength: the
+ * caller removes the old one once this returns.
  */
 export function showLocateFlash(host: HTMLElement, opts: LocateFlashOptions): () => void {
+    const from = shownFlashOpacity(host);
     const el = host.ownerDocument.createElement("div");
     el.className = opts.reduced ? "pane-locate-flash pane-locate-flash--reduced" : "pane-locate-flash";
     el.style.setProperty("--pane-locate-wash", opts.light ? LOCATE_WASH_LIGHT : LOCATE_WASH_DARK);
@@ -251,7 +272,7 @@ export function showLocateFlash(host: HTMLElement, opts: LocateFlashOptions): ()
         remove();
         return remove;
     }
-    const anim = el.animate(locateKeyframes(), { duration: ms });
+    const anim = el.animate(locateKeyframes(from), { duration: ms });
     anim.onfinish = remove;
     anim.oncancel = remove;
     return () => {

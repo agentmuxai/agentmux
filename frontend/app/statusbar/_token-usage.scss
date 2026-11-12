@@ -207,5 +207,21 @@
         border-top: 1px solid var(--border-color);
         display: flex;
         justify-content: flex-end;
+
+        // The reset question, drawn in the panel itself (no window modal).
+        .token-usage-breakdown-confirm {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-2);
+            width: 100%;
+            padding-bottom: var(--space-1-5);
+            font-size: var(--text-xs);
+        }
+
+        .token-usage-breakdown-confirm-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: var(--space-2);
+        }
     }
 }
