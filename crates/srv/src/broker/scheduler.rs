@@ -302,8 +302,7 @@ impl RefreshScheduler {
             // Unregistered concurrently between the dispatch in `ensure_fresh`
             // and this lookup. Wake any other caller parked on AlreadyInFlight
             // for this id — this path owns the only Refreshing state that
-            // existed for it, so nothing else will ever notify them (reagent
-            // re-review on #2275).
+            // existed for it, so nothing else will ever notify them (#2275).
             flight.armed = false;
             self.wake(id);
             return Err(format!("no credential registered as '{id}'"));

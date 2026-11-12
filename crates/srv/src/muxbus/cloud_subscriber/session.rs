@@ -87,8 +87,7 @@ impl Watchdog {
 pub(super) fn release_in_background(id: String, base: String, token: String, http: reqwest::Client, mstore: Arc<Store>, agents: Arc<Mutex<HashSet<String>>>) {
     tokio::spawn(async move {
         let token = shared_token_now(&mstore, &token).await;
-        // Skip if it was subscribed again meanwhile: its
-        // fresh claim must not be released (Codex P2, #3897).
+        // Skip if it was subscribed again meanwhile: its fresh claim must not be released (#3897).
         let still_gone = || !agents.lock().unwrap().contains(&id);
         crate::muxbus::wan_lease::release(&base, &id, &token, &http, still_gone).await
     });
