@@ -4,6 +4,7 @@
 // The groups of Settings → Advanced (advanced-section.tsx lays them out): Terminal, Agent panes in three runs,
 // Sysinfo widget, Drag & drop, Environment and Developer. Each group is its header and its rows.
 
+import { t } from "@/app/i18n/i18n";
 import { TextInput } from "@/app/element/ui";
 import { type JSX } from "solid-js";
 
@@ -41,7 +42,7 @@ function LimitInput(props: { settingKey: "agent:container_memory" | "agent:conta
 export function TerminalGroup(): JSX.Element {
     return (
         <>
-            <SectionHeader label="Terminal (power user)" />
+            <SectionHeader label={t("settings.advanced.group.terminalPowerUser")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.disableWebgl.id}
                 label={ADVANCED_SETTINGS.disableWebgl.label}
@@ -61,7 +62,7 @@ export function TerminalGroup(): JSX.Element {
 export function AgentPaneLimits(): JSX.Element {
     return (
         <>
-            <SectionHeader label="Agent panes" />
+            <SectionHeader label={t("settings.advanced.group.agentPanes")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.autoAnswerTimeout.id}
                 label={ADVANCED_SETTINGS.autoAnswerTimeout.label}
@@ -216,7 +217,7 @@ export function AgentPaneToggles(): JSX.Element {
 export function SysinfoGroup(): JSX.Element {
     return (
         <>
-            <SectionHeader label="Sysinfo widget" />
+            <SectionHeader label={t("settings.advanced.group.sysinfoWidget")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.sampleInterval.id}
                 label={ADVANCED_SETTINGS.sampleInterval.label}
@@ -251,7 +252,7 @@ export function SysinfoGroup(): JSX.Element {
 export function DragDropGroup(): JSX.Element {
     return (
         <>
-            <SectionHeader label="Drag & drop" />
+            <SectionHeader label={t("settings.advanced.group.dragDrop")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.enableFileDrop.id}
                 label={ADVANCED_SETTINGS.enableFileDrop.label}
@@ -301,7 +302,7 @@ export function DragDropGroup(): JSX.Element {
 export function EnvironmentGroup(): JSX.Element {
     return (
         <>
-            <SectionHeader label="Environment" />
+            <SectionHeader label={t("settings.advanced.group.environment")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.globalEnvVars.id}
                 stacked
@@ -322,7 +323,7 @@ export function EnvironmentGroup(): JSX.Element {
 export function DeveloperGroup(): JSX.Element {
     return (
         <>
-            <SectionHeader label="Developer" />
+            <SectionHeader label={t("settings.advanced.group.developer")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.devMode.id}
                 label={ADVANCED_SETTINGS.devMode.label}

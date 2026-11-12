@@ -24,16 +24,15 @@ import type { ForkSlugMigrationMode } from "@/types/rpc/ForkSlugMigrationMode";
 import type { ForkSlugPlan } from "@/types/rpc/ForkSlugPlan";
 import type { ForkSlugReport } from "@/types/rpc/ForkSlugReport";
 import type { MigrateForkSlugsResult } from "@/types/rpc/MigrateForkSlugsResult";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
-export const FORK_SLUG_SETTING = {
+export const FORK_SLUG_SETTING = settingEntry({
     id: "agents.outdated_ids",
-    label: "Outdated agent ids",
-    description:
-        "Forks made by older builds got an id that repeats every generation (loap-loap-2-loap-3). Updating gives each the id it would get today (loap-3). The old id still receives messages and review notices for 30 days, and is never given to another agent.",
+    labelKey: "settings.agents.outdatedIds.label",
+    descriptionKey: "settings.agents.outdatedIds.description",
     section: "agents",
     keywords: ["fork", "slug", "agent id", "id", "rename", "migrate", "outdated", "chain"],
-} satisfies SettingsIndexEntry;
+});
 
 type Phase = "loading" | "checking" | "idle" | "stopping" | "applying" | "undoing";
 

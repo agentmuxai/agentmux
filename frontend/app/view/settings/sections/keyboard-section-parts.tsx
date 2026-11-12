@@ -4,6 +4,7 @@
 // The pieces of Settings → Keyboard shortcuts (keyboard-section.tsx lays them out): the toolbar, a line per
 // command, a line per group of commands, and the entries of the setting that could not be used.
 
+import { t } from "@/app/i18n/i18n";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button, FilterInput, Kbd, Pill, Select, Switch } from "@/app/element/ui";
@@ -243,7 +244,7 @@ export function OtherEntries(p: { issues: KeybindingIssue[]; edit: KeyboardEdit 
     return (
         <Show when={p.issues.length > 0}>
             <section class="kb-category" aria-label="Other entries">
-                <SectionHeader label="Other entries" />
+                <SectionHeader label={t("settings.keyboard.group.otherEntries")} />
                 <ul class="kb-list" role="list">
                     <For each={p.issues}>
                         {(i) => (

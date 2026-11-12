@@ -22,36 +22,35 @@ import {
 import { sectionProblem } from "@/app/store/pane-sections";
 import { atoms } from "@/store/global";
 import { makeIconClass } from "@/util/util";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 
 import "./widget-bar-settings.scss";
 
 export const WIDGET_BAR_SETTINGS = {
-    bar: {
+    bar: settingEntry({
         id: "widgets.bar",
-        label: "Widget bar",
-        description:
-            "Choose what the widget bar shows. Pinned widgets are icons on the bar, More keeps them in the More menu, and Hidden removes them from both and from a pane's + menu.",
+        labelKey: "settings.widgetBar.bar.label",
+        descriptionKey: "settings.widgetBar.bar.description",
         section: "widgets",
         keywords: ["widget bar", "toolbar", "pin", "unpin", "hide", "show", "more menu", "+ menu", "reorder", "widget:pinned", "widget:hidden"],
-    },
-    iconOnly: {
+    }),
+    iconOnly: settingEntry({
         id: "widgets.bar.icononly",
-        label: "Show icons only",
-        description: "Icons without text labels on the widget bar",
+        labelKey: "settings.widgetBar.iconOnly.label",
+        descriptionKey: "settings.widgetBar.iconOnly.description",
         section: "widgets",
-        group: "Widget bar",
+        groupKey: "settings.widgetBar.group.widgetBar",
         keywords: ["compact widget bar", "hide labels", "icon-only", "widget:icononly"],
-    },
-    reset: {
+    }),
+    reset: settingEntry({
         id: "widgets.bar.reset",
-        label: "Reset widget bar",
-        description: "Back to the default pinned widgets, with nothing hidden",
+        labelKey: "settings.widgetBar.reset.label",
+        descriptionKey: "settings.widgetBar.reset.description",
         section: "widgets",
-        group: "Widget bar",
+        groupKey: "settings.widgetBar.group.widgetBar",
         keywords: ["default widgets", "restore", "unhide all"],
-    },
+    }),
 } satisfies Record<string, SettingsIndexEntry>;
 
 function topLevelOptions(entry: WidgetBarEntry): SegmentedOption<WidgetBarState>[] {
