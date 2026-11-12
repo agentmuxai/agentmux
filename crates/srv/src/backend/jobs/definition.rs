@@ -374,9 +374,10 @@ impl JobDefinition {
         validate_secrets(&self.secrets)
     }
 
-    /// A Drone run can't be stopped or run again yet, and each of those
-    /// would close the job's row while the drone goes on, so a drone job
-    /// can't ask for them until the engine can cancel a run.
+    /// A Drone run can't be stopped, run again or capped yet. Stopping and
+    /// retrying would close the job's row while the drone goes on, and a spending
+    /// cap would not be enforced (spending admission knows only message and
+    /// spawn actions), so a drone job can't ask for them until the engine can.
     fn validate_drone_policy(&self) -> Result<(), String> {
         if !matches!(self.action, Action::Drone { .. }) {
             return Ok(());
@@ -387,6 +388,11 @@ impl JobDefinition {
         }
         if p.overlap == Overlap::CancelOther {
             return Err(format!("policy.overlap: cancel_other would have to stop the earlier drone run, which can't be stopped yet; use skip or buffer_one (stopping runs is {LATER})"));
+        }
+        if p.caps.as_ref().is_some_and(|c| c.run_usd.is_some() || c.day_usd.is_some()) {
+            return Err(format!(
+                "policy.caps: a drone run's spend can't be capped yet, so a cap here would not hold; leave run_usd and day_usd out (caps for drone runs are {LATER})"
+            ));
         }
         if p.retries > 0 {
             return Err(format!("policy.retries: a failed drone run is not run again yet; leave retries at 0 and run it again by hand (retries are {LATER})"));
