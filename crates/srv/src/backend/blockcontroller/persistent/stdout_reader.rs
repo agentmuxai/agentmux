@@ -574,7 +574,7 @@ impl StdoutReader {
         } else if is_result_frame && !result_is_error {
             core::persist_last_failure(&self.block_id_read, None, &self.mstore_read, &self.event_bus_read);
             if let Some(mstore) = &self.mstore_read {
-                crate::backend::route_credits::turn_succeeded(mstore, &self.block_id_read);
+                crate::backend::route_credits::turn_succeeded(mstore, self.broker_read.as_ref(), &self.block_id_read);
             }
         }
         FrameVerdict { is_result_frame, inband_error, early_failure }
