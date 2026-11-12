@@ -207,7 +207,6 @@ async fn a_workers_unreported_turn_notes_its_open_leader() {
     assert_eq!(note_for(&state.mstore, &state.filestore, &failed), None, "held: within a minute of the last note");
 }
 
-
 /// A route out of credits stops every agent on it: the route's own note tells the lead once, so no worker's
 /// failure adds its own (#47449).
 #[tokio::test]

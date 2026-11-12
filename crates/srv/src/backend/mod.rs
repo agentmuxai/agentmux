@@ -229,8 +229,9 @@ pub mod bulletin;
 pub mod cold_hold;
 /// Google connectors: Calendar, Drive and Gmail for agents, called by srv.
 pub mod google;
-/// A leader hears when its workers end a turn without reporting, fail or stop.
+/// A model route out of credits (HTTP 402): every agent on it is stopped, and each lead is told once.
 pub mod route_credits;
+/// A leader hears when its workers end a turn without reporting, fail or stop.
 pub mod worker_notes;
 
 pub use oref::ORef;
