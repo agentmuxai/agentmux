@@ -369,8 +369,8 @@ mod spawn_site_coverage {
     /// `program` is the literal text between `new(` and the first `,` or `)`,
     /// which is stable across edits in a way line numbers are not.
     const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
-        ("src/identity/gh_agent_token.rs", "&exe", 1,
-         "sanitized: the host's `gh-agent token` for a container agent's repository, sanitize_external_command (it is told only the agent id)"),
+        ("src/identity/gh_agent_token.rs", "&exe", 2,
+         "sanitized: the host's `gh-agent token` for a container agent's repository, sanitize_external_command (it is told only the agent id); and its `scan-push`, which judges a container's push from data on stdin, sanitize_external_command, run in a temp directory with fixed arguments"),
         ("src/identity/aws_broker/mint.rs", "&spec.program", 1,
          "sanitized: the host program that mints a container agent's AWS session (aws configure export-credentials, or a grant's own recipe), sanitize_external_command, then only an allowlist of the environment is passed on"),
         ("src/server/files_root.rs", "\"cmd\"", 1,

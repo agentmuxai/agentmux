@@ -36,6 +36,10 @@ struct Output {
     acting_as: Option<String>,
 }
 
+/// Set to `1` in a container's commands only while this machine has a publish guard (gh-agent installed); the
+/// container's pre-push hook reads it (`agentmux-bashwrap`'s `publish_scan`) and asks nothing when it is absent.
+pub const PUBLISH_GUARD_ENV: &str = "AGENTMUX_PUBLISH_GUARD";
+
 /// `gh-agent` on the host's PATH, if it is installed.
 pub fn installed() -> Option<PathBuf> {
     which::which("gh-agent").ok()
@@ -155,6 +159,95 @@ pub async fn token_for(slug: &str, owner: &str, repo: &str) -> Result<HostToken,
     parse(&out.stdout)
 }
 
+/// How long `gh-agent scan-push` may take: the pattern list is cached for a day, but a first read, a visibility lookup and
+/// the scan itself are round trips.
+const SCAN_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// What the host's publish guard made of a container agent's push.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ScanOutcome {
+    /// Its verdict: 0 passes, anything else refuses, with the lines to show.
+    Judged { code: i64, lines: Vec<String>, public: bool },
+    /// It could not judge (not run, too slow, no answer): what to tell the agent.
+    Failed(String),
+}
+
+#[derive(Deserialize)]
+struct Verdict {
+    code: i64,
+    lines: Vec<String>,
+    /// Whether the repository is one the guard guards. An answer that doesn't say is taken as public.
+    #[serde(default = "yes")]
+    public: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// The verdict in `gh-agent scan-push`'s output.
+fn parse_verdict(stdout: &[u8]) -> Result<(i64, Vec<String>, bool), String> {
+    let v: Verdict = serde_json::from_slice(stdout).map_err(|_| "gh-agent gave no verdict".to_string())?;
+    // A bounded answer: a few lines of a few hundred characters.
+    let lines = v.lines.into_iter().take(50).map(|l| l.chars().take(1000).collect()).collect();
+    Ok((v.code, lines, v.public))
+}
+
+/// Judge a container agent's push with the host's `gh-agent scan-push --repo owner/repo`. The `material` (JSON) goes in
+/// on stdin; the arguments are fixed, there is no shell, and the working directory is the temp folder, never anything
+/// of the container's. gh-agent reads no repository and runs no git for this.
+pub async fn scan_push(slug: &str, repo: &str, material: &[u8]) -> ScanOutcome {
+    use tokio::io::AsyncWriteExt;
+    let Some((owner, name)) = repo.split_once('/') else { return ScanOutcome::Failed("not a GitHub repository".to_string()) };
+    if !is_name(owner) || !is_name(name) {
+        return ScanOutcome::Failed("not a GitHub repository".to_string());
+    }
+    let Some(exe) = installed() else { return ScanOutcome::Failed("gh-agent isn't installed on this machine".to_string()) };
+    let mut cmd = tokio::process::Command::new(&exe);
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
+    cmd.args(["scan-push", "--repo", repo])
+        .env("AGENTMUX_AGENT_ID", slug)
+        .current_dir(std::env::temp_dir())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    cmd.no_window();
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return ScanOutcome::Failed(format!("couldn't run gh-agent: {e}")),
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let material = material.to_vec();
+        // Written while the child works, so a large push can't fill the pipe and wait for a reader that isn't reading.
+        tokio::spawn(async move {
+            let _ = stdin.write_all(&material).await;
+            let _ = stdin.shutdown().await;
+        });
+    }
+    let out = match tokio::time::timeout(SCAN_TIMEOUT, child.wait_with_output()).await {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => return ScanOutcome::Failed(format!("gh-agent failed: {e}")),
+        Err(_) => {
+            return ScanOutcome::Failed(format!("the publish guard didn't answer in {} s: try the push again in a minute", SCAN_TIMEOUT.as_secs()));
+        }
+    };
+    if !out.status.success() {
+        // What gh-agent said it could not do, first line, bounded.
+        let said = String::from_utf8_lossy(&out.stderr);
+        let first = said.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("it gave no reason");
+        // An older gh-agent doesn't know the command and hands it to gh.
+        if said.contains("unknown command \"scan-push\"") {
+            return ScanOutcome::Failed("this machine's gh-agent is too old to check a container's push: update it (npm i -g @a5af/gh-agent)".to_string());
+        }
+        return ScanOutcome::Failed(format!("the publish guard could not check this push: {}", first.chars().take(300).collect::<String>()));
+    }
+    match parse_verdict(&out.stdout) {
+        Ok((code, lines, public)) => ScanOutcome::Judged { code, lines, public },
+        Err(why) => ScanOutcome::Failed(why),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,5 +288,25 @@ mod tests {
         assert!(parse(b"not json").is_err());
         assert!(parse(br#"{"token":""}"#).is_err());
         assert_eq!(parse(br#"{"token":"t"}"#).unwrap().expires_at, 0);
+    }
+
+    #[test]
+    fn the_verdict_is_read_from_the_json_and_kept_short() {
+        let (code, lines, public) = parse_verdict(br#"{"code":1,"lines":["a","b"]}"#).unwrap();
+        assert_eq!((code, lines, public), (1, vec!["a".to_string(), "b".to_string()], true));
+        assert!(!parse_verdict(br#"{"code":0,"lines":[],"public":false}"#).unwrap().2);
+        let many = format!(r#"{{"code":0,"lines":[{}]}}"#, (0..80).map(|i| format!("\"{i}\"")).collect::<Vec<_>>().join(","));
+        assert_eq!(parse_verdict(many.as_bytes()).unwrap().1.len(), 50);
+        let long = format!(r#"{{"code":0,"lines":["{}"]}}"#, "x".repeat(5000));
+        assert_eq!(parse_verdict(long.as_bytes()).unwrap().1[0].chars().count(), 1000);
+        assert!(parse_verdict(b"not json").is_err());
+        assert!(parse_verdict(br#"{"lines":[]}"#).is_err());
+    }
+
+    #[tokio::test]
+    async fn only_an_owner_and_a_repository_name_reach_the_command() {
+        for bad in ["", "a", "a/b/c", "-x/y", "a/b;c", "../x/y", "a/--flag"] {
+            assert!(matches!(scan_push("aria", bad, b"{}").await, ScanOutcome::Failed(_)), "{bad:?}");
+        }
     }
 }
