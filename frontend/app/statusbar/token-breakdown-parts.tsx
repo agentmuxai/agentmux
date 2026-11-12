@@ -208,17 +208,23 @@ export function BreakdownRows(part: { s: TokenBreakdownState }): JSX.Element {
 export function BreakdownFooter(part: { s: TokenBreakdownState }): JSX.Element {
     const { agentRows, confirmingReset, handleResetClick, handleConfirmReset, handleCancelReset } = part.s;
     let cancelRef: HTMLButtonElement | undefined;
+    let resetRef: HTMLButtonElement | undefined;
     // The button that was pressed goes away with the question, so keyboard focus moves to the safe answer.
     const ask = () => {
         handleResetClick();
         queueMicrotask(() => cancelRef?.focus());
+    };
+    // Cancel goes away with the question, so focus goes back to the button that asked it.
+    const cancel = () => {
+        handleCancelReset();
+        queueMicrotask(() => resetRef?.focus());
     };
     return (
         <div class="token-usage-breakdown-footer" data-confirming={confirmingReset() ? "true" : undefined}>
             <Show
                 when={confirmingReset()}
                 fallback={
-                    <Button tone="danger" density="compact" onClick={ask} disabled={agentRows().length === 0}>
+                    <Button ref={resetRef} tone="danger" density="compact" onClick={ask} disabled={agentRows().length === 0}>
                         Reset counter
                     </Button>
                 }
@@ -229,7 +235,7 @@ export function BreakdownFooter(part: { s: TokenBreakdownState }): JSX.Element {
                         Per-pane Worked stats stay unchanged.
                     </div>
                     <div class="token-usage-breakdown-confirm-actions">
-                        <Button ref={cancelRef} tone="quiet" density="compact" onClick={handleCancelReset}>
+                        <Button ref={cancelRef} tone="quiet" density="compact" onClick={cancel}>
                             Cancel
                         </Button>
                         <Button tone="danger" density="compact" onClick={handleConfirmReset}>

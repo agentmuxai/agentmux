@@ -183,6 +183,7 @@ describe("TokenBreakdownPopover, pinned", () => {
         expect(document.activeElement).toBe(button("Cancel"));
         fireEvent.click(button("Cancel"));
         await flush();
+        expect(document.activeElement).toBe(button("Reset counter"));
         look("cancelled");
         fireEvent.click(button("Reset counter"));
         fireEvent.click(button("Reset"));
