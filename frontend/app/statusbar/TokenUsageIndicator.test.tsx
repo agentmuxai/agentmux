@@ -21,7 +21,7 @@ describe("TokenUsageIndicator — AgentMux's own calls", () => {
         outcomesCmd.mockResolvedValue({ activity_summary: { accepted: 1, "rejected:shape": 2, cli_failed: 2 } });
         render(() => <TokenUsageIndicator />);
         const dot = await screen.findByTestId("ambient-failing-dot");
-        expect(dot.getAttribute("data-hover-tip")).toContain("1 purpose failing");
+        expect(dot.getAttribute("data-hover-tip")).toBe("AgentMux can't write the session title (failed 2 times since start)");
     });
 
     it("shows no dot when every purpose is healthy", async () => {

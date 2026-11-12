@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { summarizeAmbientOutcomes } from "./ambient-outcomes";
+import {
+    describeFailingTip,
+    describeFailure,
+    purposeWhat,
+    summarizeAmbientOutcomes,
+    type AmbientFailure,
+} from "./ambient-outcomes";
 
 describe("summarizeAmbientOutcomes", () => {
     it("gives every purpose its own row, named, in a fixed order", () => {
@@ -51,5 +57,63 @@ describe("summarizeAmbientOutcomes", () => {
         expect(summarizeAmbientOutcomes(null)).toBeNull();
         expect(summarizeAmbientOutcomes({})).toBeNull();
         expect(summarizeAmbientOutcomes({ activity_summary: {} })).toBeNull();
+    });
+});
+
+describe("describeFailure and describeFailingTip", () => {
+    const base: AmbientFailure = {
+        purpose: "activity_summary",
+        entity: "blk-1",
+        entity_name: "Deke",
+        outcome: "cli_failed",
+        count: 2585,
+        last_at: Date.UTC(2026, 10, 12, 7, 0),
+    };
+
+    it("names the call, the pane and how often it failed", () => {
+        expect(describeFailure(base)).toBe("AgentMux can't write the session title for Deke (failed 2,585 times since start)");
+    });
+
+    it("says a timeout timed out, and uses the id when srv has no name", () => {
+        const text = describeFailure({ ...base, entity_name: null, outcome: "timeout", count: 1 });
+        expect(text).toBe("AgentMux can't write the session title for blk-1 (timed out 1 time since start)");
+    });
+
+    it("leads with out of credit or needs sign-in instead of failing", () => {
+        expect(describeFailure({ ...base, class: "payment" })).toMatch(/^Out of credit: AgentMux can't write the session title for Deke/);
+        expect(describeFailure({ ...base, class: "auth" })).toMatch(/^Needs sign-in: /);
+        expect(describeFailure({ ...base, class: "other" })).toMatch(/^AgentMux can't/);
+    });
+
+    it("says when it tries again while backing off, and not after that time", () => {
+        const now = Date.UTC(2026, 10, 12, 7, 0);
+        expect(describeFailure({ ...base, retry_at: now + 600_000 }, now)).toContain(", trying again at ");
+        expect(describeFailure({ ...base, retry_at: now - 1 }, now)).not.toContain("trying again");
+    });
+
+    it("names the first failing pane and counts the rest", () => {
+        const s = summarizeAmbientOutcomes({ activity_summary: { accepted: 1, cli_failed: 5 } });
+        const other: AmbientFailure = { ...base, entity: "blk-2", entity_name: "Klon", count: 3 };
+        const tip = describeFailingTip(s, [base, other], base.last_at);
+        expect(tip).toBe("AgentMux can't write the session title for Deke (failed 2,585 times since start) +1 more");
+    });
+
+    it("ignores a failure of a purpose that is healthy now", () => {
+        const s = summarizeAmbientOutcomes({ activity_summary: { accepted: 50, cli_failed: 1 } });
+        expect(describeFailingTip(s, [base])).toBe("");
+    });
+
+    it("falls back to the purpose when srv names no pane", () => {
+        const s = summarizeAmbientOutcomes({
+            activity_summary: { accepted: 1, cli_failed: 3 },
+            next_prompt_suggestion: { accepted: 1, "rejected:format": 4 },
+        });
+        expect(describeFailingTip(s, [])).toBe("AgentMux can't write the session title (failed 3 times since start) +1 more");
+        const refused = summarizeAmbientOutcomes({ next_prompt_suggestion: { accepted: 1, "rejected:format": 4 } });
+        expect(describeFailingTip(refused, [])).toBe("AgentMux can't suggest the next prompt (refused 4 times since start)");
+    });
+
+    it("names a purpose this build doesn't know by its tag", () => {
+        expect(purposeWhat("brand_new")).toBe("run brand_new");
     });
 });

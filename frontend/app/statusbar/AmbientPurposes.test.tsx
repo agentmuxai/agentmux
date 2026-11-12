@@ -8,7 +8,7 @@ const outcomesCmd = vi.hoisted(() => vi.fn());
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AmbientOutcomesCommand: outcomesCmd } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { ambientFailingCount, refreshAmbient, watchAmbient } from "@/app/store/ambient-health";
+import { ambientFailingCount, refreshAmbient, setAmbientFailures, watchAmbient } from "@/app/store/ambient-health";
 import { AmbientPurposes } from "./AmbientPurposes";
 
 const healthy = { activity_summary: { accepted: 10, kept: 30 } };
@@ -93,5 +93,46 @@ describe("watchAmbient", () => {
         stop();
         await vi.advanceTimersByTimeAsync(10_000);
         expect(outcomesCmd).toHaveBeenCalledTimes(3);
+    });
+});
+
+describe("AmbientPurposes — why a purpose is failing", () => {
+    beforeEach(() => {
+        outcomesCmd.mockReset();
+    });
+    afterEach(cleanup);
+
+    it("opens a failing purpose to a plain sentence, and to the pane, state and reason when srv names them", async () => {
+        outcomesCmd.mockResolvedValue(failing);
+        setAmbientFailures([
+            {
+                purpose: "activity_summary",
+                entity: "blk-1",
+                entity_name: "Deke",
+                outcome: "cli_failed",
+                reason: "HTTP 402 payment required",
+                class: "payment",
+                count: 2585,
+                last_at: Date.now(),
+            },
+        ]);
+        render(() => <AmbientPurposes />);
+        await refreshAmbient();
+        fireEvent.click(await screen.findByRole("button", { name: /Session titles/ }));
+        const why = screen.getByTestId("ambient-purpose-why");
+        expect(why.textContent).toContain("AgentMux can't write the session title: 2 failed, 2 refused since start.");
+        expect(why.textContent).toContain("Deke");
+        expect(why.textContent).toContain("out of credit");
+        expect(why.textContent).toContain("2,585");
+        expect(why.textContent).toContain("HTTP 402 payment required");
+        setAmbientFailures([]);
+    });
+
+    it("says nothing extra for a healthy purpose", async () => {
+        outcomesCmd.mockResolvedValue(healthy);
+        render(() => <AmbientPurposes />);
+        await refreshAmbient();
+        fireEvent.click(await screen.findByRole("button", { name: /Session titles/ }));
+        expect(screen.queryByTestId("ambient-purpose-why")).toBeNull();
     });
 });
