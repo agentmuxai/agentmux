@@ -261,6 +261,23 @@ describe("UpdateStatus chip, once srv has staged the release by itself", () => {
         expect(screen.getByText("Restarting…")).toBeTruthy();
     });
 
+    it("the chip's tip is not drawn over the open panel, and says what is happening once the restart is under way", async () => {
+        // Closed: the tip says what the chip does, and during the restart what is happening.
+        updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/x" }));
+        render(() => <UpdateStatus />);
+        const chip = await screen.findByLabelText("Update: Restart to update");
+        expect(chip.getAttribute("data-tip")).toBe("AgentMux has downloaded an update: restart to install it");
+        // Open: no tip, which would draw over the panel's buttons.
+        fireEvent.click(chip);
+        await screen.findByText("AgentMux 0.59.27 is ready");
+        expect(chip.getAttribute("data-tip")).toBeNull();
+        // Closed again during the restart: the old wording would be out of date.
+        fireEvent.click(screen.getByRole("button", { name: "Later" }));
+        acceptAppUpdate(download("restarting", { folder: "C:/apps/x" }));
+        await screen.findByLabelText("Update: Restarting…");
+        expect(screen.getByLabelText("Update: Restarting…").getAttribute("data-tip")).toBe("AgentMux is restarting to install the update");
+    });
+
     it("the click's own answer, arriving after the event for what came next, does not put the panel back", async () => {
         // Nobody is in a turn: srv answers the click and asks the launcher a moment later. The event for
         // that reaches the window first, then the click's answer, which is the older of the two.

@@ -52,7 +52,8 @@ const labelFor = (status: ChipStatus, version: string | null | undefined, restar
     }
 };
 
-const tipFor = (staged: boolean, fromSrv: boolean, clickable: boolean): string => {
+const tipFor = (staged: boolean, fromSrv: boolean, clickable: boolean, restarting = false): string => {
+    if (restarting) return "AgentMux is restarting to install the update";
     if (staged) return "AgentMux has downloaded an update: restart to install it";
     if (fromSrv) return "A newer AgentMux is out: see what's new";
     return clickable ? "Update available, click to install" : "Update status";
@@ -114,7 +115,8 @@ const UpdateStatus = (): JSX.Element => {
                 ref={chipRef}
                 class={`status-bar-item${clickable() ? " clickable" : ""}`}
                 onClick={clickable() ? handleClick : undefined}
-                data-tip={tipFor(!!staged(), !!fromSrv(), clickable())}
+                // Not while its panel is open: the tip would draw over the panel's buttons.
+                data-tip={panelOpen() && hasPanel() ? undefined : tipFor(!!staged(), !!fromSrv(), clickable(), staged()?.state === "restarting")}
                 aria-label={`Update: ${label()}`}
                 aria-haspopup={hasPanel() ? "dialog" : undefined}
                 aria-expanded={hasPanel() ? panelOpen() : undefined}
