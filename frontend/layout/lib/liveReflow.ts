@@ -23,7 +23,8 @@
  * docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md.
  *
  * Outside a drag the same entries have a second source: a settling pass (settlingPass.ts), which glides the
- * panes to the rects a change of the tree has already given them, after a pane closed.
+ * panes to the rects a change of the arrangement has already given them: a pane closed, opened, was
+ * minimized or restored, or two were swapped.
  */
 
 import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
