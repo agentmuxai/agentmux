@@ -154,6 +154,34 @@ check. `srv-image.yml`'s build is skipped the same way (it isn't a required
 check). The decision is proven from the diff, never from a path, branch name
 or title.
 
+### R8 — A PR that only touches the frontend needs no Rust leg (added 2026-11-12)
+
+A PR whose changed files are all documentation or under `frontend/` used to run every Rust leg (the Ubuntu
+`cargo nextest`, the Windows check and nextest build, the macOS check), 13 to 20 minutes of wall clock, and was
+exposed to their stalls: on 2026-11-12 a frontend-only PR waited on an Ubuntu nextest step that stalled twice to the
+job limit.
+
+`classifyChanges` now sets `rust` false and `frontend` true when every non-documentation file is under `frontend/` and
+is not one the Rust side reads. Those are listed in `RUST_READS_FRONTEND` (`scripts/ci-classify-changes.mjs`): the
+ts-rs output and schemas under `frontend/types/rpc/`, the key table cef includes at build time, the manifest and the
+widget singleton file srv tests read, and the layout vectors another srv test reads. A test scans the crates for every
+path of `frontend/` they name (an `include_str!`, a join on the manifest directory, ts-rs's `export_to`) and fails when
+one is not listed, so a new read cannot slip past; a file outside `frontend/` (a manifest, a script, a workflow)
+runs everything. A renamed file counts under both names (the API's `previous_filename`), so moving a listed file to a
+plain frontend path still runs the Rust legs.
+
+What the skipped Rust job used to check for these files is not lost: the RPC codegen hygiene check (pure node over the
+committed generated types and `frontend/app`) moved into the frontend job, which every non-documentation PR runs; the
+bindings gate, the ts-rs warnings check and the tests only read what the list above sends to the Rust legs. A skipped
+job counts as passed for `CI required` (R5's aggregate), as for a documentation-only PR, and the merge queue runs
+everything on the merged result (the Ubuntu leg, the fast gates and both frontend legs), so a frontend change that
+breaks a Rust test through a path nobody listed is caught at merge time, not released.
+
+The nextest step itself no longer costs 40 silent minutes when a runner stalls: `scripts/ci-nextest-run.sh` keeps a
+5-second resource trace in a file (uploaded when the step fails or is cancelled), kills the biggest process when memory
+and swap are both nearly gone (the runner starves and cannot even stream its log), limits an attempt to 25 minutes (12
+in the queue) and retries a stalled attempt once.
+
 ## 3. Design
 
 ```

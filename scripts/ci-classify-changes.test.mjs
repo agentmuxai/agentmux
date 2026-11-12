@@ -10,8 +10,11 @@
 // check on code nobody compiled. So each rule gets its own adversarial cases,
 // and every case that should RUN is written as the assertion, not implied.
 
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { classifyChanges, classifyPullFiles, isDocsOnlyPath, versionOnlyChange } from "./ci-classify-changes.mjs";
+import { classifyChanges, classifyPullFiles, isDocsOnlyPath, isFrontendOnlyPath, versionOnlyChange } from "./ci-classify-changes.mjs";
 
 describe("isDocsOnlyPath — things that genuinely cannot affect a build", () => {
     it("accepts documentation and licence files", () => {
@@ -364,5 +367,103 @@ describe("R7 — version-only release PRs", () => {
             docs_only: true,
             version_only: false,
         });
+    });
+});
+
+describe("R8 — a PR that only touches the frontend skips the Rust legs", () => {
+    it("runs the frontend legs and no Rust leg when every file is a frontend file no crate reads", () => {
+        const r = classifyChanges([
+            "frontend/app/statusbar/UpdateStatus.test.tsx",
+            "frontend/app/store/app-update.ts",
+            "frontend/types/custom.d.ts",
+            ".changesets/1794485190-update-in-the-store-9q9m.md",
+        ]);
+        expect(r).toMatchObject({ rust: false, frontend: true, docs_only: false });
+        expect(r.reason).toContain("R8");
+    });
+
+    it("runs the Rust legs when one file is read by the crates or the Rust job", () => {
+        for (const read of [
+            "frontend/types/rpc/Foo.ts",
+            "frontend/types/rpc/rpc-schema.json",
+            "frontend/app/keybindings/host-keys.json",
+            "frontend/app/store/rpc-api/generated-manifest.json",
+            "frontend/app/store/widget-singleton.ts",
+        ]) {
+            expect(classifyChanges(["frontend/app/x.ts", read]), read).toMatchObject({ rust: true, frontend: true });
+        }
+    });
+
+    it("runs the Rust legs when anything outside frontend/ rides along", () => {
+        for (const other of ["crates/srv/src/lib.rs", "package.json", "package-lock.json", ".github/workflows/ci-pr.yml", "scripts/foo.mjs", "Cargo.toml", "tools/x.sh", "settings-template.jsonc"]) {
+            expect(classifyChanges(["frontend/app/x.ts", other]), other).toMatchObject({ rust: true });
+        }
+    });
+
+    it("treats look-alike paths as not frontend (R2, toward running)", () => {
+        for (const p of ["Frontend/app/x.ts", "frontend", "frontendx/app/x.ts", "docs/frontend/x.ts", "crates/cef/frontend/x.ts", ""]) {
+            expect(isFrontendOnlyPath(p), p).toBe(false);
+        }
+        expect(isFrontendOnlyPath("./frontend\\app\\x.ts")).toBe(true);
+    });
+
+    it("still skips both for documentation alone, and keeps the version-only rule", () => {
+        expect(classifyChanges(["docs/specs/SPEC_X.md"])).toMatchObject({ rust: false, frontend: false, docs_only: true });
+        const entries = [{ filename: "package.json", patch: '@@ -1,3 +1,3 @@\n-  "version": "0.60.14",\n+  "version": "0.60.15",' }];
+        expect(classifyPullFiles(entries)).toMatchObject({ rust: false, frontend: false, version_only: true });
+    });
+
+    it("classifies a frontend-only PR from the PR files API too", () => {
+        const r = classifyPullFiles([{ filename: "frontend/app/a.ts", patch: "@@ -1 +1 @@\n-a\n+b" }]);
+        expect(r).toMatchObject({ rust: false, frontend: true, version_only: false });
+    });
+});
+
+describe("R8 — a renamed file counts under its old name too", () => {
+    it("runs the Rust legs when a file the crates read is moved to a path they do not", () => {
+        const r = classifyPullFiles([
+            { filename: "frontend/app/store/widget-view.ts", previous_filename: "frontend/app/store/widget-singleton.ts", patch: "@@ -1 +1 @@\n-a\n+b" },
+        ]);
+        expect(r).toMatchObject({ rust: true, version_only: false });
+    });
+
+    it("runs the Rust legs when a Rust file is moved into frontend/", () => {
+        const r = classifyPullFiles([{ filename: "frontend/app/x.ts", previous_filename: "crates/srv/src/x.rs", patch: "" }]);
+        expect(r).toMatchObject({ rust: true });
+    });
+
+    it("keeps the skip for a frontend file moved between frontend paths no crate reads", () => {
+        const r = classifyPullFiles([{ filename: "frontend/app/b.ts", previous_filename: "frontend/app/a.ts", patch: "" }]);
+        expect(r).toMatchObject({ rust: false, frontend: true });
+    });
+
+    it("never takes a rename for a version-only change, and a bad previous name runs everything", () => {
+        const patch = '@@ -1,3 +1,3 @@\n-  "version": "0.60.14",\n+  "version": "0.60.15",';
+        const r = classifyPullFiles([{ filename: "package.json", patch }, { filename: "docs/b.md", previous_filename: "docs/a.md", patch: "" }]);
+        expect(r.version_only).toBe(false);
+        expect(classifyPullFiles([{ filename: "frontend/a.ts", previous_filename: 5, patch: "" }])).toMatchObject({ rust: true, frontend: true });
+    });
+});
+
+describe("R8 — every frontend path a crate names is one the classifier sends to the Rust legs", () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..", "crates");
+    const rustFiles = (dir) =>
+        readdirSync(dir).flatMap((name) => {
+            const full = join(dir, name);
+            if (name === "target" || name === "node_modules") return [];
+            return statSync(full).isDirectory() ? rustFiles(full) : name.endsWith(".rs") ? [full] : [];
+        });
+
+    it("finds the paths and lists each one", () => {
+        // A path of frontend/ written relative to a crate (`../../frontend/...`): include_str!, a join on
+        // CARGO_MANIFEST_DIR, ts-rs's export_to. A new read is a new line here, and the classifier must list it.
+        const found = new Map();
+        for (const file of rustFiles(root)) {
+            const text = readFileSync(file, "utf8");
+            for (const m of text.matchAll(/(?:\.\.\/)+(frontend\/[^"'`\s)]*)/g)) found.set(m[1], file);
+        }
+        expect(found.size).toBeGreaterThanOrEqual(4);
+        const unlisted = [...found].filter(([path]) => isFrontendOnlyPath(path)).map(([path, file]) => `${path} (${file})`);
+        expect(unlisted, "add these to RUST_READS_FRONTEND in scripts/ci-classify-changes.mjs").toEqual([]);
     });
 });
