@@ -129,6 +129,7 @@ beforeEach(() => {
     for (const fn of Object.values(h.rpc)) fn.mockClear();
     (globalThis as { ResizeObserver?: unknown }).ResizeObserver ??= class {
         observe() {}
+        unobserve() {}
         disconnect() {}
     };
 });

@@ -11,10 +11,12 @@ import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenu } from "@/app/components/context-menu";
 import { endPathDrag } from "@/app/drag/file-drop";
 import { Button } from "@/app/element/ui";
+import { useWidthFit } from "@/app/element/width-fit";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
 import { For, Match, Show, Switch, type JSX } from "solid-js";
 import { ColumnResizer } from "./files-column-resizer";
+import { META_COLWIDTHS } from "./files-columns";
 import { FilesFooter } from "./FilesFooter";
 import { FilesPlaces } from "./FilesPlaces";
 import { FilesToolbar } from "./FilesToolbar";
@@ -37,6 +39,12 @@ const COLUMNS: { key: SortKey; label: string; class: string }[] = [
     { key: "size", label: "Size", class: "files-col-size" },
     { key: "kind", label: "Kind", class: "files-col-kind" },
 ];
+
+/**
+ * The width tiers of the column header: `useWidthFit` sets one as its `data-fit` when the list is too
+ * narrow for its columns. Kind is dropped, then Size, then Modified (files.scss), and the rows follow.
+ */
+const COLUMN_TIERS = ["kind", "size", "modified"] as const;
 
 /** The hook groups FilesView built, handed to the parts that draw them. */
 export interface FilesViewParts {
@@ -81,6 +89,7 @@ export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
                 crumbsRef={(el) => (refs.crumbs = el)}
                 filterRef={(el) => (refs.filterInput = el)}
                 filterButtonRef={(el) => (refs.filterButton = el)}
+                openMenu={fv.setMenu}
             />
 
             <div class="files-body">
@@ -180,8 +189,11 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
 /** The sortable column header. */
 function FilesColumnHeader(props: { model: FilesModel; fv: FilesLocal }): JSX.Element {
     const model = props.model;
+    let header: HTMLDivElement | undefined;
+    // A width dragged at a divider changes what the header needs without resizing it.
+    useWidthFit(() => header, COLUMN_TIERS, undefined, () => props.fv.ctx.meta()?.[META_COLWIDTHS]);
     return (
-        <div class="files-row files-header" role="row" aria-rowindex={1}>
+        <div ref={header} class="files-row files-header" role="row" aria-rowindex={1}>
             <For each={COLUMNS}>
                 {(col) => (
                     <Button

@@ -208,6 +208,7 @@ beforeEach(() => {
     // ResizeObserver isn't in jsdom.
     (globalThis as { ResizeObserver?: unknown }).ResizeObserver ??= class {
         observe() {}
+        unobserve() {}
         disconnect() {}
     };
 });
@@ -1472,5 +1473,85 @@ describe("the Files pane: confined to an agent's workspace folder", () => {
         expect(h.rpc.FsGitStatusCommand).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: expect.stringContaining(ROOT) }));
         expect(media.blob).not.toHaveBeenCalled();
         expect(v.model.status()?.text).toContain("read-only");
+    });
+});
+
+describe("the Files pane: a narrow pane (#47504)", () => {
+    const toolbar = (v: ReturnType<typeof mount>) => v.container.querySelector(".files-toolbar") as HTMLElement;
+    const header = (v: ReturnType<typeof mount>) => v.container.querySelector(".files-header") as HTMLElement;
+    const menuRows = () => [...document.body.querySelectorAll(".ctx-menu .ctx-menu-item")] as HTMLElement[];
+    const menuLabels = () => menuRows().map((row) => row.querySelector(".ctx-menu-label")?.textContent);
+    /** The fitting after mount runs in a frame: wait it out, so it does not undo a tier a test sets. */
+    const frame = () => new Promise((done) => requestAnimationFrame(() => done(null)));
+    const openMore = (v: ReturnType<typeof mount>, tier: string) => {
+        fireEvent.keyDown(document.body, { key: "Escape" });
+        toolbar(v).setAttribute("data-fit", tier);
+        fireEvent.click(v.container.querySelector('[aria-label="More"]')!);
+    };
+
+    it("steps the toolbar and the column header down to the first tier that fits their width", async () => {
+        // jsdom lays nothing out: these are the widths each row needs at each tier, in a 280 px pane.
+        const needs: Record<string, Record<string, number>> = {
+            "files-toolbar": { "": 300, less: 272, least: 216, bare: 160 },
+            "files-header": { "": 484, kind: 344, size: 242, modified: 132 },
+        };
+        const needed = (el: Element): number => {
+            const row = Object.keys(needs).find((name) => el.classList.contains(name));
+            return row ? needs[row][el.getAttribute("data-fit") ?? ""] : 0;
+        };
+        const scroll = vi.spyOn(Element.prototype, "scrollWidth", "get").mockImplementation(function (this: Element) {
+            return needed(this);
+        });
+        const client = vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(278);
+        try {
+            const v = mount();
+            await waitFor(() => expect(v.names()).toHaveLength(4));
+            await frame();
+            // The view toggles are in More; New folder, Refresh, Back and Forward are still buttons.
+            expect(toolbar(v).getAttribute("data-fit")).toBe("less");
+            // Name and Modified: Kind and Size have no room.
+            expect(header(v).getAttribute("data-fit")).toBe("size");
+        } finally {
+            scroll.mockRestore();
+            client.mockRestore();
+        }
+    });
+
+    it("leaves a toolbar and a header with room as they are", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        await frame();
+        expect(toolbar(v).hasAttribute("data-fit")).toBe(false);
+        expect(header(v).hasAttribute("data-fit")).toBe(false);
+    });
+
+    it("offers in the More menu the buttons the toolbar's tier has hidden, a group to each tier", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        await frame();
+        openMore(v, "less");
+        expect(menuLabels()).toEqual(["Show hidden files", "Show as thumbnails"]);
+        openMore(v, "least");
+        expect(menuLabels()).toEqual(["New folder", "Refresh", "Show hidden files", "Show as thumbnails"]);
+        openMore(v, "bare");
+        expect(menuLabels()).toEqual(["Back", "Forward", "New folder", "Refresh", "Show hidden files", "Show as thumbnails"]);
+        // Nowhere to go back or forward to yet, as the buttons would say.
+        expect(menuRows().slice(0, 2).every((row) => row.classList.contains("ctx-menu-item--disabled"))).toBe(true);
+    });
+
+    it("does from the More menu what the hidden button does, and says what it will do next", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        await frame();
+        openMore(v, "less");
+        fireEvent.pointerDown(menuRows()[0]);
+        await waitFor(() => expect(v.names()).toContain(".env"));
+        expect(v.meta()["files:hidden"]).toBe(true);
+        openMore(v, "less");
+        expect(menuLabels()).toEqual(["Hide hidden files", "Show as thumbnails"]);
+        fireEvent.pointerDown(menuRows()[1]);
+        await waitFor(() => expect(v.container.querySelector(".files-grid")).toBeTruthy());
+        openMore(v, "less");
+        expect(menuLabels()).toEqual(["Hide hidden files", "Show as a list"]);
     });
 });
