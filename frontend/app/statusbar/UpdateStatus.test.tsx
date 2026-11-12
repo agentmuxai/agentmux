@@ -54,6 +54,7 @@ import {
     askStore,
     availableRelease,
     forgetStoreOffer,
+    overtaken,
     storeAnswer,
     releaseDownload,
     setStoreStayed,
@@ -63,6 +64,7 @@ import {
 } from "@/app/store/app-update";
 import { notifications, setNotifications } from "@/app/store/flash-notifications";
 import { MaintenanceSection } from "./MaintenanceSection";
+import { RESTARTING_LINE } from "./RestartToUpdatePopover";
 import { UpdateStatus } from "./UpdateStatus";
 
 const AVAILABLE = {
@@ -112,6 +114,20 @@ describe("app-update store", () => {
         acceptAppUpdate({ ...AVAILABLE, state: "up-to-date" });
         expect(availableRelease()).toBeNull();
         expect(availableRelease({ ...AVAILABLE, state: "local-build" })).toBeNull();
+    });
+
+    it("keeps the newer of two statuses, whichever arrives first", () => {
+        acceptAppUpdate({ ...AVAILABLE, rev: 5_000, notes: "newer" });
+        acceptAppUpdate({ ...AVAILABLE, rev: 4_999, notes: "older" });
+        expect(appUpdate()?.notes).toBe("newer");
+        acceptAppUpdate({ ...AVAILABLE, rev: 5_001, notes: "newest" });
+        expect(appUpdate()?.notes).toBe("newest");
+        // A status that doesn't say is taken as it comes, and so is one from long before: another run of srv.
+        expect(overtaken(0, 5_001)).toBe(false);
+        expect(overtaken(5_000, 0)).toBe(false);
+        expect(overtaken(5_000, 5_000)).toBe(false);
+        expect(overtaken(5_000, 5_000 + 11 * 60 * 1000)).toBe(false);
+        expect(overtaken(5_000, 5_000 + 9 * 60 * 1000)).toBe(true);
     });
 });
 
@@ -181,6 +197,106 @@ describe("UpdateStatus chip, once srv has staged the release by itself", () => {
         expect(installAppUpdate).not.toHaveBeenCalled();
     });
 
+    /** The popover, open on a restart that is in `state`. */
+    const openOn = async (state: string, extra: Record<string, unknown> = {}) => {
+        updateStatus.mockResolvedValue(download(state, { folder: "C:/apps/x", ...extra }));
+        render(() => <UpdateStatus />);
+        fireEvent.click(await screen.findByText(state === "restarting" ? "Restarting…" : "Restart to update"));
+        await screen.findByText("AgentMux 0.59.27 is ready");
+    };
+    const on = (...agents: string[]) => agents.map((agent) => ({ agent, why: "turn" }));
+
+    it("a wait names the one agent it waits for, and what Restart anyway interrupts", async () => {
+        await openOn("waiting", { waiting_for: 1, waiting_on: on("Vmer") });
+        expect(screen.getByText("Waiting for Vmer to finish its turn.")).toBeTruthy();
+        expect(screen.getByText("The restart starts by itself then. Restart anyway interrupts Vmer.")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Restart anyway" })).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Restart now" })).toBeNull();
+    });
+
+    it("a wait for two agents names both", async () => {
+        await openOn("waiting", { waiting_for: 2, waiting_on: on("Vmer", "Deke") });
+        expect(screen.getByText("Waiting for Vmer and Deke to finish their turn.")).toBeTruthy();
+        expect(screen.getByText("The restart starts by itself then. Restart anyway interrupts Vmer and Deke.")).toBeTruthy();
+    });
+
+    it("a wait for many agents counts them", async () => {
+        await openOn("waiting", { waiting_for: 7, waiting_on: on("A", "B", "C", "D", "E", "F", "G") });
+        expect(screen.getByText("Waiting for 7 agents to finish their turn.")).toBeTruthy();
+        expect(screen.getByText("The restart starts by itself then. Restart anyway interrupts their turns.")).toBeTruthy();
+    });
+
+    it("an agent whose request is being retried is named with what holds it up", async () => {
+        await openOn("waiting", { waiting_for: 2, waiting_on: [...on("Deke"), { agent: "Vmer", why: "network_retry" }] });
+        expect(screen.getByText("Waiting for Deke to finish its turn.")).toBeTruthy();
+        expect(screen.getByText("Waiting for Vmer, which is retrying after a network error.")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Restart anyway" })).toBeTruthy();
+    });
+
+    it("never says it waits for 0 agents: a wait for nobody shows Later and Restart now, and is noted once", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await openOn("waiting", { waiting_for: 0 });
+        expect(screen.queryByText(/Waiting for/)).toBeNull();
+        expect(screen.queryByRole("button", { name: "Restart anyway" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Later" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Restart now" })).toBeTruthy();
+        // The same again changes nothing and says nothing more.
+        acceptAppUpdate(download("waiting", { folder: "C:/apps/x", waiting_for: 0, received: 51 }));
+        expect(screen.queryByText(/Waiting for/)).toBeNull();
+        const said = warn.mock.calls.filter((c) => String(c[0]).includes("waiting, but for nobody"));
+        expect(said).toHaveLength(1);
+        expect(String(said[0][1])).toContain('"state":"waiting"');
+        warn.mockRestore();
+    });
+
+    it("when the wait ends the panel says Restarting now, with nothing left to press but What's new", async () => {
+        await openOn("waiting", { waiting_for: 1, waiting_on: on("Vmer") });
+        acceptAppUpdate(download("restarting", { folder: "C:/apps/x" }));
+        expect(await screen.findByText(RESTARTING_LINE)).toBeTruthy();
+        expect(screen.queryByText(/Waiting for/)).toBeNull();
+        for (const name of ["Cancel", "Restart anyway", "Restart now", "Later"]) expect(screen.queryByRole("button", { name })).toBeNull();
+        expect(screen.getByRole("button", { name: "What's new" })).toBeTruthy();
+        expect(screen.getByText("Restarting…")).toBeTruthy();
+    });
+
+    it("the chip's tip is not drawn over the open panel, and says what is happening once the restart is under way", async () => {
+        // Closed: the tip says what the chip does, and during the restart what is happening.
+        updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/x" }));
+        render(() => <UpdateStatus />);
+        const chip = await screen.findByLabelText("Update: Restart to update");
+        expect(chip.getAttribute("data-tip")).toBe("AgentMux has downloaded an update: restart to install it");
+        // Open: no tip, which would draw over the panel's buttons.
+        fireEvent.click(chip);
+        await screen.findByText("AgentMux 0.59.27 is ready");
+        expect(chip.getAttribute("data-tip")).toBeNull();
+        // Closed again during the restart: the old wording would be out of date.
+        fireEvent.click(screen.getByRole("button", { name: "Later" }));
+        acceptAppUpdate(download("restarting", { folder: "C:/apps/x" }));
+        await screen.findByLabelText("Update: Restarting…");
+        expect(screen.getByLabelText("Update: Restarting…").getAttribute("data-tip")).toBe("AgentMux is restarting to install the update");
+    });
+
+    it("the click's own answer, arriving after the event for what came next, does not put the panel back", async () => {
+        // Nobody is in a turn: srv answers the click and asks the launcher a moment later. The event for
+        // that reaches the window first, then the click's answer, which is the older of the two.
+        updateStatus.mockResolvedValue({ ...download("ready", { folder: "C:/apps/x" }), rev: 1_000 });
+        let answer: (status: unknown) => void = () => {};
+        upgradeRestart.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+        render(() => <UpdateStatus />);
+        fireEvent.click(await screen.findByText("Restart to update"));
+        fireEvent.click(await screen.findByRole("button", { name: "Restart now" }));
+        acceptAppUpdate({ ...download("restarting", { folder: "C:/apps/x" }), rev: 1_002 });
+        expect(await screen.findByText(RESTARTING_LINE)).toBeTruthy();
+        answer({ ...download("waiting", { folder: "C:/apps/x", waiting_for: 0 }), rev: 1_001 });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(appUpdate()?.download?.state).toBe("restarting");
+        expect(screen.getByText(RESTARTING_LINE)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Restart anyway" })).toBeNull();
+    });
+
     it("says why a restart that was refused did not start", async () => {
         updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/x" }));
         upgradeRestart.mockRejectedValue(new Error("an upgrade is already under way"));
@@ -203,7 +319,9 @@ describe("UpdateStatus chip, once srv has staged the release by itself", () => {
 
 describe("staged release helpers", () => {
     it("stagedRelease is the release once it is ready, waiting or restarting, never before", () => {
-        expect(stagedRelease(download("ready") as never)).toEqual({ version: "0.59.27", state: "ready", waitingFor: 0 });
+        expect(stagedRelease(download("ready") as never)).toEqual({ version: "0.59.27", state: "ready", waitingFor: 0, waitingOn: [] });
+        const vmer = [{ agent: "Vmer", why: "turn" }];
+        expect(stagedRelease(download("waiting", { waiting_for: 1, waiting_on: vmer }) as never)?.waitingOn).toEqual(vmer);
         expect(stagedRelease(download("waiting", { waiting_for: 3 }) as never)?.waitingFor).toBe(3);
         expect(stagedRelease(download("restarting") as never)?.state).toBe("restarting");
         for (const state of ["downloading", "unpacking", "failed"]) expect(stagedRelease(download(state) as never)).toBeNull();

@@ -57,4 +57,10 @@ download?: DownloadStatus,
  * (the release's upgrade floor, [`upgrade_floor`]): the version to
  * install first. The latest release then isn't offered for download.
  */
-install_first?: string, };
+install_first?: string, 
+/**
+ * Rises with every change srv makes to this status. The answer to a click and the event for a later change
+ * reach a window in either order, so a window keeps the one with the higher `rev`. Unix ms, pushed up when
+ * two changes share a millisecond; 0 from an srv that doesn't say.
+ */
+rev?: number, };

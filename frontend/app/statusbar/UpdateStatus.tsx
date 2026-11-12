@@ -52,7 +52,8 @@ const labelFor = (status: ChipStatus, version: string | null | undefined, restar
     }
 };
 
-const tipFor = (staged: boolean, fromSrv: boolean, clickable: boolean): string => {
+const tipFor = (staged: boolean, fromSrv: boolean, clickable: boolean, restarting = false): string => {
+    if (restarting) return "AgentMux is restarting to install the update";
     if (staged) return "AgentMux has downloaded an update: restart to install it";
     if (fromSrv) return "A newer AgentMux is out: see what's new";
     return clickable ? "Update available, click to install" : "Update status";
@@ -78,12 +79,10 @@ const UpdateStatus = (): JSX.Element => {
         const state = fromSrv() ? releaseDownload()?.state : undefined;
         return state === "downloading" || state === "unpacking";
     };
-    // The panel is for a staged release and for the wait on agents after Restart now; once the
-    // launcher has been asked, only its own dialog can stop it.
-    const hasPanel = () => {
-        const state = staged()?.state;
-        return state === "ready" || state === "waiting";
-    };
+    // The panel is for a staged release, for the wait on agents after Restart now, and for the
+    // restart that follows by itself: once the launcher has been asked the panel only says so,
+    // since its own dialog is then the one place to stop it.
+    const hasPanel = () => !!staged();
     const [panelOpen, setPanelOpen] = createSignal(false);
     let chipRef: HTMLDivElement | undefined;
     const updaterStatus = () => (staged() ? "ready" : fromSrv() ? "available" : atoms.updaterStatusAtom());
@@ -91,9 +90,9 @@ const UpdateStatus = (): JSX.Element => {
     const clickable = () => updaterStatus() === "ready" || updaterStatus() === "available";
 
     const handleClick = () => {
-        // A release srv staged: What's new / Restart now / Later. A restart under way, or a
-        // release srv found but did not stage: the version panel, which has the rest. The click
-        // itself installs nothing: Restart now still ends in the launcher's own dialog.
+        // A release srv staged: What's new / Restart now / Later, and what a restart under way
+        // waits for. A release srv found but did not stage: the version panel, which has the rest.
+        // The click itself installs nothing: Restart now still ends in the launcher's own dialog.
         if (hasPanel()) {
             setPanelOpen(!panelOpen());
             return;
@@ -116,7 +115,8 @@ const UpdateStatus = (): JSX.Element => {
                 ref={chipRef}
                 class={`status-bar-item${clickable() ? " clickable" : ""}`}
                 onClick={clickable() ? handleClick : undefined}
-                data-tip={tipFor(!!staged(), !!fromSrv(), clickable())}
+                // Not while its panel is open: the tip would draw over the panel's buttons.
+                data-tip={panelOpen() && hasPanel() ? undefined : tipFor(!!staged(), !!fromSrv(), clickable(), staged()?.state === "restarting")}
                 aria-label={`Update: ${label()}`}
                 aria-haspopup={hasPanel() ? "dialog" : undefined}
                 aria-expanded={hasPanel() ? panelOpen() : undefined}
