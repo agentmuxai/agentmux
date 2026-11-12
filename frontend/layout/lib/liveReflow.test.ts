@@ -31,7 +31,10 @@ import {
 import { showPlacement } from "@/layout/lib/placementPreview";
 import {
     commitTearOff,
+    leaveOwnPane,
+    leaveWindow,
     restOverOwnPane,
+    returnToWindow,
     TEAR_OFF_COMMIT_WAIT_MS,
     TEAR_OFF_REST_MS,
     TEAR_OFF_REST_PX,
@@ -615,6 +618,65 @@ describe("the tear-off a drag shows over its own pane (tearOffPreview.ts)", () =
         m.activeDrag._set(false);
         await Promise.resolve();
         vi.advanceTimersByTime(TEAR_OFF_REST_MS);
+        expect(m.tearOffLayout()).toBeUndefined();
+    });
+
+    it("shows the tear-off at once when the pointer leaves the window, and keeps it off the pane's overlay", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        leaveWindow(m, "a");
+        vi.advanceTimersByTime(20);
+        expect(m.liveReflowActive()).toBe(true);
+        expect(m.reflowFor("b")!.rect).toMatchObject({ left: 0, width: 1200 });
+        expect(m.reflowFor("a")).toMatchObject({ leaving: true });
+        // The pointer leaving the pane's overlay on its way out is not the pointer coming back.
+        leaveOwnPane(m);
+        expect(m.tearOffLayout()).toBeDefined();
+        // Back in the window: the panes go back.
+        returnToWindow(m);
+        vi.advanceTimersByTime(20);
+        expect(m.tearOffLayout()).toBeUndefined();
+        // The drag goes on: every tile is at rest at its own rect, none leaving.
+        expect(m.liveReflowActive()).toBe(false);
+        expect(m.reflowFor("b")).toMatchObject({ rect: own(m, "b"), leaving: false });
+        expect(m.reflowFor("a")).toMatchObject({ rect: own(m, "a"), leaving: false });
+    });
+
+    it("stays through a release outside the window until the tree lets the pane go", async () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        leaveWindow(m, "a");
+        m.activeDrag._set(false);
+        await Promise.resolve();
+        vi.advanceTimersByTime(TEAR_OFF_COMMIT_WAIT_MS - 1);
+        expect(m.reflowFor("b")!.rect).toMatchObject({ left: 0, width: 1200 });
+        m.treeReducer({ type: LayoutTreeActionType.DeleteNode, nodeId: "a" } as LayoutTreeDeleteNodeAction);
+        expect(m.tearOffLayout()).toBeUndefined();
+        expect(own(m, "b")).toMatchObject({ left: 0, width: 1200 });
+    });
+
+    it("takes a tear-off that is shown outside the window off when the drag is cancelled", async () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        m.activeDrag._set(true);
+        leaveWindow(m, "a");
+        m.activeDrag._set(false);
+        await Promise.resolve();
+        returnToWindow(m);
+        expect(m.tearOffLayout()).toBeUndefined();
+    });
+
+    it("counts a pointer that comes back over its own pane as resting there, and shows nothing outside a drag", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        leaveWindow(m, "a");
+        expect(m.tearOffLayout()).toBeUndefined();
+        m.activeDrag._set(true);
+        leaveWindow(m, "a");
+        restOverOwnPane(m, "a", 300, 300);
+        leaveOwnPane(m);
         expect(m.tearOffLayout()).toBeUndefined();
     });
 

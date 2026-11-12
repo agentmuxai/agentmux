@@ -14,7 +14,7 @@ import { DEFAULT_TRACKER, DropIntentTracker } from "./dropIntentTracker";
 import { dragState } from "./tilelayout-drag-state";
 import { clampCrossTabDirection } from "./crossTabDrag";
 import type { LayoutModel } from "./layoutModel";
-import { leaveOwnPane } from "./tearOffPreview";
+import { returnToWindow } from "./tearOffPreview";
 import { DropDirection, LayoutTreeActionType, type LayoutNode, type LayoutTreeComputeMoveNodeAction } from "./types";
 import { determineDropDirection } from "./utils";
 
@@ -69,7 +69,7 @@ export function showPlacement(
         nodeToMove: input.foreignNode,
     } as LayoutTreeComputeMoveNodeAction;
     // The pointer is over another pane: no tear-off is shown (tearOffPreview.ts).
-    leaveOwnPane(model);
+    returnToWindow(model);
     model.treeReducer(compute);
     return compute;
 }
