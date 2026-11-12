@@ -73,7 +73,7 @@ import { setPlatform } from "@/util/platformutil";
 import { chromeZoomAtom } from "./chrome-zoom";
 import { LOCAL_ZOOM_HOLD_MS, paneZoom, resetPaneZoomForTests } from "./pane-zoom-local";
 import { useZoomAnchor } from "./zoom-anchor";
-import { chromeZoomIn, initChromeZoom, usePaneZoomWheel, zoomAllPanesIn, zoomAllPanesOut, zoomBlockByWheel, zoomBlockIn, zoomIndicatorTextAtom, setZoomStepRatio } from "./zoom";
+import { chromeZoomIn, initChromeZoom, usePaneZoomWheel, zoomAllPanesIn, zoomAllPanesOut, zoomBlockByWheel, zoomBlockIn, zoomIndicatorTargetAtom, zoomIndicatorTextAtom, setZoomStepRatio } from "./zoom";
 import { setZoomMax } from "./zoom-factor";
 
 // term:fontsize is pinned to 20 for every test block so effective font size
@@ -277,6 +277,21 @@ describe("zoomAllPanesIn/Out", () => {
             setBlock("t1", "term", 1.0);
             zoomBlockIn("t1");
             expect(zoomIndicatorTextAtom()).toBe("105%");
+        });
+
+        it("names the pane for a single-pane zoom, and no pane for All panes and the chrome zoom", () => {
+            setBlock("t1", "term", 1.0);
+            setBlock("t2", "term", 1.0);
+            zoomBlockIn("t1");
+            expect(zoomIndicatorTargetAtom()).toBe("t1");
+            zoomBlockIn("t2");
+            expect(zoomIndicatorTargetAtom()).toBe("t2");
+            zoomAllPanesIn();
+            expect(zoomIndicatorTargetAtom()).toBeNull();
+            zoomBlockIn("t1");
+            expect(zoomIndicatorTargetAtom()).toBe("t1");
+            chromeZoomIn();
+            expect(zoomIndicatorTargetAtom()).toBeNull();
         });
     });
 });
