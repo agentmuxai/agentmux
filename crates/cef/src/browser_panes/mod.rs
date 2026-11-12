@@ -305,19 +305,27 @@ impl BrowserPaneManager {
                         rect.x, rect.y, rect.width, rect.height
                     ),
                 );
-                let mut task = CreateBrowserPaneTask::new(
-                    state.clone(),
-                    block_id.to_string(),
-                    label,
-                    url.to_string(),
-                    rect,
-                    window_label.to_string(),
-                );
-                post_task(ThreadId::UI, Some(&mut task));
+                post_creation(state, block_id, label, url, rect, window_label);
                 Ok(())
             }
         }
     }
+}
+
+/// Start the creation of the pane that was just given its entry and `label`, on the UI thread.
+/// The pane's kind is decided here, where its label is made, so whoever asks for it before the
+/// task has run (a focus, a resize, a close) is answered as the task will build it.
+fn post_creation(state: &Arc<AppState>, block_id: &str, label: String, url: &str, rect: Rect, window_label: &str) {
+    crate::pane_backend::note_pane_created(state, &label, window_label);
+    let mut task = CreateBrowserPaneTask::new(
+        state.clone(),
+        block_id.to_string(),
+        label,
+        url.to_string(),
+        rect,
+        window_label.to_string(),
+    );
+    post_task(ThreadId::UI, Some(&mut task));
 }
 
 /// Whether a live pane's committed URL is already the page `requested` asks

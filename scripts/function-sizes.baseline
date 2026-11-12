@@ -27,7 +27,7 @@
 168 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass::wndproc_hook
 293 crates/cef/src/browser_panes/clip.rs::BrowserPaneManager::set_pane_overlay_clip_hwnd
 136 crates/cef/src/browser_panes/clip.rs::SetPaneOverlayClipViewsTask::Task::execute
-151 crates/cef/src/browser_panes/mod.rs::BrowserPaneManager::create
+143 crates/cef/src/browser_panes/mod.rs::BrowserPaneManager::create
 417 crates/cef/src/client/crash_recovery.rs::AgentMuxHandler::on_render_process_terminated
 246 crates/cef/src/client/error_catalog.rs::describe
 139 crates/cef/src/client/handlers.rs::AgentMuxPanePermissionHandler::PermissionHandler::on_request_media_access_permission
@@ -40,7 +40,7 @@
 113 crates/cef/src/client/navigation.rs::render_load_error_html
 190 crates/cef/src/client/wndproc.rs::install_top_level_focus_restore_hook
 150 crates/cef/src/client/wndproc.rs::install_top_level_focus_restore_hook::wndproc_hook
-199 crates/cef/src/client/wndproc.rs::window_edge_resize_wndproc
+185 crates/cef/src/client/wndproc.rs::window_edge_resize_wndproc
 148 crates/cef/src/commands/cli_login.rs::open_login_terminal
 253 crates/cef/src/commands/cli_login.rs::run_cli_login
 300 crates/cef/src/commands/cli_login.rs::run_cli_login_pty
@@ -232,8 +232,8 @@
 105 crates/srv/src/migrations/m0025_agents_launch_state_backfill.rs::backfill_launch_state
 147 crates/srv/src/migrations/m0031_carry_skills_and_mcp_servers_to_identity_store.rs::carry_mcp_servers
 198 crates/srv/src/migrations/m0031_carry_skills_and_mcp_servers_to_identity_store.rs::carry_skills
-232 crates/srv/src/muxbus/cloud_subscriber.rs::connect_and_run
-280 crates/srv/src/muxbus/cloud_subscriber.rs::run_loop
+228 crates/srv/src/muxbus/cloud_subscriber.rs::connect_and_run
+277 crates/srv/src/muxbus/cloud_subscriber.rs::run_loop
 113 crates/srv/src/muxbus/cloud_subscriber.rs::sync_agent_reactive
 103 crates/srv/src/muxbus/cloud_subscriber.rs::sync_agents_batched
 177 crates/srv/src/muxbus/pkce.rs::run_pkce_login_inner

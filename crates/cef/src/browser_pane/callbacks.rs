@@ -264,8 +264,9 @@ pub(crate) fn resolve_pane_label(state: &Arc<AppState>, browser: &Browser) -> Op
 /// 2. Subclass the pane's HWND tree so clicks and focus reach the input owner
 ///    (`crate::input_owner`), and tell it the pane is live.
 pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
+    let views = browser_is_views_pane(state, browser);
     #[cfg(target_os = "windows")]
-    if !crate::pane_backend::views() {
+    if !views {
         if let Some(host) = browser.host() {
             let wh = host.window_handle();
             if !wh.0.is_null() {
@@ -304,7 +305,7 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     // side buttons (no window procedure to take them in).
     crate::browser_pane::side_button_cdp::install(state, browser);
     crate::browser_pane::signin_notice::password_manager_off(browser);
-    if crate::pane_backend::views() {
+    if views {
         // CEF's on_after_created fires from inside add_overlay_view
         // (when the BrowserView is added to the widget hierarchy) and gives
         // focus to the new pane browser. creation_views::create_browser_pane_view
@@ -492,7 +493,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     }
 
     #[cfg(target_os = "windows")]
-    if !crate::pane_backend::views() {
+    if !browser_is_views_pane(state, browser) {
         if let Some(host) = browser.host() {
             let wh = host.window_handle();
             if !wh.0.is_null() {
@@ -652,6 +653,15 @@ pub(crate) fn main_frame_url(browser: &Browser) -> String {
 /// strip the prefix and the trailing `-<seq>` to recover the uuid.
 pub(crate) fn resolve_pane_block_id(state: &Arc<AppState>, browser: &Browser) -> Option<String> {
     resolve_pane_label_and_block(state, browser).map(|(_, block_id)| block_id)
+}
+
+/// Whether pane browser `browser` is a Views overlay (`pane_backend`). A browser
+/// that is no registered pane has the process's kind.
+pub(crate) fn browser_is_views_pane(state: &Arc<AppState>, browser: &Browser) -> bool {
+    match resolve_pane_label_and_block(state, browser) {
+        Some((label, _)) => crate::pane_backend::label_is_views(&label),
+        None => crate::pane_backend::views(),
+    }
 }
 
 /// The host-state label (`browser-pane-<block_id>-<seq>`) and the block id of

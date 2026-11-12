@@ -6,64 +6,62 @@ import { Show, type JSX } from "solid-js";
 
 import { devModeOn } from "@/app/store/dev-mode";
 import { settingsAtom } from "@/app/store/global";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 import { set, SettingRow, ToggleControl } from "../settings-controls";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const WINDOW_SETTINGS = {
-    showBlockIds: {
+    showBlockIds: settingEntry({
         id: "window.show_block_ids",
-        label: "Show block IDs",
-        description: "Show each pane's internal block ID in its header (debugging aid)",
+        labelKey: "settings.window.showBlockIds.label",
+        descriptionKey: "settings.window.showBlockIds.description",
         section: "window",
         devOnly: true,
         keywords: ["pane id", "block id", "debug pane", "blockheader:showblockids"],
-    },
-    defaultNewBlock: {
+    }),
+    defaultNewBlock: settingEntry({
         id: "window.default_new_block",
-        label: "Default new block",
-        description: "View type opened by default for new tabs/panes (e.g. term, agent, shortcuts)",
+        labelKey: "settings.window.defaultNewBlock.label",
+        descriptionKey: "settings.window.defaultNewBlock.description",
         section: "window",
         keywords: ["new tab default", "new pane default", "default view", "app:defaultnewblock"],
-    },
-    showPaneNumberOverlay: {
+    }),
+    showPaneNumberOverlay: settingEntry({
         id: "window.pane_number_overlay",
-        label: "Show pane number overlay",
-        description: "Show numbered overlays for quick pane-jump shortcuts",
+        labelKey: "settings.window.showPaneNumberOverlay.label",
+        descriptionKey: "settings.window.showPaneNumberOverlay.description",
         section: "window",
         keywords: ["pane jump", "pane numbers", "quick switch", "app:showoverlayblocknums"],
-    },
-    mouseSideButtons: {
+    }),
+    mouseSideButtons: settingEntry({
         id: "window.mouse_side_buttons",
-        label: "Mouse side buttons select the previous / next pane",
-        description: "Back and Forward re-select the pane you had selected before or after, in any tab. Ctrl + button is page back / forward over a browser pane",
+        labelKey: "settings.window.mouseSideButtons.label",
+        descriptionKey: "settings.window.mouseSideButtons.description",
         section: "window",
         keywords: ["mouse", "side button", "back", "forward", "history", "mouse:sidebuttons"],
-    },
-    showStatusBar: {
+    }),
+    showStatusBar: settingEntry({
         id: "window.show_status_bar",
-        label: "Show the status bar",
-        description:
-            "The bar along the bottom with the backend dot, system stats, token and history totals, and the version. Hiding it frees a row of space; it comes back by itself if the backend goes down, and \"Toggle Status Bar\" in the command palette flips it",
+        labelKey: "settings.window.showStatusBar.label",
+        descriptionKey: "settings.window.showStatusBar.description",
         section: "window",
         keywords: ["hide status bar", "footer", "bottom bar", "statusbar", "window:showstatusbar"],
-    },
-    confirmTabClose: {
+    }),
+    confirmTabClose: settingEntry({
         id: "window.confirm_tab_close",
-        label: "Confirm before closing a tab",
-        description: "Ask before closing a tab, instead of closing it at once",
+        labelKey: "settings.window.confirmTabClose.label",
+        descriptionKey: "settings.window.confirmTabClose.description",
         section: "window",
         keywords: ["close tab prompt", "confirm close", "tab:confirmclose"],
-    },
-    confirmCloseWorking: {
+    }),
+    confirmCloseWorking: settingEntry({
         id: "window.confirm_close_working",
-        label: "Warn before closing a window with working agents",
-        description:
-            "Ask before closing a window while an agent in it is mid-turn. Closing stops its agents; the window stays in the workspace, to reopen from the version panel",
+        labelKey: "settings.window.confirmCloseWorking.label",
+        descriptionKey: "settings.window.confirmCloseWorking.description",
         section: "window",
         keywords: ["close window prompt", "running agents", "quit warning", "window:confirmcloseworking"],
-    },
+    }),
 } satisfies Record<string, SettingsIndexEntry>;
 
 // ── Section: Window & Panes ───────────────────────────────────────────────────
