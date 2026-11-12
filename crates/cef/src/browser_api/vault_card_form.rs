@@ -59,10 +59,11 @@ pub struct CardForm {
     pub fields: Vec<CardField>,
 }
 
-/// `e12` before `e102`: references in the order the snapshot numbered them.
+/// `e12` before `e102`, and `f1e3` before `f1e10`: references in the order the snapshot numbered
+/// them, by the number after the last `e` (the part before it names the frame, the same for all of them).
 fn order_of(r: &str) -> (usize, String) {
-    let digits: String = r.chars().skip_while(|c| !c.is_ascii_digit()).take_while(char::is_ascii_digit).collect();
-    (digits.parse().unwrap_or(usize::MAX), r.to_string())
+    let number = r.rsplit_once('e').and_then(|(_, n)| n.parse().ok()).unwrap_or(usize::MAX);
+    (number, r.to_string())
 }
 
 /// `POST /agentmux/browser/card_form`.
@@ -125,5 +126,9 @@ mod tests {
         let mut refs = vec!["e102", "e12", "e2"];
         refs.sort_by_key(|r| order_of(r));
         assert_eq!(refs, ["e2", "e12", "e102"]);
+        // Inside a frame the first number is the frame's, the same for every field of it.
+        let mut framed = vec!["f1e10", "f1e3", "f1e2"];
+        framed.sort_by_key(|r| order_of(r));
+        assert_eq!(framed, ["f1e2", "f1e3", "f1e10"]);
     }
 }

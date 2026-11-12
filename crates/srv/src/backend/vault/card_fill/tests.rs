@@ -42,6 +42,12 @@ fn a_single_expiry_field_takes_the_shape_it_asks_for() {
     assert_eq!(expiry(Some(6), "", ""), "032027");
     assert_eq!(expiry(None, "MMYY", ""), "0327");
     assert_eq!(expiry(None, "MM-YY", ""), "03-27");
+    assert_eq!(expiry(None, "MM YY", ""), "03 27");
+    // A placeholder that is words says nothing about the separator.
+    assert_eq!(expiry(None, "Expiration date", ""), "03/27");
+    assert_eq!(expiry(None, "Exp. date", ""), "03/27");
+    assert_eq!(expiry(None, "Valid thru", ""), "03/27");
+    assert_eq!(expiry(Some(5), "Expiry date", ""), "03/27");
     assert_eq!(expiry(None, "", r"\d{2}/\d{4}"), "03/2027");
 }
 

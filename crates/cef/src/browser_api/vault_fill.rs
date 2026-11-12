@@ -317,8 +317,9 @@ const CHOOSE: &str = r#"function (origin, v, kind, attr, tag, attrs) {
     });
   };
   const options = Array.from(this.options);
-  let at = options.findIndex((o) => !o.disabled && fits(o.value));
-  if (at < 0) at = options.findIndex((o) => !o.disabled && fits(o.label || o.textContent));
+  // What the person reads decides first: a list whose values count from 0 labels its options January to December.
+  let at = options.findIndex((o) => !o.disabled && fits(o.label || o.textContent));
+  if (at < 0) at = options.findIndex((o) => !o.disabled && fits(o.value));
   if (at < 0) return { error: "nooption" };
   this.setAttribute(attr, "1");
   this.selectedIndex = at;
@@ -493,6 +494,7 @@ mod tests {
         assert!(at("this.getAttribute(k)") < at("this.setAttribute(attr"));
         assert!(at("this.setAttribute(attr") < at("this.selectedIndex = at"));
         assert!(at("if (at < 0) return { error: \"nooption\" }") < at("this.setAttribute(attr"), "nothing is marked or chosen without a matching option");
+        assert!(at("fits(o.label || o.textContent)") < at("fits(o.value)"), "what the person reads decides before a value that may count from 0");
         assert!(!CHOOSE.contains("activeElement"));
         assert!(CHOOSE.contains(r#"new Event("input", { bubbles: true, composed: true })"#));
     }

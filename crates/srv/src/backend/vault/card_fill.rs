@@ -110,12 +110,15 @@ fn number(field: &FormField, parts: &Parts) -> Shaped {
 fn expiry_text(field: &FormField, month: u32, year: i32) -> String {
     let placeholder = field.placeholder.to_ascii_uppercase();
     let pattern = field.pattern.as_str();
-    let separator = ['/', '-', '.', ' '].into_iter().find(|c| placeholder.contains(*c));
+    // What stands between the month and year tokens of a placeholder like "MM / YY"; a placeholder
+    // that is words ("Expiration date", "Exp. date") says nothing about the separator.
+    let between = placeholder.find("MM").zip(placeholder.find("YY")).filter(|(m, y)| m + 2 <= *y).map(|(m, y)| &placeholder[m + 2..y]);
+    let separator = between.and_then(|b| b.chars().find(|c| matches!(c, '/' | '-' | '.')).or_else(|| b.contains(' ').then_some(' ')));
     let long = placeholder.contains("YYYY")
         || matches!(field.max_length, Some(6 | 7))
         || (pattern.contains("{4}") && !pattern.contains("{2}{4}") && !pattern.contains(")?"));
     // Four or six characters hold no separator; so does a placeholder that has none ("MMYY").
-    let compact = matches!(field.max_length, Some(4 | 6)) || (!placeholder.is_empty() && separator.is_none() && placeholder.contains("MM"));
+    let compact = matches!(field.max_length, Some(4 | 6)) || (between.is_some() && separator.is_none());
     let y = if long { format!("{year:04}") } else { format!("{:02}", year % 100) };
     let m = card::month_text(month);
     if compact {
