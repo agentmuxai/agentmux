@@ -780,6 +780,8 @@ declare global {
         swatchColor?: string;
         /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
         icon?: string;
+        /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
+        iconColor?: string;
     };
 
     type ContextMenuItem = {
@@ -796,6 +798,8 @@ declare global {
         swatchColor?: string;
         /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
         icon?: string;
+        /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
+        iconColor?: string;
     };
 
     type KeyPressDecl = {

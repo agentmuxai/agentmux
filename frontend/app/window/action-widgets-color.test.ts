@@ -18,7 +18,7 @@ vi.mock("@/app/store/window-appearance", () => ({
 
 import { paneRoleColor } from "@/app/block/pane-color-scheme";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
-import { widgetEntryColor, widgetIconStyle } from "./action-widgets-config";
+import { buildPaneWidgetMenuItems, widgetEntryColor, widgetIconStyle, widgetMenuIconColor } from "./action-widgets-config";
 
 const widget = (overrides: Partial<WidgetConfigType>): WidgetConfigType =>
     ({ "display:order": 0, icon: "circle", label: "W", blockdef: { meta: { view: "t-term" } }, ...overrides }) as WidgetConfigType;
@@ -82,5 +82,49 @@ describe("widgetIconStyle", () => {
     it("sets --widget-tint, or nothing so the icon keeps the monochrome token", () => {
         expect(widgetIconStyle(widget({}))).toEqual({ "--widget-tint": paneRoleColor(240, undefined, false, "widgetTint") });
         expect(widgetIconStyle(widget({ blockdef: { meta: { view: "t-none" } } } as Partial<WidgetConfigType>))).toEqual({});
+    });
+});
+
+describe("the colour of a widget's icon in the \"+\" menus", () => {
+    const entries = {
+        "defwidget@term": widget({ label: "Terminal" }),
+        "defwidget@plain": widget({ label: "Plain", blockdef: { meta: { view: "t-none" } } } as Partial<WidgetConfigType>),
+        "defwidget@chat": widget({ label: "Chat", color: "#5865f2", children: ["kid"] } as Partial<WidgetConfigType>),
+        "defwidget@kid": widget({ label: "Kid", color: "#5865f2" }),
+    } as Record<string, WidgetConfigType>;
+    const build = () => buildPaneWidgetMenuItems(entries, {}, () => {});
+    const byLabel = (label: string) => build().find((i) => i.label === label)!;
+
+    it("is the entry's identity colour at full strength, the one its pane header uses", () => {
+        expect(widgetMenuIconColor(widget({}))).toBe(paneRoleColor(240, undefined, false, "identity"));
+        expect(byLabel("Terminal").iconColor).toBe(paneRoleColor(240, undefined, false, "identity"));
+    });
+
+    it("is none for a widget with no colour, so its icon stays plain", () => {
+        expect(byLabel("Plain").iconColor).toBeUndefined();
+        setSettings({ "pane:colors": { "t-term": null } });
+        expect(byLabel("Terminal").iconColor).toBeUndefined();
+    });
+
+    it("follows a change in Widget colors the next time the menu is built, with no restart", () => {
+        const before = byLabel("Terminal").iconColor;
+        setSettings({ "pane:colors": { "t-term": 120 } });
+        expect(byLabel("Terminal").iconColor).toBe(paneRoleColor(120, undefined, false, "identity"));
+        expect(byLabel("Terminal").iconColor).not.toBe(before);
+    });
+
+    it("follows the theme", () => {
+        setSettings({ "window:theme": "light" });
+        const light = byLabel("Terminal").iconColor;
+        setSettings({});
+        expect(light).toBeDefined();
+        expect(light).not.toBe(byLabel("Terminal").iconColor);
+    });
+
+    it("gives a submenu's parent and its entries the same rule, an entry's own colour first", () => {
+        const parent = byLabel("Chat");
+        expect(parent.type).toBe("submenu");
+        expect(parent.iconColor).toBe(paneRoleColor(undefined, "#5865f2", false, "identity"));
+        expect(parent.submenu![0].iconColor).toBe(paneRoleColor(undefined, "#5865f2", false, "identity"));
     });
 });
