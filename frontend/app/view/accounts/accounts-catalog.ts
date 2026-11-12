@@ -14,6 +14,8 @@
 
 import type { AccountKind, AccountProvider } from "@/app/view/identity/identity-model";
 
+import { GITHUB_APP_CHOICE, GITHUB_TOKEN_CHOICE } from "./github-account-copy";
+
 export type AuthMode = "oauth" | "key";
 
 export interface ServiceTile {
@@ -52,7 +54,9 @@ export const SERVICE_CATALOG: ServiceTile[] = [
     { id: "custom", displayName: "Custom", authModes: ["key"], keyKind: "api_key", blurb: "Any bearer token" },
 ];
 
-export function modeLabel(mode: AuthMode): { title: string; sub: string } {
+/** What a choice says. GitHub's two say which path they are (AgentMux's own App, or the person's token). */
+export function modeLabel(mode: AuthMode, provider?: AccountProvider): { title: string; sub: string } {
+    if (provider === "github") return mode === "oauth" ? GITHUB_APP_CHOICE : GITHUB_TOKEN_CHOICE;
     return mode === "oauth"
         ? { title: "Connect with OAuth", sub: "Browser login — no key to manage" }
         : { title: "Add API key / token", sub: "Validated & stored in your OS keychain" };
