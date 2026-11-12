@@ -1224,6 +1224,12 @@ th[aria-sort="descending"] .tower-sort {
         }
     }
 
+    // The chart's heading and its hour buttons go to a second line before the heading is cut.
+    .tower-memory-chart-head {
+        flex-wrap: wrap;
+        row-gap: var(--space-1);
+    }
+
     .tower-memory-row .tower-name {
         padding-left: var(--space-3);
     }
