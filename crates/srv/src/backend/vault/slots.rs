@@ -76,7 +76,19 @@ pub fn what(kind: &Kind, part: &str) -> String {
         other => other,
     };
     match (kind.name, part) {
-        ("card", p) => format!("card {}", match p { "number" => "number", "expiry" => "expiry", "cvc" => "security code", _ => "holder name" }),
+        ("card", p) => format!(
+            "card {}",
+            match p {
+                "number" => "number",
+                "expiry" => "expiry",
+                "exp_month" => "expiry month",
+                "exp_year" => "expiry year",
+                "cvc" => "security code",
+                "zip" => "billing ZIP",
+                "name" => "holder name",
+                other => other,
+            }
+        ),
         ("bank-account", "routing") => "bank routing number".to_string(),
         ("bank-account", _) => "bank account number".to_string(),
         _ => kind_label.to_string(),
@@ -109,6 +121,24 @@ mod tests {
         assert_eq!(fillable_part(card, Some("cvc")), Ok("cvc"));
         assert!(fillable_part(card, Some("pin")).unwrap_err().contains("its parts are"));
         assert_eq!(fillable_part(kinds::kind("ssn").unwrap(), None), Ok("value"));
+    }
+
+    #[test]
+    fn every_part_of_a_card_is_named_for_what_it_is() {
+        let card = kinds::kind("card").unwrap();
+        let named: Vec<(&str, String)> = card.parts.iter().map(|p| (*p, what(card, p))).collect();
+        assert_eq!(
+            named,
+            [
+                ("number", "card number".to_string()),
+                ("exp_month", "card expiry month".to_string()),
+                ("exp_year", "card expiry year".to_string()),
+                ("expiry", "card expiry".to_string()),
+                ("cvc", "card security code".to_string()),
+                ("name", "card holder name".to_string()),
+                ("zip", "card billing ZIP".to_string()),
+            ]
+        );
     }
 
     #[test]

@@ -243,7 +243,15 @@ describe("the kind", () => {
 
     it("switching kind swaps the parts and fields", () => {
         mountNew("cards");
-        expect(rows()).toEqual(expect.arrayContaining(["Card number", "Expiry", "Security code", "Name on card"]));
+        expect(rows()).toEqual(
+            expect.arrayContaining([
+                "Card number",
+                "Expiry",
+                "Security code (CVC, 3 digits)",
+                "Name on card",
+                "Billing ZIP or postal code",
+            ])
+        );
         fireEvent.change(selectOf("Kind"), { target: { value: "bank-account" } });
         expect(rows()).toEqual(expect.arrayContaining(["Account number", "Routing number", "Bank"]));
         expect(rows()).not.toContain("Card number");
@@ -334,8 +342,8 @@ describe("the label", () => {
 
 describe("the secret parts", () => {
     it("wraps a part's control and its Clear in one box", () => {
-        mountEdit({ kind: "card", section: "cards", parts_set: ["number", "expiry"], fields: {} });
-        const box = field("Expiry").closest(".vault-part")!;
+        mountEdit({ kind: "bank-account", section: "cards", parts_set: ["account", "routing"], fields: {} });
+        const box = field("Routing number").closest(".vault-part")!;
         expect(box).not.toBeNull();
         expect(box.contains(btn("Clear"))).toBe(true);
     });
@@ -382,41 +390,40 @@ describe("the secret parts", () => {
     it("says the main part is required, and the others nothing, on a new entry", () => {
         mountNew("cards");
         expect(hintOf("Card number")).toBe("Required.");
-        expect(hintOf("Expiry")).toBeNull();
-        expect(hintOf("Security code")).toBeNull();
+        expect(hintOf("Security code (CVC, 3 digits)")).toBeNull();
     });
 
     it("shows the kind's placeholder on a new entry", () => {
         mountNew("cards");
-        expect(field("Expiry").placeholder).toBe("MM/YY");
+        expect(field("Card number").placeholder).toBe("1234 5678 9012 3456");
     });
 
     it("says a part that is set is kept until a new value is typed, and masks it", () => {
-        mountEdit({ kind: "card", section: "cards", parts_set: ["number", "expiry"], fields: {} });
+        mountEdit({ kind: "card", section: "cards", parts_set: ["number", "cvc"], fields: {} });
         expect(hintOf("Card number")).toBe("Set. Type to replace it.");
-        expect(field("Card number").placeholder).toBe("••••••••");
-        expect(hintOf("Expiry")).toBe("Set. Type to replace it.");
-        expect(field("Expiry").placeholder).toBe("••••••••");
+        expect(field("Card number").placeholder).toBe("•••• •••• •••• ••••");
+        expect(hintOf("Security code (CVC, 3 digits)")).toBe("Set. Type to replace it.");
+        expect(field("Security code (CVC, 3 digits)").placeholder).toBe("••••••••");
     });
 
     it("says the main part is required when changing an entry whose main part is not set", () => {
-        mountEdit({ kind: "card", section: "cards", parts_set: ["expiry"], fields: {} });
+        mountEdit({ kind: "card", section: "cards", parts_set: ["cvc"], fields: {} });
         expect(hintOf("Card number")).toBe("Required.");
-        expect(field("Card number").placeholder).toBe("");
+        expect(field("Card number").placeholder).toBe("1234 5678 9012 3456");
     });
 
     it("says nothing about a part that is not set and not the main one", () => {
         mountEdit({ kind: "card", section: "cards", parts_set: ["number"], fields: {} });
-        expect(hintOf("Expiry")).toBeNull();
-        expect(field("Expiry").placeholder).toBe("MM/YY");
+        expect(hintOf("Security code (CVC, 3 digits)")).toBeNull();
+        expect(field("Security code (CVC, 3 digits)").placeholder).toBe("");
     });
 
     it("offers Clear on a set part that is not the main one", () => {
-        mountEdit({ kind: "card", section: "cards", parts_set: ["number", "expiry", "cvc"], fields: {} });
+        mountEdit({ kind: "card", section: "cards", parts_set: ["number", "cvc", "name"], fields: {} });
         const clears = screen.getAllByRole("button", { name: "Clear" });
         expect(clears).toHaveLength(2);
         const owners = clears.map((c) => c.closest(".ui-field")!.querySelector("label")!.textContent);
-        expect(owners).toEqual(["Expiry", "Security code"]);
+        expect(owners).toEqual(["Security code (CVC, 3 digits)", "Name on card"]);
     });
 
     it("offers no Clear on a new entry or on a part that is not set", () => {
@@ -428,18 +435,18 @@ describe("the secret parts", () => {
     });
 
     it("Clear turns on, disables the part and says it will be cleared; again turns it off", () => {
-        mountEdit({ kind: "card", section: "cards", parts_set: ["number", "expiry"], fields: {} });
+        mountEdit({ kind: "card", section: "cards", parts_set: ["number", "cvc"], fields: {} });
         const clear = btn("Clear");
         expect(clear.getAttribute("aria-pressed")).toBe("false");
         fireEvent.click(clear);
         expect(clear.getAttribute("aria-pressed")).toBe("true");
-        expect(field("Expiry").disabled).toBe(true);
-        expect(hintOf("Expiry")).toBe("Will be cleared.");
+        expect(field("Security code (CVC, 3 digits)").disabled).toBe(true);
+        expect(hintOf("Security code (CVC, 3 digits)")).toBe("Will be cleared.");
         expect(field("Card number").disabled).toBe(false);
         fireEvent.click(clear);
         expect(clear.getAttribute("aria-pressed")).toBe("false");
-        expect(field("Expiry").disabled).toBe(false);
-        expect(hintOf("Expiry")).toBe("Set. Type to replace it.");
+        expect(field("Security code (CVC, 3 digits)").disabled).toBe(false);
+        expect(hintOf("Security code (CVC, 3 digits)")).toBe("Set. Type to replace it.");
     });
 
     it("types a multiline part in a masked text area", () => {
@@ -613,7 +620,7 @@ describe("saving a new entry", () => {
     it("leaves out whatever was left empty", async () => {
         mountNew("cards");
         type(field("Card number"), "4111");
-        type(field("Expiry"), "");
+        type(field("Name on card"), "");
         fireEvent.click(btn("Save to Vault"));
         await waitFor(() => expect(h.createEntry).toHaveBeenCalled());
         const sent = h.createEntry.mock.calls[0][0];
@@ -652,13 +659,14 @@ describe("saving a change", () => {
             kind: "card",
             section: "cards",
             label: "Visa",
-            parts_set: ["number", "expiry", "cvc"],
+            parts_set: ["number", "exp_month", "cvc"],
             fields: { owner: "Alex" },
             tags: ["t1", "t2"],
         });
         type(field("Label"), "Visa 2");
         type(field("Card number"), "4222");
         type(field("Whose"), "Alexa");
+        // The expiry row's Clear comes first, then the security code's.
         const clears = screen.getAllByRole("button", { name: "Clear" });
         fireEvent.click(clears[1]);
         fireEvent.click(btn("Save changes"));
@@ -686,13 +694,13 @@ describe("saving a change", () => {
     });
 
     it("clears in the kind's order", async () => {
-        mountEdit({ kind: "card", section: "cards", parts_set: ["number", "expiry", "cvc", "name"], fields: {} });
+        mountEdit({ kind: "card", section: "cards", parts_set: ["number", "cvc", "name", "zip"], fields: {} });
         const clears = screen.getAllByRole("button", { name: "Clear" });
         fireEvent.click(clears[2]);
         fireEvent.click(clears[0]);
         fireEvent.click(btn("Save changes"));
         await waitFor(() => expect(h.updateEntry).toHaveBeenCalled());
-        expect(h.updateEntry.mock.calls[0][0].clear).toEqual(["expiry", "name"]);
+        expect(h.updateEntry.mock.calls[0][0].clear).toEqual(["cvc", "zip"]);
     });
 
     it("drops a field that was emptied", async () => {
@@ -834,5 +842,166 @@ describe("the buttons", () => {
         mountEdit();
         fireEvent.click(within(dialog()).getByRole("button", { name: "Save changes" }));
         await waitFor(() => expect(h.updateEntry).toHaveBeenCalledTimes(1));
+    });
+});
+
+describe("the card form", () => {
+    const CVC3 = "Security code (CVC, 3 digits)";
+    const CVC4 = "Security code (CID, 4 digits)";
+
+    it("groups the number as it is typed and badges its brand", () => {
+        mountNew("cards");
+        type(field("Card number"), "4111111111111111");
+        expect(field("Card number").value).toBe("4111 1111 1111 1111");
+        expect(dialog().querySelector(".vault-card-number .ui-pill")?.textContent).toBe("Visa");
+        type(field("Card number"), "378282246310005");
+        expect(field("Card number").value).toBe("3782 822463 10005");
+        expect(dialog().querySelector(".vault-card-number .ui-pill")?.textContent).toBe("American Express");
+    });
+
+    it("warns that a number doesn't look right, and still lets it be saved", async () => {
+        mountNew("cards");
+        type(field("Card number"), "4111111111111112");
+        expect(dialog().querySelector(".vault-card-warn")?.textContent).toContain("doesn't look right");
+        type(field("Label"), "Visa");
+        fireEvent.click(btn("Save to Vault"));
+        await waitFor(() => expect(h.createEntry).toHaveBeenCalled());
+        expect(h.createEntry.mock.calls[0][0].parts.number).toBe("4111 1111 1111 1112");
+    });
+
+    it("says nothing about a number that passes, or one still being typed", () => {
+        mountNew("cards");
+        type(field("Card number"), "4111111111111111");
+        expect(dialog().querySelector(".vault-card-warn")).toBeNull();
+        type(field("Card number"), "4111");
+        expect(dialog().querySelector(".vault-card-warn")).toBeNull();
+    });
+
+    it("gives an American Express a four-digit code", () => {
+        mountNew("cards");
+        expect(field(CVC3).maxLength).toBe(3);
+        type(field("Card number"), "378282246310005");
+        expect(field(CVC4).maxLength).toBe(4);
+        expect(maybeField(CVC3)).toBeNull();
+    });
+
+    it("keeps the saved card's brand until a new number is typed", () => {
+        mountEdit({ kind: "card", section: "cards", parts_set: ["number"], fields: { brand: "amex" } });
+        expect(field(CVC4).maxLength).toBe(4);
+        type(field("Card number"), "4111");
+        expect(field(CVC3).maxLength).toBe(3);
+    });
+
+    it("sends the month and the year it was given, as two parts", async () => {
+        mountNew("cards");
+        type(field("Label"), "Visa");
+        type(field("Card number"), "4111111111111111");
+        fireEvent.change(selectOf("Expiry month"), { target: { value: "03" } });
+        const year = String(new Date().getFullYear() + 2);
+        fireEvent.change(selectOf("Expiry year"), { target: { value: year } });
+        fireEvent.click(btn("Save to Vault"));
+        await waitFor(() => expect(h.createEntry).toHaveBeenCalled());
+        expect(h.createEntry.mock.calls[0][0].parts).toEqual({
+            number: "4111 1111 1111 1111",
+            exp_month: "03",
+            exp_year: year,
+        });
+    });
+
+    it("asks for the month and the year together", async () => {
+        mountNew("cards");
+        type(field("Card number"), "4111111111111111");
+        fireEvent.change(selectOf("Expiry month"), { target: { value: "03" } });
+        fireEvent.click(btn("Save to Vault"));
+        await screen.findByRole("alert");
+        expect(screen.getByRole("alert").textContent).toContain("Choose the expiry month and the year.");
+        expect(h.createEntry).not.toHaveBeenCalled();
+    });
+
+    it("shows a saved card's expiry from its plain date and sends nothing for it until changed", async () => {
+        mountEdit({
+            kind: "card",
+            section: "cards",
+            parts_set: ["number", "exp_month", "exp_year"],
+            fields: { expires: "2031-07-31" },
+        });
+        expect(selectOf("Expiry month").value).toBe("07");
+        expect(selectOf("Expiry year").value).toBe("2031");
+        fireEvent.click(btn("Save changes"));
+        await waitFor(() => expect(h.updateEntry).toHaveBeenCalled());
+        expect(h.updateEntry.mock.calls[0][0].parts).toEqual({});
+    });
+
+    it("sends both parts when only the month of a saved card changes", async () => {
+        mountEdit({
+            kind: "card",
+            section: "cards",
+            parts_set: ["number", "exp_month", "exp_year"],
+            fields: { expires: "2031-07-31" },
+        });
+        fireEvent.change(selectOf("Expiry month"), { target: { value: "11" } });
+        fireEvent.click(btn("Save changes"));
+        await waitFor(() => expect(h.updateEntry).toHaveBeenCalled());
+        expect(h.updateEntry.mock.calls[0][0].parts).toEqual({ exp_month: "11", exp_year: "2031" });
+    });
+
+    it("offers a year that has already gone by when the saved card has one", () => {
+        mountEdit({ kind: "card", section: "cards", parts_set: ["number"], fields: { expires: "2019-02-28" } });
+        expect(selectOf("Expiry year").value).toBe("2019");
+    });
+
+    it("takes a saved expiry off with Clear: both parts and the older one are cleared, and nothing is sent for them", async () => {
+        mountEdit({
+            kind: "card",
+            section: "cards",
+            parts_set: ["number", "exp_month", "exp_year"],
+            fields: { expires: "2031-07-31" },
+        });
+        const clear = btn("Clear");
+        fireEvent.click(clear);
+        expect(clear.getAttribute("aria-pressed")).toBe("true");
+        expect(selectOf("Expiry month").disabled).toBe(true);
+        expect(selectOf("Expiry year").disabled).toBe(true);
+        expect(selectOf("Expiry month").value).toBe("");
+        fireEvent.click(btn("Save changes"));
+        await waitFor(() => expect(h.updateEntry).toHaveBeenCalled());
+        const sent = h.updateEntry.mock.calls[0][0];
+        expect(sent.clear).toEqual(["exp_month", "exp_year", "expiry"]);
+        expect(sent.parts).toEqual({});
+    });
+
+    it("offers no Clear on an expiry that isn't saved, and lets Clear be undone", () => {
+        mountNew("cards");
+        expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+        cleanup();
+        mountEdit({ kind: "card", section: "cards", parts_set: ["expiry"], fields: {} });
+        const clear = btn("Clear");
+        fireEvent.click(clear);
+        fireEvent.click(clear);
+        expect(clear.getAttribute("aria-pressed")).toBe("false");
+        expect(selectOf("Expiry month").disabled).toBe(false);
+    });
+
+    it("marks the default card with a switch that saves yes or nothing", async () => {
+        mountNew("cards");
+        type(field("Label"), "Visa");
+        type(field("Card number"), "4111111111111111");
+        const toggle = screen.getByRole("switch", { name: "Default card" });
+        fireEvent.click(toggle);
+        fireEvent.click(btn("Save to Vault"));
+        await waitFor(() => expect(h.createEntry).toHaveBeenCalled());
+        expect(h.createEntry.mock.calls[0][0].fields).toEqual({ default: "yes" });
+    });
+
+    it("doesn't show the older single expiry, the brand or the date srv works out", () => {
+        mountEdit({
+            kind: "card",
+            section: "cards",
+            parts_set: ["number", "expiry"],
+            fields: { brand: "visa", expires: "2031-07-31" },
+        });
+        expect(rows().filter((r) => r === "Expiry")).toHaveLength(1);
+        expect(rows()).not.toContain("Brand");
+        expect(rows()).not.toContain("Expires");
     });
 });

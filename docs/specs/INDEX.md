@@ -850,6 +850,7 @@ partial list.
 | [`SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15`](SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md) | SPEC: upgrading AgentMux, for users and for agents |
 | [`SPEC_USER_DATA_SYNC_LAYER_2026_11_01`](SPEC_USER_DATA_SYNC_LAYER_2026_11_01.md) | SPEC: one sync layer for a user's own data: Kanban boards and Vaults across their machines, by LAN or AgentMux Cloud |
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
+| [`SPEC_VAULT_CARD_ENTRIES_FULL_CARD_DATA_AND_AUTOFILL_2026_11_08`](SPEC_VAULT_CARD_ENTRIES_FULL_CARD_DATA_AND_AUTOFILL_2026_11_08.md) | SPEC: Vault card entries hold a full card (number, expiry month and year, CVC, name, billing ZIP) that people and agents can store and fill |
 | [`SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28`](SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md) | SPEC: secrets nobody types. The Vault generates, captures, delivers and rotates them, and the browser saves, generates and fills sign-ins |
 | [`SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19`](SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md) | SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them |
 | [`SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06`](SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md) | SPEC: the Vault's feature set matches the secrets CLI: a reason and a history on every use and change, import from AWS Secrets Manager, verify and health |

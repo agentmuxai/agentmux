@@ -284,6 +284,15 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Replaces only an entry's plain fields (a card's default flag moving to
+    /// another card), leaving its value and its update time alone. False if
+    /// there is no such entry.
+    pub fn vault_set_fields(&self, id: &str, fields: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute("UPDATE db_vault_entries SET fields = ?2 WHERE id = ?1", params![id, fields])?;
+        Ok(n > 0)
+    }
+
     /// Deletes an entry and the grants and earlier values it had.
     pub fn vault_delete(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();

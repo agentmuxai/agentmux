@@ -94,7 +94,8 @@ fn a_round_trip_keeps_every_entry_kind_part_field_tag_and_id() {
     for id in &ids {
         assert!(s.vault_get(id).unwrap().is_some(), "{id} keeps its id");
     }
-    assert_eq!(all_parts(&s, "card-company-card").len(), 4);
+    // number, the month and the year (read from the older "12/30" on save), code and name
+    assert_eq!(all_parts(&s, "card-company-card").len(), 5);
     assert_eq!(all_parts(&s, "login-example")["totp"], "JBSWY3DPEHPK3PXP");
     assert_eq!(all_parts(&s, "ssn-alex")["value"], "123-45-6789");
     let row = s.vault_get("ssn-alex").unwrap().unwrap();

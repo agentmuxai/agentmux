@@ -262,3 +262,31 @@ fn a_rotation_whose_set_never_started_leaves_nothing_behind() {
     assert!(list(&s, &id).unwrap().is_empty());
     assert_eq!(current(&s, &id), "sk_live_first_value");
 }
+
+#[test]
+fn a_restored_card_has_its_brand_and_expiry_date_again() {
+    let s = store();
+    let card = |p: &[(&str, &str)]| seal::Parts(p.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
+    let id = create(
+        &s,
+        NewEntry {
+            kind: "card".into(),
+            label: "Visa".into(),
+            fields: Default::default(),
+            tags: vec![],
+            parts: card(&[("number", "4111111111111111"), ("exp_month", "03"), ("exp_year", "2027")]),
+        },
+    )
+    .unwrap();
+    let fields = |s: &Store| -> std::collections::BTreeMap<String, String> { serde_json::from_str(&s.vault_get(&id).unwrap().unwrap().fields).unwrap() };
+    update(
+        &s,
+        EntryChange { id: id.clone(), label: "Visa".into(), fields: fields(&s), tags: vec![], parts: card(&[("number", "5555555555554444"), ("exp_month", "11"), ("exp_year", "2029")]), clear: vec![] },
+    )
+    .unwrap();
+    assert_eq!((fields(&s)["brand"].as_str(), fields(&s)["expires"].as_str()), ("mastercard", "2029-11-30"));
+
+    let seq = list(&s, &id).unwrap()[0].seq;
+    restore(&s, &id, seq).unwrap();
+    assert_eq!((fields(&s)["brand"].as_str(), fields(&s)["expires"].as_str()), ("visa", "2027-03-31"), "what the list and the reminders read follows the restored value");
+}
