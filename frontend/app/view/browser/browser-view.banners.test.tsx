@@ -31,7 +31,7 @@ vi.mock("./browser-nav-bar", () => ({ BrowserNavBar: () => <div class="stub-nav"
 vi.mock("./browser-signin-offer", () => ({ BrowserSigninOffer: () => null, BrowserSigninPending: () => null }));
 vi.mock("./download-strip", () => ({ DownloadStrip: () => null }));
 vi.mock("./driven-by-strip", () => ({ ActionLogStrip: () => null, DrivenByStrip: () => null }));
-vi.mock("@/app/drag/drag-session", () => ({ isAnyUnderway: () => false }));
+vi.mock("@/app/drag/drag-session", () => ({ ELEMENT_DRAG_KINDS: [], isAnyUnderway: () => false }));
 vi.mock("@/app/element/BrainSpinner", () => ({ BrainSpinner: () => null }));
 
 import { BrowserViewComponent } from "./browser-view";

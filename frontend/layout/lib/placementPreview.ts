@@ -7,9 +7,17 @@
  * `ComputeMove`: the tile overlay (`OverlayNode`, and its dead-spot fallback) and a tab pill
  * dragged over a pane's body (`paneBodyDrop`) both call it, so the ghost is the standard one.
  * docs/specs/SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.2.
+ *
+ * It is also the one place a shown drop is taken down again, and the one place that says when: `clearPlacement`
+ * at once, `leavePlacement` after the grace a pointer needs to cross from one pane's zones to the next.
+ * Everything a drag keeps between samples (the steadied candidate, its dwell timer, a leave about to clear)
+ * is here, so no caller can take a drop down and leave a timer behind that brings it back. A caller never
+ * dispatches `ComputeMove` or `ClearPendingAction` for a drop itself. What a drag waits for, in one list:
+ * `DEFAULT_TRACKER` (dropIntentTracker.ts: how long a new candidate must hold), `LEAVE_GRACE_MS`, and
+ * `ZONE_EXIT_MS` (how long a zone the pointer left takes to fade).
  */
 
-import { isAnyUnderway, onSessionEnded } from "@/app/drag/drag-session";
+import { ELEMENT_DRAG_KINDS, isAnyUnderway, onSessionEnded } from "@/app/drag/drag-session";
 import { chipOverChipDirection } from "./chipPlaceholder";
 import { DEFAULT_TRACKER, DropIntentTracker } from "./dropIntentTracker";
 import { dragState } from "./tilelayout-drag-state";
@@ -145,8 +153,8 @@ export function clearPlacement(model: LayoutModel, reset = false): void {
     model.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
 }
 
-/** The drags that show a drop in a layout. */
-export const GHOST_DRAG_KINDS = ["tile", "window-tab", "pane-tab", "doc-tab"] as const;
+/** How long a landing zone the pointer has left takes to go, while the drag is still on, ms (tilelayout.scss `.exiting`). */
+export const ZONE_EXIT_MS = 150;
 
 /**
  * How long a drop stays shown after the pointer left the zones it was armed from, ms. Crossing from one pane's
@@ -176,7 +184,7 @@ function cancelLeave(model: LayoutModel): void {
  * cancelled drag ends with) there is nothing to wait for.
  */
 export function leavePlacement(model: LayoutModel): void {
-    if (!isAnyUnderway(GHOST_DRAG_KINDS)) {
+    if (!isAnyUnderway(ELEMENT_DRAG_KINDS)) {
         clearPlacement(model);
         return;
     }
@@ -184,10 +192,7 @@ export function leavePlacement(model: LayoutModel): void {
     cancelLeave(model);
     leaves.set(
         model,
-        setTimeout(() => {
-            leaves.delete(model);
-            model.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-        }, LEAVE_GRACE_MS)
+        setTimeout(() => clearPlacement(model), LEAVE_GRACE_MS)
     );
 }
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createEffect, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
-import { isAnyUnderway } from "@/app/drag/drag-session";
+import { ELEMENT_DRAG_KINDS, isAnyUnderway } from "@/app/drag/drag-session";
 import { beginPageCut } from "@/app/drag/page-cut-gate";
 import { hostHas } from "@/util/host-caps";
 import { getApi } from "@/util/app-api";
@@ -36,11 +36,9 @@ import { tip } from "@/app/element/tip";
 // (use-drag-snapshot.ts).
 const DRAG_SNAPSHOT_CAP_MS = 500;
 
-// The in-app (pragmatic) drags: a whole pane, a Window Tab, a Pane Tab, an
-// Editor or Media document tab. The page is a native window drawn above the
-// DOM and can't see them, so the catcher below is shown from each one's start
-// until its source releases it.
-const ELEMENT_DRAG_KINDS = ["tile", "window-tab", "pane-tab", "doc-tab"] as const;
+// The page is a native window drawn above the DOM and can't see the in-app
+// drags (`ELEMENT_DRAG_KINDS`), so the catcher below is shown from each one's
+// start until its source releases it.
 
 /**
  * Covers the page for the length of an in-app drag (a pane, a Pane Tab, a

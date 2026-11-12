@@ -24,7 +24,7 @@
 
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { layoutBehind, markLayoutBehind, windowResizing } from "@/app/platform/window-resize";
-import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
+import { EASE_OUT } from "@/app/motion/tokens";
 import { gatingNodeIds } from "@/app/store/tab-reveal";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
@@ -40,7 +40,8 @@ import { useNodeModel, useTileLayout } from "./layoutModelHooks";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { REFLOW_CLIP, REFLOW_EDGES, REFLOW_TRANSFORM, reflowEdges, shownPx } from "./liveReflow";
 import "./tilelayout.scss";
-import { LayoutNode, LayoutTreeActionType, ResizeHandleProps, TileLayoutContents } from "./types";
+import { LayoutNode, ResizeHandleProps, TileLayoutContents } from "./types";
+import { clearPlacement } from "./placementPreview";
 import { releaseTileDrag, startTileDrag } from "./tile-drag";
 import { dragState } from "./tilelayout-drag-state";
 import { createTileDragRegistrar } from "./tile-drag-registrar";
@@ -168,49 +169,6 @@ type NodeModelOf = ReturnType<typeof useNodeModel>;
 
 type PreviewImage = { img: HTMLImageElement; size: DragPreviewSize } | null;
 
-function useHeldOverlayTransform(layoutModel: LayoutModel): () => JSX.CSSProperties | undefined {
-    const overlayTransform = () => layoutModel.overlayTransform();
-
-    // Issue #836: hold the on-screen overlayTransform for DURATION_BASE_MS after
-    // activeDrag flips false, so the Placeholder's inner-div exit fade
-    // (--duration-base, tilelayout.scss) stays visible. Without this, overlayTransform()
-    // recomputes the moment onDrop fires and moves the entire
-    // .placeholder-container off-screen (top = 2*height) before the
-    // .exiting CSS transition can play. We cache the last in-drag
-    // transform and serve it during the hold window, then release.
-    const [heldOverlayTransform, setHeldOverlayTransform] = createSignal<JSX.CSSProperties | undefined>(undefined);
-    const [overlayHold, setOverlayHold] = createSignal(false);
-    let overlayHoldTimer: ReturnType<typeof setTimeout> | null = null;
-    createEffect(() => {
-        const active = layoutModel.activeDrag();
-        const xf = overlayTransform();
-        if (active) {
-            // Drag in progress: cache the live transform and clear any pending release.
-            setHeldOverlayTransform(xf as JSX.CSSProperties);
-            if (overlayHoldTimer) { clearTimeout(overlayHoldTimer); overlayHoldTimer = null; }
-            setOverlayHold(false);
-        } else if (heldOverlayTransform()) {
-            // Drag just ended (or page initial state with no cached value, skip).
-            // Hold the last in-drag transform for DURATION_BASE_MS to match the Placeholder
-            // exit-fade duration, then release. A new drag during the hold window
-            // resets cleanly via the active branch above.
-            if (overlayHoldTimer) clearTimeout(overlayHoldTimer);
-            setOverlayHold(true);
-            overlayHoldTimer = setTimeout(() => {
-                setOverlayHold(false);
-                setHeldOverlayTransform(undefined);
-                overlayHoldTimer = null;
-            }, DURATION_BASE_MS);
-        }
-    });
-    onCleanup(() => { if (overlayHoldTimer) clearTimeout(overlayHoldTimer); });
-    // Effective transform for overlay-positioned surfaces: hold the last
-    // in-drag transform during the exit window, otherwise use the live one.
-    const effectiveOverlayTransform = (): JSX.CSSProperties | undefined =>
-        overlayHold() ? heldOverlayTransform() ?? undefined : (overlayTransform() as JSX.CSSProperties | undefined);
-    return effectiveOverlayTransform;
-}
-
 function useAnimateOnMount(platform: TileLayoutPlatform, layoutModel: LayoutModel): () => boolean {
     // Track animate state. The delay is per platform — see
     // `TileLayoutPlatform.animateDelayMs`.
@@ -239,7 +197,7 @@ function useCursorBoundsCheck(platform: TileLayoutPlatform, layoutModel: LayoutM
                 normalizedY <= 0 ||
                 normalizedY >= displayContainerRect.height
             ) {
-                layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+                clearPlacement(layoutModel);
             }
         }
     });
@@ -259,7 +217,6 @@ function tileLayout(
     ResizeHandleWrapper: (props: ResizeHandleWrapperProps) => JSX.Element
 ): JSX.Element {
     const layoutModel = useTileLayout(props.tabAtom, props.contents);
-    const effectiveOverlayTransform = useHeldOverlayTransform(layoutModel);
     const animate = useAnimateOnMount(platform, layoutModel);
 
     const gapSizePx = () => layoutModel.gapSizePx();
@@ -299,8 +256,10 @@ function tileLayout(
             <NodeBackdrops layoutModel={layoutModel} />
             <MagnifiedPaneOverlay layoutModel={layoutModel} />
 
-            <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...effectiveOverlayTransform() }} />
-            <OverlayNodeWrapper layoutModel={layoutModel} effectiveOverlayTransform={effectiveOverlayTransform} />
+            {/* Both go with the drag: nothing of the landing zone plays after the release (Placeholder),
+                so the overlay is not held in place for it (it was, for an exit fade, since #836). */}
+            <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...(layoutModel.overlayTransform() as JSX.CSSProperties) }} />
+            <OverlayNodeWrapper layoutModel={layoutModel} />
         </div>
     );
 }

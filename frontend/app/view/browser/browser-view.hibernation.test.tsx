@@ -68,7 +68,7 @@ vi.mock("./driven-by-strip", () => ({ DrivenByStrip: (p: { agent: string }) => <
 vi.mock("./give-back-strip", () => ({ NoDriverStrips: () => <div class="stub-no-driver" /> }));
 vi.mock("./browser-attention", () => ({ BrowserAttentionBanner: (p: { attention: () => { kind: string } }) => <div class="stub-attention" data-kind={p.attention().kind} /> }));
 vi.mock("./browser-popups", () => ({ BrowserPopupNotes: () => <div class="stub-popups" /> }));
-vi.mock("@/app/drag/drag-session", () => ({ isAnyUnderway: () => (globalThis as any).__underway() }));
+vi.mock("@/app/drag/drag-session", () => ({ ELEMENT_DRAG_KINDS: [], isAnyUnderway: () => (globalThis as any).__underway() }));
 vi.mock("@/app/element/BrainSpinner", () => ({ BrainSpinner: (p: { class?: string }) => <i class={`stub-brain ${p.class ?? ""}`} /> }));
 vi.mock("./hibernation", async (importOriginal) => {
     const real = await importOriginal<typeof import("./hibernation")>();

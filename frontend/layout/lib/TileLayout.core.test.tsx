@@ -29,7 +29,7 @@ interface DisplayNodesProps {
     DisplayNode: (p: { layoutModel: unknown; node: unknown }) => JSX.Element;
 }
 interface OverlayProps {
-    effectiveOverlayTransform: () => JSX.CSSProperties | undefined;
+    layoutModel: unknown;
 }
 interface PlaceholderProps {
     style: JSX.CSSProperties;
@@ -102,7 +102,6 @@ vi.mock("./tile-drag", () => ({
     releaseTileDrag: (...a: unknown[]) => h.releaseTileDrag(...a),
 }));
 
-import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { tileItemType } from "@/app/drag/drag-types";
 import { createTileLayout, type TileLayoutPlatform } from "./TileLayout.core";
 import { DRAG_PREVIEW_HOVER_MS } from "./drag-preview-size";
@@ -274,11 +273,11 @@ describe("createTileLayout: the layout", () => {
         expect([...container.querySelectorAll<HTMLElement>(".rh")].map((e) => e.dataset.id)).toEqual(["h2"]);
     });
 
-    it("gives the display nodes wrapper a DisplayNode, and the overlay wrapper the effective transform", () => {
+    it("gives the display nodes wrapper a DisplayNode, and the overlay wrapper the model", () => {
         mount(makePlatform());
         expect(typeof h.displayNodes!.DisplayNode).toBe("function");
         expect(h.displayNodes!.layoutModel).toBe(h.model);
-        expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "a" });
+        expect(h.overlay!.layoutModel).toBe(h.model);
     });
 
     describe("the overlay transform around a drag", () => {
@@ -289,40 +288,13 @@ describe("createTileLayout: the layout", () => {
             expect(h.placeholder!.style).toEqual({ top: "10000px", transform: "b" });
         });
 
-        it("holds the last in-drag transform for the exit fade after the drag ends, then lets go", () => {
-            vi.useFakeTimers();
+        it("lets the overlay go with the drag: nothing holds it in place after the release", () => {
             mount(makePlatform());
             h.model.set.setActiveDrag(true);
             h.model.set.setOverlay({ transform: "b" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "b" });
             h.model.set.setActiveDrag(false);
             h.model.set.setOverlay({ transform: "c" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "b" });
-            expect(h.placeholder!.style).toEqual({ top: "10000px", transform: "b" });
-            vi.advanceTimersByTime(DURATION_BASE_MS - 1);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "b" });
-            vi.advanceTimersByTime(1);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "c" });
-        });
-
-        it("a new drag during the hold takes the live transform again", () => {
-            vi.useFakeTimers();
-            mount(makePlatform());
-            h.model.set.setActiveDrag(true);
-            h.model.set.setActiveDrag(false);
-            h.model.set.setOverlay({ transform: "c" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "a" });
-            h.model.set.setActiveDrag(true);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "c" });
-            vi.advanceTimersByTime(DURATION_BASE_MS * 2);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "c" });
-        });
-
-        it("holds nothing when no drag came before", () => {
-            vi.useFakeTimers();
-            mount(makePlatform());
-            h.model.set.setOverlay({ transform: "z" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "z" });
+            expect(h.placeholder!.style).toEqual({ top: "10000px", transform: "c" });
         });
     });
 

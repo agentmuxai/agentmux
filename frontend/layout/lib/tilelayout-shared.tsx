@@ -29,13 +29,12 @@ import { activeKeyFor } from "./layoutNodeModels";
 import {
     DropDirection,
     LayoutNode,
-    LayoutTreeActionType,
     LayoutTreeComputeMoveNodeAction,
 } from "./types";
-import { isAnyUnderway } from "@/app/drag/drag-session";
+import { ELEMENT_DRAG_KINDS, isAnyUnderway } from "@/app/drag/drag-session";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { clearPlacement, GHOST_DRAG_KINDS, leavePlacement, previewPlacement } from "./placementPreview";
+import { clearPlacement, leavePlacement, previewPlacement, ZONE_EXIT_MS, type PlacementInput } from "./placementPreview";
 import { commitTearOff, leaveOwnPane, restOverOwnPane } from "./tearOffPreview";
 import {
     clampCrossTabDirection,
@@ -55,6 +54,49 @@ import { setTransform } from "./utils";
  */
 function crossTabDropOffered(model: LayoutModel, compute: LayoutTreeComputeMoveNodeAction): boolean {
     return computeMoveNode(model.treeState, compute) !== undefined;
+}
+
+/**
+ * One sample of the pane drag in progress over `target` (a pane of `model`, its rect, and the pointer in the
+ * layout's coordinates): show the drop it means. A pane from another tab is not in this tree, so it rides on
+ * the action (the ghost can still be computed, and `Outer*` is clamped to the split the drop can make,
+ * `clampCrossTabDirection`), and the drop is recorded now, while the drag's globals are alive: the release
+ * must not read them, since the source's own onDrop may clear them first. No record where no drop is offered.
+ */
+function samplePlacement(model: LayoutModel, draggedId: string, target: Pick<PlacementInput, "targetId" | "rect" | "offset">): void {
+    const crossTab = isCrossTabDrag(model);
+    const { direction, compute, targetId } = previewPlacement(model, {
+        ...target,
+        draggedId,
+        foreignNode: crossTab ? (dragState.node ?? undefined) : undefined,
+    });
+    if (!crossTab) return;
+    const plan = dragState.node?.data ? stackMovePlan(dragState.node.data) : undefined;
+    const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
+    const targetTabId = model.tabAtom()?.oid;
+    const targetBlockId = model.leafs().find((l) => l.id === targetId)?.data?.blockId;
+    if (plan && sourceTabId && targetTabId && targetBlockId
+        && direction !== undefined && direction !== DropDirection.Center
+        && crossTabDropOffered(model, compute)) {
+        noteCrossTabDrop({ ...plan, sourceTabId, targetTabId, targetBlockId, direction });
+    } else {
+        noteCrossTabDrop(null);
+    }
+}
+
+/**
+ * The release of a pane drag over `model`'s layout: commit the drop that is shown. A pane from another tab is
+ * moved by the sanctioned redock instead: its pending move names a node of another tab's tree, and committing
+ * it here would insert a leaf this tab does not own (Tab.blockids unchanged, a dangling ref).
+ */
+function commitPlacement(model: LayoutModel): void {
+    const crossTabDrop = takeCrossTabDropFor(model.tabAtom()?.oid);
+    if (!crossTabDrop) {
+        model.onDrop();
+        return;
+    }
+    clearPlacement(model);
+    moveBlocksToTab(crossTabDrop);
 }
 
 /**
@@ -223,10 +265,6 @@ export const DisplayNodesWrapper = (props: DisplayNodesWrapperProps) => {
 
 export interface OverlayNodeWrapperProps {
     layoutModel: LayoutModel;
-    // Issue #836: effective overlay transform that holds the last in-drag
-    // value for 150ms after onDrop so .placeholder-container does not
-    // teleport off-screen before the inner .placeholder exit fade plays.
-    effectiveOverlayTransform: () => JSX.CSSProperties | undefined;
 }
 
 export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
@@ -238,14 +276,9 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
     // "none" (pass-through for normal clicks) and "auto" (receive drag events).
     // activeDrag is set by pragmatic-dnd's onDragStart callback which fires
     // AFTER the browser commits the drag, so this toggle is safe.
-    //
-    // Issue #836: the transform comes from effectiveOverlayTransform (held
-    // during the 150ms exit window) but pointer-events flips to "none"
-    // IMMEDIATELY when activeDrag goes false — we don't want the held
-    // overlay to intercept clicks during the hold.
     const isActiveDrag = () => props.layoutModel.activeDrag();
     const overlayStyle = createMemo<JSX.CSSProperties>(() => ({
-        ...props.effectiveOverlayTransform(),
+        ...(props.layoutModel.overlayTransform() as JSX.CSSProperties),
         top: "0px",
         "pointer-events": isActiveDrag() ? "auto" : "none",
     }));
@@ -323,29 +356,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
             y: Math.max(bestRect.top, Math.min(bestRect.top + bestRect.height, offset.y)),
         };
 
-        const crossTab = isCrossTabDrag(props.layoutModel);
-        // Cross-tab: the dragged node isn't in this tree, so it rides on the action (preview only);
-        // see OverlayNode.computeDropDirection.
-        const { direction, compute, targetId } = previewPlacement(props.layoutModel, {
-            targetId: bestLeafId,
-            rect: bestRect,
-            offset: clampedOffset,
-            draggedId: dragNodeId,
-            foreignNode: crossTab ? (dragState.node ?? undefined) : undefined,
-        });
-        if (crossTab) {
-            const plan = dragState.node?.data ? stackMovePlan(dragState.node.data) : undefined;
-            const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
-            const targetTabId = props.layoutModel.tabAtom()?.oid;
-            const targetBlockId = props.layoutModel.leafs().find((l) => l.id === targetId)?.data?.blockId;
-            if (plan && sourceTabId && targetTabId && targetBlockId
-                && direction !== undefined && direction !== DropDirection.Center
-                && crossTabDropOffered(props.layoutModel, compute)) {
-                noteCrossTabDrop({ ...plan, sourceTabId, targetTabId, targetBlockId, direction });
-            } else {
-                noteCrossTabDrop(null);
-            }
-        }
+        samplePlacement(props.layoutModel, dragNodeId, { targetId: bestLeafId, rect: bestRect, offset: clampedOffset });
     });
 
     /** The pointer is over the pane being dragged (no ghost there): mark its drag to tear off. */
@@ -404,13 +415,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
                 // own onDrop already handled the commit/redock, and running
                 // it twice here would double-commit (or double-redock).
                 if (location.current.dropTargets[0]?.element !== overlayContainerRef) return;
-                const crossTabDrop = takeCrossTabDropFor(props.layoutModel.tabAtom()?.oid);
-                if (crossTabDrop) {
-                    props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-                    moveBlocksToTab(crossTabDrop);
-                } else {
-                    props.layoutModel.onDrop();
-                }
+                commitPlacement(props.layoutModel);
             },
         });
         onCleanup(cleanup);
@@ -449,44 +454,16 @@ const OverlayNode = (props: OverlayNodeProps) => {
     const computeDropDirection = throttle(50, (clientX: number, clientY: number) => {
         const dragNodeId = dragState.nodeId;
         if (!dragNodeId || dragNodeId === props.node.id) return;
-        const crossTab = isCrossTabDrag(props.layoutModel);
-
-        if (props.layoutModel.displayContainerRef?.current && additionalProps()?.rect) {
-            const containerRect = props.layoutModel.displayContainerRef.current.getBoundingClientRect();
-            const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
-            // Cross-tab: the dragged node isn't in this tree, so it rides on the action (the ghost
-            // can still be computed; the drop below routes to redockDraggedPane, never a local commit),
-            // and Outer* is clamped to its inner equivalent so the ghost matches the committed split
-            // (clampCrossTabDirection in crossTabDrag.ts).
-            const { direction, compute, targetId } = previewPlacement(props.layoutModel, {
-                targetId: props.node.id,
-                rect: additionalProps().rect,
-                offset,
-                draggedId: dragNodeId,
-                foreignNode: crossTab ? (dragState.node ?? undefined) : undefined,
-            });
-            // Capture the cross-tab drop record NOW (globals are alive during
-            // onDrag) — drop handlers must not read the drag globals, since
-            // the source draggable's own onDrop may null them first.
-            if (crossTab) {
-                const plan = dragState.node?.data ? stackMovePlan(dragState.node.data) : undefined;
-                const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
-                const targetTabId = props.layoutModel.tabAtom()?.oid;
-                const targetBlockId = props.layoutModel.leafs().find((l) => l.id === targetId)?.data?.blockId;
-                if (plan && sourceTabId && targetTabId && targetBlockId
-                    && direction !== undefined && direction !== DropDirection.Center
-                    && crossTabDropOffered(props.layoutModel, compute)) {
-                    noteCrossTabDrop({ ...plan, sourceTabId, targetTabId, targetBlockId, direction });
-                } else {
-                    noteCrossTabDrop(null);
-                }
-            }
-        } else {
-            props.layoutModel.treeReducer({
-                type: LayoutTreeActionType.ClearPendingAction,
-            });
-            if (crossTab) noteCrossTabDrop(null);
+        const container = props.layoutModel.displayContainerRef?.current;
+        const rect = additionalProps()?.rect;
+        if (!container || !rect) {
+            clearPlacement(props.layoutModel);
+            if (isCrossTabDrag(props.layoutModel)) noteCrossTabDrop(null);
+            return;
         }
+        const containerRect = container.getBoundingClientRect();
+        const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
+        samplePlacement(props.layoutModel, dragNodeId, { targetId: props.node.id, rect, offset });
     });
 
     onMount(() => {
@@ -505,18 +482,7 @@ const OverlayNode = (props: OverlayNodeProps) => {
             onDrop: () => {
                 // Valid in-window drop — clear cross-window payload so dragend monitor skips.
                 setCurrentDragPayload(null);
-                const crossTabDrop = takeCrossTabDropFor(props.layoutModel.tabAtom()?.oid);
-                if (crossTabDrop) {
-                    // Cross-tab drop: the pending Move references a node from
-                    // ANOTHER tab's tree — committing it locally would insert
-                    // a leaf this tab doesn't own (Tab.blockids unchanged →
-                    // dangling ref). Clear the preview and route through the
-                    // sanctioned redock RPC instead.
-                    props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-                    moveBlocksToTab(crossTabDrop);
-                } else {
-                    props.layoutModel.onDrop();
-                }
+                commitPlacement(props.layoutModel);
             },
         });
         onCleanup(cleanup);
@@ -543,7 +509,7 @@ export interface PlaceholderProps {
  * `.placeholder-sizer` carries the inline transform (the only thing animated
  * during drag-move, compositor-only — see `tilelayout.scss` `&.animate`
  * selector), inner `.placeholder` carries the visual appearance + enter/exit
- * animation. Delayed unmount holds the SolidJS `<Show>` node alive for 150ms
+ * animation. Delayed unmount holds the SolidJS `<Show>` node alive for `ZONE_EXIT_MS`
  * so the CSS `.exiting` fade-out can play before the DOM node is removed.
  *
  * That exit is for a zone the pointer leaves while the drag goes on. Once the drag is released the zone goes
@@ -563,7 +529,7 @@ export const Placeholder = (props: PlaceholderProps) => {
         // Not while the dragged pane's picture is still being taken: the zone's tint would be in it.
         const xf = paneCaptureInFlight() ? undefined : placeholderTransform();
         // Read before the branches, so a release in the middle of an exit ends it too.
-        const dragging = isAnyUnderway(GHOST_DRAG_KINDS);
+        const dragging = isAnyUnderway(ELEMENT_DRAG_KINDS);
         if (xf) {
             setLastTransform(xf as JSX.CSSProperties);
             if (exitTimer) { clearTimeout(exitTimer); exitTimer = null; }
@@ -577,7 +543,7 @@ export const Placeholder = (props: PlaceholderProps) => {
                 return;
             }
             setExiting(true);
-            exitTimer = setTimeout(() => { setVisible(false); setExiting(false); }, 150);
+            exitTimer = setTimeout(() => { setVisible(false); setExiting(false); }, ZONE_EXIT_MS);
         }
     });
 
@@ -589,7 +555,7 @@ export const Placeholder = (props: PlaceholderProps) => {
     // exits, the dim came back for a frame or two, over the whole layout. Kept as it was once the drag is
     // released, when the layout no longer says.
     const reflowing = createMemo<boolean>(
-        (was) => (isAnyUnderway(GHOST_DRAG_KINDS) ? props.layoutModel.liveReflowExpected() : was),
+        (was) => (isAnyUnderway(ELEMENT_DRAG_KINDS) ? props.layoutModel.liveReflowExpected() : was),
         false
     );
 
