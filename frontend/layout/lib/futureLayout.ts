@@ -154,9 +154,17 @@ export function createPlacementPreview(model: LayoutModel) {
         undefined,
         { equals: (a, b) => a === b || (!!a && !!b && a.shape === b.shape && sameAction(a.action, b.action)) }
     );
-    const futureLayout = createMemo(() => {
+    // The pending action while the layout is still the one it was armed on. A drop commits the tree before it
+    // clears the action (the throttle can hold the clearing back a few ms more), and the action read against
+    // the tree it has just made names other panes: the ghost's static fallback (`staticGhostTransform`) put
+    // the landing zone on one of them for its last moment.
+    const placementAction = createMemo(() => {
         const a = armed();
-        return a && shape() === a.shape ? futureLayoutOf(model, a.action) : undefined;
+        return a && shape() === a.shape ? a.action : undefined;
+    });
+    const futureLayout = createMemo(() => {
+        const action = placementAction();
+        return action ? futureLayoutOf(model, action) : undefined;
     });
     const placementWireframe = createMemo((): { id: string; style: CSSProperties }[] => {
         const future = futureLayout();
@@ -172,5 +180,5 @@ export function createPlacementPreview(model: LayoutModel) {
         // Read again when the layout changes under it.
         return nodeId && shape() !== undefined ? layoutWithoutOf(model, nodeId) : undefined;
     });
-    return { futureLayout, placementWireframe, tearOffLayout };
+    return { placementAction, futureLayout, placementWireframe, tearOffLayout };
 }

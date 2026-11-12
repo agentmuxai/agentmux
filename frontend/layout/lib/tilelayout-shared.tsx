@@ -32,6 +32,7 @@ import {
     LayoutTreeActionType,
     LayoutTreeComputeMoveNodeAction,
 } from "./types";
+import { isAnyUnderway } from "@/app/drag/drag-session";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { clearPlacement, previewPlacement } from "./placementPreview";
@@ -535,6 +536,9 @@ export interface PlaceholderProps {
     style: JSX.CSSProperties;
 }
 
+/** The drags that show a landing zone: while one is underway, a zone the pointer leaves plays its exit. */
+const GHOST_DRAG_KINDS = ["tile", "window-tab", "pane-tab", "doc-tab"] as const;
+
 /**
  * An overlay to preview pending actions on the layout tree.
  * Two-div split mirrors the platform TileLayout implementations: outer
@@ -543,6 +547,12 @@ export interface PlaceholderProps {
  * selector), inner `.placeholder` carries the visual appearance + enter/exit
  * animation. Delayed unmount holds the SolidJS `<Show>` node alive for 150ms
  * so the CSS `.exiting` fade-out can play before the DOM node is removed.
+ *
+ * That exit is for a zone the pointer leaves while the drag goes on. Once the drag is released the zone goes
+ * at once, with no exit: the drop has put the pane in it, and the live reflow had already shown it there. The
+ * zone fading and shrinking after the drop read as one more landing, and not always on the landing site (the
+ * operator, 2026-11-12: "it shrinks onto some other random place"; "lets just get rid of it now. just the
+ * last landing animation, i dont think we need it").
  */
 export const Placeholder = (props: PlaceholderProps) => {
     const placeholderTransform = () => props.layoutModel.placeholderTransform();
@@ -554,6 +564,8 @@ export const Placeholder = (props: PlaceholderProps) => {
     createEffect(() => {
         // Not while the dragged pane's picture is still being taken: the zone's tint would be in it.
         const xf = paneCaptureInFlight() ? undefined : placeholderTransform();
+        // Read before the branches, so a release in the middle of an exit ends it too.
+        const dragging = isAnyUnderway(GHOST_DRAG_KINDS);
         if (xf) {
             setLastTransform(xf as JSX.CSSProperties);
             if (exitTimer) { clearTimeout(exitTimer); exitTimer = null; }
@@ -561,6 +573,11 @@ export const Placeholder = (props: PlaceholderProps) => {
             setVisible(true);
         } else if (visible()) {
             if (exitTimer) { clearTimeout(exitTimer); exitTimer = null; }
+            if (!dragging) {
+                setVisible(false);
+                setExiting(false);
+                return;
+            }
             setExiting(true);
             exitTimer = setTimeout(() => { setVisible(false); setExiting(false); }, 150);
         }

@@ -787,14 +787,15 @@ export class LayoutModel {
      * settling pass (settlingPass.ts).
      */
     private createDropPreview(): void {
+        const preview = createPlacementPreview(this);
         ({
             futureLayout: this.futureLayout,
             placementWireframe: this.placementWireframe,
             tearOffLayout: this.tearOffLayout,
-        } = createPlacementPreview(this));
-        this.placeholderTransform = createMemo<CSSProperties>(() =>
-            this.getPlaceholderTransform(this.pendingTreeAction.throttledValueAtom())
-        );
+        } = preview);
+        // From the action as long as the layout is the one it was armed on, never from one the drop has just
+        // committed (futureLayout.ts `placementAction`).
+        this.placeholderTransform = createMemo<CSSProperties>(() => this.getPlaceholderTransform(preview.placementAction()));
         this.settlingPass = createSettlingPass(this);
         ({ reflowFor: this.reflowFor, liveReflowActive: this.liveReflowActive } = createLiveReflow(this));
     }

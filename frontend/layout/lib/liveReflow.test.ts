@@ -535,6 +535,21 @@ describe("the live reflow of a pane drag", () => {
     });
 });
 
+describe("the landing zone at the drop", () => {
+    it("is not placed by a move the drop has just committed: that move names panes of the layout it made", () => {
+        vi.useFakeTimers();
+        const m = modelOf(three());
+        drag(m, "a", "c", DropDirection.Bottom);
+        vi.advanceTimersByTime(20);
+        expect(m.placeholderTransform()).toEqual(expect.objectContaining({ transform: expect.any(String) }));
+        // The drop: the tree is committed first, and the pending move is cleared after it.
+        m.treeReducer(m.pendingTreeAction.currentValueAtom());
+        expect(m.pendingTreeAction.throttledValueAtom()).toBeTruthy();
+        expect(m.futureLayout()).toBeUndefined();
+        expect(m.placeholderTransform()).toBeUndefined();
+    });
+});
+
 describe("the tear-off a drag shows over its own pane (tearOffPreview.ts)", () => {
     /** A drag of `id` whose pointer is over that pane itself, at (x, y). */
     function dragOverSelf(m: LayoutModel, id: string, x = 100, y = 100) {

@@ -19,6 +19,7 @@ vi.mock("@/app/store/global", () => ({ getSettingsKeyAtom: () => () => undefined
 vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({ setCurrentDragPayload: () => {} }));
 vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({ dropTargetForElements: () => () => {} }));
 
+import { beginDrag, endDrag, markReleased } from "@/app/drag/drag-session";
 import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
 import { Placeholder } from "../lib/tilelayout-shared";
 
@@ -53,6 +54,41 @@ describe("Placeholder (the drag drop-target ghost)", () => {
         expect(container.querySelectorAll(".placement-wireframe").length).toBe(0);
         expect(container.querySelector(".placeholder-container")!.classList.contains("live-reflow")).toBe(true);
         expect(container.querySelector(".placeholder-sizer")).not.toBeNull();
+    });
+
+    it("plays its exit for a zone left while the drag goes on, and goes at once when the drag is released", () => {
+        vi.useFakeTimers();
+        try {
+            const [xf, setXf] = createSignal<Record<string, string> | null>(ghost);
+            const model = { placeholderTransform: xf, placementWireframe: () => [], liveReflowActive: () => true };
+            const { container } = render(() => <Placeholder layoutModel={model as any} style={{}} />);
+            const zone = () => container.querySelector(".placeholder");
+            beginDrag("tile");
+            // The pointer leaves the zone in the middle of the drag: the zone fades where it was.
+            setXf(null);
+            expect(zone()?.classList.contains("exiting")).toBe(true);
+            // Another zone arms before the exit is over: it is the zone again.
+            setXf(ghost);
+            expect(zone()?.classList.contains("exiting")).toBe(false);
+            // The drop: the source releases the drag, then the commit clears the zone. No exit: it is gone.
+            markReleased();
+            expect(zone()).not.toBeNull();
+            setXf(null);
+            expect(zone()).toBeNull();
+            // A release in the middle of an exit ends the exit too.
+            endDrag("drop");
+            beginDrag("tile");
+            setXf(ghost);
+            setXf(null);
+            expect(zone()?.classList.contains("exiting")).toBe(true);
+            markReleased();
+            expect(zone()).toBeNull();
+            vi.advanceTimersByTime(500);
+            expect(zone()).toBeNull();
+        } finally {
+            endDrag("cancel");
+            vi.useRealTimers();
+        }
     });
 
     it("stays away while the dragged pane's picture is being taken: its tint would be in the picture", () => {
