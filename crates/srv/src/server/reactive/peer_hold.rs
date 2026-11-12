@@ -78,16 +78,38 @@ pub(super) async fn hold_for_down_peer(
     }
     let name = crate::backend::reactive::sanitize::route_name(&req.target_agent)?.to_lowercase();
     let host = down_host(seen_agents::lookup(&name), &state.lan_discovery.get_instances(), now_unix_secs().max(0) as u64)?;
+    hold_for_peer(state, req, resp, &name, host).await
+}
+
+/// Hold `req` for an agent of a LAN peer that answers its polls but gave no answer to this message (its
+/// inbound check was stuck, as narko's was on 2026-11-12 while its cloud login was refreshing). The replay
+/// sends it again; the peer that receives it can still start a stopped agent, which this copy cannot.
+pub(super) async fn hold_for_silent_peer(
+    state: &AppState,
+    auth_via: crate::server::ReactiveAuthVia,
+    req: &InjectionRequest,
+    resp: &InjectionResponse,
+) -> Option<serde_json::Value> {
+    if !hold_applies(auth_via, req, resp) {
+        return None;
+    }
+    let name = crate::backend::reactive::sanitize::route_name(&req.target_agent)?.to_lowercase();
+    let host = seen_agents::lookup(&name).map_or_else(|| "its machine".to_string(), |seen| seen.hostname);
+    hold_for_peer(state, req, resp, &name, host).await
+}
+
+/// The hold itself, for [`hold_for_down_peer`] and [`hold_for_silent_peer`].
+async fn hold_for_peer(state: &AppState, req: &InjectionRequest, resp: &InjectionResponse, name: &str, host: String) -> Option<serde_json::Value> {
     let mstore = state.mstore.clone();
     let target = req.target_agent.clone();
     if tokio::task::spawn_blocking(move || defined_here(&mstore, &target)).await.ok()?.is_some() {
         return None;
     }
-    if relay_has_it(state, req.source_agent.as_deref(), &name).await {
+    if relay_has_it(state, req.source_agent.as_deref(), name).await {
         return None;
     }
     let mut held = crate::server::jekt_hold::held_row(req, resp.request_id.clone(), agentmux_common::time::now_ms());
-    held.target_uid = peer_key(&name);
+    held.target_uid = peer_key(name);
     let mstore = state.mstore.clone();
     let outcome = tokio::task::spawn_blocking(move || mstore.jekt_held_insert(&held)).await.ok()?;
     let target = &req.target_agent;
@@ -161,7 +183,7 @@ async fn send_over_lan(state: &AppState, row: &HeldJekt, url: &str, auth_key: &s
         // The peer kept it itself (it holds for an agent that cannot work): ours is a second copy.
         ForwardOutcome::Refused(body) if body.get("held").and_then(|v| v.as_bool()) == Some(true) => Sent::Gone,
         ForwardOutcome::Refused(_) => Sent::Refused,
-        ForwardOutcome::Stale => {
+        ForwardOutcome::Stale | ForwardOutcome::NoAnswer => {
             state.lan_discovery.evict_agent(&row.target_agent);
             Sent::Later
         }

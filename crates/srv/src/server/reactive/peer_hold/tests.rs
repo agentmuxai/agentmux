@@ -255,3 +255,17 @@ async fn a_row_that_ran_out_is_dropped_not_sent_and_a_live_one_waits() {
     settle(&state, &row, sent).await;
     assert!(state.mstore.jekt_held_for_target("peer:pspenttwo", 10).unwrap().is_empty());
 }
+
+/// A peer that answers its polls but not the message: held under the peer key like one that is down, so the replay
+/// sends it again (task #2512); not for an agent defined here, which is held the old way.
+#[tokio::test]
+async fn a_message_a_live_peer_did_not_answer_is_held_for_the_replay() {
+    let state = test_state();
+    let (req, resp) = request("Pholdsilent", "req-silent-1");
+    let answer = hold_for_silent_peer(&state, ReactiveAuthVia::FullAuthKey, &req, &resp).await.expect("held");
+    assert_eq!((answer["held"].clone(), answer["held_reason"].as_str()), (serde_json::json!(true), Some("peer_offline")), "{answer}");
+    let rows = state.mstore.jekt_held_for_target("peer:pholdsilent", 10).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].request_id, "req-silent-1");
+    assert!(hold_for_silent_peer(&state, ReactiveAuthVia::LanKey, &req, &resp).await.is_none(), "a message that came over the LAN is not held again here");
+}

@@ -135,7 +135,6 @@ pub(crate) fn check_cert(cert: &WanKeyRecord, agent: &str, observed_key: &[u8], 
 /// knows to be revoked is trusted by neither way, and a pin does not outlive a
 /// revocation the directory holds.
 pub(crate) async fn instance_trust(state: &AppState, instance_id: &str) -> Result<Path, String> {
-    use crate::muxbus::wan_verify::{instance_is_live_install, instance_is_revoked, Directory, GLOBAL_BUDGET};
     let wan = state.mstore.wan_identity().or_else(crate::backend::storage::wan_identity::global);
     if let Some(wan) = &wan {
         let known = wan.known_instance_get(instance_id).map_err(|e| format!("the known installs could not be read: {e}"))?;
@@ -151,6 +150,36 @@ pub(crate) async fn instance_trust(state: &AppState, instance_id: &str) -> Resul
             .any(|p| p.instance_id == instance_id),
         None => false,
     };
+    within(DIRECTORY_WAIT, pinned, instance_id, ask_directory(state, wan.as_deref(), instance_id, pinned)).await
+}
+
+/// How long a check of a message from another machine waits on the account's directory: the sign-in token
+/// (which can sit behind a refresh that hangs) and the lookups. The sender gives up on its forward after
+/// 10 s, so a longer wait only ends in a lost message (task #2512).
+const DIRECTORY_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// `asking`, within `wait`. Past it the answer is exactly what it is when the directory cannot be asked at all (no
+/// sign-in): a pinned install is trusted as pinned (`Path::PinnedInstance`), claiming nothing from a lookup that did
+/// not happen, and an unpinned one is not trusted, with the reason. An install already known locally to be revoked
+/// was refused before this was asked.
+async fn within(wait: std::time::Duration, pinned: bool, instance_id: &str, asking: impl std::future::Future<Output = Result<Path, String>>) -> Result<Path, String> {
+    match tokio::time::timeout(wait, asking).await {
+        Ok(answer) => answer,
+        Err(_) => {
+            tracing::warn!(instance = %instance_id, pinned, wait_secs = wait.as_secs_f32(), "lan check: the account's directory did not answer in time; going on without it");
+            if pinned {
+                Ok(Path::PinnedInstance)
+            } else {
+                Err("the install is not pinned here and the account's directory did not answer in time".to_string())
+            }
+        }
+    }
+}
+
+/// [`instance_trust`]'s asks of the account's directory: the token, the revocation of a pinned install, the
+/// listing of an unpinned one.
+async fn ask_directory(state: &AppState, wan: Option<&crate::backend::storage::wan_identity::WanIdentityStore>, instance_id: &str, pinned: bool) -> Result<Path, String> {
+    use crate::muxbus::wan_verify::{instance_is_live_install, instance_is_revoked, Directory, GLOBAL_BUDGET};
     let token = match crate::broker::get_global() {
         Some(scheduler) => crate::muxbus::cloud_subscriber::load_valid_token(&state.id_store, &scheduler).await,
         None => None,
@@ -160,7 +189,7 @@ pub(crate) async fn instance_trust(state: &AppState, instance_id: &str) -> Resul
     if pinned {
         if let Some(dir) = &dir {
             if instance_is_revoked(dir, instance_id).await == Some(true) {
-                if let Some(wan) = &wan {
+                if let Some(wan) = wan {
                     remember_revoked(wan, instance_id, agentmux_common::time::now_secs());
                 }
                 return Err("the install is revoked".to_string());
@@ -404,6 +433,10 @@ async fn bound_install_allows(state: &AppState, agent: &str, certifying: &str) -
 
 /// Whether the account's directory holds a revocation `from` signed that names `to` as its successor.
 async fn handed_over(state: &AppState, from: &str, to: &str) -> bool {
+    tokio::time::timeout(DIRECTORY_WAIT, handed_over_asking(state, from, to)).await.unwrap_or(false)
+}
+
+async fn handed_over_asking(state: &AppState, from: &str, to: &str) -> bool {
     use crate::muxbus::wan_verify::{instance_handed_over_to, Directory, GLOBAL_BUDGET};
     let token = match crate::broker::get_global() {
         Some(scheduler) => crate::muxbus::cloud_subscriber::load_valid_token(&state.id_store, &scheduler).await,

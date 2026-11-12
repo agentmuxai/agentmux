@@ -62,6 +62,8 @@ pub(super) enum ForwardOutcome {
     /// The peer refused the jekt's files for a reason no other candidate
     /// would change (`jekt_files::refused`): end the search with its answer.
     Refused(serde_json::Value),
+    /// The request went out and no answer came in time (a peer that polls fine but does not take the message).
+    NoAnswer,
 }
 
 /// The single implementation of "POST this injection to a peer srv and echo it
@@ -165,15 +167,8 @@ pub(super) async fn forward_inject_to_peer(
             ForwardOutcome::Inconclusive
         }
         Err(e) => {
-            tracing::warn!(
-                target = %req.target_agent,
-                error = %e,
-                url = %forward_url,
-                kind = peer.kind,
-                channel,
-                "inject forward: transport failure — candidate may be stale"
-            );
-            ForwardOutcome::Stale
+            tracing::warn!(target = %req.target_agent, error = %e, url = %forward_url, kind = peer.kind, channel, timed_out = e.is_timeout(), "inject forward: transport failure, candidate may be stale");
+            if e.is_timeout() { ForwardOutcome::NoAnswer } else { ForwardOutcome::Stale }
         }
     }
 }
