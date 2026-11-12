@@ -12,15 +12,15 @@ import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import { RpcApi, type PresenceOffReason, type PresenceStatusResult } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
-export const CLOUD_PRESENCE_SETTING = {
+export const CLOUD_PRESENCE_SETTING = settingEntry({
     id: "devices.cloud_presence",
-    label: "Cloud presence",
-    description: "This computer tells the cloud it is online, so your signed-in devices can list it from anywhere.",
+    labelKey: "settings.devices.cloudPresence.label",
+    descriptionKey: "settings.devices.cloudPresence.description",
     section: "devices",
     keywords: ["cloud", "presence", "online", "publish", "relay", "remote", "offline", "mobile"],
-} satisfies SettingsIndexEntry;
+});
 
 /** How often the line re-reads the status while it is shown. */
 export const POLL_MS = 3000;

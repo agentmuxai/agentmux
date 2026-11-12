@@ -2,172 +2,161 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEV_MODE_KEY } from "@/app/store/dev-mode";
-import { KANBAN_REMINDERS_DESCRIPTION } from "@/app/view/kanban/kanban-reminders";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const ADVANCED_SETTINGS = {
-    devMode: {
+    devMode: settingEntry({
         id: "advanced.dev_mode",
-        label: "Dev mode",
-        description:
-            "Shows DevTools in the menu, Inspect Element and View Page Source in right-click menus, and other developer tools. Off by default in the installed app; on by default in a task dev or debug build",
+        labelKey: "settings.advanced.devMode.label",
+        descriptionKey: "settings.advanced.devMode.description",
         section: "advanced",
-        group: "Developer",
+        groupKey: "settings.advanced.group.developer",
         keywords: ["developer", "devtools", "inspect element", "view source", "task dev", "debug build", DEV_MODE_KEY],
-    },
-    disableWebgl: {
+    }),
+    disableWebgl: settingEntry({
         id: "advanced.disable_webgl",
-        label: "Disable WebGL rendering",
-        description: "Fall back to canvas-based terminal rendering (restart required)",
+        labelKey: "settings.advanced.disableWebgl.label",
+        descriptionKey: "settings.advanced.disableWebgl.description",
         section: "advanced",
-        group: "Terminal (power user)",
+        groupKey: "settings.advanced.group.terminalPowerUser",
         keywords: ["gpu rendering", "canvas fallback", "graphics glitch", "term:disablewebgl"],
-    },
-    autoAnswerTimeout: {
+    }),
+    autoAnswerTimeout: settingEntry({
         id: "advanced.auto_answer_timeout",
-        label: "Auto-answer timeout",
-        description: "Seconds an AskUserQuestion panel waits for you before auto-selecting the recommended option(s)",
+        labelKey: "settings.advanced.autoAnswerTimeout.label",
+        descriptionKey: "settings.advanced.autoAnswerTimeout.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["auto select", "question timeout", "agent:askquestiontimeoutms"],
-    },
-    compactAt: {
+    }),
+    compactAt: settingEntry({
         id: "advanced.compact_at",
-        label: "Compact agents at",
-        description:
-            "Thousands of tokens at which Claude agents compact their context. Lower saves tokens; higher keeps more detail. 0 keeps Claude Code's own (about 967). Takes effect when each agent next starts",
+        labelKey: "settings.advanced.compactAt.label",
+        descriptionKey: "settings.advanced.compactAt.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["compaction", "context", "tokens", "autoCompactWindow", "agent:compactat"],
-    },
-    previewSkidNotches: {
+    }),
+    previewSkidNotches: settingEntry({
         id: "advanced.preview_skid_notches",
-        label: "Preview scroll skid",
-        description:
-            "Wheel notches a tool preview absorbs at its top or bottom edge before the scroll passes to the pane, so a preview sliding under the pointer is not scrolled past. 0 passes it on at once. Applies to open panes",
+        labelKey: "settings.advanced.previewSkidNotches.label",
+        descriptionKey: "settings.advanced.previewSkidNotches.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["scroll", "wheel", "notches", "tool preview", "edge", "agent:previewskidnotches"],
-    },
-    containerMemory: {
+    }),
+    containerMemory: settingEntry({
         id: "advanced.container_memory",
-        label: "Container agents' memory",
-        description:
-            "Megabytes of memory each container agent may use, unless the agent has its own limit. auto is half of what Docker has (at least 2 GB). 0 is no limit. Reaches running containers without restarting them",
+        labelKey: "settings.advanced.containerMemory.label",
+        descriptionKey: "settings.advanced.containerMemory.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["container", "docker", "memory", "ram", "limit", "out of memory", "agent:container_memory"],
-    },
-    containerCpus: {
+    }),
+    containerCpus: settingEntry({
         id: "advanced.container_cpus",
-        label: "Container agents' CPUs",
-        description:
-            "CPUs each container agent may use, unless the agent has its own limit. auto is all but a quarter of what Docker has (at least one). 0 is no limit. Reaches running containers without restarting them",
+        labelKey: "settings.advanced.containerCpus.label",
+        descriptionKey: "settings.advanced.containerCpus.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["container", "docker", "cpu", "cores", "limit", "agent:container_cpus"],
-    },
-    subagentModel: {
+    }),
+    subagentModel: settingEntry({
         id: "advanced.subagent_model",
-        label: "Sub-agent model",
-        description:
-            "The model Claude agents' general-purpose sub-agents run on: sonnet, haiku, opus, a model ID, or inherit to use the agent's own. A sub-agent that names its own model, or one the agent passes per call, still wins. Takes effect when each agent next starts",
+        labelKey: "settings.advanced.subagentModel.label",
+        descriptionKey: "settings.advanced.subagentModel.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["sub-agent", "subagent", "model", "tokens", "agent:subagentmodel", "sonnet"],
-    },
-    exploreModel: {
+    }),
+    exploreModel: settingEntry({
         id: "advanced.explore_model",
-        label: "Explore sub-agent model",
-        description:
-            "The model Claude agents' Explore sub-agents run on: haiku, sonnet, opus, a model ID, or inherit to leave Claude Code's built-in. Takes effect when each agent next starts",
+        labelKey: "settings.advanced.exploreModel.label",
+        descriptionKey: "settings.advanced.exploreModel.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["explore", "sub-agent", "subagent", "model", "tokens", "agent:exploremodel", "haiku"],
-    },
-    compactHints: {
+    }),
+    compactHints: settingEntry({
         id: "advanced.compact_hints",
-        label: "Suggest compacting",
-        description:
-            "When an agent's turn ends with a large context, tell it once that it can compact itself before its next task, so it doesn't compact by itself mid-task",
+        labelKey: "settings.advanced.compactHints.label",
+        descriptionKey: "settings.advanced.compactHints.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["compaction", "context", "tokens", "hint", "agent:compacthints"],
-    },
-    overlapNotes: {
+    }),
+    overlapNotes: settingEntry({
         id: "advanced.overlap_notes",
-        label: "Overlap notes",
-        description:
-            "Tell an agent when it edits a file another agent on this computer is also changing, naming that agent so it can message them first",
+        labelKey: "settings.advanced.overlapNotes.label",
+        descriptionKey: "settings.advanced.overlapNotes.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["same file", "conflict", "other agents", "Presence", "agent:overlapnotes"],
-    },
-    retryOnReconnect: {
+    }),
+    retryOnReconnect: settingEntry({
         id: "advanced.retry_on_reconnect",
-        label: "Retry after the API is back",
-        description:
-            "When a turn failed because the model API couldn't be reached, retry it once by itself when the API answers again, unless a tool ran in it or you typed in that pane since",
+        labelKey: "settings.advanced.retryOnReconnect.label",
+        descriptionKey: "settings.advanced.retryOnReconnect.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["offline", "network", "auto retry", "reconnect", "agent:retryonreconnect"],
-    },
-    kanbanReminders: {
+    }),
+    kanbanReminders: settingEntry({
         id: "advanced.kanban_reminders",
-        label: "Remind idle agents of their backlog",
-        description: KANBAN_REMINDERS_DESCRIPTION,
+        labelKey: "settings.advanced.kanbanReminders.label",
+        descriptionKey: "settings.advanced.kanbanReminders.description",
         section: "advanced",
-        group: "Agent panes",
+        groupKey: "settings.advanced.group.agentPanes",
         keywords: ["kanban", "backlog", "reminder", "tasks waiting", "kanban:reminders"],
-    },
-    sampleInterval: {
+    }),
+    sampleInterval: settingEntry({
         id: "advanced.sysinfo_sample_interval",
-        label: "Sample interval",
-        description: "Seconds between sysinfo widget samples",
+        labelKey: "settings.advanced.sampleInterval.label",
+        descriptionKey: "settings.advanced.sampleInterval.description",
         section: "advanced",
-        group: "Sysinfo widget",
+        groupKey: "settings.advanced.group.sysinfoWidget",
         keywords: ["sysinfo refresh rate", "polling interval", "telemetry:interval"],
-    },
-    historyLength: {
+    }),
+    historyLength: settingEntry({
         id: "advanced.sysinfo_history_length",
-        label: "History length",
-        description: "Number of sysinfo widget samples retained (30–1024)",
+        labelKey: "settings.advanced.historyLength.label",
+        descriptionKey: "settings.advanced.historyLength.description",
         section: "advanced",
-        group: "Sysinfo widget",
+        groupKey: "settings.advanced.group.sysinfoWidget",
         keywords: ["sysinfo history", "graph length", "telemetry:numpoints"],
-    },
-    enableFileDrop: {
+    }),
+    enableFileDrop: settingEntry({
         id: "advanced.enable_file_drop",
-        label: "Enable file drop",
-        description: "Drag files onto an agent pane to attach them",
+        labelKey: "settings.advanced.enableFileDrop.label",
+        descriptionKey: "settings.advanced.enableFileDrop.description",
         section: "advanced",
-        group: "Drag & drop",
+        groupKey: "settings.advanced.group.dragDrop",
         keywords: ["drag and drop", "file attach", "dnd:enabled"],
-    },
-    insertReferenceToken: {
+    }),
+    insertReferenceToken: settingEntry({
         id: "advanced.insert_reference_token",
-        label: "Insert reference token",
-        description: "Also insert a file-reference token into the composer on drop, in addition to attaching the file",
+        labelKey: "settings.advanced.insertReferenceToken.label",
+        descriptionKey: "settings.advanced.insertReferenceToken.description",
         section: "advanced",
-        group: "Drag & drop",
+        groupKey: "settings.advanced.group.dragDrop",
         keywords: ["file reference", "drop token", "dnd:agentinserttoken"],
-    },
-    maxConcurrentUploads: {
+    }),
+    maxConcurrentUploads: settingEntry({
         id: "advanced.max_concurrent_uploads",
-        label: "Max concurrent uploads",
-        description: "Files uploaded at once on a multi-file drop. Leave blank for unlimited.",
+        labelKey: "settings.advanced.maxConcurrentUploads.label",
+        descriptionKey: "settings.advanced.maxConcurrentUploads.description",
         section: "advanced",
-        group: "Drag & drop",
+        groupKey: "settings.advanced.group.dragDrop",
         keywords: ["upload concurrency", "parallel uploads", "dnd:concurrency"],
-    },
-    globalEnvVars: {
+    }),
+    globalEnvVars: settingEntry({
         id: "advanced.global_env_vars",
-        label: "Global environment variables",
-        description: "Environment variables injected into every shell",
+        labelKey: "settings.advanced.globalEnvVars.label",
+        descriptionKey: "settings.advanced.globalEnvVars.description",
         section: "advanced",
-        group: "Environment",
+        groupKey: "settings.advanced.group.environment",
         keywords: ["environment variables", "env vars", "shell env", "cmd:env"],
-    },
+    }),
 } satisfies Record<string, SettingsIndexEntry>;

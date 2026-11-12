@@ -17,16 +17,15 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { LanPinInfo } from "@/types/rpc/LanPinInfo";
 import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
-export const PINNED_SENDERS_SETTING = {
+export const PINNED_SENDERS_SETTING = settingEntry({
     id: "devices.pinned_senders",
-    label: "Pinned senders",
-    description:
-        "The first key AgentMux sees for an agent's name on your network, and the first of your installs it sees speaking for that name through your cloud account, are remembered, and a message from anything else is refused as unverified. If an agent really did change (it was recreated, or moved to another computer), accept the new one here. Forget a pin to trust whatever speaks for that name next.",
+    labelKey: "settings.devices.pinnedSenders.label",
+    descriptionKey: "settings.devices.pinnedSenders.description",
     section: "devices",
     keywords: ["pin", "pinned", "key", "sender", "agent", "network", "lan", "cloud", "install", "spoof", "verify", "trust", "reset"],
-} satisfies SettingsIndexEntry;
+});
 
 /** What one button press does to one pin. */
 export type PinChange = { kind: "lan" | "wan"; agentId: string; channel?: string; how: "adopt" | "forget"; expect?: string };

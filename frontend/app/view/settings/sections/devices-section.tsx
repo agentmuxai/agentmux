@@ -12,7 +12,7 @@
 import type { JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 import { CLOUD_PRESENCE_SETTING, CloudPresence } from "./cloud-presence";
 import { createDevices } from "./devices-section-state";
@@ -26,51 +26,46 @@ export { ago } from "./devices-section-state";
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const DEVICES_SETTINGS = {
-    pairedDevices: {
+    pairedDevices: settingEntry({
         id: "devices.paired",
-        label: "Paired devices",
-        description:
-            "Devices paired with this computer can watch its agents over your local network. Turn on Can send to let one send messages to your agents as you. Revoke one to stop it.",
+        labelKey: "settings.devices.pairedDevices.label",
+        descriptionKey: "settings.devices.pairedDevices.description",
         section: "devices",
         keywords: ["mobile", "device", "tablet", "pair", "revoke", "viewer", "live feed", "qr code", "send", "message"],
-    },
-    shareTerminals: {
+    }),
+    shareTerminals: settingEntry({
         id: "devices.share_terminals",
-        label: "Share terminals with paired devices",
-        description:
-            "Paired devices can watch this computer's terminals, read-only: what they show, as it happens. Terminals often show passwords and keys, so this is off unless you turn it on. An agent hidden from paired devices keeps its shell hidden too.",
+        labelKey: "settings.devices.shareTerminals.label",
+        descriptionKey: "settings.devices.shareTerminals.description",
         section: "devices",
-        group: "Paired devices",
+        groupKey: "settings.devices.group.pairedDevices",
         keywords: ["terminal", "shell", "mobile", "device", "share", "watch", "viewer", "viewer:shareterminals"],
-    },
+    }),
     hiddenAgents: HIDDEN_AGENTS_SETTING,
     muxbus: MUXBUS_SIGN_IN_SETTING,
     cloudPresence: CLOUD_PRESENCE_SETTING,
     pinnedSenders: PINNED_SENDERS_SETTING,
-    publishPresence: {
+    publishPresence: settingEntry({
         id: "devices.publish_presence",
-        label: "Publish this computer to my devices",
-        description:
-            "While you are signed in, your devices can list this computer from anywhere. Turn it off to stop; your devices then show it as offline. Dev builds don't publish.",
+        labelKey: "settings.devices.publishPresence.label",
+        descriptionKey: "settings.devices.publishPresence.description",
         section: "devices",
         keywords: ["cloud", "presence", "publish", "offline", "mobile", "devices", "cloud:publishpresence"],
-    },
-    shareSummaries: {
+    }),
+    shareSummaries: settingEntry({
         id: "devices.share_summaries",
-        label: "Share what my agents are working on",
-        description:
-            "Other AgentMux windows on this computer and on your local network show each agent's one-line summary in their Swarm, next to its status. Anyone on your network who can reach AgentMux can read them. Turn it off to share status only.",
+        labelKey: "settings.devices.shareSummaries.label",
+        descriptionKey: "settings.devices.shareSummaries.description",
         section: "devices",
         keywords: ["swarm", "summary", "share", "lan", "network", "channel", "status", "swarm:sharesummaries"],
-    },
-    statusbarMuxbusCloud: {
+    }),
+    statusbarMuxbusCloud: settingEntry({
         id: "devices.statusbar_muxbus_cloud",
-        label: "Show MuxBus Cloud in the status bar",
-        description:
-            "The cloud dot next to the host name, and the sign-in block in the host menu. Turn it off if you don't use MuxBus Cloud; LAN is not affected. You can still sign in from Accounts, and a dead cloud sign-in is no longer flagged in the status bar.",
+        labelKey: "settings.devices.statusbarMuxbusCloud.label",
+        descriptionKey: "settings.devices.statusbarMuxbusCloud.description",
         section: "devices",
         keywords: ["muxbus", "cloud", "dot", "status bar", "statusbar", "hide", "sign in", "statusbar:showmuxbuscloud"],
-    },
+    }),
 } satisfies Record<string, SettingsIndexEntry>;
 
 export function DevicesSection(): JSX.Element {

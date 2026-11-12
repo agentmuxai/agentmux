@@ -12,16 +12,15 @@ import { t } from "@/app/i18n/i18n";
 import { MuxBusSignInChoices } from "@/app/view/accounts/muxbus-sign-in-choices";
 import { MuxBusSignOutButton } from "@/app/view/accounts/muxbus-sign-out";
 import { muxbusDelivery, muxbusDeliveryLine, muxbusOffersSignIn } from "@/store/muxbus-delivery";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
-export const MUXBUS_SIGN_IN_SETTING = {
+export const MUXBUS_SIGN_IN_SETTING = settingEntry({
     id: "devices.muxbus",
-    label: "MuxBus",
-    description:
-        "MuxBus carries messages to this computer's agents from your other computers and from GitHub reviews and CI.",
+    labelKey: "settings.devices.muxbus.label",
+    descriptionKey: "settings.devices.muxbus.description",
     section: "devices",
     keywords: ["muxbus", "cloud", "sign in", "sign out", "login", "messages", "github", "reviews", "relay", "account"],
-} satisfies SettingsIndexEntry;
+});
 
 export function MuxBusSignIn(): JSX.Element {
     const muxbus = useMuxBusStatus();
