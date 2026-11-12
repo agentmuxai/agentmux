@@ -9,12 +9,9 @@
  */
 
 import { settingsAtom } from "@/app/store/config-signals";
-import { pushNotification } from "@/app/store/flash-notifications";
-import { openAgentInActiveTab } from "@/app/store/agent-runtime-live";
-import { setNotificationAction } from "@/app/notification/usenotification";
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import * as MOS from "@/store/mos";
-import { KEEPS_RUNNING_NOTE, keepsRunningSetting, keepsRunningTitle } from "./keeps-running-text";
+import { keepsRunningSetting } from "./keeps-running-text";
 
 const SETTING_ALWAYS_AVAILABLE = "agents:always_available";
 
@@ -23,7 +20,8 @@ export function agentsKeepRunning(): boolean {
     return keepsRunningSetting((settingsAtom() as Record<string, unknown>)[SETTING_ALWAYS_AVAILABLE]);
 }
 
-export type ParkedAgent = { agentId: string; name: string };
+export type { ParkedAgent } from "./keeps-running-toast";
+import type { ParkedAgent } from "./keeps-running-toast";
 
 /**
  * The agent srv parks when this block's pane closes, if the window knows it will: a block whose view
@@ -39,19 +37,4 @@ export function parkedAgentOf(blockId: string): ParkedAgent | undefined {
     return row ? { agentId: row.agent_id, name: row.name } : undefined;
 }
 
-/** The note after a close that parked these agents. The Open brings back the first one; the rest are in My Agents. */
-export function noteKeepsRunning(agents: ParkedAgent[]): void {
-    if (agents.length === 0) return;
-    const first = agents[0];
-    const actionKey = `agent-parked-open:${first.agentId}`;
-    setNotificationAction(actionKey, () => void openAgentInActiveTab({ agent_id: first.agentId, name: first.name }));
-    pushNotification({
-        icon: "fa-circle-play",
-        title: keepsRunningTitle(agents.map((a) => a.name)),
-        message: KEEPS_RUNNING_NOTE,
-        timestamp: new Date().toISOString(),
-        type: "info",
-        expiration: Date.now() + 8000,
-        actions: [{ label: "Open", actionKey }],
-    });
-}
+export { noteKeepsRunning } from "./keeps-running-toast";

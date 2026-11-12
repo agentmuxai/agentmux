@@ -39,7 +39,12 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 /** The notice shown after the tab is gone (spec §5.3). */
 export function quitNoticeMessage(s: QuitSummary): string {
-    const parts = ["Conversation kept — reopen the agent to resume it."];
+    return ["Conversation kept — reopen the agent to resume it.", ...quitNoticeDetails(s)].join(" ");
+}
+
+/** What the quit left behind or did, as sentences: the part of the notice that differs per agent. */
+export function quitNoticeDetails(s: QuitSummary): string[] {
+    const parts: string[] = [];
     if (s.released_claims > 0) parts.push(`Released ${plural(s.released_claims, "work claim", "work claims")}.`);
     if (s.stopped_shells > 0) parts.push(`Stopped ${plural(s.stopped_shells, "shell", "shells")}.`);
     if (s.survivors?.length) {
@@ -61,7 +66,7 @@ export function quitNoticeMessage(s: QuitSummary): string {
                 `(${s.crons_targeting.join(", ")}); pause or delete them if you meant to stop everything.`
         );
     }
-    return parts.join(" ");
+    return parts;
 }
 
 export const quitCommand: SlashCommand = {
