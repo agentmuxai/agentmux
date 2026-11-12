@@ -18,6 +18,7 @@
 import type { PaneRowAction } from "../components/PaneRow";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import type { FailureVerdict } from "./failure-verdict";
+import { ROUTE_CREDITS_TITLE } from "@/app/store/agent-unavailable";
 
 /** Handlers the pane wires to the recovery actions. */
 export interface FailureActions {
@@ -179,6 +180,15 @@ function lapsedRow(f: AgentFailure, view: FailureViewState, on: FailureActions):
     };
 }
 
+/**
+ * The recovery for a usage limit. A route out of credits is the route key's balance, not this agent's account:
+ * switching or upgrading an account changes nothing, and Retry probes the route once credits are added (#47477).
+ */
+function usageLimitAction(f: AgentFailure, retry: PaneRowAction, openAccounts: PaneRowAction): PaneRowAction {
+    if (f.title === ROUTE_CREDITS_TITLE) return retry;
+    return { ...openAccounts, label: "Accounts (switch / upgrade)", primary: true };
+}
+
 /** Project a failure + view state + handlers into a PaneRow descriptor. */
 export function failureToRow(f: AgentFailure, view: FailureViewState, on: FailureActions): FailureRow {
     if (view.verdict === "lapsed") return lapsedRow(f, view, on);
@@ -255,7 +265,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             break;
         }
         case "usage_limit":
-            actions.push({ ...openAccounts, label: "Accounts (switch / upgrade)", primary: true });
+            actions.push(usageLimitAction(f, retry, openAccounts));
             break;
         case "spawn_failure":
             // Clear `icon` — this isn't an account action, so it must NOT

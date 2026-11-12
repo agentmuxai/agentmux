@@ -129,8 +129,11 @@ export function spendChipTone(today: SpendToday): "neutral" | "warn" | "error" {
     return used >= 1 ? "error" : used >= 0.8 ? "warn" : "neutral";
 }
 
-/** What the chip's tooltip says. */
-export function spendChipTitle(today: SpendToday): string {
+/** What the chip's tooltip says. `outOfCredits`: the route's balance stopped the agent, not its cap (#47477). */
+export function spendChipTitle(today: SpendToday, outOfCredits = false): string {
+    if (outOfCredits) {
+        return `What this agent has used through its model route today (UTC). It is stopped because the route has no credits left, not by a cap: add credits to the route's key in the provider's account.`;
+    }
     if (today.cap == null) return "What this agent has used through its model route today (UTC). It has no daily cap.";
     return `What this agent has used through its model route today (UTC), against its daily cap of ${usd(today.cap)}. The gateway stops its requests at the cap; its leader or you can raise it.`;
 }
