@@ -82,7 +82,7 @@ pub(super) async fn hold_for_down_peer(
 }
 
 /// Hold `req` for an agent of a LAN peer that answers its polls but gave no answer to this message (its
-/// inbound check was stuck, as narko's was on 2026-11-12 while its cloud login was refreshing). The replay
+/// inbound check was stuck behind a cloud login refresh that never returned). The replay
 /// sends it again; the peer that receives it can still start a stopped agent, which this copy cannot.
 pub(super) async fn hold_for_silent_peer(
     state: &AppState,
