@@ -11,6 +11,8 @@
 
 .ambient-purposes {
     padding-left: calc(var(--space-3) + var(--space-2));
+    // The same inset as the popover's other rows, so the counts do not touch its border.
+    padding-right: var(--space-3);
     font-size: var(--text-xs);
 }
 
