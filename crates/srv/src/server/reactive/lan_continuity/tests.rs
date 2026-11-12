@@ -607,3 +607,51 @@ async fn a_host_signs_for_its_agent_that_its_install_hosts_it() {
     assert!(!agentmux_common::lan_install_binding::verify_lan_install_binding(&public, "lark", &cert.instance_id, cert.issued_at, sig));
     assert!(!agentmux_common::lan_install_binding::verify_lan_install_binding(&public, "maop-sg", &cert.instance_id, cert.issued_at + 1, sig));
 }
+
+/// The check of a message from another machine waits a bounded time on the account's directory (task #2512): a
+/// token refresh that hangs must not hold the message past its sender's 10 s.
+#[tokio::test]
+async fn a_directory_that_does_not_answer_in_time_costs_the_wait_not_the_message() {
+    let never = || std::future::pending::<Result<Path, String>>();
+    let wait = std::time::Duration::from_millis(30);
+    assert_eq!(within(wait, true, "inst", never()).await, Ok(Path::PinnedInstance), "a pinned install is trusted as when the directory cannot be asked");
+    let unpinned = within(wait, false, "inst", never()).await.unwrap_err();
+    assert!(unpinned.contains("did not answer in time"), "{unpinned}");
+    assert_eq!(within(wait, false, "inst", async { Ok(Path::AccountDirectory) }).await, Ok(Path::AccountDirectory), "an answer in time is the answer");
+    assert_eq!(within(wait, true, "inst", async { Err("the install is revoked".to_string()) }).await, Err("the install is revoked".to_string()));
+}
+
+/// The case that happened (task #2512): the sign-in token's refresher never returns, so the lookup for the directory
+/// never does. The scheduler would hold the caller for its own limit (75 s here); the check holds it for the wait.
+#[tokio::test]
+async fn a_hung_token_refresher_does_not_hold_the_check_past_its_wait() {
+    let scheduler = Arc::new(crate::broker::RefreshScheduler::new());
+    scheduler
+        .register(
+            crate::muxbus::CREDENTIAL_ID,
+            || Box::pin(async { false }),
+            || {
+                Box::pin(async {
+                    std::future::pending::<()>().await;
+                    Ok(())
+                })
+            },
+        )
+        .await;
+    let state = test_state();
+    let lookup = async {
+        crate::muxbus::cloud_subscriber::load_valid_token(&state.id_store, &scheduler).await;
+        Ok(Path::AccountDirectory)
+    };
+    let started = std::time::Instant::now();
+    let pinned = within(std::time::Duration::from_millis(100), true, "inst", lookup).await;
+    assert_eq!(pinned, Ok(Path::PinnedInstance), "pinned: the marker a pin-only check gives, nothing from the lookup");
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "bounded by the wait, not by the refresher: {:?}", started.elapsed());
+
+    let lookup = async {
+        crate::muxbus::cloud_subscriber::load_valid_token(&state.id_store, &scheduler).await;
+        Ok(Path::AccountDirectory)
+    };
+    let unpinned = within(std::time::Duration::from_millis(100), false, "inst", lookup).await.unwrap_err();
+    assert!(unpinned.contains("did not answer in time"), "{unpinned}");
+}
