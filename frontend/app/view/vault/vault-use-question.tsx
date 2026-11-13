@@ -93,6 +93,8 @@ function promptNote(u: UseRequest): string {
 function alwaysLabel(u: UseRequest): string {
     const agent = clip(u.agent, CLIP.name);
     if (u.signin) return `Always for ${agent} on ${siteOf(u.origin)}`;
+    // A field in another site's frame is granted as that frame on that page.
+    if (u.page) return `Always on ${siteOf(u.page)} (${siteOf(u.origin)} fields)`;
     return u.command ? `Always for ${agent}` : `Always on ${siteOf(u.origin)}`;
 }
 
@@ -108,8 +110,19 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
                     <strong>
                         <Clipped text={u.field} max={CLIP.label} />
                     </strong>{" "}
-                    on <strong>{siteOf(u.origin)}</strong>
-                    <span class="warden-manager-dim"> ({u.origin})</span>
+                    <Show
+                        when={u.page}
+                        fallback={
+                            <>
+                                on <strong>{siteOf(u.origin)}</strong>
+                                <span class="warden-manager-dim"> ({u.origin})</span>
+                            </>
+                        }
+                    >
+                        in a frame from <strong>{siteOf(u.origin)}</strong>
+                        <span class="warden-manager-dim"> ({u.origin})</span> on <strong>{siteOf(u.page)}</strong>
+                        <span class="warden-manager-dim"> ({u.page})</span>
+                    </Show>
                 </p>
             }
         >

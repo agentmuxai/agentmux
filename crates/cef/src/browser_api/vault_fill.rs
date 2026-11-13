@@ -24,6 +24,7 @@ use serde_json::{json, Value};
 
 use super::act::{call_on, describe, fail, isolated_context, page_url, resolve, unauthorized, PREPARE_FILL};
 use super::frames;
+use super::key_typing;
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
 use super::vault_slots;
@@ -62,6 +63,9 @@ pub struct FieldInfo {
     pub origin: String,
     /// The page's URL.
     pub page: String,
+    /// The page's own origin: differs from `origin` when the field is in another site's frame (a payment
+    /// provider's hosted field), which is then asked about, and granted, as that frame on that page.
+    pub page_origin: String,
     /// What the person is shown for the field: its label or name.
     pub label: String,
     /// Changes when the field's markup does.
@@ -173,6 +177,7 @@ pub async fn field_info_route(
             StatusCode::OK,
             Json(ApiResponse::ok(FieldInfo {
                 origin: l.origin,
+                page_origin: agentmux_common::allowed_origins::target_origin(&l.page).unwrap_or_default(),
                 page: l.page,
                 label: display_label(&l.facts),
                 fingerprint: fingerprint(&l.facts),
@@ -218,8 +223,35 @@ const CHECK_AND_SET: &str = r#"function (origin, v, attr, tag, attrs) {
   if (rich) { this.textContent = v; } else { d.set.call(this, v); }
   this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
-  return { same: (rich ? this.textContent : this.value) === v, validation: this.validationMessage || "" };
+  const now = rich ? this.textContent : this.value;
+  return { same: now === v, empty: now === "", validation: this.validationMessage || "" };
 }"#;
+
+/// Before a value is typed key by key: still in a document of the approved origin, and the field the focus is in, in
+/// its own document. Marks it as holding a Vault value (as [`CHECK_AND_SET`] does) before the first key.
+const CHECK_FOCUSED: &str = r#"function (origin, attr) {
+  const w = this.ownerDocument && this.ownerDocument.defaultView;
+  if (!this.isConnected || !w || w.origin !== origin) return { error: "origin" };
+  if (this.getRootNode().activeElement !== this) return { error: "focus" };
+  this.setAttribute(attr, "1");
+  return { ok: true };
+}"#;
+
+/// What a field holds after keys were typed into it: whether it is empty, and its validation message, never the text.
+const AFTER_KEYS: &str = r#"function () {
+  const now = this.isContentEditable && this.value === undefined ? this.textContent : this.value;
+  return { empty: now === "" || now === undefined, validation: this.validationMessage || "" };
+}"#;
+
+/// What the agent is told when a payment field takes neither a set value nor typed keys: the person types it.
+const DIDNT_TAKE: &str = "the field didn't take the value, set or typed: use Browser handoff to let the person type this part";
+
+/// Whether a field is in another site's frame than the page it is shown on: a payment provider's hosted field. The page
+/// can't run a script in such a frame, so it can't move the focus within it.
+fn in_another_sites_frame(field_origin: &str, page: &str, frame: &Option<frames::FrameRef>) -> bool {
+    let page_origin = agentmux_common::allowed_origins::target_origin(page).unwrap_or_default();
+    frame.is_some() && !page_origin.is_empty() && field_origin != page_origin
+}
 
 /// `POST /agentmux/browser/vault_fill`.
 pub async fn vault_fill_route(
@@ -284,11 +316,44 @@ async fn fill(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Fi
         Some("origin") => return Err(format!("the field is no longer in {}, so nothing was typed", req.expect_origin)),
         Some(_) => return Err("the field changed when it took the focus, so nothing was typed; ask again to show the person what it is now".to_string()),
     }
+    // A payment provider's field can ignore a value set from outside (its own handlers never see a typed key): it
+    // is typed key by key, in its own frame's session. Left empty after both, it is the person's to type.
+    if seen.get("empty").and_then(Value::as_bool) == Some(true) && in_another_sites_frame(&located.origin, &located.page, &frame) {
+        // Only a frame with a session of its own: keys sent on it can't land in another frame.
+        if frame.as_ref().is_none_or(|f| f.session.is_none()) || !key_typing::is_typable(&typed) {
+            return Err(DIDNT_TAKE.to_string());
+        }
+        let validation = type_into_frame(cdp, &obj, req, &located, backend, &typed).await?;
+        return Ok(FillData { filled: true, validation, changed_by_page: false });
+    }
     Ok(FillData {
         filled: true,
         validation: seen.get("validation").and_then(Value::as_str).unwrap_or("").chars().take(300).collect(),
         changed_by_page: seen.get("same").and_then(Value::as_bool) != Some(true),
     })
+}
+
+/// Types `text` into the approved field one key at a time, through the session of its own frame, so the keys go to that
+/// frame and nowhere else (a page can't move the focus inside another site's frame, and a key sent on that frame's own
+/// session never reaches another one). Everything is checked again after the focus moved there, and nothing is sent
+/// unless the field holds the focus. Answers the page's validation message; an error when the field is still empty.
+async fn type_into_frame(cdp: &mut super::cdp::CdpSession, obj: &str, req: &FillReq, located: &Located, backend: i64, text: &str) -> Result<String, String> {
+    let prepared = call_on(cdp, obj, PREPARE_FILL, vec![]).await?;
+    if prepared.get("error").is_some() {
+        return Err(DIDNT_TAKE.to_string());
+    }
+    let after_focus = describe(cdp, backend).await.ok_or("the field is gone from the page")?;
+    check_still_approved(&Located { facts: after_focus, origin: located.origin.clone(), page: located.page.clone() }, req)?;
+    let held = call_on(cdp, obj, CHECK_FOCUSED, vec![json!(req.expect_origin), json!(TAINT_ATTR)]).await?;
+    if held.get("error").is_some() {
+        return Err(DIDNT_TAKE.to_string());
+    }
+    key_typing::type_keys(cdp, text).await.map_err(|_| DIDNT_TAKE.to_string())?;
+    let seen = call_on(cdp, obj, AFTER_KEYS, vec![]).await?;
+    if seen.get("empty").and_then(Value::as_bool) != Some(false) {
+        return Err(DIDNT_TAKE.to_string());
+    }
+    Ok(seen.get("validation").and_then(Value::as_str).unwrap_or("").chars().take(300).collect())
 }
 
 /// Checks `this` is still the approved `<select>` (as [`CHECK_AND_SET`] does a text field) and
@@ -407,7 +472,7 @@ mod tests {
         // A rich-text field gets the value as its text, and is checked by it:
         // a `value` set on a div changes nothing the person sees.
         assert!(at("this.isContentEditable") < at("this.setAttribute(attr"));
-        assert!(CHECK_AND_SET.contains("this.textContent = v") && CHECK_AND_SET.contains("(rich ? this.textContent : this.value) === v"));
+        assert!(CHECK_AND_SET.contains("this.textContent = v") && CHECK_AND_SET.contains("const now = rich ? this.textContent : this.value") && CHECK_AND_SET.contains("same: now === v"));
         assert!(!CHECK_AND_SET.contains("this.value = v"), "never an expando on an element with no value");
         // A field in a shadow root: the form's listener on its host or the
         // document hears the input event, as it would a typed one.
@@ -417,6 +482,24 @@ mod tests {
         for k in ["type", "name", "id", "autocomplete", "aria-label", "placeholder"] {
             assert!(FINGERPRINT_ATTRS.contains(&k), "{k} is in the approval's fingerprint and is rechecked");
         }
+    }
+
+    #[test]
+    fn a_field_the_page_ignores_is_typed_key_by_key_only_in_another_sites_frame_with_a_session_of_its_own() {
+        let frame = Some(frames::FrameRef { frame_id: "f".into(), session: Some("s".into()), origin: "https://js.stripe.com".into(), url: String::new(), chain: vec![] });
+        assert!(in_another_sites_frame("https://js.stripe.com", "https://shop.example/pay", &frame));
+        assert!(!in_another_sites_frame("https://shop.example", "https://shop.example/pay", &frame), "a frame of the page's own site is the page's");
+        assert!(!in_another_sites_frame("https://shop.example", "https://shop.example/pay", &None), "the page's own field is not a frame's");
+        // The order: what is checked, then the key events, then the read-back; and the keys are typed only into the focused field.
+        let at = |needle: &str| CHECK_FOCUSED.find(needle).unwrap_or_else(|| panic!("{needle}"));
+        assert!(at("w.origin !== origin") < at("activeElement !== this") && at("activeElement !== this") < at("this.setAttribute(attr"));
+        assert!(!AFTER_KEYS.contains("return { value"), "what the field holds is never returned");
+        let src = include_str!("vault_fill.rs");
+        let typing = src.find("async fn type_into_frame").expect("type_into_frame");
+        let body = &src[typing..src[typing..].find("\n}\n").map(|n| typing + n).expect("end")];
+        let [prepare, approved, focused, keys, read] = ["PREPARE_FILL", "check_still_approved", "CHECK_FOCUSED", "type_keys", "AFTER_KEYS"].map(|n| body.find(n).unwrap_or_else(|| panic!("{n}")));
+        assert!(prepare < approved && approved < focused && focused < keys && keys < read);
+        assert!(DIDNT_TAKE.contains("handoff"), "the agent is told to hand the part to the person");
     }
 
     #[test]
