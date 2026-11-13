@@ -4,27 +4,17 @@
     display: flex;
     align-items: center;
 
-    // Active = recording. Red is the universal "live mic" convention, so the
-    // indicator deliberately diverges from the accent color used elsewhere.
-    // Selector is the pressed toggle (not just the chrome button) to out-specificity
-    // ui.scss's own pressed `color: var(--accent-color)` — this button is a toggle
-    // and is pressed here, and without the extra specificity here the generic accent
-    // tint would silently win over this deliberately-different red.
-    &.mic-active .ui-button--chrome.ui-button--toggle[aria-pressed="true"] {
-        color: var(--error-text-color);
+    // What the microphone hears (`--mic-level`, 0 to 1, MicButton.tsx): a red disc behind the button that
+    // grows and darkens with the sound. With nothing heard it is not there, so a mic that is on and silent
+    // (a muted or wrong device) does not look like one that hears the person. The ring on the button only
+    // says the mic is on. The wrap's own `::before`, so it is painted before the button, under its icon.
+    &.mic-active {
         position: relative;
-        // Its own stacking context, so the halo sits behind the icon and not behind the pane.
-        isolation: isolate;
 
-        // What the microphone hears (`--mic-level`, 0 to 1, MicButton.tsx): a red disc behind the icon
-        // that grows and darkens with the sound. With nothing heard it is not there, so a mic that is on
-        // and silent (a muted or wrong device) does not look like one that hears the person. The ring
-        // below only says the mic is on.
         &::before {
             content: "";
             position: absolute;
             inset: -3px;
-            z-index: -1;
             border-radius: 50%;
             background: var(--error-color);
             opacity: calc(var(--mic-level, 0) * 0.45);
@@ -40,7 +30,17 @@
                 transition: none;
             }
         }
+    }
 
+    // Active = recording. Red is the universal "live mic" convention, so the
+    // indicator deliberately diverges from the accent color used elsewhere.
+    // Selector is the pressed toggle (not just the chrome button) to out-specificity
+    // ui.scss's own pressed `color: var(--accent-color)` — this button is a toggle
+    // and is pressed here, and without the extra specificity here the generic accent
+    // tint would silently win over this deliberately-different red.
+    &.mic-active .ui-button--chrome.ui-button--toggle[aria-pressed="true"] {
+        color: var(--error-text-color);
+        position: relative;
         &::after {
             content: "";
             position: absolute;
