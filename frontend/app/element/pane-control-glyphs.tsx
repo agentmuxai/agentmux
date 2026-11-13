@@ -43,39 +43,3 @@ export const PaneRestoreGlyph = (): JSX.Element => (
         <rect x="1.93" y="2.91" width="7.5" height="12.18" rx="0.75" fill="currentColor" stroke="none" />
     </svg>
 );
-
-/**
- * The two stacked minimize buttons' glyphs (SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08.md §4).
- * Both are 16 x 2 px bars in one box, so the pair reads as two evenly spaced rules: "Minimize to
- * header" is one solid bar, "Merge into next pane" the same bar with two 2 px gaps cut in (three 4 px
- * segments at whole pixels, so the rhythm stays crisp and does not blur into a dashed haze).
- */
-const BAR_BOX = { viewBox: "0 0 16 2", width: 16, height: 2 } as const;
-
-export const PaneMinimizeGlyph = (): JSX.Element => (
-    <svg
-        class="pane-control-glyph pane-minimize-glyph"
-        {...BAR_BOX}
-        fill="currentColor"
-        shape-rendering="crispEdges"
-        aria-hidden="true"
-        data-testid="pane-minimize-glyph"
-    >
-        <rect x="0" y="0" width="16" height="2" />
-    </svg>
-);
-
-export const PaneMergeGlyph = (): JSX.Element => (
-    <svg
-        class="pane-control-glyph pane-merge-glyph"
-        {...BAR_BOX}
-        fill="currentColor"
-        shape-rendering="crispEdges"
-        aria-hidden="true"
-        data-testid="pane-merge-glyph"
-    >
-        <rect x="0" y="0" width="4" height="2" />
-        <rect x="6" y="0" width="4" height="2" />
-        <rect x="12" y="0" width="4" height="2" />
-    </svg>
-);

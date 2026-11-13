@@ -12,7 +12,7 @@ import { revealInStrip, STRIP_EDGE_FADE_PX } from "@/app/element/strip-reveal";
 import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
 import { mergeInto } from "@/app/motion/primitives";
 import { DURATION_BASE_MS, DURATION_MODERATE_MS } from "@/app/motion/tokens";
-import { findMergeTarget } from "./layoutMinimizeMerge";
+import { findExpandedMergeTarget, findMinimizeMergeTarget } from "./layoutMinimizeMerge";
 import type { LayoutModel } from "./layoutModel";
 import { findNode, findNodeByBlockId } from "./layoutNode";
 import { effectiveStack, moveBlocksInStack } from "./layoutStack";
@@ -28,7 +28,7 @@ export function mergeIntoNeighbour(model: LayoutModel, nodeId: string): boolean 
     const root = model.treeState.rootNode;
     // A minimized pane to join first (tabs that were hidden together stay together), else the expanded
     // neighbour: its tabs go in as background tabs and the pane's own tile goes.
-    const target = findMergeTarget(root, nodeId);
+    const target = findMinimizeMergeTarget(root, nodeId) ?? findExpandedMergeTarget(root, nodeId);
     const node = root && findNode(root, nodeId);
     if (!target?.data || !node?.data) return false;
     const targetBlockId = target.data.blockId;

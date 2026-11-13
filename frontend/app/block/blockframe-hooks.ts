@@ -26,12 +26,6 @@ export function minimizeToHeader(nodeModel: NodeModel): (() => void) | undefined
     return () => nodeModel.toggleMinimize({ chip: true });
 }
 
-/** The menu's "Merge into Next Pane", under the same condition as "Minimize to Header"; whether it can act is `canMergeIntoNext`. */
-export function mergeIntoNext(nodeModel: NodeModel): { run: () => void; can: boolean } | undefined {
-    if (!minimizeToHeader(nodeModel)) return undefined;
-    return { run: () => void nodeModel.mergeIntoNeighbour?.(), can: nodeModel.canMergeIntoNeighbour?.() ?? false };
-}
-
 /**
  * A narrow pane's header sheds its tab strip's last sliver, then its view's extra end buttons, then
  * its window controls (the grip's menu has them), so Close stays in the pane: `data-fit` "tabs",
@@ -127,8 +121,6 @@ export function useBodyContextMenu(opts: {
                     onMagnifyToggle: nodeModel.toggleMagnify,
                     onClose: nodeModel.onClose,
                     onMinimizeToHeader: minimizeToHeader(nodeModel),
-                    onMergeIntoNext: mergeIntoNext(nodeModel)?.run,
-                    canMergeIntoNext: mergeIntoNext(nodeModel)?.can,
                     inspectAt: { x: e.clientX, y: e.clientY },
                     omit,
                 },

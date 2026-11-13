@@ -8,7 +8,7 @@
  * and view models; the pieces it hands props to are probes that record them.
  */
 
-import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -109,7 +109,7 @@ type Over = {
     blockId?: string;
     /** The view's own end buttons (an agent pane's search and Messages). */
     endButtons?: number;
-    /** Replaces parts of the node model (the minimize pair's merge target and spies). */
+    /** Replaces parts of the node model (the pane count and the maximized state). */
     node?: Record<string, unknown>;
 };
 
@@ -135,7 +135,7 @@ function setup(over: Over = {}) {
         toggleMinimize: () => {},
         addEphemeralNodeToLayout: () => {},
         dragHandleRef: { current: null },
-        ...(over.node ?? {}),
+        ...over.node,
     } as never;
     const viewModel = over.noViewModel
         ? null
@@ -208,7 +208,7 @@ describe("the header", () => {
         expect(range.contains(pinned)).toBe(false);
         expect(q(pinned, ".block-frame-minimize")).not.toBeNull();
         expect(pinned.firstElementChild?.classList.contains("pane-grip")).toBe(true);
-        expect(pinned.children[1]?.classList.contains("block-frame-minimize-pair")).toBe(true);
+        expect(pinned.children[1]?.classList.contains("block-frame-minimize")).toBe(true);
     });
 
     it("keeps the grip right of the view's own buttons and their separator, just left of minimize", () => {
@@ -216,7 +216,7 @@ describe("the header", () => {
         const header = q(t.view.container, ".block-frame-default-header") as HTMLElement;
         const grip = q(header, ".pane-grip") as HTMLElement;
         const separator = q(header, ".block-frame-header-aux .block-frame-btn-separator") as HTMLElement;
-        const minimize = q(header, ".block-frame-minimize-pair") as HTMLElement;
+        const minimize = q(header, ".block-frame-minimize") as HTMLElement;
         expect(separator).not.toBeNull();
         const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
         expect(follows(separator, grip)).toBe(true);
@@ -499,77 +499,5 @@ describe("Maximize on a lone pane", () => {
 
     it("keeps Restore for a magnified pane, whatever the count", () => {
         expect(maximizeOf({ numLeafs: () => 1, isMagnified: () => true })).not.toBeNull();
-    });
-});
-
-describe("the two stacked minimize buttons", () => {
-    const header = (over: Over = {}) => {
-        const t = setup({ noHeader: false, ...over });
-        return q(t.view.container, ".block-frame-default-header") as HTMLElement;
-    };
-    const pairOf = (hd: HTMLElement) => q(hd, ".block-frame-minimize-pair") as HTMLElement;
-
-    it("draws Merge into next pane above Minimize to header, in that order, in a labelled group", () => {
-        const pair = pairOf(header({ node: { canMergeIntoNeighbour: () => true, mergeIntoNeighbour: () => true } }));
-        expect(pair.getAttribute("role")).toBe("group");
-        expect(pair.getAttribute("aria-label")).toBe("Minimize");
-        const buttons = [...pair.querySelectorAll("button")];
-        expect(buttons.map((b) => b.getAttribute("title"))).toEqual(["Merge into next pane", "Minimize to header"]);
-        expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(["Merge into next pane", "Minimize to header"]);
-        expect(buttons[0].querySelector("svg.pane-merge-glyph")).not.toBeNull();
-        expect(buttons[1].querySelector("svg.pane-minimize-glyph")).not.toBeNull();
-        expect(buttons[1].classList.contains("block-frame-minimize")).toBe(true);
-    });
-
-    it("Minimize calls toggleMinimize with chip, and Shift changes nothing", () => {
-        const toggleMinimize = vi.fn();
-        const hd = header({ node: { toggleMinimize, canMergeIntoNeighbour: () => true, mergeIntoNeighbour: () => true } });
-        const minimize = q(hd, ".block-frame-minimize") as HTMLElement;
-        fireEvent.click(minimize);
-        fireEvent.click(minimize, { shiftKey: true });
-        expect(toggleMinimize.mock.calls).toEqual([[{ chip: true }], [{ chip: true }]]);
-    });
-
-    it("Merge calls mergeIntoNeighbour and never toggles a minimize", () => {
-        const toggleMinimize = vi.fn();
-        const mergeIntoNeighbour = vi.fn(() => true);
-        const hd = header({ node: { toggleMinimize, mergeIntoNeighbour, canMergeIntoNeighbour: () => true } });
-        const merge = q(hd, ".block-frame-merge") as HTMLElement;
-        fireEvent.click(merge);
-        fireEvent.click(merge, { shiftKey: true });
-        expect(mergeIntoNeighbour).toHaveBeenCalledTimes(2);
-        expect(toggleMinimize).not.toHaveBeenCalled();
-    });
-
-    it("with no neighbour Merge is aria-disabled with the reason, stays focusable, and does nothing", () => {
-        const mergeIntoNeighbour = vi.fn(() => false);
-        const toggleMinimize = vi.fn();
-        const hd = header({ node: { toggleMinimize, mergeIntoNeighbour, canMergeIntoNeighbour: () => false } });
-        const merge = q(hd, ".block-frame-merge") as HTMLButtonElement;
-        expect(merge.getAttribute("aria-disabled")).toBe("true");
-        expect(merge.disabled).toBe(false);
-        expect(merge.getAttribute("title")).toBe("No other pane to merge into");
-        fireEvent.click(merge);
-        expect(mergeIntoNeighbour).not.toHaveBeenCalled();
-        expect(toggleMinimize).not.toHaveBeenCalled();
-        // Minimize still works beside it.
-        fireEvent.click(q(hd, ".block-frame-minimize") as HTMLElement);
-        expect(toggleMinimize).toHaveBeenCalledWith({ chip: true });
-    });
-
-    it("a minimized pane's header shows only Restore, and Restore does not ask for a chip", () => {
-        const toggleMinimize = vi.fn();
-        const hd = header({ node: { isMinimized: () => true, toggleMinimize } });
-        expect(pairOf(hd)).toBeNull();
-        const restore = q(hd, ".block-frame-minimize") as HTMLElement;
-        expect(restore.getAttribute("title")).toBe("Restore");
-        fireEvent.click(restore);
-        expect(toggleMinimize).toHaveBeenCalledWith();
-    });
-
-    it("shows neither for a pane that cannot minimize (the last expanded pane)", () => {
-        const hd = header({ node: { canMinimize: () => false } });
-        expect(pairOf(hd)).toBeNull();
-        expect(q(hd, ".block-frame-minimize")).toBeNull();
     });
 });

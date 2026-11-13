@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { findExpandedMergeTarget, findMergeTarget, findMinimizeMergeTarget } from "../lib/layoutMinimizeMerge";
+import { findExpandedMergeTarget, findMinimizeMergeTarget } from "../lib/layoutMinimizeMerge";
 import { newLayoutNode } from "../lib/layoutNode";
 import { FlexDirection, type LayoutNode } from "../lib/types";
 
@@ -129,46 +129,5 @@ describe("findExpandedMergeTarget", () => {
         expect(expandedOf(split(FlexDirection.Row, a, b, c), a)).toBeUndefined();
         const only = leaf("only");
         expect(expandedOf(split(FlexDirection.Row, only), only)).toBeUndefined();
-    });
-});
-
-
-describe("findMergeTarget (the header's Merge into next pane, and whether it is enabled)", () => {
-    const mergeOf = (root: LayoutNode, node: LayoutNode) => findMergeTarget(root, node.id)?.data?.blockId;
-
-    it("takes the nearest expanded pane after the pane, else before, in a Row and in a Column", () => {
-        for (const direction of [FlexDirection.Row, FlexDirection.Column]) {
-            const [a, b, c] = [leaf("a"), leaf("b"), leaf("c")];
-            const root = split(direction, a, b, c);
-            expect(mergeOf(root, a)).toBe("b");
-            expect(mergeOf(root, b)).toBe("c");
-            expect(mergeOf(root, c)).toBe("b");
-        }
-    });
-
-    it("a minimized neighbour wins over an expanded one", () => {
-        const [a, b, c] = [leaf("a", true), leaf("b"), leaf("c")];
-        expect(mergeOf(split(FlexDirection.Row, a, b, c), b)).toBe("a");
-    });
-
-    it("has no target for a pane that is alone, or whose siblings are all fully collapsed or in another split", () => {
-        const solo = leaf("solo");
-        expect(mergeOf(split(FlexDirection.Row, solo), solo)).toBeUndefined();
-        const [a, b] = [leaf("a"), leaf("b")];
-        const root = split(FlexDirection.Row, a, split(FlexDirection.Column, b));
-        expect(mergeOf(root, a)).toBe("b");
-        const [x, y] = [leaf("x"), leaf("y", true)];
-        // A minimized neighbour is a target; with no neighbour at all there is none.
-        expect(mergeOf(split(FlexDirection.Row, x, y), x)).toBe("y");
-        expect(mergeOf(split(FlexDirection.Row, x), x)).toBeUndefined();
-    });
-
-    it("is the pane the merge goes into: the same answer as the two finders it is made of", () => {
-        const [a, b, c, d] = [leaf("a"), leaf("b", true), leaf("c"), leaf("d")];
-        const root = split(FlexDirection.Row, a, b, c, d);
-        for (const node of [a, c, d]) {
-            const expected = findMinimizeMergeTarget(root, node.id) ?? findExpandedMergeTarget(root, node.id);
-            expect(findMergeTarget(root, node.id)).toBe(expected);
-        }
     });
 });

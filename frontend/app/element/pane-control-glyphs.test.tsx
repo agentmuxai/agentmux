@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cleanup, render } from "@solidjs/testing-library";
-import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it } from "vitest";
 import { DeclIconButton } from "./ui/DeclIconButton";
-import { PaneMergeGlyph, PaneMinimizeGlyph, PaneRestoreGlyph } from "./pane-control-glyphs";
+import { PaneRestoreGlyph } from "./pane-control-glyphs";
 
 afterEach(cleanup);
 
@@ -51,33 +50,5 @@ describe("PaneRestoreGlyph", () => {
         expect(btn.querySelector("svg.pane-restore-glyph")).not.toBeNull();
         expect(btn.querySelector("i")).toBeNull();
         expect(btn.innerHTML).not.toContain("fa-window-restore");
-    });
-});
-
-describe("the minimize pair's glyphs", () => {
-    const draw = (el: () => JSX.Element) => render(el).container.querySelector("svg")!;
-
-    it("share one box, and draw with currentColor", () => {
-        const solid = draw(() => <PaneMinimizeGlyph />);
-        const broken = draw(() => <PaneMergeGlyph />);
-        for (const svg of [solid, broken]) {
-            expect(svg.getAttribute("viewBox")).toBe("0 0 16 2");
-            expect(svg.getAttribute("width")).toBe("16");
-            expect(svg.getAttribute("height")).toBe("2");
-            expect(svg.getAttribute("fill")).toBe("currentColor");
-        }
-        expect(solid.getAttribute("viewBox")).toBe(broken.getAttribute("viewBox"));
-    });
-
-    it("the solid one is one 16 px bar; the broken one has three 4 px segments and two 2 px gaps", () => {
-        const bars = (svg: SVGElement) =>
-            [...svg.querySelectorAll("rect")].map((r) => [Number(r.getAttribute("x")), Number(r.getAttribute("width"))]);
-        expect(bars(draw(() => <PaneMinimizeGlyph />))).toEqual([[0, 16]]);
-        const broken = bars(draw(() => <PaneMergeGlyph />));
-        expect(broken).toEqual([[0, 4], [6, 4], [12, 4]]);
-        const gaps = broken.slice(1).map(([x], i) => x - (broken[i][0] + broken[i][1]));
-        expect(gaps).toEqual([2, 2]);
-        // The same extent as the solid bar: first edge to last edge.
-        expect(broken[2][0] + broken[2][1]).toBe(16);
     });
 });

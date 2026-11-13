@@ -6,7 +6,7 @@ import { PaneGrip } from "@/app/element/PaneGrip";
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input, NumActiveConnColors } from "@/app/block/blockutil";
 import { paneTabCapability, paneTabLabelFor } from "@/app/store/pane-tab-registry";
 import { Button } from "@/app/element/button";
-import { PaneMergeGlyph, PaneMinimizeGlyph, PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
+import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { connBarShows } from "@/app/store/conn-status-rules";
@@ -20,9 +20,8 @@ import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ClosingLabel } from "./closing-label";
-import { mergeIntoNext, minimizeToHeader, useBlockConnection, useBodyContextMenu, useHeaderFit, useHeaderScrollRange } from "./blockframe-hooks";
+import { minimizeToHeader, useBlockConnection, useBodyContextMenu, useHeaderFit, useHeaderScrollRange } from "./blockframe-hooks";
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
-import { Button as UiButton } from "@/app/element/ui/Button";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
@@ -211,7 +210,6 @@ function handleHeaderContextMenu(
     onMagnifyToggle: () => void,
     onClose: () => void,
     onMinimizeToHeader?: () => void,
-    mergeInto?: { run: () => void; can: boolean },
     extraItems: ContextMenuItem[] = []
 ) {
     e.preventDefault();
@@ -226,8 +224,6 @@ function handleHeaderContextMenu(
             onMagnifyToggle,
             onClose,
             onMinimizeToHeader,
-            onMergeIntoNext: mergeInto?.run,
-            canMergeIntoNext: mergeInto?.can,
             inspectAt: { x: e.clientX, y: e.clientY },
             omit: new Set<PaneMenuSection>(["copy"]),
         },
@@ -262,7 +258,7 @@ function handleHeaderContextMenu(
 export function showPaneTabMenu(e: MouseEvent, nodeModel: NodeModel, blockId: string, viewModel: ViewModel | null, extraItems: ContextMenuItem[]) {
     const blockData = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))();
     if (blockData == null) return;
-    handleHeaderContextMenu(e, blockData, viewModel as ViewModel, nodeModel.isMagnified(), nodeModel.toggleMagnify, nodeModel.onClose, minimizeToHeader(nodeModel), mergeIntoNext(nodeModel), extraItems);
+    handleHeaderContextMenu(e, blockData, viewModel as ViewModel, nodeModel.isMagnified(), nodeModel.toggleMagnify, nodeModel.onClose, minimizeToHeader(nodeModel), extraItems);
 }
 
 /** Inline editable name field shown in the pane header when the viewModel provides setViewName. */
@@ -342,62 +338,20 @@ function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Bloc
     }
 }
 
-/** A minimized pane's header: the one Restore button, in the slot the pair below has on an expanded pane. */
-function OptRestoreButton(props: { toggleMinimize: (opts?: { chip?: boolean }) => void }): JSX.Element {
+function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: (opts?: { chip?: boolean }) => void }): JSX.Element {
+    // OS-window minimize convention (a horizontal bar), matching the sibling
+    // OptMagnifyButton's window-maximize/window-restore pairing just below —
+    // the previous chevron-up/chevron-down pair read as a dropdown toggle
+    // rather than a minimize control.
     const decl = createMemo<IconButtonDecl>(() => ({
         elemtype: "iconbutton",
-        icon: <PaneRestoreGlyph />,
-        title: "Restore",
-        click: () => props.toggleMinimize(),
+        icon: props.minimized ? <PaneRestoreGlyph /> : "regular@window-minimize",
+        title: props.minimized ? "Restore" : "Minimize",
+        // Shift keeps today's header chip; a plain click puts the tabs in a neighbouring pane
+        // (SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md decision 4).
+        click: (e) => props.toggleMinimize({ chip: e?.shiftKey === true }),
     }));
     return <DeclIconButton decl={decl()} className="block-frame-minimize" />;
-}
-
-/** The minimize slot of the end controls: a chip's Restore, else the pair. */
-function MinimizeControls(props: { nodeModel: NodeModel; restore: boolean }): JSX.Element {
-    return (
-        <Show when={!props.restore} fallback={<OptRestoreButton toggleMinimize={props.nodeModel.toggleMinimize} />}>
-            <MinimizePair nodeModel={props.nodeModel} />
-        </Show>
-    );
-}
-
-/**
- * An expanded pane's two stacked buttons (SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08.md): Merge
- * into next pane above, Minimize to header below. Each is one explicit operation: no Shift, and Merge
- * never falls back to a chip. With no neighbour to merge into, Merge is `aria-disabled` rather than
- * `disabled`, so it stays focusable and its reason stays reachable by keyboard.
- */
-function MinimizePair(props: { nodeModel: NodeModel }): JSX.Element {
-    const canMerge = () => props.nodeModel.canMergeIntoNeighbour?.() ?? false;
-    const mergeTitle = () => (canMerge() ? "Merge into next pane" : "No other pane to merge into");
-    return (
-        <div class="block-frame-minimize-pair" role="group" aria-label="Minimize">
-            <UiButton
-                variant="chrome"
-                class="block-frame-merge"
-                title={mergeTitle()}
-                aria-label={mergeTitle()}
-                aria-disabled={canMerge() ? undefined : "true"}
-                style={{ color: "inherit" }}
-                on:click={() => {
-                    if (canMerge()) props.nodeModel.mergeIntoNeighbour();
-                }}
-            >
-                <PaneMergeGlyph />
-            </UiButton>
-            <UiButton
-                variant="chrome"
-                class="block-frame-minimize"
-                title="Minimize to header"
-                aria-label="Minimize to header"
-                style={{ color: "inherit" }}
-                on:click={() => props.nodeModel.toggleMinimize({ chip: true })}
-            >
-                <PaneMinimizeGlyph />
-            </UiButton>
-        </div>
-    );
 }
 
 /** Maximize / Restore. A lone pane (`alone`) already fills the window, so it has no Maximize; a magnified one keeps its Restore. */
@@ -491,7 +445,7 @@ function EndIcons(props: {
                 cached model — degrade to showing the button (the toggle's own
                 countExpandedLeaves guard still enforces the policy). */}
             <Show when={!ephemeral() && numLeafs() > 1 && (props.nodeModel.canMinimize?.() ?? true)}>
-                <MinimizeControls nodeModel={props.nodeModel} restore={minimized() && !magnified()} />
+                <OptMinimizeButton minimized={minimized() && !magnified()} toggleMinimize={props.nodeModel.toggleMinimize} />
             </Show>
 
             <Show
@@ -638,7 +592,7 @@ function BlockFrame_Header(
             props.nodeModel.isMagnified(),
             props.nodeModel.toggleMagnify,
             props.nodeModel.onClose,
-            minimizeToHeader(props.nodeModel), mergeIntoNext(props.nodeModel)
+            minimizeToHeader(props.nodeModel)
         );
     };
     const viewFaviconUrl = createMemo(() => util.useAtomValueSafe(props.viewModel?.viewFaviconUrl));
