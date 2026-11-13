@@ -14,7 +14,7 @@
 
 .ui-card-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(var(--ui-card-min, 200px), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(var(--ui-card-min, 200px), 100%), 1fr));
     gap: var(--space-1-5);
     min-width: 0;
 
