@@ -199,7 +199,6 @@
 183 crates/srv/src/backend/storage/filestore/counter.rs::FileStore::append_in_tx
 143 crates/srv/src/backend/storage/filestore/offset_ops.rs::FileStore::write_at
 119 crates/srv/src/backend/storage/migrations.rs::run_filestore_migrations
-310 crates/srv/src/backend/storage/muxbus.rs::Store::muxbus_load_tokens
 131 crates/srv/src/backend/subagent_watcher/mod.rs::SubagentWatcher::build_watch
 286 crates/srv/src/backend/subagent_watcher/scan.rs::SubagentWatcher::reconcile_stale_subagents_impl
 139 crates/srv/src/backend/supervisor/watcher.rs::Supervisor::evaluate
