@@ -42,7 +42,8 @@ const CATALOGS_FILE: &str = "job-template-catalogs.json";
 /// use it.
 pub const BUILTIN_PUBLISHER: &str = "agentmux";
 
-/// A template compiled into srv from `templates/jobs/<id>/`.
+/// A template compiled into srv from `templates/jobs/<id>/` or `templates/drones/<id>/`.
+#[derive(Clone, Copy)]
 pub struct Builtin {
     pub id: &'static str,
     pub files: &'static [(&'static str, &'static [u8])],
@@ -59,6 +60,29 @@ macro_rules! builtin {
             ],
         }
     };
+}
+
+/// A built-in Drone template: its id, and its three files from `templates/drones/<id>/`.
+macro_rules! builtin_drone {
+    ($name:literal) => {
+        Builtin {
+            id: concat!("agentmux.", $name),
+            files: &[
+                ("template.json", include_bytes!(concat!("../../../../../templates/drones/agentmux.", $name, "/template.json"))),
+                ("graph.json", include_bytes!(concat!("../../../../../templates/drones/agentmux.", $name, "/graph.json"))),
+                ("README.md", include_bytes!(concat!("../../../../../templates/drones/agentmux.", $name, "/README.md"))),
+            ],
+        }
+    };
+}
+
+/// The Drone templates AgentMux ships: graphs that run on the blocks this build has, each easy to build off.
+pub static DRONE_BUILTINS: &[Builtin] = &[builtin_drone!("scheduled-report"), builtin_drone!("check-and-file-task"), builtin_drone!("two-agent-handoff")];
+
+/// Every template AgentMux ships: the job templates, then the Drone ones.
+fn all_builtins() -> &'static [Builtin] {
+    static ALL: OnceLock<Vec<Builtin>> = OnceLock::new();
+    ALL.get_or_init(|| BUILTINS.iter().chain(DRONE_BUILTINS).copied().collect())
 }
 
 /// The templates AgentMux ships (§5.5, §5.6). Each still needs the
@@ -207,7 +231,7 @@ pub fn templates_dir() -> PathBuf {
 /// `data_dir` beside the widgets'.
 pub fn start(data_dir: &Path) {
     let data_dir = if data_dir.as_os_str().is_empty() { super::base::get_mux_data_dir() } else { data_dir.to_path_buf() };
-    JobTemplates::new(templates_dir(), &data_dir, BUILTINS).install_global();
+    JobTemplates::new(templates_dir(), &data_dir, all_builtins()).install_global();
 }
 
 impl JobTemplates {
