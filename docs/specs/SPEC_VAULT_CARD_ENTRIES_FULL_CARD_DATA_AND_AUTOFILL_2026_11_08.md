@@ -192,3 +192,13 @@ C2b is two PRs: this one (the picker in the approval) and the payment frames.
 - **What the agent learns.** The new entry's id in `captured`; no number, brand, last four or expiry.
 - **Reading and updating.** `Vault` `list` and `show` already carry `brand` and `default` as plain fields, and `Vault` `update` can set `default` (`yes`); a test pins both.
 - **Not yet:** C3b (capturing a card from page elements with `Browser` `capture`) and C3c (`request_value` as a whole-card form).
+
+## As built (C3b, capturing a card from a page)
+
+- **The request.** `Browser` `capture` takes `card: { number, exp, exp_month, exp_year, cvc, name, zip }`, each the ref of the element that shows only that part, with `as: { label }` (kind `card`, the default here) and the usual `reason`. No `ref`, `entry` or `download`: a card is saved whole, as a new entry. `as.fields` and `as.expires` work as for any capture.
+- **Reading.** The host reads each element's whole text or value (`whole: true` on `capture_value`): one line of at most 120 characters, not a secret picked out of the text around it, since a card number shows as "4242 4242 4242 4242" and an expiry as "03/30". An element with more than one line is refused ("holds more than one card part"), naming the ref and never the text.
+- **One site.** The host names the site of each element's frame from its own frame map; the parts must all be on one site, or nothing is saved and the answer names both sites.
+- **Storing.** One entry in one transaction, settled like any card (`card::settle`: number digits, month and year, brand, `expires`). A page's parts are not cleaned out of an output, so a month of "3" or a code of two digits is fine here, unlike C3a. A missing number, an empty part or an unknown key is refused before anything is read.
+- **After it is stored,** every element read is marked as holding a Vault value, as for a single capture; a refused capture leaves no mark. The pane's Log says "(a card), captured from <site>".
+- **What the agent learns:** the entry's id and label, the site, and the names of the parts saved. No number, brand, last four or expiry.
+- **Not yet:** C3c (`request_value` as a whole-card form in the agent's approval card, and the no-plain-text scan).
