@@ -330,6 +330,7 @@ pub fn analyze(graph: &DroneGraph) -> Result<Plan, Vec<Issue>> {
     }
 
     check_foreach(&sorted, &edges, &mut plan, &mut issues);
+    super::writers::check(&sorted, &edges, &all, &plan, &mut issues);
 
     let (back_edges, unreached) = walk_back_edges(&ids, &edges);
     plan.back_edges = back_edges;
