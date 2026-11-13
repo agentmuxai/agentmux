@@ -6,6 +6,7 @@
 //! `stop` signals only a process whose image is `agentmux-srv`, found by asking the system about
 //! that id, and never a process found by name.
 
+use agentmux_common::win32::NoWindow;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
@@ -29,7 +30,7 @@ fn image_of(pid: u32) -> Option<String> {
 
 #[cfg(all(unix, not(target_os = "linux")))]
 fn image_of(pid: u32) -> Option<String> {
-    let out = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().ok()?;
+    let out = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).no_window().output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (out.status.success() && !text.is_empty()).then_some(text)
 }

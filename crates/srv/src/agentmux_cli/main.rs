@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use agentmux_common::win32::NoWindow;
 use agentmux_common::{DataPaths, RuntimeMode};
 use clap::{Args, Parser, Subcommand};
 
@@ -275,6 +276,7 @@ fn prepare_data(paths: &DataPaths, srv: &Path) -> Result<(), i32> {
         .stdin(Stdio::null())
         .stdout(out)
         .stderr(err)
+        .no_window()
         .status();
     match status {
         Ok(s) if s.success() => Ok(()),
@@ -329,7 +331,7 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
     if let Some(web) = &args.web_dir {
         cmd.arg("--web-dir").arg(web);
     }
-    cmd.stdin(Stdio::null()).stdout(out).stderr(err);
+    cmd.stdin(Stdio::null()).stdout(out).stderr(err).no_window();
     process::detach(&mut cmd);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
