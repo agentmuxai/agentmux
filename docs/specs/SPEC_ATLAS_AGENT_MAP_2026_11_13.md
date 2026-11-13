@@ -1,7 +1,9 @@
 # Spec: Atlas, a map of every agent across machines and tiers
 
+**Status:** active. Approved by the operator on 2026-11-13; the build (#47548) ships v1 as this spec's section 6 says.
+
 Task #47547 (build: #47548, after this). Owner: Camper (panes, layout, Swarm). Written 2026-11-13 from origin/main
-32d862d3d. Status: draft for the operator. No code until it is approved.
+32d862d3d.
 
 ## 1. What the operator asked for
 
