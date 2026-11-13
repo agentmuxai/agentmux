@@ -522,8 +522,29 @@ describe("a pane opens", () => {
         vi.advanceTimersByTime(SEED_MS + 30);
         open(m, "e");
         expect([...m.settlingPass()!.enters].sort()).toEqual(["d", "e"]);
+        // d is on screen and fading: the new pass does not hide it and start its fade again. e has not been seen.
+        expect(m.settlingPass()!.gliding).toBe(false);
+        expect(m.settlingPass()!.fading).toEqual(["d"]);
         settle();
         expect(m.settlingPass()).toBeUndefined();
+    });
+
+    it("does not call a pane fading whose fade had not begun when the pass was replaced", () => {
+        const m = modelOf(three());
+        open(m, "d");
+        // Still at the start of the first pass: d is not drawn yet, so it waits with the new one.
+        open(m, "e");
+        expect([...m.settlingPass()!.enters].sort()).toEqual(["d", "e"]);
+        expect(m.settlingPass()!.fading).toBeUndefined();
+    });
+
+    it("keeps a fading pane named fading through a third pass that replaces a second not yet gliding", () => {
+        const m = modelOf(three());
+        open(m, "d");
+        vi.advanceTimersByTime(SEED_MS + 30);
+        open(m, "e");
+        open(m, "f");
+        expect(m.settlingPass()!.fading).toEqual(["d"]);
     });
 
     it("lets a pane that opened and closes at once leave no fade behind", () => {

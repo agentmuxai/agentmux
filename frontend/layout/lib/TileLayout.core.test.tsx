@@ -86,6 +86,7 @@ vi.mock("./layoutModelHooks", () => ({
     useTileLayout: () => h.model,
     useNodeModel: (_m: unknown, node: { id: string }) => h.nodeModels.get(node.id),
 }));
+vi.mock("./PillCatcher", () => ({ PillCatcher: () => null }));
 vi.mock("./tilelayout-shared", () => ({
     ClosedPaneGhosts: () => null,
     DisplayNodesWrapper: (p: DisplayNodesProps) => {
@@ -413,6 +414,12 @@ describe("createTileLayout: a tile", () => {
         const sets = vi.spyOn(el.classList, "toggle");
         h.model.set.setPass(pass(["n1", "other"], true));
         expect(el.classList.contains("tile-entering")).toBe(true);
+        expect(sets).not.toHaveBeenCalled();
+        // The second pass opens not yet gliding (it stands at its start): a pane whose fade had begun
+        // (`fading`) is still drawn and goes on fading, not taken out and faded in again from 0.
+        h.model.set.setPass({ ...pass(["n1", "other"], false), fading: ["n1"] });
+        expect(el.classList.contains("tile-entering")).toBe(true);
+        expect(el.style.opacity).toBe("1");
         expect(sets).not.toHaveBeenCalled();
         // The stylesheet's own length (the glide's), with nothing set on the tile.
         expect(el.style.getPropertyValue("animation-duration")).toBe("");

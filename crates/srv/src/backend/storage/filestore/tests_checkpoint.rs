@@ -152,6 +152,47 @@ fn the_truncate_runs_without_the_writer_mutex_and_cuts_the_wal_file_back() {
     assert_eq!(std::fs::metadata(&wal).unwrap().len(), 0, "the WAL file is cut back");
 }
 
+#[test]
+fn the_writers_own_pass_waits_for_the_background_one_and_then_empties_the_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("filestore.db");
+    let store = Arc::new(FileStore::open(&path).unwrap());
+    store.make_file("z", "output", FileMeta::default(), FileOpts::default()).unwrap();
+    store.append_lines("z", "output", &vec![b'x'; 60_000]).unwrap();
+    // As if the background pass were running.
+    let running = store.checkpointer.as_ref().unwrap().hold_pass();
+    let own = {
+        let store = Arc::clone(&store);
+        std::thread::spawn(move || store.checkpoint_between_writes())
+    };
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(!own.is_finished(), "it waits its turn: a pass made now would be refused");
+    drop(running);
+    wait_for("the writer's own pass", || own.is_finished());
+    assert!(own.join().unwrap().unwrap(), "the log is fully copied back");
+    assert_eq!(wal_backlog(&sidecar(&path, "-shm")), Some(0));
+}
+
+#[test]
+fn the_writers_own_pass_says_when_it_left_log_behind() {
+    // In memory there is no log to leave.
+    assert!(FileStore::open_in_memory().unwrap().checkpoint_between_writes().unwrap());
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("filestore.db");
+    let store = FileStore::open(&path).unwrap();
+    store.make_file("z", "output", FileMeta::default(), FileOpts::default()).unwrap();
+    store.append_lines("z", "output", &vec![b'x'; 60_000]).unwrap();
+    // A reader in the middle of a read still needs the log as it was.
+    let reader = Connection::open(&path).unwrap();
+    reader.execute_batch("BEGIN").unwrap();
+    reader.query_row("SELECT count(*) FROM db_wave_file", [], |r| r.get::<_, i64>(0)).unwrap();
+    store.append_lines("z", "output", &vec![b'x'; 60_000]).unwrap();
+    assert!(!store.checkpoint_between_writes().unwrap(), "the reader holds part of the log");
+    reader.execute_batch("COMMIT").unwrap();
+    assert!(store.checkpoint_between_writes().unwrap(), "nothing holds it now");
+}
+
 // ---------------------------------------------------------------------------
 // Reading the WAL index must not close a handle on the `-shm` file: on Unix that
 // releases every lock the process holds on it, SQLite's own included.

@@ -141,6 +141,12 @@ let flushChain: Promise<void> = Promise.resolve();
 // Upper bound on how long a pending hide waits for pane freeze-frames.
 // A slow or failed capture may only DELAY the hide, never block it.
 const FREEZE_WAIT_CAP_MS = 300;
+// Overlays that asked to be told once the host has the clip their rect is in
+// (`usePaneOverlayRect`'s `onClipped`), by overlay id, and the host's answer to
+// the last clip sent. A flush can hold its hide back for freeze-frames (above),
+// so "asked for" and "sent" are up to FREEZE_WAIT_CAP_MS apart.
+const clipWaiters = new Map<number, () => void>();
+let lastClipAnswered: Promise<void> = Promise.resolve();
 
 function rectsKey(rects: readonly OverlayRect[]): string {
     if (rects.length === 0) return "";
@@ -192,8 +198,27 @@ function sendClip(): void {
     // settled state instead of the in-flight one.
     requestAnimationFrame(() => {
         clipScheduled = false;
-        flushChain = flushChain.then(() => flushClip()).catch(() => {});
+        flushChain = flushChain.then(() => flushClipAndTell()).catch(() => {});
     });
+}
+
+/**
+ * One flush, and then the word to the overlays that asked for it (`clipWaiters`) and whose rect the flush
+ * carried: after the host answers the clip the flush sent, or the last one sent when it had nothing new to
+ * send. A flush that fails still tells them: a waiter is never left waiting on a clip that will not come.
+ */
+async function flushClipAndTell(): Promise<void> {
+    const told: (() => void)[] = [];
+    for (const [id, cb] of clipWaiters) {
+        if (!overlayRects.has(id)) continue;
+        told.push(cb);
+        clipWaiters.delete(id);
+    }
+    try {
+        await flushClip();
+    } finally {
+        if (told.length > 0) void lastClipAnswered.then(() => told.forEach((cb) => cb()));
+    }
 }
 
 async function flushClip(): Promise<void> {
@@ -305,7 +330,7 @@ async function flushClip(): Promise<void> {
             new Promise((resolve) => setTimeout(resolve, FREEZE_WAIT_CAP_MS)),
         ]);
     }
-    getApi().browserPanes.setOverlayClip(rectsToSend, window_label).catch(() => {});
+    lastClipAnswered = getApi().browserPanes.setOverlayClip(rectsToSend, window_label).catch(() => {});
 }
 
 /**
@@ -477,17 +502,29 @@ export function __autoOverlayRectCount(): number {
  * `getBoundingClientRect`), and none means no hole. For a browser pane's own page, cut away whole for the
  * length of a drag (browser-view.tsx): the page stands still while its tile is drawn elsewhere by the live
  * reflow, so the hole is the page's rect and not the tile's. It only clips: it takes no keys.
+ *
+ * `onClipped` is called once the host has the hole: after it answers the clip that carries the rect, which a
+ * flush sends only when the panes' freeze-frames are painted or their wait is over (`flushClip`). A frame
+ * count does not say that. With no rect there is nothing to cut, and it is called at once. It may be called
+ * again for a later rect.
  */
-export function usePaneOverlayRect(getRect: Accessor<OverlayRect | undefined>): void {
+export function usePaneOverlayRect(getRect: Accessor<OverlayRect | undefined>, onClipped?: () => void): void {
     const id = nextOverlayId++;
     const ownerShown = useOwnerShown();
     createEffect(() => {
         const rect = ownerShown() ? getRect() : undefined;
-        if (rect && rect.w > 0 && rect.h > 0) overlayRects.set(id, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
-        else if (!dropOverlayRect(id)) return;
+        if (rect && rect.w > 0 && rect.h > 0) {
+            overlayRects.set(id, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+            if (onClipped) clipWaiters.set(id, onClipped);
+        } else {
+            clipWaiters.delete(id);
+            onClipped?.();
+            if (!dropOverlayRect(id)) return;
+        }
         sendClip();
     });
     onCleanup(() => {
+        clipWaiters.delete(id);
         if (dropOverlayRect(id)) sendClip();
     });
 }

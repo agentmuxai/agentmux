@@ -23,6 +23,10 @@
  * page's cut has landed (page-cut-gate.ts). That holds on every platform: a host that cannot cut a page to a
  * region hides it whole for the drag, and what is drawn in its tile is the same one picture
  * (use-freeze-frame.ts). On unless the `layout:livereflow` setting is false.
+ *
+ * A single pane tab dragged over a pane's body is placed the same way (pillPlacement.ts): the panes take the
+ * rects its drop leaves them. The tab's new pane is in no tile yet, so its landing rect is the landing zone
+ * alone; a pane's only tab moves the pane itself, whose tile goes to the landing rect as a dragged pane's does.
  * docs/specs/SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md §4, §5, §6;
  * docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md.
  *
@@ -41,6 +45,7 @@ import { holdPaneSizes } from "@/app/platform/pane-size-hold";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import type { LayoutModel } from "./layoutModel";
+import { pillReflowIn } from "./pillDragState";
 import type { SettlingPass } from "./settlingPass";
 import type { LayoutNode } from "./types";
 
@@ -278,15 +283,19 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
     const targets = createMemo((): Targets | undefined => {
         if (!liveReflowEnabled()) return undefined;
         const tearOff = model.tearOffLayout();
-        if (!model.activeDrag() && !tearOff) return settlingTargets(model.settlingPass());
+        const dragging = model.activeDrag() || pillReflowIn(model);
+        if (!dragging && !tearOff) return settlingTargets(model.settlingPass());
         const leafs = model.leafs();
         if (leafs.length > REFLOW_MAX_PANES) return undefined;
         // A tear-off shown after the release has no page to wait for: the drag's cuts are over.
-        const waiting = paneCaptureInFlight() || (model.activeDrag() && pageCutsPending());
+        const waiting = paneCaptureInFlight() || (dragging && pageCutsPending());
         const future = waiting ? undefined : (model.futureLayout() ?? tearOff);
         const current = model.additionalProps();
         const futureRectOfBlock = new Map<string, Dimensions>();
         for (const id of future?.leafIds ?? []) {
+            // Not the moved pane's: it is found by its id (below), and a tab pill's stand-in carries the block
+            // of a tab that is still in its own pane, which must not take that pane to the landing rect.
+            if (id === future!.movedId) continue;
             const blockId = future!.leafBlockIds[id];
             if (blockId && future!.rects[id]) futureRectOfBlock.set(blockId, future!.rects[id]);
         }
@@ -348,7 +357,8 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
     return {
         reflowFor: (nodeId) => entries().get(nodeId),
         liveReflowActive: () => !!targets()?.showing,
-        liveReflowExpected: () => liveReflowEnabled() && model.activeDrag() && model.leafs().length <= REFLOW_MAX_PANES,
+        liveReflowExpected: () =>
+            liveReflowEnabled() && (model.activeDrag() || pillReflowIn(model)) && model.leafs().length <= REFLOW_MAX_PANES,
         landingSettled,
     };
 }

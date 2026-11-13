@@ -250,3 +250,30 @@ fn the_writer_checkpoints_by_the_log_it_has_written_not_the_output() {
     assert!(relief_due(&pending, 0, 9 * MB as usize));
     assert!(!relief_due(&pending, 0, 4096));
 }
+
+#[test]
+fn the_writer_tries_again_soon_after_a_pass_that_left_log_behind() {
+    let appends_until_due = |pending: &AtomicI64, batch: usize| {
+        let mut at = 0i64;
+        let mut appends = 0;
+        loop {
+            appends += 1;
+            let due = relief_due(pending, at, batch);
+            at += batch as i64;
+            if due {
+                return appends;
+            }
+        }
+    };
+    let pending = AtomicI64::new(0);
+    let whole = appends_until_due(&pending, 256 * 1024);
+    // That pass was refused, or a reader held part of the log: 1 MB of log later, not 8.
+    relief_left_behind(&pending);
+    let again = appends_until_due(&pending, 256 * 1024);
+    assert!((1..=4).contains(&again) && again * 6 <= whole, "{again} appends after a pass that left log behind, {whole} after a whole one");
+    // And every time it happens again.
+    relief_left_behind(&pending);
+    assert!(appends_until_due(&pending, 256 * 1024) <= 4);
+    // A pass that emptied the log gets the whole stretch.
+    assert_eq!(appends_until_due(&pending, 256 * 1024), whole);
+}
