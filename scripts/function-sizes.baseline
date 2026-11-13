@@ -182,7 +182,7 @@
 159 crates/srv/src/backend/memory/reconcile.rs::reconcile_file
 126 crates/srv/src/backend/name_resolution.rs::resolve_name_to_uid
 145 crates/srv/src/backend/notify/policy.rs::PolicyState::step
-102 crates/srv/src/backend/reactive/activity_watcher.rs::run_agent_summary_loop
+101 crates/srv/src/backend/reactive/activity_watcher.rs::run_agent_summary_loop
 150 crates/srv/src/backend/reactive/handler.rs::Handler::register_agent_full
 112 crates/srv/src/backend/reactive/sanitize.rs::sanitize_message
 110 crates/srv/src/backend/resume_preflight.rs::preflight
