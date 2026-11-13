@@ -55,10 +55,15 @@ function appInUse(a: Pick<Account, "provider" | "kind" | "context" | "status">):
 /**
  * The one sentence at the top of the GitHub section: which way agents reach GitHub now. The App wins
  * when it works (srv routes git and gh through it and keeps the person's login from agents); a token
- * or the person's own OAuth sign-in reaches only the agents it is linked to; with none of these, an agent has the person's own login unless
- * this computer has gh-agent (GITHUB_GH_AGENT_NOTE says so under it).
+ * or the person's own OAuth sign-in reaches only the agents it is linked to; with none of these, an agent has the
+ * person's own login. A computer with gh-agent is the exception to all of it: gh-agent gives agents their identity
+ * there, so that is the status (`ghAgentHere`, from srv: the frontend can't tell).
  */
-export function githubStatusLine(accounts: readonly Pick<Account, "provider" | "kind" | "context" | "status">[]): string {
+export function githubStatusLine(
+    accounts: readonly Pick<Account, "provider" | "kind" | "context" | "status">[],
+    ghAgentHere = false
+): string {
+    if (ghAgentHere) return GITHUB_GH_AGENT_STATUS;
     const github = accounts.filter((a) => a.provider === "github");
     if (github.some(appInUse)) {
         return "Connected through AgentMux's GitHub App. Agents act as muxagent[bot], only on the repositories you installed it on.";
@@ -76,8 +81,8 @@ export function githubStatusLine(accounts: readonly Pick<Account, "provider" | "
     return "Not connected. Agents use your own GitHub login on this computer, if there is one, and act as you.";
 }
 
-/** The line under the status: a computer with gh-agent installed gives agents their identity itself, whichever is connected. */
-export const GITHUB_GH_AGENT_NOTE = "On a computer with gh-agent, gh-agent gives agents their GitHub identity instead.";
+/** The status on a computer with gh-agent: it gives agents their identity, whichever account is connected. */
+export const GITHUB_GH_AGENT_STATUS = "This computer's gh-agent gives agents their GitHub identity.";
 
 /** One sentence on who agents act as through this account, or null when it isn't one of the two. */
 export function githubActsAs(a: Pick<Account, "provider" | "kind" | "context">): string | null {
