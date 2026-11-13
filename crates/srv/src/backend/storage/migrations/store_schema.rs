@@ -70,6 +70,19 @@ pub(super) const SHARED_STORE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_
         CREATE INDEX IF NOT EXISTS idx_ss_drone_definitions_updated
             ON db_drone_definitions(updated_at DESC);
 
+        -- A saved graph per drone, beside the definitions and in no relation to
+        -- them: a version of a drone that lives in another store is still saved
+        -- (m0049; no FK, the same reason m0038 drops the runs' one).
+        CREATE TABLE IF NOT EXISTS db_drone_versions (
+            drone_id TEXT NOT NULL,
+            version  INTEGER NOT NULL,
+            graph    TEXT NOT NULL,
+            hash     TEXT NOT NULL,
+            saved_at INTEGER NOT NULL,
+            saved_by TEXT NOT NULL,
+            PRIMARY KEY (drone_id, version)
+        );
+
         CREATE TABLE IF NOT EXISTS db_muxbus_credentials (
             id             TEXT PRIMARY KEY DEFAULT 'global',
             cognito_domain TEXT NOT NULL DEFAULT '',

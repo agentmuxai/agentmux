@@ -24,6 +24,7 @@
 //! registered by the interfaces PR, so that a release between the two PRs
 //! cannot record it as applied while empty.
 
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -120,30 +121,91 @@ pub trait DroneVersionStore {
     fn versions_delete_for(&self, drone_id: &str) -> Result<usize, StoreError>;
 }
 
+/// One row as the table stores it. The graph text can be from a newer build,
+/// so a parse failure is a store error, never a panic.
+fn version_from_row(row: &rusqlite::Row<'_>) -> Result<GraphVersion, StoreError> {
+    let graph_text: String = row.get(2)?;
+    Ok(GraphVersion {
+        drone_id: row.get(0)?,
+        version: row.get(1)?,
+        graph: serde_json::from_str(&graph_text)?,
+        hash: row.get(3)?,
+        saved_at: row.get(4)?,
+        saved_by: row.get(5)?,
+    })
+}
+
+/// The columns every read below selects, in [`version_from_row`]'s order.
+const SELECT: &str = "SELECT drone_id, version, graph, hash, saved_at, saved_by FROM db_drone_versions";
+
 impl DroneVersionStore for Store {
     fn version_save(&self, drone_id: &str, graph: &DroneGraph, saved_by: &str, now_ms: i64) -> Result<GraphVersion, StoreError> {
-        let _ = (drone_id, graph, saved_by, now_ms);
-        todo!("module C: version_save")
+        let graph_text = serde_json::to_string(graph)?;
+        let hash = graph_hash(graph);
+        let mut conn = self.conn().lock().unwrap();
+        // The number and the insert are one transaction: a second save cannot
+        // read the same maximum, and the primary key is the backstop if one
+        // somehow does.
+        let tx = conn.transaction()?;
+        let next: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM db_drone_versions WHERE drone_id = ?1",
+            params![drone_id],
+            |row| row.get(0),
+        )?;
+        tx.execute(
+            "INSERT INTO db_drone_versions (drone_id, version, graph, hash, saved_at, saved_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![drone_id, next, graph_text, hash, now_ms, saved_by],
+        )?;
+        tx.commit()?;
+        Ok(GraphVersion {
+            drone_id: drone_id.to_string(),
+            version: next,
+            graph: graph.clone(),
+            hash,
+            saved_at: now_ms,
+            saved_by: saved_by.to_string(),
+        })
     }
 
     fn version_get(&self, drone_id: &str, version: i64) -> Result<Option<GraphVersion>, StoreError> {
-        let _ = (drone_id, version);
-        todo!("module C: version_get")
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!("{SELECT} WHERE drone_id = ?1 AND version = ?2"))?;
+        let mut rows = stmt.query(params![drone_id, version])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(version_from_row(row)?)),
+            None => Ok(None),
+        }
     }
 
     fn version_resolve(&self, drone_id: &str, pin: Pin) -> Result<Option<GraphVersion>, StoreError> {
-        let _ = (drone_id, pin);
-        todo!("module C: version_resolve")
+        if let Pin::Number(version) = pin {
+            return self.version_get(drone_id, version);
+        }
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!("{SELECT} WHERE drone_id = ?1 ORDER BY version DESC LIMIT 1"))?;
+        let mut rows = stmt.query(params![drone_id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(version_from_row(row)?)),
+            None => Ok(None),
+        }
     }
 
     fn version_list(&self, drone_id: &str, limit: i64) -> Result<Vec<GraphVersion>, StoreError> {
-        let _ = (drone_id, limit);
-        todo!("module C: version_list")
+        let limit = limit.clamp(1, 200);
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!("{SELECT} WHERE drone_id = ?1 ORDER BY version DESC LIMIT ?2"))?;
+        let mut rows = stmt.query(params![drone_id, limit])?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            out.push(version_from_row(row)?);
+        }
+        Ok(out)
     }
 
     fn versions_delete_for(&self, drone_id: &str) -> Result<usize, StoreError> {
-        let _ = drone_id;
-        todo!("module C: versions_delete_for")
+        let conn = self.conn().lock().unwrap();
+        Ok(conn.execute("DELETE FROM db_drone_versions WHERE drone_id = ?1", params![drone_id])?)
     }
 }
 

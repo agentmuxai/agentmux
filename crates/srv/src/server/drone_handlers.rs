@@ -32,6 +32,7 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use crate::drone::executor::{run_drone, RunEvent};
 use crate::drone::storage::DroneStore;
 use crate::drone::types::{RunStatus, DroneDefinition, DroneRun};
+use crate::drone::versions::DroneVersionStore;
 
 /// Request for `listdrones`, which ignores its payload.
 ///
@@ -134,6 +135,17 @@ pub(crate) fn upsert_drone(state: &AppState, mut cmd: DroneDefinition) -> Result
         .id_store
         .drone_upsert(&cmd)
         .map_err(|e| format!("upsertdrone: {e}"))?;
+    // The request does not carry who is saving yet, so the version is the
+    // operator's. A failed version save must not undo the definition: a drone
+    // that cannot be edited is worse than one missing its latest version, so
+    // the save is logged and the definition is still returned.
+    if let Err(e) = state.id_store.version_save(&cmd.id, &cmd.graph, "operator", now) {
+        tracing::warn!(
+            drone_id = %cmd.id,
+            error = %e,
+            "upsertdrone: the definition was saved but its version was not"
+        );
+    }
     state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
     Ok(cmd)
 }
@@ -144,14 +156,19 @@ pub(crate) fn delete_drone(state: &AppState, cmd: DeleteDroneReq) -> Result<Dele
         .id_store
         .drone_delete(&cmd.id)
         .map_err(|e| format!("deletedrone: {e}"))?;
-    // The runs are in this version's store, the definition in the
-    // shared one, so nothing cascades (m0038). Definition first,
-    // then runs: a run starting meanwhile either has its row
-    // removed here or finds the definition gone and removes it
-    // itself (rundrone). Other versions keep their own runs.
+    // The runs are in this version's store, the definition and its
+    // versions in the shared one, so nothing cascades (m0038).
+    // Definition first, then runs and versions: a run starting
+    // meanwhile either has its row removed here or finds the
+    // definition gone and removes it itself (rundrone). Other
+    // versions keep their own runs.
     if let Err(e) = state.mstore.drone_runs_delete_for(&cmd.id) {
         state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
         return Err(format!("deletedrone: the drone was deleted, but removing its run history failed: {e}"));
+    }
+    if let Err(e) = state.id_store.versions_delete_for(&cmd.id) {
+        state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
+        return Err(format!("deletedrone: the drone was deleted, but removing its versions failed: {e}"));
     }
     if deleted {
         state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
