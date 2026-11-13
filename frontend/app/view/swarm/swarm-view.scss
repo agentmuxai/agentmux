@@ -127,6 +127,37 @@
     }
 }
 
+// A pane too narrow for the row's fixed parts and the name's 6ch: the name shrinks first, down to nothing, then the
+// chips at the row's end (clipped, not wrapped), and the row never grows past the pane.
+@container swarm-tree (max-width: 200px) {
+    .swarm-agent-row {
+        overflow: hidden;
+
+        .swarm-agent-label {
+            min-width: 0;
+        }
+
+        .swarm-status-chip,
+        .swarm-supervisor-chip {
+            flex-shrink: 1;
+            min-width: 0;
+            overflow: hidden;
+        }
+    }
+}
+
+// Narrower still (a 128 px pane at 200% zoom is 64 CSS px): the line under the row is one clipped line, not one letter
+// per line, and gives back the indent that lined it up with the name.
+@container swarm-tree (max-width: 120px) {
+    // Under `.swarm-tree`, so it outranks the line's own rule further down.
+    .swarm-tree .swarm-activity-summary {
+        padding-left: 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+}
+
 // Bulk "Clear completed" action (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3)
 // — only rendered at all when there's at least one clearable row.
 .swarm-toolbar {
