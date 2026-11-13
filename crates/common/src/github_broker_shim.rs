@@ -19,19 +19,25 @@ pub const GH_FUNCTION_NAME: &str = "BASH_FUNC_gh%%";
 /// says so, instead of "not logged into any GitHub hosts" (the bare command only: with flags such as
 /// `--json` it is gh's own output a caller parses). A container's `gh pr merge`, `gh release` and `gh api` first go through
 /// `github-container`: srv does the merge for it, and the API writes its token cannot make are refused with what to do
-/// (`crates/bashwrap/src/container_verbs.rs`). Without the variable it is plain `gh`.
+/// (`crates/bashwrap/src/container_verbs.rs`). The command word is read after a leading `-R`/`--repo` (`gh -R o/r pr merge 7`),
+/// for the container step, the text check and the owner tag alike. Without the variable it is plain `gh`.
 pub const GH_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}" ]; then
-    local _amx_t _amx_x _amx_n _amx_r _amx_a=();
+    local _amx_t _amx_x _amx_n _amx_r _amx_c0 _amx_c1 _amx_a=();
     if [ "$1" = auth ] && [ "$2" = status ] && [ "$#" -eq 2 ]; then
       printf '%s
 ' 'github.com' '  AgentMux signs gh in per repository: each gh command in a repository gets a short-lived token for it' '  (the AgentMux GitHub App, acting for your user). There is no stored login, so gh auth does not list one.';
       return 0;
     fi;
-    if [ "${AGENTMUX_IN_CONTAINER:-}" = 1 ] && { [ "$1" = api ] || [ "$1" = release ] || { [ "$1" = pr ] && [ "$2" = merge ]; }; }; then
+    _amx_c0=$1; _amx_c1=${2:-};
+    case "$1" in
+      -R|--repo) _amx_c0=${3:-}; _amx_c1=${4:-};;
+      -R?*|--repo=*) _amx_c0=${2:-}; _amx_c1=${3:-};;
+    esac;
+    if [ "${AGENTMUX_IN_CONTAINER:-}" = 1 ] && { [ "$_amx_c0" = api ] || [ "$_amx_c0" = release ] || { [ "$_amx_c0" = pr ] && [ "$_amx_c1" = merge ]; }; }; then
       if agentmux-bashwrap github-container -- "$@"; then return 0; else _amx_r=$?; fi;
       [ "$_amx_r" -eq 3 ] || return "$_amx_r";
     fi;
-    if [ "$1" = pr ] || [ "$1" = issue ] || [ "$1" = release ] || [ "$1" = api ]; then
+    if [ "$_amx_c0" = pr ] || [ "$_amx_c0" = issue ] || [ "$_amx_c0" = release ] || [ "$_amx_c0" = api ]; then
       while IFS= read -r -d '' _amx_x; do _amx_a+=("$_amx_x"); done < <(agentmux-bashwrap github-text-guard -- "$@");
       _amx_n=${#_amx_a[@]};
       if [ "$_amx_n" -eq 0 ]; then
@@ -45,7 +51,7 @@ pub const GH_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}
       _amx_a=();
     fi;
     _amx_t="$(agentmux-bashwrap github-token -- "$@")";
-    if [ "$1" = pr ] && { [ "$2" = create ] || [ "$2" = new ] || [ "$2" = edit ]; }; then
+    if [ "$_amx_c0" = pr ] && { [ "$_amx_c1" = create ] || [ "$_amx_c1" = new ] || [ "$_amx_c1" = edit ]; }; then
       while IFS= read -r -d '' _amx_x; do _amx_a+=("$_amx_x"); done < <(agentmux-bashwrap github-owner-tag -- "$@" 2>/dev/null);
       if [ "${#_amx_a[@]}" -gt 0 ]; then set -- "${_amx_a[@]}"; fi;
     fi;

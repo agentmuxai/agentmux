@@ -116,6 +116,61 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A repository flag in front of the command word (`gh -R o/r pr merge 7`) does not hide the command from the container
+    /// step or from the text check: both read the command word after it.
+    #[test]
+    fn a_repository_flag_in_front_of_the_command_still_reaches_the_container_step_and_the_text_check() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(bash) = crate::bash_wrap::locate_bash() else { return };
+        let dir = std::env::temp_dir().join(format!("amx-gh-lead-repo-fn-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = |name: &str, body: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        };
+        script("gh", "echo \"gh args=$*\"");
+        // The container step handles every command it is asked about; the text check refuses a body it is shown.
+        script(
+            "agentmux-bashwrap",
+            "case \"$1\" in github-container) echo container-step; exit 0;; github-text-guard) shift; shift; case \"$*\" in *SECRET*) echo text-refused >&2; printf 'refused\\0'; exit 1;; esac; for a in \"$@\"; do printf '%s\\0' \"$a\"; done; printf 'ok\\0';; github-token) printf 'ghs_X';; esac",
+        );
+        let posix_dir = {
+            let d = dir.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
+            match d.split_once(':') {
+                Some((drive, rest)) if drive.len() == 1 => format!("/{}{rest}", drive.to_ascii_lowercase()),
+                _ => d,
+            }
+        };
+        let run = |command: &str| {
+            let mut cmd = std::process::Command::new(&bash);
+            cmd.args(["-c", &format!("PATH='{posix_dir}':\"$PATH\"; {command}")])
+                .env(agentmux_common::github_broker_shim::GH_FUNCTION_NAME, agentmux_common::github_broker_shim::GH_FUNCTION_BODY)
+                .env("AGENTMUX_GITHUB_BROKER", "1")
+                .env("AGENTMUX_IN_CONTAINER", "1");
+            cmd.no_window();
+            let out = cmd.output().unwrap();
+            (String::from_utf8_lossy(&out.stdout).replace('\r', ""), out.status.code())
+        };
+        for lead in ["-R o/r", "--repo o/r", "--repo=o/r", "-Ro/r"] {
+            let (out, _) = run(&format!("gh {lead} pr merge 7 --squash"));
+            assert!(out.contains("container-step") && !out.contains("gh args="), "{lead}: {out:?}");
+            let (out, _) = run(&format!("gh {lead} release create v1"));
+            assert!(out.contains("container-step"), "{lead}: {out:?}");
+            // The text check sees the body whichever way the repository is named.
+            let (out, code) = run(&format!("gh {lead} issue create --body SECRET"));
+            assert!(!out.contains("gh args=") && code != Some(0), "{lead}: {out:?} {code:?}");
+            // A command the container step does not take runs as before.
+            let (out, _) = run(&format!("gh {lead} pr list"));
+            assert!(!out.contains("container-step") && out.contains("gh args="), "{lead}: {out:?}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The `git` function asks `git-env` before a push or a commit: a refusal stops git, what it
     /// prints becomes the command's environment, and every other git command is plain `git`. The
     /// `gh` function gives `gh pr create` the arguments `github-owner-tag` prints.
