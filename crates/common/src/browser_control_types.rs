@@ -53,6 +53,22 @@ pub struct UiBrowserHandoffStatusRequest {
     pub handoff_id: Option<String>,
 }
 
+/// `POST /api/v1/ui/browser/request` — backs Browser's `request_status` and `cancel_request`: what became of a request
+/// the agent got "waiting for the person" for (docs/specs/SPEC_WAITING_CALLS_RETURN_AND_FREE_THE_TURN_2026_11_10.md),
+/// or take it down. By `request` (the waiting answer carries it), or the newest one on `pane`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserRequestRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// Take the request down instead of reading it.
+    #[serde(default)]
+    pub cancel: bool,
+}
+
 /// `POST /api/v1/ui/browser/zoom` — zoom a browser pane the agent drives, or put it back
 /// (docs/specs/SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10.md). Exactly one of `factor`, `width`, `fit` and
 /// `reset`.

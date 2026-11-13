@@ -349,6 +349,16 @@ impl Raised {
         &self.waiting.id
     }
 
+    /// The human's answer if it comes within `grace`; else the request itself, still up and unanswered, to
+    /// wait on further ([`Raised::answer`]) from a task of its own: the caller's call ends, the banner stays.
+    pub(crate) async fn answer_within(mut self, grace: Duration) -> Result<(Answer, Waiting), Raised> {
+        match tokio::time::timeout(grace, &mut self.rx).await {
+            Ok(Ok(a)) => Ok((a, self.waiting)),
+            Ok(Err(_)) => Ok((Answer::Cancelled, self.waiting)),
+            Err(_) => Err(self),
+        }
+    }
+
     /// The human's answer, after up to `timeout` (`None`: no limit). A
     /// request taken down without one (replaced, or its pane closed) reads
     /// as Cancelled. The pane stays as it is until the returned [`Waiting`]

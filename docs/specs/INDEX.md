@@ -859,6 +859,7 @@ partial list.
 | [`SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01`](SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md) | SPEC: an agent's Vault and secrets requests ask inside its own pane, as a card with a 30-second veto, not as a window-wide modal |
 | [`SPEC_VAULT_SHARED_ACROSS_MACHINES_LAN_AND_CLOUD_2026_11_01`](SPEC_VAULT_SHARED_ACROSS_MACHINES_LAN_AND_CLOUD_2026_11_01.md) | SPEC: one Vault across a person's machines, by LAN or AgentMux Cloud, several Vaults per person, and the Vault's formal link to AWS Secrets Manager |
 | [`SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01`](SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) | Version drift upgrades (2026-10-01 report) and provider harness tests |
+| [`SPEC_WAITING_CALLS_RETURN_AND_FREE_THE_TURN_2026_11_10`](SPEC_WAITING_CALLS_RETURN_AND_FREE_THE_TURN_2026_11_10.md) | Spec: a call that waits for the person returns "waiting" and frees the agent's turn |
 | [`SPEC_WAN_JEKT_VERIFICATION_2026_09_24`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) | SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay |
 | [`SPEC_WARDEN_HISTORY_SECTION_2026_10_18`](SPEC_WARDEN_HISTORY_SECTION_2026_10_18.md) | SPEC: agent history in Warden — the History section |
 | [`SPEC_WARDEN_KANBAN_2026_10_20`](SPEC_WARDEN_KANBAN_2026_10_20.md) | Spec: a Kanban section in Warden, where agents keep their work current and the operator follows it |

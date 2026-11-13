@@ -1089,7 +1089,7 @@ pub(crate) fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)
     crate::server::browser_actions::not_paused(pane)?;
     match crate::server::browser_attention::waiting_on_user(pane) {
         None => Ok(()),
-        Some(kind) => Err((StatusCode::CONFLICT, kind.tools_paused(pane))),
+        Some(kind) => Err((StatusCode::CONFLICT, crate::server::browser_waiting::paused_text(pane, kind.tools_paused(pane)))),
     }
 }
 
@@ -1147,7 +1147,15 @@ pub(crate) async fn handle_ui_browser_handoff(
     let handoff_id = raised.id().to_string();
     // If this call ends before the person answers, the hand-off reads as abandoned.
     let tracked = crate::server::browser_handoffs::Tracked::start(&handoff_id, &block_id, &req.auth.agent_id);
-    let (answer, waiting) = raised.answer(Some(std::time::Duration::from_secs(minutes * 60))).await;
+    let (wait, started) = (std::time::Duration::from_secs(minutes * 60), std::time::Instant::now());
+    // The person's answer if it comes soon; else "waiting", and the agent ends its turn (`browser_waiting`).
+    let (answer, waiting) = match raised.answer_within(crate::server::browser_waiting::grace()).await {
+        Ok(answered) => answered,
+        Err(raised) => {
+            let who = crate::server::browser_waiting::Handoff { agent: &req.auth.agent_id, block_id: &block_id, banner_at: &banner_at, reason: &reason };
+            return crate::server::browser_waiting::detach_handoff(&state, who, raised, tracked, wait, started);
+        }
+    };
     drop(waiting);
     tracked.finish(crate::server::browser_handoffs::State::of_answer(answer));
     note(&block_id, &req.auth.agent_id, Kind::Handoff).target(&reason).how(How::from_answer(answer)).record(&state);

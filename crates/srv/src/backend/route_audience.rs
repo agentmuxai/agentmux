@@ -301,6 +301,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/ui/browser/forward"), Audience::Everyone),
     (Match::Route("/api/v1/ui/browser/handoff"), Audience::Everyone),
     (Match::Route("/api/v1/ui/browser/handoff_status"), Audience::Everyone),
+    (Match::Route("/api/v1/ui/browser/request"), Audience::Everyone),
     (Match::Route("/api/v1/ui/browser/navigate"), Audience::Everyone),
     (Match::Route("/api/v1/ui/browser/open"), Audience::Everyone),
     (Match::Route("/api/v1/ui/browser/release"), Audience::Everyone),

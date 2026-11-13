@@ -261,6 +261,9 @@ async fn run_act(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<Stri
         anyhow::bail!("{name} {r} failed: HTTP {status} — {text}");
     }
     let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("{name}: bad response: {e}"))?;
+    if let Some(waiting) = super::browser_waiting::waiting_text(&body) {
+        return Ok(waiting);
+    }
     Ok(act_result_text(name, &r, &body))
 }
 
@@ -355,6 +358,9 @@ async fn run_handoff(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         anyhow::bail!("Browser handoff failed: HTTP {status} — {text}");
     }
     let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("Browser handoff: bad response: {e}"))?;
+    if let Some(waiting) = super::browser_waiting::waiting_text(&body) {
+        return Ok(waiting);
+    }
     let answer = match body.pointer("/data/answer").and_then(|v| v.as_str()).unwrap_or("") {
         "done" => "The user clicked Done. Take a new snapshot: don't assume what they changed.",
         "cancelled" => "The user clicked Cancel. Ask them in chat how to proceed; don't retry the hand-off unasked.",
@@ -559,6 +565,9 @@ async fn run_dispatch_key(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String>
         anyhow::bail!("dispatch_key failed: HTTP {status} — {text}");
     }
     let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+    if let Some(waiting) = super::browser_waiting::waiting_text(&body) {
+        return Ok(waiting);
+    }
     Ok(key_result_text(body.get("data")))
 }
 
