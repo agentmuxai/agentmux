@@ -122,7 +122,7 @@ export function AgentViewLayout({ v }: { v: AgentViewParts }): JSX.Element {
                         blockId={model.blockId}
                         controls={messages}
                         nodes={found.paneModel.document}
-                        jumpTo={input.scroll.jumpTo}
+                        jumpTo={input.show}
                         zoom={input.zoomFactor()}
                     />
                 </div>
@@ -219,7 +219,7 @@ function AgentViewTranscript({ v }: { v: AgentViewParts }): JSX.Element {
                 scrollToBottomRef={(fn) => {
                     late.scrollToBottom = fn;
                 }}
-                highlightNodeId={input.search.highlightId}
+                highlightNodeId={input.highlightId}
                 registerHistoryReadyCallback={feed.registerHistoryReady}
                 zoomFactor={input.zoomFactor}
                 blockId={model.blockId}

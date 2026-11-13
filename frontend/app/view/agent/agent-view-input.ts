@@ -10,7 +10,7 @@
 
 import { snapshot as layoutSnapshot } from "@/app/store/agent-pane-layout-store";
 import { paneZoom } from "@/app/store/pane-zoom-local";
-import { createMemo, onCleanup } from "solid-js";
+import { createMemo, createSignal, onCleanup } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import type { PaneFoundation } from "./agent-view-foundation";
 import type { PaneLate } from "./agent-view-late";
@@ -21,11 +21,15 @@ import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useJektsAwaitingYou } from "./hooks/useJektsAwaitingYou";
 import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
-import { showInPanelIfHeld } from "./messages/messages-state";
+import { messagesControlsFor, showInPanelIfHeld } from "./messages/messages-state";
+import { showMessage } from "./messages/show-message";
 import { createSearchReveal } from "./search-reveal";
 import { focusSearchField, registerSearchControls, restoreFocusToMagnifier } from "./search/search-bridge";
 import { topVisibleNodeId } from "./search/top-row";
 import { rawIdAtOrAfter, topRowId } from "./search/transcript-index";
+
+/** How long "Show message" marks the row it scrolled to. */
+const MARK_MS = 2400;
 
 export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; shown: ReturnType<typeof useShownDocument>; late: PaneLate }) {
     const { found, model, late } = p;
@@ -42,8 +46,29 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
         jumpTo: scroll.jumpTo,
     });
 
+    // "Show message" (the card, the panel's strip and rows): to the panel when the conversation has no row for the message,
+    // else to its row, marked for a moment so a row already on screen still answers (messages/show-message.ts).
+    const [marked, setMarked] = createSignal<string | null>(null);
+    let markTimer: ReturnType<typeof setTimeout> | undefined;
+    const mark = (nodeId: string): void => {
+        clearTimeout(markTimer);
+        setMarked(nodeId);
+        markTimer = setTimeout(() => setMarked(null), MARK_MS);
+    };
+    onCleanup(() => clearTimeout(markTimer));
+    const hasRow = (nodeId: string): boolean =>
+        p.shown.shownDocument().some((n) => n.id === nodeId || (n.type === "hidden_run" && n.hiddenIds.includes(nodeId)));
+    const show = (nodeId: string): void =>
+        void showMessage(nodeId, {
+            panel: messagesControlsFor(model.blockId),
+            nodes: paneModel.document,
+            hasRow,
+            jump: reveal.jumpTo,
+            mark,
+        });
+
     // A sensitive jekt that waits on the person: a card above the composer and a wait for the pane (jekts-awaiting-you.ts).
-    useJektsAwaitingYou({ blockId: model.blockId, getDocument: p.shown.getDocument, jumpTo: scroll.jumpTo });
+    useJektsAwaitingYou({ blockId: model.blockId, getDocument: p.shown.getDocument, jumpTo: show });
 
     // In-session search over the loaded document slice: matches, navigation, highlight. A new query starts at the
     // first match from the row at the top of the screen; a query with no match closes what a jump opened.
@@ -105,5 +130,8 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
         log: found.shell.log,
     });
 
-    return { scroll, search, zoomFactor };
+    // The row the transcript marks: the search's current match, else the message "Show message" just took the person to.
+    const highlightId = createMemo(() => search.highlightId() ?? marked());
+
+    return { scroll, search, zoomFactor, show, highlightId };
 }
