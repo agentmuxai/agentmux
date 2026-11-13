@@ -30,6 +30,7 @@ mod state;
 mod drone;
 mod messaging;
 mod muxbus;
+mod open_cli;
 mod util;
 #[cfg(windows)]
 mod crash_monitor;
@@ -111,6 +112,8 @@ fn prepare_process_mode() -> bool {
 
 async fn app_main() {
     exit_if_helper_child();
+    // `agentmux-srv open` is a client of a running headless srv: it starts nothing of srv's own.
+    open_cli::exit_if_requested().await;
     // -1. Crash monitor branch — must be checked before any other initialization.
     if bootstrap::maybe_run_crash_monitor() {
         return;
@@ -176,6 +179,8 @@ async fn app_main() {
 
     let viewer_router = server::build_viewer_router(state.clone());
     bootstrap::spawn_state_services(&state);
+    // A headless srv that serves its own UI signs a browser in on its web port.
+    server::local_session_routes::enable(net.web_addr.port(), &config.instance_id);
     let routers = build_routers(state.clone());
     backend::container::listener::set_router(routers.container);
     let router = routers.full;

@@ -45,6 +45,11 @@ pub struct CliArgs {
     #[arg(long = "allowed-origin")]
     pub allowed_origins: Vec<String>,
 
+    /// Headless, with `--frontend-dir`: the one origin a browser reaches the UI on when it is not
+    /// srv's own port, e.g. through `ssh -L 8080:127.0.0.1:7380`. Must be `http://127.0.0.1:<port>`.
+    #[arg(long = "public-origin")]
+    pub public_origin: Option<String>,
+
     /// Headless: where srv keeps secrets (API keys, OAuth accounts, cloud
     /// credentials). Default `file`: owner-only files under the shared dir,
     /// for machines with no OS keychain.
@@ -91,6 +96,24 @@ pub enum SrvCommand {
         /// It writes, so it can't be combined with the read-only flags.
         #[arg(long, conflicts_with_all = ["dry_run", "list", "verify"])]
         prepare: bool,
+    },
+    /// Sign a browser in to a headless srv that serves its own UI (`--frontend-dir`): mint a one-time
+    /// code, open the browser at it, show the check phrase and ask whether it is the page you opened.
+    /// Run by the same user, in a terminal. SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI §3.
+    Open {
+        /// The server's web port (`--web-port`).
+        #[arg(long)]
+        port: u16,
+        /// The server's key file (default: `srv-auth-key` in its data folder).
+        #[arg(long, value_name = "FILE")]
+        key_file: Option<PathBuf>,
+        /// Print the sign-in line for your own browser instead of opening one.
+        #[arg(long)]
+        print: bool,
+        /// The address the browser reaches the server on, when it is not `http://127.0.0.1:<port>`
+        /// (the other end of a tunnel; it must match the server's `--public-origin`).
+        #[arg(long)]
+        origin: Option<String>,
     },
     /// Give pre-fix forks the agent id `fork_slug` gives, keeping the old one
     /// as a former slug (SPEC_FORK_SLUG_MIGRATION_2026_10_22.md §4 Phase 2).
