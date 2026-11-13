@@ -828,12 +828,22 @@
     align-items: center;
     gap: 4px;
     font-size: var(--text-xs);
-    flex-shrink: 0;
+    // In a narrow row the words are cut with an ellipsis (the whole text is the tooltip and the line below),
+    // never pushed past the row's edge.
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
     white-space: nowrap;
     color: var(--warning-text-color);
 
     .swarm-unavailable-icon {
+        flex-shrink: 0;
         font-size: var(--text-2xs);
+    }
+
+    .swarm-unavailable-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 }
 
