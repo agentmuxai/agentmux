@@ -114,15 +114,16 @@ pub(crate) fn compose(node: &FlowNode, scope: &ExecutionScope) -> Result<TaskSpe
         .map(|t| scope.resolve(t))
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty())
-        .map(|k| hash_key(&node.id, target, &k));
+        .map(|k| hash_key(&scope.drone_id, &node.id, target, &k));
     Ok(TaskSpec { title, body, target: target.to_string(), key })
 }
 
-/// A short stable hash of the key with the node and the target, so the stored line carries no text
-/// from outside and another node, or another target, doesn't share the task.
-fn hash_key(node_id: &str, target: &str, key: &str) -> String {
+/// A short stable hash of the key with the drone, the node and the target, so the stored line carries
+/// no text from outside and another drone, another node or another target doesn't share the task
+/// (node ids are only unique inside one graph).
+fn hash_key(drone_id: &str, node_id: &str, target: &str, key: &str) -> String {
     let mut h = Sha256::new();
-    for part in [node_id, target, key] {
+    for part in [drone_id, node_id, target, key] {
         h.update((part.len() as u64).to_le_bytes());
         h.update(part.as_bytes());
     }
@@ -238,6 +239,19 @@ mod tests {
         assert_eq!(key("t1", "agenty"), key("t1", "agenty"));
         assert_ne!(key("t1", "agenty"), key("t2", "agenty"), "another node has its own task");
         assert_ne!(key("t1", "agenty"), key("t1", "loap"), "another target has its own task");
+    }
+
+    #[test]
+    fn the_key_is_per_drone_when_two_drones_share_a_node_id_target_and_key_text() {
+        let n = node(json!({ "title": "x", "target": "agenty", "dedupe": "nightly" }));
+        let key = |drone: &str| {
+            let mut scope = ExecutionScope::for_drone(drone, Value::Null);
+            scope.outputs.insert("a".to_string(), json!({}));
+            compose(&n, &scope).unwrap().key.unwrap()
+        };
+        assert_eq!(key("drone-1"), key("drone-1"), "one drone keeps finding its own task");
+        assert_ne!(key("drone-1"), key("drone-2"), "another drone has its own task");
+        assert_ne!(key("drone-1"), key(""), "a scope outside a run is not any drone's");
     }
 
     #[test]
