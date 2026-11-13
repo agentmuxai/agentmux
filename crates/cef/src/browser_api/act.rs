@@ -32,6 +32,7 @@ pub(super) use super::hidden_choices::hidden_choices;
 use super::dates;
 use super::frames::{self, FrameRef};
 use super::key_typing;
+use super::nav_settle::NavWatch;
 use super::secret_fill::fill_if_secret;
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
@@ -936,9 +937,16 @@ pub async fn act_route(
             return fail(e);
         }
     }
+    // A click may start a navigation: the page is read once it has loaded, not while it is still the old one.
+    let nav = if req.action == "click" { NavWatch::start(&mut cdp).await } else { None };
     let result = act(&mut cdp, &table, backend, frame.as_ref(), allowed.as_deref(), &req).await;
     let page = match &result {
-        Ok(after) if after.get("needs_approval").is_none() => page_now(&mut cdp, &table.url).await,
+        Ok(after) if after.get("needs_approval").is_none() => {
+            if let Some(nav) = nav {
+                nav.settle().await;
+            }
+            page_now(&mut cdp, &table.url).await
+        }
         _ => None,
     };
     let _ = cdp.close().await;
