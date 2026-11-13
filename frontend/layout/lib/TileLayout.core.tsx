@@ -64,6 +64,7 @@ import {
     OverlayNodeWrapper,
     Placeholder,
 } from "./tilelayout-shared";
+import { PillCatcher } from "./PillCatcher";
 import { tileItemType } from "@/app/drag/drag-types";
 
 export interface TileLayoutProps {
@@ -260,6 +261,7 @@ function tileLayout(
                 so the overlay is not held in place for it (it was, for an exit fade, since #836). */}
             <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...(layoutModel.overlayTransform() as JSX.CSSProperties) }} />
             <OverlayNodeWrapper layoutModel={layoutModel} />
+            <PillCatcher layoutModel={layoutModel} />
         </div>
     );
 }
