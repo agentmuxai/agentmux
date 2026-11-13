@@ -22,7 +22,7 @@
         "title": "The scheduled check found a problem",
         "body": "{{check.response}}",
         "target": "{{param.target}}",
-        "dedupe": "agentmux.check-and-file-task"
+        "dedupe": "agentmux.check-and-file-task:{{param.check}}"
       }
     }
   ],

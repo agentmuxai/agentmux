@@ -261,6 +261,19 @@ fn only_a_problem_files_a_task_in_the_check_template() {
 }
 
 #[test]
+fn two_checks_from_the_check_template_do_not_share_a_task() {
+    let b = DRONE_BUILTINS.iter().find(|b| b.id == "agentmux.check-and-file-task").unwrap();
+    let pkg = package::load_embedded(b.id, b.files).unwrap();
+    let key = |check: &str| {
+        let given = json!({ "check": check }).as_object().cloned().unwrap();
+        let g = graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given).unwrap();
+        g.nodes.iter().find(|n| n.id == "file").unwrap().data["dedupe"].as_str().unwrap().to_string()
+    };
+    assert_ne!(key("Is the build green?"), key("Is the site up?"), "the check is part of the dedupe key");
+    assert_eq!(key("Is the build green?"), key("Is the build green?"), "the same check repeats into one task");
+}
+
+#[test]
 fn the_service_lists_the_built_in_drone_templates_for_approval_beside_the_job_ones() {
     let tmp = tempfile::tempdir().unwrap();
     let svc = JobTemplates::new(tmp.path().join("job-templates"), &tmp.path().join("data"), all_builtins());
