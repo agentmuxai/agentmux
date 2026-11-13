@@ -7,6 +7,7 @@
  * counted every click after a mouse move as the end of a drag and stopped it before the pane saw it (Kanban #615).
  */
 import { cleanup, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
@@ -20,6 +21,8 @@ vi.hoisted(() => {
 });
 vi.mock("uplot/dist/uPlot.min.css", () => ({}));
 
+import { FocusView } from "./sysinfo-focus";
+import { sampleReducer } from "./sysinfo-model";
 import { SingleLinePlot } from "./sysinfo-plot";
 
 class FixedSizeObserver {
@@ -93,4 +96,38 @@ describe("a click on a sysinfo chart", () => {
         over.dispatchEvent(new MouseEvent("click", at));
         expect(paneClicks).toHaveBeenCalledTimes(1);
     });
+});
+
+describe("a sysinfo chart over time", () => {
+    const base = 1_791_900_000_000;
+    const rows = (n: number, cores: boolean) =>
+        Array.from({ length: n }).reduce<any[]>(
+            (acc, _, i) =>
+                sampleReducer(acc, {
+                    type: "APPEND",
+                    item: { ts: base + i * 1000, cpu: 40 + i, ...(cores ? { "cpu:0": 10, "cpu:1": 20 } : {}) } as any,
+                    intervalSecs: 1,
+                    numPoints: 300,
+                }),
+            []
+        );
+
+    // A rebuild replaces uPlot's `.u-over`, so a press that straddled one lost its click (Kanban #615).
+    for (const cores of [false, true]) {
+        it(`keeps its plot element when a sample arrives (${cores ? "with" : "without"} per-core data)`, async () => {
+            const [data, setData] = createSignal(rows(3, cores));
+            const { container } = render(() => (
+                <FocusView area="cpu" plotData={data()} targetLen={300} intervalSecs={1} syncKey="k" />
+            ));
+            await vi.waitFor(() => expect(container.querySelector(".u-over")).not.toBeNull());
+            const before = Array.from(container.querySelectorAll(".u-over"));
+            for (let n = 4; n < 9; n++) {
+                setData(rows(n, cores));
+                await new Promise((r) => setTimeout(r, 20));
+            }
+            const after = Array.from(container.querySelectorAll(".u-over"));
+            expect(after).toHaveLength(before.length);
+            expect(after.every((el, i) => el === before[i])).toBe(true);
+        });
+    }
 });
