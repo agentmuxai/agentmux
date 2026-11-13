@@ -80,6 +80,7 @@ vi.mock("./layoutModelHooks", () => ({
     useTileLayout: () => h.model,
     useNodeModel: (_m: unknown, node: { id: string }) => h.nodeModels.get(node.id),
 }));
+vi.mock("./PillCatcher", () => ({ PillCatcher: () => null }));
 vi.mock("./tilelayout-shared", () => ({
     ClosedPaneGhosts: () => null,
     DisplayNodesWrapper: (p: DisplayNodesProps) => {

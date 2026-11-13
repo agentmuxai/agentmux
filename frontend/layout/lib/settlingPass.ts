@@ -31,6 +31,7 @@ import { scaledMs } from "@/app/motion/motion";
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { tabSwitching } from "@/app/store/tab-reveal";
 import type { LayoutModel } from "./layoutModel";
+import { pillReflowIn } from "./pillDragState";
 import {
     liveReflowEnabled,
     movesWithReflow,
@@ -84,6 +85,9 @@ const states = new WeakMap<LayoutModel, State>();
 
 type Props = Record<string, LayoutNodeAdditionalProps>;
 
+/** Whether a drag is showing its result in `model`'s layout now: a pane's, a tab pill's being placed, or a tear-off. */
+const dragShows = (model: LayoutModel): boolean => model.activeDrag() || pillReflowIn(model) || !!model.tearOffLayout();
+
 /** The settling pass open on `model`'s layout, or none. Made in the model's reactive owner, once per model. */
 export function createSettlingPass(model: LayoutModel): Accessor<SettlingPass | undefined> {
     const [pass, setPass] = createSignal<SettlingPass | undefined>(undefined);
@@ -92,10 +96,10 @@ export function createSettlingPass(model: LayoutModel): Accessor<SettlingPass | 
 
     createEffect(
         on(
-            () => model.activeDrag() || !!model.tearOffLayout(),
+            () => dragShows(model),
             (live) => {
                 if (live) state.dragShown = true;
-                else setTimeout(() => (state.dragShown = untrack(() => model.activeDrag() || !!model.tearOffLayout())), 0);
+                else setTimeout(() => (state.dragShown = untrack(() => dragShows(model))), 0);
             }
         )
     );
