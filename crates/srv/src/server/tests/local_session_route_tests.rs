@@ -1,10 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+use agentmux_common::AUTH_KEY_HEADER;
 use axum::http::{HeaderMap, Request};
 use tower::ServiceExt;
 
 use super::*;
+use crate::server::local_proof::{self, Client, HelloReply};
 use crate::server::route_scan::registered_routes;
 use crate::server::routes::build_router;
 use crate::server::tests::test_state;
@@ -50,8 +52,43 @@ fn field(body: &str, name: &str) -> String {
     }
 }
 
-fn from_command(path: &str, body: &str) -> Request<Body> {
-    request(Method::POST, path, &[("host", HOST), (AUTH_KEY_HEADER, KEY)], body)
+/// `open`'s end of a channel, begun through the router the way `open` begins it.
+struct Open {
+    client: Client,
+}
+
+impl Open {
+    async fn connect(router: &Router) -> Open {
+        let nonce = local_proof::new_nonce();
+        let hello = request(Method::POST, "/auth/hello", &[("host", HOST)], &format!(r#"{{"nonce":"{nonce}"}}"#));
+        let (status, _, body) = call(router, hello).await;
+        assert_eq!(status, 200, "{body}");
+        let reply = HelloReply { channel: field(&body, "channel"), nonce: field(&body, "nonce"), declared: field(&body, "declared"), proof: field(&body, "proof") };
+        Open { client: Client::accept(KEY.as_bytes(), &nonce, HOST, reply).expect("srv proves it holds the key at its own address") }
+    }
+
+    /// A command signed on this channel.
+    fn command(&mut self, path: &str, body: &str) -> (Request<Body>, u64) {
+        let signed = self.client.sign("POST", path, body.as_bytes());
+        let req = request(
+            Method::POST,
+            path,
+            &[("host", HOST), (local_proof::CHANNEL_HEADER, &signed.channel), (local_proof::SEQ_HEADER, &signed.seq.to_string()), (local_proof::PROOF_HEADER, &signed.proof)],
+            body,
+        );
+        (req, signed.seq)
+    }
+
+    /// Send a command and read the answer, which must carry the channel's proof; returns the body.
+    async fn ask(&mut self, router: &Router, path: &str, body: &str) -> String {
+        let (req, seq) = self.command(path, body);
+        let (status, hs, answer) = call(router, req).await;
+        assert_eq!(status, 200, "{path}: {answer}");
+        let proof = hs.get(local_proof::PROOF_HEADER).expect("the answer carries a proof").to_str().unwrap();
+        assert!(self.client.answer_ok(seq, status, answer.as_bytes(), proof), "{path}: the answer's proof");
+        assert!(!self.client.answer_ok(seq, status, format!("{answer} ").as_bytes(), proof), "{path}: a changed answer");
+        answer
+    }
 }
 
 fn from_page(path: &str, body: &str) -> Request<Body> {
@@ -101,13 +138,26 @@ fn a_command_sends_no_browser_headers_and_the_page_sends_same_origin() {
 async fn every_failure_gives_the_same_answer() {
     ensure_shape();
     let router = build_router(test_state());
+    let mut open = Open::connect(&router).await;
+    let signed = |open: &mut Open, path: &str, extra: &[(&str, &str)]| {
+        let s = open.client.sign("POST", path, b"{}");
+        let mut hs = vec![(local_proof::CHANNEL_HEADER.to_string(), s.channel), (local_proof::SEQ_HEADER.to_string(), s.seq.to_string()), (local_proof::PROOF_HEADER.to_string(), s.proof)];
+        hs.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        let hs: Vec<(&str, &str)> = hs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        request(Method::POST, path, &hs, "{}")
+    };
     let evil_origin = [("host", HOST), ("origin", "http://evil.test"), ("sec-fetch-site", "same-origin")];
     let cases: Vec<(&str, Request<Body>)> = vec![
-        ("code, wrong key", request(Method::POST, "/auth/code", &[("host", HOST), (AUTH_KEY_HEADER, "wrong")], "")),
-        ("code, no key", request(Method::POST, "/auth/code", &[("host", HOST)], "")),
-        ("code, other host", request(Method::POST, "/auth/code", &[("host", "localhost:7777"), (AUTH_KEY_HEADER, KEY)], "")),
-        ("code, origin", request(Method::POST, "/auth/code", &[("host", HOST), ("origin", "http://evil.test"), (AUTH_KEY_HEADER, KEY)], "")),
-        ("code, browser header", request(Method::POST, "/auth/code", &[("host", HOST), ("sec-fetch-site", "same-origin"), (AUTH_KEY_HEADER, KEY)], "")),
+        ("code, the key itself", request(Method::POST, "/auth/code", &[("host", HOST), (AUTH_KEY_HEADER, KEY)], "{}")),
+        ("code, no proof", request(Method::POST, "/auth/code", &[("host", HOST)], "{}")),
+        ("code, unknown channel", request(Method::POST, "/auth/code", &[("host", HOST), (local_proof::CHANNEL_HEADER, &"a".repeat(64)), (local_proof::SEQ_HEADER, "1"), (local_proof::PROOF_HEADER, &"0".repeat(64))], "{}")),
+        ("code, wrong proof", request(Method::POST, "/auth/code", &[("host", HOST), (local_proof::CHANNEL_HEADER, &open.client.sign("POST", "/auth/code", b"{}").channel), (local_proof::SEQ_HEADER, "9"), (local_proof::PROOF_HEADER, &"0".repeat(64))], "{}")),
+        ("code, other host", signed(&mut open, "/auth/code", &[("host", "localhost:7777")])),
+        ("code, origin", signed(&mut open, "/auth/code", &[("host", HOST), ("origin", "http://evil.test")])),
+        ("code, browser header", signed(&mut open, "/auth/code", &[("host", HOST), ("sec-fetch-site", "same-origin")])),
+        ("hello, other host", request(Method::POST, "/auth/hello", &[("host", "localhost:7777")], &format!(r#"{{"nonce":"{}"}}"#, local_proof::new_nonce()))),
+        ("hello, not a nonce", request(Method::POST, "/auth/hello", &[("host", HOST)], r#"{"nonce":"abc"}"#)),
+        ("hello, not json", request(Method::POST, "/auth/hello", &[("host", HOST)], "nope")),
         ("enter, wrong code", from_page("/auth/enter", r#"{"code":"nope"}"#)),
         ("enter, not json", from_page("/auth/enter", "nope")),
         ("enter, other host", request(Method::POST, "/auth/enter", &[("host", "evil.test"), ("sec-fetch-site", "same-origin")], r#"{"code":"x"}"#)),
@@ -139,7 +189,7 @@ async fn every_failure_gives_the_same_answer() {
 #[tokio::test(start_paused = true)]
 async fn a_refusal_waits_a_fixed_quarter_second_whatever_was_wrong() {
     ensure_shape();
-    for reason in [Reason::Code, Reason::Host, Reason::Origin, Reason::FetchSite, Reason::Key] {
+    for reason in [Reason::Code, Reason::Host, Reason::Origin, Reason::FetchSite, Reason::Proof] {
         let before = tokio::time::Instant::now();
         let r = refuse("/auth/test", reason).await;
         assert_eq!(r.status().as_u16(), 403);
@@ -158,19 +208,19 @@ async fn a_browser_signs_in_with_a_code_the_person_confirms_and_only_then_reache
         request(Method::GET, "/agentmux/work/boards", &hs, "")
     };
 
-    // `open` mints a code with the key.
-    let (status, _, body) = call(&router, from_command("/auth/code", "")).await;
-    assert_eq!(status, 200);
+    // `open` mints a code on a channel srv proved itself on.
+    let mut open = Open::connect(&router).await;
+    let body = open.ask(&router, "/auth/code", "{}").await;
     let code = field(&body, "code");
     assert_eq!(code.len(), 64);
-    let pending = |code: &str| from_command("/auth/pending", &format!(r#"{{"code":"{code}"}}"#));
-    assert_eq!(field(&call(&router, pending(&code)).await.2, "state"), "unused");
+    let pending_body = format!(r#"{{"code":"{code}"}}"#);
+    assert_eq!(field(&open.ask(&router, "/auth/pending", &pending_body).await, "state"), "unused");
 
     // The browser enters it and holds a pending session with a phrase.
     let (status, _, body) = call(&router, from_page("/auth/enter", &format!(r#"{{"code":"{code}"}}"#))).await;
     assert_eq!(status, 200);
     let (handle, phrase) = (field(&body, "handle"), field(&body, "phrase"));
-    let (_, _, body) = call(&router, pending(&code)).await;
+    let body = open.ask(&router, "/auth/pending", &pending_body).await;
     assert_eq!((field(&body, "state"), field(&body, "phrase")), ("entered".to_string(), phrase.clone()));
 
     // A second entry of the same code is refused.
@@ -187,8 +237,8 @@ async fn a_browser_signs_in_with_a_code_the_person_confirms_and_only_then_reache
         async move { call(&router, from_page("/auth/wait", &body)).await }
     });
     tokio::task::yield_now().await;
-    let confirm = from_command("/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#));
-    assert_eq!(field(&call(&router, confirm).await.2, "found"), "true");
+    let confirmed = open.ask(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#)).await;
+    assert_eq!(field(&confirmed, "found"), "true");
     let (status, hs, body) = waiting.await.unwrap();
     assert_eq!(status, 200);
     let token = field(&body, "token");
@@ -214,7 +264,7 @@ async fn a_browser_signs_in_with_a_code_the_person_confirms_and_only_then_reache
     assert_eq!(call(&router, both(vec![("origin", "http://evil.test".into())])).await.0, 401);
 
     // Logging out ends it.
-    let (_, _, body) = call(&router, from_command("/auth/logout", "")).await;
+    let body = open.ask(&router, "/auth/logout", "{}").await;
     assert!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["revoked"].as_u64().unwrap() >= 1);
     assert_eq!(call(&router, both(vec![])).await.0, 401);
 }
@@ -223,17 +273,87 @@ async fn a_browser_signs_in_with_a_code_the_person_confirms_and_only_then_reache
 async fn a_discarded_sign_in_gives_the_browser_nothing_and_the_person_a_line() {
     ensure_shape();
     let router = build_router(test_state());
-    let code = field(&call(&router, from_command("/auth/code", "")).await.2, "code");
+    let mut open = Open::connect(&router).await;
+    let code = field(&open.ask(&router, "/auth/code", "{}").await, "code");
     let entered = call(&router, from_page("/auth/enter", &format!(r#"{{"code":"{code}"}}"#))).await.2;
     let handle = field(&entered, "handle");
-    let no = from_command("/auth/confirm", &format!(r#"{{"code":"{code}","accept":false}}"#));
-    assert_eq!(field(&call(&router, no).await.2, "found"), "true");
+    let no = open.ask(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":false}}"#)).await;
+    assert_eq!(field(&no, "found"), "true");
     let (status, hs, _) = call(&router, from_page("/auth/wait", &format!(r#"{{"handle":"{handle}"}}"#))).await;
     assert_eq!(status, 403);
     assert!(hs.get(header::SET_COOKIE).is_none());
     // Nobody else's code is answerable.
-    let other = from_command("/auth/confirm", r#"{"code":"someone else's","accept":true}"#);
-    assert_eq!(field(&call(&router, other).await.2, "found"), "false");
+    let other = open.ask(&router, "/auth/confirm", r#"{"code":"someone else's","accept":true}"#).await;
+    assert_eq!(field(&other, "found"), "false");
+}
+
+// ---- The proof of the key ----
+
+/// The key is never sent: where it used to be accepted, it is now refused, on every key route.
+#[tokio::test]
+async fn the_key_itself_is_not_accepted_on_any_command_route() {
+    ensure_shape();
+    let router = build_router(test_state());
+    for path in ["/auth/code", "/auth/pending", "/auth/confirm", "/auth/logout"] {
+        let req = request(Method::POST, path, &[("host", HOST), (AUTH_KEY_HEADER, KEY)], r#"{"code":"x","accept":true}"#);
+        let (status, _, body) = call(&router, req).await;
+        assert_eq!((status, body.as_str()), (403, "not accepted"), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn a_signed_command_works_once_only_as_signed_and_only_on_its_channel() {
+    ensure_shape();
+    let router = build_router(test_state());
+    let mut open = Open::connect(&router).await;
+    let mut other = Open::connect(&router).await;
+
+    // The same request again (a copy of it taken from the wire).
+    let (req, _) = open.command("/auth/code", "{}");
+    let replay = clone_request(&req);
+    assert_eq!(call(&router, req).await.0, 200);
+    assert_eq!(call(&router, replay).await.0, 403, "a replay");
+
+    // Signed for one route, sent to another; a body changed after it was signed.
+    let (pending, _) = open.command("/auth/pending", r#"{"code":"x"}"#);
+    let (mut as_code, _) = open.command("/auth/pending", "{}");
+    *as_code.uri_mut() = "/auth/code".parse().unwrap();
+    assert_eq!(call(&router, as_code).await.0, 403, "another route");
+    let (signed_for, _) = other.command("/auth/confirm", r#"{"code":"x","accept":false}"#);
+    let (parts, _) = signed_for.into_parts();
+    let changed = Request::from_parts(parts, Body::from(r#"{"code":"x","accept":true}"#));
+    assert_eq!(call(&router, changed).await.0, 403, "another body");
+    assert_eq!(call(&router, pending).await.0, 200, "the untouched one still works");
+
+    // Another channel's proof does not do.
+    let (mut from_other, _) = other.command("/auth/code", "{}");
+    let first = open.command("/auth/code", "{}").0;
+    from_other.headers_mut().insert(local_proof::CHANNEL_HEADER, first.headers()[local_proof::CHANNEL_HEADER].clone());
+    assert_eq!(call(&router, from_other).await.0, 403, "a channel's number and proof under another channel");
+}
+
+/// srv's proof is for the address it is bound to: a forwarder on another port gets the same answer
+/// and `open`, talking to its own port, does not accept it.
+#[tokio::test]
+async fn srv_proves_the_address_it_is_bound_to() {
+    ensure_shape();
+    let router = build_router(test_state());
+    let nonce = local_proof::new_nonce();
+    let hello = request(Method::POST, "/auth/hello", &[("host", HOST)], &format!(r#"{{"nonce":"{nonce}"}}"#));
+    let body = call(&router, hello).await.2;
+    let reply = |declared: String| HelloReply { channel: field(&body, "channel"), nonce: field(&body, "nonce"), declared, proof: field(&body, "proof") };
+    assert!(Client::accept(KEY.as_bytes(), &nonce, HOST, reply(field(&body, "declared"))).is_ok());
+    assert_eq!(field(&body, "declared"), "http://127.0.0.1:8080");
+    assert!(Client::accept(KEY.as_bytes(), &nonce, "127.0.0.1:7778", reply(field(&body, "declared"))).is_err(), "a forwarder's port");
+    assert!(Client::accept(b"another-key", &nonce, HOST, reply(field(&body, "declared"))).is_err(), "a listener without the key");
+}
+
+fn clone_request(req: &Request<Body>) -> Request<Body> {
+    let mut b = Request::builder().method(req.method().clone()).uri(req.uri().clone());
+    for (k, v) in req.headers() {
+        b = b.header(k, v);
+    }
+    b.body(Body::from("{}")).unwrap()
 }
 
 // ---- Routes and how a request carries its session ----
