@@ -13,11 +13,15 @@
 //!   * `reply`   optional, `"ok"` to let the agent answer; the default is `"none"`
 //!               (a drone's note is a status, and an answer would start a turn for nothing).
 //!
-//! Output: `{ "delivered": bool, "to": "<agent>", "id": "<message id>" }`.
+//! The message goes the way an ordinary one does (`server::reactive::deliver`): to an agent here, to
+//! one in another AgentMux instance or channel, over the LAN or the cloud relay, and held when the
+//! agent is out of quota, signed out or not running. A held message is not a failed run.
+//!
+//! Output: `{ "delivered": bool, "held": bool, "to": "<agent>", "id": "<message id>" }`, with
+//! `held_reason` when held and `tier` when it was forwarded. A message nothing took fails the block.
 
 use serde_json::{json, Value};
 
-use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::sanitize::quote_in_system_note;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::drone::data_flow::ExecutionScope;
@@ -34,11 +38,28 @@ pub(crate) const STANDING_LINE: &str =
 pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
     let (req, id) = build_request(node, scope)?;
     let to = req.target_agent.clone();
-    let resp = get_global_handler().inject_message(req);
-    if !resp.success {
-        return Err(format!("message to {to} wasn't delivered: {}", resp.error.unwrap_or_else(|| "no reason given".to_string())));
+    let state = crate::drone::host::state()?;
+    // Unattributed: no agent sent it, the drone did (the request's source is "drone").
+    let answer = crate::server::reactive::deliver(state, crate::server::ReactiveAuthVia::FullAuthKey, "", req).await;
+    outcome(&answer, &to, &id)
+}
+
+/// What `reactive::deliver` answered, as the block's output. Delivered (here or forwarded) and held
+/// both end well, since a held message arrives when the agent can take it; anything else fails the block.
+pub(crate) fn outcome(answer: &Value, to: &str, id: &str) -> Result<Value, String> {
+    if answer.get("success").and_then(Value::as_bool) == Some(true) {
+        let mut out = json!({ "delivered": true, "held": false, "to": to, "id": id });
+        if let Some(tier) = answer.get("tier").and_then(Value::as_str) {
+            out["tier"] = json!(tier);
+        }
+        return Ok(out);
     }
-    Ok(json!({ "delivered": true, "to": to, "id": id }))
+    if answer.get("held").and_then(Value::as_bool) == Some(true) {
+        let reason = answer.get("held_reason").and_then(Value::as_str).unwrap_or("not_running");
+        return Ok(json!({ "delivered": false, "held": true, "held_reason": reason, "to": to, "id": id }));
+    }
+    let why = answer.get("error").and_then(Value::as_str).unwrap_or("no reason given");
+    Err(format!("message to {to} wasn't delivered: {why}"))
 }
 
 /// The request the block sends, and its id. Pure, so the quoting is testable without a server.
@@ -112,6 +133,28 @@ mod tests {
         let mut s = ExecutionScope::new();
         s.outputs.insert(block.to_string(), value);
         s
+    }
+
+    #[test]
+    fn a_delivered_a_forwarded_and_a_held_message_all_end_the_block_well() {
+        let delivered = outcome(&json!({ "success": true }), "agenty", "m1").unwrap();
+        assert_eq!(delivered, json!({ "delivered": true, "held": false, "to": "agenty", "id": "m1" }));
+        let forwarded = outcome(&json!({ "success": true, "tier": "lan" }), "klon", "m2").unwrap();
+        assert_eq!(forwarded["delivered"], json!(true));
+        assert_eq!(forwarded["tier"], json!("lan"));
+        // A held answer is `success: false` with `held: true`: not a failure.
+        let held = outcome(&json!({ "success": false, "held": true, "held_reason": "limited", "error": "held for 24 h" }), "loap", "m3").unwrap();
+        assert_eq!(held, json!({ "delivered": false, "held": true, "held_reason": "limited", "to": "loap", "id": "m3" }));
+        let held_plain = outcome(&json!({ "success": false, "held": true }), "loap", "m4").unwrap();
+        assert_eq!(held_plain["held_reason"], json!("not_running"));
+    }
+
+    #[test]
+    fn a_message_nothing_took_fails_the_block_with_the_reason() {
+        let err = outcome(&json!({ "success": false, "error": "agent not found: nobody" }), "nobody", "m5").unwrap_err();
+        assert_eq!(err, "message to nobody wasn't delivered: agent not found: nobody");
+        let bare = outcome(&json!({ "success": false }), "x", "m6").unwrap_err();
+        assert!(bare.ends_with("no reason given"), "{bare}");
     }
 
     #[test]
