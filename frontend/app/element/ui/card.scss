@@ -272,6 +272,8 @@
     gap: var(--space-2);
     padding: var(--space-1-5) var(--space-2) var(--space-2);
     min-width: 0;
+    // The header below answers the section's own width, not the window's: a pane can be thin in a wide window.
+    container-type: inline-size;
 }
 
 .ui-card-section-header {
@@ -297,6 +299,26 @@
         min-width: 80px;
         max-width: 240px;
         margin-left: auto;
+    }
+}
+
+// A thin section (a pane at about 280 px): the title and the section's action keep the first row, and the
+// filter takes the row under them at full width, where it was squeezed to a few letters beside them.
+@container (max-width: 340px) {
+    .ui-card-section-header {
+        flex-wrap: wrap;
+        row-gap: var(--space-1-5);
+
+        > :not(.ui-card-section-filter):last-child {
+            margin-left: auto;
+        }
+
+        .ui-card-section-filter {
+            order: 1;
+            flex: 1 1 100%;
+            max-width: none;
+            margin-left: 0;
+        }
     }
 }
 
