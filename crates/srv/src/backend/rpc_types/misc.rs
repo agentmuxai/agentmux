@@ -227,16 +227,18 @@ pub struct RpcContext {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub agent_id: String,
     /// The CEF host vouched that this connection is the AgentMux window's
-    /// (`server::operator_proof`). Set only by srv, never read from the wire,
-    /// and dropped when the connection registers as an agent.
+    /// (`server::operator_proof`), or, on a headless srv, a browser the person
+    /// signed in opened it (a confirmed local session). Set only by srv, never
+    /// read from the wire, and dropped when the connection registers as an agent.
     #[serde(skip)]
     pub operator_proven: bool,
 }
 
 impl RpcContext {
     /// Operator-only actions need the host's proof: the connection must be
-    /// the AgentMux window's, proven through the CEF host, and not registered
-    /// as an agent. Holding the instance auth key is not enough. `why`
+    /// the AgentMux window's, proven through the CEF host (or, on a headless
+    /// srv, opened by a browser the person signed in), and not registered as
+    /// an agent. Holding the instance auth key is not enough. `why`
     /// completes "FORBIDDEN: …".
     pub fn operator_only(&self, why: &str) -> Result<(), String> {
         if !self.agent_id.is_empty() {

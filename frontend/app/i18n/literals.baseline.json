@@ -1,8 +1,4 @@
 {
-    "frontend/app/statusbar/HistoryUsagePopover.tsx": 8,
-    "frontend/app/view/accounts/AgentMuxConnectPanel.tsx": 4,
-    "frontend/app/view/agent/components/input-history-search-parts.tsx": 7,
-    "frontend/app/view/history/history-storage.tsx": 25,
     "frontend/app/view/settings/sections/advanced-section-parts.tsx": 3,
     "frontend/app/view/settings/sections/keyboard-section-parts.tsx": 1,
     "frontend/app/view/settings/sections/recording-section.tsx": 2

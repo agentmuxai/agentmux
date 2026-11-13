@@ -213,6 +213,10 @@ pub(super) const COLS: &str = "id, title, payload, kind, target_agent, target_gr
                     created_at, updated_at, not_before, result, \
                     target_agent_uid, claimed_by_uid, created_by_uid";
 
+/// The history line a hand-back writes (`work_queue_hand_back`): who handed the task back is what an
+/// unnamed claim of theirs skips it for.
+pub const HANDED_BACK_EVENT: &str = "handed_back";
+
 /// What a quota floor lets through: a task aimed at the claimer (the claim already holds only tasks aimed
 /// at it or its groups), or with `priority >= floor`. An integer, so it is part of the text safely.
 fn floor_exempt(floor: i64) -> String {
@@ -348,6 +352,12 @@ impl Store {
                                 AND (target_agent = '' OR target_agent = ?1)))
                        AND (target_group = ''{groups})
                        AND (?4 = '' OR kind = ?4)
+                       -- A task aimed at no one that this agent handed back as outside its area is
+                       -- not offered to it again by an unnamed claim (a claim by number still works).
+                       -- One aimed at the agent (moved or retried to it since) is its own again.
+                       AND (target_agent_uid <> '' OR target_agent <> ''
+                            OR NOT EXISTS (SELECT 1 FROM db_work_events e
+                                            WHERE e.work_id = q.id AND e.actor = ?1 AND e.kind = '{handed_back}'))
                        {quota}
                        -- Several boards: not an archived board, nor one whose
                        -- agent list leaves this claimer out; and only the
@@ -371,6 +381,7 @@ impl Store {
               RETURNING {cols}",
             claimed = work_state::CLAIMED,
             open = work_state::OPEN,
+            handed_back = HANDED_BACK_EVENT,
             groups = group_placeholders,
             quota = quota,
             visible = super::work_boards::card_visible_to_agent("?1", "?5"),
@@ -518,6 +529,54 @@ impl Store {
             },
             params![id, agent_id, attempt, reason, now_ms, caller_uid],
         )
+    }
+
+    /// Hand a claim back because the task is not this agent's to do (outside its area): the task goes
+    /// back to the pool open, and the attempt the claim took is given back, so a hand-back never parks
+    /// it as `failed`. It is not a failure of the work: no work began. The caller writes the
+    /// [`HANDED_BACK_EVENT`] history line, written in the same transaction as the update: it is what keeps
+    /// an unnamed claim from offering the task to the same agent again, so it never exists without the
+    /// hand-back or the hand-back without it.
+    ///
+    /// Fenced by `attempt`, as [`Self::work_queue_release`] is: the next claim takes the same number,
+    /// but never from the holder this one was.
+    pub fn work_queue_hand_back(
+        &self,
+        id: &str,
+        agent_id: &str,
+        caller_uid: &str,
+        attempt: i64,
+        reason: &str,
+        now_ms: i64,
+    ) -> Result<Option<HolderMatch>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let matched = holder_update(
+            &tx,
+            |holder| {
+                format!(
+                    "UPDATE db_work_queue
+                        SET state = '{open}', attempts = MAX(attempts - 1, 0),
+                            claimed_by = '', claimed_by_uid = '', claim_expires = NULL,
+                            result = ?4, updated_at = ?5
+                      WHERE id = ?1 AND {holder} AND attempts = ?3
+                        AND state = '{c}'",
+                    open = work_state::OPEN,
+                    c = work_state::CLAIMED
+                )
+            },
+            params![id, agent_id, attempt, reason, now_ms, caller_uid],
+        )?;
+        if matched.is_some() {
+            let body: String = crate::backend::reactive::sanitize::sanitize_message(reason.trim()).chars().take(500).collect();
+            tx.execute(
+                "INSERT INTO db_work_events (work_id, at, actor, actor_kind, kind, from_state, to_state, body)
+                 VALUES (?1, ?2, ?3, 'agent', ?4, ?5, ?6, ?7)",
+                params![id, now_ms, agent_id, HANDED_BACK_EVENT, work_state::CLAIMED, work_state::OPEN, body],
+            )?;
+        }
+        tx.commit()?;
+        Ok(matched)
     }
 
     /// Reclaim every item whose lease expired: back to `open`, or to `failed`
@@ -1263,6 +1322,53 @@ mod tests {
             s.work_queue_claim(&any("a3"), 3_000, 60_000).unwrap().is_none(),
             "the cycle must be broken, not merely slowed"
         );
+    }
+
+    #[test]
+    fn a_hand_back_returns_the_task_with_its_attempt_and_is_not_offered_to_the_same_agent_again() {
+        let (s, _d) = store();
+        let mut hot = item("w", "hot");
+        hot.max_attempts = 2;
+        s.work_queue_enqueue(&hot).unwrap();
+        // Three agents hand it back in turn: no real attempt was used, so it is never parked as failed.
+        for (who, at) in [("lazo", 1_500), ("korp", 2_500), ("posa", 3_500)] {
+            let c = s.work_queue_claim(&any(who), at, 60_000).unwrap().expect(who);
+            assert_eq!(c.attempts, 1, "{who}: the attempt is given back each time");
+            assert!(s.work_queue_hand_back("w", who, "", c.attempts, "outside my seat", at + 100).unwrap().is_some());
+            let back = s.work_queue_get("w").unwrap().unwrap();
+            assert_eq!((back.state.as_str(), back.attempts, back.result.as_str()), ("open", 0, "outside my seat"));
+            assert!(s.work_queue_claim(&any(who), at + 200, 60_000).unwrap().is_none(), "{who} is not offered it again");
+        }
+        // Someone who has not handed it back still takes it.
+        assert!(s.work_queue_claim(&any("agenta"), 4_000, 60_000).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_task_aimed_at_the_agent_is_its_own_again_after_a_hand_back_and_the_reminder_stays_quiet() {
+        let (s, _d) = store();
+        s.work_queue_enqueue(&item("w", "pool")).unwrap();
+        let c = s.work_queue_claim(&any("lazo"), 1_000, 60_000).unwrap().unwrap();
+        assert!(s.work_queue_hand_back("w", "lazo", "", c.attempts, "outside my seat", 1_100).unwrap().is_some());
+        assert!(s.work_queue_claim(&any("lazo"), 1_200, 60_000).unwrap().is_none(), "unaimed: skipped");
+        // The task is later aimed at the agent that handed it back: an unnamed claim returns it.
+        {
+            let conn = s.conn().lock().unwrap();
+            conn.execute("UPDATE db_work_queue SET target_agent = 'lazo' WHERE id = 'w'", []).unwrap();
+        }
+        assert!(s.work_queue_claim(&any("lazo"), 1_300, 60_000).unwrap().is_some(), "aimed at it: its own again");
+        // The idle reminder never names a task the agent handed back, however long ago.
+        assert!(s.work_recently_released_by("w", "lazo", 1_000_000_000, 3_600_000).unwrap());
+        assert!(!s.work_recently_released_by("w", "korp", 1_000_000_000, 3_600_000).unwrap());
+    }
+
+    #[test]
+    fn a_hand_back_by_a_stale_or_other_holder_changes_nothing() {
+        let (s, _d) = store();
+        s.work_queue_enqueue(&item("w", "t")).unwrap();
+        let c = s.work_queue_claim(&any("a1"), 1_500, 60_000).unwrap().unwrap();
+        assert!(s.work_queue_hand_back("w", "impostor", "", c.attempts, "no", 2_000).unwrap().is_none());
+        assert!(s.work_queue_hand_back("w", "a1", "", c.attempts + 1, "stale", 2_000).unwrap().is_none());
+        assert_eq!(s.work_queue_get("w").unwrap().unwrap().state, work_state::CLAIMED);
     }
 
     /// Defence in depth for the same finding: even if a row somehow reaches

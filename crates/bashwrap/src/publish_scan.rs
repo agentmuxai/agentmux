@@ -155,14 +155,16 @@ fn tag_target(tag: &str) -> Option<String> {
     tag.lines().take_while(|l| !l.is_empty()).find_map(|l| l.strip_prefix("object ")).map(|s| s.trim().to_string())
 }
 
-/// The message of the annotated tag at `sha`, joined with those of the tags it wraps; `None` when `sha` is not a tag
-/// object (a commit, say).
-fn tag_messages(sha: &str, git: Git) -> Result<Option<String>, String> {
+/// What `sha` is once the annotated tags around it are peeled: the message of those tags, joined in order (`None`
+/// when `sha` is no tag object), and the type of what is left (`commit`, `blob`, `tree`, or `tag` for a tag git
+/// could not follow).
+fn peel_tags(sha: &str, git: Git) -> Result<(Option<String>, String), String> {
     let mut at = sha.to_string();
     let mut bodies: Vec<String> = Vec::new();
     loop {
-        if git(&["cat-file", "-t", &at])?.trim() != "tag" {
-            break;
+        let kind = git(&["cat-file", "-t", &at])?.trim().to_string();
+        if kind != "tag" {
+            return Ok(((!bodies.is_empty()).then(|| bodies.join("\n")), kind));
         }
         if bodies.len() >= MAX_TAG_DEPTH {
             return Err(format!("this push is a tag wrapped in more than {MAX_TAG_DEPTH} tags"));
@@ -171,10 +173,9 @@ fn tag_messages(sha: &str, git: Git) -> Result<Option<String>, String> {
         bodies.push(tag_body(&raw));
         match tag_target(&raw) {
             Some(next) => at = next,
-            None => break,
+            None => return Ok((Some(bodies.join("\n")), kind)),
         }
     }
-    Ok((!bodies.is_empty()).then(|| bodies.join("\n")))
 }
 
 /// The material of each ref update. The commands are the ones gh-agent's own pre-push hook runs, so both judge the same text.
@@ -208,7 +209,12 @@ pub fn collect(updates: &[RefUpdate], remote: &str, git: Git) -> Result<Vec<Part
         if count <= MAX_PUSH_COMMITS {
             // By what the pushed object is, not by what its source ref is called: `git push origin <tag-sha>:refs/heads/x`
             // and `refs/heads/y:refs/tags/v1` publish a tag's message as much as `refs/tags/v1` does.
-            part.tag_message = tag_messages(&u.local_sha, git)?;
+            let (message, kind) = peel_tags(&u.local_sha, git)?;
+            // The range lists commits, so only a commit can be read: any other object fails the check.
+            if kind != "commit" {
+                return Err(format!("{} points at a {kind}, not a commit, so its content cannot be checked", u.local_ref));
+            }
+            part.tag_message = message;
             if count > 0 {
                 part.messages = run(with(&["log", "--format=%H%x00%B%x1e"]))?;
                 part.name_status = run(with(&["-c", "core.quotePath=false", "log", "--reverse", "-z", "--name-status", "--find-renames", "--format=%x01%H"]))?;
@@ -564,6 +570,40 @@ mod tests {
             _ => git.run(a),
         };
         assert!(collect(&[update("refs/tags/v1", ZERO)], "origin", &looped).is_err());
+    }
+
+    #[test]
+    fn a_push_whose_object_is_not_a_commit_fails_the_check_under_any_ref_name() {
+        let git = fake("0");
+        let (pushed, target) = ("b".repeat(40), "a".repeat(40));
+        // The pushed object is `kind`, or a tag whose target is `kind`.
+        let object_is = |kind: &'static str, via_tag: bool| {
+            let (pushed, target, git) = (pushed.clone(), target.clone(), &git);
+            move |a: &[&str]| match a {
+                ["cat-file", "-t", s] if via_tag && *s == pushed => Ok("tag\n".to_string()),
+                ["cat-file", "tag", s] if *s == pushed => Ok(format!("object {target}\ntype {kind}\n\nnotes")),
+                ["cat-file", "-t", _] => Ok(format!("{kind}\n")),
+                _ => git.run(a),
+            }
+        };
+        for kind in ["blob", "tree"] {
+            for via_tag in [false, true] {
+                for local_ref in ["refs/tags/v1", "refs/heads/x", "HEAD"] {
+                    let err = collect(&[update(local_ref, ZERO)], "origin", &object_is(kind, via_tag)).unwrap_err();
+                    assert!(err.contains(&format!("points at a {kind}, not a commit")), "{kind} {via_tag} {local_ref}: {err}");
+                }
+            }
+        }
+        // A tag of a commit is read as before.
+        let parts = collect(&[update("refs/tags/v1", ZERO)], "origin", &object_is("commit", true)).unwrap();
+        assert_eq!(parts[0].tag_message.as_deref(), Some("notes"));
+        // A tag git cannot follow (no object line) is no commit either.
+        let broken = |a: &[&str]| match a {
+            ["cat-file", "-t", _] => Ok("tag\n".to_string()),
+            ["cat-file", "tag", _] => Ok("tag v1\n\nnotes".to_string()),
+            _ => git.run(a),
+        };
+        assert!(collect(&[update("refs/tags/v1", ZERO)], "origin", &broken).unwrap_err().contains("not a commit"));
     }
 
     #[test]

@@ -53,6 +53,7 @@ import type { LanFirewall } from "@/types/rpc/LanFirewall";
 import type { LanInstanceList } from "@/types/rpc/LanInstanceList";
 import type { LspMessageEvent } from "@/types/rpc/LspMessageEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
+import type { MessageFlowEvent } from "@/types/rpc/MessageFlowEvent";
 import type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
 import type { MuxObjBatch } from "@/types/rpc/MuxObjBatch";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
@@ -179,6 +180,7 @@ export type MuxEventPayloads = {
   "mcp:observed": BlockRefEvent;
   "media:file_changed": PathChangedEvent;
   "memories:changed": null;
+  "message-flow": MessageFlowEvent;
   "muxbus:status": MuxBusDeliveryStatus;
   "namedagents:changed": null;
   notification: OsNotification;
@@ -307,6 +309,7 @@ export const TYPED_MUX_EVENTS = [
   "mcp:observed",
   "media:file_changed",
   "memories:changed",
+  "message-flow",
   "muxbus:status",
   "namedagents:changed",
   "notification",
