@@ -33,7 +33,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
 /// Copy the WAL back once this many frames (4 KB pages) are waiting: SQLite's
@@ -54,6 +54,9 @@ pub(super) struct Checkpointer {
     /// Checkpoints this thread has run. Only the tests read it.
     #[cfg_attr(not(test), allow(dead_code))]
     runs: Arc<AtomicU64>,
+    /// Held while this thread's pass runs, and by the store's writer for a pass
+    /// of its own ([`Checkpointer::hold_pass`]).
+    pass: Arc<Mutex<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -71,7 +74,8 @@ impl Checkpointer {
         let shm = sidecar(db, "-shm");
         let stop = Arc::new(AtomicBool::new(false));
         let runs = Arc::new(AtomicU64::new(0));
-        let (thread_stop, thread_runs) = (Arc::clone(&stop), Arc::clone(&runs));
+        let pass = Arc::new(Mutex::new(()));
+        let (thread_stop, thread_runs, thread_pass) = (Arc::clone(&stop), Arc::clone(&runs), Arc::clone(&pass));
         let slowest = poll * IDLE_BACKOFF;
         let thread = std::thread::Builder::new()
             .name("filestore-checkpoint".into())
@@ -91,10 +95,12 @@ impl Checkpointer {
                         continue;
                     }
                     thread_runs.fetch_add(1, Ordering::Relaxed);
+                    let running = thread_pass.lock().unwrap_or_else(|e| e.into_inner());
                     // (busy, frames in the WAL, frames copied back)
                     let pass = conn.query_row("PRAGMA wal_checkpoint(PASSIVE);", [], |r| {
                         Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
                     });
+                    drop(running);
                     match pass {
                         Ok((busy, log, done)) => tracing::trace!(busy, log, done, "filestore: background checkpoint"),
                         Err(e) => tracing::debug!(error = %e, "filestore: background checkpoint failed; retrying next poll"),
@@ -102,7 +108,20 @@ impl Checkpointer {
                 }
             })
             .ok()?;
-        Some(Self { stop, runs, thread: Some(thread) })
+        Some(Self { stop, runs, pass, thread: Some(thread) })
+    }
+
+    /// Wait for this thread's pass to end, if one is running, and keep the next
+    /// one from starting until the guard is dropped. SQLite runs one checkpoint
+    /// of a database at a time and refuses a second at once, without waiting
+    /// (the busy handler is not called for it), so a pass the writer makes while
+    /// this thread's is running copies nothing back.
+    pub(super) fn hold_pass(&self) -> MutexGuard<'_, ()> {
+        match self.pass.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => super::off_worker::off_worker(|| self.pass.lock().unwrap_or_else(|e| e.into_inner())),
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+        }
     }
 
     /// Checkpoints run so far.
