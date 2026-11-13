@@ -191,6 +191,13 @@ async fn ask_then_click_within(
             let task_id = id.clone();
             tokio::spawn(async move {
                 let (answer, waiting) = raised.answer(Some(WAIT.saturating_sub(asked.asked_at.elapsed()))).await;
+                // The agent took the question back itself: nothing is clicked and nobody is woken.
+                if answer == super::browser_attention::Answer::Cancelled && super::browser_waiting::was_cancelled(&task_id) {
+                    drop(waiting);
+                    note.asked(&ask).how(How::Refused("taken back by the agent".to_string())).fail(&state, StatusCode::CONFLICT, String::new());
+                    super::browser_waiting::finish(&task_id, super::browser_waiting::State::Cancelled);
+                    return;
+                }
                 let settled = match settle_approval(&asked, &block_id, &ask, answer, waiting) {
                     Ok((_waiting, asked_at)) => {
                         let clicked = proxy_value(&state, &route, approved_body, std::time::Duration::from_secs(20)).await;
@@ -362,17 +369,28 @@ mod tests {
         let pane = pane(&state);
         let (_, body) = call(&state, &pane, Duration::from_millis(30)).await;
         let id = body["data"]["request"].as_str().unwrap().to_string();
-        let at = waiting::cancel(AGENT, &id).unwrap();
+        let at = waiting::begin_cancel(AGENT, &id).unwrap();
         browser_attention::resolve(&id, &at, Answer::Cancelled).unwrap();
-        for _ in 0..100 {
-            if browser_attention::tests::banner(&state, &pane).is_null() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        assert_eq!(waiting::status(AGENT, Some(&id), None).unwrap().state, "cancelled", "the cancel stands against the answer it raced");
+        assert_eq!(settled(&id).await.state, "cancelled");
         assert_eq!(clicks.load(Ordering::SeqCst), 0);
         assert!(browser_attention::tests::banner(&state, &pane).is_null());
+    }
+
+    #[tokio::test]
+    async fn an_answer_that_came_first_stands_against_a_late_cancel() {
+        let state = crate::server::tests::test_state();
+        let clicks = fake_host(&state).await;
+        let pane = pane(&state);
+        let (_, body) = call(&state, &pane, Duration::from_millis(30)).await;
+        let id = body["data"]["request"].as_str().unwrap().to_string();
+        // The person's Allow is in; the agent's cancel starts after it.
+        browser_attention::resolve(&id, &pane, Answer::Yes).unwrap();
+        let at = waiting::begin_cancel(AGENT, &id).unwrap();
+        assert!(browser_attention::resolve(&id, &at, Answer::Cancelled).is_err(), "the request was already answered");
+        waiting::abort_cancel(&id);
+        let s = settled(&id).await;
+        assert_eq!(s.state, "done", "the approved click is made and the agent is told");
+        assert_eq!(clicks.load(Ordering::SeqCst), 1);
     }
 
     #[test]
