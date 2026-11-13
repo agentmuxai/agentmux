@@ -274,10 +274,17 @@
     50%      { box-shadow: var(--shadow-focus-ring); }
 }
 
-// A closed modal's backdrop fading out (modal-exit-fade.ts): a copy of the root with only the
-// backdrop, for one quick fade. It takes no clicks. The JS draws none under a reduced policy.
-.modal-root--leaving {
+// A closed modal's backdrop fading out (modal-exit-fade.ts): a stand-in placed like the root with
+// only the backdrop, for one quick fade. It takes no clicks. The JS draws none under a reduced policy.
+.modal-leaving {
+    @include mixins.fixed-fill;
+    z-index: var(--z-modal);
     pointer-events: none;
+
+    &[data-scope="tab"],
+    &[data-scope="pane"] {
+        position: absolute;
+    }
 
     .modal-backdrop {
         animation: am-fade-out var(--duration-quick) var(--ease-out) forwards;

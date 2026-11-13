@@ -22,6 +22,8 @@ const hub = vi.hoisted(() => ({
     cancelCliLogin: vi.fn(),
 }));
 
+// The dialog's fade-out leaves a stand-in in the body for 120 ms; these snapshots are of the panel, not of it.
+vi.mock("@/app/element/modal-exit-fade", () => ({ fadeOutBackdrop: () => {} }));
 vi.mock("@/app/store/global", () => ({
     getApi: () => ({
         cancelCliLogin: (...args: unknown[]) => hub.cancelCliLogin(...args),

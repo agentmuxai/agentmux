@@ -41,17 +41,16 @@ describe("fadeOutBackdrop", () => {
         mount.remove();
     });
 
-    it("leaves a hidden copy with only a backdrop where the modal was", () => {
+    it("leaves a hidden stand-in with only a backdrop where the modal was", () => {
         const root = modalRoot(mount);
         fadeOutBackdrop(root, mount);
-        const leaving = mount.querySelector(".modal-root--leaving") as HTMLElement;
+        const leaving = mount.querySelector(".modal-leaving") as HTMLElement;
         expect(leaving).not.toBeNull();
         expect(leaving.getAttribute("data-scope")).toBe("pane");
         expect(leaving.getAttribute("aria-hidden")).toBe("true");
         expect(leaving.getAttribute("role")).toBeNull();
-        expect(leaving.getAttribute("aria-modal")).toBeNull();
         expect(leaving.getAttribute("aria-label")).toBeNull();
-        expect(leaving.getAttribute("tabindex")).toBeNull();
+        expect(leaving.classList.contains("modal-root")).toBe(false);
         expect(leaving.querySelector(".modal-backdrop")).not.toBeNull();
         expect(leaving.querySelector(".modal-panel")).toBeNull();
         // The modal's own root is left alone.
@@ -60,28 +59,28 @@ describe("fadeOutBackdrop", () => {
 
     it("removes the copy when the fade ends, or after the fade's length if it never reports", () => {
         fadeOutBackdrop(modalRoot(mount), mount);
-        mount.querySelector(".modal-root--leaving .modal-backdrop")!.dispatchEvent(new Event("animationend"));
-        expect(mount.querySelector(".modal-root--leaving")).toBeNull();
+        mount.querySelector(".modal-leaving .modal-backdrop")!.dispatchEvent(new Event("animationend"));
+        expect(mount.querySelector(".modal-leaving")).toBeNull();
 
         fadeOutBackdrop(modalRoot(mount), mount);
-        expect(mount.querySelector(".modal-root--leaving")).not.toBeNull();
+        expect(mount.querySelector(".modal-leaving")).not.toBeNull();
         vi.advanceTimersByTime(200);
-        expect(mount.querySelector(".modal-root--leaving")).toBeNull();
+        expect(mount.querySelector(".modal-leaving")).toBeNull();
     });
 
     it("draws nothing when transitions are reduced, the duration is nothing, or there is no root", () => {
         motion.reduced = true;
         fadeOutBackdrop(modalRoot(mount), mount);
-        expect(mount.querySelector(".modal-root--leaving")).toBeNull();
+        expect(mount.querySelector(".modal-leaving")).toBeNull();
 
         motion.reduced = false;
         motion.ms = 0;
         fadeOutBackdrop(modalRoot(mount), mount);
-        expect(mount.querySelector(".modal-root--leaving")).toBeNull();
+        expect(mount.querySelector(".modal-leaving")).toBeNull();
 
         motion.ms = 120;
         fadeOutBackdrop(null, mount);
         fadeOutBackdrop(modalRoot(mount), null);
-        expect(mount.querySelector(".modal-root--leaving")).toBeNull();
+        expect(mount.querySelector(".modal-leaving")).toBeNull();
     });
 });

@@ -8,8 +8,9 @@
 // and sharp at once. When that was a pane's conversation and the agent restarted in the same moment
 // (a sign-in that moves the agent to the new account), it read as the conversation flashing.
 //
-// The dialog itself is gone as before. This leaves a copy of the root with only a backdrop in its
-// place for one quick fade, so the modal's own mount and unmount are untouched.
+// The dialog itself is gone as before. This leaves a stand-in with only a backdrop, placed like the
+// modal's root, for one quick fade, so the modal's own mount and unmount are untouched. It is not
+// a `.modal-root`, so nothing that looks for open dialogs finds it.
 
 import { DURATION_QUICK_MS } from "@/app/motion/tokens";
 import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
@@ -26,12 +27,13 @@ export function fadeOutBackdrop(root: HTMLElement | null | undefined, mount: HTM
     if (!root || !mount || shouldReduceMotion("transition")) return;
     const ms = scaledMs(DURATION_QUICK_MS);
     if (ms <= 0) return;
-    const copy = root.cloneNode(false) as HTMLElement;
-    for (const name of copy.getAttributeNames()) {
-        if (name === "role" || name === "tabindex" || name === "id" || name.startsWith("aria-")) copy.removeAttribute(name);
-    }
+    const copy = root.ownerDocument.createElement("div");
+    copy.className = "modal-leaving";
     copy.setAttribute("aria-hidden", "true");
-    copy.classList.add("modal-root--leaving");
+    for (const name of ["data-scope", "data-placement"]) {
+        const value = root.getAttribute(name);
+        if (value !== null) copy.setAttribute(name, value);
+    }
     const backdrop = root.ownerDocument.createElement("div");
     backdrop.className = "modal-backdrop";
     copy.append(backdrop);

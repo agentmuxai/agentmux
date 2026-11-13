@@ -289,7 +289,7 @@ export const Modal: Component<ModalProps> = (props) => {
         if (props.open && !mounted()) {
             openModal();
         } else if (!props.open && mounted()) {
-            fadeOutBackdrop(rootRef, mountNode); closeModal(); // the dim fades, not one frame: modal-exit-fade.ts
+            closeModal();
         }
     });
 
@@ -323,7 +323,7 @@ export const Modal: Component<ModalProps> = (props) => {
     };
 
     const closeModal = (): void => {
-        remove(id);
+        fadeOutBackdrop(rootRef, mountNode); remove(id); // the dim fades, not one frame: modal-exit-fade.ts
         stackEntry = null;
 
         // Release the per-region lock. If this was the last modal in
