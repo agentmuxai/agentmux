@@ -425,6 +425,7 @@ pub async fn shut_down(
 ) {
     // This host's other LAN channels stop listing this one as a sibling.
     lan_discovery.withdraw_instance_record();
+    crate::headless::withdraw_port_file();
 
     // Shutdown cleanup: close every agent through the one teardown
     // (SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md, `Policy::app_exit()`),

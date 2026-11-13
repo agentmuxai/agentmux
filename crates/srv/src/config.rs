@@ -101,9 +101,10 @@ pub enum SrvCommand {
     /// code, open the browser at it, show the check phrase and ask whether it is the page you opened.
     /// Run by the same user, in a terminal. SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI §3.
     Open {
-        /// The server's web port (`--web-port`).
+        /// The server's web port (`--web-port`). By default `open` reads it from the file the server
+        /// writes beside its key file.
         #[arg(long)]
-        port: u16,
+        port: Option<u16>,
         /// The server's key file (default: `srv-auth-key` in its data folder).
         #[arg(long, value_name = "FILE")]
         key_file: Option<PathBuf>,

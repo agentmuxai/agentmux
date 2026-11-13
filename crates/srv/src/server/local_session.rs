@@ -43,7 +43,7 @@ fn digest(secret: &str) -> Digest32 {
 }
 
 /// 256 random bits as 64 hex characters (a valid WebSocket subprotocol token and cookie value).
-fn random_secret() -> String {
+pub(crate) fn random_secret() -> String {
     let mut bytes = [0u8; 32];
     SystemRandom::new().fill(&mut bytes).expect("the system random source");
     hex::encode(bytes)

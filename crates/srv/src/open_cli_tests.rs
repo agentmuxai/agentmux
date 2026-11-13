@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use super::*;
+use crate::server::local_proof::Channels;
 use crate::server::local_session::{CodeState, Entered, SessionStore};
 
 /// `open` talking to a real session store.
@@ -177,14 +178,149 @@ async fn a_code_nobody_enters_ends_the_wait_after_a_minute() {
 fn the_origin_is_held_to_the_rule_of_the_servers_public_origin() {
     let missing = std::path::PathBuf::from("no/such/key-file");
     for bad in ["https://127.0.0.1:8080", "http://localhost:8080", "http://evil.test", "http://127.0.0.1", "http://192.0.2.1:80", "http://127.0.0.1:8080/x"] {
-        let err = prepare(None, 7380, Some(missing.clone()), Some(bad.to_string())).err().expect(bad);
+        let err = prepare(None, Some(7380), Some(missing.clone()), Some(bad.to_string())).err().expect(bad);
         assert!(err.contains("--origin"), "{bad}: {err}");
     }
     let dir = tempfile::tempdir().unwrap();
     let key = dir.path().join("k");
     std::fs::write(&key, "secret\n").unwrap();
-    let t = prepare(None, 7380, Some(key.clone()), Some("http://127.1:8080/".into())).unwrap();
+    let t = prepare(None, Some(7380), Some(key.clone()), Some("http://127.1:8080/".into())).unwrap();
     assert_eq!(t.origin, "http://127.0.0.1:8080");
-    let t = prepare(None, 7380, Some(key), None).unwrap();
+    let t = prepare(None, Some(7380), Some(key), None).unwrap();
     assert_eq!(t.origin, "http://127.0.0.1:7380");
+}
+
+// ---- The port: written beside the key file by the server ----
+
+#[test]
+fn the_port_is_read_beside_the_key_file_and_the_flag_overrides_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = dir.path().join("srv-auth-key");
+    std::fs::write(&key, "secret\n").unwrap();
+    assert_eq!(crate::headless::port_file_path(&key), dir.path().join("srv-auth-key.port"));
+
+    let err = prepare(None, None, Some(key.clone()), None).err().expect("no port file yet");
+    assert!(err.contains("--port"), "{err}");
+    std::fs::write(dir.path().join("srv-auth-key.port"), "7391\n").unwrap();
+    let t = prepare(None, None, Some(key.clone()), None).unwrap();
+    assert_eq!((t.port, t.origin.as_str()), (7391, "http://127.0.0.1:7391"));
+    assert_eq!(prepare(None, Some(7392), Some(key.clone()), None).unwrap().port, 7392, "--port wins");
+    for junk in ["", "abc", "0", "70000", "-1"] {
+        std::fs::write(dir.path().join("srv-auth-key.port"), junk).unwrap();
+        assert!(prepare(None, None, Some(key.clone()), None).is_err(), "{junk:?}");
+    }
+}
+
+// ---- Proving the server before anything is sent ----
+
+const SECRET: &str = "the-key-that-must-never-be-sent";
+
+fn target(port: u16, origin: Option<&str>) -> Target {
+    Target { port, key: SECRET.to_string(), origin: origin.map(str::to_string).unwrap_or_else(|| format!("http://127.0.0.1:{port}")) }
+}
+
+/// A listener that is not srv: it answers every request with a hello-shaped answer, and keeps what it was sent.
+async fn impostor() -> (u16, std::sync::Arc<Mutex<Vec<u8>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    tokio::spawn(async move {
+        while let Ok((mut conn, _)) = listener.accept().await {
+            let log = log.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                // Read the request (headers and the small body), then answer.
+                let mut got = 0;
+                while let Ok(n) = conn.read(&mut buf[got..]).await {
+                    got += n;
+                    let text = String::from_utf8_lossy(&buf[..got]).to_string();
+                    if n == 0 || (text.contains("\r\n\r\n") && text.contains("nonce")) {
+                        break;
+                    }
+                }
+                log.lock().unwrap().extend_from_slice(&buf[..got]);
+                let body = format!(r#"{{"channel":"{0}","nonce":"{0}","declared":"","proof":"{1}"}}"#, "a".repeat(64), "0".repeat(64));
+                let reply = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+                let _ = conn.write_all(reply.as_bytes()).await;
+            });
+        }
+    });
+    (port, seen)
+}
+
+/// A server that holds `SECRET` and answers a hello for the address it is bound to.
+async fn real_srv(declared: &'static str) -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let channels = std::sync::Arc::new(Channels::default());
+    let app = axum::Router::new().route(
+        "/auth/hello",
+        axum::routing::post(move |axum::Json(v): axum::Json<serde_json::Value>| {
+            let channels = channels.clone();
+            async move {
+                let h = channels.hello(SECRET.as_bytes(), v["nonce"].as_str().unwrap_or_default(), &format!("127.0.0.1:{port}"), declared, Instant::now()).unwrap();
+                axum::Json(serde_json::json!({ "channel": h.channel, "nonce": h.nonce, "declared": declared, "proof": h.proof }))
+            }
+        }),
+    );
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    port
+}
+
+/// A forwarder: connections to its port are passed on, byte for byte, to `to`.
+async fn forwarder(to: u16) -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut a, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                if let Ok(mut b) = tokio::net::TcpStream::connect(("127.0.0.1", to)).await {
+                    let _ = tokio::io::copy_bidirectional(&mut a, &mut b).await;
+                }
+            });
+        }
+    });
+    port
+}
+
+#[tokio::test]
+async fn a_listener_that_is_not_srv_gets_no_key_and_no_usable_proof() {
+    let (port, seen) = impostor().await;
+    let err = HttpServer::connect(&target(port, None)).await.err().expect("not srv");
+    assert!(err.contains("did not prove") && err.contains("nothing was sent"), "{err}");
+    let sent = String::from_utf8_lossy(&seen.lock().unwrap()).to_lowercase();
+    assert!(sent.contains("post /auth/hello"), "{sent}");
+    assert!(!sent.contains(&SECRET.to_lowercase()), "the key reached the listener");
+    for header in ["x-authkey", crate::server::local_proof::PROOF_HEADER, crate::server::local_proof::CHANNEL_HEADER] {
+        assert!(!sent.contains(header), "{header} reached the listener: {sent}");
+    }
+    assert!(!sent.contains("/auth/code"), "nothing but the hello was asked");
+}
+
+#[tokio::test]
+async fn nothing_listening_is_a_plain_line() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let err = HttpServer::connect(&target(port, None)).await.err().unwrap();
+    assert!(err.contains("could not reach srv"), "{err}");
+}
+
+#[tokio::test]
+async fn the_real_server_is_accepted_and_a_forwarder_on_another_port_is_not() {
+    let srv = real_srv("").await;
+    assert!(HttpServer::connect(&target(srv, None)).await.is_ok());
+    let fwd = forwarder(srv).await;
+    let err = HttpServer::connect(&target(fwd, None)).await.err().expect("a forwarder");
+    assert!(err.contains("did not prove"), "{err}");
+}
+
+#[tokio::test]
+async fn the_browser_is_opened_only_at_an_address_the_server_proved() {
+    let srv = real_srv("http://127.0.0.1:9191").await;
+    assert!(HttpServer::connect(&target(srv, Some("http://127.0.0.1:9191"))).await.is_ok(), "the declared origin");
+    let err = HttpServer::connect(&target(srv, Some("http://127.0.0.1:9292"))).await.err().expect("another origin");
+    assert!(err.contains("--origin") && err.contains("http://127.0.0.1:9191"), "{err}");
+    let bare = real_srv("").await;
+    assert!(HttpServer::connect(&target(bare, Some("http://127.0.0.1:9191"))).await.is_err(), "nothing declared");
 }

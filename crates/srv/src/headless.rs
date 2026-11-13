@@ -44,6 +44,9 @@ static PORTS: OnceLock<(Option<u16>, Option<u16>)> = OnceLock::new();
 /// `--frontend-dir` / `--allowed-origin`, held in-process like the ports.
 static WEB: OnceLock<WebOptions> = OnceLock::new();
 
+/// The file the key was read from or written to, when it came from a file (not the environment).
+static KEY_FILE: OnceLock<PathBuf> = OnceLock::new();
+
 #[derive(Debug, Default)]
 struct WebOptions {
     frontend_dir: Option<PathBuf>,
@@ -141,9 +144,14 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     if !agentmux_common::secret_env::is_set("AGENTMUX_AUTH_KEY") {
         let key_file = cli.auth_key_file.clone().or_else(|| std::env::var_os("AGENTMUX_AUTH_KEY_FILE").map(PathBuf::from));
         let key = match key_file {
-            Some(file) => read_key_file(&file)?,
+            Some(file) => {
+                let key = read_key_file(&file)?;
+                let _ = KEY_FILE.set(file);
+                key
+            }
             None => {
                 let (key, path) = write_generated_key(&data_dir)?;
+                let _ = KEY_FILE.set(path.clone());
                 generated = Some(path);
                 key
             }
@@ -265,6 +273,50 @@ pub fn key_file_path(wavedata: Option<&Path>) -> Result<PathBuf, String> {
         }
     };
     Ok(effective_data_dir(wavedata, &paths.data_dir).join(AUTH_KEY_FILE_NAME))
+}
+
+/// The file that holds a headless srv's web port, beside its key file: `<key file>.port`. One name per
+/// key file, so the port is read for the server that key belongs to.
+pub(crate) fn port_file_path(key_file: &Path) -> PathBuf {
+    let mut name = key_file.file_name().unwrap_or_default().to_os_string();
+    name.push(".port");
+    key_file.with_file_name(name)
+}
+
+/// Write the web port beside the key file (owner-only), so `agentmux-srv open` finds this server
+/// without being told the port. Only a headless srv that serves its own UI and whose key came from a
+/// file. The file is replaced at every start and removed at a clean exit; after a crash it can name a
+/// port nobody listens on, or one another program now holds, which `open` meets with its proof of the
+/// key and refuses.
+pub(crate) fn publish_port(port: u16) {
+    let Some(key_file) = KEY_FILE.get().filter(|_| local_sign_in()) else { return };
+    let path = port_file_path(key_file);
+    let _ = std::fs::remove_file(&path);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    use std::io::Write;
+    if let Err(e) = opts.open(&path).and_then(|mut f| f.write_all(format!("{port}\n").as_bytes())) {
+        tracing::warn!(file = %path.display(), error = %e, "could not write the web port file; `agentmux-srv open` needs --port");
+    }
+}
+
+/// Remove the port file at a clean exit.
+pub(crate) fn withdraw_port_file() {
+    if let Some(key_file) = KEY_FILE.get().filter(|_| local_sign_in()) {
+        let _ = std::fs::remove_file(port_file_path(key_file));
+    }
+}
+
+/// The web port the server that owns `key_file` wrote beside it.
+pub(crate) fn read_port_file(key_file: &Path) -> Result<u16, String> {
+    let path = port_file_path(key_file);
+    let text = std::fs::read_to_string(&path).map_err(|_| format!("no {} (is the server running with its own UI? or pass --port)", path.display()))?;
+    text.trim().parse::<u16>().ok().filter(|p| *p != 0).ok_or_else(|| format!("{} does not hold a port (pass --port)", path.display()))
 }
 
 /// Read a key from a file the operator provided; surrounding whitespace is ignored.
