@@ -52,6 +52,13 @@ AgentMux uses Chromium/CEF's kernel **user-namespace sandbox** on Linux (`--disa
 
 When the running binary is somewhere the fix cannot name (a development build, the portable `.tar.xz`), the dialog says so, shows the path, and offers only **Continue without sandbox this time** and **Cancel**: installing the profile would not help, and offering it would just ask again.
 
+**An agent's start has nobody to click the dialog, so it does not show it** (task #610). When the host is started from an agent's environment (`AGENTMUX_AGENT_ID` is set: every agent's shell has it, a person's terminal does not), it prints why to stderr, the launcher writes the same reason to its log, and both stop within seconds with exit code `78` (`EX_CONFIG`), without relaunching. Before this, a `task dev` build started by an agent waited behind the dialog for hours with its debug port never opening. The message names the way on:
+
+- `AGENTMUX_UNSAFE_NOSANDBOX=1 task dev ...` runs that one build without the sandbox. It is always an explicit choice; nothing turns the sandbox off for you. What it costs: the browser engine runs web pages with no operating-system sandbox, so a flaw in a page could act with your rights. A look check of your own pane layout, or of pages you wrote, loses nothing you can see; do not browse sites you do not trust in that build.
+- To keep the sandbox, run an AppImage or a `.deb`/`.rpm` install after the one-time fix, started from a terminal of your own.
+
+A person's start (a launcher icon, their own terminal) keeps the dialog above.
+
 If neither `zenity` nor `kdialog` is available (headless / minimal window manager, no PolicyKit), AgentMux prints the same explanation to stderr and exits rather than silently proceeding either sandboxed-and-broken or silently unsandboxed.
 
 **Manual alternatives**, if you'd rather not use the dialog:

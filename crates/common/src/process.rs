@@ -346,6 +346,12 @@ pub const SRV_APP_EXIT_CAP: std::time::Duration = std::time::Duration::from_secs
 pub const SRV_EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 const _: () = assert!(SRV_EXIT_WAIT.as_millis() > SRV_APP_EXIT_CAP.as_millis() + 1000);
 
+/// The exit code of the CEF host when it stops at start-up because the browser sandbox is blocked by system
+/// policy (AppArmor) and the start was made from an agent's environment, where nobody can answer the dialog
+/// (`agentmux_cef::linux_sandbox`). `78` is `EX_CONFIG`. The launcher does not relaunch the host on it (a relaunch
+/// would stop the same way, three times) and exits with it, so a `task dev` run ends with this code within seconds.
+pub const HOST_EXIT_SANDBOX_UNAVAILABLE: i32 = 78;
+
 #[cfg(test)]
 mod tests {
     use super::*;

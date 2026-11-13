@@ -299,6 +299,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
             // the user asked to FIX it, not to run without a sandbox;
             // never auto-disable on their behalf).
             while !linux_sandbox::probe_userns_available() {
+                linux_sandbox::stop_if_nobody_can_answer();
                 match linux_sandbox::show_userns_blocked_dialog() {
                     SandboxDialogChoice::FixNow => {
                         let helper = linux_sandbox::resolve_helper_script_path();
@@ -359,16 +360,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
                     SandboxDialogChoice::Cancel => {
                         std::process::exit(1);
                     }
-                    SandboxDialogChoice::NoDialogToolAvailable => {
-                        eprintln!(
-                            "AgentMux: the sandbox is blocked by a system AppArmor policy \
-                             (common on newer Ubuntu), and no dialog tool (zenity/kdialog) is \
-                             available to ask how to proceed. Set AGENTMUX_UNSAFE_NOSANDBOX=1 \
-                             to run without the sandbox, or see docs/linux.md for how to \
-                             install the proper fix."
-                        );
-                        std::process::exit(1);
-                    }
+                    SandboxDialogChoice::NoDialogToolAvailable => linux_sandbox::exit_no_dialog_tool(),
                 }
             }
         }
