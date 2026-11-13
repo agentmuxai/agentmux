@@ -43,6 +43,8 @@ export const WpsEvent = {
     EventsDropped: "ws:eventsdropped",
     UserInput: "userinput",
     AgentMessageAccepted: "agent-message-accepted",
+    // One message between two agents handled by an srv: ids and times only (Atlas pulses). Payload MessageFlowEvent.
+    MessageFlow: "message-flow",
     // Image attachment processing, scoped `block:<id>` of the pane that
     // started the batch. Payloads in frontend/types/rpc/Attachment*Event.ts;
     // see docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.5.

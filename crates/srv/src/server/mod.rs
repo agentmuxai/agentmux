@@ -111,6 +111,7 @@ mod quota_mode_handler;
 mod agent_status_handlers;
 mod work_claims_handlers;
 mod work_facts_handlers;
+mod message_flow_handler;
 mod message_stats_handler;
 pub(crate) mod memory_launch_cost;
 pub(crate) mod native_memory_diff;
