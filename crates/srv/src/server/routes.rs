@@ -514,6 +514,7 @@ fn agent_api_routes() -> Router<AppState> {
         // backend and return the transcript. Key stays server-side.
         // See SPEC_VOICE_STT_ENGINE_2026_06_20.md and #1591.
         .route("/api/v1/voice/transcribe", post(voice::handle_voice_transcribe))
+        .route("/api/v1/voice/status", get(voice::handle_voice_status))
         // Image attachments in the agent composer: serve stored files and
         // accept the paste fallback's streamed upload.
         // SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.2, §6.5.
