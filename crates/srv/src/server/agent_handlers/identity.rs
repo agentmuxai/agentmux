@@ -127,6 +127,10 @@ struct OAuthStartReq {
     /// connected as with the one who just authorized.
     #[serde(default)]
     replace_github_user: bool,
+    /// Run with AgentMux's own client even though the person has saved one of their own (the
+    /// GitHub App choice: its title promises the App).
+    #[serde(default)]
+    use_builtin_client: bool,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
@@ -200,6 +204,12 @@ fn byo_from_req(req: &OAuthStartReq) -> Result<Option<crate::identity::oauth_cli
         client_secret: req.client_secret.clone().filter(|s| !s.is_empty()),
         mode,
     }))
+}
+
+/// Whether a start reads the person's saved client: only when the request brought none and did not ask
+/// for AgentMux's own.
+fn reads_saved_client(req: &OAuthStartReq, byo: &Option<crate::identity::oauth_client::ByoCredentials>) -> bool {
+    byo.is_none() && !req.use_builtin_client
 }
 
 /// Serialize an OAuthStatus to the frontend wire shape.
@@ -477,6 +487,18 @@ mod oauth_rpc_tests {
     use super::*;
     use crate::identity::oauth_client::OAuthStatus;
     use crate::identity::oauth_tokens::ClientMode;
+
+    #[test]
+    fn a_start_reads_the_saved_client_unless_it_brings_one_or_asks_for_agentmuxs_own() {
+        let plain: OAuthStartReq = serde_json::from_value(json!({ "provider": "github" })).unwrap();
+        let builtin: OAuthStartReq = serde_json::from_value(json!({ "provider": "github", "useBuiltinClient": true })).unwrap();
+        let with_client: OAuthStartReq = serde_json::from_value(json!({ "provider": "github", "clientId": "Iv1.mine" })).unwrap();
+        let none = byo_from_req(&plain).unwrap();
+        let some = byo_from_req(&with_client).unwrap();
+        assert!(reads_saved_client(&plain, &none), "a request with no client uses the saved one, as before");
+        assert!(!reads_saved_client(&builtin, &none), "the App choice must not run with a saved client of the person's own");
+        assert!(!reads_saved_client(&with_client, &some), "a client sent with the request is the one used");
+    }
 
     #[test]
     fn a_start_request_without_the_new_fields_still_parses() {

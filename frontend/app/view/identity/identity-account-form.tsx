@@ -16,7 +16,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { OAuthConnectPanel } from "@/app/view/accounts/OAuthConnectPanel";
 import { GITHUB_APP_KIND_LABEL, GITHUB_TOKEN_KIND_LABEL } from "@/app/view/accounts/github-account-copy";
 import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
-import { isServiceOAuthAccount, reconnectScopes } from "@/app/view/accounts/oauth-account-state";
+import { isBrokeredGithub, isServiceOAuthAccount, reconnectScopes } from "@/app/view/accounts/oauth-account-state";
 import "./identity-view.scss";
 import "@/app/view/accounts/oauth-connect.scss";
 import { Button, IconButton, TextInput } from "@/app/element/ui";
@@ -446,6 +446,9 @@ function OAuthSection({ ctx }: { ctx: FormCtx }): JSX.Element {
                 accountId={reauthTarget()?.id}
                 scopes={reauthTarget() ? reconnectScopes(reauthTarget()!) : undefined}
                 clientIdHint={reauthTarget()?.context.oauth_client?.client_id}
+                // "Use AgentMux's GitHub App" connects the App (a new account, or one the App made), whatever
+                // client the person saved; an account made with their own client reconnects with it.
+                useBuiltinClient={f.provider() === "github" && (!reauthTarget() || isBrokeredGithub(reauthTarget()!))}
                 onConnected={() => model.cancelForm()}
             />
         </Show>

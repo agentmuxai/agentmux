@@ -40,6 +40,8 @@ export interface OAuthConnectPanelProps {
     autoStart?: boolean;
     /** Prefills the client id if the user has to enter the client again. */
     clientIdHint?: string;
+    /** Connect with AgentMux's own client, whatever client the person saved (the GitHub App choice). */
+    useBuiltinClient?: boolean;
     /** Called once the backend reports success (account already created or updated). */
     onConnected: (result: OAuthConnectResult) => void;
     /** Shows a Cancel button beside Connect. */
@@ -138,7 +140,7 @@ function createFlowSession(props: OAuthConnectPanelProps) {
 
 /** The OAuth connect's state: everything the panel's markup reads, and what it does. */
 export function createOAuthConnect(props: OAuthConnectPanelProps, info: OAuthServiceInfo) {
-    const client = createOAuthClientState(info, props.clientIdHint);
+    const client = createOAuthClientState(info, props.clientIdHint, props.useBuiltinClient === true);
     const flow = createFlowSession(props);
     const { sessionId, setSessionId, status, setStatus, setBusy, localError, setLocalError, stopPolling, applyStatus } = flow;
 
@@ -187,11 +189,16 @@ export function createOAuthConnect(props: OAuthConnectPanelProps, info: OAuthSer
     const needsCloud = () =>
         githubNeedsCloudSignIn(
             props.provider,
-            client.state.loaded() && !client.state.showFields() && client.state.info()?.saved !== true,
+            client.state.loaded() &&
+                !client.state.showFields() &&
+                (props.useBuiltinClient === true || client.state.info()?.saved !== true),
             muxbusDelivery(),
         );
 
-    const unavailable = () => clientUnavailable(info, client.state.info());
+    const unavailable = () =>
+        props.useBuiltinClient
+            ? client.state.info() != null && !client.state.info()!.builtinAvailable
+            : clientUnavailable(info, client.state.info());
 
     // A Reconnect starts by itself once it knows it has a client to use, and, for GitHub, a Cloud sign-in.
     let autoStarted = false;

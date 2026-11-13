@@ -23,6 +23,8 @@ export interface OAuthClientFields {
     clientId?: string;
     clientSecret?: string;
     clientMode?: ClientMode;
+    /** Run with AgentMux's own client even if the person saved one (the GitHub App choice). */
+    useBuiltinClient?: boolean;
 }
 
 export interface OAuthClientState {
@@ -39,9 +41,11 @@ export interface OAuthClientState {
 
 /**
  * Reads the saved client once and keeps the BYO inputs. `clientIdHint`
- * prefills the client id (a reconnect whose saved client was forgotten).
+ * prefills the client id (a reconnect whose saved client was forgotten). `builtinOnly` is a connect
+ * that must run with AgentMux's own client whatever the person saved: no client is shown and the
+ * request asks for AgentMux's.
  */
-export function createOAuthClientState(svc: OAuthServiceInfo, clientIdHint?: string) {
+export function createOAuthClientState(svc: OAuthServiceInfo, clientIdHint?: string, builtinOnly = false) {
     const [info, setInfo] = createSignal<AccountOAuthClientInfo | null>(null);
     const [loaded, setLoaded] = createSignal(false);
     const [changing, setChanging] = createSignal(false);
@@ -65,7 +69,7 @@ export function createOAuthClientState(svc: OAuthServiceInfo, clientIdHint?: str
 
     const saved = () => info()?.saved === true;
     const showFields = () =>
-        loaded() && !svc.hidesClient && (changing() || (!saved() && needsByo(svc, info()?.builtinAvailable)));
+        loaded() && !svc.hidesClient && !builtinOnly && (changing() || (!saved() && needsByo(svc, info()?.builtinAvailable)));
 
     const forget = async () => {
         setForgetting(true);
@@ -82,6 +86,7 @@ export function createOAuthClientState(svc: OAuthServiceInfo, clientIdHint?: str
     };
 
     const requestFields = (): { fields: OAuthClientFields } | { error: string } => {
+        if (builtinOnly) return { fields: { useBuiltinClient: true } };
         if (!showFields()) return { fields: {} };
         const id = clientId().trim();
         const secret = clientSecret().trim();
@@ -106,6 +111,7 @@ export function createOAuthClientState(svc: OAuthServiceInfo, clientIdHint?: str
     const view = {
         svc,
         saved,
+        builtinOnly,
         changing,
         setChanging,
         clientId,
@@ -174,7 +180,7 @@ export function OAuthClientSection(props: { client: ReturnType<typeof createOAut
             <Show when={v.error()}>
                 <div class="identity-form-error">{v.error()}</div>
             </Show>
-            <Show when={v.saved() && !v.changing() && !v.svc.hidesClient}>
+            <Show when={v.saved() && !v.changing() && !v.svc.hidesClient && !v.builtinOnly}>
                 <div class="oauth-saved-client">
                     <span>Using your saved client</span>
                     <code class="oauth-client-id">{s.info()?.clientId}</code>
