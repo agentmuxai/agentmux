@@ -256,36 +256,6 @@
             padding: 0;
         }
 
-        // The two stacked minimize buttons (Merge into next pane above, Minimize to header below;
-        // SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08.md §3): 26 x 16 px halves that fill the
-        // header's inner height, reaching into its vertical padding so each target is as large as
-        // the header allows. The wrapper is one child of the end controls, so a narrow header
-        // hides the pair as a unit, like Minimize and Maximize before it.
-        .block-frame-minimize-pair {
-            display: flex;
-            flex-direction: column;
-            flex-shrink: 0;
-            align-self: stretch;
-            width: 26px;
-            // The header's padding above and below, less its 1px bottom border: 32px in all.
-            margin-block: calc(-1 * var(--space-1)) calc(-1 * var(--space-1) + 1px);
-
-            .ui-button--chrome {
-                flex: 1 1 0;
-                min-height: 0;
-                height: auto;
-                width: 26px;
-                padding: 0;
-            }
-
-            // Disabled by `aria-disabled`, not `disabled`: it stays focusable and its tooltip
-            // says why. The click does nothing.
-            .block-frame-merge[aria-disabled="true"] {
-                opacity: 0.35;
-                cursor: default;
-            }
-        }
-
         // Close: a bigger X that turns the standard Windows close red on hover.
         // Free has no `xmark-large`, so 25px of font gives the ~15.6px X the Pro glyph had.
         // The colour goes on the <i>: IconButton writes `color: inherit` inline on the

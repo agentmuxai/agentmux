@@ -434,40 +434,6 @@ function registerTabCommands(): void {
     });
 }
 
-/** The pane header's two stacked buttons as commands. */
-function registerPaneMinimizeCommands(): void {
-    // The pane header's two stacked buttons, as commands (no default keys; the person can bind them):
-    // the equivalent controls that make the 16 px button halves acceptable.
-    // SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08.md §5.
-    commandRegistry.register({
-        id: "pane:minimize-to-header",
-        label: "Minimize Pane to Header",
-        category: "Pane",
-        icon: "regular@window-minimize",
-        execute: () => {
-            const layoutModel = getLayoutModelForStaticTab();
-            const focusedNode = layoutModel.focusedNode?.();
-            if (focusedNode == null) return;
-            if (layoutModel.localTreeStateAtom().magnifiedNodeId === focusedNode.id) {
-                layoutModel.collapseMaximizedNode(focusedNode.id, { chip: true });
-            } else {
-                layoutModel.minimizeNodeToggle(focusedNode.id, { chip: true });
-            }
-        },
-    });
-    commandRegistry.register({
-        id: "pane:merge-into-next",
-        label: "Merge Pane into Next Pane",
-        category: "Pane",
-        icon: "right-to-bracket",
-        execute: () => {
-            const layoutModel = getLayoutModelForStaticTab();
-            const focusedNode = layoutModel.focusedNode?.();
-            if (focusedNode != null) layoutModel.mergeNodeIntoNeighbour(focusedNode.id);
-        },
-    });
-}
-
 /** The "Pane" commands. */
 function registerPaneCommands(): void {
     commandRegistry.register({
@@ -493,7 +459,6 @@ function registerPaneCommands(): void {
             }
         },
     });
-    registerPaneMinimizeCommands();
     commandRegistry.register({
         id: "pane:history:back",
         label: "Back to Previous Pane",

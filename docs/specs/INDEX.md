@@ -436,7 +436,6 @@ partial list.
 | [`SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10`](SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md) | SPEC: The pane header's horizontal scroll covers tabs, +, grip and aux controls (minimize stays pinned) |
 | [`SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21`](SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md) | SPEC: the pane header's tail color follows the pane, not the active tab |
 | [`SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21`](SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md) | SPEC: pane header informational text becomes a hover tooltip |
-| [`SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08`](SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08.md) | Spec: the pane header's two stacked minimize buttons |
 | [`SPEC_PANE_REFLOW_GLIDE_2026_11_01`](SPEC_PANE_REFLOW_GLIDE_2026_11_01.md) | SPEC: Panes glide into place when the layout changes (close first), like the My agents rows |
 | [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
 | [`SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22`](SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md) | Selecting a pane should focus its input — not just opening one |
@@ -1357,6 +1356,7 @@ partial list.
 | [`SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14`](SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md) | Pre-launch auth — complete user stories + state machine |
 | [`SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15`](SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md) | MuxBus Delivery Hierarchy |
 | [`SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20`](SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md) | SPEC: MuxBus — GitHub PR review notifications (end-to-end MVP) |
+| [`SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08`](SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08.md) | Spec: the pane header's two stacked minimize buttons |
 | [`SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20`](SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md) | Pane Tear-Off — Mother Window Resize |
 | [`SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14`](SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14.md) | SPEC: Persistence layer analysis — keep SQLite, or move? |
 | [`SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01`](SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md) | Saga + Reducer + IPC Architecture — Target End State |
