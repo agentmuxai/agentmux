@@ -4,6 +4,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.unmock("@/app/element/modal-exit-fade");
+
 import { fadeOutBackdrop } from "./modal-exit-fade";
 
 const motion = vi.hoisted(() => ({ reduced: false, ms: 120 }));

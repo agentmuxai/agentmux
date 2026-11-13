@@ -11,6 +11,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal, Show } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.unmock("@/app/element/modal-exit-fade");
 vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
 vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: () => false, scaledMs: () => 120 }));
 
