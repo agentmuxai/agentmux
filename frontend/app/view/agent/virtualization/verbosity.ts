@@ -208,6 +208,11 @@ export function hiddenRunId(firstHiddenId: string): string {
     return `${HIDDEN_RUN_PREFIX}${firstHiddenId}`;
 }
 
+/** The first row a run hides, from the run's id; null for any other id. */
+export function firstHiddenIdOf(runId: string): string | null {
+    return runId.startsWith(HIDDEN_RUN_PREFIX) ? runId.slice(HIDDEN_RUN_PREFIX.length) : null;
+}
+
 /**
  * Whether a pinned id still stands for something in `present` (the ids of the document). An opened
  * run is pinned under its synthetic id, which is in no document: it stands while its first hidden row does.
