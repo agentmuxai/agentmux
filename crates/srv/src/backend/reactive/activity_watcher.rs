@@ -140,15 +140,12 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
     // One call per block at a time: a slow call (up to the CLI timeout) must not
     // be dispatched again by the next tick. Every insert has a matching remove.
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    // The gateway's generation only has to increase per (block, purpose).
-    let mut tick: u64 = 0;
-    // The same count, readable by a call that ends later: its failure wait starts then.
+    // The sweep count: the gateway's generation only has to increase per (block, purpose), and a call that ends later reads it to start its failure wait.
     let clock = Arc::new(AtomicU64::new(0));
 
     loop {
         ticker.tick().await;
-        tick += 1;
-        clock.store(tick, Ordering::Relaxed);
+        let tick = clock.fetch_add(1, Ordering::Relaxed) + 1;
 
         let agents = get_global_handler().list_agents();
         let registered: HashSet<String> = agents.iter().map(|a| a.block_id.clone()).collect();
@@ -195,9 +192,7 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
             let mstore = mstore.clone();
             let filestore = filestore.clone();
             let event_bus = event_bus.clone();
-            let attempts = attempts.clone();
-            let in_flight = in_flight.clone();
-            let clock = clock.clone();
+            let (attempts, in_flight, clock) = (attempts.clone(), in_flight.clone(), clock.clone());
 
             tokio::spawn(async move {
                 let result =
