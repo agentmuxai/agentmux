@@ -115,18 +115,54 @@ export function captureOnScreen(blockId: string, view: LayoutView | null | undef
     return onScreenRows(view, snap.scrollTop, snap.viewportPx);
 }
 
-/** After it: keep them where they were, in the slice and in `scroller`. */
+/** Frames a restore is repeated at most while the rows it moved are measured. */
+const SETTLE_FRAMES = 12;
+const settling = new Map<string, () => void>();
+
+/** One restore: put the rows back where they were. True when nothing needed moving. */
+function restoreOnce(blockId: string, rows: readonly OnScreenRow[], latest: () => LayoutView | null | undefined, scroller: HTMLElement | undefined, nodes: readonly DocumentNode[]): boolean {
+    const snap = snapshotLayout(blockId);
+    if (!snap) return true;
+    const top = keptScrollTop(rows, latest(), scroller ? scroller.scrollTop : snap.scrollTop, nodes); // perf:allow-layout-read — a few frames after a view change
+    if (top == null) return true;
+    if (scroller) scrollTranscriptTo(scroller, top);
+    dispatchLayoutIfRegistered(blockId, { type: "Scrolled", scrollTop: top, viewportPx: snap.viewportPx });
+    return false;
+}
+
+/**
+ * After the change: keep the rows where they were, in the slice and in `scroller`. The rows the change
+ * made new (a run, a fold in its other state) stand on estimates until they are measured, a frame or
+ * two later, and the rows above the reader move by the difference. So when the first restore moved
+ * the scroll, it is repeated each frame until two passes in a row agree, the reader scrolls or the
+ * pane follows the bottom.
+ */
 export function restoreOnScreen(
     blockId: string,
     rows: readonly OnScreenRow[],
-    view: LayoutView | null | undefined,
+    latest: () => LayoutView | null | undefined,
     scroller: HTMLElement | undefined,
     nodes: readonly DocumentNode[] = []
 ): void {
-    const snap = snapshotLayout(blockId);
-    if (!snap) return;
-    const top = keptScrollTop(rows, view, snap.scrollTop, nodes);
-    if (top == null) return;
-    if (scroller) scrollTranscriptTo(scroller, top);
-    dispatchLayoutIfRegistered(blockId, { type: "Scrolled", scrollTop: top, viewportPx: snap.viewportPx });
+    settling.get(blockId)?.();
+    settling.delete(blockId);
+    if (restoreOnce(blockId, rows, latest, scroller, nodes) || !scroller) return;
+    let frame = 0;
+    let agreed = 0;
+    let raf = 0;
+    const stop = (): void => {
+        cancelAnimationFrame(raf);
+        for (const type of ["wheel", "touchstart", "pointerdown", "keydown"]) scroller.removeEventListener(type, stop);
+        if (settling.get(blockId) === stop) settling.delete(blockId);
+    };
+    const pass = (): void => {
+        const snap = snapshotLayout(blockId);
+        if (!snap || atBottomOf(latest(), scroller.scrollTop, snap.viewportPx)) return stop(); // perf:allow-layout-read — a few frames after a view change
+        agreed = restoreOnce(blockId, rows, latest, scroller, nodes) ? agreed + 1 : 0;
+        if (agreed >= 2 || ++frame >= SETTLE_FRAMES) return stop();
+        raf = requestAnimationFrame(pass);
+    };
+    for (const type of ["wheel", "touchstart", "pointerdown", "keydown"]) scroller.addEventListener(type, stop, { passive: true });
+    settling.set(blockId, stop);
+    raf = requestAnimationFrame(pass);
 }
