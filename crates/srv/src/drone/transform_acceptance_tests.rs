@@ -223,8 +223,8 @@ fn the_output_carries_the_taint_bits_of_the_chain() {
     // A filter by in_set keeps the elements tainted: only the membership is clean.
     let f = tainted(json!([{ "op": "filter", "expr": "item.team in_set ['core']" }]));
     assert_eq!((f.v.as_array().map(Vec::len), f.tainted, f.derived), (Some(2), true, false));
-    // A sum of a count stays derived; an exists is a derived boolean.
-    let s = tainted(json!([{ "op": "count" }, { "op": "sum" }]));
+    // A sum over a filtered tainted list is clean and derived; an exists is a derived boolean.
+    let s = tainted(json!([{ "op": "filter", "expr": "item.team in_set ['core']" }, { "op": "sum", "by": "item.age" }]));
     assert_eq!((s.tainted, s.derived), (false, true));
     let e = tainted(json!([{ "op": "exists", "expr": "item.age > 40" }]));
     assert_eq!((e.v, e.tainted, e.derived), (json!(true), false, true));
