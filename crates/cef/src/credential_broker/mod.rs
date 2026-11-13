@@ -447,6 +447,17 @@ async fn call_credential_service(
     call_host_only_service(state, "credential", method, args0, SRV_CALL_TIMEOUT).await
 }
 
+/// srv's service URL. The launcher hands the host a bare `host:port` (`127.0.0.1:29705`), which is no URL for
+/// an HTTP client: it needs the scheme in front.
+fn service_url(web_endpoint: &str) -> String {
+    let base = web_endpoint.trim_end_matches('/');
+    if base.contains("://") {
+        format!("{base}/agentmux/service")
+    } else {
+        format!("http://{base}/agentmux/service")
+    }
+}
+
 /// POST `{"service": service, "method": ..., "args": [args0, secret]}` to
 /// srv's `/agentmux/service` — for srv services gated on the host secret
 /// (`credential`). See [`call_credential_service`] for why
@@ -474,7 +485,7 @@ pub(crate) async fn call_host_only_service(
              host identity to srv"
         ));
     }
-    let url = format!("{}/agentmux/service", web_endpoint.trim_end_matches('/'));
+    let url = service_url(&web_endpoint);
     let body = serde_json::json!({
         "service": service,
         "method": method,
@@ -550,6 +561,16 @@ mod recent_fill {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_service_url_has_a_scheme_whether_or_not_the_endpoint_does() {
+        for endpoint in ["127.0.0.1:29705", "127.0.0.1:29705/", "http://127.0.0.1:29705", "http://127.0.0.1:29705/"] {
+            let url = super::service_url(endpoint);
+            assert_eq!(url, "http://127.0.0.1:29705/agentmux/service", "{endpoint}");
+            assert!(reqwest::Url::parse(&url).is_ok(), "{url}");
+        }
+        assert!(reqwest::Url::parse("127.0.0.1:29705/agentmux/service").is_err(), "the bare form is what failed to build");
+    }
+
     use super::recent_fill;
 
     #[test]
