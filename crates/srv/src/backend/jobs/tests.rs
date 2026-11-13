@@ -139,7 +139,7 @@ fn the_brief_line_names_the_run_and_a_late_one_says_so() {
 
 #[test]
 fn a_drone_runs_cost_is_the_sum_of_its_agent_blocks() {
-    use crate::drone::types::BlockState;
+    use crate::backend::storage::drone_types::BlockState;
     let block = |out: Option<serde_json::Value>| BlockState {
         status: "done".into(),
         output: out,
@@ -722,7 +722,7 @@ async fn two_schedulers_count_the_same_downtime_once() {
 /// pending fire keeps waiting.
 #[tokio::test(flavor = "multi_thread")]
 async fn interrupted_runs_are_closed_after_a_restart() {
-    use crate::drone::types::DroneRun;
+    use crate::backend::storage::drone_types::DroneRun;
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap());
     let mstore = Arc::new(Store::open_in_memory().unwrap());
@@ -768,7 +768,7 @@ async fn interrupted_runs_are_closed_after_a_restart() {
 /// summed cost of its Agent blocks.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_drone_run_is_written_to_the_ledger_with_its_cost() {
-    use crate::drone::types::BlockState;
+    use crate::backend::storage::drone_types::BlockState;
     let rig = rig();
     let id = rig.ledger.drone_started("dr-9", "d-9", "Nightly graph", 100, &Value::Null).unwrap();
     let r = rig.store.job_run_get(&id).unwrap().unwrap();

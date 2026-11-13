@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use super::graph;
 use super::manifest::{self, JobTemplateKind, JobTemplateManifest};
 use crate::backend::widget::packages as wp;
-use crate::drone::types::DroneGraph;
+use crate::backend::storage::drone_types::DroneGraph;
 use crate::backend::widget::signature as sig;
 
 pub const TEMPLATE_FILE: &str = "template.json";

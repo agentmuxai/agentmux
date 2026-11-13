@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Drone + run types. Mirrors the frontend shape so RPC payloads
-//! flow through `serde_json::to_value` without manual mapping.
+//! flow through `serde_json::to_value` without manual mapping. They sit with the
+//! storage layer because the job store and job templates use them;
+//! `crate::drone::types` still names this module.
 
 use std::collections::HashMap;
 
