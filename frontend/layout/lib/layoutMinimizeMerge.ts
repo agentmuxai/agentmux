@@ -44,6 +44,16 @@ export function findMinimizeMergeTarget(root: LayoutNode | undefined, nodeId: st
 }
 
 /**
+ * The pane `nodeId` merges into: a minimized neighbour first, else the nearest expanded one
+ * (`findExpandedMergeTarget`). One answer for the click (`mergeIntoNeighbour`) and for whether the
+ * header's Merge button is enabled, so the two never disagree. Pure.
+ */
+export function findMergeTarget(root: LayoutNode | undefined, nodeId: string): LayoutNode | undefined {
+    const target = findMinimizeMergeTarget(root, nodeId) ?? findExpandedMergeTarget(root, nodeId);
+    return target?.data ? target : undefined;
+}
+
+/**
  * In a Row, a minimized sibling that docks onto the same expanded pane `node` would dock onto
  * once minimized: the two chips are stacked over that pane, so they are neighbours on screen
  * though an expanded pane sits between them in the tree. The nearest one before `node`, else after.

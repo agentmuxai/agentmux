@@ -436,6 +436,7 @@ partial list.
 | [`SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10`](SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md) | SPEC: The pane header's horizontal scroll covers tabs, +, grip and aux controls (minimize stays pinned) |
 | [`SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21`](SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md) | SPEC: the pane header's tail color follows the pane, not the active tab |
 | [`SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21`](SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md) | SPEC: pane header informational text becomes a hover tooltip |
+| [`SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08`](SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08.md) | Spec: the pane header's two stacked minimize buttons |
 | [`SPEC_PANE_REFLOW_GLIDE_2026_11_01`](SPEC_PANE_REFLOW_GLIDE_2026_11_01.md) | SPEC: Panes glide into place when the layout changes (close first), like the My agents rows |
 | [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
 | [`SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22`](SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md) | Selecting a pane should focus its input — not just opening one |

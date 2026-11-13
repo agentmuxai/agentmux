@@ -299,6 +299,7 @@ describe("the body's right-click menu", () => {
             "Split Down",
             "separator",
             "Magnify Pane",
+            "Merge into Next Pane",
             "Minimize to Header",
             "Close Pane",
           ]
