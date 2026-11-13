@@ -354,6 +354,12 @@ pub trait Controller: Send + Sync {
     /// `seq` is the per-TermViewModel monotonic counter; `None` means fire-and-forget (no ordering).
     fn send_input(&self, input: BlockInputUnion, seq: Option<u64>) -> Result<(), String>;
 
+    /// End the turn in progress the way the harness itself is asked to, leaving its process and session up. The default is
+    /// the Stop button's: `send_input(SIGINT)`, which kills the process (the session resumes at the next message).
+    fn interrupt_turn(&self) -> Result<(), String> {
+        self.send_input(BlockInputUnion::signal("SIGINT"), None)
+    }
+
     /// Get the controller type (e.g., "shell", "cmd").
     fn controller_type(&self) -> &str;
 

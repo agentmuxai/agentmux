@@ -26,6 +26,9 @@ const DRONE_ENV_PREFIX: &str = "AGENTMUX_DR_";
 ///   * `vars[name]` — drone-scope variables (set by Variables block)
 ///   * `trigger` — what started the run: the input of `rundrone`, or what
 ///     the job passed; `Null` when nothing did (`{{trigger.*}}`)
+///   * `drone_id` — the drone the run belongs to, for what a block keeps across
+///     runs and must not share with another drone (the Task block's dedupe key);
+///     empty for a scope built outside a run
 #[derive(Debug, Default)]
 pub struct ExecutionScope {
     pub outputs: HashMap<String, Value>,
@@ -42,6 +45,7 @@ pub struct ExecutionScope {
     /// of the item.
     pub locals: HashMap<String, Value>,
     pub local_bits: (bool, bool),
+    pub drone_id: String,
 }
 
 impl ExecutionScope {
@@ -103,6 +107,11 @@ impl ExecutionScope {
             derived |= d;
         }
         (tainted, !tainted && derived)
+    }
+
+    /// A scope for a run of the drone `drone_id`, started by `trigger`.
+    pub fn for_drone(drone_id: &str, trigger: Value) -> Self {
+        Self { trigger, drone_id: drone_id.to_string(), ..Self::default() }
     }
 
     /// Resolve `{{...}}` tokens in `input` against this scope. Unknown

@@ -22,6 +22,7 @@ pub enum BlockKind {
     Message,
     Task,
     Notify,
+    AppQuery,
     /// Shapes a list or object with a restricted expression language.
     Transform,
     /// Runs one body block once per item of a list.
@@ -40,6 +41,7 @@ impl BlockKind {
             "message" => Some(Self::Message),
             "task" => Some(Self::Task),
             "notify" => Some(Self::Notify),
+            "app_query" => Some(Self::AppQuery),
             "transform" => Some(Self::Transform),
             "foreach" => Some(Self::ForEach),
             _ => None,

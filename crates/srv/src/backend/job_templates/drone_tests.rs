@@ -4,7 +4,7 @@
 //! A template package that carries a Drone graph
 //! (docs/specs/SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md, "What is a template?").
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use super::tests::manifest_json;
 use super::*;
@@ -206,4 +206,82 @@ fn a_job_from_a_drone_template_names_the_drone_it_runs() {
     assert_eq!(def["action"], json!({ "kind": "drone", "drone_id": "d-1" }), "no brief is written into a drone action");
     assert_eq!(def["trigger"]["kind"], "cron", "the template's trigger default is filled in");
     assert_eq!(def["template"]["hash"], hash.as_str());
+}
+
+// ── The built-in set ────────────────────────────────────────────────────────
+
+/// Example values for each built-in's parameters.
+fn example(id: &str) -> Map<String, Value> {
+    let v = match id {
+        "agentmux.scheduled-report" => json!({ "question": "What changed this week?", "owner": "loap" }),
+        "agentmux.check-and-file-task" => json!({ "check": "Is the build green?" }),
+        "agentmux.two-agent-handoff" => json!({ "first": "Name three colours.", "second": "Sort them.", "owner": "loap" }),
+        other => panic!("no example for {other}"),
+    };
+    v.as_object().cloned().unwrap()
+}
+
+#[test]
+fn the_built_in_drone_templates_are_valid_and_render_with_example_parameters() {
+    let ids: Vec<&str> = DRONE_BUILTINS.iter().map(|b| b.id).collect();
+    assert_eq!(ids, ["agentmux.scheduled-report", "agentmux.check-and-file-task", "agentmux.two-agent-handoff"]);
+    for b in DRONE_BUILTINS {
+        let pkg = package::load_embedded(b.id, b.files).unwrap_or_else(|e| panic!("{}: {e}", b.id));
+        assert_eq!(pkg.manifest.kind, manifest::JobTemplateKind::Drone, "{}", b.id);
+        assert!(b.files.iter().any(|(name, _)| *name == "README.md"), "{} says what to change first", b.id);
+        let rendered = graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &example(b.id)).unwrap();
+        graph::check(&rendered).unwrap();
+        // No placeholder is left for the run to trip on.
+        assert!(!serde_json::to_string(&rendered).unwrap().contains("{{param."), "{}", b.id);
+        // A template runs on today's blocks and each node carries what its block reads.
+        for node in &rendered.nodes {
+            let needs: &[&str] = match node.data["kind"].as_str().unwrap() {
+                "agent" => &["task"],
+                "message" => &["to", "body"],
+                "condition" => &["expr"],
+                "task" => &["title"],
+                other => panic!("{}: node {} is a {other} node", b.id, node.id),
+            };
+            for key in needs {
+                assert!(node.data.get(*key).and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty()), "{}: node {} needs {key}", b.id, node.id);
+            }
+        }
+        // Nothing is secret-looking or private, and nothing writes outside AgentMux.
+        assert!(graph::summarize(pkg.graph.as_ref().unwrap()).writes_outside.is_empty(), "{}", b.id);
+        assert!(pkg.manifest.secrets.is_empty());
+    }
+}
+
+#[test]
+fn only_a_problem_files_a_task_in_the_check_template() {
+    let b = DRONE_BUILTINS.iter().find(|b| b.id == "agentmux.check-and-file-task").unwrap();
+    let g = package::load_embedded(b.id, b.files).unwrap().graph.unwrap();
+    let edge = g.edges.iter().find(|e| e.target == "file").unwrap();
+    assert_eq!((edge.source.as_str(), edge.source_handle.as_deref()), ("problem", Some("true")), "the task is filed on the true branch only");
+}
+
+#[test]
+fn two_checks_from_the_check_template_do_not_share_a_task() {
+    let b = DRONE_BUILTINS.iter().find(|b| b.id == "agentmux.check-and-file-task").unwrap();
+    let pkg = package::load_embedded(b.id, b.files).unwrap();
+    let key = |check: &str| {
+        let given = json!({ "check": check }).as_object().cloned().unwrap();
+        let g = graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given).unwrap();
+        g.nodes.iter().find(|n| n.id == "file").unwrap().data["dedupe"].as_str().unwrap().to_string()
+    };
+    assert_ne!(key("Is the build green?"), key("Is the site up?"), "the check is part of the dedupe key");
+    assert_eq!(key("Is the build green?"), key("Is the build green?"), "the same check repeats into one task");
+}
+
+#[test]
+fn the_service_lists_the_built_in_drone_templates_for_approval_beside_the_job_ones() {
+    let tmp = tempfile::tempdir().unwrap();
+    let svc = JobTemplates::new(tmp.path().join("job-templates"), &tmp.path().join("data"), all_builtins());
+    let listed = svc.list();
+    assert_eq!(listed.len(), BUILTINS.len() + DRONE_BUILTINS.len());
+    for b in DRONE_BUILTINS {
+        let info = listed.iter().find(|t| t.id == b.id).unwrap();
+        assert_eq!((info.state, info.source, info.error.clone()), (JobTemplateState::NeedsApproval, JobTemplateSource::Builtin, None));
+        assert!(info.drone.is_some());
+    }
 }

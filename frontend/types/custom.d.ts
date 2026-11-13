@@ -501,6 +501,9 @@ declare global {
          *  input owner last saw it; null where the host doesn't track it. */
         inputOwnerState(windowLabel: string): Promise<InputOwnerReport | null>;
         getAuthKey(): string;
+        /** A browser host signed in by `agentmux-srv open`: this tab's session token, sent as
+         *  `X-AM-Session` and as the WebSocket's second protocol. Absent where the host holds the key. */
+        getSessionToken?(): string | undefined;
         /** Reload this window's page, keeping what the host needs to reconnect it. */
         reloadWindow(): void;
         getIsDev(): boolean;

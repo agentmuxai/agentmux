@@ -147,6 +147,36 @@ pub fn tag_body(tag: &str) -> String {
 /// Runs git with these arguments in the current directory: its stdout, or what failed.
 pub type Git<'a> = &'a dyn Fn(&[&str]) -> Result<String, String>;
 
+/// Most annotated tags one pushed object may be wrapped in (a tag of a tag of ...); more fails the check.
+const MAX_TAG_DEPTH: usize = 8;
+
+/// The object a tag points at: the `object` line of `git cat-file tag` output.
+fn tag_target(tag: &str) -> Option<String> {
+    tag.lines().take_while(|l| !l.is_empty()).find_map(|l| l.strip_prefix("object ")).map(|s| s.trim().to_string())
+}
+
+/// The message of the annotated tag at `sha`, joined with those of the tags it wraps; `None` when `sha` is not a tag
+/// object (a commit, say).
+fn tag_messages(sha: &str, git: Git) -> Result<Option<String>, String> {
+    let mut at = sha.to_string();
+    let mut bodies: Vec<String> = Vec::new();
+    loop {
+        if git(&["cat-file", "-t", &at])?.trim() != "tag" {
+            break;
+        }
+        if bodies.len() >= MAX_TAG_DEPTH {
+            return Err(format!("this push is a tag wrapped in more than {MAX_TAG_DEPTH} tags"));
+        }
+        let raw = git(&["cat-file", "tag", &at])?;
+        bodies.push(tag_body(&raw));
+        match tag_target(&raw) {
+            Some(next) => at = next,
+            None => break,
+        }
+    }
+    Ok((!bodies.is_empty()).then(|| bodies.join("\n")))
+}
+
 /// The material of each ref update. The commands are the ones gh-agent's own pre-push hook runs, so both judge the same text.
 pub fn collect(updates: &[RefUpdate], remote: &str, git: Git) -> Result<Vec<Part>, String> {
     let named = git(&["remote"])?.lines().any(|l| l.trim() == remote);
@@ -176,9 +206,9 @@ pub fn collect(updates: &[RefUpdate], remote: &str, git: Git) -> Result<Vec<Part
             ..Part::default()
         };
         if count <= MAX_PUSH_COMMITS {
-            if u.local_ref.starts_with("refs/tags/") && git(&["cat-file", "-t", &u.local_sha])?.trim() == "tag" {
-                part.tag_message = Some(tag_body(&git(&["cat-file", "tag", &u.local_sha])?));
-            }
+            // By what the pushed object is, not by what its source ref is called: `git push origin <tag-sha>:refs/heads/x`
+            // and `refs/heads/y:refs/tags/v1` publish a tag's message as much as `refs/tags/v1` does.
+            part.tag_message = tag_messages(&u.local_sha, git)?;
             if count > 0 {
                 part.messages = run(with(&["log", "--format=%H%x00%B%x1e"]))?;
                 part.name_status = run(with(&["-c", "core.quotePath=false", "log", "--reverse", "-z", "--name-status", "--find-renames", "--format=%x01%H"]))?;
@@ -456,6 +486,7 @@ mod tests {
             ("remote", "origin\nupstream\n".to_string()),
             ("rev-list", format!("{count}\n")),
             ("cat-file -e", String::new()),
+            ("cat-file -t", "commit\n".to_string()),
             ("log --format=%H", "abc\0unrelated\n\x1e".to_string()),
             ("-c core.quotePath=false log", "\x01abc\0\nA\0.changesets/c.md\0\nA\0plans/PLAN_X.md\0".to_string()),
             ("show", "the changeset".to_string()),
@@ -487,6 +518,52 @@ mod tests {
         assert!(ran.contains("-c core.quotePath=false log --reverse -z --name-status --find-renames --format=%x01%H"), "{ran}");
         assert!(ran.contains("log --no-merges --format=commit %H -p --text --unified=0 --no-color --no-ext-diff --no-textconv --find-renames"), "{ran}");
         assert!(ran.contains("log --merges --cc --format=commit %H -p"), "{ran}");
+    }
+
+    /// `fake`, except that the object `b`*40 (what `update` pushes) is an annotated tag whose message is `notes` and which
+    /// points at the commit `a`*40.
+    fn with_tag<'a>(git: &'a FakeGit, notes: &str) -> impl Fn(&[&str]) -> Result<String, String> + 'a {
+        let (tag, commit) = ("b".repeat(40), "a".repeat(40));
+        let notes = notes.to_string();
+        move |a: &[&str]| match a {
+            ["cat-file", "-t", s] if *s == tag => Ok("tag\n".into()),
+            ["cat-file", "tag", s] if *s == tag => Ok(format!("object {commit}\ntype commit\ntag v1\ntagger t <t@t> 1 +0000\n\n{notes}")),
+            _ => git.run(a),
+        }
+    }
+
+    #[test]
+    fn a_tags_message_is_collected_by_what_is_pushed_whatever_its_ref_is_called() {
+        let git = fake("1");
+        let run = with_tag(&git, "the notes");
+        for local_ref in ["refs/tags/v1", "refs/heads/x", "HEAD", &"b".repeat(40)] {
+            let parts = collect(&[update(local_ref, ZERO)], "origin", &run).unwrap();
+            assert_eq!(parts[0].tag_message.as_deref(), Some("the notes"), "{local_ref}");
+        }
+        // A commit is not a tag, even under a tag's name.
+        let parts = collect(&[update("refs/tags/v1", ZERO)], "origin", &|a| git.run(a)).unwrap();
+        assert!(parts[0].tag_message.is_none());
+    }
+
+    #[test]
+    fn a_tag_wrapped_in_tags_gives_every_message_and_a_loop_fails_the_check() {
+        let git = fake("1");
+        let (outer, inner, commit) = ("b".repeat(40), "c".repeat(40), "a".repeat(40));
+        let nested = |a: &[&str]| match a {
+            ["cat-file", "-t", s] if *s == outer || *s == inner => Ok("tag\n".to_string()),
+            ["cat-file", "tag", s] if *s == outer => Ok(format!("object {inner}\ntype tag\n\nouter notes")),
+            ["cat-file", "tag", s] if *s == inner => Ok(format!("object {commit}\ntype commit\n\ninner notes")),
+            _ => git.run(a),
+        };
+        let parts = collect(&[update("refs/tags/v1", ZERO)], "origin", &nested).unwrap();
+        assert_eq!(parts[0].tag_message.as_deref(), Some("outer notes\ninner notes"));
+        // A tag that points at itself cannot be read to its end.
+        let looped = |a: &[&str]| match a {
+            ["cat-file", "-t", _] => Ok("tag\n".to_string()),
+            ["cat-file", "tag", s] => Ok(format!("object {s}\ntype tag\n\nagain")),
+            _ => git.run(a),
+        };
+        assert!(collect(&[update("refs/tags/v1", ZERO)], "origin", &looped).is_err());
     }
 
     #[test]

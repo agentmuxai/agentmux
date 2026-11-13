@@ -94,7 +94,7 @@ struct Scheduler<'a> {
 
 pub(super) async fn execute(
     run_id: &str,
-    (graph, trigger, run_cap_usd): (&DroneGraph, Value, Option<f64>),
+    (graph, trigger, run_cap_usd, drone_id): (&DroneGraph, Value, Option<f64>, &str),
     tx: &mpsc::UnboundedSender<RunEvent>,
     states: &States,
 ) -> Result<Value, String> {
@@ -104,7 +104,7 @@ pub(super) async fn execute(
     let plan = schedule::analyze(graph).map_err(|issues| {
         issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; ")
     })?;
-    let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::with_trigger(trigger), run_cap_usd, tx, states);
+    let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::for_drone(drone_id, trigger), run_cap_usd, tx, states);
     s.run().await?;
     Ok(s.response.unwrap_or(Value::Null))
 }
@@ -247,6 +247,7 @@ impl<'a> Scheduler<'a> {
             BlockKind::Message => blocks::message::run(node, scope).await,
             BlockKind::Task => blocks::task::run(node, scope).await,
             BlockKind::Notify => blocks::notify::run(node, scope).await,
+            BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
             BlockKind::Transform => blocks::transform::run(node, scope).await,
             BlockKind::ForEach => unreachable!("handled above"),
         }
@@ -300,7 +301,7 @@ impl<'a> Scheduler<'a> {
     fn mark_bits(&mut self, node: &FlowNode, kind: BlockKind) {
         let read = |key: &str| node.data.get(key).and_then(Value::as_str).map(|t| self.scope.bits_of(t)).unwrap_or((false, false));
         let bits = match kind {
-            BlockKind::Agent | BlockKind::Api | BlockKind::Message => (true, false),
+            BlockKind::Agent | BlockKind::Api | BlockKind::Message | BlockKind::AppQuery => (true, false),
             BlockKind::Condition => {
                 let (tainted, derived) = read("expr");
                 (false, tainted || derived)
