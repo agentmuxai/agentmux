@@ -545,6 +545,8 @@ $preview-hidden-to: 640px;
 .files-filter-input {
     flex: 0 1 160px;
     min-width: 64px;
+    // The path is scrolled to its end, so its last name ends at the box: keep them apart.
+    margin-left: 4px;
     height: 22px;
     padding: 0 6px;
     border: 1px solid var(--border-color);
