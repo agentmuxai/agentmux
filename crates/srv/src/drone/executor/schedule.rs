@@ -7,9 +7,10 @@
 //!
 //! A graph may hold a cycle, but **every cycle must pass through a Condition**,
 //! which is the loop's guard. A guard has `max_iterations` (1 to 1,000, 25 when
-//! absent) and `on_cap` (`end_run`, the default, or `exit_loop`). Each time a
-//! guard sends the run along an edge that stays inside its cycle that is one
-//! more iteration; the scheduler stops it at the cap.
+//! absent), `on_cap` (`end_run`, the default, or `exit_loop`), and optionally
+//! `max_cost_usd` and `max_minutes`. Each time a guard sends the run along an
+//! edge that stays inside its cycle that is one more iteration; the scheduler
+//! stops the loop at any cap.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -31,16 +32,20 @@ pub enum OnCap {
 }
 
 /// A Condition that sits on a cycle.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Guard {
     pub max_iterations: u32,
     pub on_cap: OnCap,
+    /// What the loop's blocks may spend in all, in dollars; none is no limit.
+    pub max_cost_usd: Option<f64>,
+    /// How long the loop may run, in minutes; none is no limit.
+    pub max_minutes: Option<f64>,
     /// The ids of the edges out of the guard that stay inside its cycle.
     pub loop_edges: BTreeSet<String>,
 }
 
 /// What the scheduler reads of a graph that passed [`analyze`].
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Plan {
     /// The edges that close a cycle. The scheduler does not wait on them for
     /// their target to be ready, so the others form an acyclic graph.
@@ -117,7 +122,19 @@ fn read_guard(node: &FlowNode, loop_edges: BTreeSet<String>, issues: &mut Vec<Is
             OnCap::EndRun
         }
     };
-    Guard { max_iterations, on_cap, loop_edges }
+    let mut limit = |key: &str| match node.data.get(key) {
+        None | Some(Value::Null) => None,
+        Some(v) => match v.as_f64().filter(|n| *n > 0.0) {
+            Some(n) => Some(n),
+            None => {
+                issues.push(Issue::at(&node.id, format!("{key} must be a number above 0")));
+                None
+            }
+        },
+    };
+    let max_cost_usd = limit("max_cost_usd");
+    let max_minutes = limit("max_minutes");
+    Guard { max_iterations, on_cap, max_cost_usd, max_minutes, loop_edges }
 }
 
 /// The edges that close a cycle, found by a walk from the blocks nothing leads
@@ -302,6 +319,18 @@ mod tests {
     fn the_guard_reads_its_own_limit_and_what_to_do_at_it() {
         let plan = analyze(&retry_loop(json!({ "max_iterations": 3, "on_cap": "exit_loop" }))).unwrap();
         assert_eq!((plan.guards["guard"].max_iterations, plan.guards["guard"].on_cap), (3, OnCap::ExitLoop));
+    }
+
+    #[test]
+    fn a_loop_may_also_limit_its_cost_and_its_time() {
+        let g = analyze(&retry_loop(json!({ "max_cost_usd": 0.5, "max_minutes": 10 }))).unwrap().guards["guard"].clone();
+        assert_eq!((g.max_cost_usd, g.max_minutes), (Some(0.5), Some(10.0)));
+        let none = analyze(&retry_loop(json!({}))).unwrap().guards["guard"].clone();
+        assert_eq!((none.max_cost_usd, none.max_minutes), (None, None));
+        for bad in [json!(0), json!(-1), json!("lots")] {
+            let issues = analyze(&retry_loop(json!({ "max_cost_usd": bad }))).unwrap_err();
+            assert!(issues[0].message.contains("max_cost_usd"), "{issues:?}");
+        }
     }
 
     #[test]
