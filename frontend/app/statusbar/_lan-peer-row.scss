@@ -46,3 +46,11 @@
     font-size: 0.85em;
     color: var(--warning-text-color);
 }
+
+// The peer list's own scroll area. `vh` is in screen pixels and the popover body is zoomed, so the
+// cap is divided by the chrome zoom; the 420px is what the rest of the popover needs above and below it.
+.host-popover-peers {
+    max-height: max(160px, calc((100vh - 420px) / var(--zoomfactor, 1)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
