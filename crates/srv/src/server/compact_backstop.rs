@@ -4,7 +4,8 @@
 //! The launch environment moves the CLI's own auto-compact down to the model's budget; if an agent's context is still
 //! more than 1.5 times that budget (the variable was ignored, or the CLI's compaction is off or failing), srv sends the
 //! agent `/compact` the way `Agents compact` does: once per try, between turns, never mid-turn. After two tries that
-//! left it over, the agent's pane gets a warning line and its leader a note, once.
+//! left it over, the agent's pane gets a warning line (block meta `agent:context_warning`, its own key: the spend
+//! watcher's 80% warning is not touched) and its leader a note, once.
 //!
 //! It runs off the spend watcher's per-response event, so it costs a map lookup per response of a route agent.
 
@@ -16,9 +17,12 @@ use serde_json::{json, Value};
 use crate::backend::context_reading::{self, ContextReading};
 use crate::backend::model_gateway::token::Grant;
 use crate::backend::model_gateway::{catalog, launch};
-use crate::backend::{obj, worker_notes};
+use crate::backend::worker_notes;
 use crate::server::spend_watch;
 use crate::server::AppState;
+
+/// The pane's context warning: `{at, context}`. Taken off when the context is back under the limit.
+pub const CONTEXT_WARNING_META_KEY: &str = "agent:context_warning";
 
 /// Compactions sent for one stretch over the limit before the agent's pane and leader are told.
 const TRIES: u8 = 2;
@@ -29,8 +33,26 @@ const SETTLE_MS: u64 = context_reading::MIN_MS_BETWEEN;
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 struct Episode {
     tries: u8,
+    /// When the last try was scheduled, and from the moment it was sent, when that was.
     last_try_ms: u64,
+    /// The last try is scheduled and not yet known to have been sent or given up.
+    pending: bool,
     told: bool,
+}
+
+impl Episode {
+    /// Settles a pending try against what the reading says happened to it: sent (counted from when it went) or given up
+    /// (not counted: the turn never ended, or the send failed).
+    fn settle(&mut self, reading: &ContextReading) {
+        if !self.pending || reading.compact_scheduled {
+            return;
+        }
+        self.pending = false;
+        match reading.last_self_compact_ms.filter(|sent| *sent >= self.last_try_ms) {
+            Some(sent) => self.last_try_ms = sent,
+            None => self.tries = self.tries.saturating_sub(1),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -68,11 +90,16 @@ fn episodes() -> &'static Mutex<HashMap<String, Episode>> {
 pub(crate) fn after_settled(state: &AppState, grant: &Grant) {
     let Some(route) = catalog::route(&grant.route) else { return };
     let Some(budget) = launch::model_on_route(&state.mstore, &grant.def_id, route).and_then(|m| m.compact_budget()) else { return };
+    // A pane that was closed leaves no reading: its episode goes with it.
+    episodes().lock().unwrap().retain(|block_id, _| context_reading::get(block_id).is_some());
     for block_id in worker_notes::live_panes_of(&state.mstore, &grant.def_id) {
         let Some(reading) = context_reading::get(&block_id) else { continue };
         let Some(tokens) = reading.tokens else { continue };
         let now = agentmux_common::time::now_ms_u64();
-        let ep = episodes().lock().unwrap().get(&block_id).copied();
+        let ep = episodes().lock().unwrap().get_mut(&block_id).map(|ep| {
+            ep.settle(&reading);
+            *ep
+        });
         match decide(tokens, u64::from(budget), ep, &reading, now) {
             Step::Nothing => {}
             Step::Recovered => recovered(state, grant, &block_id, ep.is_some_and(|e| e.told)),
@@ -89,6 +116,7 @@ fn compact(state: &AppState, block_id: &str, tokens: u64, budget: u32, now: u64)
             let ep = map.entry(block_id.to_string()).or_default();
             ep.tries += 1;
             ep.last_try_ms = now;
+            ep.pending = true;
             tracing::info!(block_id, tokens, budget, try_no = ep.tries, "compaction backstop: the context is over 1.5 times the budget, /compact sent when the turn ends");
         }
         // Too soon after the last compaction, or one already scheduled: the next response looks again.
@@ -100,10 +128,9 @@ fn tell(state: &AppState, grant: &Grant, block_id: &str, tokens: u64) {
     if let Some(ep) = episodes().lock().unwrap().get_mut(block_id) {
         ep.told = true;
     }
-    let (_, cap, spent) = crate::backend::model_gateway::cap::agent_level(&state.mstore, grant, agentmux_common::time::now_ms());
     let place = catalog::route(&grant.route).map_or_else(|| grant.route.clone(), |r| r.label.to_string());
-    let card = json!({ "at": agentmux_common::time::now_ms(), "scope": "agent", "cap": cap.unwrap_or(0.0), "spent": spent, "route": grant.route, "place": place, "context": tokens });
-    spend_watch::set_meta(state, block_id, spend_watch::WARNING_META_KEY, card);
+    let card = json!({ "at": agentmux_common::time::now_ms(), "context": tokens });
+    spend_watch::set_meta(state, block_id, CONTEXT_WARNING_META_KEY, card);
     let name = state.mstore.agent_def_get(&grant.def_id).ok().flatten().map_or_else(|| grant.def_id.clone(), |d| d.name);
     let note = format!(
         "{name}'s context is {}K tokens, over 1.5 times its compaction budget on {place}, and two /compact attempts did not bring it down. It re-reads that context on every turn: compact or restart it (Agents compact, Agents fresh).",
@@ -119,16 +146,8 @@ fn recovered(state: &AppState, grant: &Grant, block_id: &str, told: bool) {
     if !told {
         return;
     }
-    let ours = state.mstore.get::<obj::Block>(block_id).ok().flatten().is_some_and(|b| is_context_card(b.meta.get(spend_watch::WARNING_META_KEY)));
-    if ours {
-        spend_watch::set_meta(state, block_id, spend_watch::WARNING_META_KEY, Value::Null);
-    }
+    spend_watch::set_meta(state, block_id, CONTEXT_WARNING_META_KEY, Value::Null);
     tracing::info!(agent = %grant.agent, "compaction backstop: the context is back under the limit");
-}
-
-/// Whether a pane's warning card is the context one, not the 80% spend one.
-fn is_context_card(card: Option<&Value>) -> bool {
-    card.and_then(|c| c.get("context")).is_some_and(Value::is_number)
 }
 
 #[cfg(test)]
@@ -147,7 +166,7 @@ mod tests {
 
     #[test]
     fn it_tries_twice_then_tells_once_after_the_last_try_had_time() {
-        let at = |tries, last_try_ms, told| Some(Episode { tries, last_try_ms, told });
+        let at = |tries, last_try_ms, told| Some(Episode { tries, last_try_ms, pending: false, told });
         assert_eq!(decide(480_000, 300_000, at(1, 0, false), &reading(), 1), Step::Compact);
         assert_eq!(decide(480_000, 300_000, at(2, 1_000, false), &reading(), 1_000 + SETTLE_MS - 1), Step::Nothing, "the second try still has time");
         assert_eq!(decide(480_000, 300_000, at(2, 1_000, false), &reading(), 1_000 + SETTLE_MS), Step::Tell);
@@ -166,15 +185,28 @@ mod tests {
 
     #[test]
     fn a_context_that_came_back_under_ends_the_episode() {
-        let ep = Some(Episode { tries: 2, last_try_ms: 1, told: true });
+        let ep = Some(Episode { tries: 2, last_try_ms: 1, pending: false, told: true });
         assert_eq!(decide(200_000, 300_000, ep, &reading(), 5), Step::Recovered);
         assert_eq!(decide(200_000, 300_000, None, &reading(), 5), Step::Nothing);
     }
 
     #[test]
-    fn only_a_card_with_a_context_is_ours_to_take_off() {
-        assert!(is_context_card(Some(&json!({ "cap": 20, "spent": 17, "context": 480_000 }))));
-        assert!(!is_context_card(Some(&json!({ "cap": 20, "spent": 17 }))));
-        assert!(!is_context_card(None));
+    fn a_try_counts_from_when_it_was_sent_and_not_at_all_when_it_never_was() {
+        let scheduled = Episode { tries: 1, last_try_ms: 1_000, pending: true, told: false };
+        let mut waiting = scheduled;
+        let mut queued = reading();
+        queued.compact_scheduled = true;
+        waiting.settle(&queued);
+        assert_eq!(waiting, scheduled, "still waiting for the turn to end");
+
+        let mut sent = scheduled;
+        let mut r = reading();
+        r.last_self_compact_ms = Some(5_000);
+        sent.settle(&r);
+        assert_eq!((sent.tries, sent.last_try_ms, sent.pending), (1, 5_000, false), "counted from the send");
+
+        let mut given_up = scheduled;
+        given_up.settle(&reading());
+        assert_eq!((given_up.tries, given_up.pending), (0, false), "the turn never ended: no try was made");
     }
 }

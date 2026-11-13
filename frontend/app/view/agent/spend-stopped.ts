@@ -6,8 +6,9 @@
  * (`crates/srv/src/server/spend_watch.rs`, docs/specs/SPEC_ROUTE_AGENT_BRAKES_2026_11_10.md section 3):
  *
  * - `agent:spend_today`: the figure the chips show, `{day, spent, cap}`.
- * - `agent:spend_warning`: from 80% of the cap, a line above the composer; or, with `context`, the context staying far
- *   over its compaction budget.
+ * - `agent:spend_warning`: from 80% of the cap, a line above the composer.
+ * - `agent:context_warning`: the context stayed far over its compaction budget after srv sent `/compact` twice; the same
+ *   line, until the context is back under (`crates/srv/src/server/compact_backstop.rs`).
  * - `agent:spend_stopped`: the cap is used and the gateway refuses the agent's requests; the card offers Raise, Reset
  *   today and Dismiss.
  */
@@ -20,6 +21,7 @@ import { createSignal, onCleanup, type Accessor } from "solid-js";
 export const SPEND_TODAY_META_KEY = "agent:spend_today";
 export const SPEND_WARNING_META_KEY = "agent:spend_warning";
 export const SPEND_STOPPED_META_KEY = "agent:spend_stopped";
+export const CONTEXT_WARNING_META_KEY = "agent:context_warning";
 /** Set by the window when the card is dismissed: the `at` of the stop it was dismissed for. The stop itself stays. */
 export const SPEND_DISMISSED_META_KEY = "agent:spend_stopped_dismissed";
 
@@ -37,7 +39,7 @@ export interface SpendCard {
     route: string;
     /** "OpenRouter (DeepSeek V4.1 Flash)". */
     place: string;
-    /** Set on a warning that is about the context, not the spend: its size in tokens, compaction having failed to bring it down. */
+    /** Set on the context warning, which is not about the spend: the context's size in tokens. */
     context?: number;
 }
 
@@ -56,8 +58,7 @@ function readCard(raw: unknown): SpendCard | null {
     const cap = num(r.cap);
     const spent = num(r.spent);
     if (cap == null || spent == null) return null;
-    const context = num(r.context) ?? undefined;
-    return { at: num(r.at) ?? 0, scope: r.scope === "route" ? "route" : "agent", cap, spent, route: str(r.route), place: str(r.place), ...(context != null ? { context } : {}) };
+    return { at: num(r.at) ?? 0, scope: r.scope === "route" ? "route" : "agent", cap, spent, route: str(r.route), place: str(r.place) };
 }
 
 /** Whether a card was written on an earlier UTC day than `now`'s: the gateway's day has turned since, so it no longer holds. */
@@ -70,12 +71,21 @@ export function readSpendStopped(meta: Record<string, unknown> | null | undefine
     return num(meta?.[SPEND_DISMISSED_META_KEY]) === card.at ? null : card;
 }
 
-/** The 80% warning, or null (absent, from an earlier UTC day, or the stop shows instead). */
+/** The context warning as a card, or null (absent or not the shape srv writes). It stands until srv takes it off, not for the UTC day. */
+function readContextWarning(raw: unknown): SpendCard | null {
+    if (raw == null || typeof raw !== "object") return null;
+    const r = raw as Record<string, unknown>;
+    const context = num(r.context);
+    return context == null ? null : { at: num(r.at) ?? 0, scope: "agent", cap: 0, spent: 0, route: "", place: "", context };
+}
+
+/** The warning line, or null (absent, from an earlier UTC day, or the stop shows instead): the 80% one, else the context one. */
 export function readSpendWarning(meta: Record<string, unknown> | null | undefined, now: number = Date.now()): SpendCard | null {
     const stop = readCard(meta?.[SPEND_STOPPED_META_KEY]);
     if (stop && !fromEarlierDay(stop, now)) return null;
     const card = readCard(meta?.[SPEND_WARNING_META_KEY]);
-    return card && !fromEarlierDay(card, now) ? card : null;
+    if (card && !fromEarlierDay(card, now)) return card;
+    return readContextWarning(meta?.[CONTEXT_WARNING_META_KEY]);
 }
 
 /** The UTC day number, read again just after each UTC midnight, so a card read against it expires without another event. */
