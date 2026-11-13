@@ -252,21 +252,19 @@ pub(crate) fn outcome_text(id: &str, kind: &str, question: &str, state: &State) 
     }
 }
 
+/// One try at `text` for `agent`, by the name the request was opened under. That is the agent's stable slug,
+/// which the handler keeps bound after a rename, so its own resolution finds the agent; the display name in the
+/// registry is not what is asked for.
+fn deliver_to(handler: &crate::backend::reactive::ReactiveHandler, agent: &str, text: &str) -> Result<(), crate::backend::upgrade_notice::Undelivered> {
+    handler.deliver_system_note(agent, text).map_err(crate::backend::upgrade_notice::Undelivered::Retry)
+}
+
 /// Tell `agent` how a request ended, with a note that starts a turn if it is between turns. Retried a few
 /// times: the agent may just be registering again.
 pub(crate) async fn wake(agent: &str, text: String) {
     let agent = agent.to_string();
     let sent = crate::backend::upgrade_notice::deliver_with_retry(
-        || {
-            let handler = crate::backend::reactive::get_global_handler();
-            let target = handler
-                .list_agents()
-                .into_iter()
-                .find(|r| r.agent_id.eq_ignore_ascii_case(&agent) || r.uid.as_deref().is_some_and(|u| u.eq_ignore_ascii_case(&agent)))
-                .map(|r| r.uid.unwrap_or(r.agent_id))
-                .ok_or_else(|| crate::backend::upgrade_notice::Undelivered::Gone("not registered".to_string()))?;
-            handler.deliver_system_note(&target, &text).map_err(crate::backend::upgrade_notice::Undelivered::Retry)
-        },
+        || deliver_to(&crate::backend::reactive::get_global_handler(), &agent, &text),
         3,
         Duration::from_secs(2),
     )
@@ -461,6 +459,24 @@ mod tests {
             assert_eq!(t.matches("[AgentMux]").count(), 0, "no marker of the page's making: {t}");
             assert!(!t.contains("[JEKT:"), "{t}");
         }
+    }
+
+    #[test]
+    fn the_outcome_reaches_an_agent_whose_display_name_differs_from_its_slug() {
+        use crate::backend::reactive::{ReactiveHandler, SenderDelivery};
+        use std::sync::Arc;
+        let got = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = got.clone();
+        let handler = ReactiveHandler::new();
+        handler.set_message_sender(Arc::new(move |_block: &str, text: &str, _inline: &[Value], _origin: &crate::backend::message_origin::MessageOrigin, _exp: Option<i64>| {
+            seen.lock().unwrap().push(text.to_string());
+            Ok(SenderDelivery::Delivered)
+        }));
+        handler.register_agent_full("korp", "block-k", None, 7, Some("korp"), Some("4f3c0000-0000-4000-8000-000000000b01"), "test.waiting").unwrap();
+        // The agent is renamed in its pane: the registry's display name is now "Renamed", the slug stays bound.
+        handler.register_agent_full("Renamed", "block-k", None, 0, None, None, "test.waiting").unwrap();
+        assert!(deliver_to(&handler, "korp", "[AgentMux] done").is_ok());
+        assert_eq!(got.lock().unwrap().len(), 1);
     }
 
     #[test]
