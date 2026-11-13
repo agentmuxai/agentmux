@@ -145,6 +145,7 @@ pub(super) async fn claim_and_deliver(
         delivery_status::fetched(agent_id, 0, &body.expired);
         return AgentSyncOutcome::Ok;
     }
+    let Some(hooks) = crate::muxbus::server_hooks::installed() else { return AgentSyncOutcome::Ok }; // see `installed`
 
     // Claim BEFORE delivering, not after: this is what prevents
     // double-delivery when the same agent_id is concurrently registered by
@@ -191,7 +192,7 @@ pub(super) async fn claim_and_deliver(
         // Verified, and its agent can't work now: kept here until it can. Injected now it would be lost in
         // a failed turn, or given back to the relay to come again. Or a routine message to a session gone
         // cold, which waits for its next activity as a local or LAN one does (#2263).
-        if crate::server::jekt_hold::hold_wan_for_unavailable(mstore, handler, &req) || crate::server::jekt_cold::hold_relayed(&req).await {
+        if hooks.hold_wan_for_unavailable(mstore, handler, &req) || hooks.hold_relayed(&req).await {
             note_flow(&req, MessageFlowOutcome::Held);
             delivered_count += 1;
             steps::record_delivered(&checked);
@@ -229,7 +230,7 @@ async fn inject_or_release(
     let delivery = handler.inject_message(req);
     note_flow_of(&flow_req, if delivery.success { MessageFlowOutcome::Delivered } else { MessageFlowOutcome::Refused });
     if let Some(charged) = &charged {
-        crate::server::jekt_files::settle(charged, delivery.success);
+        crate::muxbus::server_hooks::hooks().settle_files(charged, delivery.success);
     }
     tracing::debug!(
         injection_id = %inj.id,
