@@ -970,6 +970,11 @@ jobs:
       - name: vite-port self-test
         run: bash scripts/vite-port.test.sh
 
+      # The Vite `task dev` starts ends with the run (charlie #611): the PID it records, the
+      # parent that ends, the stop that touches only that process.
+      - name: dev-vite self-test
+        run: bash scripts/dev-vite.test.sh
+
       # The .deb's Depends and the .rpm's Requires come from scripts/linux-package-deps.list,
       # and the build refuses a staged tree that needs a system library the list lacks. A
       # minimal install without one cannot start; this is the script that guards it.
