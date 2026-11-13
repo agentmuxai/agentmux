@@ -677,10 +677,11 @@ function useLayoutSliceFeed(props: AgentDocumentVirtualListProps, s: ListState):
         // removed). `batch()` defers every signal write inside it, so
         // `windowedRows()` sees ONE consistent LayoutView per update.
         // Rows removed or inserted above the screen (a roll-off, the
-        // history link) don't move the rows on screen (keep-on-screen.ts).
+        // history link) don't move the rows on screen, and a view change keeps the
+        // topmost row, or the run that now holds it, in place (keep-on-screen.ts).
         const onScreen = captureOnScreen(blockId, untrack(() => props.layoutView?.()));
         batch(() => pushLayoutInputs(s, blockId, vnodes, docState, pushed));
-        restoreOnScreen(blockId, onScreen, untrack(() => props.layoutView?.()), s.scrollRef);
+        restoreOnScreen(blockId, onScreen, untrack(() => props.layoutView?.()), s.scrollRef, vnodes);
         // Heights of nodes that left the buffer any other way (removed,
         // cleared) are dropped; the buffer holds a few dozen at most.
         const inBuffer = new Set(s.partition().streamingNodes.map((n) => n.id));

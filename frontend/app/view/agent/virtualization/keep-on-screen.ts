@@ -25,8 +25,11 @@ import {
     snapshot as snapshotLayout,
     type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
+import type { RowPosition } from "@/app/store/agent-pane-layout/reducer";
 import { REATTACH_PX } from "@/app/scroll/follow-controller";
+import type { DocumentNode } from "../../../agent-model/types";
 import { scrollTranscriptTo } from "../scroll/one-way-flow";
+import { firstHiddenIdOf } from "./verbosity";
 
 /** A row on screen, and how far the viewport top is past its start. */
 export interface OnScreenRow {
@@ -54,21 +57,45 @@ export function onScreenRows(
 }
 
 /**
- * The scroll position that puts the first of `rows` still in `view` back at
- * its offset, or null when none is left or none moved. The rows are in
- * document order, and a removal or insertion keeps that order, so the first
- * one found is the topmost survivor.
+ * Where the row `id` is now that the view changed what the list shows: a row a switch hid is in the
+ * run that holds it; a run that went (its rows show again) is its first row, or the run that holds that.
+ * Null when it is nowhere (the row left the document).
  */
-export function keptScrollTop(rows: readonly OnScreenRow[], view: LayoutView | null | undefined, scrollTop: number): number | null {
+export function successorRow(id: string, view: LayoutView, nodes: readonly DocumentNode[]): RowPosition | null {
+    const rowOf = (rowId: string) => view.rows.find((r) => r.nodeId === rowId) ?? null;
+    const first = firstHiddenIdOf(id);
+    const target = first ?? id;
+    const run = nodes.find((n) => n.type === "hidden_run" && n.hiddenIds.includes(target));
+    return rowOf(target) ?? (run ? rowOf(run.id) : null);
+}
+
+/**
+ * The scroll position that puts the topmost of `rows` back at its offset. The topmost row stands in
+ * for itself; when the view hid it, the run that holds it does (the offset kept within the run's
+ * height). Otherwise the first of `rows` still in `view`. Null when none is left or none moved. The
+ * rows are in document order, and a removal or insertion keeps that order, so the first one found
+ * is the topmost survivor.
+ */
+export function keptScrollTop(
+    rows: readonly OnScreenRow[],
+    view: LayoutView | null | undefined,
+    scrollTop: number,
+    nodes: readonly DocumentNode[] = []
+): number | null {
     if (!view || rows.length === 0) return null;
-    const offsets = new Map(rows.map((r) => [r.nodeId, r.offsetPx] as const));
-    for (const row of view.rows) {
-        const offset = offsets.get(row.nodeId);
-        if (offset === undefined) continue;
-        const top = Math.max(0, row.start + offset);
+    const settle = (row: RowPosition, offset: number) => {
+        const top = Math.max(0, row.start + Math.min(offset, row.height));
         return Math.abs(top - scrollTop) < 0.5 ? null : top;
+    };
+    const offsets = new Map(rows.map((r) => [r.nodeId, r.offsetPx] as const));
+    let held: RowPosition | null = null;
+    for (const row of view.rows) {
+        if (row.nodeId === rows[0].nodeId) return settle(row, rows[0].offsetPx);
+        if (!held && offsets.has(row.nodeId)) held = row;
     }
-    return null;
+    const successor = successorRow(rows[0].nodeId, view, nodes);
+    if (successor) return settle(successor, rows[0].offsetPx);
+    return held ? settle(held, offsets.get(held.nodeId)!) : null;
 }
 
 /**
@@ -93,11 +120,12 @@ export function restoreOnScreen(
     blockId: string,
     rows: readonly OnScreenRow[],
     view: LayoutView | null | undefined,
-    scroller: HTMLElement | undefined
+    scroller: HTMLElement | undefined,
+    nodes: readonly DocumentNode[] = []
 ): void {
     const snap = snapshotLayout(blockId);
     if (!snap) return;
-    const top = keptScrollTop(rows, view, snap.scrollTop);
+    const top = keptScrollTop(rows, view, snap.scrollTop, nodes);
     if (top == null) return;
     if (scroller) scrollTranscriptTo(scroller, top);
     dispatchLayoutIfRegistered(blockId, { type: "Scrolled", scrollTop: top, viewportPx: snap.viewportPx });
