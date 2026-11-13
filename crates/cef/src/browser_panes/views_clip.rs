@@ -109,6 +109,20 @@ fn uncovered(width: i32, height: i32, holes: &[(i32, i32, i32, i32)]) -> Vec<Rec
     out
 }
 
+/// Whether `holes` (`(left, top, right, bottom)`, inside the pane's box plus the DIP the cut reaches past it)
+/// leave nothing of the pane's own `width` × `height` box. A pane left with only the DIP beyond its edge is
+/// not shown: that strip is no page, and a pane that is still shown, even as a sliver, is still where CEF
+/// finds the drop target for a drag, so a drag over a page cut away whole (the browser view's drag hole, which
+/// is exactly the page's rect) never reached the app page's landing zones on Linux.
+fn covers_box(width: i32, height: i32, holes: &[(i32, i32, i32, i32)]) -> bool {
+    let inside: Vec<(i32, i32, i32, i32)> = holes
+        .iter()
+        .map(|&(left, top, right, bottom)| (left, top, right.min(width), bottom.min(height)))
+        .filter(|hole| hole.0 < hole.2 && hole.1 < hole.3)
+        .collect();
+    uncovered(width, height, &inside).is_empty()
+}
+
 /// What to show of the pane at `pane` with `overlays` over its window, both in the page's physical
 /// pixels; `scale` is the window's display scale where Views works in DIPs (Windows) and 1 elsewhere.
 ///
@@ -135,6 +149,9 @@ pub(crate) fn pane_cut(pane: Rect, overlays: &[Rect], scale: f64) -> PaneCut {
         .collect();
     if holes.is_empty() {
         return PaneCut::Whole;
+    }
+    if covers_box(width - 1, height - 1, &holes) {
+        return PaneCut::Hidden;
     }
     let rects = uncovered(width, height, &holes);
     if rects.is_empty() { PaneCut::Hidden } else { PaneCut::Rects(rects) }
@@ -300,6 +317,26 @@ mod tests {
         assert_eq!(pane_cut((100, 50, 400, 300), &[(0, 0, 2000, 1000)], 1.0), PaneCut::Hidden);
         // Two overlays that cover it between them.
         assert_eq!(pane_cut((100, 50, 400, 300), &[(100, 50, 250, 400), (300, 0, 400, 400)], 1.0), PaneCut::Hidden);
+    }
+
+    #[test]
+    fn a_hole_that_is_exactly_the_pane_hides_it_and_does_not_leave_the_dip_past_its_edge() {
+        // The browser view's drag hole is the page's own rect. The DIP the cut reaches past the pane's right and
+        // bottom edges is not page: left alone it kept the pane shown, and CEF's drag target with it.
+        assert_eq!(pane_cut((100, 50, 400, 300), &[(100, 50, 400, 300)], 1.0), PaneCut::Hidden);
+        // Bigger than the pane, and in two pieces.
+        assert_eq!(pane_cut((100, 50, 400, 300), &[(90, 40, 420, 320)], 1.0), PaneCut::Hidden);
+        assert_eq!(pane_cut((100, 50, 400, 300), &[(100, 50, 200, 300), (300, 50, 200, 300)], 1.0), PaneCut::Hidden);
+        // At 125%, where the hole is grown to whole DIPs.
+        assert_eq!(pane_cut((125, 63, 500, 375), &[(125, 63, 500, 375)], 1.25), PaneCut::Hidden);
+    }
+
+    #[test]
+    fn a_hole_one_dip_short_of_the_pane_still_leaves_that_dip_of_page() {
+        let cut = pane_cut((100, 50, 400, 300), &[(100, 50, 399, 300)], 1.0);
+        assert_eq!(cut, PaneCut::Rects(vec![(399, 0, 2, 300), (0, 300, 401, 1)]));
+        let cut = pane_cut((100, 50, 400, 300), &[(100, 50, 400, 299)], 1.0);
+        assert_eq!(cut, PaneCut::Rects(vec![(400, 0, 1, 299), (0, 299, 401, 2)]));
     }
 
     #[test]
