@@ -164,8 +164,19 @@ pub fn has_other_github_identity(env: &HashMap<String, String>) -> bool {
     }
 }
 
+/// Whether this computer has gh-agent (its hooks written, or the command on this process's PATH): the part
+/// of [`has_other_github_identity`] that is about the machine, not about the AgentMux App. Connectors says
+/// it as the GitHub section's status (`github.connection`).
+pub fn gh_agent_on_this_computer() -> bool {
+    gh_agent_here(&HashMap::new(), |k| std::env::var(k).ok())
+}
+
+/// [`gh_agent_on_this_computer`] for the spawn env `env`, with `process` for anything it doesn't set.
+fn gh_agent_here(env: &HashMap<String, String>, process: impl Fn(&str) -> Option<String>) -> bool {
+    crate::backend::publish_guard::hooks_dir_for(env, process).is_some() || gh_agent_on_path(env)
+}
+
 /// Whether a `gh-agent` command is on the PATH the spawn gets (its own, else this process's).
-#[cfg_attr(test, allow(dead_code))]
 fn gh_agent_on_path(env: &HashMap<String, String>) -> bool {
     let path = env
         .iter()
@@ -281,6 +292,23 @@ mod tests {
         assert!(!gh_agent_on_path(&env(&[("PATH", &path(&[empty.path()]))])));
         std::fs::write(bin.path().join(name), "").unwrap();
         assert!(gh_agent_on_path(&env(&[("PATH", &path(&[empty.path(), bin.path()]))])));
+    }
+
+    #[test]
+    fn this_computer_has_gh_agent_when_its_hooks_are_written_or_its_command_is_on_the_path() {
+        let hooks = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let empty = tempfile::tempdir().unwrap();
+        let path = |dir: &Path| std::env::join_paths([dir]).unwrap().to_string_lossy().into_owned();
+        let process = |k: &str| (k == "GH_AGENT_HOOKS_DIR").then(|| hooks.path().to_string_lossy().into_owned());
+        let nothing = env(&[("PATH", &path(empty.path()))]);
+        assert!(!gh_agent_here(&nothing, process), "neither the hooks nor the command");
+        std::fs::write(hooks.path().join("pre-push"), "# gh-agent publish guard: written by gh-agent 0.13.0; do not edit\n").unwrap();
+        assert!(gh_agent_here(&nothing, process), "the hooks gh-agent wrote");
+        std::fs::remove_file(hooks.path().join("pre-push")).unwrap();
+        let name = if cfg!(windows) { "gh-agent.cmd" } else { "gh-agent" };
+        std::fs::write(bin.path().join(name), "").unwrap();
+        assert!(gh_agent_here(&env(&[("PATH", &path(bin.path()))]), process), "the command on the PATH");
     }
 
     #[test]

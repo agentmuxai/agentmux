@@ -23,4 +23,9 @@ status?: string | null,
 /**
  * GitHub's numeric user id, as text.
  */
-githubUserId?: string | null, login?: string | null, };
+githubUserId?: string | null, login?: string | null, 
+/**
+ * This computer has gh-agent, which gives agents their GitHub identity instead of the App
+ * (crate::backend::gh_guard). True whether or not the person is signed in to AgentMux Cloud.
+ */
+ghAgentOnThisComputer: boolean, };
