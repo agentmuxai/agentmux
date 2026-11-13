@@ -830,8 +830,9 @@
     font-size: var(--text-xs);
     // In a narrow row the words are cut with an ellipsis (the whole text is the tooltip and the line below),
     // never pushed past the row's edge.
+    // It keeps room for its icon, so a row too narrow for any words still shows the warning.
     flex-shrink: 1;
-    min-width: 0;
+    min-width: 14px;
     overflow: hidden;
     white-space: nowrap;
     color: var(--warning-text-color);
