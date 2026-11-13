@@ -845,4 +845,152 @@ mod tests {
         assert_eq!(out.status.code(), Some(75), "it should wait out BUILD_SLOT_MAX_WAIT and give up: {err}");
         assert!(!String::from_utf8_lossy(&out.stdout).contains("never"), "the command must not run while the slot is held");
     }
+
+    /// `spawn_slot` with more environment (a slower poll, a shorter ticket limit).
+    fn spawn_slot_env(bash: &Path, script: &Path, root: &Path, env: &[(&str, &str)], args: &[&str]) -> std::process::Child {
+        let mut cmd = std::process::Command::new(bash);
+        cmd.arg(script)
+            .args(args)
+            .env("AGENTMUX_BUILD_SLOT_DIR", root)
+            .env_remove("BUILD_SLOT_HELD")
+            .env_remove("BUILD_SLOT_MAX")
+            .env("BUILD_SLOT_POLL", "1")
+            .envs(env.iter().copied())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        #[cfg(windows)]
+        {
+            use crate::win32::NoWindow;
+            cmd.no_window();
+        }
+        cmd.spawn().unwrap()
+    }
+
+    fn queue_tickets(root: &Path) -> Vec<(String, String)> {
+        let mut tickets: Vec<(String, String)> = std::fs::read_dir(root.join("queue"))
+            .map(|d| {
+                d.filter_map(|e| e.ok())
+                    .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+                    .map(|e| (e.file_name().to_string_lossy().to_string(), std::fs::read_to_string(e.path()).unwrap_or_default()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        tickets.sort();
+        tickets
+    }
+
+    /// Polls `ok` for up to 30 s (process start-up is slow under load).
+    fn wait_for(what: &str, mut ok: impl FnMut() -> bool) {
+        for _ in 0..120 {
+            if ok() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        panic!("never saw {what}");
+    }
+
+    /// A waiter that a loaded host makes slow (more than the ticket limit between two touches of
+    /// its ticket) still goes in the order it arrived. The script used to delete any other
+    /// waiter's ticket older than 30 s, so a later arrival that was quicker took the slot first.
+    /// Here the ticket limit is 2 s and the first waiter polls every 4 s, which is the same thing
+    /// at test speed.
+    #[test]
+    fn a_slow_waiter_keeps_its_place_in_the_line() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        let order = h.path().join("order.txt");
+        let append = |who: &str| format!("echo {who} >> \"{}\"", order.to_string_lossy().replace('\\', "/"));
+
+        let holder = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "8"]);
+        wait_for("the holder", || root.join("slot").join("owner").exists());
+        wait_for("the holder's ticket to go", || queue_tickets(&root).is_empty());
+        let limit = [("BUILD_SLOT_TICKET_STALE_SECS", "2")];
+        let slow = [("BUILD_SLOT_TICKET_STALE_SECS", "2"), ("BUILD_SLOT_POLL", "4")];
+        let a = spawn_slot_env(&bash, &script, &root, &slow, &["--", "bash", "-c", &append("A")]);
+        wait_for("A's ticket", || queue_tickets(&root).len() == 1);
+        // B arrives in a later second than A, so its ticket sorts after A's.
+        std::thread::sleep(std::time::Duration::from_millis(2200));
+        let b = spawn_slot_env(&bash, &script, &root, &limit, &["--", "bash", "-c", &append("B")]);
+        assert_eq!(a.wait_with_output().unwrap().status.code(), Some(0));
+        assert_eq!(b.wait_with_output().unwrap().status.code(), Some(0));
+        holder.wait_with_output().unwrap();
+        let ran = std::fs::read_to_string(&order).unwrap().replace("\r\n", "\n");
+        assert_eq!(ran, "A\nB\n", "A arrived first and must run first, even though its loop is slow");
+    }
+
+    /// A ticket whose waiter is gone is dropped once it is stale, so a dead waiter never holds up
+    /// the line; this is what the 30 s rule was for, and it still works.
+    #[test]
+    fn the_ticket_of_a_waiter_that_is_gone_is_dropped() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        std::fs::create_dir_all(root.join("queue")).unwrap();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        // Arrived five minutes ago, untouched for two, and no process has this pid.
+        let ticket = root.join("queue").join(format!("{}-2147483000", now - 300));
+        std::fs::write(&ticket, "gone: cargo test\n").unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(120);
+        std::fs::File::options().write(true).open(&ticket).unwrap().set_modified(old).unwrap();
+        // The dead waiter's ticket is first in line, so a run that gives up (exit 75) or has to wait
+        // out the ticket's age (the limit is 300 s) shows the ticket held the line.
+        let out = spawn_slot_env(&bash, &script, &root, &[("BUILD_SLOT_MAX_WAIT", "150")], &["--", "echo", "ran"])
+            .wait_with_output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(String::from_utf8_lossy(&out.stdout).contains("ran"));
+        assert!(!ticket.exists(), "the dead waiter's ticket is removed");
+    }
+
+    /// A waiter whose ticket was removed writes it again under the same name (the same place in
+    /// the line), with its text.
+    #[test]
+    fn a_ticket_that_goes_missing_comes_back_in_the_same_place() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        let holder = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "9"]);
+        wait_for("the holder", || root.join("slot").join("owner").exists());
+        // The holder takes its own ticket out of the queue just after it writes the owner file.
+        wait_for("the holder's ticket to go", || queue_tickets(&root).is_empty());
+        let waiter = spawn_slot(&bash, &script, &root, None, &["--", "true"]);
+        wait_for("the waiter's ticket", || {
+            let t = queue_tickets(&root);
+            t.len() == 1 && !t[0].1.is_empty()
+        });
+        let (name, text) = queue_tickets(&root).remove(0);
+        assert!(text.contains("true"), "the ticket says who waits and for what: {text:?}");
+        std::fs::remove_file(root.join("queue").join(&name)).unwrap();
+        wait_for("the ticket again", || !queue_tickets(&root).is_empty());
+        assert_eq!(queue_tickets(&root), vec![(name, text)], "back under its own name, with its text");
+        assert_eq!(waiter.wait_with_output().unwrap().status.code(), Some(0));
+        holder.wait_with_output().unwrap();
+    }
+
+    /// `status` names every live waiter, in line; a ticket still being written is shown by its pid.
+    #[test]
+    fn status_lists_the_waiters_in_line_and_never_an_empty_entry() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        std::fs::create_dir_all(root.join("queue")).unwrap();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        std::fs::write(root.join("queue").join(format!("{}-4242", now - 5)), "lazo: cargo test\n").unwrap();
+        std::fs::write(root.join("queue").join(format!("{}-4343", now - 4)), "").unwrap();
+        let out = spawn_slot(&bash, &script, &root, None, &["status"]).wait_with_output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+        assert!(text.contains("queued #1: lazo: cargo test"), "got {text:?}");
+        assert!(text.contains("queued #2: (waiter pid 4343)"), "got {text:?}");
+    }
 }
