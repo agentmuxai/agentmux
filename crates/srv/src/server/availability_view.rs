@@ -144,7 +144,18 @@ pub(super) fn status_of(
         }
     };
     let read = state_block(live, block.map(|b| b.oid.as_str()), controller);
-    AgentStatus { availability: availability_of_block(mstore, read, now_ms), pane, wanted, api, controller }
+    let availability = stop_is_not_an_error(availability_of_block(mstore, read, now_ms), wanted);
+    AgentStatus { availability, pane, wanted, api, controller }
+}
+
+/// An agent whose block records a stop (the idle lifecycle, `Agents stop`, a person's shut down) is `stopped`
+/// even when its process ended with a non-zero exit code: the stop is a forced kill, which exits that way. `error`
+/// is for a process that ended when nothing asked it to.
+fn stop_is_not_an_error(availability: Availability, wanted: Wanted) -> Availability {
+    match (availability, wanted) {
+        (Availability::NotRunning { exited_with_error: true }, Wanted::Stopped) => Availability::NotRunning { exited_with_error: false },
+        _ => availability,
+    }
 }
 
 /// The block whose controller says what the agent is doing: the registered one, else the agent's own block
@@ -462,5 +473,26 @@ mod tests {
         let working = Availability::Running { waiting_on_user: false };
         let v = describe_status(&status(working, Pane::Shown, Wanted::Running, Reach::Offline), Some(AFTER));
         assert_eq!(v["would"].as_str(), Some("deliver"), "a message that joins a turn goes");
+    }
+
+    #[test]
+    fn a_stop_that_was_asked_for_is_not_an_error_even_when_the_kill_exits_non_zero() {
+        let crashed = Availability::NotRunning { exited_with_error: true };
+        let stopped = Availability::NotRunning { exited_with_error: false };
+        assert_eq!(stop_is_not_an_error(crashed, Wanted::Stopped), stopped, "the idle lifecycle's forced kill is a stop");
+        assert_eq!(stop_is_not_an_error(crashed, Wanted::Running), crashed, "an exit nobody asked for stays an error");
+        assert_eq!(stop_is_not_an_error(crashed, Wanted::Unset), crashed);
+        assert_eq!(stop_is_not_an_error(stopped, Wanted::Stopped), stopped);
+        let idle = Availability::Idle { quiet_for_ms: None };
+        assert_eq!(stop_is_not_an_error(idle, Wanted::Stopped), idle, "only the error exit is rewritten");
+    }
+
+    #[test]
+    fn agents_list_and_the_availability_view_both_call_an_asked_for_stop_stopped() {
+        let av = stop_is_not_an_error(Availability::NotRunning { exited_with_error: true }, Wanted::Stopped);
+        let v = describe_status(&status(av, Pane::NotInWindow, Wanted::Stopped, Reach::NotTracked), Some(AFTER));
+        assert_eq!(v["state"].as_str(), Some("stopped"));
+        let (state, _, _, desired) = crate::server::agent_runtime::runtime_of(&status(av, Pane::NotInWindow, Wanted::Stopped, Reach::NotTracked));
+        assert_eq!((state, desired), (crate::backend::agent_runtime_state::AgentRuntimeState::Stopped, crate::backend::agent_runtime_state::AgentDesiredState::Stopped));
     }
 }
