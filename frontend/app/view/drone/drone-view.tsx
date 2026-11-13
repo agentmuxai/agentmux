@@ -695,7 +695,9 @@ function nodeSummary(n: FlowNode): string {
             return truncate((n.data["title"] as string) || "<no title>");
         case "app_query": {
             const query = (n.data["query"] as string) || "muxbus";
-            return query === "agent" ? `agent ${(n.data["agent"] as string) || "<no one>"}` : query;
+            if (query === "agent") return `agent ${(n.data["agent"] as string) || "<no one>"}`;
+            if (query === "jobs" && n.data["job"]) return `jobs of ${n.data["job"] as string}`;
+            return query;
         }
         case "api":
             return `${(n.data["method"] as string) ?? "GET"} ${truncate((n.data["url"] as string) ?? "")}`;
@@ -979,6 +981,8 @@ const AppQueryFields = (p: { node: FlowNode; update: (patch: Record<string, unkn
                     <option value="muxbus">MuxBus</option>
                     <option value="agent">One agent</option>
                     <option value="tasks">Kanban tasks</option>
+                    <option value="lan_peers">LAN peers</option>
+                    <option value="jobs">Job runs</option>
                 </select>
             </NodeField>
             <Show when={query() === "agent"}>
@@ -988,6 +992,9 @@ const AppQueryFields = (p: { node: FlowNode; update: (patch: Record<string, unkn
                 <NodeText node={p.node} update={p.update} label="Holder" key="holder" placeholder="an agent's name; empty is anyone" />
                 <NodeText node={p.node} update={p.update} label="State" key="state" placeholder="claimed, open, done...; empty is any" />
                 <NodeText node={p.node} update={p.update} label="PR link" key="pr" placeholder="{{trigger.url}}; empty is any" />
+            </Show>
+            <Show when={query() === "jobs"}>
+                <NodeText node={p.node} update={p.update} label="Job" key="job" placeholder="a job's name or id (not a {{reference}}); empty is every job's newest run" />
             </Show>
         </>
     );
