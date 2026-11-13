@@ -13,7 +13,9 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
+use super::manifest::{self, JobTemplateManifest};
 use crate::drone::types::{BlockKind, DroneGraph};
 
 /// The most nodes and edges a template graph holds.
@@ -21,7 +23,7 @@ pub const MAX_NODES: usize = 100;
 pub const MAX_EDGES: usize = 300;
 
 /// The node kinds this build has, for the error that names a missing one.
-const KINDS: &str = "agent, condition, api, response, variables, message, task";
+const KINDS: &str = "agent, condition, api, response, variables, message, task, notify, app_query";
 
 /// What the approval prompt shows of a template's graph.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, ts_rs::TS)]
@@ -93,4 +95,108 @@ pub fn summarize(graph: &DroneGraph) -> DroneSummary {
         }
     }
     out
+}
+
+// ── Parameters ──────────────────────────────────────────────────────────────
+
+/// A parameter placeholder in a node's text: `{{param.repo}}`. Any other
+/// `{{` belongs to the drone's own templating and is left as it is.
+const PARAM_OPEN: &str = "{{param.";
+
+enum Seg<'a> {
+    Text(&'a str),
+    Param(&'a str),
+}
+
+/// `text` split into plain text and the parameter names it uses. A
+/// `{{param.` that does not close as a well-formed name is an error, so a
+/// typo can't pass as text.
+fn split_params(text: &str) -> Result<Vec<Seg<'_>>, String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(PARAM_OPEN) {
+        out.push(Seg::Text(&rest[..start]));
+        let after = &rest[start + PARAM_OPEN.len()..];
+        let name = after.find("}}").map(|end| &after[..end]).filter(|n| manifest::valid_param_name(n));
+        let Some(name) = name else {
+            return Err(format!("{PARAM_OPEN} must open a placeholder like {PARAM_OPEN}repo}}}}"));
+        };
+        out.push(Seg::Param(name));
+        rest = &after[name.len() + 2..];
+    }
+    out.push(Seg::Text(rest));
+    Ok(out)
+}
+
+/// Every string inside the node's `data`, to read or rewrite.
+fn each_string(value: &mut Value, f: &mut dyn FnMut(&mut String) -> Result<(), String>) -> Result<(), String> {
+    match value {
+        Value::String(s) => f(s),
+        Value::Array(items) => items.iter_mut().try_for_each(|v| each_string(v, f)),
+        Value::Object(map) => map.values_mut().try_for_each(|v| each_string(v, f)),
+        _ => Ok(()),
+    }
+}
+
+/// The parameter names the graph uses, each of which the manifest must declare.
+pub fn param_names(graph: &DroneGraph) -> Result<Vec<String>, String> {
+    let mut names = Vec::new();
+    for node in &graph.nodes {
+        let mut data = node.data.clone();
+        each_string(&mut data, &mut |s| {
+            for part in split_params(s).map_err(|e| format!("graph.json: node {:?}: {e}", node.id))? {
+                if let Seg::Param(name) = part {
+                    names.push(name.to_string());
+                }
+            }
+            Ok(())
+        })?;
+    }
+    Ok(names)
+}
+
+/// The graph with each `{{param.NAME}}` replaced by its parameter's value
+/// (the given one, else the default). The values go in once and are never read
+/// for placeholders. A `{{` that a value contains, or that a value forms with the
+/// text next to it, is refused: the drone's own templating would read it at run
+/// time.
+pub fn render(graph: &DroneGraph, m: &JobTemplateManifest, given: &Map<String, Value>) -> Result<DroneGraph, String> {
+    let params = manifest::resolve_params(m, given)?;
+    if let Some((name, _)) = params.iter().find(|(_, v)| manifest::as_text(v).contains("{{")) {
+        return Err(format!("parameter {name:?} can't contain {{{{: a drone would read it as a reference"));
+    }
+    let mut out = graph.clone();
+    for node in &mut out.nodes {
+        let id = node.id.clone();
+        each_string(&mut node.data, &mut |s| {
+            let mut text = String::with_capacity(s.len());
+            let mut inserted = Vec::new();
+            for part in split_params(s)? {
+                match part {
+                    Seg::Text(plain) => text.push_str(plain),
+                    Seg::Param(name) => {
+                        let start = text.len();
+                        text.push_str(&params.get(name).map(manifest::as_text).unwrap_or_default());
+                        inserted.push(start..text.len());
+                    }
+                }
+            }
+            if opens_reference_in(&text, &inserted) {
+                return Err("a parameter value forms {{ with the text next to it: a drone would read it as a reference".to_string());
+            }
+            *s = text;
+            Ok(())
+        })
+        .map_err(|e| format!("node {id:?}: {e}"))?;
+    }
+    Ok(out)
+}
+
+/// Whether a `{{` in `text` takes in a byte of a value that was put in, which
+/// the template text alone would not have written.
+fn opens_reference_in(text: &str, inserted: &[std::ops::Range<usize>]) -> bool {
+    text.as_bytes()
+        .windows(2)
+        .enumerate()
+        .any(|(at, pair)| pair == b"{{" && inserted.iter().any(|r| at < r.end && at + 2 > r.start))
 }

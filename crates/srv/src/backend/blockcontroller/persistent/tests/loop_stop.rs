@@ -75,3 +75,23 @@ async fn a_turn_that_repeats_a_failing_call_is_ended_and_the_agent_is_told() {
     assert_eq!(failed, 0, "the interrupt we sent is not a failure");
     let _ = std::fs::remove_file(&stub);
 }
+
+#[test]
+fn a_replaced_processs_reader_does_not_interrupt_its_successor() {
+    let c = PersistentSubprocessController::new("tab".to_string(), "blk-loop-fence".to_string(), None, None, None, None);
+    let (tx, mut rx) = mpsc::channel::<String>(4);
+    {
+        let mut g = c.inner.lock().unwrap();
+        g.stdin_tx = Some(tx);
+        g.spawn_generation = 7;
+    }
+    let stuck = crate::agents::loop_guard::Stuck::SameThought;
+
+    // The reader of generation 6 saw the loop; generation 7 is the process whose stdin this is now.
+    assert!(!stdout_reader::loop_stop::end_the_turn(&c.inner, 6, "blk-loop-fence", None, &stuck));
+    assert!(rx.try_recv().is_err(), "nothing was sent to the successor's stdin");
+    assert_eq!(crate::backend::reactive::held_notes::attach("blk-loop-fence", "next").0, "next", "no note is held for a turn that did not end");
+
+    assert!(stdout_reader::loop_stop::end_the_turn(&c.inner, 7, "blk-loop-fence", None, &stuck));
+    assert!(rx.try_recv().unwrap().contains("interrupt"), "the current process's reader does interrupt");
+}

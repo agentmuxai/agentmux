@@ -235,20 +235,92 @@ pub async fn merge_base_setting(root: &str, branch: &str) -> Option<String> {
 /// when either can't be found, on the base itself, or when git can't say in
 /// [`PROBE_TIMEOUT`]. A diff of two commits: no working-tree filter runs.
 pub async fn branch_files(root: &str, base: Option<&str>, head: &str) -> Vec<String> {
+    branch_diff_names(root, base, head, None).await
+}
+
+/// The files that PR deletes (the `--diff-filter=D` part of
+/// [`branch_files`]). A release PR deletes every changeset it consumes.
+pub async fn branch_deleted_files(root: &str, base: Option<&str>, head: &str) -> Vec<String> {
+    branch_diff_names(root, base, head, Some("--diff-filter=D")).await
+}
+
+/// The refs a PR's base can be, in the order tried.
+fn base_candidates(base: Option<&str>) -> Vec<String> {
+    match base {
+        Some(b) => vec![format!("origin/{b}"), b.to_string()],
+        None => ["origin/HEAD", "origin/main", "origin/master"].iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+async fn branch_diff_names(root: &str, base: Option<&str>, head: &str, filter: Option<&str>) -> Vec<String> {
     if !plain_branch(head) || base.is_some_and(|b| !plain_branch(b)) {
         return Vec::new();
     }
     let files = async {
-        let bases: Vec<String> = match base {
-            Some(b) => vec![format!("origin/{b}"), b.to_string()],
-            None => ["origin/HEAD", "origin/main", "origin/master"].iter().map(|s| s.to_string()).collect(),
-        };
-        let base = first_ref(root, &bases).await?;
+        let base = first_ref(root, &base_candidates(base)).await?;
         let head = first_ref(root, &[format!("refs/heads/{head}"), format!("origin/{head}")]).await?;
-        let out = safe_git_line(root, &["diff", "--name-only", &format!("{base}...{head}")]).await?;
+        let range = format!("{base}...{head}");
+        let mut args = vec!["diff", "--name-only"];
+        args.extend(filter);
+        args.push(&range);
+        let out = safe_git_line(root, &args).await?;
         Some(out.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect::<Vec<_>>())
     };
     tokio::time::timeout(PROBE_TIMEOUT, files).await.ok().flatten().unwrap_or_default()
+}
+
+/// Whether every commit of `branch` is already in the default branch of
+/// `root` (`origin/HEAD`, `origin/main`, `origin/master`): a merged or
+/// fast-forwarded branch. False when either can't be found. A squash merge
+/// leaves the tip outside the default branch: [`landed_files`] sees those.
+pub async fn branch_contained_in_default(root: &str, branch: &str) -> bool {
+    if !plain_branch(branch) {
+        return false;
+    }
+    let check = async {
+        let base = first_ref(root, &base_candidates(None)).await?;
+        let head = first_ref(root, &[format!("refs/heads/{branch}"), format!("origin/{branch}")]).await?;
+        let n = safe_git_line(root, &["rev-list", "--count", &format!("{base}..{head}")]).await?;
+        Some(n.trim() == "0")
+    };
+    tokio::time::timeout(PROBE_TIMEOUT, check).await.ok().flatten().unwrap_or(false)
+}
+
+/// Of `files` (which `their_branch` changes in `their_root`), the ones whose
+/// content on that branch is exactly what the PR's base has in `my_root`:
+/// the change already landed there (a squash merge leaves the branch tip
+/// outside the base, but the blobs are the same), so it is no overlap. Blob
+/// ids are content hashes, comparable across clones. A file either side can't
+/// be read is kept.
+pub async fn landed_files(
+    my_root: &str,
+    base: Option<&str>,
+    their_root: &str,
+    their_branch: &str,
+    files: &[String],
+) -> Vec<String> {
+    if files.is_empty() || !plain_branch(their_branch) || base.is_some_and(|b| !plain_branch(b)) {
+        return Vec::new();
+    }
+    let check = async {
+        let my_base = first_ref(my_root, &base_candidates(base)).await?;
+        let their_head = first_ref(their_root, &[format!("refs/heads/{their_branch}"), format!("origin/{their_branch}")]).await?;
+        let mut landed = Vec::new();
+        for f in files {
+            if f.starts_with('-') || f.contains(['\n', ':']) {
+                continue;
+            }
+            let (mine, theirs) = (
+                safe_git_line(my_root, &["rev-parse", "--verify", "--quiet", &format!("{my_base}:{f}")]).await,
+                safe_git_line(their_root, &["rev-parse", "--verify", "--quiet", &format!("{their_head}:{f}")]).await,
+            );
+            if mine.is_some() && mine == theirs {
+                landed.push(f.clone());
+            }
+        }
+        Some(landed)
+    };
+    tokio::time::timeout(PROBE_TIMEOUT, check).await.ok().flatten().unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -410,6 +482,63 @@ mod tests {
         assert_eq!(merge_base_setting(&root, "agent/y").await.as_deref(), Some("agent/x"));
         assert!(branch_files(&root, None, "no/such/branch").await.is_empty(), "a head that can't be found");
         assert!(branch_files(&root, None, "--output=x").await.is_empty(), "never a flag");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A merged branch, a squash-merged branch and a release's deleted
+    /// changesets are told apart from work still in flight.
+    #[tokio::test]
+    async fn merged_squashed_and_deleted_files_are_told_from_work_in_flight() {
+        let tmp = std::env::temp_dir().join(format!("wf-landed-{}-{}", std::process::id(), agentmux_common::time::now_ms()));
+        std::fs::create_dir_all(tmp.join(".changesets")).unwrap();
+        git(&tmp, &["init", "-q", "-b", "main"]);
+        git(&tmp, &["config", "user.email", "t@t"]);
+        git(&tmp, &["config", "user.name", "t"]);
+        std::fs::write(tmp.join("base.rs"), "a").unwrap();
+        git(&tmp, &["add", "."]);
+        git(&tmp, &["commit", "-q", "-m", "base"]);
+        git(&tmp, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        let root = tmp.to_string_lossy().to_string();
+
+        git(&tmp, &["checkout", "-q", "-b", "agent/x"]);
+        std::fs::write(tmp.join("base.rs"), "x").unwrap();
+        std::fs::write(tmp.join("other.rs"), "o").unwrap();
+        std::fs::write(tmp.join(".changesets/1.md"), "c").unwrap();
+        git(&tmp, &["add", "."]);
+        git(&tmp, &["commit", "-q", "-m", "work"]);
+        assert!(!branch_contained_in_default(&root, "agent/x").await, "not merged yet");
+        assert!(!branch_contained_in_default(&root, "no/such").await, "unknown branch");
+        assert!(!branch_contained_in_default(&root, "--output=x").await, "never a flag");
+        let files = vec!["base.rs".to_string(), "other.rs".to_string(), ".changesets/1.md".to_string()];
+        assert!(landed_files(&root, None, &root, "agent/x", &files).await.is_empty(), "nothing on main yet");
+
+        // Squash merge: main gets the same content in a new commit, the
+        // branch tip stays outside it; other.rs is not part of it.
+        git(&tmp, &["checkout", "-q", "main"]);
+        std::fs::create_dir_all(tmp.join(".changesets")).unwrap();
+        std::fs::write(tmp.join("base.rs"), "x").unwrap();
+        std::fs::write(tmp.join(".changesets/1.md"), "c").unwrap();
+        git(&tmp, &["add", "."]);
+        git(&tmp, &["commit", "-q", "-m", "squash"]);
+        git(&tmp, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        assert!(!branch_contained_in_default(&root, "agent/x").await, "a squash leaves the tip outside");
+        assert_eq!(
+            landed_files(&root, None, &root, "agent/x", &files).await,
+            vec!["base.rs".to_string(), ".changesets/1.md".to_string()],
+            "same content on main: landed; other.rs is not"
+        );
+
+        // A release PR deletes the consumed changeset.
+        git(&tmp, &["checkout", "-q", "-b", "agent/release"]);
+        git(&tmp, &["rm", "-q", ".changesets/1.md"]);
+        git(&tmp, &["commit", "-q", "-m", "release"]);
+        assert_eq!(branch_deleted_files(&root, None, "agent/release").await, vec![".changesets/1.md".to_string()]);
+        assert_eq!(branch_files(&root, None, "agent/release").await, vec![".changesets/1.md".to_string()]);
+        assert!(branch_deleted_files(&root, None, "agent/x").await.is_empty(), "a branch that deletes nothing");
+
+        // A fast-forward merge: the branch is inside main.
+        git(&tmp, &["update-ref", "refs/remotes/origin/main", "agent/x"]);
+        assert!(branch_contained_in_default(&root, "agent/x").await);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

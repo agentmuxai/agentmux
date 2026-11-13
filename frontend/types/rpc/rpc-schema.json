@@ -4806,6 +4806,25 @@
     }
   },
   {
+    "command": "jobs.templates.make_drone",
+    "request": "agentmux_srv::server::drone_template_handlers::MakeDroneReq",
+    "requestName": "MakeDroneReq",
+    "requestTs": {
+      "imports": [
+        "MakeDroneReq"
+      ],
+      "name": "MakeDroneReq"
+    },
+    "response": "agentmux_srv::server::drone_template_handlers::MakeDroneResult",
+    "responseName": "MakeDroneResult",
+    "responseTs": {
+      "imports": [
+        "MakeDroneResult"
+      ],
+      "name": "MakeDroneResult"
+    }
+  },
+  {
     "command": "jobs.templates.uninstall",
     "request": "agentmux_srv::server::job_template_handlers::JobTemplateIdReq",
     "requestName": "JobTemplateIdReq",

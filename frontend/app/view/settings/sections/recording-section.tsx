@@ -367,7 +367,7 @@ function WhisperRows(p: {
                         }}
                     >
                         <For each={WHISPER_MODEL_CHOICES}>{(m) => <option value={m}>{m}</option>}</For>
-                        <option value="custom">custom path…</option>
+                        <option value="custom">{t("settings.recording.whisperModel.custom")}</option>
                     </Select>
                 }
                 description={RECORDING_SETTINGS.model.description}
@@ -404,10 +404,10 @@ function EngineRows(p: {
                 label={RECORDING_SETTINGS.engine.label}
                 control={
                     <Select class="setting-select" value={p.engine()} onChange={(v) => set("voice:engine", v)}>
-                        <option value="groq">Groq (cloud)</option>
-                        <option value="whisper-local">whisper.cpp (local, offline)</option>
+                        <option value="groq">{t("settings.recording.engine.groq")}</option>
+                        <option value="whisper-local">{t("settings.recording.engine.whisperLocal")}</option>
                         <Show when={isDev()}>
-                            <option value="webspeech">Web Speech (dev only)</option>
+                            <option value="webspeech">{t("settings.recording.engine.webSpeech")}</option>
                         </Show>
                     </Select>
                 }
@@ -422,7 +422,7 @@ function EngineRows(p: {
                         <MaskedKeyField
                             value={p.s()["voice:groqApiKey"] as string | undefined}
                             onSave={(key) => set("voice:groqApiKey", key)}
-                            placeholder="paste key — never displayed again after saving"
+                            placeholder={t("settings.recording.groqKey.placeholder")}
                         />
                     }
                     description={RECORDING_SETTINGS.groqApiKey.description}
@@ -449,9 +449,9 @@ function MicrophoneRows(p: { s: SettingsFn; devices: Accessor<MediaDeviceInfo[]>
                         value={(p.s()["voice:inputDeviceId"] as string) ?? "default"}
                         onChange={(v) => set("voice:inputDeviceId", v)}
                     >
-                        <option value="default">System default</option>
+                        <option value="default">{t("settings.recording.microphone.systemDefault")}</option>
                         <For each={p.devices()}>
-                            {(d, i) => <option value={d.deviceId}>{d.label || `Microphone ${i() + 1}`}</option>}
+                            {(d, i) => <option value={d.deviceId}>{d.label || t("settings.recording.microphone.numbered", { n: i() + 1 })}</option>}
                         </For>
                     </Select>
                 }
@@ -467,10 +467,10 @@ function MicTestRows(p: { t: MicTest }): JSX.Element {
             <SectionHeader label={t("settings.recording.group.testMicrophone")} />
             <div class="setting-mic-test">
                 <Button tone="accent" disabled={listeningOrTranscribing()} onClick={() => void runMicTest(p.t)}>
-                    {p.t.state() === "listening" ? "Listening…" : p.t.state() === "transcribing" ? "Transcribing…" : "Start test"}
+                    {p.t.state() === "listening" ? t("settings.recording.test.listening") : p.t.state() === "transcribing" ? t("settings.recording.test.transcribing") : t("settings.recording.test.start")}
                 </Button>
                 <Show when={listeningOrTranscribing()}>
-                    <Button onClick={() => cancelMicTest(p.t)}>Cancel</Button>
+                    <Button onClick={() => cancelMicTest(p.t)}>{t("settings.recording.test.cancel")}</Button>
                 </Show>
                 <div class="setting-mic-test-meter">
                     <div class="setting-mic-test-meter-fill" style={{ width: `${Math.min(100, p.t.meter.level() * 220)}%` }} />

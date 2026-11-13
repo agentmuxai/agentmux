@@ -353,6 +353,7 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
         "attempt": attempt,
         "result": result_text,
         "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
+        "handback": segment == "release" && arguments.get("handback").and_then(|v| v.as_bool()).unwrap_or(false),
     });
     let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
         .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
@@ -381,6 +382,11 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
             // agent can pick it up when nobody ever will (Codex P2 on
             // PR #2902). The server reports the resulting state; trust
             // it rather than re-deriving the attempts rule here.
+            if segment == "release" && arguments.get("handback").and_then(|v| v.as_bool()).unwrap_or(false) {
+                return Ok(format!(
+                    "Handed {id} back to the pool: no attempt used, and an unnamed claim won't offer it to you again."
+                ));
+            }
             let resulting = serde_json::from_str::<Value>(&text)
                 .ok()
                 .and_then(|v| v.get("state").and_then(|s| s.as_str()).map(str::to_string))
@@ -389,8 +395,9 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
                 format!(
                     "Released {id}, and it has now used its final attempt — the item is \
                      parked as FAILED and will not be offered to any agent again. If it \
-                     still needs doing, enqueue a fresh item (ideally with what you \
-                     learned about why it kept failing)."
+                     still needs doing, Tasks retry reopens it (or enqueue a fresh item, ideally \
+                     with what you learned about why it kept failing). A task that is simply \
+                     outside your area is handed back with handback: true, which never parks it."
                 )
             } else {
                 format!("Released {id} back to the queue for another agent.")
@@ -690,27 +697,34 @@ fn attached_text(v: &Value) -> String {
     format!(" Attached: {}.", names.join(", "))
 }
 
-/// The refusal for a call without `attempt`: the tasks this agent holds, each with the attempt to pass. A
-/// weak model repeats a bare refusal; this one says what to send. It never fills the attempt in: the
-/// argument is how srv rejects a stale holder, and a default would defeat it.
-async fn missing_attempt(arguments: &Value, self_id: &str, cx: &ToolCtx<'_>) -> anyhow::Error {
+/// The tasks `self_id` holds in `state` on any board, each with its attempt.
+async fn held_in(state: &str, self_id: &str, cx: &ToolCtx<'_>) -> Vec<(String, i64)> {
     let ToolCtx { local_url, auth_key, client, .. } = *cx;
-    let asked = arguments.get("id").and_then(|v| v.as_str()).map(|s| s.trim().trim_start_matches('#')).unwrap_or("");
     let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
-    let held: Vec<(String, i64)> = match client.get(&url).query(&[("state", "claimed"), ("limit", "200"), ("board", "all")]).header(AUTH_KEY_HEADER, auth_key).send().await {
+    match client.get(&url).query(&[("state", state), ("limit", "200"), ("board", "all")]).header(AUTH_KEY_HEADER, auth_key).send().await {
         Ok(resp) => resp.json::<Value>().await.ok(),
         Err(_) => None,
     }
     .and_then(|v| v.get("items").and_then(Value::as_array).cloned())
     .unwrap_or_default()
     .iter()
-    .filter(|it| it.get("claimed_by").and_then(Value::as_str) == Some(self_id))
+    .filter(|it| it.get("claimed_by").and_then(Value::as_str) == Some(self_id) && it.get("state").and_then(Value::as_str).is_none_or(|s| s == state))
     .filter_map(|it| {
         let task = it.get("ref").and_then(Value::as_str).map(|r| r.trim_start_matches('#').to_string())
             .or_else(|| it.get("num").and_then(Value::as_i64).map(|n| n.to_string()))?;
         Some((task, it.get("attempts").and_then(Value::as_i64)?))
     })
-    .collect();
+    .collect()
+}
+
+/// The refusal for a call without `attempt`: the tasks this agent holds, each with the attempt to pass. A
+/// weak model repeats a bare refusal; this one says what to send. It never fills the attempt in: the
+/// argument is how srv rejects a stale holder, and a default would defeat it.
+async fn missing_attempt(arguments: &Value, self_id: &str, cx: &ToolCtx<'_>) -> anyhow::Error {
+    let asked = arguments.get("id").and_then(|v| v.as_str()).map(|s| s.trim().trim_start_matches('#')).unwrap_or("");
+    // A task asked about with `Tasks ask` is `blocked` and still held: update and submit still take it.
+    let mut held = held_in("claimed", self_id, cx).await;
+    held.extend(held_in("blocked", self_id, cx).await);
     let mine = held.iter().find(|(task, _)| !asked.is_empty() && task == asked);
     anyhow::anyhow!(match (mine, held.as_slice()) {
         (Some((task, n)), _) => format!("missing required parameter: attempt. You hold #{task} as attempt {n}: pass id={task} attempt={n}."),

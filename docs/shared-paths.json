@@ -182,7 +182,7 @@
         "crates/srv/src/backend/cli_install.rs",
         "crates/srv/src/backend/cli_uv.rs",
         "crates/srv/src/backend/cli_prune.rs",
-        "crates/srv/src/server/install_handlers.rs",
+        "crates/srv/src/server/install_task.rs",
         "crates/srv/src/headless.rs",
         "crates/srv/src/identity/secret_store.rs"
       ]

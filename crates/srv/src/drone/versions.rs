@@ -24,11 +24,11 @@
 //! registered by the interfaces PR, so that a release between the two PRs
 //! cannot record it as applied while empty.
 
-use rusqlite::params;
+use rusqlite::{params, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::types::DroneGraph;
+use super::types::{DroneDefinition, DroneGraph};
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::store::Store;
 
@@ -100,6 +100,20 @@ pub trait DroneVersionStore {
     /// **Module C.**
     fn version_save(&self, drone_id: &str, graph: &DroneGraph, saved_by: &str, now_ms: i64) -> Result<GraphVersion, StoreError>;
 
+    /// Save `definition` and its next version in one immediate transaction, so a
+    /// concurrent save cannot leave the stored definition and the newest version
+    /// from different writes. `Ok(Ok(v))` saved both; `Ok(Err(e))` saved the
+    /// definition but not the version (a drone must stay editable); `Err(e)`
+    /// saved neither.
+    ///
+    /// **Module C.**
+    fn drone_save_with_version(
+        &self,
+        definition: &DroneDefinition,
+        saved_by: &str,
+        now_ms: i64,
+    ) -> Result<Result<GraphVersion, StoreError>, StoreError>;
+
     /// One version, or `None` when the drone has no such number. A saved version never changes.
     ///
     /// **Module C.**
@@ -138,34 +152,72 @@ fn version_from_row(row: &rusqlite::Row<'_>) -> Result<GraphVersion, StoreError>
 /// The columns every read below selects, in [`version_from_row`]'s order.
 const SELECT: &str = "SELECT drone_id, version, graph, hash, saved_at, saved_by FROM db_drone_versions";
 
+/// The next version of `drone_id` and its insert, on `conn` (a transaction the
+/// caller owns). A deferred transaction would let two connections read the same
+/// maximum; both callers take the write lock first.
+fn insert_version(
+    conn: &rusqlite::Connection,
+    drone_id: &str,
+    graph: &DroneGraph,
+    saved_by: &str,
+    now_ms: i64,
+) -> Result<GraphVersion, StoreError> {
+    let graph_text = serde_json::to_string(graph)?;
+    let hash = graph_hash(graph);
+    let next: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(version), 0) + 1 FROM db_drone_versions WHERE drone_id = ?1",
+        params![drone_id],
+        |row| row.get(0),
+    )?;
+    conn.execute(
+        "INSERT INTO db_drone_versions (drone_id, version, graph, hash, saved_at, saved_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![drone_id, next, graph_text, hash, now_ms, saved_by],
+    )?;
+    Ok(GraphVersion {
+        drone_id: drone_id.to_string(),
+        version: next,
+        graph: graph.clone(),
+        hash,
+        saved_at: now_ms,
+        saved_by: saved_by.to_string(),
+    })
+}
+
 impl DroneVersionStore for Store {
     fn version_save(&self, drone_id: &str, graph: &DroneGraph, saved_by: &str, now_ms: i64) -> Result<GraphVersion, StoreError> {
-        let graph_text = serde_json::to_string(graph)?;
-        let hash = graph_hash(graph);
         let mut conn = self.conn().lock().unwrap();
-        // The number and the insert are one transaction: a second save cannot
-        // read the same maximum, and the primary key is the backstop if one
-        // somehow does.
-        let tx = conn.transaction()?;
-        let next: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(version), 0) + 1 FROM db_drone_versions WHERE drone_id = ?1",
-            params![drone_id],
-            |row| row.get(0),
-        )?;
-        tx.execute(
-            "INSERT INTO db_drone_versions (drone_id, version, graph, hash, saved_at, saved_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![drone_id, next, graph_text, hash, now_ms, saved_by],
-        )?;
+        // Immediate: the write lock is taken before the maximum is read, so a
+        // second process waits instead of reading the same number.
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let saved = insert_version(&tx, drone_id, graph, saved_by, now_ms)?;
         tx.commit()?;
-        Ok(GraphVersion {
-            drone_id: drone_id.to_string(),
-            version: next,
-            graph: graph.clone(),
-            hash,
-            saved_at: now_ms,
-            saved_by: saved_by.to_string(),
-        })
+        Ok(saved)
+    }
+
+    fn drone_save_with_version(
+        &self,
+        definition: &DroneDefinition,
+        saved_by: &str,
+        now_ms: i64,
+    ) -> Result<Result<GraphVersion, StoreError>, StoreError> {
+        let mut conn = self.conn().lock().unwrap();
+        // One immediate transaction holds the write lock from the definition
+        // through the version insert, so another save cannot get between them.
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        super::storage::upsert_definition(&tx, definition)?;
+        match insert_version(&tx, &definition.id, &definition.graph, saved_by, now_ms) {
+            Ok(version) => {
+                tx.commit()?;
+                Ok(Ok(version))
+            }
+            // Keep the definition when only the version fails: the drone must
+            // stay editable, and the caller logs this.
+            Err(e) => {
+                tx.commit()?;
+                Ok(Err(e))
+            }
+        }
     }
 
     fn version_get(&self, drone_id: &str, version: i64) -> Result<Option<GraphVersion>, StoreError> {
@@ -212,6 +264,7 @@ impl DroneVersionStore for Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::drone::storage::DroneStore;
     use crate::drone::types::{FlowNode, NodePosition};
     use serde_json::json;
 
@@ -247,5 +300,77 @@ mod tests {
     fn a_pin_is_written_as_latest_or_a_number() {
         assert_eq!(serde_json::to_value(Pin::Latest).unwrap(), json!("latest"));
         assert_eq!(serde_json::to_value(Pin::Number(3)).unwrap(), json!({ "number": 3 }));
+    }
+
+    /// Two processes are two connections to the shared store; the write lock
+    /// must be taken before the next number is read, or one save is lost.
+    #[test]
+    fn two_connections_saving_at_once_take_versions_one_and_two() {
+        use std::sync::{Arc, Barrier};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shared.db");
+        let stores = [Arc::new(Store::open(&path).unwrap()), Arc::new(Store::open(&path).unwrap())];
+        let barrier = Arc::new(Barrier::new(2));
+        let handles: Vec<_> = stores
+            .into_iter()
+            .enumerate()
+            .map(|(i, store)| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.version_save("d1", &graph(&format!("t{i}")), "operator", i as i64).unwrap().version
+                })
+            })
+            .collect();
+        let mut versions: Vec<i64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        versions.sort();
+        assert_eq!(versions, [1, 2], "neither save is lost");
+    }
+
+    /// The definition and the newest version must come from the same save; a
+    /// save that gets between them would leave `Latest` on an older graph.
+    #[test]
+    fn a_definition_and_its_latest_version_agree_under_concurrent_saves() {
+        use std::sync::{Arc, Barrier};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shared.db");
+        let stores = [Arc::new(Store::open(&path).unwrap()), Arc::new(Store::open(&path).unwrap())];
+        let definition = |writer: usize, round: usize| {
+            let mut d: DroneDefinition = serde_json::from_value(json!({
+                "id": "d1", "name": "Echo", "created_at": 0, "updated_at": 0
+            }))
+            .unwrap();
+            d.graph = graph(&format!("{writer}-{round}"));
+            d
+        };
+        let reader = stores[0].clone();
+        let barrier = Arc::new(Barrier::new(2));
+        let handles: Vec<_> = stores
+            .into_iter()
+            .enumerate()
+            .map(|(writer, store)| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for round in 0..10 {
+                        store
+                            .drone_save_with_version(&definition(writer, round), "operator", round as i64)
+                            .unwrap()
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let definition = reader.drone_get("d1").unwrap().unwrap();
+        let latest = reader.version_resolve("d1", Pin::Latest).unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(&definition.graph).unwrap(),
+            serde_json::to_value(&latest.graph).unwrap(),
+            "the definition is the graph of the newest version"
+        );
+        assert_eq!(reader.version_list("d1", 50).unwrap().len(), 20, "every save has a version");
     }
 }

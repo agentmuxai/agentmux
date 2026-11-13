@@ -50,6 +50,7 @@ pub mod bundle_scope;
 pub mod bundle_versions;
 pub mod migrations;
 pub mod muxbus;
+mod muxbus_load;
 mod muxbus_presence;
 pub mod registry_mirror;
 pub mod builtin_seeds;

@@ -691,6 +691,12 @@ function nodeSummary(n: FlowNode): string {
             return `to ${(n.data["to"] as string) || "<no one>"} · ${truncate((n.data["body"] as string) ?? "")}`;
         case "task":
             return truncate((n.data["title"] as string) || "<no title>");
+        case "notify":
+            return truncate((n.data["title"] as string) || "<no title>");
+        case "app_query": {
+            const query = (n.data["query"] as string) || "muxbus";
+            return query === "agent" ? `agent ${(n.data["agent"] as string) || "<no one>"}` : query;
+        }
         case "api":
             return `${(n.data["method"] as string) ?? "GET"} ${truncate((n.data["url"] as string) ?? "")}`;
         case "condition":
@@ -732,6 +738,12 @@ export function nodeCopyEntries(n: FlowNode): CopyMenuEntry[] {
             break;
         case "task":
             entries.push({ label: "Copy title", value: str("title") }, { label: "Copy task text", value: str("body") });
+            break;
+        case "notify":
+            entries.push({ label: "Copy title", value: str("title") }, { label: "Copy text", value: str("body") });
+            break;
+        case "app_query":
+            entries.push({ label: "Copy query", value: str("query") });
             break;
         case "api":
             entries.push({ label: "Copy URL", value: str("url") }, { label: "Copy request body", value: str("body") });
@@ -833,6 +845,12 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
             </Show>
             <Show when={p.node.data.kind === "task"}>
                 <TaskFields node={p.node} update={update} />
+            </Show>
+            <Show when={p.node.data.kind === "notify"}>
+                <NotifyFields node={p.node} update={update} />
+            </Show>
+            <Show when={p.node.data.kind === "app_query"}>
+                <AppQueryFields node={p.node} update={update} />
             </Show>
             <Show when={p.node.data.kind === "api"}>
                 <NodeField label="Method">
@@ -944,6 +962,42 @@ const TaskFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>
         <NodeLongText node={p.node} update={p.update} label="Text" key="body" placeholder="What to look at" />
         <NodeText node={p.node} update={p.update} label="For" key="target" placeholder="an agent's id; empty is the backlog" />
         <NodeText node={p.node} update={p.update} label="Key" key="dedupe" placeholder="one task per key, e.g. {{a.workflow}}" />
+    </>
+);
+
+/** The App query block's fields: what to read, and the filters that query takes. */
+const AppQueryFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => {
+    const query = () => (p.node.data["query"] as string) || "muxbus";
+    return (
+        <>
+            <NodeField label="Query">
+                <select
+                    class="drone-input nodrag"
+                    value={query()}
+                    onChange={(e) => p.update({ query: e.currentTarget.value })}
+                >
+                    <option value="muxbus">MuxBus</option>
+                    <option value="agent">One agent</option>
+                    <option value="tasks">Kanban tasks</option>
+                </select>
+            </NodeField>
+            <Show when={query() === "agent"}>
+                <NodeText node={p.node} update={p.update} label="Agent" key="agent" placeholder="an agent's name (not a {{reference}})" />
+            </Show>
+            <Show when={query() === "tasks"}>
+                <NodeText node={p.node} update={p.update} label="Holder" key="holder" placeholder="an agent's name; empty is anyone" />
+                <NodeText node={p.node} update={p.update} label="State" key="state" placeholder="claimed, open, done...; empty is any" />
+                <NodeText node={p.node} update={p.update} label="PR link" key="pr" placeholder="{{trigger.url}}; empty is any" />
+            </Show>
+        </>
+    );
+};
+
+/** The Notify block's fields: the heading (the graph's own words) and the text. */
+const NotifyFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => (
+    <>
+        <NodeText node={p.node} update={p.update} label="Title" key="title" placeholder="Backup is late (not a {{reference}})" />
+        <NodeLongText node={p.node} update={p.update} label="Text" key="body" placeholder="Last good run: {{a.finished}}" />
     </>
 );
 

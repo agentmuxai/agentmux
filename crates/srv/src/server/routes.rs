@@ -104,8 +104,12 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     // itself. Full router only; a container reaches it through the container listener.
     let model_gateway = Router::new().route("/api/v1/model/:route/*tail", axum::routing::any(super::model_gateway_handlers::handle_model_gateway));
 
+    // A headless srv serving its own UI also serves the browser sign-in (`local_session_routes`).
+    let sign_in = if super::local_session_routes::enabled() { super::local_session_routes::routes() } else { Router::new() };
+
     let full = Router::new()
         .merge(full_health)
+        .merge(sign_in)
         .merge(widget_files)
         .merge(model_gateway)
         .merge(whatsapp_webhooks)
@@ -609,6 +613,8 @@ fn muxspect_routes() -> Router<AppState> {
         .route("/api/v1/work-facts/who", get(work_facts_handlers::handle_who_is_working_on))
         // What messages cost per agent per day (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md section 7). Read-only.
         .route("/api/v1/message-stats", get(message_stats_handler::handle_message_stats))
+        // The recent messages between agents, ids and times only, for the Atlas map on open (`backend::message_flow`). Read-only.
+        .route("/api/v1/message-flow", get(message_flow_handler::handle_message_flow))
         // ClaimWork / ReleaseWork (same spec, §3.4): informational claims,
         // never a lock.
         // PostToChannel / ReadChannel: a repository's coordination channel
@@ -944,7 +950,9 @@ fn google_agent_routes() -> Router<AppState> {
 pub(super) fn with_frontend(router: Router<AppState>, dir: &std::path::Path) -> Router<AppState> {
     use tower_http::services::{ServeDir, ServeFile};
     let index = ServeFile::new(dir.join("index.html"));
-    router.fallback_service(ServeDir::new(dir).fallback(index))
+    // The UI's files carry the sign-in's policy (CSP, framing) when srv signs a browser in.
+    let files = Router::new().fallback_service(ServeDir::new(dir).fallback(index)).layer(middleware::from_fn(super::local_session_routes::ui_headers));
+    router.fallback_service(files)
 }
 
 #[cfg(test)]

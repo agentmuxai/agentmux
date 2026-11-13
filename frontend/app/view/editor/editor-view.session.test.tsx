@@ -684,6 +684,22 @@ describe("the resize handles", () => {
         await expect(out()).toMatchFileSnapshot(snap("resize-tree"));
     });
 
+    it("starts a tree drag from the width the column is drawn at, when a narrow pane shrinks it below the stored one", async () => {
+        const v = await mountView();
+        vi.spyOn(v.model, "commitTreeWidth").mockResolvedValue(undefined as never);
+        const column = v.container.querySelector<HTMLElement>(".editor-tree-column")!;
+        const handle = v.container.querySelector(".editor-tree-resize-handle")!;
+        expect(v.model.treeWidthAtom()).toBe(240);
+        // 350 px of pane: the 240 px column is drawn at 186 px (flex: 0 1 240px).
+        vi.spyOn(column, "getBoundingClientRect").mockReturnValue({ width: 186 } as DOMRect);
+        fireEvent.mouseDown(handle, { clientX: 186 });
+        fireEvent.mouseMove(document, { clientX: 156 });
+        expect(v.model.treeWidthAtom(), "the divider followed the pointer 30 px left").toBe(156);
+        fireEvent.mouseMove(document, { clientX: 216 });
+        expect(v.model.treeWidthAtom()).toBe(216);
+        fireEvent.mouseUp(document);
+    });
+
     it("drags the preview's height, up for taller", async () => {
         const v = await mountView();
         await open(v.model, "/home/u/notes.md");

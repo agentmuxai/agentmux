@@ -54,17 +54,26 @@ export function posixShim() {
 /** Why `home` mustn't be used, or null: it's the machine's own data folder,
  *  by its path or through a symlink or junction. Paths that exist are
  *  resolved first, so an alias of the real folder is refused too (Codex on
- *  #4667). */
-export function homeProblem(home, realHome = join(homedir(), ".agentmux")) {
+ *  #4667). A path that exists but can't be resolved (`realpathSync.native` throws
+ *  UNKNOWN on a Windows junction on some hosts) is refused, not compared as
+ *  written: its written form is the alias. `resolvers` are tried in order. */
+export function homeProblem(home, realHome = join(homedir(), ".agentmux"), resolvers = [realpathSync.native, realpathSync]) {
     const real = (p) => {
-        try {
-            return realpathSync.native(p);
-        } catch {
-            return resolve(p);
+        let absent = true;
+        for (const resolveReal of resolvers) {
+            try {
+                return resolveReal(p);
+            } catch (err) {
+                absent &&= err.code === "ENOENT" || err.code === "ENOTDIR";
+            }
         }
+        // Nothing there yet: it can't be an alias of a folder that is.
+        return absent ? resolve(p) : null;
     };
-    const norm = (p) => real(p).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-    return norm(home) === norm(realHome) ? "it is this machine's own ~/.agentmux" : null;
+    const norm = (p) => real(p)?.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    const [a, b] = [norm(home), norm(realHome)];
+    if (a === undefined || b === undefined) return "it can't be told apart from this machine's own ~/.agentmux";
+    return a === b ? "it is this machine's own ~/.agentmux" : null;
 }
 
 /**

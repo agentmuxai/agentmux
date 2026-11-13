@@ -155,7 +155,6 @@
 110 crates/srv/src/backend/blockcontroller/persistent/queue.rs::PersistentSubprocessController::send_message_with_images_from
 197 crates/srv/src/backend/blockcontroller/persistent/resume_retry.rs::PersistentSubprocessController::retry_after_resume_failure
 155 crates/srv/src/backend/blockcontroller/persistent/segments.rs::PersistentSubprocessController::apply_resume_gate_with
-292 crates/srv/src/backend/blockcontroller/persistent_resume.rs::update
 151 crates/srv/src/backend/blockcontroller/shell/file_ops.rs::handle_append_block_file
 162 crates/srv/src/backend/blockcontroller/shell/indexing.rs::build_output_idx_from
 145 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
@@ -182,7 +181,7 @@
 159 crates/srv/src/backend/memory/reconcile.rs::reconcile_file
 126 crates/srv/src/backend/name_resolution.rs::resolve_name_to_uid
 145 crates/srv/src/backend/notify/policy.rs::PolicyState::step
-102 crates/srv/src/backend/reactive/activity_watcher.rs::run_agent_summary_loop
+101 crates/srv/src/backend/reactive/activity_watcher.rs::run_agent_summary_loop
 150 crates/srv/src/backend/reactive/handler.rs::Handler::register_agent_full
 112 crates/srv/src/backend/reactive/sanitize.rs::sanitize_message
 110 crates/srv/src/backend/resume_preflight.rs::preflight
@@ -199,7 +198,6 @@
 183 crates/srv/src/backend/storage/filestore/counter.rs::FileStore::append_in_tx
 143 crates/srv/src/backend/storage/filestore/offset_ops.rs::FileStore::write_at
 119 crates/srv/src/backend/storage/migrations.rs::run_filestore_migrations
-310 crates/srv/src/backend/storage/muxbus.rs::Store::muxbus_load_tokens
 131 crates/srv/src/backend/subagent_watcher/mod.rs::SubagentWatcher::build_watch
 286 crates/srv/src/backend/subagent_watcher/scan.rs::SubagentWatcher::reconcile_stale_subagents_impl
 139 crates/srv/src/backend/supervisor/watcher.rs::Supervisor::evaluate
@@ -222,7 +220,6 @@
 102 crates/srv/src/bootstrap/stores.rs::prepare_in_process
 113 crates/srv/src/bootstrap/watchers.rs::start_parent_watcher
 154 crates/srv/src/broker/state.rs::update
-140 crates/srv/src/drone/executor/engine.rs::execute
 134 crates/srv/src/identity/oauth_client.rs::start_code_flow
 125 crates/srv/src/identity/resolver/oauth_probe.rs::probe_oauth_status
 111 crates/srv/src/messaging/discord/gateway.rs::handle_dispatch
@@ -280,7 +277,6 @@
 146 crates/srv/src/server/http_viewer.rs::feed_stream
 133 crates/srv/src/server/http_viewer_input.rs::handle_viewer_input
 106 crates/srv/src/server/identity_auth_dirs.rs::compute_and_ensure_account_dir
-332 crates/srv/src/server/install_handlers.rs::spawn_install_task
 102 crates/srv/src/server/jekt_files.rs::receive
 104 crates/srv/src/server/jekt_hold.rs::hold_with_reason
 238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event
@@ -306,7 +302,7 @@
 201 crates/srv/src/server/vault_handlers.rs::handle_host_vault
 120 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
-227 crates/srv/src/server/websocket.rs::handle_ws_connection
+231 crates/srv/src/server/websocket.rs::handle_ws_connection
 111 crates/srv/src/server/widget_agent_handlers.rs::handle_widgets_install
 104 crates/srv/src/server/work_queue.rs::enqueue_core
 120 crates/srv/src/server/work_queue.rs::handle_work_claim

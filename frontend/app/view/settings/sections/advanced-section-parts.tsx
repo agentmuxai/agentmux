@@ -17,6 +17,18 @@ import { ADVANCED_SETTINGS } from "./advanced-settings-index";
 
 const s = () => settingsAtom() ?? ({} as any);
 
+/** The setting a model route's daily spend cap is kept under (the gateway reads it at each request). */
+const ROUTE_CAP_SETTING = "model:spend_cap_usd:openrouter";
+const DEFAULT_ROUTE_CAP_USD = 100;
+
+/** The cap in dollars as the field shows it: unset is the default, `none` or 0 is shown as 0 (no cap). */
+function routeCapShown(stored: unknown): number {
+    if (stored == null) return DEFAULT_ROUTE_CAP_USD;
+    if (typeof stored === "string" && /^(none|unlimited|off)$/i.test(stored.trim())) return 0;
+    const n = Number(typeof stored === "string" ? stored.trim().replace(/^\$/, "") : stored);
+    return Number.isFinite(n) && n >= 0 ? n : DEFAULT_ROUTE_CAP_USD;
+}
+
 /** A limit setting: "auto" (shown as it is, stored as unset), 0 for no limit, or a positive number. */
 function LimitInput(props: { settingKey: "agent:container_memory" | "agent:container_cpus"; value: unknown }): JSX.Element {
     return (
@@ -86,6 +98,19 @@ export function AgentPaneLimits(): JSX.Element {
                         min={0} step={50}
                         value={((s()["agent:compactat"] as number) ?? 600000) / 1000}
                         onChange={(v) => set("agent:compactat", Math.max(0, Math.round(v)) * 1000)}
+                    />
+                }
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.routeSpendCap.id}
+                label={ADVANCED_SETTINGS.routeSpendCap.label}
+                description={ADVANCED_SETTINGS.routeSpendCap.description}
+                control={
+                    <NumberControl
+                        class="setting-number setting-number--wide"
+                        min={0} step={1}
+                        value={routeCapShown(s()[ROUTE_CAP_SETTING])}
+                        onChange={(v) => set(ROUTE_CAP_SETTING, Math.max(0, v))}
                     />
                 }
             />
@@ -283,7 +308,7 @@ export function DragDropGroup(): JSX.Element {
                     <TextInput
                         class="setting-number setting-number--wide"
                         type="number" min={1}
-                        placeholder="unlimited"
+                        placeholder={t("settings.advanced.dndConcurrency.placeholder")}
                         value={(s()["dnd:concurrency"] as number) ?? ""}
                         onBlur={(e) => {
                             const raw = e.currentTarget.value.trim();

@@ -96,35 +96,32 @@ else
     bad "package:release:macos sets STRIP_MAPS=1" "release DMGs would ship with source maps"
 fi
 
-# srv must sign with a FIXED code identifier, not one derived from its
-# versioned file name (agentmux-srv-<version>-darwin.<arch>). srv is the only
-# process that reads the Keychain, and a Keychain item trusts an app by its
-# designated requirement, which includes the identifier: with the version in
-# it, "Always Allow" never carried over and every new version asked for the
-# login keychain on first launch (retro-keychain-prompt-recurs-per-build-
-# identity-2026-08-21.md). Run the script's real srv signing line, ad hoc, on
-# two copies named for different versions: both must come out the same.
-SIGN_LINE="$(grep -E '^"\$\{SIGN\[@\]\}".*\$\(basename "\$SRV"\)' "$SCRIPT")"
+# srv signs as the fixed identifier ai.agentmux.srv, whatever the version. srv is the only
+# process that reads the Keychain, and a Keychain item trusts an app by its designated
+# requirement, which includes the identifier: with the version in it, "Always Allow" never
+# carried over and every new version asked for the login keychain on first launch
+# (retro-keychain-prompt-recurs-per-build-identity-2026-08-21.md). srv lives in its own helper
+# app now (`$SRV_APP_BIN/agentmux-srv`). Run the script's real srv signing line, ad hoc, on two
+# copies built under different versions: both must come out the same.
+SIGN_LINE="$(grep -E '^"\$\{SIGN\[@\]\}" --identifier ai\.agentmux\.srv .*"\$SRV_APP_BIN/agentmux-srv"$' "$SCRIPT")"
 if [ -z "$SIGN_LINE" ]; then
     bad "extract srv's signing line" "not found — did the signing step change shape?"
 elif ! command -v codesign > /dev/null 2>&1; then
     printf '  SKIP  srv signing identifier (no codesign; macOS only)\n'
 else
-    srv_identifier() { # $1 = version in the file name. Prints the signed identifier.
-        local app="$TMP/sign-$1/AgentMux.app"
-        mkdir -p "$app/Contents/MacOS" "$TMP/sign-$1/dist/bin"
-        local srv="$TMP/sign-$1/dist/bin/agentmux-srv-$1-darwin.arm64"
-        cp /usr/bin/true "$srv"
-        cp "$srv" "$app/Contents/MacOS/"
-        # shellcheck disable=SC2034  # all four are read by the eval'd signing line
+    srv_identifier() { # $1 = version of the build. Prints the signed identifier.
+        local app="$TMP/sign-$1/AgentMux Server.app"
+        local bin="$app/Contents/MacOS"
+        mkdir -p "$bin"
+        cp /usr/bin/true "$bin/agentmux-srv"
+        # shellcheck disable=SC2034  # both are read by the eval'd signing line
         (
-            APP="$app"; SRV="$srv"
+            SRV_APP_BIN="$bin"
             ENTITLEMENTS="$HERE/../build/entitlements.mac.plist"
             SIGN=(codesign --force --sign -)
             eval "$SIGN_LINE"
         ) > /dev/null 2>&1
-        codesign -dv "$app/Contents/MacOS/$(basename "$srv")" 2>&1 \
-            | sed -n 's/^Identifier=//p'
+        codesign -dv "$bin/agentmux-srv" 2>&1 | sed -n 's/^Identifier=//p'
     }
     id_a="$(srv_identifier 0.0.1)"
     id_b="$(srv_identifier 0.0.2)"

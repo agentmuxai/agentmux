@@ -372,6 +372,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 }
 
 mod channel_v2; mod detached;
+mod flow_notes;
 mod forward_tiers;
 pub(super) mod peer_hold;
 pub(crate) mod lan_signer;
@@ -657,20 +658,21 @@ pub(crate) async fn deliver(
 ) -> serde_json::Value {
     let mut replay = match admit(state, auth_via, caller_uid, &mut req).await {
         Ok(replay) => replay,
-        Err(answer) => return answer,
+        Err(answer) => return flow_notes::noted(state, &req, answer),
     };
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = super::cron::inject_here_following_runs(state, &req).await;
     if resp.success {
         replay.delivered();
+        flow_notes::note_delivered(state, &req);
         echo_local_delivery(state, &req, &resp);
         return super::jekt_files::with_count(serde_json::to_value(&resp).unwrap_or_default(), &req);
     }
 
     // The target is here but not signed in, or its pane has no controller yet: held, not failed.
     if let Some(answer) = super::jekt_hold::hold_for_refusal_here(state, auth_via, &req, &resp, &mut replay).await {
-        return answer;
+        return flow_notes::noted(state, &req, answer);
     }
 
     // 2. On "agent not found", check cross-instance file registry and forward.
@@ -969,8 +971,8 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
             // (muxbus::relay_watch). The LAN peers go in the answer: the target is on none of them.
             crate::muxbus::relay_watch::watch(state.reactive_handler, source, &req.target_agent, &request_id);
             let peers = state.lan_discovery.get_instances().iter().map(crate::backend::lan::peer_words::describe_peer).collect();
-            let body = crate::muxbus::relay_watch::queued_answer(request_id, target_in_account, peers, now_unix_secs().max(0) as u64);
-            Some(body)
+            let body = crate::muxbus::relay_watch::queued_answer(request_id.clone(), target_in_account, peers, now_unix_secs().max(0) as u64);
+            Some(flow_notes::queued(state, req, &request_id, body))
         }
         crate::muxbus::relay::RelayOutcome::Failed(e) => {
             tracing::warn!(

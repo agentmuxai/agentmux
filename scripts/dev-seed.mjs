@@ -133,6 +133,29 @@ export async function seed({ home, port: requested, count, name, open, script })
     }
 }
 
+export const USAGE = `usage: node scripts/dev-seed.mjs [options]
+  --port <n>       the CDP port of the running dev build (it must be the one on --home)
+  --home <dir>     the dev home to seed (default: AGENTMUX_HOME_OVERRIDE, else the one folder under ./.dev-home)
+  --agents <n>     how many agents to seed (default 1)
+  --name <name>    the agent's name (default fake-agent; with --agents > 1, <name>-1, <name>-2, ...)
+  --script <file>  the stand-in's conversation, as a JSON file
+  --no-open        do not open the first agent in the active tab
+  -h, --help       print this and exit`;
+
+const VALUE_FLAGS = ["--port", "--home", "--agents", "--name", "--script"];
+const SWITCHES = ["--no-open"];
+
+/** What `argv` asks for without seeding: "help" for -h/--help, an error message for an argument it does not
+ *  know, else null. Looked at before anything is touched, so a typo never seeds an agent. */
+export function argProblem(argv) {
+    if (argv.includes("--help") || argv.includes("-h")) return "help";
+    for (let i = 0; i < argv.length; i++) {
+        if (VALUE_FLAGS.includes(argv[i])) i++;
+        else if (!SWITCHES.includes(argv[i])) return `unknown option ${argv[i]}`;
+    }
+    return null;
+}
+
 function parse(argv) {
     const get = (flag, fallback) => {
         const i = argv.indexOf(flag);
@@ -149,7 +172,17 @@ function parse(argv) {
 }
 
 async function main() {
-    const opts = parse(process.argv.slice(2));
+    const argv = process.argv.slice(2);
+    const asked = argProblem(argv);
+    if (asked === "help") {
+        console.log(USAGE);
+        return;
+    }
+    if (asked) {
+        console.error(`❌ ${asked}\n${USAGE}`);
+        process.exit(1);
+    }
+    const opts = parse(argv);
     try {
         const home = pickHome({ home: opts.home, env: process.env, cwd: process.cwd() });
         const ids = await seed({ ...opts, home });

@@ -1,0 +1,27 @@
+{
+  "nodes": [
+    {
+      "id": "first",
+      "position": { "x": 0, "y": 0 },
+      "data": { "kind": "agent", "task": "{{param.first}}", "max_turns": 20 }
+    },
+    {
+      "id": "second",
+      "position": { "x": 280, "y": 0 },
+      "data": {
+        "kind": "agent",
+        "task": "{{param.second}}\n\nThe first agent's answer, to work from:\n{{first.response}}",
+        "max_turns": 20
+      }
+    },
+    {
+      "id": "tell",
+      "position": { "x": 560, "y": 0 },
+      "data": { "kind": "message", "to": "{{param.owner}}", "body": "{{second.response}}" }
+    }
+  ],
+  "edges": [
+    { "id": "first-second", "source": "first", "target": "second" },
+    { "id": "second-tell", "source": "second", "target": "tell" }
+  ]
+}

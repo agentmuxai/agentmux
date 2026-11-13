@@ -25,6 +25,9 @@ const MIB: i64 = 1 << 20;
 /// from one 4 KB read to 256 KB, and the smaller they are the more log each
 /// byte of output costs.
 const WAL_RELIEF_EVERY: i64 = 8 * MIB;
+/// Log written before the writer tries again, after a pass that could not copy
+/// all of the log back (`FileStore::checkpoint_between_writes`).
+const WAL_RELIEF_RETRY: i64 = MIB;
 /// The block file the cap applies to.
 pub const TERM_FILE: &str = "term";
 
@@ -46,6 +49,12 @@ fn relief_due(pending: &AtomicI64, start: i64, len: usize) -> bool {
     }
     pending.store(0, Ordering::Relaxed);
     true
+}
+
+/// The pass just made left log behind: the next one is due after
+/// `WAL_RELIEF_RETRY` of log, not a whole `WAL_RELIEF_EVERY`.
+fn relief_left_behind(pending: &AtomicI64) {
+    pending.fetch_add(WAL_RELIEF_EVERY - WAL_RELIEF_RETRY, Ordering::Relaxed);
 }
 
 /// The cap in bytes; 0 means no limit.
@@ -128,8 +137,13 @@ fn after_append_capped(fs: &FileStore, block_id: &str, start: i64, data: &[u8], 
     let len = data.len();
     // Under a flood the log would only grow: empty it every few megabytes.
     if relief_due(&LOG_SINCE_RELIEF, start, len) {
-        if let Err(e) = fs.checkpoint_between_writes() {
-            tracing::debug!(error = %e, "term cap: checkpoint between writes failed");
+        match fs.checkpoint_between_writes() {
+            Ok(true) => {}
+            Ok(false) => relief_left_behind(&LOG_SINCE_RELIEF),
+            Err(e) => {
+                tracing::debug!(error = %e, "term cap: checkpoint between writes failed");
+                relief_left_behind(&LOG_SINCE_RELIEF);
+            }
         }
     }
     let mut trim = false;
