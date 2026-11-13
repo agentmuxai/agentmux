@@ -886,11 +886,11 @@ async fn run_cli_login_pty(
             .load(std::sync::atomic::Ordering::SeqCst)
             == generation
         {
-            *state_for_cleanup.cli_login_stdin.lock() = None;
-            *state_for_cleanup.cli_login_pty_pid.lock() = None;
             state_for_cleanup
                 .cli_login_active
                 .store(false, std::sync::atomic::Ordering::SeqCst);
+            *state_for_cleanup.cli_login_stdin.lock() = None;
+            *state_for_cleanup.cli_login_pty_pid.lock() = None;
         }
     });
 
