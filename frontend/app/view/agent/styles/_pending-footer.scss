@@ -62,6 +62,20 @@
         .agent-voice-setup-notice {
             flex-wrap: wrap;
             margin-bottom: var(--space-0-5);
+
+            // Zoomed in, the two buttons side by side are wider than a narrow pane: the second goes
+            // under the first, and a button's own words wrap before they leave the pane.
+            .ui-notice-actions {
+                flex: 0 1 auto;
+                flex-wrap: wrap;
+                min-width: 0;
+                max-width: 100%;
+
+                > * {
+                    max-width: 100%;
+                    white-space: normal;
+                }
+            }
         }
 
         .agent-input-container {
