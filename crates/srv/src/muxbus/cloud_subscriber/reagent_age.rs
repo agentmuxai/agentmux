@@ -1,13 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! How old a signed notice may be when it is delivered, and the replay check that goes with that.
+//! How old a signed notice may be when it is delivered, and what happens to a copy of one already delivered.
 //!
 //! A notice is signed when it is sent and may then wait at the relay for a host that is off. Judging the
 //! signature's age at delivery alone would read every notice held past [`REAGENT_SIG_MAX_AGE_SECS`] as forged.
 //! The age is therefore judged at the moment the relay accepted the notice (its own record, `created_at`), with
-//! two bounds that need no trust in the relay: the notice must be inside the longest hold a sender uses, and a
-//! signed message id is accepted once ([`first_use`]).
+//! a bound at delivery that needs no trust in the relay ([`SIG_MAX_HOLD_SECS`]). A signed message that was already
+//! delivered to an agent is not delivered again under another delivery ([`delivered_under_another`]): a sender
+//! that retried a call the relay had in fact taken signs once and sends twice, and a replay of a captured notice
+//! looks the same. Either way nothing is shown, neither as the notice nor as a forgery.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -22,7 +24,7 @@ pub(super) const SIG_MAX_HOLD_SECS: i64 = 6 * 60 * 60 + REAGENT_SIG_MAX_AGE_SECS
 /// How far the relay's clock and the signer's may differ.
 const CLOCK_SKEW_SECS: i64 = 60;
 
-/// Signed message ids remembered at most.
+/// Delivered signed messages remembered at most.
 const MAX_SEEN: usize = 4096;
 
 /// Is a signature made at `ts_secs` recent enough to trust at `now`? `accepted_secs` is when the relay says it
@@ -42,40 +44,49 @@ pub(super) fn age_ok(ts_secs: i64, accepted_secs: Option<i64>, now: i64) -> bool
     accepted - ts_secs <= REAGENT_SIG_MAX_AGE_SECS && now - ts_secs <= SIG_MAX_HOLD_SECS
 }
 
-/// The signed message ids already accepted, each with the delivery it was accepted for and when it is forgotten.
+/// The signed messages already delivered, by (signed message id, agent): the delivery each went out under and
+/// when it is forgotten. The sender signs one id per recipient, and the agent is part of the key anyway, so two
+/// recipients of one id never meet.
 #[derive(Default)]
-struct Seen {
-    ids: HashMap<String, (String, i64)>,
+struct Delivered {
+    ids: HashMap<(String, String), (String, i64)>,
 }
 
-impl Seen {
-    /// Record `msg_id` as accepted for the delivery `inj_id`. The same delivery again (a claim retried) is not a
-    /// repeat; the same message id under another delivery is, and is refused. Entries are kept for
-    /// [`SIG_MAX_HOLD_SECS`], the longest a signature can still pass; past `MAX_SEEN` the one due soonest is dropped.
-    fn first_use(&mut self, msg_id: &str, inj_id: &str, now: i64) -> bool {
+impl Delivered {
+    /// The delivery `msg_id` already went to `agent` as, when that is another delivery than `inj_id`. The same
+    /// delivery again (a claim given back and taken again) is not a repeat.
+    fn delivered_under_another(&self, msg_id: &str, agent: &str, inj_id: &str, now: i64) -> Option<String> {
+        let (delivered_as, until) = self.ids.get(&(msg_id.to_string(), agent.to_string()))?;
+        (*until > now && delivered_as != inj_id).then(|| delivered_as.clone())
+    }
+
+    /// Remember that `msg_id` went to `agent` as the delivery `inj_id`, for [`SIG_MAX_HOLD_SECS`], the longest a
+    /// signature can still pass. Past `MAX_SEEN` entries the one due soonest is dropped.
+    fn record(&mut self, msg_id: &str, agent: &str, inj_id: &str, now: i64) {
         if self.ids.len() >= MAX_SEEN {
             self.ids.retain(|_, (_, until)| *until > now);
         }
-        if let Some((seen_for, until)) = self.ids.get(msg_id) {
-            if *until > now {
-                return seen_for == inj_id;
-            }
-        }
-        if self.ids.len() >= MAX_SEEN {
+        let key = (msg_id.to_string(), agent.to_string());
+        if !self.ids.contains_key(&key) && self.ids.len() >= MAX_SEEN {
             if let Some(oldest) = self.ids.iter().min_by_key(|(_, (_, until))| *until).map(|(k, _)| k.clone()) {
                 self.ids.remove(&oldest);
             }
         }
-        self.ids.insert(msg_id.to_string(), (inj_id.to_string(), now + SIG_MAX_HOLD_SECS));
-        true
+        // The first delivery keeps its record: a later one never moves it.
+        self.ids.entry(key).or_insert_with(|| (inj_id.to_string(), now + SIG_MAX_HOLD_SECS));
     }
 }
 
-static SEEN: LazyLock<Mutex<Seen>> = LazyLock::new(Default::default);
+static DELIVERED: LazyLock<Mutex<Delivered>> = LazyLock::new(Default::default);
 
-/// Accept the signed message id `msg_id` for the delivery `inj_id` once (see [`Seen::first_use`]).
-pub(super) fn first_use(msg_id: &str, inj_id: &str, now: i64) -> bool {
-    SEEN.lock().unwrap_or_else(|e| e.into_inner()).first_use(msg_id, inj_id, now)
+/// The delivery the signed message `msg_id` already went to `agent` as, when it is another than `inj_id`.
+pub(super) fn delivered_under_another(msg_id: &str, agent: &str, inj_id: &str, now: i64) -> Option<String> {
+    DELIVERED.lock().unwrap_or_else(|e| e.into_inner()).delivered_under_another(msg_id, agent, inj_id, now)
+}
+
+/// The signed message `msg_id` has been delivered to `agent` as `inj_id`.
+pub(super) fn record_delivered(msg_id: &str, agent: &str, inj_id: &str, now: i64) {
+    DELIVERED.lock().unwrap_or_else(|e| e.into_inner()).record(msg_id, agent, inj_id, now)
 }
 
 #[cfg(test)]
@@ -116,26 +127,44 @@ mod tests {
     }
 
     #[test]
-    fn a_signed_message_id_is_accepted_once_per_delivery() {
-        let mut seen = Seen::default();
-        assert!(seen.first_use("m1", "inj-1", 100));
-        assert!(seen.first_use("m1", "inj-1", 101), "the same delivery claimed again");
-        assert!(!seen.first_use("m1", "inj-2", 102), "the same signed message under another delivery is a replay");
-        assert!(seen.first_use("m2", "inj-2", 102));
-        assert!(!seen.first_use("m1", "inj-2", 100 + SIG_MAX_HOLD_SECS - 1), "still remembered at the end of the bound");
-        assert!(seen.first_use("m1", "inj-3", 100 + SIG_MAX_HOLD_SECS + 1), "forgotten once no signature can pass");
+    fn a_delivered_message_is_a_repeat_only_under_another_delivery() {
+        let mut d = Delivered::default();
+        assert_eq!(d.delivered_under_another("m1", "agentx", "inj-1", 100), None, "never delivered");
+        d.record("m1", "agentx", "inj-1", 100);
+        assert_eq!(d.delivered_under_another("m1", "agentx", "inj-1", 101), None, "the same delivery claimed again");
+        assert_eq!(d.delivered_under_another("m1", "agentx", "inj-2", 102).as_deref(), Some("inj-1"), "another delivery of it");
     }
 
     #[test]
-    fn the_seen_ids_stay_bounded_and_drop_the_one_due_soonest() {
-        let mut seen = Seen::default();
+    fn one_signed_id_for_two_recipients_never_meets() {
+        let mut d = Delivered::default();
+        d.record("m1", "author", "inj-1", 100);
+        assert_eq!(d.delivered_under_another("m1", "leader", "inj-2", 101), None, "another agent is not a repeat");
+        d.record("m1", "leader", "inj-2", 101);
+        assert_eq!(d.delivered_under_another("m1", "author", "inj-1", 102), None);
+        assert_eq!(d.delivered_under_another("m1", "leader", "inj-2", 102), None);
+        assert_eq!(d.delivered_under_another("m1", "leader", "inj-3", 102).as_deref(), Some("inj-2"));
+    }
+
+    #[test]
+    fn a_record_is_kept_for_the_longest_hold_and_the_first_delivery_keeps_it() {
+        let mut d = Delivered::default();
+        d.record("m1", "agentx", "inj-1", 100);
+        d.record("m1", "agentx", "inj-2", 5000);
+        assert!(d.delivered_under_another("m1", "agentx", "inj-2", 100 + SIG_MAX_HOLD_SECS - 1).is_some(), "remembered at the end of the bound");
+        assert_eq!(d.delivered_under_another("m1", "agentx", "inj-2", 100 + SIG_MAX_HOLD_SECS), None, "forgotten once no signature can pass");
+    }
+
+    #[test]
+    fn the_records_stay_bounded_and_drop_the_one_due_soonest() {
+        let mut d = Delivered::default();
         for i in 0..MAX_SEEN as i64 {
-            assert!(seen.first_use(&format!("m{i}"), "inj", 1_000 + i));
+            d.record(&format!("m{i}"), "agentx", "inj", 1_000 + i);
         }
-        assert_eq!(seen.ids.len(), MAX_SEEN);
-        assert!(seen.first_use("one-more", "inj", 1_000 + MAX_SEEN as i64));
-        assert_eq!(seen.ids.len(), MAX_SEEN);
-        assert!(!seen.ids.contains_key("m0"), "the oldest entry went");
-        assert!(seen.ids.contains_key("m1") && seen.ids.contains_key("one-more"));
+        assert_eq!(d.ids.len(), MAX_SEEN);
+        d.record("one-more", "agentx", "inj", 1_000 + MAX_SEEN as i64);
+        assert_eq!(d.ids.len(), MAX_SEEN);
+        assert!(!d.ids.contains_key(&("m0".to_string(), "agentx".to_string())), "the oldest entry went");
+        assert!(d.ids.contains_key(&("one-more".to_string(), "agentx".to_string())));
     }
 }

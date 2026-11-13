@@ -9,6 +9,10 @@ use super::*;
 /// What was checked about one claimed message: kept for the delivery and for noting it delivered.
 pub(super) struct Checked {
     reagent_verified: Option<bool>,
+    /// (signed message id, agent, delivery id) of a reagent-signed message that verified: recorded once it is delivered.
+    reagent_delivery: Option<(String, String, String)>,
+    /// The delivery a verified signed message already went to this agent as, when this is a second copy of it.
+    pub(super) repeat_of: Option<String>,
     wan_row: crate::muxbus::wan_verify::CarriedRow,
     wan_store: Option<Arc<crate::backend::storage::wan_identity::WanIdentityStore>>,
     wan_verdict: crate::muxbus::wan_verify::WanVerdict,
@@ -139,6 +143,15 @@ pub(super) async fn verify(
     mstore: &Arc<Store>,
 ) -> Checked {
     let reagent_verified = reagent_verdict(inj, agent_id, now_unix_secs());
+    // A verified signed message that already reached this agent under another delivery id is a second copy (the
+    // sender retried a call the relay had in fact taken, or a captured notice was sent again): not delivered again.
+    let reagent_delivery = match (reagent_verified, &inj.reagent_msg_id) {
+        (Some(true), Some(msg_id)) => Some((msg_id.clone(), agent_id.to_string(), inj.id.clone())),
+        _ => None,
+    };
+    let repeat_of = reagent_delivery
+        .as_ref()
+        .and_then(|(msg_id, agent, inj_id)| reagent_age::delivered_under_another(msg_id, agent, inj_id, now_unix_secs()));
 
     // W3-S (§2.3): a same-account agent's WAN signature, verified here —
     // before transcript-request resolution, and against the POLLED
@@ -186,7 +199,7 @@ pub(super) async fn verify(
         (_, None) => crate::muxbus::wan_verify::WanVerdict::default(),
     };
     log_wan_outcome(inj, &wan_verdict);
-    Checked { reagent_verified, wan_row, wan_store, wan_verdict }
+    Checked { reagent_verified, reagent_delivery, repeat_of, wan_row, wan_store, wan_verdict }
 }
 
 /// The verdict on a reagent-signed message; `None` when it carries no complete signature.
@@ -220,9 +233,10 @@ pub(super) fn reagent_verdict(inj: &PendingInj, agent_id: &str, now: i64) -> Opt
     // (600s vs. 300s) because this is real network delivery, not a
     // same-machine call. A notice the relay held for a host that was off
     // is older than that when it arrives: it is judged by `reagent_age`
-    // (its age when the relay accepted it, a bound at delivery, and one
-    // acceptance per signed message id), not by delivery time alone,
-    // which read a genuine late notice as a forgery.
+    // (its age when the relay accepted it, and a bound at delivery), not
+    // by delivery time alone, which read a genuine late notice as a
+    // forgery. A second copy of one already delivered is dropped by the
+    // caller (`Checked::repeat_of`), not rendered as a forgery.
     match (&inj.reagent_sig, &inj.reagent_key_id, &inj.reagent_msg_id, inj.reagent_ts_secs) {
         (Some(sig), Some(key_id), Some(msg_id), Some(ts_secs)) => {
             // The relay's own record of when it accepted the message: a notice that waited for a host that
@@ -238,8 +252,7 @@ pub(super) fn reagent_verdict(inj: &PendingInj, agent_id: &str, now: i64) -> Opt
                         ts_secs,
                         &inj.message,
                         sig,
-                    )
-                    && reagent_age::first_use(msg_id, &inj.id, now),
+                    ),
             )
         }
         _ => None,
@@ -341,6 +354,9 @@ pub(super) async fn attach_files(
 
 /// Note a signature as seen, once its message is delivered.
 pub(super) fn record_delivered(checked: &Checked) {
+    if let Some((msg_id, agent, inj_id)) = &checked.reagent_delivery {
+        reagent_age::record_delivered(msg_id, agent, inj_id, now_unix_secs());
+    }
     if let Some(wan) = &checked.wan_store {
         crate::muxbus::wan_verify::record_delivered(wan, &checked.wan_verdict, &checked.wan_row, now_unix_secs());
     }
@@ -400,11 +416,21 @@ mod tests {
     }
 
     #[test]
-    fn a_signed_message_resubmitted_under_another_delivery_is_refused() {
+    fn a_second_copy_of_a_delivered_signed_message_still_verifies_and_is_dropped_not_shown_as_forged() {
         let now = SIGNED_AT + 20 * 60;
-        assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", now), Some(true));
-        assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", now + 5), Some(true), "the same delivery claimed again");
-        assert_eq!(reagent_verdict(&notice("inj-replay", Some(ACCEPTED), SIG), "agentx", now + 10), Some(false));
+        // Not delivered yet: neither copy is a repeat, so a first attempt that never reached the agent does not
+        // use up its retry.
+        assert_eq!(reagent_age::delivered_under_another("msg-1", "agentx", "inj-retry", now), None);
+        // The first copy is delivered.
+        assert_eq!(reagent_verdict(&notice("inj-first", Some(ACCEPTED), SIG), "agentx", now), Some(true));
+        reagent_age::record_delivered("msg-1", "agentx", "inj-first", now);
+        // The second, under another delivery id: still a genuine signature, and a repeat of the first.
+        assert_eq!(reagent_verdict(&notice("inj-retry", Some(ACCEPTED), SIG), "agentx", now + 10), Some(true));
+        assert_eq!(reagent_age::delivered_under_another("msg-1", "agentx", "inj-retry", now + 10).as_deref(), Some("inj-first"));
+        // The same delivery claimed again (a release and re-claim) is not.
+        assert_eq!(reagent_age::delivered_under_another("msg-1", "agentx", "inj-first", now + 10), None);
+        // Another recipient of the same signed id is not.
+        assert_eq!(reagent_age::delivered_under_another("msg-1", "agenty", "inj-retry", now + 10), None);
     }
 
     #[test]
