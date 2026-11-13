@@ -38,6 +38,17 @@
           <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"50\",\"value\":\"400\"}">
             <span data-cb="onChange">
               "change"
+    <div class="setting-row" id="setting-advanced.route_spend_cap">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Model route daily cap"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "Dollars a day that all agents together may use through the OpenRouter model route. When it is used, every agent on the route stops until you raise it here or the UTC day ends. 0 is no cap"
+        <div class="ui-field-control">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"0\"}">
+            <span data-cb="onChange">
+              "change"
     <div class="setting-row" id="setting-advanced.preview_skid_notches">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">

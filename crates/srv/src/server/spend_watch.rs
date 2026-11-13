@@ -252,7 +252,7 @@ fn stop(state: &AppState, grant: &Grant, hit: &Hit, now: i64) {
             hit.spent, hit.cap, place_of(state, grant)
         ),
         Scope::Route => format!(
-            "{name} is stopped: the cap of ${:.2} for today on its model route is used (${:.2}). It can go on when the cap is raised in Settings or the UTC day ends.",
+            "{name} is stopped: the cap of ${:.2} for today on its model route is used (${:.2}). It can go on when the cap is raised in Settings (Advanced) or the UTC day ends.",
             hit.cap, hit.spent
         ),
     };
