@@ -44,7 +44,7 @@ export const KanbanSection = (props: SectionProps): JSX.Element => {
                 </Show>
 
                 <Show when={s.adding()}>
-                    <KanbanNewTask model={s.model} agents={s.agents()} onDone={() => s.setAdding(false)} />
+                    <KanbanNewTask model={s.model} agents={s.agents()} board={s.selectedSlug()} onDone={() => s.setAdding(false)} />
                 </Show>
 
                 <AgentStrip s={s} />
