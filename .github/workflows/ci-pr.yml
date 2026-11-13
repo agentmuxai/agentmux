@@ -240,7 +240,7 @@ jobs:
     # §5 Phase 4; ~4.5 of the ~6.5 nextest minutes were compiling).
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      CARGO_PROFILE_TEST_DEBUG: ${{ matrix.os == 'ubuntu-latest' && '0' || 'line-tables-only' }}
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     # Both legs block, per SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md R2.
     # Ubuntu used to be `continue-on-error` — it spent ~6 min on every PR and
     # could not fail one, while Windows (14-15 min, the slowest leg) was the
@@ -306,6 +306,11 @@ jobs:
       # left on device" (rust-cache restore, then `cargo metadata`). So: free the preinstalled
       # toolchains we never use when / is short, put the swapfile on /mnt when it has room, and on /
       # size it to what is left, keeping 25 GB for the build.
+      # A measurement for the srv test crate's compile memory (rustc holds ~14.9 GB of the Ubuntu runner's 16 GB):
+      # fewer, larger codegen units on this leg only. No debug info did not lower it (push 1 of PR 7164).
+      - name: Fewer codegen units for the test build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: echo "CARGO_PROFILE_TEST_CODEGEN_UNITS=16" >> "$GITHUB_ENV"
       - name: Free disk and add swap (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
