@@ -117,7 +117,7 @@ fn a_package_holds_only_its_known_files() {
     assert!(package::load_dir(&dir, "acme.drift").is_ok());
     assert!(package::load_dir(&dir, "acme.other").unwrap_err().contains("folder name"));
     std::fs::write(dir.join("graph.json"), "{}").unwrap();
-    assert!(package::load_dir(&dir, "acme.drift").unwrap_err().contains("later version"), "a Drone graph waits for P4");
+    assert!(package::load_dir(&dir, "acme.drift").unwrap_err().contains("only a Drone template"), "a job template carries no graph");
     std::fs::remove_file(dir.join("graph.json")).unwrap();
     std::fs::write(dir.join("run.sh"), "rm -rf /").unwrap();
     assert!(package::load_dir(&dir, "acme.drift").unwrap_err().contains("run.sh"));

@@ -15,6 +15,7 @@
 
 pub mod catalog;
 pub mod cloud;
+pub mod graph;
 pub mod manifest;
 pub mod package;
 
@@ -105,6 +106,10 @@ pub struct JobTemplateInfo {
     /// The current content hash (empty when invalid).
     pub hash: String,
     pub manifest: Option<JobTemplateManifest>,
+    /// A Drone template's graph, as the approval prompt shows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub drone: Option<graph::DroneSummary>,
     /// A cloud template's reporter, and whether approving pins it, refuses, or finds it pinned already.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -298,6 +303,7 @@ impl JobTemplates {
                     error: Some(e.clone()),
                     hash: String::new(),
                     manifest: None,
+                    drone: None,
                     reporter: None,
                     signature: sig::describe(&f.id, None, &inner.pins),
                     folder,
@@ -316,6 +322,7 @@ impl JobTemplates {
             error: None,
             hash: pkg.hash.clone(),
             manifest: Some(pkg.manifest.clone()),
+            drone: pkg.graph.as_ref().map(graph::summarize),
             reporter: pkg.manifest.reporter.as_ref().filter(|_| pkg.manifest.kind == JobTemplateKind::Cloud).map(|r| cloud::ReporterNote {
                 name: r.name.clone(),
                 fingerprint: sig::fingerprint(&r.key),
@@ -484,6 +491,8 @@ impl JobTemplates {
 
 #[cfg(test)]
 mod cloud_tests;
+#[cfg(test)]
+mod drone_tests;
 #[cfg(test)]
 mod starters_tests;
 #[cfg(test)]

@@ -40,6 +40,8 @@ pub const OUTSIDE_OUTPUTS: &[&str] = &["pull_request", "comment", "message:other
 pub enum JobTemplateKind {
     Job,
     Cloud,
+    /// A Drone graph (`graph.json`) the job runs, instead of a brief.
+    Drone,
 }
 
 /// One parameter, as a JSON Schema subset: `string` (with `enum`, or
@@ -282,6 +284,7 @@ pub fn validate(m: &JobTemplateManifest, folder: &str, brief: Option<&str>) -> R
     super::cloud::validate(m)?;
     match (m.kind, brief) {
         (JobTemplateKind::Job, None) => return Err("a job template needs its brief in brief.md".to_string()),
+        (JobTemplateKind::Drone, Some(_)) => return Err("a Drone template has no brief.md: its graph is graph.json".to_string()),
         (_, Some(b)) => {
             for name in placeholders(b)? {
                 if !kinds.contains_key(name) {
@@ -289,7 +292,7 @@ pub fn validate(m: &JobTemplateManifest, folder: &str, brief: Option<&str>) -> R
                 }
             }
         }
-        (JobTemplateKind::Cloud, None) => {}
+        (JobTemplateKind::Cloud | JobTemplateKind::Drone, None) => {}
     }
     rule_of_two(m)
 }
@@ -335,6 +338,7 @@ fn validate_defaults(m: &JobTemplateManifest) -> Result<(), String> {
     match (m.kind, &m.action) {
         (JobTemplateKind::Job, None) => return Err("a job template needs an action".to_string()),
         (JobTemplateKind::Cloud, Some(_)) => return Err("a cloud template runs elsewhere and has no action".to_string()),
+        (JobTemplateKind::Drone, Some(_)) => return Err("a Drone template has no action: its graph is the action".to_string()),
         (_, Some(a)) => match kind_of(a) {
             Some("drone") => return Err("a Drone action needs a later version of AgentMux".to_string()),
             Some(k) if ACTION_KINDS.contains(&k) => {
@@ -344,7 +348,7 @@ fn validate_defaults(m: &JobTemplateManifest) -> Result<(), String> {
             }
             _ => return Err(format!("action.kind must be one of {}", ACTION_KINDS.join(", "))),
         },
-        (JobTemplateKind::Cloud, None) => {}
+        (JobTemplateKind::Cloud | JobTemplateKind::Drone, None) => {}
     }
     if let Some(p) = &m.policy {
         if !p.is_object() {

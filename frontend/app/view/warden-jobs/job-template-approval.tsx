@@ -13,6 +13,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import { Button, Pill, type PillTone } from "@/app/element/ui";
 import type { CloudExpect } from "@/types/rpc/CloudExpect";
+import type { DroneSummary } from "@/types/rpc/DroneSummary";
 import type { JobTemplateInfo } from "@/types/rpc/JobTemplateInfo";
 import type { JobTemplateManifest } from "@/types/rpc/JobTemplateManifest";
 import type { ReporterNote } from "@/types/rpc/ReporterNote";
@@ -156,6 +157,31 @@ const JobFacts = (props: { manifest: JobTemplateManifest }): JSX.Element => (
     </>
 );
 
+/** A Drone template's facts: when it triggers, how big its graph is, and every call it makes outside AgentMux. */
+const DroneFacts = (props: { manifest: JobTemplateManifest; drone: DroneSummary | undefined }): JSX.Element => (
+    <>
+        <dt>Triggers</dt>
+        <dd>{triggerWords(props.manifest.trigger)}</dd>
+        <dt>Does</dt>
+        <dd>
+            runs a drone of {props.drone?.nodes ?? 0} {props.drone?.nodes === 1 ? "node" : "nodes"}
+            <Show when={(props.drone?.agents ?? 0) > 0}>, {props.drone?.agents} of them start an agent</Show>
+            <Show when={props.manifest.readsUntrusted}>
+                <span class="warden-manager-dim"> · reads text nobody vouches for</span>
+            </Show>
+        </dd>
+        <dt>Calls outside</dt>
+        <dd>
+            <Show
+                when={(props.drone?.writes_outside.length ?? 0) > 0}
+                fallback={<span class="warden-manager-dim">none</span>}
+            >
+                <For each={props.drone?.writes_outside}>{(call) => <Pill tone="warn">{call}</Pill>}</For>
+            </Show>
+        </dd>
+    </>
+);
+
 /** Every output the template declares; the ones that write outside AgentMux are marked. */
 const OutputsFact = (props: { outputs: string[] }): JSX.Element => (
     <>
@@ -206,8 +232,11 @@ const ApprovalFacts = (props: { info: JobTemplateInfo; manifest: JobTemplateMani
                 <Show when={props.manifest.kind === "cloud"}>
                     <CloudFacts manifest={props.manifest} reporter={props.info.reporter} />
                 </Show>
-                <Show when={props.manifest.kind !== "cloud"}>
+                <Show when={props.manifest.kind === "job"}>
                     <JobFacts manifest={props.manifest} />
+                </Show>
+                <Show when={props.manifest.kind === "drone"}>
+                    <DroneFacts manifest={props.manifest} drone={props.info.drone} />
                 </Show>
                 <OutputsFact outputs={props.manifest.outputs} />
                 <SecretsFact secrets={props.manifest.secrets} />

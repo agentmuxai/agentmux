@@ -86,6 +86,9 @@ pub(crate) fn apply_with(def: &mut Value, previous: Option<&TemplateRef>, svc: &
             e
         }
     })?;
+    if approved.manifest.kind == jt::manifest::JobTemplateKind::Drone {
+        return Err(format!("{id} is a Drone template: it makes a drone, not a brief-based job, and this build can't make one from it yet"));
+    }
     let hash = text(&asked, "hash");
     if !hash.is_empty() && hash != approved.hash {
         return Err(format!("{id} changed since the job's template pin was recorded; it needs the operator's approval again"));
