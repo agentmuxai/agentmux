@@ -129,6 +129,9 @@ wrap_task! {
 /// A wheel or click at `pt` that Windows gave to `target`: wrong if it was over
 /// a visible pane and went elsewhere, or went to a pane it wasn't over.
 fn check_pointer(state: &Arc<AppState>, kind: Kind, pt: POINT, target: HWND) {
+    if matches!(kind, Kind::Click) {
+        log_views_click(state, pt, target);
+    }
     let under = pane_at(state, pt);
     let got = crate::browser_pane::hwnd::pane_block_for_hwnd(target);
     if under.is_none() && got.is_none() {
@@ -153,6 +156,17 @@ fn check_pointer(state: &Arc<AppState>, kind: Kind, pt: POINT, target: HWND) {
     );
 }
 
+/// A click in a window with Views panes, with where Views says the focus is (#47567): a click in a pane's page has
+/// no hook of its own there, so this line is what shows whether the click arrived and who held the focus.
+fn log_views_click(state: &Arc<AppState>, pt: POINT, target: HWND) {
+    let Some(window) = (unsafe { root_label(state, target) }) else { return };
+    let report = crate::input_owner::views::focus_report(state, &window);
+    if report.contains("pane:") {
+        tracing::info!("[input-watch] click in win={window} went to {}; views focus: {report}", describe_hwnd(target));
+        let _ = pt;
+    }
+}
+
 /// Keys sent to `focus` (the window with the keyboard): wrong if the input owner of the
 /// window in front believes someone else has it, isn't active though the window
 /// is in front, or nothing of that window has the keyboard.
@@ -171,12 +185,22 @@ fn check_keys(state: &Arc<AppState>, focus: HWND, foreground: HWND) {
         "the window is in front but its input owner counts it inactive"
     } else if surface == Surface::Elsewhere {
         "no window of it has the keyboard"
-    } else if matches!(&have, Have::Owned(s) if *s != surface) {
+    } else if matches!(&have, Have::Owned(s) if *s != surface && !views_pane_looks_like_app(state, s, &surface)) {
         "the input owner believes someone else has the keyboard"
     } else {
         return;
     };
     report(Kind::Key, format!("keys in win={window} went to {surface} ({problem}); input owner: {described}"));
+}
+
+/// A Views pane is a view inside its window's one widget, so the window handle a key goes to is the window's
+/// whatever view holds the keyboard: a key typed with a Views pane selected always reads as the app here. That is
+/// no disagreement, only a reading that can't tell (the owner's own check reads the view that has focus, #47567).
+fn views_pane_looks_like_app(state: &Arc<AppState>, owned: &Surface, read: &Surface) -> bool {
+    match (owned, read) {
+        (Surface::Pane(block), Surface::App) => crate::pane_backend::pane_is_views(state, block),
+        _ => false,
+    }
 }
 
 fn report(kind: Kind, line: String) {
