@@ -138,7 +138,7 @@ pub(super) async fn verify(
     http: &reqwest::Client,
     mstore: &Arc<Store>,
 ) -> Checked {
-    let reagent_verified = reagent_verdict(inj, agent_id);
+    let reagent_verified = reagent_verdict(inj, agent_id, now_unix_secs());
 
     // W3-S (§2.3): a same-account agent's WAN signature, verified here —
     // before transcript-request resolution, and against the POLLED
@@ -190,7 +190,7 @@ pub(super) async fn verify(
 }
 
 /// The verdict on a reagent-signed message; `None` when it carries no complete signature.
-fn reagent_verdict(inj: &PendingInj, agent_id: &str) -> Option<bool> {
+pub(super) fn reagent_verdict(inj: &PendingInj, agent_id: &str, now: i64) -> Option<bool> {
     // Verify a reagent-signed WAN message (see PendingInj's doc comment)
     // before delivery. Only attempted when every one of the four
     // signing fields is present — a partial set (e.g. a sig but no
@@ -218,14 +218,18 @@ fn reagent_verdict(inj: &PendingInj, agent_id: &str) -> Option<bool> {
     // class of gap host-tier's `verify_jekt_signature` closed with
     // `JEKT_SIG_MAX_AGE_SECS`. `REAGENT_SIG_MAX_AGE_SECS` is wider
     // (600s vs. 300s) because this is real network delivery, not a
-    // same-machine call — matches the review notifications' own
-    // delivery window, so a message
-    // that's still legitimately within its own staleness budget never
-    // spuriously fails signature freshness on top of that.
+    // same-machine call. A notice the relay held for a host that was off
+    // is older than that when it arrives: it is judged by `reagent_age`
+    // (its age when the relay accepted it, a bound at delivery, and one
+    // acceptance per signed message id), not by delivery time alone,
+    // which read a genuine late notice as a forgery.
     match (&inj.reagent_sig, &inj.reagent_key_id, &inj.reagent_msg_id, inj.reagent_ts_secs) {
         (Some(sig), Some(key_id), Some(msg_id), Some(ts_secs)) => {
+            // The relay's own record of when it accepted the message: a notice that waited for a host that
+            // was off is judged by its age when it was accepted, within a bound at delivery, and once.
+            let accepted_secs = inj.created_at.as_deref().and_then(delivery_status::notes::parse_created_at).map(|ms| ms / 1000);
             Some(
-                reagent_sig_is_fresh(ts_secs, now_unix_secs())
+                reagent_age::age_ok(ts_secs, accepted_secs, now)
                     && agentmux_common::jekt_sign::verify_trusted_reagent_jekt(
                         key_id,
                         msg_id,
@@ -234,7 +238,8 @@ fn reagent_verdict(inj: &PendingInj, agent_id: &str) -> Option<bool> {
                         ts_secs,
                         &inj.message,
                         sig,
-                    ),
+                    )
+                    && reagent_age::first_use(msg_id, &inj.id, now),
             )
         }
         _ => None,
@@ -338,5 +343,80 @@ pub(super) async fn attach_files(
 pub(super) fn record_delivered(checked: &Checked) {
     if let Some(wan) = &checked.wan_store {
         crate::muxbus::wan_verify::record_delivered(wan, &checked.wan_verdict, &checked.wan_row, now_unix_secs());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A signature made offline under the production `reagent-v1` key over ("msg-1", "github-consumer", "agentx",
+    // 1000, "hello"): the same fixture as `server/tests/reactive/verify_reagent_signature_tests.rs`.
+    const SIG: &str = "FCFjcvAzla329a39u8fFxOvRWaH1R2fUn8RsGtP9RaIbLbaS3aXgAQ7YB4ssWV5TDvAeGrwSkHfoeGi11iCPBg==";
+    const SIGNED_AT: i64 = 1_000;
+
+    fn notice(id: &str, created_at: Option<&str>, sig: &str) -> PendingInj {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "source_agent": "github-consumer",
+            "message": "hello",
+            "created_at": created_at,
+            "reagent_sig": sig,
+            "reagent_key_id": "reagent-v1",
+            "reagent_msg_id": "msg-1",
+            "reagent_ts_secs": SIGNED_AT,
+        }))
+        .unwrap()
+    }
+
+    // 1970-01-01T00:16:45Z, five seconds after the signature was made.
+    const ACCEPTED: &str = "1970-01-01T00:16:45Z";
+
+    #[test]
+    fn a_notice_signed_and_accepted_together_and_delivered_twenty_minutes_later_verifies() {
+        // Signed 16:46, accepted 16:46, delivered 17:06.
+        assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", SIGNED_AT + 20 * 60), Some(true));
+    }
+
+    #[test]
+    fn a_relay_time_that_does_not_fit_falls_back_to_the_delivery_time_rule() {
+        let late = SIGNED_AT + 20 * 60;
+        // No time from the relay (an older relay).
+        assert_eq!(reagent_verdict(&notice("inj-1", None, SIG), "agentx", late), Some(false));
+        // Accepted in the future, or before it was signed (beyond skew).
+        assert_eq!(reagent_verdict(&notice("inj-1", Some("1970-01-01T01:00:00Z"), SIG), "agentx", late), Some(false));
+        assert_eq!(reagent_verdict(&notice("inj-1", Some("1970-01-01T00:00:00Z"), SIG), "agentx", late), Some(false));
+        // Accepted more than ten minutes after it was signed.
+        assert_eq!(reagent_verdict(&notice("inj-1", Some("1970-01-01T00:27:00Z"), SIG), "agentx", late), Some(false));
+        // Fresh at delivery needs no time from the relay.
+        assert_eq!(reagent_verdict(&notice("inj-1", None, SIG), "agentx", SIGNED_AT + 60), Some(true));
+    }
+
+    #[test]
+    fn a_notice_past_the_longest_hold_is_not_trusted_whatever_the_relay_says() {
+        let at_the_end = SIGNED_AT + reagent_age::SIG_MAX_HOLD_SECS;
+        assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", at_the_end), Some(true));
+        assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", at_the_end + 1), Some(false));
+    }
+
+    #[test]
+    fn a_signed_message_resubmitted_under_another_delivery_is_refused() {
+        let now = SIGNED_AT + 20 * 60;
+        assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", now), Some(true));
+        assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", now + 5), Some(true), "the same delivery claimed again");
+        assert_eq!(reagent_verdict(&notice("inj-replay", Some(ACCEPTED), SIG), "agentx", now + 10), Some(false));
+    }
+
+    #[test]
+    fn a_bad_or_missing_signature_is_judged_exactly_as_before() {
+        let now = SIGNED_AT + 20 * 60;
+        // Wrong signature: present and failing.
+        assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), "AAAA"), "agentx", now), Some(false));
+        // Another agent's target: the signature covers who it was for.
+        assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), SIG), "agenty", now), Some(false));
+        // No signature at all is no verdict.
+        let mut unsigned = notice("inj-1", Some(ACCEPTED), SIG);
+        unsigned.reagent_sig = None;
+        assert_eq!(reagent_verdict(&unsigned, "agentx", now), None);
     }
 }

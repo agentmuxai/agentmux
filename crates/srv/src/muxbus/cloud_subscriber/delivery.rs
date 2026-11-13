@@ -10,6 +10,9 @@ use super::*;
 #[path = "delivery_steps.rs"]
 mod steps;
 
+#[path = "reagent_age.rs"]
+mod reagent_age;
+
 /// One agent's answer to a pending pull, single or batched.
 #[derive(Deserialize)]
 pub(super) struct PendingResp {
