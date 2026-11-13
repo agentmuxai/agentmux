@@ -264,14 +264,23 @@ pub(crate) async fn run_agent_with_bin(
         let _ = stderr_tx.send(buf);
     });
 
-    tokio::spawn(async move {
-        let result = drain_and_collect(stdout, &tx, &mut child, stderr_rx).await;
-        let _ = result_tx.send(result);
-    });
+    tokio::spawn(finish_or_abandon(result_tx, async move { drain_and_collect(stdout, &tx, &mut child, stderr_rx).await }));
 
     Ok(AgentRunHandle {
         final_result: result_rx,
     })
+}
+
+/// Run `work` and send its result, unless the caller drops `final_result` first
+/// (a drone run cancelled or timed out): then `work` is dropped where it stands,
+/// and the child it owns is killed with it (`KillGroupOnDrop`).
+async fn finish_or_abandon<T>(mut result_tx: oneshot::Sender<T>, work: impl std::future::Future<Output = T>) {
+    tokio::select! {
+        result = work => {
+            let _ = result_tx.send(result);
+        }
+        () = result_tx.closed() => {}
+    }
 }
 
 /// Drain `stdout` line-by-line through `ClaudeTranslator`, forward
@@ -652,6 +661,33 @@ mod tests {
             .expect("agent run ok");
         assert!(result.response.contains('4'), "got: {}", result.response);
         assert!(result.cost_usd > 0.0);
+    }
+
+    #[tokio::test]
+    async fn a_run_whose_caller_gave_up_is_dropped_with_what_it_owns() {
+        struct Owned(Option<oneshot::Sender<()>>);
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                let _ = self.0.take().unwrap().send(());
+            }
+        }
+        let (result_tx, result_rx) = oneshot::channel::<u32>();
+        let (dropped_tx, dropped_rx) = oneshot::channel();
+        let task = tokio::spawn(finish_or_abandon(result_tx, async move {
+            let _owned = Owned(Some(dropped_tx));
+            std::future::pending::<u32>().await
+        }));
+        tokio::task::yield_now().await;
+        drop(result_rx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), dropped_rx).await.expect("the work was dropped").unwrap();
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_finished_run_sends_its_result() {
+        let (result_tx, result_rx) = oneshot::channel::<u32>();
+        tokio::spawn(finish_or_abandon(result_tx, async { 7 }));
+        assert_eq!(result_rx.await.unwrap(), 7);
     }
 
     #[tokio::test]

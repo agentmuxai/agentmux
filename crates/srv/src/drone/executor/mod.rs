@@ -7,4 +7,4 @@ pub mod schedule;
 mod scheduler;
 mod writers;
 
-pub use engine::{run_drone, RunEvent};
+pub use engine::{cancel_run, run_drone, RunEvent};

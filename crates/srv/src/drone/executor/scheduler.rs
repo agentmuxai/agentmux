@@ -17,14 +17,15 @@
 //! nothing else can run, because a later iteration may still take it.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::mpsc;
 
 use super::blocks;
-use super::engine::{mark_state, RunEvent};
+use super::engine::{mark_state, Cancel, RunEnd, RunEvent};
 use super::schedule::{self, Guard, OnCap, Plan};
 use crate::drone::data_flow::ExecutionScope;
 use crate::drone::types::{BlockKind, BlockState, DroneGraph, FlowEdge, FlowNode};
@@ -35,6 +36,39 @@ use agentmux_common::time::now_ms;
 const HISTORY_LEN: usize = 50;
 
 type States = Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>;
+
+/// What stops a run besides its graph: its dollar cap and the way to cancel it.
+#[derive(Default)]
+pub(super) struct Limits {
+    pub(super) run_cap_usd: Option<f64>,
+    pub(super) cancel: Cancel,
+}
+
+/// How long a block may run when its graph does not say (`timeout_seconds`): an
+/// Agent block 15 minutes, a block that reaches outside the run 5. An API block
+/// has its own request timeout, and the rest do no waiting.
+fn default_timeout(kind: BlockKind) -> Option<Duration> {
+    match kind {
+        BlockKind::Agent => Some(Duration::from_secs(15 * 60)),
+        BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery => Some(Duration::from_secs(5 * 60)),
+        BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach => None,
+    }
+}
+
+fn plain_duration(d: Duration) -> String {
+    let secs = d.as_secs();
+    match secs {
+        s if s >= 3600 && s % 3600 == 0 => format!("{} hours", s / 3600),
+        s if s >= 60 && s % 60 == 0 => format!("{} minutes", s / 60),
+        s => format!("{s} seconds"),
+    }
+}
+
+/// `work`, or its failure when it takes longer than `limit`.
+async fn within<T>(limit: Option<Duration>, work: impl Future<Output = Result<T, String>>) -> Result<T, String> {
+    let Some(limit) = limit else { return work.await };
+    tokio::time::timeout(limit, work).await.unwrap_or_else(|_| Err(format!("timed out after {}", plain_duration(limit))))
+}
 
 /// Why the run must not start another block: what its Agent blocks have spent
 /// has reached its cap (`caps::reached`: a run that spent nothing has not
@@ -88,25 +122,31 @@ struct Scheduler<'a> {
     scope: ExecutionScope,
     response: Option<Value>,
     run_cap_usd: Option<f64>,
+    cancel: Cancel,
+    /// Set when the run ended because `cancel` did, so that is not taken for a failure.
+    cancelled: bool,
     tx: &'a mpsc::UnboundedSender<RunEvent>,
     states: &'a States,
 }
 
 pub(super) async fn execute(
     run_id: &str,
-    (graph, trigger, run_cap_usd, drone_id): (&DroneGraph, Value, Option<f64>, &str),
+    (graph, trigger, limits, drone_id): (&DroneGraph, Value, Limits, &str),
     tx: &mpsc::UnboundedSender<RunEvent>,
     states: &States,
-) -> Result<Value, String> {
+) -> Result<Value, RunEnd> {
     if graph.nodes.is_empty() {
-        return Err("drone has no blocks".to_string());
+        return Err(RunEnd::Failed("drone has no blocks".to_string()));
     }
     let plan = schedule::analyze(graph).map_err(|issues| {
-        issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; ")
+        RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))
     })?;
-    let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::for_drone(drone_id, trigger), run_cap_usd, tx, states);
-    s.run().await?;
-    Ok(s.response.unwrap_or(Value::Null))
+    let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::for_drone(drone_id, trigger), limits, tx, states);
+    match s.run().await {
+        Ok(()) => Ok(s.response.unwrap_or(Value::Null)),
+        Err(_) if s.cancelled => Err(RunEnd::Cancelled(s.cancel.reason())),
+        Err(e) => Err(RunEnd::Failed(e)),
+    }
 }
 
 impl<'a> Scheduler<'a> {
@@ -115,7 +155,7 @@ impl<'a> Scheduler<'a> {
         graph: &'a DroneGraph,
         plan: Plan,
         scope: ExecutionScope,
-        run_cap_usd: Option<f64>,
+        limits: Limits,
         tx: &'a mpsc::UnboundedSender<RunEvent>,
         states: &'a States,
     ) -> Self {
@@ -145,7 +185,9 @@ impl<'a> Scheduler<'a> {
             history: HashMap::new(),
             scope,
             response: None,
-            run_cap_usd,
+            run_cap_usd: limits.run_cap_usd,
+            cancel: limits.cancel,
+            cancelled: false,
             tx,
             states,
         }
@@ -203,6 +245,10 @@ impl<'a> Scheduler<'a> {
     }
 
     async fn step(&mut self, id: &'a str, forced: bool) -> Result<(), String> {
+        if self.cancel.is_cancelled() {
+            self.cancelled = true;
+            return Err(format!("stopped: {}", self.cancel.reason()));
+        }
         let node = self.node_of[id];
         let ins = self.incoming.get(id).cloned().unwrap_or_default();
         let runs = ins.is_empty() || forced || ins.iter().any(|e| self.decided.get(e.id.as_str()) == Some(&true));
@@ -228,6 +274,24 @@ impl<'a> Scheduler<'a> {
         let output = self.run_block(node).await?;
         self.finished.insert(id);
         self.route(node, &output)
+    }
+
+    /// A block's code, ended when the run is cancelled (an Agent block's process
+    /// goes with it) or the block passes its timeout.
+    async fn guarded(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
+        let limit = match schedule::timeout_seconds(node)? {
+            Some(secs) => Some(Duration::from_secs(secs)),
+            None => default_timeout(kind),
+        };
+        let cancel = self.cancel.clone();
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => {
+                self.cancelled = true;
+                Err(format!("stopped: {}", cancel.reason()))
+            }
+            result = within(limit, self.dispatch(node, kind)) => result,
+        }
     }
 
     /// Hand a block to the code for its kind. A for-each runs its body block
@@ -268,7 +332,7 @@ impl<'a> Scheduler<'a> {
             completed_at: done.then(now_ms),
         };
         mark_state(self.states, id, state("running", None, None, false)).await;
-        let result = self.dispatch(node, kind).await;
+        let result = self.guarded(node, kind).await;
         match result {
             Ok(mut output) => {
                 self.keep_history(id, &mut output);
@@ -285,6 +349,10 @@ impl<'a> Scheduler<'a> {
                     self.response = Some(output.get("value").cloned().unwrap_or_else(|| output.clone()));
                 }
                 Ok(output)
+            }
+            Err(e) if self.cancelled => {
+                mark_state(self.states, id, state("cancelled", None, Some(e.clone()), true)).await;
+                Err(e)
             }
             Err(e) => {
                 let _ = self.tx.send(RunEvent::BlockError { run_id: self.run_id.to_string(), block_id: id.to_string(), error: e.clone() });

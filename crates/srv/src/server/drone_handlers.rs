@@ -250,7 +250,7 @@ fn spawn_run_drain(
             // `running` row (codex P2 on PR #843).
             let is_terminal = matches!(
                 ev,
-                RunEvent::RunDone { .. } | RunEvent::RunFailed { .. }
+                RunEvent::RunDone { .. } | RunEvent::RunFailed { .. } | RunEvent::RunCancelled { .. }
             );
             if is_terminal {
                 match &ev {
@@ -268,6 +268,10 @@ fn spawn_run_drain(
                     RunEvent::RunFailed { error: e, .. } => {
                         last_status = RunStatus::Failed;
                         error = e.clone();
+                    }
+                    RunEvent::RunCancelled { reason, .. } => {
+                        last_status = RunStatus::Cancelled;
+                        error = reason.clone();
                     }
                     _ => unreachable!(),
                 }
@@ -297,7 +301,11 @@ fn spawn_run_drain(
                     ),
                 }
                 if let Some((ledger, ledger_id)) = &ledger_run {
-                    ledger.drone_finished(ledger_id, last_status == RunStatus::Done, &row.block_states, &row.error);
+                    if last_status == RunStatus::Cancelled {
+                        ledger.drone_stopped(ledger_id, &row.block_states, &row.error);
+                    } else {
+                        ledger.drone_finished(ledger_id, last_status == RunStatus::Done, &row.block_states, &row.error);
+                    }
                 }
             }
             broker_for_drain.publish_event_for::<crate::backend::mps_events::DroneRun>(&run_id_for_drain, &ev, vec![], 0);
