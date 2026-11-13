@@ -505,7 +505,9 @@ main{max-width:34rem;padding:0 1rem;text-align:center}\
 #hint{color:#bbb}code{background:#222;padding:.1rem .3rem;border-radius:.2rem}\n";
 
 /// The code is in the fragment. The history entry loses it before anything is sent; the page then
-/// waits for the person's answer in the terminal and keeps the token in `sessionStorage` only.
+/// waits for the person's answer in the terminal and keeps the token in `sessionStorage` only. A page
+/// opened with no code (a visitor with no session, or a browser that signed itself out) says how to
+/// sign in and is no refusal: it is the same words for everyone and tells nothing about the server.
 const ENTER_JS: &str = r#"(async () => {
   const msg = document.getElementById("msg");
   const phrase = document.getElementById("phrase");
@@ -517,7 +519,13 @@ const ENTER_JS: &str = r#"(async () => {
   };
   const code = location.hash.slice(1);
   history.replaceState(null, "", location.pathname);
-  if (!code) return fail();
+  if (!code) {
+    // Nobody tried to sign in: a visitor with no session, or a browser that has just signed out.
+    msg.textContent = "This browser is not signed in.";
+    hint.textContent = "To sign in, run agentmux open (or agentmux-srv open) in a terminal on the machine where AgentMux runs, as the user that started it.";
+    hint.hidden = false;
+    return;
+  }
   const post = (path, body) =>
     fetch(path, {
       method: "POST",
