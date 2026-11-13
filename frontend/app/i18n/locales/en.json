@@ -288,6 +288,8 @@
     "settings.advanced.group.agentPanes": "Agent panes",
     "settings.advanced.compactAt.label": "Compact agents at",
     "settings.advanced.compactAt.description": "Thousands of tokens at which Claude agents compact their context. Lower saves tokens; higher keeps more detail. 0 keeps Claude Code's own (about 967). Takes effect when each agent next starts",
+    "settings.advanced.routeSpendCap.label": "Model route daily cap",
+    "settings.advanced.routeSpendCap.description": "Dollars a day that all agents together may use through the OpenRouter model route. When it is used, every agent on the route stops until you raise it here or the UTC day ends. 0 is no cap",
     "settings.advanced.previewSkidNotches.label": "Preview scroll skid",
     "settings.advanced.previewSkidNotches.description": "Wheel notches a tool preview absorbs at its top or bottom edge before the scroll passes to the pane, so a preview sliding under the pointer is not scrolled past. 0 passes it on at once. Applies to open panes",
     "settings.advanced.containerMemory.label": "Container agents' memory",

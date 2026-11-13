@@ -148,7 +148,7 @@ export function spendStoppedText(card: SpendCard): string {
 /** The card's second line. */
 export function spendStoppedHint(card: SpendCard): string {
     return card.scope === "route"
-        ? "Every agent on the route is stopped until the route's cap is raised in Settings or the UTC day ends."
+        ? "Every agent on the route is stopped until the route's cap is raised in Settings (Advanced) or the UTC day ends."
         : "Its requests are refused until you raise the cap, or the UTC day ends.";
 }
 
