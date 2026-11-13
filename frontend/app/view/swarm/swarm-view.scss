@@ -149,7 +149,8 @@
 // Narrower still (a 128 px pane at 200% zoom is 64 CSS px): the line under the row is one clipped line, not one letter
 // per line, and gives back the indent that lined it up with the name.
 @container swarm-tree (max-width: 120px) {
-    .swarm-activity-summary {
+    // Under `.swarm-tree`, so it outranks the line's own rule further down.
+    .swarm-tree .swarm-activity-summary {
         padding-left: 10px;
         white-space: nowrap;
         overflow: hidden;
