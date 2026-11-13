@@ -163,7 +163,7 @@ pub struct ApprovedTemplate {
     pub manifest: JobTemplateManifest,
     pub brief: Option<String>,
     /// A Drone template's graph, exactly as approved.
-    pub graph: Option<crate::drone::types::DroneGraph>,
+    pub graph: Option<crate::backend::storage::drone_types::DroneGraph>,
     /// When the operator approved it, in ms.
     pub approved_at_ms: i64,
 }

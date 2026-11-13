@@ -39,7 +39,7 @@ use crate::backend::cron::{FireOutcome, MissReason};
 use crate::backend::mps::Broker;
 use crate::backend::storage::job_runs::{infra, reason, state, JobFlag, JobRun, RunCost};
 use crate::backend::storage::store::Store;
-use crate::drone::storage::DroneStore;
+use crate::backend::storage::drone_store::DroneStore;
 
 /// Job kinds in `job_source` (§3.1).
 pub const SOURCE_CRON: &str = "cron";
@@ -581,7 +581,7 @@ impl RunLedger {
         &self,
         run_id: &str,
         ok: bool,
-        block_states: &std::collections::HashMap<String, crate::drone::types::BlockState>,
+        block_states: &std::collections::HashMap<String, crate::backend::storage::drone_types::BlockState>,
         error: &str,
     ) {
         let infra_status = if ok { infra::OK } else { infra::ERROR };
@@ -670,7 +670,7 @@ fn add_trigger_digest(links: &mut Value, trigger: &Value) {
 /// The summed `cost_usd` of a Drone run's blocks: only Agent blocks report
 /// one, in their output (`drone/executor/blocks/agent.rs`). Known only when
 /// at least one block reported a cost.
-pub fn drone_cost(block_states: &std::collections::HashMap<String, crate::drone::types::BlockState>) -> RunCost {
+pub fn drone_cost(block_states: &std::collections::HashMap<String, crate::backend::storage::drone_types::BlockState>) -> RunCost {
     let mut cost = RunCost::default();
     for b in block_states.values() {
         let Some(out) = &b.output else { continue };

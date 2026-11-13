@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::manifest::{self, JobTemplateManifest};
-use crate::drone::types::{BlockKind, DroneGraph};
+use crate::backend::storage::drone_types::{BlockKind, DroneGraph};
 
 /// The most nodes and edges a template graph holds.
 pub const MAX_NODES: usize = 100;
@@ -44,7 +44,7 @@ pub fn parse(raw: &[u8]) -> Result<DroneGraph, String> {
 }
 
 /// The kind a node names in `data.kind`.
-fn kind_of(node: &crate::drone::types::FlowNode) -> Result<BlockKind, String> {
+fn kind_of(node: &crate::backend::storage::drone_types::FlowNode) -> Result<BlockKind, String> {
     let name = node.data.get("kind").and_then(|k| k.as_str()).unwrap_or("");
     BlockKind::parse(name).ok_or_else(|| format!("graph.json: node {:?} is a {name:?} node, and this AgentMux has only {KINDS}", node.id))
 }
