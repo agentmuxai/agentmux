@@ -105,29 +105,142 @@ impl RunState {
     /// fine. Once the name has a value its reducer cannot change: another one is
     /// a [`StateError::Type`] with `needs` "the reducer it was written under".
     /// A bad name is a [`StateError::Name`].
-    ///
-    /// **Module B.** Not written yet.
     pub fn declare(&mut self, name: &str, reducer: Reducer) -> Result<(), StateError> {
-        let _ = (name, reducer);
-        todo!("module B: RunState::declare")
+        check_name(name)?;
+        if self.snapshot.vars.contains_key(name) && self.reducer_of(name) != reducer {
+            return Err(StateError::Type {
+                name: name.to_string(),
+                reducer,
+                needs: "the reducer it was written under",
+                got: "a different reducer",
+            });
+        }
+        self.snapshot.reducers.insert(name.to_string(), reducer);
+        Ok(())
     }
 
     /// Apply a write under the variable's reducer (see the table above). On an
     /// error nothing changes. After a write the state is at most [`STATE_CAP_BYTES`].
-    ///
-    /// **Module B.** Not written yet.
     pub fn write(&mut self, name: &str, value: Tv) -> Result<(), StateError> {
-        let _ = (name, value);
-        todo!("module B: RunState::write")
+        check_name(name)?;
+        let reducer = self.reducer_of(name);
+        let current = self.snapshot.vars.get(name);
+        let new_value = match reducer {
+            Reducer::Replace => value.v.clone(),
+            Reducer::Append => append_value(name, current, &value)?,
+            Reducer::Merge => merge_value(name, current, &value)?,
+            Reducer::Add => add_value(name, current, &value)?,
+        };
+        let (tainted, derived) = merged_bits(current, &value);
+        // Apply to a copy and measure before committing, so an over-cap write
+        // leaves the state exactly as it was.
+        let mut candidate = self.snapshot.clone();
+        candidate.vars.insert(name.to_string(), Tv { v: new_value, tainted, derived });
+        let bytes = snapshot_len(&candidate);
+        if bytes > STATE_CAP_BYTES {
+            return Err(StateError::TooLarge { bytes, cap: STATE_CAP_BYTES });
+        }
+        self.snapshot = candidate;
+        Ok(())
     }
 
     /// The size of the state as JSON, the number [`STATE_CAP_BYTES`] bounds:
     /// the length of `serde_json::to_string(&snapshot())`.
-    ///
-    /// **Module B.** Not written yet.
     pub fn size_bytes(&self) -> usize {
-        todo!("module B: RunState::size_bytes")
+        snapshot_len(&self.snapshot)
     }
+}
+
+/// Refuse a name that cannot be a variable: empty, with a dot, or with whitespace.
+fn check_name(name: &str) -> Result<(), StateError> {
+    if name.is_empty() || name.contains('.') || name.chars().any(char::is_whitespace) {
+        return Err(StateError::Name(name.to_string()));
+    }
+    Ok(())
+}
+
+/// What a value is, for the `got` half of a [`StateError::Type`].
+fn kind(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "a list",
+        serde_json::Value::Object(_) => "an object",
+    }
+}
+
+fn type_error(name: &str, reducer: Reducer, needs: &'static str, got: &serde_json::Value) -> StateError {
+    StateError::Type { name: name.to_string(), reducer, needs, got: kind(got) }
+}
+
+/// The JSON length of a snapshot, the measure [`STATE_CAP_BYTES`] bounds.
+fn snapshot_len(snapshot: &StateSnapshot) -> usize {
+    serde_json::to_string(snapshot).map(|text| text.len()).unwrap_or(usize::MAX)
+}
+
+/// `append`: the first write makes `[w]`; after that `w` is one more element.
+fn append_value(name: &str, current: Option<&Tv>, write: &Tv) -> Result<serde_json::Value, StateError> {
+    let Some(current) = current else {
+        return Ok(serde_json::Value::Array(vec![write.v.clone()]));
+    };
+    let serde_json::Value::Array(items) = &current.v else {
+        return Err(type_error(name, Reducer::Append, "a list", &current.v));
+    };
+    let mut next = items.clone();
+    next.push(write.v.clone());
+    Ok(serde_json::Value::Array(next))
+}
+
+/// `merge`: a shallow object merge, `w`'s keys winning. A merge channel holds
+/// objects, so the first write must be one too.
+fn merge_value(name: &str, current: Option<&Tv>, write: &Tv) -> Result<serde_json::Value, StateError> {
+    let Some(write_object) = write.v.as_object() else {
+        return Err(type_error(name, Reducer::Merge, "an object", &write.v));
+    };
+    let Some(current) = current else {
+        return Ok(serde_json::Value::Object(write_object.clone()));
+    };
+    let Some(current_object) = current.v.as_object() else {
+        return Err(type_error(name, Reducer::Merge, "an object", &current.v));
+    };
+    let mut merged = current_object.clone();
+    for (key, value) in write_object {
+        merged.insert(key.clone(), value.clone());
+    }
+    Ok(serde_json::Value::Object(merged))
+}
+
+/// `add`: numbers only; two integers stay an integer, any float makes a float.
+fn add_value(name: &str, current: Option<&Tv>, write: &Tv) -> Result<serde_json::Value, StateError> {
+    let Some(write_number) = write.v.as_number() else {
+        return Err(type_error(name, Reducer::Add, "a number", &write.v));
+    };
+    let Some(current) = current else {
+        return Ok(write.v.clone());
+    };
+    let Some(current_number) = current.v.as_number() else {
+        return Err(type_error(name, Reducer::Add, "a number", &current.v));
+    };
+    let sum = add_numbers(current_number, write_number)
+        .ok_or_else(|| type_error(name, Reducer::Add, "a number", &write.v))?;
+    Ok(serde_json::Value::Number(sum))
+}
+
+/// The sum of two JSON numbers, keeping integers integers where it can.
+fn add_numbers(a: &serde_json::Number, b: &serde_json::Number) -> Option<serde_json::Number> {
+    if let (Some(x), Some(y)) = (a.as_u64(), b.as_u64()) {
+        if let Some(sum) = x.checked_add(y) {
+            return Some(serde_json::Number::from(sum));
+        }
+    }
+    if let (Some(x), Some(y)) = (a.as_i64(), b.as_i64()) {
+        if let Some(sum) = x.checked_add(y) {
+            return Some(serde_json::Number::from(sum));
+        }
+    }
+    serde_json::Number::from_f64(a.as_f64()? + b.as_f64()?)
 }
 
 #[cfg(test)]
