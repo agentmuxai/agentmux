@@ -269,6 +269,12 @@ fn focus_pane_browser(state: &Arc<AppState>, block: &str) {
     }
 }
 
+/// What Views says about focus in `window`, for a log line: which view has it (#47567). Views panes only.
+#[cfg(not(target_os = "macos"))]
+pub fn focus_report(state: &Arc<AppState>, window: &str) -> String {
+    platform::report(state, window)
+}
+
 // ── Per platform ─────────────────────────────────────────────────────────
 
 /// macOS: a pane has the keyboard while its overlay NSWindow is the key window
@@ -382,6 +388,14 @@ mod platform {
             return Surface::App;
         }
         Surface::Elsewhere
+    }
+
+    /// Which views of `window` hold Views focus right now, for the log: each pane's `has_focus()` and the app's.
+    pub fn report(state: &Arc<AppState>, window: &str) -> String {
+        let panes: Vec<String> =
+            pane_views(state, window).into_iter().map(|(block, v)| format!("pane:{}={}", &block[..block.len().min(8)], v.has_focus() != 0)).collect();
+        let app = window_view(state, window).map(|v| v.has_focus() != 0);
+        format!("app={app:?} {}", panes.join(" "))
     }
 
     /// Panes are views inside the window here: a deactivation is the window's.
