@@ -16,7 +16,7 @@ import { resetPaneSizeHoldForTests } from "@/app/platform/pane-size-hold";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { shownPx } from "@/layout/lib/liveReflow";
 import { pillDragIn, pillPlacingIn } from "@/layout/lib/pillDragState";
-import { beginPillPlacement, dropPill, followPill, paneReadsPill, registerPillPane, releasePill } from "@/layout/lib/pillPlacement";
+import { beginPillPlacement, dropPill, followPill, panePillZone, paneReadsPill, registerPillPane, releasePill } from "@/layout/lib/pillPlacement";
 import { FlexDirection, type LayoutNode } from "@/layout/lib/types";
 import { setPlatform } from "@/util/platformutil";
 import type { SignalAtom } from "@/util/util";
@@ -312,6 +312,51 @@ describe("a release the layout's catcher gets", () => {
         expect(pillPlacingIn(m)).toBe(false);
         releasePill(m, dropAt(MIDDLE_OF_B));
         expect(release).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("a pane reading the pointer itself", () => {
+    const header = { getBoundingClientRect: () => ({ height: 33 }) } as HTMLElement;
+    const pane = { headerEl: header, hasBody: () => true, place: () => "b", release: () => {} };
+    /** Over b's header as the layout has it: b stands at 600,0. */
+    const HEADER_OF_B = { x: 640, y: 10 };
+    /** b's header where the reflow still shows it: in the right half, so the pointer is not over it. */
+    const glidingHeader = { left: 900, top: 0, right: 1200, bottom: 33 };
+    const input = (m: LayoutModel, nodeId: string, pointer: { x: number; y: number }) => ({
+        model: m,
+        nodeId,
+        blockId: "a2",
+        pointer,
+        headerRect: glidingHeader,
+        ownPane: false,
+        hasBody: true,
+    });
+
+    it("reads nothing while the layout has the drag", () => {
+        const m = layout(true);
+        registerPillPane(m, "b", pane);
+        beginPillPlacement(m, "a2", LEFT_OF_B);
+        expect(panePillZone(input(m, "b", HEADER_OF_B))).toEqual({ kind: "none" });
+    });
+
+    it("joins over its header band as the layout has it while the panes glide home, wherever the header is on screen", () => {
+        vi.useFakeTimers();
+        const m = layout(true);
+        registerPillPane(m, "b", pane);
+        beginPillPlacement(m, "a2", LEFT_OF_B);
+        followPill(m, MIDDLE_OF_B);
+        expect(pillPlacingIn(m)).toBe(false);
+        // By the header on screen this point is the body's left edge, where the tab would be placed.
+        expect(panePillZone(input(m, "b", HEADER_OF_B))).toEqual({ kind: "join" });
+        // And only the pane that stands there reads it.
+        expect(panePillZone(input(m, "c", HEADER_OF_B))).toEqual({ kind: "none" });
+    });
+
+    it("reads its own header once nothing glides", () => {
+        const m = layout(true);
+        registerPillPane(m, "b", pane);
+        expect(panePillZone(input(m, "b", HEADER_OF_B))).toMatchObject({ kind: "place" });
+        expect(panePillZone({ ...input(m, "b", HEADER_OF_B), headerRect: { left: 600, top: 0, right: 1200, bottom: 33 } })).toEqual({ kind: "join" });
     });
 });
 

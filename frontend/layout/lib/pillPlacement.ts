@@ -27,7 +27,7 @@ import { findNodeByBlockId } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
 import { effectiveStack } from "./layoutStack";
 import { reflowSettleMs } from "./liveReflow";
-import { pillStandIn, pillZone, placePill, type PillZone } from "./paneBodyDrop";
+import { pillStandIn, pillZone, placePill, type PillZone, type PillZoneInput } from "./paneBodyDrop";
 import { currentPillDrag, pillDragIn, pillReflowIn, setPillDrag, type PillDrag } from "./pillDragState";
 import { clearPlacement, previewPlacement, resetDropIntent, settleDropIntent, sideOfDirection } from "./placementPreview";
 
@@ -106,6 +106,31 @@ export function paneReadsPill(model: LayoutModel, nodeId: string, client: { x: n
     return paneAt(model, client)?.nodeId === nodeId;
 }
 
+/** The header band of the pane `nodeId` where it stands in the layout, not where the reflow shows it now. */
+function standingHeader(model: LayoutModel, nodeId: string): PillZoneInput["headerRect"] {
+    const container = model.displayContainerRef?.current;
+    const rect = model.getNodeRectById(nodeId);
+    const height = panes.get(model)?.get(nodeId)?.headerEl.getBoundingClientRect().height ?? 0;
+    if (!container || !rect || height <= 0) return undefined;
+    const box = container.getBoundingClientRect();
+    const [left, top] = [box.x + rect.left, box.y + rect.top];
+    return { left, top, right: left + rect.width, bottom: top + height };
+}
+
+/**
+ * What a tab's pointer means to the pane `input.nodeId`, read by the pane itself: for its own drop target, and
+ * for a release the catcher passes on to it (`releasePill`). Nothing while the layout has the drag, and nothing
+ * to a pane that does not stand under the pointer while the panes glide home (`paneReadsPill`). During that
+ * glide the pane's header is not yet where the layout has it, so the pointer is read against the header band
+ * in the layout, as the layout itself reads it: a release over that band joins the pane, and is not taken for
+ * its body's edge. With nothing gliding, the pane is where the layout has it and its own header is read.
+ */
+export function panePillZone(input: PillZoneInput): PillZone {
+    const { model, nodeId, pointer } = input;
+    if (!paneReadsPill(model, nodeId, pointer)) return { kind: "none" };
+    return pillZone(pillReflowIn(model) ? { ...input, headerRect: standingHeader(model, nodeId) } : input);
+}
+
 /** What the tab would do if released at `client`, by the layout's own rects. */
 function zoneAt(pill: PillDrag, client: { x: number; y: number }): { hit: Hit; zone: PillZone } | undefined {
     const { model } = pill;
@@ -116,19 +141,14 @@ function zoneAt(pill: PillDrag, client: { x: number; y: number }): { hit: Hit; z
     const ownPane = hit.nodeId === pill.sourceNodeId;
     // A pane's only tab has nowhere to go inside its own pane.
     if (ownPane && pill.lone) return { hit, zone: { kind: "none" } };
-    const pane = panes.get(model)?.get(hit.nodeId);
-    const box = container.getBoundingClientRect();
-    // The header band where the pane stands in the layout, not where the reflow shows it now.
-    const headerHeight = pane?.headerEl.getBoundingClientRect().height ?? 0;
-    const [left, top] = [box.x + rect.left, box.y + rect.top];
     const zone = pillZone({
         model,
         nodeId: hit.nodeId,
         blockId: pill.blockId,
         pointer: hit.pointer,
-        headerRect: headerHeight > 0 ? { left, top, right: left + rect.width, bottom: top + headerHeight } : undefined,
+        headerRect: standingHeader(model, hit.nodeId),
         ownPane,
-        hasBody: pane?.hasBody() ?? true,
+        hasBody: panes.get(model)?.get(hit.nodeId)?.hasBody() ?? true,
     });
     return { hit, zone };
 }

@@ -53,7 +53,7 @@ vi.mock("@/layout/lib/pillPlacement", () => ({
         layout.begun.push(args);
         return layout.takes;
     },
-    paneReadsPill: () => layout.reads,
+    panePillZone: () => (layout.reads ? zone.current : { kind: "none" }),
     followPill: (...args: unknown[]) => void layout.followed.push(args),
     dropPill: (...args: unknown[]) => {
         layout.dropped.push(args);

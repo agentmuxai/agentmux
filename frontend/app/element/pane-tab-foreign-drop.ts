@@ -11,9 +11,9 @@ import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { paneTabItemType } from "@/app/drag/drag-types";
-import { clearPillGhost, pillZone, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
+import { clearPillGhost, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
 import { pillPlacingIn } from "@/layout/lib/pillDragState";
-import { beginPillPlacement, dropPill, followPill, paneReadsPill, registerPillPane, type PillRelease } from "@/layout/lib/pillPlacement";
+import { beginPillPlacement, dropPill, followPill, panePillZone, registerPillPane, type PillRelease } from "@/layout/lib/pillPlacement";
 import type { DropDirection } from "@/layout/lib/types";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { edgeFlashArea } from "./drop-blink-clock";
@@ -167,7 +167,7 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
             followPill(input.model, input.pointer);
             if (pillPlacingIn(input.model)) return;
         }
-        zone = paneReadsPill(input.model, paneKey, input.pointer) ? pillZone(input) : { kind: "none" };
+        zone = panePillZone(input);
         // The header glows where the pill would join, and nowhere else.
         if (zone.kind === "join") {
             if (!hover.hovering()) hover.begin(args.source);
@@ -206,8 +206,7 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
     /** Where the pointer was released, not where the throttled drag last looked. */
     const zoneAtDrop = (args: PillArgs): PillZone => {
         if (!singlePill(args)) return zone;
-        const input = zoneInput(args);
-        return paneReadsPill(input.model, paneKey, input.pointer) ? pillZone(input) : { kind: "none" };
+        return panePillZone(zoneInput(args));
     };
     return { singlePill, follow, end, zoneAtDrop, dropInLayout };
 }
