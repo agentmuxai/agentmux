@@ -173,7 +173,7 @@ pub(crate) async fn run<S: Server, T: Terminal>(server: &S, origin: &str, print:
             0
         }
         Ok(true) => {
-            terminal.say("Discarded. If your browser did not show that phrase, someone else used the code. Run `agentmux-srv open --print` and paste the line into your own browser.");
+            terminal.say("Discarded. If your browser did not show that phrase, someone else used the code. Run it again with --print and paste the line into your own browser.");
             1
         }
         Ok(false) => {
