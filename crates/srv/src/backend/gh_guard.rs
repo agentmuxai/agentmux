@@ -303,7 +303,7 @@ mod tests {
         let process = |k: &str| (k == "GH_AGENT_HOOKS_DIR").then(|| hooks.path().to_string_lossy().into_owned());
         let nothing = env(&[("PATH", &path(empty.path()))]);
         assert!(!gh_agent_here(&nothing, process), "neither the hooks nor the command");
-        std::fs::write(hooks.path().join("pre-push"), format!("# {}\n", crate::backend::publish_guard::MARKER)).unwrap();
+        std::fs::write(hooks.path().join("pre-push"), "# gh-agent publish guard: written by gh-agent 0.13.0; do not edit\n").unwrap();
         assert!(gh_agent_here(&nothing, process), "the hooks gh-agent wrote");
         std::fs::remove_file(hooks.path().join("pre-push")).unwrap();
         let name = if cfg!(windows) { "gh-agent.cmd" } else { "gh-agent" };
