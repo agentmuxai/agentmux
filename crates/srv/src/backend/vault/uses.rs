@@ -78,6 +78,26 @@ pub struct UseRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub import: Option<UseImport>,
+    /// The cards the person may pick from, when the agent named none or named one the person may swap
+    /// (`Browser` `fill` of a whole card): none for any other use. `entry_id` is the one preselected, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub choices: Option<Vec<UseChoice>>,
+}
+
+/// One card of a picker: what the person reads of it, never a number.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UseChoice {
+    /// The entry's id.
+    pub id: String,
+    pub label: String,
+    /// "Visa •••• 4242, expires 03/27", or "…, expired 03/2026".
+    pub detail: String,
+    /// Past its month: "Always" is never offered for it.
+    pub expired: bool,
+    /// The person's default card.
+    pub default: bool,
 }
 
 /// What an import copies, as the person reads it: where from, and where to. Nothing of the value.
@@ -154,11 +174,13 @@ pub struct UseAnswer {
     /// Keep the typed value in the Vault.
     pub save: bool,
     pub by: By,
+    /// The card the person picked (an entry id from the request's `choices`), for a whole-card fill.
+    pub choice: Option<String>,
 }
 
 impl UseAnswer {
     pub fn of(decision: Decision) -> Self {
-        Self { decision, value: None, save: false, by: By::Person }
+        Self { decision, value: None, save: false, by: By::Person, choice: None }
     }
 
     fn by(decision: Decision, by: By) -> Self {

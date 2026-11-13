@@ -526,3 +526,56 @@ async fn holding_a_countdown_goes_through_the_host_only() {
     assert_eq!(s, StatusCode::BAD_REQUEST);
     uses::uses().forget("hold-1");
 }
+
+// A whole-card question with a picker: the person's choice must be one of its cards, an expired one
+// takes no "Always", and a card must be chosen to allow.
+#[tokio::test]
+async fn a_card_pick_must_be_one_of_the_questions_cards_and_never_always_for_an_expired_one() {
+    use crate::backend::vault::uses::{self, Decision, UseChoice, UseRequest};
+    let app = app().await;
+    let host = |body: Value| post("/api/v1/host/vault", &[HOST], body);
+    let choice = |id: &str, expired: bool| UseChoice { id: id.into(), label: id.into(), detail: format!("Visa {id}"), expired, default: false };
+    let request = |id: &str, entry_id: &str| UseRequest {
+        id: id.into(),
+        agent: "Builder".into(),
+        entry_id: entry_id.into(),
+        entry_label: "a card".into(),
+        what: "card".into(),
+        origin: "https://shop.example".into(),
+        field: "the card fields: number".into(),
+        offer_always: true,
+        reason: "no card was named".into(),
+        kind: "card".into(),
+        requested_ms: agentmux_common::time::now_ms_u64(),
+        choices: Some(vec![choice("card-a", false), choice("card-old", true)]),
+        ..Default::default()
+    };
+
+    // Nothing preselected: a card is needed to allow, but not to deny.
+    let rx = uses::uses().ask(request("pick-1", ""), std::time::Duration::from_secs(120));
+    let (s, body) = send(&app, host(json!({ "op": "answer_use", "id": "pick-1", "decision": "once" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("choose a card"), "{body}");
+    // An id the agent or a page made up is not a choice.
+    let (s, body) = send(&app, host(json!({ "op": "answer_use", "id": "pick-1", "decision": "once", "choice": "card-elsewhere" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("isn't one of the choices"), "{body}");
+    // An expired card is allowed once, never always.
+    let (s, body) = send(&app, host(json!({ "op": "answer_use", "id": "pick-1", "decision": "always", "choice": "card-old" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("Always isn't offered for that card"), "{body}");
+    let (s, body) = send(&app, host(json!({ "op": "answer_use", "id": "pick-1", "decision": "always", "choice": "card-a" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let got = rx.await.unwrap();
+    assert_eq!((got.decision, got.choice.as_deref()), (Decision::Always, Some("card-a")));
+
+    // A preselected card stands when none is picked; a no carries no choice.
+    let rx = uses::uses().ask(request("pick-2", "card-a"), std::time::Duration::from_secs(120));
+    let (s, _) = send(&app, host(json!({ "op": "answer_use", "id": "pick-2", "decision": "once" }))).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(rx.await.unwrap().choice.as_deref(), Some("card-a"));
+    let rx = uses::uses().ask(request("pick-3", ""), std::time::Duration::from_secs(120));
+    let (s, _) = send(&app, host(json!({ "op": "answer_use", "id": "pick-3", "decision": "deny" }))).await;
+    assert_eq!(s, StatusCode::OK, "denying needs no card");
+    assert_eq!(rx.await.unwrap().choice, None);
+}

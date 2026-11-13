@@ -8,7 +8,7 @@
 import { createEffect, createSignal, onCleanup, Show, type Accessor, type Component, type JSX } from "solid-js";
 
 import { tip } from "@/app/element/tip";
-import { Button, Field, TextInput } from "@/app/element/ui";
+import { Button, Field, Select, TextInput, type SelectOption } from "@/app/element/ui";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import { answerUse, holdUse, vaultUses, type UseDecision } from "./vault-store";
 // The question's styles, loaded with it: a card in an agent's pane is drawn
@@ -256,13 +256,15 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const [busy, setBusy] = createSignal(false);
     const [typed, setTyped] = createSignal("");
     const [save, setSave] = createSignal(false);
+    // The card the person picks for a whole-card fill: the agent's own, or the default, to begin with; none otherwise.
+    const [card, setCard] = createSignal(u.choices?.some((c) => c.id === u.entry_id) ? u.entry_id : "");
     createEffect(() => {
         if (!vaultUses().some((x) => x.id === u.id)) done();
     });
     const decide = async (decision: UseDecision) => {
         setBusy(true);
         try {
-            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined);
+            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined);
             // The typed value doesn't outlive the answer.
             setTyped("");
             done();
@@ -277,7 +279,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
             setBusy(false);
         }
     };
-    return { decide, busy, error, typed, setTyped, save, setSave };
+    return { decide, busy, error, typed, setTyped, save, setSave, card, setCard };
 }
 
 export type UseAnswerState = ReturnType<typeof createUseAnswer>;
@@ -318,6 +320,28 @@ function UseSays(props: { use: UseRequest }): JSX.Element {
     );
 }
 
+/** The cards the person may pick from for a whole-card fill, and why they are asked. */
+function CardPicker(props: { use: UseRequest; answer: UseAnswerState }): JSX.Element {
+    const u = props.use;
+    const a = props.answer;
+    const options = (): SelectOption[] => [
+        { value: "", label: "Choose a card…", disabled: true },
+        ...(u.choices ?? []).map((c) => ({ value: c.id, label: `${clip(c.label, CLIP.label)}: ${c.detail}${c.default ? " (default)" : ""}` })),
+    ];
+    return (
+        <>
+            <Field label="Card" layout="stacked" description={`You're asked because: ${clip(u.reason, CLIP.reason)}.`}>
+                <Select value={a.card()} onChange={a.setCard} options={options()} ariaLabel="Card" disabled={a.busy()} />
+            </Field>
+        </>
+    );
+}
+
+/** Whether the card picked is past its month: "Always" is never for it. */
+function pickedExpired(u: UseRequest, a: UseAnswerState): boolean {
+    return !!u.choices?.find((c) => c.id === a.card())?.expired;
+}
+
 /** What a fill, sign-in, command or capture is about: where it goes, and whose value. */
 function UseSubject(props: { use: UseRequest; answer: UseAnswerState; focus: boolean }): JSX.Element {
     const u = props.use;
@@ -329,6 +353,9 @@ function UseSubject(props: { use: UseRequest; answer: UseAnswerState; focus: boo
             <Show
                 when={u.needs_value}
                 fallback={
+                    <Show
+                        when={u.choices?.length}
+                        fallback={
                     <p>
                         <Show
                             when={u.replaces}
@@ -345,6 +372,10 @@ function UseSubject(props: { use: UseRequest; answer: UseAnswerState; focus: boo
                             The current value is kept for 7 days, and you can put it back from the Vault pane.
                         </Show>
                     </p>
+                        }
+                    >
+                        <CardPicker use={u} answer={props.answer} />
+                    </Show>
                 }
             >
                 <TypedValue use={u} answer={props.answer} focus={props.focus} />
@@ -394,11 +425,11 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 </Button>
                 {/* The yeses wrap as one group, so a narrow card never puts Always beside Deny. */}
                 <span class="vault-use-allow">
-                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed())} onClick={() => void a.decide("once")}>
+                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card())} onClick={() => void a.decide("once")}>
                         {u.needs_value ? "Fill it in" : "Allow once"}
                     </Button>
-                    <Show when={u.offer_always}>
-                        <Button tone="attention" disabled={a.busy()} onClick={() => void a.decide("always")}>
+                    <Show when={u.offer_always && !pickedExpired(u, a)}>
+                        <Button tone="attention" disabled={a.busy() || (!!u.choices?.length && !a.card())} onClick={() => void a.decide("always")}>
                             {alwaysLabel(u)}
                         </Button>
                     </Show>

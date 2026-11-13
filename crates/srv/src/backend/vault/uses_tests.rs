@@ -39,7 +39,7 @@ async fn an_answer_reaches_the_waiting_agent_once() {
     let u = uses();
     let rx = u.ask(req("u1"), WAIT);
     assert_eq!(u.list().len(), 1);
-    assert!(u.answer("u1", UseAnswer { decision: Decision::Once, value: Some("typed".to_string().into()), save: true, by: By::Person }));
+    assert!(u.answer("u1", UseAnswer { decision: Decision::Once, value: Some("typed".to_string().into()), save: true, by: By::Person, choice: None }));
     assert!(!u.answer("u1", UseAnswer::of(Decision::Deny)), "answered already");
     let got = rx.await.unwrap();
     assert_eq!((got.decision, got.value.as_deref().map(String::as_str), got.save), (Decision::Once, Some("typed"), true));

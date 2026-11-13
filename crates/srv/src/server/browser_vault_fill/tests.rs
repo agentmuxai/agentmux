@@ -432,7 +432,7 @@ async fn request_value(s: &Setup, kind: &str, label: &str) -> (StatusCode, Value
 async fn type_when_asked(agent: String, value: &'static str, save: bool) -> UseRequest {
     for _ in 0..200 {
         if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
-            uses::uses().answer(&u.id, UseAnswer { decision: Decision::Once, value: Some(value.to_string().into()), save, by: uses::By::Person });
+            uses::uses().answer(&u.id, UseAnswer { decision: Decision::Once, value: Some(value.to_string().into()), save, by: uses::By::Person, choice: None });
             return u;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -678,4 +678,166 @@ async fn a_card_named_with_a_part_still_fills_one_field() {
     ask.await.unwrap();
     assert_eq!(routes(&s), ["field_info", "vault_fill"]);
     assert_eq!(body["data"]["part"], "cvc");
+}
+
+// The picker: `card` with no default, or a named card the person may swap.
+
+/// Answers `agent`'s waiting use as the person would, picking `card` (or none).
+async fn pick_when_asked(agent: String, decision: Decision, card: Option<String>) -> UseRequest {
+    for _ in 0..200 {
+        if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
+            uses::uses().answer(&u.id, UseAnswer { choice: card, ..UseAnswer::of(decision) });
+            return u;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the use was never asked about");
+}
+
+/// A second card, in the same Vault, with its own number and label.
+fn make_second_card(s: &Setup, number: &str, label: &str) -> String {
+    create(
+        &s.state.identity_store,
+        NewEntry {
+            kind: "card".into(),
+            label: label.into(),
+            fields: Default::default(),
+            tags: vec![],
+            parts: crate::backend::vault::seal::Parts([("number", number), ("exp_month", "03"), ("exp_year", "2099"), ("cvc", "456")].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()),
+        },
+    )
+    .unwrap()
+}
+
+fn one_card_form() -> Value {
+    card_form("https://shop.example", vec![card_field("card-number", false), card_field("card-cvc", false)])
+}
+
+#[tokio::test]
+async fn card_with_no_default_is_picked_by_the_person_and_the_picked_card_is_filled() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = one_card_form();
+    let first = make_card(&s, "2099", true);
+    let second = make_second_card(&s, "5555555555554444", "Probe Mastercard");
+    let ask = tokio::spawn(pick_when_asked(s.auth.agent_id.clone(), Decision::Once, Some(second.clone())));
+    let (status, body) = fill(&s, "card").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let asked = ask.await.unwrap();
+    // Nothing is preselected, both cards are offered, and "Always" is the per-card decision of the handler.
+    assert_eq!((asked.entry_id.as_str(), asked.what.as_str()), ("", "card"));
+    let offered: Vec<&str> = asked.choices.as_ref().unwrap().iter().map(|c| c.id.as_str()).collect();
+    assert!(offered.contains(&first.as_str()) && offered.contains(&second.as_str()) && offered.len() == 2, "{offered:?}");
+    assert!(asked.choices.as_ref().unwrap().iter().all(|c| c.detail.contains("••••")), "{:?}", asked.choices);
+    assert_eq!(typed_all(&s)[0]["text"], "5555555555554444", "the card the person picked is the one typed");
+    assert_eq!(body["data"]["filled_from_vault"], second);
+    assert!(!body.to_string().contains("5555") && !body.to_string().contains("Mastercard"), "{body}");
+}
+
+#[tokio::test]
+async fn a_named_card_can_be_swapped_for_another_when_the_person_has_more_than_one() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = one_card_form();
+    let first = make_card(&s, "2099", true);
+    let second = make_second_card(&s, "5555555555554444", "Probe Mastercard");
+    let ask = tokio::spawn(pick_when_asked(s.auth.agent_id.clone(), Decision::Once, Some(second.clone())));
+    let (status, body) = fill(&s, &first).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let asked = ask.await.unwrap();
+    assert_eq!(asked.entry_id, first, "the agent's card is preselected");
+    assert_eq!(asked.choices.as_ref().map(Vec::len), Some(2));
+    assert_eq!(typed_all(&s)[0]["text"], "5555555555554444");
+    assert_eq!(body["data"]["filled_from_vault"], second);
+
+    // With one card only, nobody picks.
+    let lone = setup(ssn_field("https://shop.example")).await;
+    *lone.host.card.lock().unwrap() = one_card_form();
+    let only = make_card(&lone, "2099", true);
+    let ask = tokio::spawn(answer_when_asked(lone.auth.agent_id.clone(), Decision::Once));
+    let (status, body) = fill(&lone, &only).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(ask.await.unwrap().choices.is_none());
+}
+
+#[tokio::test]
+async fn an_always_for_the_picked_card_is_for_that_card_on_that_site() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = one_card_form();
+    let first = make_card(&s, "2099", true);
+    let second = make_second_card(&s, "5555555555554444", "Probe Mastercard");
+    let ask = tokio::spawn(pick_when_asked(s.auth.agent_id.clone(), Decision::Always, Some(second.clone())));
+    let (status, body) = fill(&s, &first).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    ask.await.unwrap();
+    assert!(s.state.identity_store.vault_grant_check(&second, "https://shop.example").unwrap(), "the picked card is granted");
+    assert!(!s.state.identity_store.vault_grant_check(&first, "https://shop.example").unwrap(), "the one the agent named is not");
+}
+
+#[tokio::test]
+async fn nobody_picking_a_card_types_nothing_and_a_no_picks_nothing() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = one_card_form();
+    make_card(&s, "2099", true);
+    make_second_card(&s, "5555555555554444", "Probe Mastercard");
+    // An answer with no card (not possible through the host, which asks for one) fills nothing.
+    let ask = tokio::spawn(pick_when_asked(s.auth.agent_id.clone(), Decision::Once, None));
+    let (status, body) = fill(&s, "card").await;
+    ask.await.unwrap();
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("no card was chosen"), "{body}");
+    assert!(typed_all(&s).is_empty());
+    // A no.
+    let ask = tokio::spawn(pick_when_asked(s.auth.agent_id.clone(), Decision::Deny, None));
+    let (status, _) = fill(&s, "card").await;
+    ask.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(typed_all(&s).is_empty());
+}
+
+/// The card sealed with something else, as one changed under another Vault key would be: it no longer opens.
+fn break_card(s: &Setup, id: &str) {
+    let mut row = s.state.identity_store.vault_get(id).unwrap().expect("the card");
+    row.sealed = vec![0u8; row.sealed.len().max(32)];
+    assert!(s.state.identity_store.vault_update(&row).unwrap());
+}
+
+#[tokio::test]
+async fn a_card_that_does_not_open_stops_no_other_fill_and_is_never_offered() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = one_card_form();
+    let good = make_card(&s, "2099", true);
+    let bad = make_second_card(&s, "5555555555554444", "Probe Mastercard");
+    break_card(&s, &bad);
+    // A named card still fills, and the broken one is not among the choices (so nobody picks).
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let (status, body) = fill(&s, &good).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(ask.await.unwrap().choices.is_none());
+    // With no default, the person picks among the cards that open: the broken one is not there.
+    let ask = tokio::spawn(pick_when_asked(s.auth.agent_id.clone(), Decision::Once, Some(good.clone())));
+    let (status, body) = fill(&s, "card").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let offered: Vec<String> = ask.await.unwrap().choices.unwrap().into_iter().map(|c| c.id).collect();
+    assert_eq!(offered, [good]);
+}
+
+#[tokio::test]
+async fn a_card_that_is_the_only_one_and_does_not_open_says_so_and_asks_nobody() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = one_card_form();
+    let only = make_second_card(&s, "5555555555554444", "Probe Mastercard");
+    break_card(&s, &only);
+    let (status, body) = fill(&s, "card").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("no card saved that can be filled"), "{body}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
+}
+
+#[tokio::test]
+async fn card_with_no_card_saved_says_so_and_asks_nobody() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = one_card_form();
+    let (status, body) = fill(&s, "card").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("you have no card saved"), "{body}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
 }

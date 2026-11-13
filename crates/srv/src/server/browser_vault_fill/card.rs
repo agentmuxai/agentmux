@@ -17,7 +17,7 @@ use zeroize::Zeroizing;
 
 use super::*;
 use crate::backend::vault::card_fill::{self, FormField, Shaped};
-use crate::backend::vault::card_target::{self, CardTarget};
+use crate::backend::vault::card_target::{self, Asked, CardTarget};
 use crate::backend::vault::seal::Parts;
 use crate::server::caller::Caller;
 
@@ -68,30 +68,49 @@ fn part_names(fields: &[CardField]) -> Vec<&'static str> {
 pub(super) async fn whole_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, block_id: &str, agent: &str, reason: &str) -> Option<Response> {
     let wanted = req.vault.clone()?;
     let (store, who) = (state.identity_store.clone(), agent.to_string());
-    let found = tokio::task::spawn_blocking(move || card_target::card_target(&store, &wanted, Some(&who))).await;
+    let found = tokio::task::spawn_blocking(move || {
+        let asked = card_target::card_asked(&store, &wanted, Some(&who))?;
+        let cards = if matches!(asked, Asked::NotACard) { Vec::new() } else { card_target::card_choices(&store, Some(&who))? };
+        Ok::<_, String>((asked, cards))
+    })
+    .await;
     match found {
-        Ok(Ok(Some(card))) => Some(fill_card(state, caller, req, block_id, agent, reason, card).await),
-        Ok(Ok(None)) => None,
+        Ok(Ok((Asked::NotACard, _))) => None,
+        Ok(Ok((Asked::One(card), cards))) => Some(fill_card(state, caller, req, block_id, agent, reason, Some(*card), cards).await),
+        // The cards the person might pick from can be none: all deleted, or none that opens, since `card_asked` looked.
+        Ok(Ok((Asked::Pick, cards))) if cards.is_empty() => Some(err_response(StatusCode::BAD_REQUEST, "you have no card saved that can be filled: ask the person to add one in the Vault, or to type it (Vault request_value)".to_string())),
+        Ok(Ok((Asked::Pick, cards))) => Some(fill_card(state, caller, req, block_id, agent, reason, None, cards).await),
         Ok(Err(e)) => Some(err_response(StatusCode::BAD_REQUEST, e)),
         Err(e) => Some(err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
 }
 
-fn card_question(agent: &str, pane: String, card: &CardTarget, origin: &str, names: &[&str], ask: (bool, &str), agent_reason: &str) -> UseRequest {
+/// What the person is asked: the card named (or none), and the cards they may pick from when they may.
+struct Question<'a> {
+    card: Option<&'a CardTarget>,
+    picker: &'a [CardTarget],
+    origin: &'a str,
+    names: &'a [&'a str],
+    offer_always: bool,
+    why: &'a str,
+}
+
+fn card_question(agent: &str, pane: String, q: &Question, agent_reason: &str) -> UseRequest {
     UseRequest {
         id: uuid::Uuid::new_v4().to_string(),
         agent: agent.to_string(),
         block_id: pane,
-        entry_id: card.fill.id.clone(),
-        entry_label: card.fill.label.clone(),
-        what: card.describe(),
-        origin: origin.to_string(),
-        field: format!("the card fields: {}", names.join(", ")),
-        offer_always: ask.0,
-        reason: ask.1.to_string(),
+        entry_id: q.card.map(|c| c.fill.id.clone()).unwrap_or_default(),
+        entry_label: q.card.map(|c| c.fill.label.clone()).unwrap_or_else(|| "a card".to_string()),
+        what: q.card.map(CardTarget::describe).unwrap_or_else(|| "card".to_string()),
+        origin: q.origin.to_string(),
+        field: format!("the card fields: {}", q.names.join(", ")),
+        offer_always: q.offer_always,
+        reason: q.why.to_string(),
         agent_reason: agent_reason.to_string(),
         kind: "card".to_string(),
         requested_ms: agentmux_common::time::now_ms_u64(),
+        choices: (!q.picker.is_empty()).then(|| q.picker.iter().map(CardTarget::choice).collect()),
         ..Default::default()
     }
 }
@@ -183,8 +202,85 @@ fn answer(card: &CardTarget, origin: &str, done: &Outcome, went_ahead: bool) -> 
     out
 }
 
-async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, block_id: &str, agent: &str, reason: &str, mut card: CardTarget) -> Response {
-    tracing::info!(agent = %agent, block_id = %block_id, entry = %card.fill.id, "[vault] a whole-card web form fill was asked for");
+/// Whether the person may pick the card: none was named, or they have more than one.
+fn picks(card: &Option<CardTarget>, picker: &[CardTarget]) -> bool {
+    card.is_none() || picker.len() > 1
+}
+
+/// The card the fill is for once the person has answered, and how they answered.
+struct Settled {
+    card: CardTarget,
+    always: bool,
+    went_ahead: bool,
+}
+
+/// What a use record names when no card was chosen (a refusal, a no, no answer): never a card of the person's.
+fn stand_in(card: &Option<CardTarget>, picker: &[CardTarget]) -> crate::backend::vault::FillTarget {
+    match (card, picker.first()) {
+        (Some(c), _) => c.fill.clone(),
+        (None, Some(first)) => {
+            let mut fill = first.fill.clone();
+            fill.id = String::new();
+            fill.label = "a card".to_string();
+            fill
+        }
+        (None, None) => unreachable!("a whole-card fill has a card or a list of cards"),
+    }
+}
+
+/// Asks the person, unless this card is granted on this site and current: the card they chose (the named one when
+/// they chose none), or the response that ends the call.
+async fn settle(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, call: (&str, &str, &str), place: (&str, &[&str]), (card, picker): (Option<CardTarget>, Vec<CardTarget>)) -> Result<Settled, Response> {
+    let ((block_id, agent, reason), (origin, names)) = (call, place);
+    let site = format!("{origin} (card form)");
+    let (store, grant_origin) = (state.identity_store.clone(), origin.to_string());
+    let granted_id = card.as_ref().filter(|c| !c.expired).map(|c| c.fill.id.clone());
+    let granted = match granted_id {
+        Some(entry) => tokio::task::spawn_blocking(move || store.vault_grant_check(&entry, &grant_origin).unwrap_or(false)).await.unwrap_or(false),
+        None => false,
+    };
+    let pick = picks(&card, &picker);
+    let planned = plan(!origin.is_empty(), false, true, granted, true);
+    if let Plan::Refuse(why) = planned {
+        record(state, block_id, &stand_in(&card, &picker), agent, &site, "refused", reason);
+        return Err(err_response(StatusCode::BAD_REQUEST, why.to_string()));
+    }
+    if matches!(planned, Plan::Go) && card.as_ref().is_some_and(|c| !c.expired) {
+        return Ok(Settled { card: card.expect("a card was named"), always: false, went_ahead: false });
+    }
+    let expired = card.as_ref().is_some_and(|c| c.expired);
+    let (offer_always, why) = match planned {
+        // The person may pick a current card, so "Always" is offered and enforced per card (vault_handlers.rs).
+        _ if pick => (true, if card.is_none() { "no card was named, and there is no default card" } else { "you may want a different card" }),
+        Plan::Ask { offer_always, reason } if !expired => (offer_always, reason),
+        _ => (false, "the card has expired"),
+    };
+    let asked = Question { card: card.as_ref(), picker: if pick { &picker } else { &[] }, origin, names, offer_always, why };
+    let question = card_question(agent, super::super::vault_ask::agent_pane(state, caller, &req.auth), &asked, reason);
+    let headline = format!("{agent} wants to fill your {} on {origin}", card.as_ref().map(CardTarget::describe).unwrap_or_else(|| "card".to_string()));
+    let (ended, answer) = super::super::vault_ask::ask(state, block_id, question, ANSWER_WAIT, &headline).await;
+    if !ended.allowed() {
+        record(state, block_id, &stand_in(&card, &picker), agent, &site, ended.outcome(), reason);
+        let code = if ended == Ended::NoAnswer { StatusCode::REQUEST_TIMEOUT } else { StatusCode::FORBIDDEN };
+        return Err(err_response(code, ended.refusal("nothing was typed")));
+    }
+    // The card they picked is one of those opened for this question, so a card changed since is caught when it is opened.
+    let picked = answer.and_then(|a| a.choice);
+    let stand = stand_in(&card, &picker);
+    let chosen = match (picked, card) {
+        (Some(id), Some(c)) if c.fill.id == id => Some(c),
+        (Some(id), _) => picker.into_iter().find(|c| c.fill.id == id),
+        (None, c) => c,
+    };
+    let Some(card) = chosen else {
+        record(state, block_id, &stand, agent, &site, "failed", reason);
+        return Err(err_response(StatusCode::BAD_REQUEST, "no card was chosen: nothing was typed".to_string()));
+    };
+    Ok(Settled { always: ended == Ended::Always && !card.expired, went_ahead: ended == Ended::WentAhead, card })
+}
+
+async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, block_id: &str, agent: &str, reason: &str, card: Option<CardTarget>, picker: Vec<CardTarget>) -> Response {
+    tracing::info!(agent = %agent, block_id = %block_id, entry = %card.as_ref().map(|c| c.fill.id.as_str()).unwrap_or("(the person picks)"), "[vault] a whole-card web form fill was asked for");
     let form = match proxy_value(state, "card_form", json!({ "block_id": block_id, "ref": req.ref_ }), HOST_WAIT).await {
         Ok(v) => v,
         Err((code, e)) => return err_response(code, e),
@@ -192,42 +288,18 @@ async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillReq
     let origin = form.get("origin").and_then(Value::as_str).unwrap_or("").to_string();
     let fields = parse_fields(&form);
     if !fields.iter().any(|f| MAIN_SLOTS.contains(&f.shape.slot.as_str())) {
+        let named = card.as_ref().map(|c| c.fill.id.as_str()).unwrap_or("<id>");
         return err_response(
             StatusCode::BAD_REQUEST,
-            format!("no card number, expiry or security code field was found with that one: fill a single field with {}.<part> (number, exp_month, exp_year, cvc, name, zip), or take a new snapshot", card.fill.id),
+            format!("no card number, expiry or security code field was found with that one: fill a single field with {named}.<part> (number, exp_month, exp_year, cvc, name, zip), or take a new snapshot"),
         );
     }
     let names = part_names(&fields);
     let site = format!("{origin} (card form)");
-
-    let store = state.identity_store.clone();
-    let (entry, grant_origin) = (card.fill.id.clone(), origin.clone());
-    let granted = !card.expired && tokio::task::spawn_blocking(move || store.vault_grant_check(&entry, &grant_origin).unwrap_or(false)).await.unwrap_or(false);
-    let (mut always, mut went_ahead) = (false, false);
-    match plan(!origin.is_empty(), false, true, granted, true) {
-        Plan::Refuse(why) => {
-            record(state, block_id, &card.fill, agent, &site, "refused", reason);
-            return err_response(StatusCode::BAD_REQUEST, why.to_string());
-        }
-        Plan::Go if !card.expired => {}
-        asked => {
-            let (offer_always, why) = match asked {
-                Plan::Ask { offer_always, reason } if !card.expired => (offer_always, reason),
-                _ => (false, "the card has expired"),
-            };
-            let pane = super::super::vault_ask::agent_pane(state, caller, &req.auth);
-            let question = card_question(agent, pane, &card, &origin, &names, (offer_always, why), reason);
-            let headline = format!("{agent} wants to fill your {} on {origin}", card.describe());
-            let (ended, _) = super::super::vault_ask::ask(state, block_id, question, ANSWER_WAIT, &headline).await;
-            if !ended.allowed() {
-                record(state, block_id, &card.fill, agent, &site, ended.outcome(), reason);
-                let code = if ended == Ended::NoAnswer { StatusCode::REQUEST_TIMEOUT } else { StatusCode::FORBIDDEN };
-                return err_response(code, ended.refusal("nothing was typed"));
-            }
-            always = ended == Ended::Always && !card.expired;
-            went_ahead = ended == Ended::WentAhead;
-        }
-    }
+    let Settled { mut card, always, went_ahead } = match settle(state, caller, req, (block_id, agent, reason), (&origin, &names), (card, picker)).await {
+        Ok(s) => s,
+        Err(response) => return response,
+    };
     if always {
         let (store, entry, grant_origin, created) = (state.identity_store.clone(), card.fill.id.clone(), origin.clone(), card.fill.created_at);
         let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&entry, &grant_origin, agentmux_common::time::now_ms(), created)).await;
@@ -267,7 +339,7 @@ mod tests {
     fn a_card() -> CardTarget {
         let kind = kinds::kind("card").expect("the card kind");
         let fill = FillTarget { id: "card-a".into(), kind: kind.name, typed: false, kind_info: kind, label: "A".into(), part: "number", slot: None, what: "card".into(), created_at: 1, version: None };
-        CardTarget { fill, brand: "visa", last_four: "4242".into(), expiry: Some((3, 2027)), expired: false, sealed: vec![] }
+        CardTarget { fill, brand: "visa", last_four: "4242".into(), expiry: Some((3, 2027)), expired: false, default: false, sealed: vec![] }
     }
 
     #[test]
@@ -275,6 +347,6 @@ mod tests {
         let done = Outcome { filled: vec!["number"], ..Default::default() };
         assert!(answer(&a_card(), "https://shop.example", &done, false).get("approval").is_none());
         assert_eq!(answer(&a_card(), "https://shop.example", &done, true)["approval"], uses::WENT_AHEAD);
-        assert!(!uses::goes_ahead(&card_question("a", String::new(), &a_card(), "https://shop.example", &["number"], (false, "x"), "")), "silence denies a card");
+        assert!(!uses::goes_ahead(&card_question("a", String::new(), &Question { card: Some(&a_card()), picker: &[], origin: "https://shop.example", names: &["number"], offer_always: false, why: "x" }, "")), "silence denies a card");
     }
 }
