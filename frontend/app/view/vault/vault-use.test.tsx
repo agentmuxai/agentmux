@@ -387,4 +387,66 @@ describe("srv's deadline in the prompt", () => {
     it("formats the clock as minutes and seconds", () => {
         expect([clock(30), clock(5), clock(0), clock(90)]).toEqual(["0:30", "0:05", "0:00", "1:30"]);
     });
+
+    describe("a whole card the person picks", () => {
+        const cards = [
+            { id: "card-a", label: "Probe Visa", detail: "Visa •••• 4242, expires 03/27", expired: false, default: true },
+            { id: "card-old", label: "Old Mastercard", detail: "Mastercard •••• 4444, expired 03/2020", expired: true, default: false },
+        ];
+        const cardUse = (over: Partial<UseRequest> = {}) =>
+            use({ kind: "card", entry_id: "", entry_label: "a card", what: "card", field: "the card fields: number, expiry", reason: "no card was named, and there is no default card", choices: cards, ...over });
+
+        it("lists the cards with brand, last four and expiry, takes no yes until one is chosen, and answers with the chosen one", async () => {
+            uses = [cardUse()];
+            await refreshVault();
+            render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+            const dialog = await screen.findByRole("group");
+            const select = within(dialog).getByRole("combobox", { name: "Card" }) as HTMLSelectElement;
+            expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+                "Choose a card…",
+                "Probe Visa: Visa •••• 4242, expires 03/27 (default)",
+                "Old Mastercard: Mastercard •••• 4444, expired 03/2020",
+            ]);
+            expect(dialog.textContent).toContain("no card was named, and there is no default card");
+            // Nothing chosen: no yes (the Always button too), but a no.
+            expect(within(dialog).getByRole("button", { name: "Allow once" })).toBeDisabled();
+            expect(within(dialog).getByRole("button", { name: "Always on www.irs.gov" })).toBeDisabled();
+            expect(within(dialog).getByRole("button", { name: "Deny" })).toBeEnabled();
+
+            fireEvent.change(select, { target: { value: "card-a" } });
+            fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
+            await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once", choice: "card-a" }]));
+        });
+
+        it("starts on the card the agent named, and offers no Always for an expired one", async () => {
+            uses = [cardUse({ entry_id: "card-a", entry_label: "Probe Visa", what: "Visa •••• 4242, expires 03/27" })];
+            await refreshVault();
+            render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+            const dialog = await screen.findByRole("group");
+            const select = within(dialog).getByRole("combobox", { name: "Card" }) as HTMLSelectElement;
+            expect(select.value).toBe("card-a");
+            expect(within(dialog).getByRole("button", { name: "Allow once" })).toBeEnabled();
+            expect(within(dialog).getByRole("button", { name: "Always on www.irs.gov" })).toBeEnabled();
+
+            fireEvent.change(select, { target: { value: "card-old" } });
+            expect(within(dialog).getByRole("button", { name: "Allow once" })).toBeEnabled();
+            expect(within(dialog).queryByRole("button", { name: /^Always/ })).toBeNull();
+
+            fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
+            await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once", choice: "card-old" }]));
+        });
+
+        it("sends no card with a no, and no picker for a use that is not a whole card", async () => {
+            uses = [cardUse()];
+            await refreshVault();
+            render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+            fireEvent.click(within(await screen.findByRole("group")).getByRole("button", { name: "Deny" }));
+            await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));
+            cleanup();
+            uses = [use()];
+            await refreshVault();
+            render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+            expect(within(await screen.findByRole("group")).queryByRole("combobox")).toBeNull();
+        });
+    });
 });

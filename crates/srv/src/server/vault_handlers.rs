@@ -242,7 +242,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 let (id, word) = (s("id"), s("decision"));
                 let decision = vault::uses::Decision::parse(&word).ok_or_else(|| "decision is once, always or deny".to_string())?;
                 let request = vault::uses::uses().get(&id).ok_or_else(|| "that request is no longer waiting".to_string())?;
-                if decision == vault::uses::Decision::Always && !request.offer_always {
+                if decision == vault::uses::Decision::Always && !request.offer_always && request.choices.as_ref().is_none_or(|c| c.is_empty()) {
                     return Err("Always isn't offered here: the field doesn't look like what the entry is".into());
                 }
                 // A value the person typed because no entry exists: required to allow, and
@@ -256,7 +256,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     }
                 }
                 let save = request.needs_value && body.get("save").and_then(Value::as_bool).unwrap_or(false);
-                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save, by: vault::uses::By::Person };
+                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save, by: vault::uses::By::Person, choice: chosen_card(&request, body.get("choice").and_then(Value::as_str), decision)? };
                 if !vault::uses::uses().answer(&id, answer) {
                     return Err("that request is no longer waiting".into());
                 }
@@ -503,6 +503,25 @@ pub(crate) struct RequestBody {
 /// The person is reading or acting in a use's prompt: its countdown holds
 /// (SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §5, "Hold").
 /// Only the host's route reaches it, like the answer itself.
+/// The card the person picked for a whole-card fill: one of the request's own choices (the preselected
+/// one when they picked none), never an id the agent or the page made up. "Always" is never for an expired
+/// card. `None` for any other use, and for a no.
+fn chosen_card(request: &vault::uses::UseRequest, picked: Option<&str>, decision: vault::uses::Decision) -> Result<Option<String>, String> {
+    let Some(choices) = request.choices.as_ref().filter(|c| !c.is_empty()) else { return Ok(None) };
+    if decision == vault::uses::Decision::Deny {
+        return Ok(None);
+    }
+    let id = picked.filter(|p| !p.is_empty()).unwrap_or(&request.entry_id);
+    if id.is_empty() {
+        return Err("choose a card, or deny".into());
+    }
+    let card = choices.iter().find(|c| c.id == id).ok_or_else(|| "that card isn't one of the choices".to_string())?;
+    if decision == vault::uses::Decision::Always && (card.expired || !request.offer_always) {
+        return Err("Always isn't offered for that card".into());
+    }
+    Ok(Some(card.id.clone()))
+}
+
 fn hold_use(body: &Value) -> Result<(Value, bool), String> {
     let id = body.get("id").and_then(Value::as_str).unwrap_or("");
     if !vault::uses::uses().hold(id) {
