@@ -40,8 +40,8 @@ const owners: { name: string; Provider: (p: { value: Accessor<boolean>; children
     { name: "pane-stack member", Provider: (p) => <PaneStackMemberActiveProvider value={p.value}>{p.children}</PaneStackMemberActiveProvider> },
 ];
 
-function RectOverlay(p: { rect: Accessor<OverlayRect | undefined> }) {
-    usePaneOverlayRect(p.rect);
+function RectOverlay(p: { rect: Accessor<OverlayRect | undefined>; onClipped?: () => void }) {
+    usePaneOverlayRect(p.rect, p.onClipped);
     return null;
 }
 
@@ -63,6 +63,20 @@ describe("usePaneOverlayRect: a hole given as a rect (a browser page cut away fo
         setRect({ x: 10, y: 20, w: 100, h: 50 });
         unmount();
         expect(__overlayRectCount()).toBe(before);
+    });
+
+    test("says when the host has its hole: at once with no rect, and after the clip's flush with one", async () => {
+        const clipped = vi.fn();
+        const [rect, setRect] = createSignal<OverlayRect | undefined>(undefined);
+        render(() => <RectOverlay rect={rect} onClipped={clipped} />);
+        // No rect: nothing to cut.
+        expect(clipped).toHaveBeenCalledTimes(1);
+        setRect({ x: 10, y: 20, w: 100, h: 50 });
+        // Asked for, and not flushed yet.
+        expect(clipped).toHaveBeenCalledTimes(1);
+        await new Promise((r) => setTimeout(r, 50));
+        // No pane is under it, so the host has nothing to do for it: the flush itself is the answer.
+        expect(clipped).toHaveBeenCalledTimes(2);
     });
 
     test("cuts nothing while its window tab is hidden", () => {
