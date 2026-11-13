@@ -176,15 +176,7 @@ pub(super) async fn claim_and_deliver(
         }
 
         let checked = steps::verify(inj, agent_id, token, http, mstore).await;
-        // A verified signed notice this agent already got under another delivery id: the sender signs once and
-        // may send twice (a retry of a call the relay had taken), and a replay looks the same. Neither is shown.
-        if let Some(delivered_as) = &checked.repeat_of {
-            tracing::warn!(
-                injection_id = %inj.id,
-                delivered_as = %delivered_as,
-                agent_id = %agent_id,
-                "cloud_subscriber: a signed notice already delivered to this agent came again under another delivery id; not delivered again"
-            );
+        if steps::is_repeat(inj, agent_id, &checked) {
             continue;
         }
         let mut req = steps::request(inj, &target, &checked, mstore);

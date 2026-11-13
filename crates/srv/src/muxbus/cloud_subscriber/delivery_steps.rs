@@ -12,7 +12,7 @@ pub(super) struct Checked {
     /// (signed message id, agent, delivery id) of a reagent-signed message that verified: recorded once it is delivered.
     reagent_delivery: Option<(String, String, String)>,
     /// The delivery a verified signed message already went to this agent as, when this is a second copy of it.
-    pub(super) repeat_of: Option<String>,
+    repeat_of: Option<String>,
     wan_row: crate::muxbus::wan_verify::CarriedRow,
     wan_store: Option<Arc<crate::backend::storage::wan_identity::WanIdentityStore>>,
     wan_verdict: crate::muxbus::wan_verify::WanVerdict,
@@ -353,6 +353,20 @@ pub(super) async fn attach_files(
 }
 
 /// Note a signature as seen, once its message is delivered.
+/// A verified signed notice this agent already got under another delivery id: the sender signs once and may send
+/// twice (a retry of a call the relay had taken), and a replay looks the same. Neither is shown: one warning names
+/// both ids, and the caller delivers nothing. False for every other message.
+pub(super) fn is_repeat(inj: &PendingInj, agent_id: &str, checked: &Checked) -> bool {
+    let Some(delivered_as) = &checked.repeat_of else { return false };
+    tracing::warn!(
+        injection_id = %inj.id,
+        delivered_as = %delivered_as,
+        agent_id = %agent_id,
+        "cloud_subscriber: a signed notice already delivered to this agent came again under another delivery id; not delivered again"
+    );
+    true
+}
+
 pub(super) fn record_delivered(checked: &Checked) {
     if let Some((msg_id, agent, inj_id)) = &checked.reagent_delivery {
         reagent_age::record_delivered(msg_id, agent, inj_id, now_unix_secs());
