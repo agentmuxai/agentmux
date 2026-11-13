@@ -322,7 +322,7 @@ export function AccountForm({ model, inline }: { model: IdentityViewModel; inlin
                         type="text"
                         value={f.displayName()}
                         onInput={(e) => f.setDisplayName(e.currentTarget.value)}
-                        placeholder="your GitHub login"
+                        placeholder={displayNamePlaceholder(f.provider())}
                     />
                 </FormField>
 
@@ -341,6 +341,16 @@ export function AccountForm({ model, inline }: { model: IdentityViewModel; inlin
     );
 }
 
+/** What the Name field suggests: the provider's own name, which follows the Provider select. */
+export function namePlaceholder(provider: AccountProvider): string {
+    return provider === "custom" ? "Name this account" : PROVIDER_LABELS[provider];
+}
+
+/** What the Display name field suggests: a GitHub login for GitHub, otherwise how the account is shown. */
+export function displayNamePlaceholder(provider: AccountProvider): string {
+    return provider === "github" ? "your GitHub login" : "optional";
+}
+
 function NameField({ f }: { f: FormFields }): JSX.Element {
     return (
         <FormField label="Name *">
@@ -349,7 +359,7 @@ function NameField({ f }: { f: FormFields }): JSX.Element {
                 type="text"
                 value={f.name()}
                 onInput={(e) => f.setName(e.currentTarget.value)}
-                placeholder="GitHub"
+                placeholder={namePlaceholder(f.provider())}
                 ref={(el) => focusOnOpen(el, { select: true })}
             />
         </FormField>

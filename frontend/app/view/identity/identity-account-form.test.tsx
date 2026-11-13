@@ -141,6 +141,21 @@ describe("AccountForm: opening", () => {
         expect(inputOf("Notes").value).toBe("");
     });
 
+    it("suggests the chosen provider's name and a login only for GitHub, and follows the Provider select", () => {
+        renderForm();
+        expect(inputOf("Name *").placeholder).toBe("GitHub");
+        expect(inputOf("Display name").placeholder).toBe("your GitHub login");
+        choose(selectOf("Provider"), "custom");
+        expect(inputOf("Name *").placeholder).toBe("Name this account");
+        expect(inputOf("Display name").placeholder).toBe("optional");
+        choose(selectOf("Provider"), "openai");
+        expect(inputOf("Name *").placeholder).toBe("OpenAI");
+        expect(inputOf("Display name").placeholder).toBe("optional");
+        choose(selectOf("Provider"), "github");
+        expect(inputOf("Name *").placeholder).toBe("GitHub");
+        expect(inputOf("Display name").placeholder).toBe("your GitHub login");
+    });
+
     it("lists every provider in the Provider select", () => {
         renderForm();
         expect(optionValues("Provider")).toEqual([
