@@ -211,6 +211,16 @@ wrap_focus_handler! {
             // when creating a 2nd browser pane). The input owner puts back
             // focus a page takes that wasn't asked for.
             tracing::info!("[pane-focus] on_set_focus source={:?} cancel=false", source);
+            // Where Views says the focus is as CEF reports this one (#47567): a click that never reaches the
+            // input owner leaves no other trace.
+            #[cfg(not(target_os = "macos"))]
+            if let Some((block, window)) = browser.as_ref().and_then(|b| {
+                let block = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)?;
+                let window = self.state.browser_pane_window_label(&block)?;
+                crate::pane_backend::pane_is_views(&self.state, &block).then_some((block, window))
+            }) {
+                tracing::info!("[pane-focus] views focus on pane:{} in win={window}: {}", &block[..block.len().min(8)], crate::input_owner::views::focus_report(&self.state, &window));
+            }
             // Linux, and Windows with Views panes, have no click hook into a
             // pane's page (Windows' child-window panes and macOS do): focus
             // the user gave the page (a click, Tab) is the user choosing that

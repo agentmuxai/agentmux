@@ -130,6 +130,10 @@ pub enum CaptureFrom {
     Regex(String),
     /// One line, counted from 1, trimmed.
     Line(u32),
+    /// A new card, made whole from several values of one output: `number`, `exp` (one text, "03/30" or
+    /// "2030-03"), `exp_month`, `exp_year`, `cvc`, `name`, `zip`, each as one of the forms above (not a `parts`
+    /// again). `number` is required. Only for `as` with `kind: "card"` and no `id`.
+    Parts(std::collections::BTreeMap<String, CaptureFrom>),
 }
 
 /// Response from `POST /api/v1/shell/create`

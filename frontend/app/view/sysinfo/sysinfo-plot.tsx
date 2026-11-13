@@ -312,7 +312,10 @@ function chartOptions(c: ChartState, width: number, height: number): uPlot.Optio
             // Only the time is shared: each chart has its own y scale, and by
             // default uPlot would also draw the hovered chart's y value on the others.
             sync: props.syncKey ? { key: props.syncKey, scales: ["x", null] } : undefined,
-            drag: { x: false, y: false },
+            // `click` is uPlot's "this click ended a drag" hook: it stops the click from reaching anything above the
+            // chart. With the press unbound (below) uPlot sees every click as the end of a drag, so the default would
+            // swallow the click that gives the pane focus; this one lets it through.
+            drag: { x: false, y: false, click: () => {} },
             // A press does nothing here (no drag, no lock). uPlot still binds a mouseup on the document at every
             // mousedown, and its handler reads the plot's rect: a forced layout of whatever the click dirtied.
             bind: { mousedown: noBind, mouseup: noBind, click: noBind, dblclick: noBind },
@@ -375,12 +378,28 @@ function drawOnChange(c: ChartState) {
     const { props, bare, zoom } = c;
     // A new chart when what it draws changes (series, colors, axes, or the
     // theme, whose colors the canvas resolved when it was built), or when it
-    // has none yet; otherwise only a new size, or new data.
+    // has none yet; otherwise only a new size, or new data. A getter that reads a
+    // signal runs this again on every sample even when its value is the same (the
+    // focus view's `timeAxis` reads its core list; the simple view builds a new
+    // `series` array each time), so a run with the same values is skipped, the
+    // series compared by content: a rebuild replaces uPlot's `.u-over`, and a
+    // press that straddled it lost its click (Kanban #615).
+    let drawn: unknown[] | undefined;
     createEffect(
         on(
-            [() => props.series, bare, () => props.timeAxis, () => props.yLabels, zoom, appliedWindowTheme],
-            () => build(c),
-            { defer: true }
+            [
+                () => JSON.stringify(props.series),
+                bare,
+                () => props.timeAxis,
+                () => props.yLabels,
+                zoom,
+                appliedWindowTheme,
+            ],
+            (deps) => {
+                const before = drawn;
+                drawn = deps;
+                if (before?.some((d, i) => d !== deps[i])) build(c);
+            }
         )
     );
     createEffect(

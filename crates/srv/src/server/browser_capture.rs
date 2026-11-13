@@ -307,7 +307,7 @@ pub(crate) fn store_captured(
             fields.entry(f.to_string()).or_insert_with(|| origin.to_string());
         }
     }
-    let ids = plan.store(store, &[Found { value, printed: None }])?;
+    let ids = plan.store(store, &[Found { value, printed: None, also: Vec::new() }])?;
     let label = match &plan.rules[0].into {
         Target::New { label, .. } | Target::Existing { label, .. } => label.clone(),
     };

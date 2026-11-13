@@ -160,8 +160,8 @@ impl Store {
                 }
                 CaptureWrite::Replace { row, was, kept } => {
                     let n = tx.execute(
-                        "UPDATE db_vault_entries SET sealed = ?2, updated_at = ?3 WHERE id = ?1 AND created_at = ?4 AND sealed = ?5",
-                        params![row.id, row.sealed, row.updated_at, row.created_at, was],
+                        "UPDATE db_vault_entries SET sealed = ?2, updated_at = ?3, fields = ?6 WHERE id = ?1 AND created_at = ?4 AND sealed = ?5",
+                        params![row.id, row.sealed, row.updated_at, row.created_at, was, row.fields],
                     )?;
                     if n == 0 {
                         // Dropping `tx` rolls back what this capture wrote so far.
