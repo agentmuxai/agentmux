@@ -356,6 +356,8 @@ fn clear_global_current_zone_in(gfs: &FileStore, definition_id: &str) {
             "global transcripts: failed to clear current zone on archive"
         );
     }
+    // The next conversation reuses this zone: what was counted in the old one is not a floor for it.
+    crate::backend::transcript::images::forget(&zone);
 }
 
 /// List archive zones for `definition_id`, newest first.
@@ -532,6 +534,28 @@ mod preview_tests {
         assert_eq!(snapshot_preview(&bytes), ("fix the bug".to_string(), 3));
         assert_eq!(snapshot_preview(b"not json"), (String::new(), 0));
         assert_eq!(snapshot_preview(br#"{"nodes":{}}"#), (String::new(), 0));
+    }
+}
+
+#[cfg(test)]
+mod image_count_tests {
+    use super::*;
+    use crate::backend::transcript::images;
+
+    #[test]
+    fn clearing_the_current_zone_forgets_the_images_counted_in_it() {
+        let def = "def-arch-images-1";
+        let zone = agent_current_zone(def);
+        let gfs = FileStore::open_in_memory().unwrap();
+        let line = serde_json::json!({ "type": "user", "message": { "role": "user", "content":
+            "look\n\n<attached_files>\nThe user attached 1 files.\n1. a.png — /x/ab/0123.v1-e2000.send.png\n</attached_files>" } });
+        write_zone_file(&gfs, &zone, OUTPUT_FILE, format!("{line}\n").as_bytes()).unwrap();
+        assert_eq!(images::count_in_zone(&gfs, &zone).unwrap(), 1);
+        assert_eq!(images::counted(&zone), Some(1));
+
+        clear_global_current_zone_in(&gfs, def);
+
+        assert_eq!(images::counted(&zone), None, "the next conversation in this zone starts with no count");
     }
 }
 

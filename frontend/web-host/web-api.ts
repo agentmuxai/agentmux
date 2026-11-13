@@ -200,6 +200,15 @@ function identityAndEnvApi(platform: NodeJS.Platform) {
     return {
         // The proxy in front of srv adds the key; the page never holds it.
         getAuthKey: () => "",
+        // The tab's session, set by srv's sign-in page after the person confirmed it in the terminal.
+        // `sessionStorage` is per tab and per origin (port included); a hosted page has none.
+        getSessionToken: () => {
+            try {
+                return window.sessionStorage.getItem("amx-session") ?? undefined;
+            } catch {
+                return undefined;
+            }
+        },
         reloadWindow: () => window.location.reload(),
         getIsDev: () => false,
         getCursorPoint: () => lastPointer,

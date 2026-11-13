@@ -10,6 +10,7 @@
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import { formatLocale } from "@/app/i18n/i18n";
@@ -54,14 +55,14 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
             onDismiss={props.onClose}
             class="history-usage-popover"
             role="dialog"
-            aria-label="Agent history kept on this machine"
+            aria-label={t("historyUsage.aria")}
             style={{ width: "340px" }}
         >
             <div class="history-usage-header">
-                <span class="history-usage-title">Agent history</span>
-                <span class="history-usage-note">kept forever</span>
+                <span class="history-usage-title">{t("historyUsage.title")}</span>
+                <span class="history-usage-note">{t("historyUsage.keptForever")}</span>
             </div>
-            <Show when={props.usage} fallback={<div class="history-usage-empty">Measuring…</div>}>
+            <Show when={props.usage} fallback={<div class="history-usage-empty">{t("historyUsage.measuring")}</div>}>
                 {(usage) => (
                     <>
                         <div class="history-usage-total">{formatBytes(usage().total_bytes)}</div>
@@ -82,12 +83,12 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                         </div>
                         <Show when={(usage().reclaimable_bytes ?? 0) > 0}>
                             <div class="history-usage-row" data-store="reclaimable">
-                                <span class="history-usage-label">Reclaimable (not in the total)</span>
+                                <span class="history-usage-label">{t("historyUsage.reclaimable")}</span>
                                 <span class="history-usage-bytes">{formatBytes(usage().reclaimable_bytes)}</span>
                             </div>
                         </Show>
                         <Show when={usage().agents.length > 0}>
-                            <div class="history-usage-subtitle">Largest pane histories</div>
+                            <div class="history-usage-subtitle">{t("historyUsage.largest")}</div>
                             <div class="history-usage-list">
                                 <For each={usage().agents}>
                                     {(a) => (
@@ -100,9 +101,9 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                             </div>
                         </Show>
                         <div class="history-usage-footer">
-                            <span class="history-usage-note">Measured {measuredAgo(usage().computed_at_ms, Date.now(), formatLocale())}</span>
+                            <span class="history-usage-note">{t("historyUsage.measured", { ago: measuredAgo(usage().computed_at_ms, Date.now(), formatLocale()) })}</span>
                             <Button tone="quiet" density="compact" busy={refreshing()} onClick={() => void refresh()}>
-                                {refreshing() ? "Measuring…" : "Measure again"}
+                                {refreshing() ? t("historyUsage.measuring") : t("historyUsage.measureAgain")}
                             </Button>
                             <Button
                                 tone="quiet"
@@ -112,7 +113,7 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                                     void openOrFocusPaneByView("history");
                                 }}
                             >
-                                Open History
+                                {t("historyUsage.openHistory")}
                             </Button>
                         </div>
                     </>

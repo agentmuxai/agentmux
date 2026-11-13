@@ -23,7 +23,7 @@ pub const MAX_NODES: usize = 100;
 pub const MAX_EDGES: usize = 300;
 
 /// The node kinds this build has, for the error that names a missing one.
-const KINDS: &str = "agent, condition, api, response, variables, message, task, notify";
+const KINDS: &str = "agent, condition, api, response, variables, message, task, notify, app_query";
 
 /// What the approval prompt shows of a template's graph.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, ts_rs::TS)]
