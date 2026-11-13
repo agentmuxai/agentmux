@@ -221,6 +221,12 @@
         // of a drag, which with many long transcripts starved the renderer. It
         // catches up after the resize settles, one pane per idle period, as a hidden
         // window tab does (workspace.tsx; window-resize.ts; ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md).
+        // The glide to the chip (settlingPass.ts `minimizing`): the pane's content is drawn until the glide
+        // ends, under the tile's closing clip, so the pane sinks into its header and does not vanish at once.
+        &.tile-minimized.tile-minimizing .block-content {
+            visibility: visible;
+        }
+
         &.tile-minimized.tile-resize-skip .block-content {
             content-visibility: hidden;
         }

@@ -62,6 +62,8 @@ export interface SettlingPass {
     ghosts: PaneGhost[];
     /** The panes that came or were restored, by node id: each fades in at its own rect, with the glide. */
     enters: string[];
+    /** The panes this change minimized, by node id: each glides to its chip with its content still drawn, hidden at the end. */
+    minimizing?: string[];
     /** False while the tiles stand at `from` (the frame the pass opens on, and any late ones after it), true from then. */
     gliding: boolean;
 }
@@ -197,8 +199,9 @@ function movesOf(
     for (const leaf of nextLeafs) {
         const to = nextProps[leaf.id]?.rect;
         if (!to || !movesWithReflow(leaf)) continue;
-        // A pane that came, was restored or was minimized takes its rect at once: the first two fade in.
-        if (cameIds.has(leaf.id) || change.restored.has(leaf.id) || change.minimized.has(leaf.id)) continue;
+        // A pane that came or was restored takes its rect at once and fades in. One that was minimized glides
+        // to its chip like the rest, its content drawn until the end (`minimizing`).
+        if (cameIds.has(leaf.id) || change.restored.has(leaf.id)) continue;
         const gliding = open?.moves.get(leaf.id);
         if (gliding) {
             moves.set(leaf.id, open!.gliding ? { to } : { from: gliding.from, to });
@@ -265,7 +268,11 @@ export function planSettlingPass(
     // A pane still fading in from the open pass goes on fading.
     const still = (open?.enters ?? []).filter((id) => nextProps[id] && !change.minimized.has(id));
     const enters = [...new Set([...still, ...change.came.map((leaf) => leaf.id), ...change.restored])];
-    return { moves, ghosts, enters, gliding: false };
+    // A pane still on its way to its chip from the open pass goes on, unless it was restored since.
+    const minimizing = [
+        ...new Set([...(open?.minimizing ?? []).filter((id) => nextProps[id] && !change.restored.has(id)), ...change.minimized]),
+    ];
+    return { moves, ghosts, enters, ...(minimizing.length > 0 && { minimizing }), gliding: false };
 }
 
 /** A frame whose callbacks run this long after the frame's own time is late: the main thread was busy. */

@@ -317,7 +317,6 @@
 364 frontend/app/block/block.tsx::Block
 138 frontend/app/block/block.tsx::BlockFull
 293 frontend/app/block/blockframe.tsx::BlockFrame_Header
-102 frontend/app/block/blockframe.tsx::EndIcons
 114 frontend/app/block/blockutil.tsx::ConnectionButton
 108 frontend/app/block/lazy-pane-tab.tsx::createStandIn
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance

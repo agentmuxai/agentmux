@@ -483,6 +483,25 @@ describe("the block's component model", () => {
     });
 });
 
+describe("Maximize on a lone pane", () => {
+    const maximizeOf = (node: Record<string, unknown>) => {
+        const t = setup({ noHeader: false, node });
+        return q(t.view.container, ".block-frame-magnify");
+    };
+
+    it("is drawn when the tab has more than one pane", () => {
+        expect(maximizeOf({ numLeafs: () => 2 })).not.toBeNull();
+    });
+
+    it("is left out when the tab has one pane", () => {
+        expect(maximizeOf({ numLeafs: () => 1 })).toBeNull();
+    });
+
+    it("keeps Restore for a magnified pane, whatever the count", () => {
+        expect(maximizeOf({ numLeafs: () => 1, isMagnified: () => true })).not.toBeNull();
+    });
+});
+
 describe("the two stacked minimize buttons", () => {
     const header = (over: Over = {}) => {
         const t = setup({ noHeader: false, ...over });

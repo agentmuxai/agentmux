@@ -677,6 +677,8 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
                 "tear-off-offered": isDragging() && !paneCaptureInFlight() && props.layoutModel.tearOffOffered(),
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
+                // On its way to its chip: its content stays drawn under the closing clip until the glide ends.
+                "tile-minimizing": nodeModel.isMinimized() && (props.layoutModel.settlingPass()?.minimizing?.includes(props.node.id) ?? false),
                 "tile-resize-skip": skipsLayout(),
                 "tile-entering": entering(),
             })}

@@ -400,7 +400,8 @@ function MinimizePair(props: { nodeModel: NodeModel }): JSX.Element {
     );
 }
 
-function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }): JSX.Element {
+/** Maximize / Restore. A lone pane (`alone`) already fills the window, so it has no Maximize; a magnified one keeps its Restore. */
+function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void; disabled: boolean; alone?: boolean }): JSX.Element {
     const magnifyDecl = createMemo<IconButtonDecl>(() => ({
         elemtype: "iconbutton",
         icon: props.magnified ? <PaneRestoreGlyph /> : "regular@window-maximize",
@@ -408,7 +409,11 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
         click: props.toggleMagnify,
         disabled: props.disabled,
     }));
-    return <DeclIconButton decl={magnifyDecl()} className="block-frame-magnify" />;
+    return (
+        <Show when={!props.alone || props.magnified}>
+            <DeclIconButton decl={magnifyDecl()} className="block-frame-magnify" />
+        </Show>
+    );
 }
 
 /** The view's own end buttons. They live in the header's scrolling range
@@ -494,13 +499,7 @@ function EndIcons(props: {
                 fallback={
                     <Show
                         when={floatingLabel()}
-                        fallback={
-                            <OptMagnifyButton
-                                magnified={magnified()}
-                                toggleMagnify={props.nodeModel.toggleMagnify}
-                                disabled={magnifyDisabled()}
-                            />
-                        }
+                        fallback={<OptMagnifyButton magnified={magnified()} toggleMagnify={props.nodeModel.toggleMagnify} disabled={magnifyDisabled()} alone={numLeafs() <= 1} />}
                     >
                         {/* "Always on top" tack, outermost of the window controls
                         (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §4). */}

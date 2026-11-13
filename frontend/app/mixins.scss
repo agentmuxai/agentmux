@@ -284,6 +284,32 @@
                 opacity: 0.35;
                 cursor: default;
             }
+
+            // Hovering Merge splits its three segments across the colour wheel, 120 degrees apart,
+            // so it reads as a separate button from Minimize below it. Saturation and lightness
+            // follow the theme's polarity: lighter on a dark theme, deeper on a light one, so the
+            // colours keep their contrast against either header. A disabled Merge stays plain.
+            --merge-hue: 0;
+            --merge-sat: 72%;
+            --merge-light: 64%;
+            [data-theme-polarity="light"] & {
+                --merge-sat: 78%;
+                --merge-light: 42%;
+            }
+            .pane-merge-glyph rect {
+                transition: fill 120ms ease;
+            }
+            .block-frame-merge:not([aria-disabled="true"]):hover .pane-merge-glyph rect {
+                &:nth-child(1) {
+                    fill: hsl(calc(var(--merge-hue) + 0), var(--merge-sat), var(--merge-light));
+                }
+                &:nth-child(2) {
+                    fill: hsl(calc(var(--merge-hue) + 120), var(--merge-sat), var(--merge-light));
+                }
+                &:nth-child(3) {
+                    fill: hsl(calc(var(--merge-hue) + 240), var(--merge-sat), var(--merge-light));
+                }
+            }
         }
 
         // Close: a bigger X that turns the standard Windows close red on hover.
