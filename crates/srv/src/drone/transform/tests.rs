@@ -263,6 +263,19 @@ fn nesting_past_the_limit_is_an_error_not_a_crash() {
 }
 
 #[test]
+fn a_matches_pattern_must_be_a_string_literal() {
+    for source in ["item matches item.pat", "item matches lower('A')"] {
+        assert!(
+            matches!(
+                one(source, json!("x")),
+                Err(TransformError::Expr { index: 0, .. })
+            ),
+            "a pattern from data or a call must be refused"
+        );
+    }
+}
+
+#[test]
 fn the_smallest_integer_against_minus_one_does_not_panic() {
     let min = "(-9223372036854775807 - 1)";
     let remainder = value(&format!("{min} % -1"), Value::Null);

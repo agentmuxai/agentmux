@@ -36,7 +36,9 @@
 //!   `map`, `filter` and the key expressions (`by`). A missing path is `null`,
 //!   never an error.
 //! * `a contains b`: a string contains a substring, or a list holds an element.
-//!   `a matches 're'`: the Rust `regex` crate (linear time) on a string.
+//!   `a matches 're'`: the Rust `regex` crate (linear time) on a string. The
+//!   pattern must be a string literal, compiled once when the chain is read, so
+//!   no element pays for a compile.
 //!   `a in_set [..]`: the list holds `a` (JSON equality).
 //! * `lower(s)`, `trunc(s, n)` (at most `n` characters), `default(x, d)` (`d`
 //!   when `x` is null), `exists(path)` (the path is not null). **No other
@@ -71,10 +73,6 @@ pub const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 /// compile to more is an expression error, so a hostile one cannot make the
 /// compiler work without bound.
 const MAX_REGEX_BYTES: usize = 1024 * 1024;
-/// How many compiled `matches` patterns one node keeps. A chain with more
-/// distinct patterns compiles the rest per element, and the budget still bounds
-/// how many can be evaluated.
-const MAX_CACHED_PATTERNS: usize = 32;
 
 /// One step of a chain. A chain reads top to bottom, each result feeding the next.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

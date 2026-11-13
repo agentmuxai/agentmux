@@ -5,15 +5,11 @@
 //! evaluator (docs/specs/SPEC_DRONE_GENERAL_AUTOMATION_2026_11_11.md §3.9).
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
 use regex::{Regex, RegexBuilder};
 use serde_json::{Number, Value};
 
-use super::{
-    expr_step, op_step, BoundKind, TransformError, MAX_CACHED_PATTERNS, MAX_OPERATIONS,
-    MAX_REGEX_BYTES,
-};
+use super::{expr_step, op_step, BoundKind, TransformError, MAX_OPERATIONS, MAX_REGEX_BYTES};
 
 /// An expression's source may be at most this long. The grammar is small, and
 /// a bound keeps the tokenizer and parser work finite; the size of a `matches`
@@ -28,12 +24,10 @@ const MAX_NESTING_DEPTH: usize = 64;
 const MAX_EVAL_DEPTH: usize = 256;
 
 /// What one node's evaluation carries between elements: the budget it has
-/// spent and the `matches` patterns it has already compiled, so a constant
-/// pattern is compiled once rather than once per element.
+/// spent.
 #[derive(Default)]
 pub(super) struct State {
     budget: u64,
-    regexes: HashMap<String, Regex>,
 }
 
 /// One unit of the evaluation budget; the total may not pass
@@ -219,7 +213,7 @@ fn text_at(chars: &[char], start: usize, quote: char) -> Result<(String, usize),
 // The parser
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub(super) enum Expr {
     Literal(Value),
     Path(Vec<String>),
@@ -230,6 +224,12 @@ pub(super) enum Expr {
     },
     Not(Box<Expr>),
     Negate(Box<Expr>),
+    /// `value matches 'pattern'`, with the pattern compiled when the chain was
+    /// parsed so no element ever pays for a compile.
+    Matches {
+        value: Box<Expr>,
+        regex: Regex,
+    },
     Binary {
         op: Op,
         left: Box<Expr>,
@@ -365,7 +365,27 @@ impl Parser {
         };
         self.pos += 1;
         let right = self.sum()?;
+        if op == Op::Matches {
+            return self.matches(left, right);
+        }
         Ok(binary(op, left, right))
+    }
+
+    /// `a matches 'pattern'`: the pattern is a string literal, compiled here
+    /// once, so a chain over many elements never compiles one per element and
+    /// a hostile pattern cannot buy compile work with element count.
+    fn matches(&mut self, value: Expr, pattern: Expr) -> Result<Expr, String> {
+        let Expr::Literal(Value::String(pattern)) = pattern else {
+            return Err("matches needs a string literal pattern".to_string());
+        };
+        let regex = RegexBuilder::new(&pattern)
+            .size_limit(MAX_REGEX_BYTES)
+            .build()
+            .map_err(|error| format!("bad regular expression: {error}"))?;
+        Ok(Expr::Matches {
+            value: Box::new(value),
+            regex,
+        })
     }
 
     fn sum(&mut self) -> Result<Expr, String> {
@@ -562,6 +582,13 @@ impl<'a> Eval<'a> {
                 negate(&value).map_err(|message| self.fail(message))
             }
             Expr::Binary { op, left, right } => self.binary(*op, left, right),
+            Expr::Matches { value, regex } => {
+                let value = self.eval(value)?;
+                let text = value
+                    .as_str()
+                    .ok_or_else(|| self.fail("matches needs a string"))?;
+                Ok(Value::Bool(regex.is_match(text)))
+            }
         }
     }
 
@@ -632,24 +659,6 @@ impl<'a> Eval<'a> {
         }
     }
 
-    /// Whether `text` matches `pattern`. A pattern is compiled at most once per
-    /// node: without the cache, a chain over many elements would pay the same
-    /// compile for every one of them.
-    fn matches(&mut self, pattern: &str, text: &str) -> Result<bool, TransformError> {
-        if let Some(regex) = self.state.regexes.get(pattern) {
-            return Ok(regex.is_match(text));
-        }
-        let regex = RegexBuilder::new(pattern)
-            .size_limit(MAX_REGEX_BYTES)
-            .build()
-            .map_err(|error| self.fail(format!("bad regular expression: {error}")))?;
-        let matched = regex.is_match(text);
-        if self.state.regexes.len() < MAX_CACHED_PATTERNS {
-            self.state.regexes.insert(pattern.to_string(), regex);
-        }
-        Ok(matched)
-    }
-
     fn binary(&mut self, op: Op, left: &Expr, right: &Expr) -> Result<Value, TransformError> {
         match op {
             Op::And => {
@@ -699,18 +708,6 @@ impl<'a> Eval<'a> {
                 in_set(&left, &right)
                     .map(Value::Bool)
                     .map_err(|message| self.fail(message))
-            }
-            Op::Matches => {
-                let value = self.eval(left)?;
-                let pattern = self.eval(right)?;
-                let pattern = pattern
-                    .as_str()
-                    .ok_or_else(|| self.fail("matches needs a pattern string"))?;
-                let text = value
-                    .as_str()
-                    .ok_or_else(|| self.fail("matches needs a string"))?;
-                let matched = self.matches(pattern, text)?;
-                Ok(Value::Bool(matched))
             }
             Op::Plus | Op::Minus | Op::Star | Op::Slash | Op::Percent => {
                 let left = self.eval(left)?;
