@@ -74,17 +74,29 @@ describe("PopoverMenu icons", () => {
         expect(rowOf("Plain").querySelector(".menu-item-icon-spacer")).not.toBeNull();
     });
 
-    it("keeps a checkbox row's check in the slot and gives it no icon", () => {
+    it("keeps a checkbox row's check in the leading slot and draws its icon after it, in its own colour", () => {
         render(() => (
             <PopoverMenu
-                items={[{ type: "checkbox", label: "Show Icons Only", checked: true, icon: "plus", click: vi.fn() }]}
+                items={[
+                    { type: "checkbox", label: "Terminal", checked: true, icon: "plus", iconColor: "#58c142", click: vi.fn() },
+                    { type: "checkbox", label: "Show Icons Only", checked: false, click: vi.fn() },
+                ]}
                 pos={{ x: 0, y: 0 }}
                 onClose={vi.fn()}
             />
         ));
-        const slot = rowOf("Show Icons Only").querySelector(".menu-item-icon")!;
-        expect(slot.classList.contains("fa-check")).toBe(true);
-        expect(slot.classList.contains("fa-plus")).toBe(false);
+        const [check, icon] = [...rowOf("Terminal").querySelectorAll<HTMLElement>(".menu-item-icon")];
+        expect(check.classList.contains("fa-check")).toBe(true);
+        expect(icon.classList.contains("fa-plus")).toBe(true);
+        expect(icon.getAttribute("aria-hidden")).toBe("true");
+        expect(icon.style.getPropertyValue("--menu-icon-color")).toBe("#58c142");
+        // A checkbox row with no icon is just its check, as before.
+        expect(rowOf("Show Icons Only").querySelectorAll(".menu-item-icon")).toHaveLength(1);
+    });
+
+    it("sets no colour variable on an icon that has no colour", () => {
+        render(() => <PopoverMenu items={[{ label: "New Tab", icon: "plus", click: vi.fn() }]} pos={{ x: 0, y: 0 }} onClose={vi.fn()} />);
+        expect(rowOf("New Tab").querySelector<HTMLElement>(".menu-item-icon")!.style.getPropertyValue("--menu-icon-color")).toBe("");
     });
 });
 

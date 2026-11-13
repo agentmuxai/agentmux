@@ -18,8 +18,10 @@ type PopoverMenuActionItem = {
     /** When true, clicking this item does not close the popover. Default false. */
     keepOpen?: boolean;
     /** A Font Awesome name drawn in the row's leading slot (not on a checkbox row, whose check
-     *  takes the slot); decoration only. See app/util/menu-icons.ts. */
+     *  takes the slot, so there the icon follows the check); decoration only. See app/util/menu-icons.ts. */
     icon?: string;
+    /** The icon's colour (any CSS colour), as the "+" menus draw a widget's icon in its own. */
+    iconColor?: string;
     click: () => void;
 };
 
@@ -97,6 +99,10 @@ const PopoverMenuItemRenderer = (props: {
         return <PopoverMenuSectionRenderer section={item} onClose={props.onClose} />;
     }
 
+    // The icon's own colour, through the variable the flyout menus read (flyoutmenu.scss).
+    const iconStyle = (): JSX.CSSProperties | undefined =>
+        item.iconColor ? ({ "--menu-icon-color": item.iconColor } as JSX.CSSProperties) : undefined;
+
     // Normal / checkbox action item
     const handleClick = (e: MouseEvent) => {
         e.stopPropagation();
@@ -114,7 +120,7 @@ const PopoverMenuItemRenderer = (props: {
                 when={item.type === "checkbox"}
                 fallback={
                     <Show when={menuIconClass(item.icon)} fallback={<span class="menu-item-icon-spacer" />}>
-                        {(cls) => <i class={cls()} aria-hidden="true" />}
+                        {(cls) => <i class={cls()} style={iconStyle()} aria-hidden="true" />}
                     </Show>
                 }
             >
@@ -124,6 +130,10 @@ const PopoverMenuItemRenderer = (props: {
                         { "fa-check": item.checked === true },
                     )}
                 />
+                {/* A checkbox row's own icon (a widget's), after its check. */}
+                <Show when={menuIconClass(item.icon)}>
+                    {(cls) => <i class={cls()} style={iconStyle()} aria-hidden="true" />}
+                </Show>
             </Show>
             <span class="label">{item.label}</span>
         </div>
