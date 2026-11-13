@@ -210,6 +210,12 @@ pub async fn install_into(
 /// What an sdist build needs in the venv before it starts.
 const BUILD_TOOLS: &[&str] = &["setuptools", "wheel"];
 
+/// The lock entries of the build tools an sdist build needs in the venv first (the container route writes them to a
+/// file of their own, as the host install does).
+pub fn build_tools_lock(spec: &UvSpec) -> String {
+    lock_entries(spec.lock, BUILD_TOOLS)
+}
+
 /// The entries of a hash-locked requirements file for the named packages, each with its hash lines.
 fn lock_entries(lock: &str, names: &[&str]) -> String {
     let mut out = String::new();

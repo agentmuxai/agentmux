@@ -28,6 +28,8 @@ mod pull;
 mod reap;
 pub mod argv;
 pub mod cli;
+pub mod cli_release;
+mod upload;
 pub mod credential;
 pub mod image;
 pub mod listener;
@@ -776,48 +778,8 @@ impl ContainerManager {
         turn_id: &str,
         message: &str,
     ) -> Result<String, ContainerError> {
-        // No usable uid means no usable file: at 0600 a root-owned prompt is
-        // unreadable by the exec user, and /tmp's sticky bit makes it
-        // un-unlinkable too. Failing here is a clear, retryable error; writing
-        // it anyway would be a permission-denied on open plus a leaked file.
-        let (uid, gid) = self.exec_identity(container_name).await.ok_or_else(|| {
-            ContainerError::NotAvailable(format!(
-                "could not resolve the exec user of container {container_name}; \
-                 cannot write a readable turn prompt"
-            ))
-        })?;
         let file_name = format!("agentmux-turn-{turn_id}");
-        let bytes = message.as_bytes();
-
-        let mut header = tar::Header::new_gnu();
-        header.set_size(bytes.len() as u64);
-        header.set_mode(0o600);
-        header.set_uid(uid);
-        header.set_gid(gid);
-        header.set_mtime(0);
-        header.set_cksum();
-
-        let mut archive = tar::Builder::new(Vec::new());
-        archive
-            .append_data(&mut header, &file_name, bytes)
-            .map_err(|e| ContainerError::NotAvailable(format!("tar build failed: {e}")))?;
-        let tar_bytes = archive
-            .into_inner()
-            .map_err(|e| ContainerError::NotAvailable(format!("tar finish failed: {e}")))?;
-
-        self.inner
-            .docker
-            .upload_to_container(
-                container_name,
-                Some(bollard::container::UploadToContainerOptions {
-                    path: "/tmp",
-                    no_overwrite_dir_non_dir: "true",
-                }),
-                tar_bytes.into(),
-            )
-            .await?;
-
-        Ok(format!("/tmp/{file_name}"))
+        self.upload_tmp_file(container_name, &file_name, message.as_bytes()).await
     }
 
     /// Retrieve the exit code of a finished exec via the Docker socket.
@@ -919,7 +881,7 @@ impl ContainerManager {
         install: &CliInstall,
         on_install_start: impl FnOnce(),
     ) -> Result<CliProvision, ContainerError> {
-        self.provision_cli_with(container_name, install, InstallLimits::default(), on_install_start).await
+        self.provision_cli_with(container_name, install, install.limits(), on_install_start).await
     }
 
     /// [`provision_cli`](Self::provision_cli) with explicit time limits.
@@ -983,6 +945,10 @@ impl ContainerManager {
         tracing::info!(container = container_name, command = %install.command, specs = ?install.specs, "installing the provider CLI in the container");
         let started = std::time::Instant::now();
         let reaper = reap::ReapOnDrop::new(self, container_name);
+        // The Python route reads its hash lock from files, which are too large for an argument.
+        for file in install.uploads() {
+            self.upload_tmp_file(container_name, &file.name, &file.bytes).await.map_err(|e| fail(e.to_string()))?;
+        }
         let run = self
             .exec_collect(container_name, &install.install_argv(limits), limits.run)
             .await?;

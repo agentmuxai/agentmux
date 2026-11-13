@@ -546,7 +546,7 @@ async fn itest_provision_cli_installs_once_and_a_turn_can_run_it() {
     let out = fresh
         .exec_collect(
             name,
-            &["sh".into(), "-c".into(), format!("PATH=\"$PATH:{}\"; export PATH; claude --version", crate::backend::container::cli::cli_bin_dir())],
+            &["sh".into(), "-c".into(), format!("PATH=\"$PATH:{}\"; export PATH; claude --version", crate::backend::container::cli::cli_path_dirs())],
             std::time::Duration::from_secs(60),
         )
         .await
@@ -564,6 +564,53 @@ async fn itest_provision_cli_installs_once_and_a_turn_can_run_it() {
     cm.remove(name, true).await.expect("cleanup");
     let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
     let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
+}
+
+/// Docker-gated: the container route for CLIs that are not on npm (`container::cli_release`). Installs each provider
+/// named in AGENTMUX_ITEST_NON_NPM (comma separated, default `goose,aider`) into a container made from the real
+/// base image, checks the marker answers a second time, and runs `<cli> --version` the way a turn does. Needs the
+/// base image (AGENTMUX_ITEST_BASE_IMAGE) and network access to the vendors. Run with:
+///   AGENTMUX_ITEST_BASE_IMAGE=<tag> cargo test -p agentmux-srv --bin agentmux-srv -- --ignored --nocapture itest_provision_non_npm
+#[tokio::test]
+#[ignore]
+async fn itest_provision_non_npm_clis_install_and_run() {
+    let image = std::env::var("AGENTMUX_ITEST_BASE_IMAGE").expect("set AGENTMUX_ITEST_BASE_IMAGE to a built base image");
+    let wanted = std::env::var("AGENTMUX_ITEST_NON_NPM").unwrap_or_else(|_| "goose,aider".to_string());
+    let cm = ContainerManager::connect().expect("connect to docker");
+    cm.check_available().await.expect("docker daemon must be reachable");
+    for id in wanted.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let name = format!("agentmux-itest-non-npm-{id}");
+        let _ = cm.remove(&name, true).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
+        cm.ensure_running_observed(&name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running");
+        let provider = crate::backend::providers::get_provider(id).expect("a provider");
+        let install = CliInstall::for_provider(id, provider.cli_command).expect("a container route");
+
+        let mut announced = 0;
+        let first = cm.provision_cli(&name, &install, || announced += 1).await.unwrap_or_else(|e| panic!("{id}: {e:?}"));
+        assert!(matches!(first, CliProvision::Installed { .. }), "{id}: {first:?}");
+        println!("{id} {} installed in {first:?}", install.version);
+        let fresh = ContainerManager::connect().expect("connect");
+        let again = fresh.provision_cli(&name, &install, || announced += 1).await.expect("second provision");
+        assert_eq!(again, CliProvision::Present, "{id}");
+        assert_eq!(announced, 1, "{id}: a marker on the volume means no reinstall");
+
+        let out = fresh
+            .exec_collect(
+                &name,
+                &["sh".into(), "-c".into(), format!("PATH=\"$PATH:{}\"; export PATH; {} --version", crate::backend::container::cli::cli_path_dirs(), provider.cli_command)],
+                std::time::Duration::from_secs(60),
+            )
+            .await
+            .expect("run the cli");
+        assert_eq!(out.exit, Some(0), "{id}: {}", out.output);
+        println!("{id} --version: {}", out.output.trim());
+
+        cm.remove(&name, true).await.expect("cleanup");
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
+    }
 }
 
 /// Docker-gated integration test for the dev-proxy network attachment

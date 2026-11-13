@@ -106,7 +106,7 @@ The operator saw the agent pane tell them to install Goose themselves and asked 
 | 5a | npm hardening (§8): the public registry and an empty npm config for every install | built |
 | 5b | the strict lookup order and the "Use the CLI on my PATH" setting (§3) | built |
 | 5c | Toolchain Install and Uninstall (§4), the picker note and catalog hints: built (`install.uninstall`, `backend/cli_uninstall.rs`) | built |
-| 5d | the container route for the six that are not on npm (§2 last column): a pinned, hash-checked download or hashed `uv` install into the per-agent volume | 1–2 days |
+| 5d | the container route for the six that are not on npm (§2 last column): built (`backend/container/cli_release.rs`). The container fetches the same pinned Linux file as the host (goose, grok, muse, antigravity) or runs the pinned `uv` (aider, kimi) from the same registries, checks the SHA-256 before it unpacks, and writes `bin/<command>` or `venv/bin/<command>` in the per-agent volume with the npm installs' marker. The hash lock is uploaded as a file (it is larger than one argument may be). | built |
 
 **Tests:** hash mismatch refused and the partial removed; truncated and oversize download; a zip with `..` or an absolute path; two instances installing at once (the lock); a stale folder without the marker is cleared; the lookup order (own copy, then PATH only on request); `installable_provider` refuses an unknown id and a caller-sent URL; a registry test that every `Download` provider has an asset for each OS it claims and every hash is the right length. Live: a real install of each on Windows (Area54), macOS (Clare) and Linux (Maricon), then an agent turn.
 
