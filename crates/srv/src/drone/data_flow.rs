@@ -38,6 +38,10 @@ pub struct ExecutionScope {
     /// Each block's output bits `(tainted, derived)`, set by the scheduler and
     /// by the blocks that compute one. A block with none is clean.
     pub bits: HashMap<String, (bool, bool)>,
+    /// `{{item}}` and `{{index}}` while a for-each runs its body, and the bits
+    /// of the item.
+    pub locals: HashMap<String, Value>,
+    pub local_bits: (bool, bool),
 }
 
 impl ExecutionScope {
@@ -48,6 +52,18 @@ impl ExecutionScope {
     /// A scope for a run started by `trigger`.
     pub fn with_trigger(trigger: Value) -> Self {
         Self { trigger, ..Self::default() }
+    }
+
+    /// The value a template stands for: the raw value (a list, an object, a
+    /// number) when the template is one `{{...}}` token, else the text with every
+    /// token filled in.
+    pub fn value_of(&self, template: &str) -> Value {
+        let t = template.trim();
+        let one = t.strip_prefix("{{").and_then(|r| r.strip_suffix("}}")).filter(|inner| !inner.contains("{{") && !inner.contains("}}"));
+        if let Some(v) = one.and_then(|inner| self.lookup(inner.trim())) {
+            return v;
+        }
+        Value::String(self.resolve(template))
     }
 
     /// Declare how writes to `name` combine (`replace` when never declared).
@@ -79,6 +95,7 @@ impl ExecutionScope {
             let (t, d) = match parts.next().unwrap_or("") {
                 "trigger" => (!self.trigger.is_null(), false),
                 "env" => (false, false),
+                "item" | "index" if self.locals.contains_key(path.split('.').next().unwrap_or("")) => self.local_bits,
                 "var" | "vars" => parts.next().and_then(|name| self.state.get(name)).map(|tv| (tv.tainted, tv.derived)).unwrap_or((false, false)),
                 node => self.bits.get(node).copied().unwrap_or((false, false)),
             };
@@ -152,6 +169,9 @@ impl ExecutionScope {
             let name = rest.first()?;
             let v = self.vars.get(*name)?;
             return Some(walk(v.clone(), &rest[1..]));
+        } else if (head == "item" || head == "index") && self.locals.contains_key(head) {
+            // `{{item.path}}` and `{{index}}` inside a for-each body.
+            return Some(walk(self.locals.get(head)?.clone(), &rest));
         } else if head == "trigger" {
             // `{{trigger.path}}`: the run input. Missing keys resolve to
             // nothing, so the token stays visible like any unknown one.

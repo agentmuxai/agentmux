@@ -20,6 +20,8 @@ use crate::drone::types::{DroneGraph, FlowEdge, FlowNode};
 
 pub const DEFAULT_MAX_ITERATIONS: u32 = 25;
 pub const MAX_ITERATIONS_CEILING: u32 = 1_000;
+pub const DEFAULT_MAX_ITEMS: usize = 100;
+pub const MAX_ITEMS_CEILING: usize = 1_000;
 
 /// What happens when a loop reaches its `max_iterations`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +57,71 @@ pub struct Plan {
     /// For each node on a cycle, every node of its cycle: the ones that run
     /// again when a loop goes round.
     pub cycle_of: BTreeMap<String, BTreeSet<String>>,
+    /// The blocks a for-each runs as its body. They are not scheduled on their own.
+    pub owned: BTreeSet<String>,
+}
+
+/// What a for-each does when one item's body fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnItemError {
+    /// The run fails (the default).
+    Stop,
+    /// The item is recorded in `errors` and the next one runs.
+    Continue,
+}
+
+/// A for-each block's settings (§3.1). The body is one block of the graph,
+/// named by id, that has no edges of its own and runs once per item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForEachConfig {
+    /// A template for the list, such as `{{api.body.items}}`.
+    pub items: String,
+    pub body: String,
+    pub max_items: usize,
+    pub on_item_error: OnItemError,
+    pub on_cap: OnCap,
+    pub max_cost_usd: Option<f64>,
+    pub max_minutes: Option<f64>,
+}
+
+fn positive(node: &FlowNode, key: &str) -> Result<Option<f64>, String> {
+    match node.data.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_f64().filter(|n| *n > 0.0).map(Some).ok_or_else(|| format!("{key} must be a number above 0")),
+    }
+}
+
+/// Read and check a for-each block's settings.
+pub fn foreach_config(node: &FlowNode) -> Result<ForEachConfig, String> {
+    let text = |key: &str| node.data.get(key).and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty());
+    let items = text("items").ok_or("a for-each needs `items`: the list to go through, such as {{api.body.items}}")?;
+    let body = text("body").ok_or("a for-each needs `body`: the id of the block to run for each item")?;
+    let max_items = match node.data.get("max_items") {
+        None | Some(Value::Null) => DEFAULT_MAX_ITEMS,
+        Some(v) => v
+            .as_u64()
+            .filter(|n| (1..=MAX_ITEMS_CEILING as u64).contains(n))
+            .ok_or_else(|| format!("max_items must be a whole number from 1 to {MAX_ITEMS_CEILING}"))? as usize,
+    };
+    let on_item_error = match node.data.get("on_item_error").and_then(Value::as_str) {
+        None | Some("stop") => OnItemError::Stop,
+        Some("continue") => OnItemError::Continue,
+        Some(_) => return Err("on_item_error must be stop or continue".to_string()),
+    };
+    let on_cap = match node.data.get("on_cap").and_then(Value::as_str) {
+        None | Some("end_run") => OnCap::EndRun,
+        Some("exit_loop") => OnCap::ExitLoop,
+        Some(_) => return Err("on_cap must be end_run or exit_loop".to_string()),
+    };
+    Ok(ForEachConfig {
+        items: items.to_string(),
+        body: body.to_string(),
+        max_items,
+        on_item_error,
+        on_cap,
+        max_cost_usd: positive(node, "max_cost_usd")?,
+        max_minutes: positive(node, "max_minutes")?,
+    })
 }
 
 /// A reason a graph cannot run, for the author: which block, and what to do.
@@ -180,6 +247,34 @@ fn walk_back_edges(ids: &[&str], edges: &[(usize, usize, &FlowEdge)]) -> (BTreeS
     (back, unreached)
 }
 
+/// Check each for-each: its settings, and that its body is a block of the graph
+/// that is not wired into it, is not a for-each, and is not another one's body.
+fn check_foreach(sorted: &[&FlowNode], edges: &[(usize, usize, &FlowEdge)], plan: &mut Plan, issues: &mut Vec<Issue>) {
+    for node in sorted.iter().filter(|n| kind_of(n) == "foreach") {
+        let cfg = match foreach_config(node) {
+            Ok(cfg) => cfg,
+            Err(message) => {
+                issues.push(Issue::at(&node.id, message));
+                continue;
+            }
+        };
+        let Some(body) = sorted.iter().find(|n| n.id == cfg.body) else {
+            issues.push(Issue::at(&node.id, format!("the body {:?} is not a block of this drone", cfg.body)));
+            continue;
+        };
+        let wired = edges.iter().any(|(s, t, _)| sorted[*s].id == body.id || sorted[*t].id == body.id);
+        if body.id == node.id {
+            issues.push(Issue::at(&node.id, "a for-each cannot be its own body"));
+        } else if kind_of(body) == "foreach" {
+            issues.push(Issue::at(&node.id, format!("the body {:?} is itself a for-each: nest loops with a sub-drone", body.id)));
+        } else if wired {
+            issues.push(Issue::at(&body.id, format!("{:?} is the body of the for-each {:?} and runs once per item: take its edges off", body.id, node.id)));
+        } else if !plan.owned.insert(body.id.clone()) {
+            issues.push(Issue::at(&node.id, format!("the body {:?} is already the body of another for-each", body.id)));
+        }
+    }
+}
+
 /// Check the graph's loops and say how the scheduler should run it. A graph
 /// with no cycle gets an empty plan.
 pub fn analyze(graph: &DroneGraph) -> Result<Plan, Vec<Issue>> {
@@ -233,6 +328,8 @@ pub fn analyze(graph: &DroneGraph) -> Result<Plan, Vec<Issue>> {
             plan.guards.insert(ids[u].to_string(), read_guard(sorted[u], loop_edges, &mut issues));
         }
     }
+
+    check_foreach(&sorted, &edges, &mut plan, &mut issues);
 
     let (back_edges, unreached) = walk_back_edges(&ids, &edges);
     plan.back_edges = back_edges;
@@ -392,5 +489,58 @@ mod tests {
     fn an_edge_to_a_block_that_is_not_there_is_refused() {
         let g = DroneGraph { nodes: vec![node("a", "api", json!({}))], edges: vec![edge("e1", "a", "ghost", None)] };
         assert!(analyze(&g).unwrap_err()[0].message.contains("unknown node"));
+    }
+
+    fn foreach_graph(extra: Value, body_edges: bool) -> DroneGraph {
+        let mut data = json!({ "items": "{{trigger.list}}", "body": "work" });
+        data.as_object_mut().unwrap().extend(extra.as_object().cloned().unwrap_or_default());
+        let mut g = DroneGraph {
+            nodes: vec![node("start", "variables", json!({})), node("each", "foreach", data), node("work", "agent", json!({}))],
+            edges: vec![edge("e1", "start", "each", None)],
+        };
+        if body_edges {
+            g.edges.push(edge("e2", "start", "work", None));
+        }
+        g
+    }
+
+    #[test]
+    fn a_for_each_owns_its_body_and_reads_its_limits() {
+        let plan = analyze(&foreach_graph(json!({}), false)).unwrap();
+        assert_eq!(plan.owned, BTreeSet::from(["work".to_string()]));
+        let g = foreach_graph(json!({ "max_items": 7, "on_item_error": "continue", "on_cap": "exit_loop", "max_cost_usd": 2 }), false);
+        let cfg = foreach_config(&g.nodes[1]).unwrap();
+        assert_eq!((cfg.max_items, cfg.on_item_error, cfg.on_cap, cfg.max_cost_usd), (7, OnItemError::Continue, OnCap::ExitLoop, Some(2.0)));
+        let plain = foreach_config(&foreach_graph(json!({}), false).nodes[1]).unwrap();
+        assert_eq!((plain.max_items, plain.on_item_error, plain.on_cap), (100, OnItemError::Stop, OnCap::EndRun), "the defaults");
+    }
+
+    #[test]
+    fn a_for_each_that_cannot_run_is_refused_and_says_what_to_fix() {
+        for (extra, wants) in [
+            (json!({ "max_items": 0 }), "max_items"),
+            (json!({ "max_items": 1001 }), "max_items"),
+            (json!({ "on_item_error": "never" }), "on_item_error"),
+            (json!({ "body": "ghost" }), "not a block of this drone"),
+            (json!({ "body": "each" }), "its own body"),
+            (json!({ "items": "" }), "needs `items`"),
+        ] {
+            let issues = analyze(&foreach_graph(extra.clone(), false)).unwrap_err();
+            assert!(issues.iter().any(|i| i.message.contains(wants)), "{extra}: {issues:?}");
+        }
+        let issues = analyze(&foreach_graph(json!({}), true)).unwrap_err();
+        assert!(issues[0].message.contains("take its edges off"), "{issues:?}");
+    }
+
+    #[test]
+    fn a_for_each_body_is_not_a_for_each_and_is_not_shared() {
+        let mut g = foreach_graph(json!({}), false);
+        g.nodes.push(node("again", "foreach", json!({ "items": "{{trigger.y}}", "body": "work" })));
+        g.edges.push(edge("e4", "start", "again", None));
+        let issues = analyze(&g).unwrap_err();
+        assert!(issues.iter().any(|i| i.message.contains("already the body of another")), "{issues:?}");
+        let mut nested = foreach_graph(json!({ "body": "inner" }), false);
+        nested.nodes.push(node("inner", "foreach", json!({ "items": "{{trigger.x}}", "body": "work" })));
+        assert!(analyze(&nested).unwrap_err().iter().any(|i| i.message.contains("sub-drone")));
     }
 }

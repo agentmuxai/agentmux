@@ -3,7 +3,8 @@
 
 //! Variables block: writes the run's named values. The block's `data.entries` is
 //! a list of `{name, value, reducer?}`. Each string value is `{{}}`-resolved
-//! against the current scope and written under the variable's reducer
+//! against the current scope (a value that is one `{{...}}` token keeps its type:
+//! a number stays a number, a list a list) and written under the variable's reducer
 //! (`replace`, the default, `append`, `merge` or `add`; see `drone/state.rs`),
 //! so a loop can collect into a list or add up a number. A value that reads
 //! something tainted is written tainted, and no later write clears it.
@@ -41,7 +42,7 @@ pub async fn run(node: &FlowNode, scope: &mut ExecutionScope) -> Result<Value, S
         let tv = match raw {
             Value::String(s) => {
                 let (tainted, derived) = scope.bits_of(&s);
-                Tv { v: Value::String(scope.resolve(&s)), tainted, derived }
+                Tv { v: scope.value_of(&s), tainted, derived }
             }
             other => Tv::clean(other),
         };

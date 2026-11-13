@@ -152,7 +152,7 @@ impl<'a> Scheduler<'a> {
     }
 
     async fn run(&mut self) -> Result<(), String> {
-        let mut roots: Vec<&str> = self.node_of.keys().copied().filter(|id| self.incoming.get(id).is_none_or(|v| v.is_empty())).collect();
+        let mut roots: Vec<&str> = self.node_of.keys().copied().filter(|id| !self.plan.owned.contains(*id) && self.incoming.get(id).is_none_or(|v| v.is_empty())).collect();
         roots.sort_unstable();
         for id in roots {
             self.enqueue(id, false);
@@ -230,6 +230,28 @@ impl<'a> Scheduler<'a> {
         self.route(node, &output)
     }
 
+    /// Hand a block to the code for its kind. A for-each runs its body block
+    /// through [`run_block`](Self::run_block), so it is handled here, not in
+    /// `blocks`.
+    async fn dispatch(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
+        if kind == BlockKind::ForEach {
+            return self.run_foreach(node).await;
+        }
+        let scope = &mut self.scope;
+        match kind {
+            BlockKind::Variables => blocks::variables::run(node, scope).await,
+            BlockKind::Api => blocks::api::run(node, scope).await,
+            BlockKind::Condition => blocks::condition::run(node, scope).await,
+            BlockKind::Response => blocks::response::run(node, scope).await,
+            BlockKind::Agent => blocks::agent::run(node, scope).await,
+            BlockKind::Message => blocks::message::run(node, scope).await,
+            BlockKind::Task => blocks::task::run(node, scope).await,
+            BlockKind::Notify => blocks::notify::run(node, scope).await,
+            BlockKind::Transform => blocks::transform::run(node, scope).await,
+            BlockKind::ForEach => unreachable!("handled above"),
+        }
+    }
+
     /// Run one block with its events and its recorded state.
     async fn run_block(&mut self, node: &'a FlowNode) -> Result<Value, String> {
         let id = node.id.as_str();
@@ -245,17 +267,7 @@ impl<'a> Scheduler<'a> {
             completed_at: done.then(now_ms),
         };
         mark_state(self.states, id, state("running", None, None, false)).await;
-        let scope = &mut self.scope;
-        let result = match kind {
-            BlockKind::Variables => blocks::variables::run(node, scope).await,
-            BlockKind::Api => blocks::api::run(node, scope).await,
-            BlockKind::Condition => blocks::condition::run(node, scope).await,
-            BlockKind::Response => blocks::response::run(node, scope).await,
-            BlockKind::Agent => blocks::agent::run(node, scope).await,
-            BlockKind::Message => blocks::message::run(node, scope).await,
-            BlockKind::Task => blocks::task::run(node, scope).await,
-            BlockKind::Notify => blocks::notify::run(node, scope).await,
-        };
+        let result = self.dispatch(node, kind).await;
         match result {
             Ok(mut output) => {
                 self.keep_history(id, &mut output);
@@ -294,7 +306,7 @@ impl<'a> Scheduler<'a> {
                 (false, tainted || derived)
             }
             BlockKind::Response => read("template"),
-            BlockKind::Variables => return,
+            BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach => return,
             BlockKind::Task | BlockKind::Notify => (false, false),
         };
         self.scope.bits.insert(node.id.clone(), bits);
@@ -405,6 +417,8 @@ impl<'a> Scheduler<'a> {
         self.enqueue(head, true);
     }
 }
+
+mod foreach;
 
 #[cfg(test)]
 #[path = "scheduler_tests.rs"]
