@@ -80,8 +80,9 @@ pub fn repo_of_gh_command(args: &[String], env_repo: Option<&str>, origin_url: i
             explicit = it.next().cloned();
         } else if let Some(v) = a.strip_prefix("--repo=").or_else(|| a.strip_prefix("-R=")) {
             explicit = Some(v.to_string());
-        } else if let Some(v) = a.strip_prefix("-R").filter(|v| !v.is_empty() && !v.starts_with('-')) {
-            // `-Rowner/repo`, the value written against the flag.
+        } else if let Some(v) = a.strip_prefix("-R").filter(|v| v.contains('/') && !v.chars().any(char::is_whitespace)) {
+            // `-Rowner/repo`, the value written against the flag. Text that merely begins with `-R` (a title like
+            // `-Rework parser`) has no `/` or has a space, and is not taken for a repository.
             explicit = Some(v.to_string());
         }
     }
@@ -565,6 +566,9 @@ pub(crate) mod tests {
         assert_eq!(repo_of_gh_command(&args(&["pr", "create", "-Rocto/hello"]), None, origin), repo("octo", "hello"));
         assert_eq!(repo_of_gh_command(&args(&["pr", "create", "-R=octo/hello"]), None, origin), repo("octo", "hello"));
         assert_eq!(repo_of_gh_command(&args(&["-Rocto/hello", "pr", "edit", "7"]), None, origin), repo("octo", "hello"));
+        // A value that only begins with `-R` is text, not a repository: the working directory's repository stays.
+        assert_eq!(repo_of_gh_command(&args(&["pr", "create", "--title", "-Rework parser"]), None, origin), repo("home", "checkout"));
+        assert_eq!(repo_of_gh_command(&args(&["pr", "create", "--title", "-Rework/a b"]), None, origin), repo("home", "checkout"));
         assert_eq!(repo_of_gh_command(&args(&["pr", "list"]), Some("env/repo"), origin), repo("env", "repo"));
         assert_eq!(repo_of_gh_command(&args(&["api", "repos/octo/hello/pulls"]), None, origin), repo("octo", "hello"));
         // gh fills the placeholders from the working directory's repository.
