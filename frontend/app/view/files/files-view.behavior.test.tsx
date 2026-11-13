@@ -131,6 +131,9 @@ vi.mock("./files-open", async (orig) => ({
         return h.state.target !== "only-tab";
     },
 }));
+// The toolbar and the column header are fitted to their width by the window's shared observer
+// (files-view.test.tsx covers it); the lifecycle logged here is the list's own observer.
+vi.mock("@/app/element/width-fit", () => ({ useWidthFit: () => {} }));
 vi.mock("./files-menus", async (orig) => {
     const real = await orig<typeof import("./files-menus")>();
     return {
@@ -154,11 +157,16 @@ class FakeResizeObserver {
     constructor(public cb: () => void) {
         h.state.roCallbacks.push(cb);
     }
-    observe() {
+    watchesList = false;
+    // The record is of the list's observer; the breadcrumb row's (the path kept at its end) is not in it.
+    observe(el: Element) {
+        if (el.classList.contains("files-breadcrumb")) return;
+        this.watchesList = true;
         life("ResizeObserver.observe(list)");
     }
+    unobserve() {}
     disconnect() {
-        life("ResizeObserver.disconnect()");
+        if (this.watchesList) life("ResizeObserver.disconnect()");
     }
 }
 
@@ -849,7 +857,9 @@ describe("FilesView filter button and column dividers", () => {
         await settled(v);
         expect(listVar(v, "--files-w-size")).toBe("100px");
         expect(listVar(v, "--files-w-kind")).toBe("");
-        expect(listVar(v, "--files-flex-name")).toBe("0 0 300px");
+        // Name's width is the most it takes: it gives way in a list too narrow for it.
+        expect(listVar(v, "--files-flex-name")).toBe("0 1 300px");
+        expect(listVar(v, "--files-w-name")).toBe("300px");
     });
 });
 

@@ -94,3 +94,39 @@ export const buildFolderMenu = (model: FilesModel, actions: Pick<RowMenuActions,
         { type: "action", label: "Undo", icon: MENU_ICON.undo, shortcut: shortcutFor("files:undo"), onSelect: () => void model.undo() },
     ]);
 };
+
+/**
+ * The width tiers of the toolbar: `useWidthFit` sets one as the row's `data-fit` when the row is too
+ * narrow for its buttons. files.scss hides a group of buttons at each, and the More menu offers them.
+ */
+export const TOOLBAR_TIERS = ["less", "least", "bare"] as const;
+
+/** What the More menu needs of the view: how the list is drawn, and the toggle for it. */
+export type ToolbarMenuView = { grid: boolean; toggleViewMode: () => void };
+
+/** The toolbar's More menu: the buttons its width tier has hidden, a group to each tier. */
+export const buildToolbarMenu = (model: FilesModel, tier: string | undefined, view: ToolbarMenuView): ContextMenuItem[] => {
+    const hidden = TOOLBAR_TIERS.indexOf(tier as (typeof TOOLBAR_TIERS)[number]) + 1;
+    const items: ContextMenuItem[] = [];
+    if (hidden >= 3) {
+        items.push(
+            { type: "action", label: "Back", icon: MENU_ICON.back, shortcut: shortcutFor("files:back"), disabled: !model.canBack(), onSelect: () => model.goBack() },
+            { type: "action", label: "Forward", icon: MENU_ICON.forward, shortcut: shortcutFor("files:forward"), disabled: !model.canForward(), onSelect: () => model.goForward() },
+            { type: "separator" }
+        );
+    }
+    if (hidden >= 2) {
+        items.push(
+            { type: "action", label: "New folder", icon: MENU_ICON.newFolder, shortcut: shortcutFor("files:newFolder"), onSelect: () => void model.createNew("dir") },
+            { type: "action", label: "Refresh", icon: MENU_ICON.refresh, shortcut: shortcutFor("files:refresh"), onSelect: () => model.refresh() },
+            { type: "separator" }
+        );
+    }
+    if (hidden >= 1) {
+        items.push(
+            { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", icon: model.showHidden() ? MENU_ICON.hide : MENU_ICON.show, onSelect: () => model.toggleHidden() },
+            { type: "action", label: view.grid ? "Show as a list" : "Show as thumbnails", icon: view.grid ? "list" : "table-cells-large", onSelect: view.toggleViewMode }
+        );
+    }
+    return items;
+};

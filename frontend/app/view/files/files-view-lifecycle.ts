@@ -39,12 +39,23 @@ export function useFilesLifecycle(fv: FilesLocal): void {
     );
 
     // A long path shows its end: the folder you're in matters more than the
-    // drive it's on.
+    // drive it's on. It is put there again whenever the row's width changes (a thinner pane, the filter
+    // box opening, buttons moving into the More menu): a row that only got narrower would keep its start.
+    const showPathEnd = () => {
+        if (refs.crumbs) refs.crumbs.scrollLeft = refs.crumbs.scrollWidth;
+    };
+    const crumbsSize = new ResizeObserver(showPathEnd);
+    let watched: HTMLElement | undefined;
+    refs.onCrumbs = (el) => {
+        if (watched) crumbsSize.unobserve(watched);
+        watched = el;
+        crumbsSize.observe(el);
+    };
+    if (refs.crumbs) refs.onCrumbs(refs.crumbs);
+    onCleanup(() => crumbsSize.disconnect());
     createEffect(
         on(model.path, () => {
-            queueMicrotask(() => {
-                if (refs.crumbs) refs.crumbs.scrollLeft = refs.crumbs.scrollWidth;
-            });
+            queueMicrotask(showPathEnd);
         })
     );
 

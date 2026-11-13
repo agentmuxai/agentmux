@@ -1,12 +1,18 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/** The Files pane's toolbar: history, the breadcrumb (or the path editor), the filter box and the view toggles. */
+/**
+ * The Files pane's toolbar: history, the breadcrumb (or the path editor), the filter box and the view toggles.
+ * A row too narrow for its buttons moves them into a More menu, a group at a time (TOOLBAR_TIERS).
+ */
 
+import type { ContextMenuItem } from "@/app/components/context-menu";
 import { Button, IconButton } from "@/app/element/ui";
+import { useWidthFit } from "@/app/element/width-fit";
 import { shortcutFor } from "@/app/keybindings";
 import { tip } from "@/app/element/tip";
 import { For, Show, type JSX } from "solid-js";
+import { buildToolbarMenu, TOOLBAR_TIERS } from "./files-menus";
 import type { FilesModel } from "./files-model";
 import { crumbsOf } from "./files-path";
 
@@ -27,12 +33,22 @@ export function FilesToolbar(props: {
     crumbsRef: (el: HTMLElement) => void;
     filterRef: (el: HTMLInputElement) => void;
     filterButtonRef: (el: HTMLElement) => void;
+    /** Show a menu at a point of the window: the More menu, under its button. */
+    openMenu: (menu: { x: number; y: number; items: ContextMenuItem[] }) => void;
 }): JSX.Element {
     const model = props.model;
+    let bar: HTMLDivElement | undefined;
+    // The filter box and the path editor change what the row needs without resizing it.
+    useWidthFit(() => bar, TOOLBAR_TIERS, undefined, () => [props.filterOpen(), props.editingPath()]);
+    const openMore = (e: MouseEvent): void => {
+        const at = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const items = buildToolbarMenu(model, bar?.dataset.fit, { grid: props.grid(), toggleViewMode: props.onToggleViewMode });
+        props.openMenu({ x: at.left, y: at.bottom, items });
+    };
     return (
-        <div class="files-toolbar">
-            <IconButton icon="arrow-left" label={`Back (${shortcutFor("files:back")})`} class="files-tool" disabled={!model.canBack()} onClick={() => model.goBack()} />
-            <IconButton icon="arrow-right" label={`Forward (${shortcutFor("files:forward")})`} class="files-tool" disabled={!model.canForward()} onClick={() => model.goForward()} />
+        <div ref={bar} class="files-toolbar">
+            <IconButton icon="arrow-left" label={`Back (${shortcutFor("files:back")})`} class="files-tool files-tool--history" disabled={!model.canBack()} onClick={() => model.goBack()} />
+            <IconButton icon="arrow-right" label={`Forward (${shortcutFor("files:forward")})`} class="files-tool files-tool--history" disabled={!model.canForward()} onClick={() => model.goForward()} />
             <IconButton icon="arrow-up" label={`Up (${shortcutFor("files:up")})`} class="files-tool" disabled={crumbsOf(model.path()).length < 2} onClick={() => model.goUp()} />
             <Show
                 when={!props.editingPath()}
@@ -80,12 +96,13 @@ export function FilesToolbar(props: {
                 <FilterBox model={model} closeFilter={props.closeFilter} focusList={props.focusList} filterRef={props.filterRef} />
             </Show>
             <FilterButton model={model} open={props.filterOpen} toggle={props.toggleFilter} buttonRef={props.filterButtonRef} />
-            <IconButton icon="folder-plus" label="New folder" class="files-tool" onClick={() => void model.createNew("dir")} />
-            <IconButton icon={model.showHidden() ? "eye" : "eye-slash"} label={model.showHidden() ? "Hide hidden files" : "Show hidden files"} pressed={model.showHidden()} class="files-tool" onClick={() => model.toggleHidden()} />
-            <IconButton icon="arrows-rotate" label="Refresh (F5)" class="files-tool" onClick={() => model.refresh()} />
-            <IconButton icon="table-columns" label={model.showSidebar() ? "Hide Places" : "Show Places"} pressed={model.showSidebar()} class="files-tool" onClick={() => model.toggleSidebar()} />
-            <IconButton icon={props.grid() ? "list" : "table-cells-large"} label={props.grid() ? "Show as a list" : "Show as thumbnails"} pressed={props.grid()} class="files-tool" onClick={props.onToggleViewMode} />
-            <IconButton icon="eye" label={model.showPreview() ? "Hide preview (Space)" : "Show preview (Space)"} pressed={model.showPreview()} class="files-tool" onClick={() => model.togglePreview()} />
+            <IconButton icon="folder-plus" label="New folder" class="files-tool files-tool--action" onClick={() => void model.createNew("dir")} />
+            <IconButton icon={model.showHidden() ? "eye" : "eye-slash"} label={model.showHidden() ? "Hide hidden files" : "Show hidden files"} pressed={model.showHidden()} class="files-tool files-tool--view" onClick={() => model.toggleHidden()} />
+            <IconButton icon="arrows-rotate" label="Refresh (F5)" class="files-tool files-tool--action" onClick={() => model.refresh()} />
+            <IconButton icon="table-columns" label={model.showSidebar() ? "Hide Places" : "Show Places"} pressed={model.showSidebar()} class="files-tool files-tool--places" onClick={() => model.toggleSidebar()} />
+            <IconButton icon={props.grid() ? "list" : "table-cells-large"} label={props.grid() ? "Show as a list" : "Show as thumbnails"} pressed={props.grid()} class="files-tool files-tool--view" onClick={props.onToggleViewMode} />
+            <IconButton icon="eye" label={model.showPreview() ? "Hide preview (Space)" : "Show preview (Space)"} pressed={model.showPreview()} class="files-tool files-tool--preview" onClick={() => model.togglePreview()} />
+            <IconButton icon="ellipsis" label="More" class="files-tool files-tool--more" aria-haspopup="menu" onClick={openMore} />
         </div>
     );
 }

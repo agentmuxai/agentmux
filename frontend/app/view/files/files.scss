@@ -7,6 +7,11 @@
 
 @use "../../mixins.scss";
 
+// Up to these widths of the pane there is no room for Places, or for the preview, beside the list: the
+// panel is not drawn, and neither is the toolbar button that would show it.
+$places-hidden-to: 480px;
+$preview-hidden-to: 640px;
+
 .files-view {
     display: flex;
     flex-direction: column;
@@ -27,6 +32,10 @@
     --files-w-size: 72px;
     --files-w-kind: 90px;
     --files-flex-name: 1;
+    // The narrowest Name is drawn with every column shown; less once the header has dropped some (below).
+    --files-min-name: 200px;
+    // A Name width set by dragging caps that minimum, so the column gives way in a thinner pane; none until then.
+    --files-w-name: 100vw;
 }
 
 // ── Toolbar ─────────────────────────────────────────────────────────────────
@@ -38,15 +47,68 @@
     padding: 4px 6px;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
+
+    // A button is whole or in the More menu: only the path and the filter box give way.
+    > * {
+        flex-shrink: 0;
+    }
 }
 
-// The toolbar buttons are element/ui IconButtons (quiet; toggles pressed).
+// The toolbar buttons are element/ui IconButtons (quiet; toggles pressed), each inside its tooltip's
+// anchor, which is the box the row lays out.
+//
+// A row too narrow for its buttons moves them into its More menu, a group at a time: `useWidthFit` steps
+// `data-fit` through TOOLBAR_TIERS (files-menus.ts) until the row fits, so no width is named here and
+// the pane's zoom needs no rule of its own. The list's view toggles go first, then New folder and
+// Refresh, then Back and Forward. Up, the path, the filter and More stay.
+.files-toolbar {
+    &:not([data-fit]) .ui-tooltip-anchor:has(> .files-tool--more),
+    &[data-fit] .ui-tooltip-anchor:has(> .files-tool--view),
+    &:is([data-fit="least"], [data-fit="bare"]) .ui-tooltip-anchor:has(> .files-tool--action),
+    &[data-fit="bare"] .ui-tooltip-anchor:has(> .files-tool--history) {
+        display: none;
+    }
+
+    .ui-tooltip-anchor:has(> .files-tool--places) {
+        @container (max-width: #{$places-hidden-to}) {
+            display: none;
+        }
+    }
+
+    .ui-tooltip-anchor:has(> .files-tool--preview) {
+        @container (max-width: #{$preview-hidden-to}) {
+            display: none;
+        }
+    }
+
+    // In a fitted row the open filter box takes the path's place, so the buttons stay where they are.
+    &[data-fit]:has(.files-filter-input) .files-breadcrumb {
+        display: none;
+    }
+
+    &[data-fit] .files-filter-input {
+        flex-grow: 1;
+    }
+
+    // The last tier has nothing left to move: the path and the filter box take what there is.
+    &[data-fit="bare"] {
+        .files-breadcrumb,
+        .files-path-input {
+            min-width: 0;
+        }
+
+        .files-filter-input {
+            min-width: 40px;
+        }
+    }
+}
 
 .files-breadcrumb {
     display: flex;
     align-items: center;
     flex: 1;
-    min-width: 0;
+    // Room for the end of the folder's name: the row sheds buttons before the path gets less.
+    min-width: 64px;
     // Scrolled to its end by the view, so a long path hides its start.
     overflow: hidden;
     padding: 0 4px;
@@ -87,7 +149,7 @@
 
 .files-path-input {
     flex: 1;
-    min-width: 0;
+    min-width: 64px;
     height: 22px;
     padding: 0 6px;
     border: 1px solid var(--accent-color);
@@ -116,7 +178,7 @@
     border-right: 1px solid var(--border-color);
     overflow-y: auto;
 
-    @container (max-width: 420px) {
+    @container (max-width: #{$places-hidden-to}) {
         display: none;
     }
 }
@@ -239,11 +301,42 @@
     .ui-button.files-col-name {
         gap: 6px;
         flex: var(--files-flex-name);
-        min-width: 120px;
+        min-width: min(var(--files-min-name), var(--files-w-name));
     }
+}
 
-    .ui-button.files-col-kind {
-        @container (max-width: 520px) {
+// A list too narrow for its columns drops them from the right: `useWidthFit` steps the header's
+// `data-fit` through COLUMN_TIERS (files-view-parts.tsx) until the header fits, and the rows under it
+// follow. Kind goes, then Size, then Modified. Name keeps a width worth reading at each step, so a
+// column is dropped before Name is squeezed to its narrowest; a width the person dragged Name to gives
+// way first (files-columns.ts). The list's own width decides, so Places, the preview, dragged widths and
+// the pane's zoom are all counted, and the list does not scroll sideways for its columns.
+.files-header[data-fit] {
+    &,
+    & ~ .files-rows {
+        --files-min-name: 150px;
+
+        .files-col-kind {
+            display: none;
+        }
+    }
+}
+
+.files-header:is([data-fit="size"], [data-fit="modified"]) {
+    &,
+    & ~ .files-rows {
+        --files-min-name: 120px;
+
+        .files-col-size {
+            display: none;
+        }
+    }
+}
+
+.files-header[data-fit="modified"] {
+    &,
+    & ~ .files-rows {
+        .files-col-modified {
             display: none;
         }
     }
@@ -290,7 +383,7 @@
     align-items: center;
     gap: 6px;
     flex: var(--files-flex-name);
-    min-width: 120px;
+    min-width: min(var(--files-min-name), var(--files-w-name));
 }
 
 .files-col-modified {
@@ -311,10 +404,6 @@
     width: var(--files-w-kind);
     flex-shrink: 0;
     color: var(--secondary-text-color);
-
-    @container (max-width: 520px) {
-        display: none;
-    }
 }
 
 .files-icon-box {
@@ -454,7 +543,10 @@
 }
 
 .files-filter-input {
-    width: 160px;
+    flex: 0 1 160px;
+    min-width: 64px;
+    // The path is scrolled to its end, so its last name ends at the box: keep them apart.
+    margin-left: 4px;
     height: 22px;
     padding: 0 6px;
     border: 1px solid var(--border-color);
@@ -480,7 +572,7 @@
     overflow: auto;
 
     // Narrow panes drop the preview after Places (§5.1).
-    @container (max-width: 640px) {
+    @container (max-width: #{$preview-hidden-to}) {
         display: none;
     }
 }

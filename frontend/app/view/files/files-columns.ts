@@ -4,7 +4,8 @@
 /**
  * The list view's column widths: dragged at the dividers in the column header, one number per column in the
  * pane's block meta (`files:colwidths`), so they survive a restart. A column with no stored width keeps its
- * stylesheet width (Name takes what the others leave). While a divider is dragged the width is held in a
+ * stylesheet width (Name takes what the others leave). Name's width is the most it takes: in a list too
+ * narrow for the columns it gives way before any column is dropped. While a divider is dragged the width is held in a
  * signal and written to meta once, on release, so a drag is not a stream of meta writes.
  */
 
@@ -44,9 +45,11 @@ export function readColumnWidths(raw: unknown): ColumnWidths {
 export function columnVars(widths: ColumnWidths): Record<string, string> {
     const vars: Record<string, string> = {};
     for (const [key, px] of Object.entries(widths)) {
-        // Name takes what the others leave until it is given a width of its own.
-        if (key === "name") vars["--files-flex-name"] = `0 0 ${px}px`;
-        else vars[`--files-w-${key}`] = `${px}px`;
+        // Name takes what the others leave until it is given a width of its own, which it keeps while
+        // the list has room for it. The width is given twice: the stylesheet's narrowest Name is no
+        // wider than a width the person chose.
+        if (key === "name") vars["--files-flex-name"] = `0 1 ${px}px`;
+        vars[`--files-w-${key}`] = `${px}px`;
     }
     return vars;
 }

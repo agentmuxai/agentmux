@@ -1,12 +1,12 @@
 <div class="files-toolbar">
 <div class="ui-tooltip-anchor">
-<button aria-label="Back (Alt+←)" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool" disabled="">
+<button aria-label="Back (Alt+←)" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool files-tool--history" disabled="">
 <i aria-hidden="true" class="fa-solid fa-arrow-left">
 </i>
 </button>
 </div>
 <div class="ui-tooltip-anchor">
-<button aria-label="Forward (Alt+→)" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool" disabled="">
+<button aria-label="Forward (Alt+→)" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool files-tool--history" disabled="">
 <i aria-hidden="true" class="fa-solid fa-arrow-right">
 </i>
 </button>
@@ -36,38 +36,44 @@
 </button>
 </div>
 <div class="ui-tooltip-anchor">
-<button aria-label="New folder" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool">
+<button aria-label="New folder" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool files-tool--action">
 <i aria-hidden="true" class="fa-solid fa-folder-plus">
 </i>
 </button>
 </div>
 <div class="ui-tooltip-anchor">
-<button aria-label="Show hidden files" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool" aria-pressed="false">
+<button aria-label="Show hidden files" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool files-tool--view" aria-pressed="false">
 <i aria-hidden="true" class="fa-solid fa-eye-slash">
 </i>
 </button>
 </div>
 <div class="ui-tooltip-anchor">
-<button aria-label="Refresh (F5)" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool">
+<button aria-label="Refresh (F5)" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool files-tool--action">
 <i aria-hidden="true" class="fa-solid fa-arrows-rotate">
 </i>
 </button>
 </div>
 <div class="ui-tooltip-anchor">
-<button aria-label="Hide Places" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool" aria-pressed="true">
+<button aria-label="Hide Places" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool files-tool--places" aria-pressed="true">
 <i aria-hidden="true" class="fa-solid fa-table-columns">
 </i>
 </button>
 </div>
 <div class="ui-tooltip-anchor">
-<button aria-label="Show as thumbnails" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool" aria-pressed="false">
+<button aria-label="Show as thumbnails" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool files-tool--view" aria-pressed="false">
 <i aria-hidden="true" class="fa-solid fa-table-cells-large">
 </i>
 </button>
 </div>
 <div class="ui-tooltip-anchor">
-<button aria-label="Show preview (Space)" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool" aria-pressed="false">
+<button aria-label="Show preview (Space)" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool files-tool--preview" aria-pressed="false">
 <i aria-hidden="true" class="fa-solid fa-eye">
+</i>
+</button>
+</div>
+<div class="ui-tooltip-anchor">
+<button aria-haspopup="menu" aria-label="More" type="button" class="ui-button ui-tone-quiet ui-icon-button files-tool files-tool--more">
+<i aria-hidden="true" class="fa-solid fa-ellipsis">
 </i>
 </button>
 </div>
