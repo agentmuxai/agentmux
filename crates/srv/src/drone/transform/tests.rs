@@ -245,6 +245,23 @@ fn an_operator_chain_deeper_than_the_evaluation_limit_is_an_error() {
 }
 
 #[test]
+fn a_chain_that_fits_the_source_limit_is_an_error_not_a_crash() {
+    // 30,000 terms is 60 KB of source: under the byte cap, far over the
+    // operator cap. Dropping a tree this deep would recurse once per node.
+    let chain = format!("{}1", "1+".repeat(30_000));
+    assert!(chain.len() < 64 * 1024);
+    for source in [chain.clone(), chain.replace('+', "&&"), chain.replace('+', "*")] {
+        assert!(
+            matches!(
+                one(&source, Value::Null),
+                Err(TransformError::Expr { index: 0, .. })
+            ),
+            "a long operator chain must be refused while parsing"
+        );
+    }
+}
+
+#[test]
 fn nesting_past_the_limit_is_an_error_not_a_crash() {
     for source in [
         format!("{}1{}", "(".repeat(200), ")".repeat(200)),

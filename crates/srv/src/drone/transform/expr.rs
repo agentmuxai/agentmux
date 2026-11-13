@@ -22,6 +22,10 @@ const MAX_NESTING_DEPTH: usize = 64;
 /// How deep an expression tree may be before evaluation stops: a chain such as
 /// `1 + 1 + ...` is not nested in the source but is deep in the tree.
 const MAX_EVAL_DEPTH: usize = 256;
+/// How many binary operators one expression may hold. A chain is built by a
+/// loop, so it is neither nested in the source nor limited by the nesting
+/// depth, but dropping its tree recurses once per node.
+const MAX_OPERATORS: usize = 1024;
 
 /// What one node's evaluation carries between elements: the budget it has
 /// spent.
@@ -250,6 +254,7 @@ struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     depth: usize,
+    operators: usize,
 }
 
 impl Parser {
@@ -263,6 +268,7 @@ impl Parser {
             tokens: tokenize(source)?,
             pos: 0,
             depth: 0,
+            operators: 0,
         };
         let expr = parser.expression()?;
         if parser.pos < parser.tokens.len() {
@@ -317,6 +323,17 @@ impl Parser {
         }
     }
 
+    /// Join two operands, counting the operator against [`MAX_OPERATORS`].
+    fn join(&mut self, op: Op, left: Expr, right: Expr) -> Result<Expr, String> {
+        self.operators += 1;
+        if self.operators > MAX_OPERATORS {
+            return Err(format!(
+                "an expression may hold at most {MAX_OPERATORS} operators"
+            ));
+        }
+        Ok(binary(op, left, right))
+    }
+
     fn expression(&mut self) -> Result<Expr, String> {
         self.enter()?;
         let expr = self.or()?;
@@ -327,7 +344,8 @@ impl Parser {
     fn or(&mut self) -> Result<Expr, String> {
         let mut expr = self.and()?;
         while self.eat(Op::Or) {
-            expr = binary(Op::Or, expr, self.and()?);
+            let right = self.and()?;
+            expr = self.join(Op::Or, expr, right)?;
         }
         Ok(expr)
     }
@@ -335,7 +353,8 @@ impl Parser {
     fn and(&mut self) -> Result<Expr, String> {
         let mut expr = self.not()?;
         while self.eat(Op::And) {
-            expr = binary(Op::And, expr, self.not()?);
+            let right = self.not()?;
+            expr = self.join(Op::And, expr, right)?;
         }
         Ok(expr)
     }
@@ -368,7 +387,7 @@ impl Parser {
         if op == Op::Matches {
             return self.matches(left, right);
         }
-        Ok(binary(op, left, right))
+        self.join(op, left, right)
     }
 
     /// `a matches 'pattern'`: the pattern is a string literal, compiled here
@@ -398,7 +417,8 @@ impl Parser {
             } else {
                 return Ok(expr);
             };
-            expr = binary(op, expr, self.product()?);
+            let right = self.product()?;
+            expr = self.join(op, expr, right)?;
         }
     }
 
@@ -414,7 +434,8 @@ impl Parser {
             } else {
                 return Ok(expr);
             };
-            expr = binary(op, expr, self.unary()?);
+            let right = self.unary()?;
+            expr = self.join(op, expr, right)?;
         }
     }
 
