@@ -312,7 +312,10 @@ function chartOptions(c: ChartState, width: number, height: number): uPlot.Optio
             // Only the time is shared: each chart has its own y scale, and by
             // default uPlot would also draw the hovered chart's y value on the others.
             sync: props.syncKey ? { key: props.syncKey, scales: ["x", null] } : undefined,
-            drag: { x: false, y: false },
+            // `click` is uPlot's "this click ended a drag" hook: it stops the click from reaching anything above the
+            // chart. With the press unbound (below) uPlot sees every click as the end of a drag, so the default would
+            // swallow the click that gives the pane focus; this one lets it through.
+            drag: { x: false, y: false, click: () => {} },
             // A press does nothing here (no drag, no lock). uPlot still binds a mouseup on the document at every
             // mousedown, and its handler reads the plot's rect: a forced layout of whatever the click dirtied.
             bind: { mousedown: noBind, mouseup: noBind, click: noBind, dblclick: noBind },

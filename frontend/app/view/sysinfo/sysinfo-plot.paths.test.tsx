@@ -258,7 +258,12 @@ describe("TimeChart: what it hands uPlot", () => {
         mountChart();
         const { opts } = last();
         expect(opts.legend).toEqual({ show: false });
-        expect(opts.cursor.drag).toEqual({ x: false, y: false });
+        expect(opts.cursor.drag).toEqual({ x: false, y: false, click: expect.any(Function) });
+        // Its click hook is uPlot's "a drag ended": it must not stop the click, which gives the pane focus.
+        const click = { stopPropagation: vi.fn(), stopImmediatePropagation: vi.fn() };
+        opts.cursor.drag.click(null, click);
+        expect(click.stopPropagation).not.toHaveBeenCalled();
+        expect(click.stopImmediatePropagation).not.toHaveBeenCalled();
         expect(opts.cursor.points).toEqual({ size: 6 });
     });
 
