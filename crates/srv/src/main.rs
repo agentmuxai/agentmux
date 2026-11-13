@@ -27,6 +27,7 @@ mod server;
 mod srv_ipc;
 mod srv_info;
 mod state;
+mod system_drive;
 mod drone;
 mod messaging;
 mod muxbus;
@@ -43,6 +44,9 @@ fn main() {
     // Before anything is spawned or any thread exists: the launcher's secrets leave
     // the environment, so no child inherits them and /proc/<pid>/environ shows none.
     agentmux_common::secret_env::stash_startup_secrets();
+    // A bare environment has no SystemDrive, and the Windows shell then makes a
+    // folder named "%SystemDrive%" in the current directory (#2524).
+    system_drive::ensure();
     // Linux (glibc): cap malloc arenas before any thread exists, so the runtime's
     // workers below share them (malloc_arenas.rs).
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
