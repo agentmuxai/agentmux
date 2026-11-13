@@ -686,8 +686,7 @@ describe("closeControls (rule 17)", () => {
             '// icon="xmark" in a comment',
             '/* fa-xmark too */',
             '<span>{w}×{h}</span>',
-        ].join("
-");
+        ].join("\n");
         expect(countCloseControls(source)).toBe(3);
     });
 
