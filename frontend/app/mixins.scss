@@ -285,29 +285,23 @@
                 cursor: default;
             }
 
-            // Hovering Merge splits its three segments across the colour wheel, 120 degrees apart,
-            // so it reads as a separate button from Minimize below it. Saturation and lightness
-            // follow the theme's polarity: lighter on a dark theme, deeper on a light one, so the
-            // colours keep their contrast against either header. A disabled Merge stays plain.
-            --merge-hue: 0;
-            --merge-sat: 72%;
-            --merge-light: 64%;
-            [data-theme-polarity="light"] & {
-                --merge-sat: 78%;
-                --merge-light: 42%;
-            }
+            // Hovering Merge splits its three segments across the colour wheel, 120 degrees apart, so it
+            // reads as a separate button from Minimize below it. The colours are the theme's own error
+            // colour with its hue turned 0, 120 and 240 degrees (relative colour syntax), so each theme
+            // gives its own saturation and lightness, deeper on a light theme and lighter on a dark one.
+            // A disabled Merge stays plain.
             .pane-merge-glyph rect {
                 transition: fill var(--duration-quick) var(--ease-out);
             }
             .block-frame-merge:not([aria-disabled="true"]):hover .pane-merge-glyph rect {
                 &:nth-child(1) {
-                    fill: hsl(calc(var(--merge-hue) + 0), var(--merge-sat), var(--merge-light));
+                    fill: hsl(from var(--error-color) calc(h + 0) s l);
                 }
                 &:nth-child(2) {
-                    fill: hsl(calc(var(--merge-hue) + 120), var(--merge-sat), var(--merge-light));
+                    fill: hsl(from var(--error-color) calc(h + 120) s l);
                 }
                 &:nth-child(3) {
-                    fill: hsl(calc(var(--merge-hue) + 240), var(--merge-sat), var(--merge-light));
+                    fill: hsl(from var(--error-color) calc(h + 240) s l);
                 }
             }
         }
