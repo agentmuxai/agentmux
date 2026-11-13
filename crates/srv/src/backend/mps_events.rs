@@ -99,7 +99,7 @@ events! {
     /// A Claude CLI request is being retried, or no longer is.
     AgentApiRetry: super::mps::EVENT_AGENT_API_RETRY => crate::backend::agent_api_retry::ApiRetryEvent,
     /// One line of a closing agent pane's shutdown log (`sagas::close_pane::publish_shutdown`).
-    AgentShutdown: crate::sagas::close_pane::EVENT_AGENT_SHUTDOWN => crate::sagas::close_pane::ShutdownLineEvent,
+    AgentShutdown: crate::backend::shutdown_events::EVENT_AGENT_SHUTDOWN => crate::backend::shutdown_events::ShutdownLineEvent,
     /// A call to action srv holds open started, or ended (`backend::user_attention`).
     UserAttention: super::mps::EVENT_USER_ATTENTION => crate::backend::user_attention::UserAttentionEvent,
     /// "Pause all agent browsing" was turned on or off (`browser_pause_all`).
@@ -189,8 +189,8 @@ events! {
     AgentProcessAdded: "agent:process-added" => ProcessAddedEvent,
     AgentProcessExited: "agent:process-exited" => ProcessExitedEvent,
     /// A shutdown waiting for the user to keep the agent, and its end (`sagas::pending_shutdown`).
-    AgentShutdownPending: crate::sagas::pending_shutdown::EVENT_SHUTDOWN_PENDING => crate::sagas::pending_shutdown::PendingView,
-    AgentShutdownPendingCleared: crate::sagas::pending_shutdown::EVENT_SHUTDOWN_PENDING_CLEARED => crate::sagas::pending_shutdown::PendingClearedEvent,
+    AgentShutdownPending: crate::backend::shutdown_events::EVENT_SHUTDOWN_PENDING => crate::backend::shutdown_events::PendingView,
+    AgentShutdownPendingCleared: crate::backend::shutdown_events::EVENT_SHUTDOWN_PENDING_CLEARED => crate::backend::shutdown_events::PendingClearedEvent,
     /// A sensitive request's countdown, and its end (`sagas::sensitive_window`).
     SensitivePending: crate::sagas::sensitive_window::EVENT_SENSITIVE_PENDING => crate::sagas::sensitive_window::SensitiveView,
     SensitiveCleared: crate::sagas::sensitive_window::EVENT_SENSITIVE_CLEARED => crate::sagas::sensitive_window::SensitiveClearedEvent,
