@@ -71,7 +71,9 @@
 
 .native-memory-manager-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    // `min(200px, 100%)`: a track never needs more than the grid has, however the pane is zoomed (the container
+    // query below reads the pane's own width, which a zoomed pane's content is not laid out in).
+    grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
     gap: var(--space-2);
 }
 
@@ -164,7 +166,7 @@
 
 .native-memory-manager-file-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
     gap: var(--space-2);
 }
 
@@ -220,6 +222,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+    min-width: 0;
 
     // Collapse the row entirely when a file has neither an index marker nor a
     // metadata_type, so the meta line doesn't sit on a phantom gap.
@@ -236,6 +239,10 @@
     @include mixins.label-caps;
     color: var(--secondary-text-color);
     white-space: nowrap;
+    // A badge wider than a narrow card is cut, not left to widen the card and the pane under it.
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 
     &--index {
         border-color: color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
