@@ -970,6 +970,21 @@ impl Router {
         }));
     }
 
+    /// A drone's Notify block (`drone::executor::blocks::notify`). `key` is
+    /// `drone:<id>`, one per notification; `title` is the block's own words,
+    /// written in the graph (never a value from outside); the body is the
+    /// block's text with its outside values quoted.
+    pub fn drone_note(&self, key: &str, title: &str, body: String) {
+        self.step(Input::Emit(Request {
+            kind: NotifyKind::DroneNote,
+            block_id: key.to_string(),
+            agent_name: sanitize_name(title),
+            body: Some(body),
+            summary: None,
+            shutdown: None,
+        }));
+    }
+
     /// This channel's MuxBus sign-in stopped working
     /// (`muxbus::delivery_status`). Fixed text; about no agent. Taken down
     /// with `resolve("", Family::Cloud)`.
