@@ -164,8 +164,7 @@ fn peel_tags(sha: &str, git: Git) -> Result<(Option<String>, String), String> {
     loop {
         let kind = git(&["cat-file", "-t", &at])?.trim().to_string();
         if kind != "tag" {
-            return Ok(((!bodies.is_empty()).then(|| bodies.join("
-")), kind));
+            return Ok(((!bodies.is_empty()).then(|| bodies.join("\n")), kind));
         }
         if bodies.len() >= MAX_TAG_DEPTH {
             return Err(format!("this push is a tag wrapped in more than {MAX_TAG_DEPTH} tags"));
@@ -174,8 +173,7 @@ fn peel_tags(sha: &str, git: Git) -> Result<(Option<String>, String), String> {
         bodies.push(tag_body(&raw));
         match tag_target(&raw) {
             Some(next) => at = next,
-            None => return Ok((Some(bodies.join("
-")), kind)),
+            None => return Ok((Some(bodies.join("\n")), kind)),
         }
     }
 }
