@@ -58,7 +58,9 @@ pub(super) async fn handle_ws(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    ws.on_upgrade(move |socket| handle_ws_connection(socket, state))
+    // A signed-in browser offers its session token as a second protocol (it can't set a header on a
+    // WebSocket); srv selects only the fixed name, never the token.
+    ws.protocols([super::local_session_routes::WS_PROTOCOL]).on_upgrade(move |socket| handle_ws_connection(socket, state))
 }
 
 async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {

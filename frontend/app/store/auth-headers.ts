@@ -3,7 +3,7 @@
 //
 // The one place an HTTP request to srv gets its `X-AuthKey` header.
 
-import { AUTH_KEY_HEADER } from "@/util/sharedconst";
+import { AUTH_KEY_HEADER, SESSION_HEADER } from "@/util/sharedconst";
 import { getApi } from "@/util/app-api";
 
 /**
@@ -16,6 +16,12 @@ import { getApi } from "@/util/app-api";
  * a `?authkey=` query parameter on the `/ws` upgrade only (crates/srv/src/server/auth.rs).
  */
 export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-    const key = globalThis.window != null ? getApi()?.getAuthKey?.() : undefined;
-    return key ? { ...extra, [AUTH_KEY_HEADER]: key } : { ...extra };
+    const api = globalThis.window != null ? getApi() : undefined;
+    const key = api?.getAuthKey?.();
+    if (key) {
+        return { ...extra, [AUTH_KEY_HEADER]: key };
+    }
+    // A browser signed in by `agentmux-srv open` holds a session, not the key.
+    const session = api?.getSessionToken?.();
+    return session ? { ...extra, [SESSION_HEADER]: session } : { ...extra };
 }

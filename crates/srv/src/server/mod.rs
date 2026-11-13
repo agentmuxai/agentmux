@@ -75,6 +75,8 @@ mod tool_handlers;
 mod providers_handlers;
 mod voice;
 mod attachments;
+pub(crate) mod local_session;
+pub(crate) mod local_session_routes;
 pub(crate) mod mux_obj_bridge;
 mod websocket;
 mod ws_register;
