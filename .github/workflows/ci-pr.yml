@@ -285,7 +285,12 @@ jobs:
     # The ubuntu leg gets 50 (the nextest step's two attempts are limited to 25 + 15 minutes and end it by
     # themselves): the job's own limit used to come first and, on a runner that had stopped answering, was only
     # enforced after the service's grace period (2026-11-12: a 35-minute job was cancelled after 40).
-    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 50 || 35 }}
+    #
+    # In the merge queue the Ubuntu leg gets 28: it takes 7 to 10 minutes there, the nextest step's two attempts
+    # are limited to 12 + 8, and a stalled leg holds every entry behind it until the limit ends it (and only the
+    # limit does: a cancel needs the runner to answer, which a stalled one cannot). 2026-11-13: nine stalls ran to
+    # 50 + 5 minutes, the queue 19 deep behind them.
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && (needs.changes.outputs.queue == 'true' && 28 || 50) || 35 }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
