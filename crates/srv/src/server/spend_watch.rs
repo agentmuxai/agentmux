@@ -99,6 +99,7 @@ fn refresh_chips(state: &AppState) {
     for def in &defs {
         let on_route = launch::choice_of(&state.mstore, &def.id).is_some();
         drop_stale(state, &def.id, on_route, now);
+        forget_alert_off_route(&def.slug, on_route, now);
         if on_route && spending.contains(&def.slug) {
             let spent = spend::today(&def.slug, now).cost_usd;
             publish_today(state, &def.id, &def.slug, cap::agent_cap(&state.mstore, &def.id), spent, now, true);
@@ -118,6 +119,15 @@ fn stale_keys(meta: &obj::MetaMapType, on_route: bool, now: i64) -> Vec<&'static
             Some(card) => !on_route || (*key != TODAY_META_KEY && earlier_day(card)),
         })
         .collect()
+}
+
+/// An agent off a model route has had its stop and warning taken off its panes, so the alert level the gateway's refusals
+/// check goes back to zero with them. Left at 100, an agent stopped at its cap that returns to a route the same UTC day
+/// is refused on its first request and gets no stop card, because the stop was already counted as sent.
+fn forget_alert_off_route(slug: &str, on_route: bool, now: i64) {
+    if !on_route && spend::alerted(slug, now) > 0 {
+        spend::set_alerted(slug, 0, now);
+    }
 }
 
 fn drop_stale(state: &AppState, def_id: &str, on_route: bool, now: i64) {
@@ -339,6 +349,19 @@ mod tests {
         let shown = view(&store, &defs, "dsh-def").expect("a line saying so");
         assert_eq!(shown["measured"], json!(false));
         assert!(shown.get("spent_usd").is_none() && shown.get("cap_usd").is_none(), "no figure is made up");
+    }
+
+    #[test]
+    fn an_agent_stopped_at_its_cap_that_leaves_a_route_and_returns_gets_its_stop_again() {
+        let model = crate::backend::model_gateway::catalog::route("openrouter").unwrap().model("deepseek/deepseek-v4.1-flash-1017").unwrap();
+        let used = TokenCounts { input: 1_000_000, ..Default::default() };
+        let now = 5_000;
+        spend::record("stop-return", "openrouter", model, &used, Some(1.0), now);
+        spend::set_alerted("stop-return", 100, now);
+        forget_alert_off_route("stop-return", true, now);
+        assert_eq!(spend::alerted("stop-return", now), 100, "on its route the stop stays counted as sent");
+        forget_alert_off_route("stop-return", false, now);
+        assert_eq!(spend::alerted("stop-return", now), 0, "off the route it is forgotten, so the next refusal sends the stop");
     }
 
     fn meta_of(entries: &[(&str, Value)]) -> obj::MetaMapType {

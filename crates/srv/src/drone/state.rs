@@ -104,7 +104,10 @@ impl RunState {
     /// Declare how `name`'s writes combine. Declaring the same reducer again is
     /// fine. Once the name has a value its reducer cannot change: another one is
     /// a [`StateError::Type`] with `needs` "the reducer it was written under".
-    /// A bad name is a [`StateError::Name`].
+    /// A bad name is a [`StateError::Name`]. A declaration counts toward
+    /// [`STATE_CAP_BYTES`] like a value, because [`Self::size_bytes`] measures
+    /// the declarations too; one that would pass it is a
+    /// [`StateError::TooLarge`] and changes nothing.
     pub fn declare(&mut self, name: &str, reducer: Reducer) -> Result<(), StateError> {
         check_name(name)?;
         if self.snapshot.vars.contains_key(name) && self.reducer_of(name) != reducer {
@@ -115,7 +118,15 @@ impl RunState {
                 got: "a different reducer",
             });
         }
-        self.snapshot.reducers.insert(name.to_string(), reducer);
+        // Measure on a copy, as `write` does: a declaration is part of the
+        // state's JSON, so it can take the state over the cap on its own.
+        let mut candidate = self.snapshot.clone();
+        candidate.reducers.insert(name.to_string(), reducer);
+        let bytes = snapshot_len(&candidate);
+        if bytes > STATE_CAP_BYTES {
+            return Err(StateError::TooLarge { bytes, cap: STATE_CAP_BYTES });
+        }
+        self.snapshot = candidate;
         Ok(())
     }
 
@@ -230,17 +241,31 @@ fn add_value(name: &str, current: Option<&Tv>, write: &Tv) -> Result<serde_json:
 
 /// The sum of two JSON numbers, keeping integers integers where it can.
 fn add_numbers(a: &serde_json::Number, b: &serde_json::Number) -> Option<serde_json::Number> {
-    if let (Some(x), Some(y)) = (a.as_u64(), b.as_u64()) {
-        if let Some(sum) = x.checked_add(y) {
-            return Some(serde_json::Number::from(sum));
+    // A JSON integer may be held as u64 or i64, and a pair can mix the two
+    // (a negative with one above `i64::MAX`). Summing those as i128 is exact
+    // for every pair of 64-bit values; going through f64 would round.
+    if let (Some(x), Some(y)) = (integer_of(a), integer_of(b)) {
+        let sum = x.checked_add(y)?;
+        if let Ok(fits) = i64::try_from(sum) {
+            return Some(serde_json::Number::from(fits));
         }
-    }
-    if let (Some(x), Some(y)) = (a.as_i64(), b.as_i64()) {
-        if let Some(sum) = x.checked_add(y) {
-            return Some(serde_json::Number::from(sum));
+        if let Ok(fits) = u64::try_from(sum) {
+            return Some(serde_json::Number::from(fits));
         }
+        // A sum outside both the i64 and the u64 range (only two same-sign
+        // extremes reach it) has no integer form in JSON, so the float is the
+        // best this type can hold.
+        return serde_json::Number::from_f64(sum as f64);
     }
     serde_json::Number::from_f64(a.as_f64()? + b.as_f64()?)
+}
+
+/// The integer a JSON number holds, signed or unsigned, as an `i128`.
+fn integer_of(number: &serde_json::Number) -> Option<i128> {
+    if let Some(signed) = number.as_i64() {
+        return Some(i128::from(signed));
+    }
+    number.as_u64().map(i128::from)
 }
 
 #[cfg(test)]
@@ -265,5 +290,34 @@ mod tests {
     fn a_reducer_is_written_in_snake_case() {
         assert_eq!(serde_json::to_value(Reducer::Append).unwrap(), json!("append"));
         assert_eq!(Reducer::default(), Reducer::Replace);
+    }
+
+    #[test]
+    fn adding_integers_is_exact_across_the_sign_boundary() {
+        let mut s = RunState::new();
+        s.declare("n", Reducer::Add).unwrap();
+        // One above i64::MAX is held as u64; the sum with -1 is the largest
+        // i64 and must not be rounded through f64.
+        s.write("n", Tv::clean(json!(9_223_372_036_854_775_808u64))).unwrap();
+        s.write("n", Tv::clean(json!(-1))).unwrap();
+        assert_eq!(s.get("n").unwrap().v, json!(9_223_372_036_854_775_807u64));
+        // A float still makes the result a float.
+        let mut f = RunState::new();
+        f.declare("f", Reducer::Add).unwrap();
+        f.write("f", Tv::clean(json!(3))).unwrap();
+        f.write("f", Tv::clean(json!(0.5))).unwrap();
+        assert_eq!(f.get("f").unwrap().v, json!(3.5));
+    }
+
+    #[test]
+    fn a_declaration_over_the_cap_is_refused_and_changes_nothing() {
+        let mut s = RunState::new();
+        s.write("ok", Tv::clean(json!(1))).unwrap();
+        let before = s.size_bytes();
+        let name = "x".repeat(STATE_CAP_BYTES + 1);
+        let err = s.declare(&name, Reducer::Add).unwrap_err();
+        assert!(matches!(err, StateError::TooLarge { cap, .. } if cap == STATE_CAP_BYTES), "{err:?}");
+        assert_eq!(s.size_bytes(), before);
+        assert_eq!(s.reducer_of(&name), Reducer::Replace, "the declaration did not land");
     }
 }

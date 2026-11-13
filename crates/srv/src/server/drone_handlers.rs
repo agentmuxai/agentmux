@@ -131,20 +131,20 @@ pub(crate) fn upsert_drone(state: &AppState, mut cmd: DroneDefinition) -> Result
     if cmd.id.is_empty() {
         cmd.id = uuid::Uuid::new_v4().to_string();
     }
-    state
-        .id_store
-        .drone_upsert(&cmd)
-        .map_err(|e| format!("upsertdrone: {e}"))?;
-    // The request does not carry who is saving yet, so the version is the
-    // operator's. A failed version save must not undo the definition: a drone
-    // that cannot be edited is worse than one missing its latest version, so
-    // the save is logged and the definition is still returned.
-    if let Err(e) = state.id_store.version_save(&cmd.id, &cmd.graph, "operator", now) {
-        tracing::warn!(
+    // The definition and its version are one immediate transaction, so a
+    // concurrent save cannot leave the stored definition on a graph newer than
+    // the one `Latest` returns. The request does not carry who is saving yet,
+    // so the version is the operator's.
+    match state.id_store.drone_save_with_version(&cmd, "operator", now) {
+        Ok(Ok(_)) => {}
+        // A failed version save must not undo the definition: a drone that
+        // cannot be edited is worse than one missing its latest version.
+        Ok(Err(e)) => tracing::warn!(
             drone_id = %cmd.id,
             error = %e,
             "upsertdrone: the definition was saved but its version was not"
-        );
+        ),
+        Err(e) => return Err(format!("upsertdrone: {e}")),
     }
     state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
     Ok(cmd)
