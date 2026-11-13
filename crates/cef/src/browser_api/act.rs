@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
 use super::choice_facts::{add_option_owners, describe_scope};
+use super::click_delivery;
 use super::combobox;
 pub(super) use super::hidden_choices::hidden_choices;
 use super::dates;
@@ -142,25 +143,6 @@ pub(super) async fn page_now(cdp: &mut CdpSession, before: &str) -> Option<Value
 /// (`scripts/click_point.js`).
 const CLICK_POINT: &str = include_str!("scripts/click_point.js");
 
-/// Before a click: whether the page is being shown, and start counting the mouse events that reach its window
-/// (`scripts/click_watch.js`). `CLICK_SEEN` reads the count (`scripts/click_seen.js`).
-const CLICK_WATCH: &str = include_str!("scripts/click_watch.js");
-const CLICK_SEEN: &str = include_str!("scripts/click_seen.js");
-
-/// How long a click may take to reach the page before it counts as not delivered, and how often to look.
-const CLICK_DELIVERY_WAIT: std::time::Duration = std::time::Duration::from_millis(1200);
-const CLICK_DELIVERY_POLL: std::time::Duration = std::time::Duration::from_millis(40);
-
-/// The answer for a click on a page that is not being shown: its window is minimized or covered, or its tab is in
-/// the background. The browser hands such a page no mouse events (or holds them), so a click would report "done"
-/// and do nothing (#47534).
-pub(super) const CLICK_PAGE_HIDDEN: &str = "this page is not being shown (its window is minimized or covered, or its \
-    tab is in the background), so it takes no clicks: nothing was clicked. Ask the person to bring the pane into \
-    view, then click again";
-
-/// The answer for a click the page never received.
-pub(super) const CLICK_NOT_DELIVERED: &str = "the click was sent but the page never received it, so nothing was \
-    clicked: take a new snapshot and try again (check the page before acting as if it was done)";
 
 /// Focus and select the current contents, so inserted text replaces them.
 pub(super) const PREPARE_FILL: &str = r#"function () {
@@ -606,13 +588,7 @@ pub(super) async fn click_element(
     frame: Option<&FrameRef>,
     object_id: &str,
 ) -> Result<(), String> {
-    // A page that is not being shown takes no clicks, and an answer of "done" for one would be false. A page that
-    // can't be asked is clicked as before, without the check after.
-    let watching = match call_on(cdp, object_id, CLICK_WATCH, vec![]).await {
-        Ok(v) if v.get("hidden").and_then(|h| h.as_bool()) == Some(true) => return Err(CLICK_PAGE_HIDDEN.to_string()),
-        Ok(_) => true,
-        Err(_) => false,
-    };
+    let watching = click_delivery::begin(cdp, object_id).await?;
     let p = match call_on(cdp, object_id, CLICK_POINT, vec![]).await {
         Ok(p) => p,
         Err(e) => return Err(explain_unclickable(cdp, object_id, e).await),
@@ -628,29 +604,7 @@ pub(super) async fn click_element(
         y += oy;
     }
     click_at(root, x, y).await?;
-    if watching && !click_reached_page(cdp, object_id).await {
-        return Err(CLICK_NOT_DELIVERED.to_string());
-    }
-    Ok(())
-}
-
-/// Whether a mouse event of the click just made reached the element's window. A page that was replaced meanwhile
-/// (the click navigated it) can't be asked, and that counts as received: only a page that answered with no
-/// event, for as long as `CLICK_DELIVERY_WAIT`, did not get the click.
-async fn click_reached_page(cdp: &mut CdpSession, object_id: &str) -> bool {
-    let started = std::time::Instant::now();
-    loop {
-        let last = started.elapsed() >= CLICK_DELIVERY_WAIT;
-        match call_on(cdp, object_id, CLICK_SEEN, vec![json!(last)]).await {
-            Ok(v) => match v.get("seen").and_then(|s| s.as_u64()) {
-                Some(0) if !last => {}
-                Some(0) => return false,
-                _ => return true,
-            },
-            Err(_) => return true,
-        }
-        tokio::time::sleep(CLICK_DELIVERY_POLL).await;
-    }
+    click_delivery::check(cdp, object_id, watching).await
 }
 
 /// An element that can't be clicked, as the agent should read it: "not
