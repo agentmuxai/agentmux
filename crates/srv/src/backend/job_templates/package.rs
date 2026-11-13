@@ -67,7 +67,13 @@ pub fn parse(folder: &str, files: &BTreeMap<String, Vec<u8>>) -> Result<Package,
 /// A Drone template's graph, checked; a job or cloud template has none.
 fn graph_of(m: &JobTemplateManifest, files: &BTreeMap<String, Vec<u8>>) -> Result<Option<DroneGraph>, String> {
     match (m.kind == JobTemplateKind::Drone, files.get(GRAPH_FILE)) {
-        (true, Some(raw)) => graph::parse(raw).map(Some),
+        (true, Some(raw)) => {
+            let g = graph::parse(raw)?;
+            if let Some(name) = graph::param_names(&g)?.into_iter().find(|n| !m.params.properties.contains_key(n)) {
+                return Err(format!("graph.json uses {{{{param.{name}}}}}, which isn't one of its parameters"));
+            }
+            Ok(Some(g))
+        }
         (true, None) => Err("a Drone template needs its graph in graph.json".to_string()),
         (false, Some(_)) => Err("only a Drone template (kind \"drone\") carries graph.json".to_string()),
         (false, None) => Ok(None),

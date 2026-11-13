@@ -1085,6 +1085,7 @@ fn register_service_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_
 
     // Drone handlers (issue #753 — Drone pane DAG executor)
     super::drone_handlers::register_drone_handlers(engine, &state);
+    super::drone_template_handlers::register(engine, &state);
 
     // Pre-launch OAuth handlers (auth.start / poll / submitcallback /
     // cancel — see docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
