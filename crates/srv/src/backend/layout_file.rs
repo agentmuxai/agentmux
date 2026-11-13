@@ -690,7 +690,7 @@ const MAX_TREE_DEPTH: usize = 32;
 
 /// Views that need no config to open, beyond their type.
 const PLAIN_VIEWS: &[&str] = &[
-    "swarm", "kanban", "history", "audit", "help", "drone", "workflows", "toolchain", "launcher", "shortcuts", "identity", "tower",
+    "swarm", "kanban", "history", "audit", "help", "drone", "workflows", "toolchain", "launcher", "shortcuts", "identity", "tower", "atlas",
 ];
 
 /// The pane a Warden section opens now, or None when it is still Warden's own (Jobs). Host, no
