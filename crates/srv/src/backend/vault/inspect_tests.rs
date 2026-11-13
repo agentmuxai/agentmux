@@ -250,3 +250,26 @@ fn health_counts_what_the_agent_may_use_and_says_when_the_key_store_is_unreadabl
     assert!(!broken.history.intact && !broken.history.problem.is_empty());
     no_value(&[serde_json::to_string(&h).unwrap(), serde_json::to_string(&broken).unwrap()]);
 }
+
+#[test]
+fn a_card_shows_its_brand_and_an_agent_can_mark_it_the_default_without_touching_the_number() {
+    let s = store();
+    let card = NewEntry {
+        kind: "card".into(),
+        label: "Everyday".into(),
+        fields: BTreeMap::new(),
+        tags: vec![],
+        parts: seal::Parts([("number".to_string(), "4242 4242 4242 4242".to_string())].into()),
+    };
+    let id = create(&s, card).unwrap();
+    let shown = show(&s, &id, Some("builder"), &key(), today()).unwrap();
+    assert_eq!(shown.fields.get("brand").map(String::as_str), Some("visa"), "the brand is shown, as a plain field");
+    assert!(!shown.fields.contains_key("default"));
+
+    let done = update_details(&s, &UpdateRequest { fields: [("default".to_string(), "yes".to_string())].into(), ..asked(&id) }, "builder").unwrap();
+    assert_eq!(done.changed, ["field default"]);
+    let shown = show(&s, &id, Some("builder"), &key(), today()).unwrap();
+    assert_eq!(shown.fields.get("default").map(String::as_str), Some("yes"));
+    assert_eq!(shown.fields.get("brand").map(String::as_str), Some("visa"));
+    assert_eq!(reveal(&s, &id, "number", "revealed").unwrap().as_str(), "4242424242424242", "the number is as it was");
+}
