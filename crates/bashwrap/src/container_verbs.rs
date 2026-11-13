@@ -205,11 +205,26 @@ pub fn narrowing_machine(marker: Option<&str>) -> bool {
     matches!(marker, Some("1" | "older-gh-agent"))
 }
 
+/// A repository flag in front of the command word (`gh -R o/r pr merge 7`, which `gh` accepts): the repository it names, and
+/// the arguments without it. `None` for a command that does not start with one, or whose flag is not `OWNER/REPO` (then
+/// `gh` itself says what is wrong).
+pub fn lead_repo_flag(args: &[String]) -> Option<(Option<(String, String)>, &[String])> {
+    let first = args.first()?.as_str();
+    let (value, used) = match first {
+        "-R" | "--repo" => (args.get(1)?.as_str(), 2),
+        _ if first.starts_with("--repo=") => (&first["--repo=".len()..], 1),
+        _ if first.starts_with("-R") && first.len() > 2 => (first[2..].trim_start_matches('='), 1),
+        _ => return Some((None, args)),
+    };
+    Some((Some(repo_of_flag(Some(value)).ok()?), &args[used..]))
+}
+
 /// `github-container -- <gh args>`.
 pub fn run_github_container(gh_args: &[String]) -> i32 {
     if !narrowing_machine(std::env::var("AGENTMUX_PUBLISH_GUARD").ok().as_deref()) {
         return NOT_HANDLED;
     }
+    let Some((lead_repo, gh_args)) = lead_repo_flag(gh_args) else { return NOT_HANDLED };
     if let Some(why) = refused_command(gh_args) {
         eprintln!("agentmux: not run: {why}");
         return 1;
@@ -225,7 +240,7 @@ pub fn run_github_container(gh_args: &[String]) -> i32 {
             return 1;
         }
     };
-    let Some((owner, repo)) = merge.repo.clone().or_else(|| std::env::var("GH_REPO").ok().and_then(|r| repo_of_flag(Some(&r)).ok())).or_else(|| default_repo_source(None).and_then(|s| repo_of_default(&s))) else {
+    let Some((owner, repo)) = merge.repo.clone().or(lead_repo).or_else(|| std::env::var("GH_REPO").ok().and_then(|r| repo_of_flag(Some(&r)).ok())).or_else(|| default_repo_source(None).and_then(|s| repo_of_default(&s))) else {
         eprintln!("agentmux: gh pr merge not run: no repository: pass -R OWNER/REPO, or run it in a clone of the repository");
         return 1;
     };
@@ -351,6 +366,35 @@ mod tests {
         std::env::set_var("AGENTMUX_PUBLISH_GUARD", "1");
         assert_eq!(run_github_container(&args(&["release", "create", "v1"])), 1, "on a machine with gh-agent it is refused");
         assert_eq!(run_github_container(&args(&["issue", "list"])), NOT_HANDLED);
+        std::env::remove_var("AGENTMUX_PUBLISH_GUARD");
+    }
+
+    #[test]
+    fn a_repository_flag_in_front_of_the_command_is_read_and_set_aside() {
+        let rest = |a: &[&str]| lead_repo_flag(&args(a)).map(|(r, rest)| (r, rest.to_vec()));
+        let repo = Some(("octo".to_string(), "hello".to_string()));
+        let tail = args(&["pr", "merge", "7"]);
+        for lead in [&["-R", "octo/hello"][..], &["--repo", "octo/hello"], &["--repo=octo/hello"], &["-Rocto/hello"], &["-R=octo/hello"], &["--repo", "github.com/octo/hello"]] {
+            let mut a = lead.to_vec();
+            a.extend(["pr", "merge", "7"]);
+            assert_eq!(rest(&a), Some((repo.clone(), tail.clone())), "{lead:?}");
+        }
+        // No flag in front: the arguments as they are. A flag that is not OWNER/REPO or has no value: not ours, gh says what is wrong.
+        assert_eq!(rest(&["pr", "merge", "7"]), Some((None, tail.clone())));
+        assert_eq!(rest(&["-R", "not-a-repo", "pr", "merge", "7"]), None);
+        assert_eq!(rest(&["-R"]), None);
+    }
+
+    #[test]
+    fn a_leading_repository_flag_does_not_hide_a_command_from_the_container_steps() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("AGENTMUX_PUBLISH_GUARD", "1");
+        for cmd in [&["-R", "o/r", "release", "create", "v1"][..], &["--repo=o/r", "release", "delete", "v1"], &["-Ro/r", "api", "-X", "DELETE", "repos/o/r/git/refs/heads/x"]] {
+            assert_eq!(run_github_container(&args(cmd)), 1, "{cmd:?}");
+        }
+        assert_eq!(run_github_container(&args(&["-R", "o/r", "issue", "list"])), NOT_HANDLED);
+        assert_eq!(run_github_container(&args(&["-R", "o/r", "pr", "list"])), NOT_HANDLED);
+        assert_eq!(run_github_container(&args(&["-R", "not-a-repo", "pr", "merge", "7"])), NOT_HANDLED);
         std::env::remove_var("AGENTMUX_PUBLISH_GUARD");
     }
 
