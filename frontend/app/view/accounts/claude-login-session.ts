@@ -103,7 +103,7 @@ export function createLoginSession(s: LoginState) {
             if (s.cancelled) return;
 
             let outcome: ProviderLoginOutcome = await runAttempt(cliPath, authEnv, false);
-            if (outcome === "inapp-timeout" && s.terminalRequested && !s.cancelled) {
+            if ((outcome === "inapp-timeout" || outcome === "inapp-ended") && s.terminalRequested && !s.cancelled) {
                 // "Use terminal instead" was asked for during the in-app tier:
                 // release the request and re-run with the terminal.
                 s.terminalRequested = false;

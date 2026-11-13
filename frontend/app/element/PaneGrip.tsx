@@ -42,7 +42,7 @@ function openPaneMenuFrom(el: HTMLElement): void {
 export const PaneGrip = (props: {
     /** The pane can't be dragged right now (magnified or ephemeral: the
      *  header's `canDrag` vetoes it). The grip then offers only the menu:
-     *  no grab cursor, and its label and tooltip drop "move". */
+     *  its label and tooltip drop "move". */
     dragDisabled?: boolean;
 }): JSX.Element => (
     <div

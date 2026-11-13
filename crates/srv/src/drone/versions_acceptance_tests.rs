@@ -37,7 +37,6 @@ fn drone(id: &str, template: &str) -> DroneDefinition {
 }
 
 #[tokio::test]
-#[ignore = "module C"]
 async fn the_first_save_is_version_one_then_one_more_each_time() {
     let state = crate::server::tests::test_state();
     let store = &state.id_store;
@@ -51,7 +50,6 @@ async fn the_first_save_is_version_one_then_one_more_each_time() {
 }
 
 #[tokio::test]
-#[ignore = "module C"]
 async fn a_saved_version_never_changes_however_the_drone_is_edited() {
     let state = crate::server::tests::test_state();
     let store = &state.id_store;
@@ -65,7 +63,6 @@ async fn a_saved_version_never_changes_however_the_drone_is_edited() {
 }
 
 #[tokio::test]
-#[ignore = "module C"]
 async fn a_job_pinned_to_a_number_gets_that_version_and_latest_follows_the_newest() {
     let state = crate::server::tests::test_state();
     let store = &state.id_store;
@@ -83,7 +80,6 @@ async fn a_job_pinned_to_a_number_gets_that_version_and_latest_follows_the_newes
 }
 
 #[tokio::test]
-#[ignore = "module C"]
 async fn the_list_is_newest_first_and_limited() {
     let state = crate::server::tests::test_state();
     let store = &state.id_store;
@@ -99,7 +95,6 @@ async fn the_list_is_newest_first_and_limited() {
 }
 
 #[tokio::test]
-#[ignore = "module C"]
 async fn saving_a_drone_through_the_handler_makes_a_version_each_time() {
     let state = crate::server::tests::test_state();
     let saved = upsert_drone(&state, drone("", "one")).unwrap();
@@ -115,7 +110,6 @@ async fn saving_a_drone_through_the_handler_makes_a_version_each_time() {
 }
 
 #[tokio::test]
-#[ignore = "module C"]
 async fn deleting_a_drone_deletes_its_versions_and_only_its_own() {
     let state = crate::server::tests::test_state();
     let a = upsert_drone(&state, drone("", "a")).unwrap();
@@ -128,7 +122,6 @@ async fn deleting_a_drone_deletes_its_versions_and_only_its_own() {
 }
 
 #[tokio::test]
-#[ignore = "module C"]
 async fn the_table_has_no_foreign_key_to_the_definitions() {
     // Versions of a drone that is only in another store are still saved (m0038).
     let state = crate::server::tests::test_state();

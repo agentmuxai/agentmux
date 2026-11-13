@@ -14,8 +14,10 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use super::manifest::{self, JobTemplateManifest};
+use super::graph;
+use super::manifest::{self, JobTemplateKind, JobTemplateManifest};
 use crate::backend::widget::packages as wp;
+use crate::drone::types::DroneGraph;
 use crate::backend::widget::signature as sig;
 
 pub const TEMPLATE_FILE: &str = "template.json";
@@ -30,6 +32,8 @@ pub const MAX_BYTES: u64 = 256 * 1024;
 pub struct Package {
     pub manifest: JobTemplateManifest,
     pub brief: Option<String>,
+    /// A Drone template's graph (graph.json), checked.
+    pub graph: Option<DroneGraph>,
     pub hash: String,
     /// The key (base64) whose `template.sig` verifies, if it is signed.
     pub signer: Option<String>,
@@ -45,9 +49,6 @@ pub fn parse(folder: &str, files: &BTreeMap<String, Vec<u8>>) -> Result<Package,
             sig::JOB_TEMPLATE.sig_file
         ));
     }
-    if files.contains_key(GRAPH_FILE) {
-        return Err("graph.json (a Drone template) needs a later version of AgentMux".to_string());
-    }
     if files.values().map(|b| b.len() as u64).sum::<u64>() > MAX_BYTES {
         return Err(format!("a template is at most {} KB", MAX_BYTES / 1024));
     }
@@ -58,8 +59,19 @@ pub fn parse(folder: &str, files: &BTreeMap<String, Vec<u8>>) -> Result<Package,
         .map(|b| String::from_utf8(b.clone()).map_err(|_| "brief.md isn't UTF-8 text".to_string()))
         .transpose()?;
     manifest::validate(&m, folder, brief.as_deref())?;
+    let graph = graph_of(&m, files)?;
     let hashes = files.iter().map(|(p, b)| (p.clone(), hex::encode(Sha256::digest(b)))).collect();
-    Ok(Package { manifest: m, brief, hash: wp::package_hash(&hashes), signer: None })
+    Ok(Package { manifest: m, brief, graph, hash: wp::package_hash(&hashes), signer: None })
+}
+
+/// A Drone template's graph, checked; a job or cloud template has none.
+fn graph_of(m: &JobTemplateManifest, files: &BTreeMap<String, Vec<u8>>) -> Result<Option<DroneGraph>, String> {
+    match (m.kind == JobTemplateKind::Drone, files.get(GRAPH_FILE)) {
+        (true, Some(raw)) => graph::parse(raw).map(Some),
+        (true, None) => Err("a Drone template needs its graph in graph.json".to_string()),
+        (false, Some(_)) => Err("only a Drone template (kind \"drone\") carries graph.json".to_string()),
+        (false, None) => Ok(None),
+    }
 }
 
 /// The files of the template folder `dir`, without its signature: no links,

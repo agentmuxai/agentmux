@@ -772,7 +772,7 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         await vi.advanceTimersByTimeAsync(6_000);
         const outcome = await promise;
 
-        expect(outcome).toBe("inapp-timeout");
+        expect(outcome).toBe("inapp-ended");
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
     });
 
@@ -822,7 +822,7 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         await vi.advanceTimersByTimeAsync(6_000);
         const outcome = await promise;
 
-        expect(outcome).toBe("inapp-timeout");
+        expect(outcome).toBe("inapp-ended");
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
     });
 
@@ -854,7 +854,7 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         expect(hub.cancelCliLogin).not.toHaveBeenCalled();
     });
 
-    it("fails fast with 'inapp-timeout' when the child exits WITHOUT a credential ever landing (login crashed/failed) — after grace re-checks, well before the full window", async () => {
+    it("fails fast with 'inapp-ended' (not a timeout) when the child exits WITHOUT a credential ever landing (login crashed/failed) — after grace re-checks, well before the full window", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(CLAUDE_AUTHORIZE_URL);
         hub.getCliLoginStatus.mockResolvedValue({ active: false, credential_changed: false });
@@ -873,7 +873,7 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         await vi.advanceTimersByTimeAsync(6_000);
         const outcome = await promise;
 
-        expect(outcome).toBe("inapp-timeout");
+        expect(outcome).toBe("inapp-ended");
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
         expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
         // No automatic tier 3 fallback — the user already has the URL.

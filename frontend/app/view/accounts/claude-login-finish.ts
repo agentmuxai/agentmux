@@ -96,6 +96,9 @@ export function applyOutcome(s: LoginState, outcome: ProviderLoginOutcome, linkC
         case "inapp-timeout":
             s.setError("The login link timed out. Complete it in your browser, then try again.");
             break;
+        case "inapp-ended":
+            s.setError("The sign-in ended before it finished. Try again; if it asks for a code, paste the whole code.");
+            break;
         case "terminal-timeout":
             s.setError("Opened a terminal window, but no login was detected within 5 minutes.");
             break;

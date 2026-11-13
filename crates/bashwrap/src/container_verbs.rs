@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::github::{default_repo_source, owner_repo_of_path, repo_of_default};
+use crate::github::{default_repo_source, owner_repo_of_path, repo_of_default, repo_of_spec};
 use crate::mps_client::WpsClient;
 
 /// srv runs the merge on the host and may wait on GitHub and a merge queue.
@@ -82,6 +82,7 @@ pub fn parse_merge(args: &[String]) -> Result<Parsed, String> {
             }
             "-R" | "--repo" => m.repo = Some(repo_of_flag(it.next().map(String::as_str))?),
             _ if a.starts_with("--repo=") => m.repo = Some(repo_of_flag(Some(&a["--repo=".len()..]))?),
+            _ if a.starts_with("-R") && a.len() > 2 => m.repo = Some(repo_of_flag(Some(a[2..].trim_start_matches('=')))?),
             _ if a.starts_with('-') => return Err(unsupported(a)),
             _ => {
                 if positional.replace(a).is_some() {
@@ -109,10 +110,26 @@ pub fn parse_merge(args: &[String]) -> Result<Parsed, String> {
     Ok(Parsed::Merge(m))
 }
 
+/// The repository a `-R`/`--repo`/`GH_REPO` value names. The whole spec must be `OWNER/REPO` or `github.com/OWNER/REPO`:
+/// another host, or a longer path, names a repository this step cannot merge on, and is never cut down to its first two
+/// parts (that would merge on a different repository than the one named).
 fn repo_of_flag(value: Option<&str>) -> Result<(String, String), String> {
     let spec = value.ok_or_else(|| "-R needs OWNER/REPO".to_string())?;
-    let spec = spec.strip_prefix("github.com/").unwrap_or(spec);
-    owner_repo_of_path(spec).ok_or_else(|| format!("{spec} is not OWNER/REPO"))
+    repo_of_spec(spec).ok_or_else(|| format!("{spec} is not OWNER/REPO or github.com/OWNER/REPO"))
+}
+
+/// The repository a merge is on: the one the merge names, else a leading `-R`, else `GH_REPO`, else the working
+/// directory's. A `GH_REPO` that is not a plain repository is refused, not replaced by the working directory's.
+fn merge_repo(merge: &Merge, lead_repo: Option<(String, String)>) -> Result<(String, String), String> {
+    if let Some(found) = merge.repo.clone().or(lead_repo) {
+        return Ok(found);
+    }
+    if let Some(env) = std::env::var("GH_REPO").ok().filter(|r| !r.is_empty()) {
+        return repo_of_flag(Some(&env)).map_err(|why| format!("GH_REPO: {why}"));
+    }
+    default_repo_source(None)
+        .and_then(|s| repo_of_default(&s))
+        .ok_or_else(|| "no repository: pass -R OWNER/REPO, or run it in a clone of the repository".to_string())
 }
 
 /// The refusal for a raw `gh api` write a container's token cannot make, with the command that does the job; `None` for
@@ -205,11 +222,26 @@ pub fn narrowing_machine(marker: Option<&str>) -> bool {
     matches!(marker, Some("1" | "older-gh-agent"))
 }
 
+/// A repository flag in front of the command word (`gh -R o/r pr merge 7`, which `gh` accepts): the repository it names, and
+/// the arguments without it. `None` for a command that does not start with one, or whose flag is not `OWNER/REPO` (then
+/// `gh` itself says what is wrong).
+pub fn lead_repo_flag(args: &[String]) -> Option<(Option<(String, String)>, &[String])> {
+    let first = args.first()?.as_str();
+    let (value, used) = match first {
+        "-R" | "--repo" => (args.get(1)?.as_str(), 2),
+        _ if first.starts_with("--repo=") => (&first["--repo=".len()..], 1),
+        _ if first.starts_with("-R") && first.len() > 2 => (first[2..].trim_start_matches('='), 1),
+        _ => return Some((None, args)),
+    };
+    Some((Some(repo_of_flag(Some(value)).ok()?), &args[used..]))
+}
+
 /// `github-container -- <gh args>`.
 pub fn run_github_container(gh_args: &[String]) -> i32 {
     if !narrowing_machine(std::env::var("AGENTMUX_PUBLISH_GUARD").ok().as_deref()) {
         return NOT_HANDLED;
     }
+    let Some((lead_repo, gh_args)) = lead_repo_flag(gh_args) else { return NOT_HANDLED };
     if let Some(why) = refused_command(gh_args) {
         eprintln!("agentmux: not run: {why}");
         return 1;
@@ -225,9 +257,12 @@ pub fn run_github_container(gh_args: &[String]) -> i32 {
             return 1;
         }
     };
-    let Some((owner, repo)) = merge.repo.clone().or_else(|| std::env::var("GH_REPO").ok().and_then(|r| repo_of_flag(Some(&r)).ok())).or_else(|| default_repo_source(None).and_then(|s| repo_of_default(&s))) else {
-        eprintln!("agentmux: gh pr merge not run: no repository: pass -R OWNER/REPO, or run it in a clone of the repository");
-        return 1;
+    let (owner, repo) = match merge_repo(&merge, lead_repo) {
+        Ok(found) => found,
+        Err(why) => {
+            eprintln!("agentmux: gh pr merge not run: {why}");
+            return 1;
+        }
     };
     match ask_merge(&owner, &repo, &merge) {
         Ok(said) => {
@@ -351,6 +386,72 @@ mod tests {
         std::env::set_var("AGENTMUX_PUBLISH_GUARD", "1");
         assert_eq!(run_github_container(&args(&["release", "create", "v1"])), 1, "on a machine with gh-agent it is refused");
         assert_eq!(run_github_container(&args(&["issue", "list"])), NOT_HANDLED);
+        std::env::remove_var("AGENTMUX_PUBLISH_GUARD");
+    }
+
+    #[test]
+    fn a_repository_flag_in_front_of_the_command_is_read_and_set_aside() {
+        let rest = |a: &[&str]| lead_repo_flag(&args(a)).map(|(r, rest)| (r, rest.to_vec()));
+        let repo = Some(("octo".to_string(), "hello".to_string()));
+        let tail = args(&["pr", "merge", "7"]);
+        for lead in [&["-R", "octo/hello"][..], &["--repo", "octo/hello"], &["--repo=octo/hello"], &["-Rocto/hello"], &["-R=octo/hello"], &["--repo", "github.com/octo/hello"]] {
+            let mut a = lead.to_vec();
+            a.extend(["pr", "merge", "7"]);
+            assert_eq!(rest(&a), Some((repo.clone(), tail.clone())), "{lead:?}");
+        }
+        // No flag in front: the arguments as they are. A flag that is not OWNER/REPO or has no value: not ours, gh says what is wrong.
+        assert_eq!(rest(&["pr", "merge", "7"]), Some((None, tail.clone())));
+        assert_eq!(rest(&["-R", "not-a-repo", "pr", "merge", "7"]), None);
+        assert_eq!(rest(&["-R"]), None);
+    }
+
+    #[test]
+    fn a_repository_that_is_not_owner_repo_is_never_cut_down_to_its_first_two_parts() {
+        let repo = |v: &str| repo_of_flag(Some(v)).ok();
+        let octo = Some(("octo".to_string(), "hello".to_string()));
+        assert_eq!(repo("octo/hello"), octo);
+        assert_eq!(repo("github.com/octo/hello"), octo);
+        assert_eq!(repo("GitHub.com/octo/hello"), octo);
+        for bad in ["enterprise/team/project", "github.com/octo/hello/extra", "ghe.example.com/octo/hello", "octo", "octo/", "/hello", "octo/hello/", ""] {
+            assert_eq!(repo(bad), None, "{bad:?}");
+        }
+        // A merge that names such a repository is refused, whichever way it is written, rather than sent for another repository.
+        for flag in [&["-R", "enterprise/team/project"][..], &["--repo=enterprise/team/project"], &["-Renterprise/team/project"], &["-R=ghe.example.com/octo/hello"]] {
+            let mut a = vec!["pr", "merge", "7"];
+            a.extend(flag);
+            assert!(matches!(parse_merge(&args(&a)), Err(why) if why.contains("OWNER/REPO")), "{flag:?}");
+        }
+        let attached = parse_merge(&args(&["pr", "merge", "7", "-Rocto/hello"]));
+        assert!(matches!(attached, Ok(Parsed::Merge(m)) if m.repo == octo && m.number == 7));
+        // In front of the command it is left to gh.
+        assert_eq!(lead_repo_flag(&args(&["-R", "enterprise/team/project", "pr", "merge", "7"])), None);
+    }
+
+    #[test]
+    fn a_github_repo_that_is_not_owner_repo_is_refused_not_replaced_by_the_working_directory() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let merge = Merge { number: 7, ..Merge::default() };
+        std::env::set_var("GH_REPO", "enterprise/team/project");
+        let why = merge_repo(&merge, None).unwrap_err();
+        assert!(why.contains("GH_REPO") && why.contains("OWNER/REPO"), "{why}");
+        std::env::set_var("GH_REPO", "octo/hello");
+        assert_eq!(merge_repo(&merge, None), Ok(("octo".to_string(), "hello".to_string())));
+        // A repository the merge or a leading flag names wins over GH_REPO.
+        let lead = Some(("lead".to_string(), "repo".to_string()));
+        assert_eq!(merge_repo(&merge, lead.clone()), Ok(("lead".to_string(), "repo".to_string())));
+        std::env::remove_var("GH_REPO");
+    }
+
+    #[test]
+    fn a_leading_repository_flag_does_not_hide_a_command_from_the_container_steps() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("AGENTMUX_PUBLISH_GUARD", "1");
+        for cmd in [&["-R", "o/r", "release", "create", "v1"][..], &["--repo=o/r", "release", "delete", "v1"], &["-Ro/r", "api", "-X", "DELETE", "repos/o/r/git/refs/heads/x"]] {
+            assert_eq!(run_github_container(&args(cmd)), 1, "{cmd:?}");
+        }
+        assert_eq!(run_github_container(&args(&["-R", "o/r", "issue", "list"])), NOT_HANDLED);
+        assert_eq!(run_github_container(&args(&["-R", "o/r", "pr", "list"])), NOT_HANDLED);
+        assert_eq!(run_github_container(&args(&["-R", "not-a-repo", "pr", "merge", "7"])), NOT_HANDLED);
         std::env::remove_var("AGENTMUX_PUBLISH_GUARD");
     }
 

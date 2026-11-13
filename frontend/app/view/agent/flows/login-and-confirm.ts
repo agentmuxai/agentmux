@@ -168,6 +168,7 @@ export async function logInAndConfirm(p: LogInAndConfirmParams): Promise<LoginCo
         case "terminal-cli-signed-in":
             return { kind: "signed-in", email: null };
         case "inapp-timeout":
+        case "inapp-ended":
             return { kind: "not-detected", stage: "inapp" };
         case "terminal-timeout":
             return { kind: "not-detected", stage: "terminal" };

@@ -27,7 +27,6 @@ fn state_with(name: &str, reducer: Reducer) -> RunState {
 // ── reducers ────────────────────────────────────────────────────────────
 
 #[test]
-#[ignore = "module B"]
 fn replace_is_the_default_and_the_last_write_wins() {
     let mut s = RunState::new();
     assert_eq!(s.reducer_of("x"), Reducer::Replace);
@@ -38,7 +37,6 @@ fn replace_is_the_default_and_the_last_write_wins() {
 }
 
 #[test]
-#[ignore = "module B"]
 fn append_makes_a_list_and_pushes_each_write_as_one_element() {
     let mut s = state_with("log", Reducer::Append);
     s.write("log", Tv::clean(json!("a"))).unwrap();
@@ -52,7 +50,6 @@ fn append_makes_a_list_and_pushes_each_write_as_one_element() {
 }
 
 #[test]
-#[ignore = "module B"]
 fn merge_is_a_shallow_object_merge_where_the_write_wins() {
     let mut s = state_with("o", Reducer::Merge);
     s.write("o", Tv::clean(json!({ "a": 1, "b": { "x": 1 } }))).unwrap();
@@ -64,7 +61,6 @@ fn merge_is_a_shallow_object_merge_where_the_write_wins() {
 }
 
 #[test]
-#[ignore = "module B"]
 fn add_sums_numbers_and_integers_stay_integers() {
     let mut s = state_with("n", Reducer::Add);
     s.write("n", Tv::clean(json!(1))).unwrap();
@@ -77,7 +73,6 @@ fn add_sums_numbers_and_integers_stay_integers() {
 }
 
 #[test]
-#[ignore = "module B"]
 fn a_bad_variable_name_is_refused() {
     let mut s = RunState::new();
     for name in ["", "a.b", "a b", " "] {
@@ -89,7 +84,6 @@ fn a_bad_variable_name_is_refused() {
 // ── taint through a write ───────────────────────────────────────────────
 
 #[test]
-#[ignore = "module B"]
 fn a_variable_tainted_in_one_iteration_is_tainted_in_the_next() {
     // append keeps what was there: one tainted write taints the whole list for good.
     let mut s = state_with("items", Reducer::Append);
@@ -105,7 +99,6 @@ fn a_variable_tainted_in_one_iteration_is_tainted_in_the_next() {
 }
 
 #[test]
-#[ignore = "module B"]
 fn add_and_merge_join_the_bits_and_a_derived_number_stays_derived() {
     let mut n = state_with("count", Reducer::Add);
     n.write("count", Tv::clean(json!(1))).unwrap();
@@ -123,7 +116,6 @@ fn add_and_merge_join_the_bits_and_a_derived_number_stays_derived() {
 // ── the size cap ────────────────────────────────────────────────────────
 
 #[test]
-#[ignore = "module B"]
 fn state_over_the_cap_fails_the_write_with_the_size_and_changes_nothing() {
     let mut s = RunState::new();
     s.write("small", Tv::clean(json!("ok"))).unwrap();
@@ -153,7 +145,6 @@ fn state_over_the_cap_fails_the_write_with_the_size_and_changes_nothing() {
 // ── the checkpoint encoding ─────────────────────────────────────────────
 
 #[test]
-#[ignore = "module B"]
 fn a_checkpoint_round_trips_with_every_taint_bit_and_reducer() {
     let c = sample(4);
     let bytes = encode(&c).unwrap();
@@ -171,7 +162,6 @@ fn a_checkpoint_round_trips_with_every_taint_bit_and_reducer() {
 }
 
 #[test]
-#[ignore = "module B"]
 fn a_restore_never_clears_a_bit_and_a_missing_bit_is_unreadable() {
     let mut value = serde_json::from_slice::<serde_json::Value>(&encode(&sample(1)).unwrap()).unwrap();
     value["state"]["vars"]["title"].as_object_mut().unwrap().remove("tainted");
@@ -182,7 +172,6 @@ fn a_restore_never_clears_a_bit_and_a_missing_bit_is_unreadable() {
 }
 
 #[test]
-#[ignore = "module B"]
 fn a_newer_format_is_refused_before_the_rest_is_read() {
     let mut c = sample(0);
     c.schema_version = SCHEMA_VERSION + 1;
@@ -195,14 +184,12 @@ fn a_newer_format_is_refused_before_the_rest_is_read() {
 }
 
 #[test]
-#[ignore = "module B"]
 fn a_run_has_at_most_the_step_limit_of_checkpoints() {
     assert!(encode(&sample(MAX_STEPS - 1)).is_ok());
     assert_eq!(encode(&sample(MAX_STEPS)).unwrap_err(), CheckpointError::TooManySteps { step: MAX_STEPS, max: MAX_STEPS });
 }
 
 #[test]
-#[ignore = "module B"]
 fn a_diff_applied_to_the_checkpoint_before_gives_the_next_one() {
     let prev = sample(4);
     let mut next = sample(5);
@@ -221,7 +208,6 @@ fn a_diff_applied_to_the_checkpoint_before_gives_the_next_one() {
 }
 
 #[test]
-#[ignore = "module B"]
 fn a_diff_of_a_small_change_is_much_smaller_than_the_checkpoint() {
     let mut prev = sample(1);
     prev.state.vars.insert("big".into(), Tv::tainted(json!("z".repeat(50_000))));
@@ -240,7 +226,6 @@ fn a_diff_of_a_small_change_is_much_smaller_than_the_checkpoint() {
 }
 
 #[test]
-#[ignore = "module B"]
 fn a_diff_applies_only_to_the_checkpoint_it_follows() {
     let prev = sample(4);
     let d = diff(&prev, &sample(5)).unwrap();

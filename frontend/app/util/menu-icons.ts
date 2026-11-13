@@ -39,7 +39,6 @@ export const MENU_ICON = {
     show: "eye",
     // Panes
     minimize: "regular@window-minimize",
-    merge: "right-to-bracket",
     magnify: "regular@window-maximize",
     unmagnify: "regular@window-restore",
     splitDown: "table-rows",

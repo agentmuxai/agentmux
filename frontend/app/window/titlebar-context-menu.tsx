@@ -6,12 +6,18 @@ import { hostHas } from "@/util/host-caps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { openConfigFileOrTell } from "@/app/util/open-config-file";
 import { createTab } from "@/store/tab-actions";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createSignal, untrack, type JSX } from "solid-js";
-import { getEffectiveGroupedChildKeys, getHiddenKeys, getSavedPinNames, isWidgetHidden, pinIdOf } from "./action-widgets-config";
+import {
+    getEffectiveGroupedChildKeys,
+    getHiddenKeys,
+    getSavedPinNames,
+    isWidgetHidden,
+    pinIdOf,
+    widgetMenuIconColor,
+} from "./action-widgets-config";
 
 interface TitleBarContextMenuProps {
     pos: { x: number; y: number };
@@ -88,14 +94,6 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             },
         });
 
-        items.push({ type: "separator" });
-        items.push({
-            label: "Open widgets.json",
-            icon: MENU_ICON.openInEditor,
-            click: () => {
-                void openConfigFileOrTell("widgets.json");
-            },
-        });
 
         // A grouped child not currently individually pinned (e.g.
         // Messengers' Discord/Slack/etc.) is excluded here the same way
@@ -123,6 +121,9 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
                     return {
                         type: "checkbox" as const,
                         label: cfg.label ?? shortName,
+                        // The widget's own icon, in its own colour, as in the "+" menus.
+                        icon: cfg.icon,
+                        iconColor: widgetMenuIconColor(cfg),
                         checked: pinnedKeys().has(shortName),
                         keepOpen: true,
                         click: () => toggleWidget(shortName),

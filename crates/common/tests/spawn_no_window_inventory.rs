@@ -88,7 +88,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/bashwrap/src/prefix.rs", "resolved", 1,
      "no-window: calls no_window()/creation_flags in this file"),
-    ("crates/bashwrap/src/shim_functions.rs", "&bash", 3,
+    ("crates/bashwrap/src/shim_functions.rs", "&bash", 4,
      "no-window: a test helper, hidden with no_window() like the production spawns; calls it in this file"),
     ("crates/bashwrap/src/shim_functions.rs", "bash", 1,
      "no-window: a test helper, hidden with no_window() like the production spawns; calls it in this file"),

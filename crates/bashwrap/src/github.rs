@@ -80,6 +80,10 @@ pub fn repo_of_gh_command(args: &[String], env_repo: Option<&str>, origin_url: i
             explicit = it.next().cloned();
         } else if let Some(v) = a.strip_prefix("--repo=").or_else(|| a.strip_prefix("-R=")) {
             explicit = Some(v.to_string());
+        } else if let Some(v) = a.strip_prefix("-R").filter(|v| v.contains('/') && !v.chars().any(char::is_whitespace)) {
+            // `-Rowner/repo`, the value written against the flag. Text that merely begins with `-R` (a title like
+            // `-Rework parser`) has no `/` or has a space, and is not taken for a repository.
+            explicit = Some(v.to_string());
         }
     }
     if let Some(r) = explicit.as_deref().filter(|r| !r.is_empty()) {
@@ -157,7 +161,7 @@ fn positional_repo(args: &[String]) -> Option<(String, String)> {
 }
 
 /// `[HOST/]OWNER/REPO`; a host other than github.com is not ours.
-fn repo_of_spec(spec: &str) -> Option<(String, String)> {
+pub fn repo_of_spec(spec: &str) -> Option<(String, String)> {
     let parts: Vec<&str> = spec.trim().split('/').collect();
     match parts.as_slice() {
         [owner, repo] => owner_repo_of_path(&format!("{owner}/{repo}")),
@@ -558,6 +562,13 @@ pub(crate) mod tests {
         assert_eq!(repo_of_gh_command(&args(&["pr", "list", "-R", "octo/hello"]), None, origin), repo("octo", "hello"));
         assert_eq!(repo_of_gh_command(&args(&["pr", "list", "--repo", "github.com/octo/hello"]), None, origin), repo("octo", "hello"));
         assert_eq!(repo_of_gh_command(&args(&["pr", "list", "--repo=octo/hello"]), None, origin), repo("octo", "hello"));
+        // The value written against the flag names the repository too, with or without the `=`.
+        assert_eq!(repo_of_gh_command(&args(&["pr", "create", "-Rocto/hello"]), None, origin), repo("octo", "hello"));
+        assert_eq!(repo_of_gh_command(&args(&["pr", "create", "-R=octo/hello"]), None, origin), repo("octo", "hello"));
+        assert_eq!(repo_of_gh_command(&args(&["-Rocto/hello", "pr", "edit", "7"]), None, origin), repo("octo", "hello"));
+        // A value that only begins with `-R` is text, not a repository: the working directory's repository stays.
+        assert_eq!(repo_of_gh_command(&args(&["pr", "create", "--title", "-Rework parser"]), None, origin), repo("home", "checkout"));
+        assert_eq!(repo_of_gh_command(&args(&["pr", "create", "--title", "-Rework/a b"]), None, origin), repo("home", "checkout"));
         assert_eq!(repo_of_gh_command(&args(&["pr", "list"]), Some("env/repo"), origin), repo("env", "repo"));
         assert_eq!(repo_of_gh_command(&args(&["api", "repos/octo/hello/pulls"]), None, origin), repo("octo", "hello"));
         // gh fills the placeholders from the working directory's repository.

@@ -317,7 +317,6 @@
 364 frontend/app/block/block.tsx::Block
 138 frontend/app/block/block.tsx::BlockFull
 293 frontend/app/block/blockframe.tsx::BlockFrame_Header
-102 frontend/app/block/blockframe.tsx::EndIcons
 114 frontend/app/block/blockutil.tsx::ConnectionButton
 108 frontend/app/block/lazy-pane-tab.tsx::createStandIn
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance
@@ -440,7 +439,7 @@
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection
 137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
-117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
+112 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive
 170 frontend/app/workspace/redock-ghost.ts::installFloatingRedockHoverListener
 472 frontend/app/workspace/workspace.tsx::WorkspaceElem

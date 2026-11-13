@@ -41,6 +41,7 @@ export function AccountsGallery(props: {
                 (SPEC_CONNECTORS_CARDS_2026_10_13.md §3.2). */}
             <CardGrid
                 size="chip"
+                minCardWidth={150}
                 class="accounts-gallery-grid"
                 ariaLabel="Add an account"
                 items={SERVICE_CATALOG}

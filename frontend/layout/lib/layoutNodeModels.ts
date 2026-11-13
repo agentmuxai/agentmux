@@ -4,7 +4,6 @@
 
 import { createSignalAtom, fireAndForget } from "@/util/util";
 import { findNode } from "./layoutNode";
-import { canMergeNode } from "./layoutMinimize";
 import type { Properties as CSSProperties } from "csstype";
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
@@ -28,26 +27,6 @@ function innerRectOf(model: LayoutModel, nodeid: string, addlProps: LayoutNodeAd
         width: `${box ? `${box.width}px` : addlProps.transform.width} - ${gapSizePx}px`,
         height: `${box ? `${box.height}px` : addlProps.transform.height} - ${gapSizePx}px`,
     } as CSSProperties;
-}
-
-/**
- * The header's Merge into next pane on a node model: whether the pane has a neighbour to merge into (the
- * same finder the click runs, so a disabled button and a refused click cannot disagree), and the merge.
- */
-function withMergeApi(
-    model: LayoutModel,
-    nodeid: string,
-    base: Omit<NodeModel, "canMergeIntoNeighbour" | "mergeIntoNeighbour">
-): NodeModel {
-    return {
-        ...base,
-        canMergeIntoNeighbour: createMemo(() => {
-            model.localTreeStateAtom();
-            model.minimizedNodeIds();
-            return canMergeNode(model.treeState.rootNode, nodeid);
-        }),
-        mergeIntoNeighbour: () => model.mergeNodeIntoNeighbour(nodeid),
-    };
 }
 
 /**
@@ -124,7 +103,7 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     setActiveViewModelSig(() => vm);
                 };
                 model.nodeModelDisposers.set(nodeid, disposeThisNodeModel);
-                model.nodeModels.set(nodeid, withMergeApi(model, nodeid, {
+                model.nodeModels.set(nodeid, {
                 // See NodeModel.layoutModel's own doc comment (types.ts) for
                 // why this must be `model` — the LayoutModel this exact call
                 // is already scoped to — and never re-derived from
@@ -207,7 +186,7 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                 focusNode: () => model.focusNode(nodeid),
                 dragHandleRef: { current: null as HTMLDivElement | null },
                 displayContainerRef: model.displayContainerRef,
-                }));
+                });
             });
         });
     }

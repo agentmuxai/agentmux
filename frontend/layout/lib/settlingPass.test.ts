@@ -536,17 +536,30 @@ describe("a pane opens", () => {
 });
 
 describe("a pane is minimized or restored", () => {
-    it("glides the neighbours, and the minimized pane takes its chip at once", () => {
+    it("glides the neighbours, and the minimized pane glides to its chip with its content drawn", () => {
         const m = modelOf(three());
         const before = own(m, "b");
+        const was = own(m, "c");
         minimize(m, "c");
         expect(m.minimizedNodeIds().has("c")).toBe(true);
         const pass = m.settlingPass()!;
-        expect(pass.moves.has("c")).toBe(false);
+        expect(pass.moves.get("c")!.from).toEqual(was);
+        expect(pass.minimizing).toEqual(["c"]);
         expect(pass.enters).toEqual([]);
         expect(pass.ghosts).toEqual([]);
         expect(own(m, "b").height).toBeGreaterThan(before.height);
         expect(m.reflowFor("b")!.rect).toEqual(before);
+        expect(m.reflowFor("c")!.rect).toEqual(was);
+        settle();
+        expect(m.settlingPass()).toBeUndefined();
+    });
+
+    it("keeps no chip's content drawn for a pane that was already minimized", () => {
+        const m = modelOf(three());
+        minimize(m, "c");
+        settle();
+        minimize(m, "b");
+        expect(m.settlingPass()!.minimizing).toEqual(["b"]);
     });
 
     it("fades the restored pane in at its rect while the neighbours glide back", () => {

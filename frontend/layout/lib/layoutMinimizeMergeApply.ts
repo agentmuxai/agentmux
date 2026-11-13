@@ -12,45 +12,65 @@ import { revealInStrip, STRIP_EDGE_FADE_PX } from "@/app/element/strip-reveal";
 import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
 import { mergeInto } from "@/app/motion/primitives";
 import { DURATION_BASE_MS, DURATION_MODERATE_MS } from "@/app/motion/tokens";
-import { findMergeTarget } from "./layoutMinimizeMerge";
+import { findExpandedMergeTargets, findMinimizeMergeTarget } from "./layoutMinimizeMerge";
 import type { LayoutModel } from "./layoutModel";
 import { findNode, findNodeByBlockId } from "./layoutNode";
 import { effectiveStack, moveBlocksInStack } from "./layoutStack";
 
 /**
- * Merge the pane `nodeId` into its neighbour instead of minimizing it: a minimized one, else the
- * nearest expanded one. All its tabs are appended to the end of the target's strip, in their strip
- * order, inactive (the target's own tab keeps showing), and the emptied pane is removed as a move
- * (its space goes to the other panes, as for a minimize). Returns false, touching nothing, when
- * there is no target or the move could not be applied, so the caller minimizes as before.
+ * Merge the pane `nodeId` into its neighbours instead of minimizing it: into a minimized neighbour when
+ * there is one (tabs that were hidden together stay together), else dealt out round robin to the
+ * expanded panes (`findExpandedMergeTargets`: the nearest first, one tab each in strip order, round
+ * again). The tabs are appended to the end of each target's strip, inactive (the target's own tab keeps
+ * showing), and the emptied pane is removed as a move (its space goes to the other panes, as for a
+ * minimize). Returns false, touching nothing, when there is no target or the first move could not be
+ * applied, so the caller minimizes as before.
  */
 export function mergeIntoNeighbour(model: LayoutModel, nodeId: string): boolean {
     const root = model.treeState.rootNode;
-    // A minimized pane to join first (tabs that were hidden together stay together), else the expanded
-    // neighbour: its tabs go in as background tabs and the pane's own tile goes.
-    const target = findMergeTarget(root, nodeId);
+    const chip = findMinimizeMergeTarget(root, nodeId);
+    const targets = chip ? [chip] : findExpandedMergeTargets(root, nodeId);
     const node = root && findNode(root, nodeId);
-    if (!target?.data || !node?.data) return false;
-    const targetBlockId = target.data.blockId;
-    const blockIds = effectiveStack(node.data);
+    if (!node?.data || targets.length === 0 || targets.some((t) => !t.data)) return false;
+    const deals = dealOut(effectiveStack(node.data), targets.map((t) => t.data!.blockId));
     const reduceMotion = shouldReduceMotion("transition");
-    const from = reduceMotion ? undefined : pillRects(node.data.blockId, blockIds);
-
-    // A maximized pane that merges ends its maximize, as a minimize does (removeLeafEmptiedByMove).
-    const moved = moveBlocksInStack(model, blockIds, targetBlockId);
-    if (!moved) return false;
-
-    if (moved.length) {
-        const landedIn = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, targetBlockId);
-        // The pills travel first (as copies, see travelPills), then land with the bounce.
-        const travelMs = from?.size ? DURATION_MODERATE_MS : 0;
-        if (landedIn && !reduceMotion) {
-            if (travelMs) travelPills(targetBlockId, moved, from!, () => markLanded(moved, landedIn.id));
-            else markLanded(moved, landedIn.id);
-        }
-        revealArrivals(targetBlockId, moved[moved.length - 1], reduceMotion, travelMs);
+    const from = reduceMotion ? undefined : pillRects(node.data.blockId, [...deals.values()].flat());
+    // The nearest pane's deal goes last, so the focus the last move leaves is where the first tab went.
+    let any = false;
+    for (const [targetBlockId, ids] of [...deals].reverse()) {
+        const moved = moveBlocksInStack(model, ids, targetBlockId);
+        if (!moved) continue;
+        any = true;
+        if (moved.length) animateArrival(model, targetBlockId, moved, from, reduceMotion);
     }
-    return true;
+    return any;
+}
+
+/** `blockIds` dealt out round robin to `targetBlockIds` (the first tab to the first target); a target with no tab is left out. */
+function dealOut(blockIds: readonly string[], targetBlockIds: readonly string[]): Map<string, string[]> {
+    const deals = new Map<string, string[]>();
+    blockIds.forEach((id, i) => {
+        const target = targetBlockIds[i % targetBlockIds.length];
+        deals.set(target, [...(deals.get(target) ?? []), id]);
+    });
+    return deals;
+}
+
+/** The pills that arrived in `targetBlockId` travel first (as copies, see travelPills), then land with the bounce. */
+function animateArrival(
+    model: LayoutModel,
+    targetBlockId: string,
+    moved: string[],
+    from: Map<string, DOMRect> | undefined,
+    reduceMotion: boolean
+): void {
+    const landedIn = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, targetBlockId);
+    const travelMs = from?.size ? DURATION_MODERATE_MS : 0;
+    if (landedIn && !reduceMotion) {
+        if (travelMs) travelPills(targetBlockId, moved, from!, () => markLanded(moved, landedIn.id));
+        else markLanded(moved, landedIn.id);
+    }
+    revealArrivals(targetBlockId, moved[moved.length - 1], reduceMotion, travelMs);
 }
 
 /** The on-screen rectangle of each of the pane's pills, by block id; empty where the pane is not drawn. */

@@ -13,6 +13,13 @@
 .accounts-gallery {
     display: flex;
     flex-direction: column;
+
+    // A tile's line says what the service is for ("Repos, Actions, PRs"): it wraps to a second line
+    // rather than ending in an ellipsis, which in a thin pane cut every one of them.
+    .account-tile .ui-card-subtitle {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
 }
 
 // The brand logo in the chooser's header.
