@@ -500,9 +500,6 @@ pub(crate) struct RequestBody {
     vault: Option<String>,
 }
 
-/// The person is reading or acting in a use's prompt: its countdown holds
-/// (SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §5, "Hold").
-/// Only the host's route reaches it, like the answer itself.
 /// The card the person picked for a whole-card fill: one of the request's own choices (the preselected
 /// one when they picked none), never an id the agent or the page made up. "Always" is never for an expired
 /// card. `None` for any other use, and for a no.
@@ -522,6 +519,9 @@ fn chosen_card(request: &vault::uses::UseRequest, picked: Option<&str>, decision
     Ok(Some(card.id.clone()))
 }
 
+/// The person is reading or acting in a use's prompt: its countdown holds
+/// (SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §5, "Hold").
+/// Only the host's route reaches it, like the answer itself.
 fn hold_use(body: &Value) -> Result<(Value, bool), String> {
     let id = body.get("id").and_then(Value::as_str).unwrap_or("");
     if !vault::uses::uses().hold(id) {

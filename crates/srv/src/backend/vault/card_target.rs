@@ -104,11 +104,12 @@ pub fn card_by_id(store: &Store, id: &str, agent: Option<&str>) -> Result<CardTa
 }
 
 /// Every card among the Vaults the agent may use, for the person's picker: the default first, then the
-/// most recently saved.
+/// most recently saved. A card that can't be opened (changed, or sealed with another Vault key) is left out
+/// of the list: it can't be filled, and it must not stop a fill of another card.
 pub fn card_choices(store: &Store, agent: Option<&str>) -> Result<Vec<CardTarget>, String> {
     let mut rows = usable_cards(store, agent)?;
     rows.sort_by(|a, b| is_default(b).cmp(&is_default(a)).then(b.updated_at.cmp(&a.updated_at)));
-    rows.into_iter().map(open_row).collect()
+    Ok(rows.into_iter().filter_map(|row| open_row(row).ok()).collect())
 }
 
 fn usable_cards(store: &Store, agent: Option<&str>) -> Result<Vec<super::VaultRow>, String> {
@@ -252,5 +253,25 @@ mod tests {
         assert_eq!(all[1].choice().detail, "Visa •••• 1111, expires 03/99");
         assert!(card_by_id(&store, &plain, None).is_ok());
         assert!(card_by_id(&store, "nope", None).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_card_that_does_not_open_is_left_out_of_the_choices_and_stops_nothing() {
+        use super::super::{create, NewEntry};
+        seal::use_test_key();
+        let store = crate::server::tests::test_state().identity_store.clone();
+        let make = |label: &str, number: &str| {
+            let parts = seal::Parts([("number", number), ("exp_month", "03"), ("exp_year", "2099")].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
+            create(&store, NewEntry { kind: "card".into(), label: label.into(), fields: Default::default(), tags: vec![], parts }).unwrap()
+        };
+        let good = make("Good", "4111111111111111");
+        let bad = make("Bad", "5555555555554444");
+        // Sealed with something else, as a card changed under another Vault key would be.
+        let mut row = store.vault_get(&bad).unwrap().expect("the card");
+        row.sealed = vec![0u8; row.sealed.len().max(32)];
+        assert!(store.vault_update(&row).unwrap());
+        let all = card_choices(&store, None).expect("one card that does not open does not fail the list");
+        assert_eq!(all.iter().map(|c| c.fill.id.as_str()).collect::<Vec<_>>(), [good.as_str()]);
+        assert!(card_by_id(&store, &bad, None).is_err());
     }
 }

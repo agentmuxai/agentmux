@@ -793,6 +793,45 @@ async fn nobody_picking_a_card_types_nothing_and_a_no_picks_nothing() {
     assert!(typed_all(&s).is_empty());
 }
 
+/// The card sealed with something else, as one changed under another Vault key would be: it no longer opens.
+fn break_card(s: &Setup, id: &str) {
+    let mut row = s.state.identity_store.vault_get(id).unwrap().expect("the card");
+    row.sealed = vec![0u8; row.sealed.len().max(32)];
+    assert!(s.state.identity_store.vault_update(&row).unwrap());
+}
+
+#[tokio::test]
+async fn a_card_that_does_not_open_stops_no_other_fill_and_is_never_offered() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = one_card_form();
+    let good = make_card(&s, "2099", true);
+    let bad = make_second_card(&s, "5555555555554444", "Probe Mastercard");
+    break_card(&s, &bad);
+    // A named card still fills, and the broken one is not among the choices (so nobody picks).
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let (status, body) = fill(&s, &good).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(ask.await.unwrap().choices.is_none());
+    // With no default, the person picks among the cards that open: the broken one is not there.
+    let ask = tokio::spawn(pick_when_asked(s.auth.agent_id.clone(), Decision::Once, Some(good.clone())));
+    let (status, body) = fill(&s, "card").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let offered: Vec<String> = ask.await.unwrap().choices.unwrap().into_iter().map(|c| c.id).collect();
+    assert_eq!(offered, [good]);
+}
+
+#[tokio::test]
+async fn a_card_that_is_the_only_one_and_does_not_open_says_so_and_asks_nobody() {
+    let s = setup(ssn_field("https://shop.example")).await;
+    *s.host.card.lock().unwrap() = one_card_form();
+    let only = make_second_card(&s, "5555555555554444", "Probe Mastercard");
+    break_card(&s, &only);
+    let (status, body) = fill(&s, "card").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("no card saved that can be filled"), "{body}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
+}
+
 #[tokio::test]
 async fn card_with_no_card_saved_says_so_and_asks_nobody() {
     let s = setup(ssn_field("https://shop.example")).await;

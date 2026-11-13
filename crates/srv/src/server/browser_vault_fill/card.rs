@@ -77,6 +77,8 @@ pub(super) async fn whole_card(state: &AppState, caller: Option<&Caller>, req: &
     match found {
         Ok(Ok((Asked::NotACard, _))) => None,
         Ok(Ok((Asked::One(card), cards))) => Some(fill_card(state, caller, req, block_id, agent, reason, Some(*card), cards).await),
+        // The cards the person might pick from can be none: all deleted, or none that opens, since `card_asked` looked.
+        Ok(Ok((Asked::Pick, cards))) if cards.is_empty() => Some(err_response(StatusCode::BAD_REQUEST, "you have no card saved that can be filled: ask the person to add one in the Vault, or to type it (Vault request_value)".to_string())),
         Ok(Ok((Asked::Pick, cards))) => Some(fill_card(state, caller, req, block_id, agent, reason, None, cards).await),
         Ok(Err(e)) => Some(err_response(StatusCode::BAD_REQUEST, e)),
         Err(e) => Some(err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
