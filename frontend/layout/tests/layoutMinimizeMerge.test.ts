@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { findExpandedMergeTarget, findMinimizeMergeTarget } from "../lib/layoutMinimizeMerge";
+import { findExpandedMergeTarget, findExpandedMergeTargets, findMinimizeMergeTarget } from "../lib/layoutMinimizeMerge";
 import { newLayoutNode } from "../lib/layoutNode";
 import { FlexDirection, type LayoutNode } from "../lib/types";
 
@@ -129,5 +129,30 @@ describe("findExpandedMergeTarget", () => {
         expect(expandedOf(split(FlexDirection.Row, a, b, c), a)).toBeUndefined();
         const only = leaf("only");
         expect(expandedOf(split(FlexDirection.Row, only), only)).toBeUndefined();
+    });
+});
+
+describe("findExpandedMergeTargets", () => {
+    const targetsOf = (root: LayoutNode, node: LayoutNode) => findExpandedMergeTargets(root, node.id).map((t) => t.data?.blockId);
+
+    it("starts with the nearest expanded pane and goes on in tree order, wrapping round", () => {
+        const [a, b, c, d] = [leaf("a"), leaf("b"), leaf("c"), leaf("d")];
+        const root = split(FlexDirection.Row, a, b, c, d);
+        expect(targetsOf(root, a)).toEqual(["b", "c", "d"]);
+        expect(targetsOf(root, b)).toEqual(["c", "d", "a"]);
+        expect(targetsOf(root, d)).toEqual(["c", "a", "b"]);
+    });
+
+    it("reaches the open panes of other splits too, and leaves out minimized ones and the pane itself", () => {
+        const [a, x, m, y, z] = [leaf("a"), leaf("x"), leaf("m", true), leaf("y"), leaf("z")];
+        const root = split(FlexDirection.Row, a, split(FlexDirection.Column, x, m, y), z);
+        expect(targetsOf(root, a)).toEqual(["x", "y", "z"]);
+        expect(targetsOf(root, z)).toEqual(["x", "y", "a"]); // across the column every pane touches the near edge: the topmost first
+    });
+
+    it("is empty when every other pane is minimized, or the pane is alone", () => {
+        const [a, b] = [leaf("a"), leaf("b", true)];
+        expect(targetsOf(split(FlexDirection.Row, a, b), a)).toEqual([]);
+        expect(findExpandedMergeTargets(undefined, "a")).toEqual([]);
     });
 });
