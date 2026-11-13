@@ -324,12 +324,20 @@ async fn file_pair(
 fn claimed_body(state: &AppState, item: &WorkItem, num: Option<i64>) -> Value {
     let after = state.work_store.work_deps_of(&item.id).unwrap_or_default();
     let (task_ref, board) = super::work_tasks::ref_of(state, &item.id).unzip();
-    json!({
+    let mut body = json!({
         "claimed": true, "attempt": item.attempts, "num": num, "ref": task_ref, "board": board, "item": item, "after": after,
         "status": "Your status line now shows this task's title. Say what you are doing in your own words with \
                    Presence status (line), and again when your plan changes, when you are blocked or waiting, \
                    and when you are done.",
-    })
+    });
+    if item.target_agent.is_empty() && item.target_agent_uid.is_empty() && item.target_group.is_empty() {
+        body["unaimed"] = json!(
+            "This task was not aimed at you. If it is outside your area, hand it back with Tasks release (id, attempt, \
+             handback: true, reason): it returns to the pool without using an attempt, and an unnamed claim will not \
+             offer it to you again."
+        );
+    }
+    body
 }
 
 /// The answer to a claim that took: the body above, after the claim's title is written to the agent's
@@ -587,6 +595,10 @@ pub(super) struct HolderRequest {
     pub result: String,
     #[serde(default)]
     pub lease_ms: Option<i64>,
+    /// release: the task is outside the holder's area. It goes back to the pool with its attempt
+    /// given back (never parked as failed) and is not offered to this agent by an unnamed claim again.
+    #[serde(default)]
+    pub handback: bool,
 }
 
 /// The caller's UID for a holder check (identity M4c-2, spec §6.5.9): the
@@ -690,10 +702,12 @@ pub(super) async fn handle_work_release(
         Some(&req.agent_id),
     );
     let id = super::work_tasks::resolve_id(&state, &id);
-    match state
-        .work_store
-        .work_queue_release(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
-    {
+    let released = if req.handback {
+        state.work_store.work_queue_hand_back(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
+    } else {
+        state.work_store.work_queue_release(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
+    };
+    match released {
         Ok(Some(matched)) => {
             count_holder_match(Some(matched));
             publish_changed(&state);
@@ -707,7 +721,8 @@ pub(super) async fn handle_work_release(
                 .flatten()
                 .map(|i| i.state)
                 .unwrap_or_default();
-            super::work_tasks::record(&state, &id, &req.agent_id, "agent", "released", "claimed", &resulting, &req.result);
+            let kind = if req.handback { crate::backend::storage::work_queue::HANDED_BACK_EVENT } else { "released" };
+            super::work_tasks::record(&state, &id, &req.agent_id, "agent", kind, "claimed", &resulting, &req.result);
             super::agent_status_handlers::task_ended(&state, &req.agent_id, holder_uid(caller.as_deref()), &id);
             (StatusCode::OK, Json(json!({ "ok": true, "state": resulting })))
         }

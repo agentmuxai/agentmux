@@ -107,6 +107,14 @@ fn cases() -> Vec<Case> {
         ),
         c(
             "WorkRelease",
+            json!({ "id": "7", "attempt": 2, "reason": "outside my seat", "handback": true }),
+            json!({ "state": "open" }),
+            "/agentmux/work/7/release",
+            json!({ "attempt": 2, "result": "outside my seat", "handback": true }),
+            &["Handed 7 back to the pool"],
+        ),
+        c(
+            "WorkRelease",
             json!({ "id": "7", "attempt": 3 }),
             json!({ "state": "failed" }),
             "/agentmux/work/7/release",
