@@ -65,6 +65,20 @@ function pillRects(paneBlockId: string, blockIds: readonly string[]): Map<string
     return rects;
 }
 
+/**
+ * The right edge, in viewport px, of where `el` can be seen: the nearest right edge among the ancestors that
+ * clip it (the tab strip's scroller, the header, the pane). Undefined when nothing clips it.
+ */
+export function visibleRight(el: Element): number | undefined {
+    let right: number | undefined;
+    for (let up = el.parentElement; up; up = up.parentElement) {
+        if (getComputedStyle(up).overflowX === "visible") continue;
+        const r = up.getBoundingClientRect().right;
+        right = right === undefined ? r : Math.min(right, r);
+    }
+    return right;
+}
+
 function paneElement(blockId: string): HTMLElement | null {
     if (typeof document === "undefined") return null;
     return document.querySelector<HTMLElement>(`[data-role="pane"][data-blockid="${CSS.escape(blockId)}"]`);
@@ -75,8 +89,9 @@ function paneElement(blockId: string): HTMLElement | null {
  * the merged pane's header to its place in the strip (motion primitive `mergeInto`), so the tabs
  * move into the neighbour instead of appearing in it. The copies live in a fixed layer, not in the
  * pills themselves: the strip clips its contents, so a pill moved back to the other pane's header
- * would be invisible until it entered the strip. The real pills stay hidden meanwhile; `land` marks
- * them for the bounce (pane-tab-landing) once the first arrives, and again if none could be found.
+ * would be invisible until it entered the strip. The layer is cut off at the strip's right edge, so the pills
+ * of a strip that is wider than its pane (those scrolled out of view) do not fly past the pane. The real
+ * pills stay hidden meanwhile; `land` marks them for the bounce (pane-tab-landing) once the first arrives, and again if none could be found.
  */
 function travelPills(
     targetBlockId: string,
@@ -104,6 +119,9 @@ function travelPills(
             land: markOnce,
             // The copy is a picture of the pill, not an active or just-landed one.
             onCopy: (copy) => copy.classList.remove("pane-tab--landing", "pane-tab--active"),
+            // A pill the strip has scrolled out of view flies toward its place and is cut off at the strip's edge, not
+            // drawn across whatever lies beyond the pane.
+            clipRight: visibleRight,
         }
     );
     // A pane that is gone, or pills that were not drawn: nothing flew, but the bounce still belongs to the move.
