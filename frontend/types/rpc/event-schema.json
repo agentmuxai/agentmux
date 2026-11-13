@@ -711,6 +711,15 @@
     }
   },
   {
+    "event": "message-flow",
+    "payloadTs": {
+      "imports": [
+        "MessageFlowEvent"
+      ],
+      "name": "MessageFlowEvent"
+    }
+  },
+  {
     "event": "muxbus:status",
     "payloadTs": {
       "imports": [

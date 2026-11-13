@@ -563,7 +563,11 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // starts (`waiting`): a pass stands at its start while the first frames lay the panes out, its neighbours
     // still cover its place for that time, and a fade that ran through it would be over before they moved.
     const enters = createMemo(() => props.layoutModel.settlingPass()?.enters.includes(props.node.id) ?? false);
-    const entering = createMemo(() => enters() && !!props.layoutModel.settlingPass()?.gliding);
+    // A pane whose fade began in the pass this one replaced keeps fading (`fading`): not drawn again at 0.
+    const entering = createMemo(() => {
+        const pass = props.layoutModel.settlingPass();
+        return enters() && !!pass && (pass.gliding || (pass.fading?.includes(props.node.id) ?? false));
+    });
     const waiting = createMemo(() => enters() && !entering());
     const tileStyle = createMemo<JSX.CSSProperties>(() => {
         const entry = reflow();

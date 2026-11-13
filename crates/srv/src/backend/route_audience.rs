@@ -266,6 +266,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/google/self/services"), Audience::Everyone),
     (Match::Route("/api/v1/google/status"), Audience::Everyone),
     (Match::Route("/api/v1/layout"), Audience::Everyone),
+    (Match::Route("/api/v1/message-flow"), Audience::Everyone),
     (Match::Route("/api/v1/message-stats"), Audience::Everyone),
     (Match::Route("/api/v1/muxspect/background-tasks"), Audience::Everyone),
     (Match::Route("/api/v1/muxspect/conversations"), Audience::Everyone),

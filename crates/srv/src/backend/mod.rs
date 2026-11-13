@@ -105,6 +105,7 @@ pub mod slug_migration;
 pub mod host_os;
 pub mod lan;
 pub mod lsp;
+pub mod message_flow;
 pub mod messagebus;
 pub mod notify;
 pub mod oref;
