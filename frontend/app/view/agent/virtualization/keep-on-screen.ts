@@ -57,16 +57,24 @@ export function onScreenRows(
 }
 
 /**
- * Where the row `id` is now that the view changed what the list shows: a row a switch hid is in the
- * run that holds it; a run that went (its rows show again) is its first row, or the run that holds that.
- * Null when it is nowhere (the row left the document).
+ * The ids `id` may be shown as after the view changed what the list shows, best first: itself, then
+ * (for a run that went, its rows show again) its first row, then the run that holds that row (a row
+ * a switch hid is in the run that holds it).
  */
-export function successorRow(id: string, view: LayoutView, nodes: readonly DocumentNode[]): RowPosition | null {
-    const rowOf = (rowId: string) => view.rows.find((r) => r.nodeId === rowId) ?? null;
+export function successorIds(id: string, nodes: readonly DocumentNode[]): string[] {
     const first = firstHiddenIdOf(id);
     const target = first ?? id;
     const run = nodes.find((n) => n.type === "hidden_run" && n.hiddenIds.includes(target));
-    return rowOf(target) ?? (run ? rowOf(run.id) : null);
+    return [id, ...(first ? [first] : []), ...(run ? [run.id] : [])];
+}
+
+/** Where the row `id` went in the slice's rows; null when it is nowhere (the row left the document). */
+export function successorRow(id: string, view: LayoutView, nodes: readonly DocumentNode[]): RowPosition | null {
+    for (const next of successorIds(id, nodes).slice(1)) {
+        const row = view.rows.find((r) => r.nodeId === next);
+        if (row) return row;
+    }
+    return null;
 }
 
 /**
@@ -115,18 +123,68 @@ export function captureOnScreen(blockId: string, view: LayoutView | null | undef
     return onScreenRows(view, snap.scrollTop, snap.viewportPx);
 }
 
+/** The topmost row on screen as the DOM draws it, for rows the layout slice does not hold (the turn's tail). */
+export interface DomAnchor {
+    nodeId: string;
+    /** How far the viewport top is past the row's top, in the pane's own px (negative: the row starts below it). */
+    offsetPx: number;
+}
+
+/** Before a change to the rows: the topmost row on screen. One layout read, so only for a view change. */
+export function captureDomAnchor(scroller: HTMLElement | undefined, zoom: number): DomAnchor | null {
+    if (!scroller) return null;
+    const top = scroller.getBoundingClientRect().top; // perf:allow-layout-read — once per view change, before the rows change
+    for (const el of scroller.querySelectorAll<HTMLElement>("[data-node-id]")) {
+        const box = el.getBoundingClientRect(); // perf:allow-layout-read — once per view change, before the rows change
+        if (box.bottom > top + 1 && el.dataset.nodeId) return { nodeId: el.dataset.nodeId, offsetPx: (top - box.top) / (zoom || 1) };
+    }
+    return null;
+}
+
+/** How far to scroll to put the anchor's row (or its successor) back, or null when none of them is drawn. */
+function domShift(scroller: HTMLElement, anchor: DomAnchor, nodes: readonly DocumentNode[], zoom: number): number | null {
+    const top = scroller.getBoundingClientRect().top; // perf:allow-layout-read — a few frames after a view change
+    for (const id of successorIds(anchor.nodeId, nodes)) {
+        const el = scroller.querySelector<HTMLElement>(`[data-node-id=${JSON.stringify(id)}]`);
+        if (!el) continue;
+        const box = el.getBoundingClientRect(); // perf:allow-layout-read — a few frames after a view change
+        const offset = Math.min(anchor.offsetPx, box.height / (zoom || 1));
+        return (box.top - top) / (zoom || 1) + offset;
+    }
+    return null;
+}
+
 /** Frames a restore is repeated at most while the rows it moved are measured. */
 const SETTLE_FRAMES = 12;
 const settling = new Map<string, () => void>();
 
+export interface RestoreOnScreen {
+    blockId: string;
+    /** The slice's rows on screen before the change (captureOnScreen). */
+    rows: readonly OnScreenRow[];
+    /** The topmost row as drawn, captured before a view change; held first when it is still drawn. */
+    dom?: DomAnchor | null;
+    latest: () => LayoutView | null | undefined;
+    scroller: HTMLElement | undefined;
+    nodes?: readonly DocumentNode[];
+    zoom?: () => number;
+    /** The pane follows the bottom: the follow flow holds it, so the repeats stop. */
+    following?: () => boolean;
+}
+
 /** One restore: put the rows back where they were. True when nothing needed moving. */
-function restoreOnce(blockId: string, rows: readonly OnScreenRow[], latest: () => LayoutView | null | undefined, scroller: HTMLElement | undefined, nodes: readonly DocumentNode[]): boolean {
-    const snap = snapshotLayout(blockId);
+function restoreOnce(o: RestoreOnScreen): boolean {
+    const snap = snapshotLayout(o.blockId);
     if (!snap) return true;
-    const top = keptScrollTop(rows, latest(), scroller ? scroller.scrollTop : snap.scrollTop, nodes); // perf:allow-layout-read — a few frames after a view change
+    const nodes = o.nodes ?? [];
+    const shift = o.scroller && o.dom ? domShift(o.scroller, o.dom, nodes, o.zoom?.() ?? 1) : null;
+    const current = o.scroller ? o.scroller.scrollTop : snap.scrollTop; // perf:allow-layout-read — a few frames after a view change
+    // A row that is not drawn (unmounted in the slice's window) is placed from the slice, ahead of the on-screen rows.
+    const held = o.dom ? [{ nodeId: o.dom.nodeId, offsetPx: o.dom.offsetPx }, ...o.rows] : o.rows;
+    const top = shift != null ? (Math.abs(shift) < 0.5 ? null : Math.max(0, current + shift)) : keptScrollTop(held, o.latest(), current, nodes);
     if (top == null) return true;
-    if (scroller) scrollTranscriptTo(scroller, top);
-    dispatchLayoutIfRegistered(blockId, { type: "Scrolled", scrollTop: top, viewportPx: snap.viewportPx });
+    if (o.scroller) scrollTranscriptTo(o.scroller, top);
+    dispatchLayoutIfRegistered(o.blockId, { type: "Scrolled", scrollTop: top, viewportPx: snap.viewportPx });
     return false;
 }
 
@@ -135,18 +193,16 @@ function restoreOnce(blockId: string, rows: readonly OnScreenRow[], latest: () =
  * made new (a run, a fold in its other state) stand on estimates until they are measured, a frame or
  * two later, and the rows above the reader move by the difference. So when the first restore moved
  * the scroll, it is repeated each frame until two passes in a row agree, the reader scrolls or the
- * pane follows the bottom.
+ * pane follows the bottom (`following`; the slice's own bottom is the end of the virtualized rows, which a
+ * reader in the turn's tail is always past).
  */
-export function restoreOnScreen(
-    blockId: string,
-    rows: readonly OnScreenRow[],
-    latest: () => LayoutView | null | undefined,
-    scroller: HTMLElement | undefined,
-    nodes: readonly DocumentNode[] = []
-): void {
+export function restoreOnScreen(o: RestoreOnScreen): void {
+    const { blockId, scroller } = o;
     settling.get(blockId)?.();
     settling.delete(blockId);
-    if (restoreOnce(blockId, rows, latest, scroller, nodes) || !scroller) return;
+    // Now: the slice's rows, which the change has already laid out. A drawn row is read from the DOM a frame
+    // later: when the rows change, the container's height still has its old value for the rest of this task.
+    if ((restoreOnce({ ...o, dom: null }) && !o.dom) || !scroller) return;
     let frame = 0;
     let agreed = 0;
     let raf = 0;
@@ -157,8 +213,8 @@ export function restoreOnScreen(
     };
     const pass = (): void => {
         const snap = snapshotLayout(blockId);
-        if (!snap || atBottomOf(latest(), scroller.scrollTop, snap.viewportPx)) return stop(); // perf:allow-layout-read — a few frames after a view change
-        agreed = restoreOnce(blockId, rows, latest, scroller, nodes) ? agreed + 1 : 0;
+        if (!snap || (o.following ? o.following() : atBottomOf(o.latest(), scroller.scrollTop, snap.viewportPx))) return stop(); // perf:allow-layout-read — a few frames after a view change
+        agreed = restoreOnce(o) ? agreed + 1 : 0;
         if (agreed >= 2 || ++frame >= SETTLE_FRAMES) return stop();
         raf = requestAnimationFrame(pass);
     };

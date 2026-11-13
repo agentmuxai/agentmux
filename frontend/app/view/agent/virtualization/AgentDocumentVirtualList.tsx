@@ -29,7 +29,7 @@
  */
 
 import { Button } from "@/app/element/ui";
-import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX, type Setter } from "solid-js";
+import { batch, createComputed, createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, untrack, type Accessor, type JSX, type Setter } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { Key } from "@/util/keyed";
@@ -58,7 +58,9 @@ import {
     type RowPosition,
 } from "@/app/store/agent-pane-layout-store";
 import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
-import { captureOnScreen, restoreOnScreen } from "./keep-on-screen";
+import { captureDomAnchor, captureOnScreen, restoreOnScreen, type DomAnchor } from "./keep-on-screen";
+import { agentViewControls } from "../agent-view-controls";
+import { SWITCH_KEYS } from "./verbosity";
 import { useSettleOnShow } from "../scroll/settle-on-show";
 import { useScrolledOffRelease, type AwayArrivals } from "./held-release";
 import { useScrollMemo } from "./scroll-memo";
@@ -649,6 +651,23 @@ function useLayoutSliceFeed(props: AgentDocumentVirtualListProps, s: ListState):
     const pushed: PushedLayoutInputs = { pushedExpansion: new Map<string, string>(), estimatesPushed: new Set<string>() };
     const capPx = useCapPx();
     let lastCapPx = capPx();
+    // A view change: the topmost row as drawn, read now, before the rows change. A computation runs before the
+    // render effects that redraw the rows; the effect below uses it, and it is dropped if that effect does not run.
+    let viewDom: DomAnchor | null = null;
+    const viewKey = createMemo(() => {
+        const view = agentViewControls(props.blockId)?.resolved().view;
+        return view ? SWITCH_KEYS.map((k) => view[k]).join("|") : "";
+    });
+    createComputed(
+        on(
+            viewKey,
+            () => {
+                viewDom = untrack(props.viewState.stickToBottom) ? null : captureDomAnchor(s.scrollRef, untrack(() => props.zoomFactor?.()) ?? 1);
+                queueMicrotask(() => (viewDom = null));
+            },
+            { defer: true }
+        )
+    );
     createEffect(() => {
         const blockId = props.blockId!;
         const vnodes = s.partition().virtualizedNodes;
@@ -680,8 +699,19 @@ function useLayoutSliceFeed(props: AgentDocumentVirtualListProps, s: ListState):
         // history link) don't move the rows on screen, and a view change keeps the
         // topmost row, or the run that now holds it, in place (keep-on-screen.ts).
         const onScreen = captureOnScreen(blockId, untrack(() => props.layoutView?.()));
+        const dom = viewDom;
+        viewDom = null;
         batch(() => pushLayoutInputs(s, blockId, vnodes, docState, pushed));
-        restoreOnScreen(blockId, onScreen, () => untrack(() => props.layoutView?.()), s.scrollRef, vnodes);
+        restoreOnScreen({
+            blockId,
+            rows: onScreen,
+            dom,
+            latest: () => untrack(() => props.layoutView?.()),
+            scroller: s.scrollRef,
+            nodes: untrack(props.viewState.nodes),
+            zoom: () => props.zoomFactor?.() ?? 1,
+            following: props.viewState.stickToBottom,
+        });
         // Heights of nodes that left the buffer any other way (removed,
         // cleared) are dropped; the buffer holds a few dozen at most.
         const inBuffer = new Set(s.partition().streamingNodes.map((n) => n.id));
