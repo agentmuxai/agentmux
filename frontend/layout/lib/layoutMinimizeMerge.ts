@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Minimizing a pane next to a minimized pane merges its tabs into that pane; with none, into the
- * nearest expanded pane of its split (`findExpandedMergeTarget`).
+ * Minimizing a pane next to a minimized pane merges its tabs into that pane; with none, they are dealt
+ * out one by one, round robin, to the expanded panes, the nearest one of its split first
+ * (`findExpandedMergeTargets`).
  * docs/specs/SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md,
  * amended by SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md.
  *
@@ -83,6 +84,25 @@ export function findExpandedMergeTarget(root: LayoutNode | undefined, nodeId: st
         }
     }
     return undefined;
+}
+
+/**
+ * The panes `nodeId`'s tabs are dealt out to when there is no minimized pane to merge into: every other
+ * expanded pane of the tab, the nearest one first (`findExpandedMergeTarget`) and the rest in tree order
+ * after it, wrapping round, so the first tab goes to the nearest pane, the second to the next, and so on
+ * round again. Empty when `findExpandedMergeTarget` has none. Pure.
+ */
+export function findExpandedMergeTargets(root: LayoutNode | undefined, nodeId: string): LayoutNode[] {
+    const nearest = findExpandedMergeTarget(root, nodeId);
+    if (!root || !nearest) return [];
+    const open: LayoutNode[] = [];
+    const collect = (node: LayoutNode) => {
+        if (node.children?.length) node.children.forEach(collect);
+        else if (node.id !== nodeId && node.data && !isEffectivelyMinimized(node)) open.push(node);
+    };
+    collect(root);
+    const at = open.findIndex((leaf) => leaf.id === nearest.id);
+    return [...open.slice(at), ...open.slice(0, at)];
 }
 
 /**

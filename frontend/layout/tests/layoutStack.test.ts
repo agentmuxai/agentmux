@@ -1836,17 +1836,26 @@ describe("minimizing next to a minimized pane (merge)", () => {
         expect(leaves(model)).toHaveLength(3);
     });
 
-    it("with no minimized neighbour, merges into the nearest expanded pane after it as background tabs", () => {
+    it("with no minimized neighbour, deals the tabs out round robin to the open panes, nearest first, as background tabs", async () => {
         const model = fourPanes();
 
         model.minimizeNodeToggle(idOf(model, "b1"));
+        await settle();
 
+        // b1 to the nearest (c1), b2 to the next (d1); a1 is third in the round.
         const target = getNodeByBlockId(model, "c1")!;
-        expect(effectiveStack(target.data!)).toEqual(["c1", "b1", "b2"]);
+        expect(effectiveStack(target.data!)).toEqual(["c1", "b1"]);
         expect(target.data!.activeBlockId).toBe("c1"); // the target keeps showing
         expect(target.minimized).toBeUndefined();
         expect(getNodeByBlockId(model, "b1")).toBe(target);
+        expect(effectiveStack(getNodeByBlockId(model, "d1")!.data!)).toEqual(["d1", "b2"]);
+        expect(effectiveStack(getNodeByBlockId(model, "a1")!.data!)).toEqual(["a1", "a2"]);
         expect(leaves(model)).toHaveLength(3);
+        // One move per pane that took tabs, the nearest pane last (where the focus ends).
+        expect(paneCommands().map((c) => c[1])).toMatchObject([
+            { block_ids: ["b2"], target_block_id: "d1" },
+            { block_ids: ["b1"], target_block_id: "c1" },
+        ]);
     });
 
     it("the last pane of a split merges into the expanded pane before it", () => {
@@ -1858,12 +1867,28 @@ describe("minimizing next to a minimized pane (merge)", () => {
         expect(leaves(model)).toHaveLength(3);
     });
 
-    it("the first pane of a split merges into the expanded pane after it", () => {
+    it("goes round again when the pane has more tabs than there are open panes", () => {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "a1");
+        for (const id of ["a2", "a3", "a4", "a5"]) pushBlockOntoStack(model, p1, id);
+        addPane(model, "b1");
+        addPane(model, "c1");
+        model.updateTree();
+
+        model.minimizeNodeToggle(idOf(model, "a1"));
+
+        expect(effectiveStack(getNodeByBlockId(model, "b1")!.data!)).toEqual(["b1", "a1", "a3", "a5"]);
+        expect(effectiveStack(getNodeByBlockId(model, "c1")!.data!)).toEqual(["c1", "a2", "a4"]);
+        expect(leaves(model)).toHaveLength(2);
+    });
+
+    it("the first pane of a split deals its tabs to the open panes after it", () => {
         const model = fourPanes();
 
         model.minimizeNodeToggle(idOf(model, "a1"));
 
-        expect(effectiveStack(getNodeByBlockId(model, "b1")!.data!)).toEqual(["b1", "b2", "a1", "a2"]);
+        expect(effectiveStack(getNodeByBlockId(model, "b1")!.data!)).toEqual(["b1", "b2", "a1"]);
+        expect(effectiveStack(getNodeByBlockId(model, "c1")!.data!)).toEqual(["c1", "a2"]);
         expect(leaves(model)).toHaveLength(3);
     });
 
