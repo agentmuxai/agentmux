@@ -1,7 +1,7 @@
 # Spec: AgentMux as a server-only package, with a free local web UI (task #2522, build #2523)
 
 **Author:** AgentA@Area54. **Date:** 2026-11-12, revision 3 on 2026-11-13 (section 3 reworked twice, section 4 gets the setup commands; revision notes at the end). **For:** AgentY, then the operator. Written short, slices first.
-**Status:** in progress. S0 and S1 are merged (#7076, #7092, #7137, #7177, #7197). S2 (the `agentmux` command and the `headless` channel) is built in part: `run`, `start`, `stop`, `restart`, `status`, `open`, `logout`, `logs`, `version`; `setup`, `doctor`, `update`, `uninstall` and the service files follow. S3 (tarball, install script, release job) is not started.
+**Status:** active. S0 and S1 are merged (#7076, #7092, #7137, #7177, #7197). S2 (the `agentmux` command and the `headless` channel) is built in part: `run`, `start`, `stop`, `restart`, `status`, `open`, `logout`, `logs`, `version`; `setup`, `doctor`, `update`, `uninstall` and the service files follow. S3 (tarball, install script, release job) is not started.
 **The operator's words (via AgentY, 2026-11-12):** "so, we already did the port of the local frontend, so that it can work in the cloud. we want to reuse it for a local headless setup. so a user can go to http://localhost:port and access the normal experience." and, on the three options: "right, browser UI is free, that is good. that moves the generic part out of cloud, and allows us to easily ship the localhost web frontend, right/" (option A) and "a headless can also run in parallel (on a different channel) ... it would be 'headless' channel".
 
 ## 0. Slices, in order
