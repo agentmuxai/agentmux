@@ -545,7 +545,7 @@ mod spawn_site_coverage {
          "sanitized: provider OAuth CLI under a PTY (the resolved npm shim), strict policy"),
         ("src/server/identity_auth_spawn_steps.rs", "cli_path", 1,
          "sanitized: provider OAuth CLI, strict policy"),
-        ("src/server/install_handlers.rs", "if cfg!(windows", 1,
+        ("src/server/install_task.rs", "if cfg!(windows", 1,
          "sanitized: installer shell, sanitize_external_command"),
         ("src/server/shell_handlers.rs", "&shell", 1,
          "sanitized: /api/v1/shell/create runner (resolved POSIX shell), sanitize_process_command"),

@@ -177,8 +177,8 @@ export function ToolTonesGroup(): JSX.Element {
                             value={(s()["notify:tooltones:scope"] as string) ?? "all"}
                             onChange={(v) => set("notify:tooltones:scope", v)}
                         >
-                            <option value="all">All panes</option>
-                            <option value="focused">Focused pane only</option>
+                            <option value="all">{t("settings.sounds.toolTones.scope.all")}</option>
+                            <option value="focused">{t("settings.sounds.toolTones.scope.focused")}</option>
                         </Select>
                     }
                 />

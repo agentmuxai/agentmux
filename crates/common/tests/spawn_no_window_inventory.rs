@@ -406,7 +406,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/server/identity_auth_spawn_steps.rs", "cli_path", 1,
      "no-window: calls no_window()/creation_flags in this file"),
-    ("crates/srv/src/server/install_handlers.rs", "if cfg!(windows", 1,
+    ("crates/srv/src/server/install_task.rs", "if cfg!(windows", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/server/shell_handlers.rs", "&shell", 1,
      "no-window: calls no_window()/creation_flags in this file"),

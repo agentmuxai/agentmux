@@ -59,12 +59,52 @@ fn owned_roots() -> Vec<PathBuf> {
     if let Some(home) = dirs::home_dir() {
         roots.push(home.join(".agentmux"));
     }
+    // A working directory is compared with its links followed, so a root that is itself a link
+    // is compared by what it points at too.
+    let resolved: Vec<PathBuf> = roots.iter().filter_map(|root| canonical(root)).collect();
+    roots.extend(resolved);
     roots
 }
 
-/// `path` with every `.` and `..` resolved lexically, without touching the filesystem (the
-/// folder may not exist yet). A `..` above the root stays at the root.
-fn normalize_lexically(path: &Path) -> PathBuf {
+/// `std::fs::canonicalize` of `path`, without the `\\?\` prefix Windows puts on it (the roots
+/// and the paths compared with them are written without it). `None` when it does not resolve.
+fn canonical(path: &Path) -> Option<PathBuf> {
+    let resolved = std::fs::canonicalize(path).ok()?;
+    #[cfg(windows)]
+    {
+        let text = resolved.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            return Some(PathBuf::from(format!(r"\\{rest}")));
+        }
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            if rest.as_bytes().get(1) == Some(&b':') {
+                return Some(PathBuf::from(rest));
+            }
+        }
+    }
+    Some(resolved)
+}
+
+/// Whether `meta` is a symlink, or on Windows any reparse point (a junction is one).
+fn is_link(meta: &std::fs::Metadata) -> bool {
+    if meta.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        return meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+/// `path` with every `.` and `..` resolved, and every symlink on the way followed as it is met,
+/// so a `..` after a link goes up from the link's target, as the filesystem does (`link/..` is
+/// the target's parent, not the link's). A folder that does not exist yet (or a link that does
+/// not resolve) is kept as written. A `..` above the root stays at the root.
+fn normalize_path(path: &Path) -> PathBuf {
     use std::path::Component;
     let mut out = PathBuf::new();
     for component in path.components() {
@@ -80,7 +120,14 @@ fn normalize_lexically(path: &Path) -> PathBuf {
                 Some(_) => {}
                 None => out.push(".."),
             },
-            Component::Normal(part) => out.push(part),
+            Component::Normal(part) => {
+                out.push(part);
+                if std::fs::symlink_metadata(&out).is_ok_and(|meta| is_link(&meta)) {
+                    if let Some(target) = canonical(&out) {
+                        out = target;
+                    }
+                }
+            }
         }
     }
     out
@@ -98,7 +145,7 @@ fn absolutize(path: &Path) -> PathBuf {
             .map(|cwd| cwd.join(path))
             .unwrap_or_else(|_| path.to_path_buf())
     };
-    normalize_lexically(&absolute)
+    normalize_path(&absolute)
 }
 
 /// Whether `work_dir` is AgentMux's own folder, where the config belongs in it.
@@ -170,7 +217,7 @@ mod tests {
         let home = dirs::home_dir().unwrap();
         let agent = home.join(".agentmux").join("agents").join("aria");
         assert!(relocated_path_for(&agent).is_none(), "an AgentMux folder keeps .mcp.json in it");
-        assert_eq!(config_path_for(&agent), agent.join(MCP_JSON));
+        assert_eq!(config_path_for(&agent), absolutize(&agent).join(MCP_JSON));
     }
 
     #[test]
@@ -217,8 +264,39 @@ mod tests {
         assert!(is_agent_owned_workdir(&inside_agent), "the fixture starts owned");
         let escapes = inside_agent.join("..").join("..").join("..").join("..").join("agentmux-escape-project");
         assert!(!is_agent_owned_workdir(&escapes), "resolved out of .agentmux: {}", escapes.display());
-        assert_eq!(relocated_dir_for(&escapes), relocated_dir_for(&normalize_lexically(&escapes)), "one resolved key");
-        assert!(!config_path_for(&escapes).starts_with(normalize_lexically(&escapes)), "the config is not in the project");
+        assert_eq!(relocated_dir_for(&escapes), relocated_dir_for(&normalize_path(&escapes)), "one resolved key");
+        assert!(!config_path_for(&escapes).starts_with(normalize_path(&escapes)), "the config is not in the project");
+    }
+
+    /// A directory link: a symlink, or a junction on Windows (it needs no privilege there).
+    fn link_dir(link: &Path, target: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        junction::create(target, link).unwrap();
+    }
+
+    /// #47418: `<dir>/link/..` is the link's target's parent, not `<dir>`. Resolved by its text,
+    /// a project reached through a link to a folder elsewhere would read as the folder the link
+    /// is in, and be classified (and written into) as if it were there.
+    #[test]
+    fn a_parent_after_a_link_goes_up_from_the_links_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = canonical(tmp.path()).expect("the temp folder resolves");
+        let child = base.join("projects").join("child");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::create_dir_all(base.join("home")).unwrap();
+        let link = base.join("home").join("link");
+        link_dir(&link, &child);
+
+        let through_link = link.join("..").join("sibling");
+        assert_eq!(normalize_path(&through_link), base.join("projects").join("sibling"));
+        assert_ne!(normalize_path(&through_link), base.join("home").join("sibling"), "not the lexical answer");
+        // The same folder spelled with and without the link keys one config folder.
+        assert_eq!(relocated_dir_for(&through_link), relocated_dir_for(&base.join("projects").join("sibling")));
+        // A link as the last part is followed too, and a path with no link in it is left as written.
+        assert_eq!(normalize_path(&link), child);
+        assert_eq!(normalize_path(&base.join("home").join("not-there")), base.join("home").join("not-there"));
     }
 
     /// #47392: the writer gets `cmd:cwd` as written; ACP/MSP resolve a relative one against the
