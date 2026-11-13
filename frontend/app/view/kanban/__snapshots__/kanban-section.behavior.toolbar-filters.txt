@@ -13,11 +13,13 @@ untracked off: {"tasks":["w1","w2","w3","w4","w5","w6"],"untracked":[],"agents":
 <div class="kanban-container">
 <div class="warden-manager-body kanban">
 <div class="kanban-toolbar">
+<div class="kanban-toolbar__find">
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
 <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
 </span>
+</div>
 <select class="ui-input ui-density-compact" aria-label="Repository">
 <option value="">All repositories</option>
 <option value="a5af/other">a5af/other</option>

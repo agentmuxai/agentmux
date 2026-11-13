@@ -25,6 +25,7 @@ import {
     untrackedAgents,
     type ColumnId,
 } from "./kanban-columns";
+import { defaultSlugOf, infoOf, needsByBoard, resolveBoard, tasksOnLiveBoards } from "./kanban-boards";
 import { KanbanModel, taskForOpenRequest } from "./kanban-model";
 import type { KanbanSectionProps } from "./kanban-props";
 import { reportsTo, seatOf, taskReportsTo, useSeatIndex } from "./kanban-seats";
@@ -34,13 +35,14 @@ import type { KanbanTask } from "./kanban-types";
 export type SectionProps = Pick<KanbanSectionProps, "visible"> & Partial<Omit<KanbanSectionProps, "visible">>;
 
 /** The model, followed while the pane is shown, and the Needs-you count it gives the pane. */
-function useBoardModel(props: SectionProps): KanbanModel {
-    const model = new KanbanModel();
+function useBoardModel(props: SectionProps, selected: () => string | null): KanbanModel {
+    const model = new KanbanModel(selected);
     onCleanup(() => model.dispose());
     createEffect(() => model.setVisible(props.visible));
     // An account episode counts once (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2).
     const accountEpisodes = useAccountEpisodes();
-    createEffect(() => props.onNeedsCount?.(needsCountOf(model.board()?.tasks ?? [], accountEpisodes()) + accountEpisodes().length));
+    // The title counts every board that isn't archived, not only the one shown.
+    createEffect(() => props.onNeedsCount?.(needsCountOf(tasksOnLiveBoards(model.everything()), accountEpisodes()) + accountEpisodes().length));
     return model;
 }
 
@@ -99,9 +101,35 @@ function useFoldedLanes() {
     return { folded, fold };
 }
 
+/**
+ * The board the pane shows (`kanban:board`, by slug; the default board when none): the pane's, or this
+ * section's own when it mounts alone. A choice shows at once and holds until the pane's meta says the same
+ * (or a few seconds pass), as the collapsed columns do.
+ */
+function useSelectedBoard(props: SectionProps) {
+    const [own, setOwn] = createSignal<string | null>(null);
+    const [pending, setPending] = createSignal<string | null>(null);
+    const wanted = () => pending() ?? (props.onBoard ? (props.board ?? null) : own());
+    createEffect(() => {
+        const mine = pending();
+        if (mine && props.board === mine) setPending(null);
+    });
+    let timer: number | undefined;
+    onCleanup(() => window.clearTimeout(timer));
+    const select = (slug: string) => {
+        if (!props.onBoard) return setOwn(slug);
+        setPending(slug);
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => setPending(null), 3000);
+        props.onBoard(slug);
+    };
+    return { wanted, select };
+}
+
 /** The Kanban section's state: everything its markup reads, and what it does. */
 export function createKanbanSection(props: SectionProps) {
-    const model = useBoardModel(props);
+    const { wanted, select } = useSelectedBoard(props);
+    const model = useBoardModel(props, wanted);
     const tick = useTick(10_000);
     const { bindContainer, narrow } = useNarrow();
     const now = () => (tick(), Date.now());
@@ -112,6 +140,8 @@ export function createKanbanSection(props: SectionProps) {
     const seats = useSeatIndex();
     const [showUntracked, setShowUntracked] = createSignal(true);
     const [adding, setAdding] = createSignal(false);
+    // The panel that creates and manages boards (a panel, never a modal).
+    const [managing, setManaging] = createSignal<false | "new" | "manage">(false);
     const [openId, setOpenId] = createSignal<string | null>(null);
     const [ownLanes, setOwnLanes] = createSignal(false);
     const lanes = () => props.lanes ?? ownLanes();
@@ -131,6 +161,14 @@ export function createKanbanSection(props: SectionProps) {
     });
 
     const board = () => model.board();
+    const boards = () => model.everything()?.boards ?? [];
+    const defaultSlug = () => defaultSlugOf(model.everything());
+    const selectedSlug = () => resolveBoard(boards(), wanted(), defaultSlug());
+    const selectedInfo = () => infoOf(boards(), selectedSlug());
+    const episodes = useAccountEpisodes();
+    const needsOn = createMemo(() => needsByBoard(model.everything(), episodes()));
+    // An archived board is read-only: no new tasks.
+    const readOnly = () => selectedInfo()?.archived === true;
     const agents = () => board()?.agents ?? [];
     const repos = createMemo(() => [...new Set((board()?.tasks ?? []).map((t) => t.card.repo).filter(Boolean))].sort());
     const tasks = createMemo(() =>
@@ -159,6 +197,7 @@ export function createKanbanSection(props: SectionProps) {
     return {
         model, bindContainer, narrow, now,
         query, setQuery, repo, setRepo, lead, setLead, showUntracked, setShowUntracked,
+        boards, defaultSlug, selectedSlug, selectedInfo, selectBoard: select, needsOn, readOnly, managing, setManaging,
         adding, setAdding, setOpenId, lanes, setLanes, collapsed, toggleColumn, folded, fold, reviewLimit,
         board, agents, repos, tasks, openTask, holding, untracked, laneList, reviewTotal, open, openAgent,
     };

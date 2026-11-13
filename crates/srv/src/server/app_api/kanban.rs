@@ -429,6 +429,16 @@ struct ActRequest {
     /// move to a board: remove the task's dependencies, which stay inside one board.
     #[serde(default)]
     drop_deps: Option<bool>,
+    /// board_create, board_edit: the board's display name and slug, whether AgentMux Cloud may read it
+    /// (a cloud board), and the agents that see it (`[]` means all). `board` names the board acted on.
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    slug: Option<String>,
+    #[serde(default)]
+    readable: Option<bool>,
+    #[serde(default)]
+    agents: Option<Vec<String>>,
 }
 
 /// "#12, #15" for the history.
@@ -617,6 +627,23 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
     // (and its own work); here the decision would be recorded as the operator's.
     if !actor.is_operator && matches!(req.action.as_str(), "accept" | "send_back") {
         return Err(format!("{}: an agent decides with Tasks {}", req.action, req.action));
+    }
+    // The boards themselves (SPEC_SHARED_KANBAN_ACROSS_MACHINES_2026_11_01.md §9.2): the same moves the
+    // MuxAPI has, as the operator's. An agent makes them through `Tasks`, which records it by name.
+    if let Some(board_action) = req.action.strip_prefix("board_") {
+        if !actor.is_operator {
+            return Err(format!("{}: an agent manages boards with Tasks {}", req.action, req.action));
+        }
+        let board_req = crate::server::work_boards::BoardsRequest {
+            action: board_action.to_string(),
+            board: req.board.clone(),
+            name: req.name.clone(),
+            slug: req.slug.clone(),
+            tier: None,
+            readable: req.readable,
+            agents: req.agents.clone(),
+        };
+        return crate::server::work_boards::board_act(state, None, &actor.name, board_req);
     }
     let now = now_ms();
     let regs = state.reactive_handler.list_agents();

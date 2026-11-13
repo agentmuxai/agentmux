@@ -476,3 +476,29 @@ async fn move_and_start_refuse_an_agent_the_tasks_board_leaves_out() {
     act(&state, json!({"action": "move", "id": id, "agent": "agentx"})).await.unwrap();
     act(&state, json!({"action": "move", "id": id, "agent": ""})).await.unwrap();
 }
+
+// ---- the boards ----
+
+#[tokio::test]
+async fn the_operator_manages_boards_through_kanban_act() {
+    let state = test_state();
+    let made = act(&state, json!({"action": "board_create", "name": "Client X"})).await.unwrap();
+    assert_eq!(made["ok"], true);
+    let slug = made["board"]["slug"].as_str().unwrap().to_string();
+    act(&state, json!({"action": "board_edit", "board": slug, "name": "Client Y"})).await.unwrap();
+    let archived = act(&state, json!({"action": "board_archive", "board": slug})).await.unwrap();
+    assert_eq!(archived["board"]["archived"], true);
+    let back = act(&state, json!({"action": "board_unarchive", "board": slug})).await.unwrap();
+    assert_eq!(back["board"]["archived"], false);
+    let listed = list(&state, &json!({"board": "all"})).await.unwrap();
+    assert!(listed["boards"].as_array().unwrap().iter().any(|b| b["name"] == "Client Y"));
+    // A board needs naming.
+    assert!(act(&state, json!({"action": "board_archive"})).await.is_err());
+}
+
+#[tokio::test]
+async fn an_agent_manages_boards_through_tasks_not_kanban_act() {
+    let state = test_state();
+    let err = act_as(&state, json!({"action": "board_create", "name": "Mine"}), &Actor::agent("agent9")).await.unwrap_err();
+    assert!(err.contains("Tasks board_create"), "{err}");
+}

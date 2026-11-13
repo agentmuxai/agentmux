@@ -6,12 +6,16 @@
 
 import { createEffect, createMemo, createSignal, For, on, Show, type Accessor, type JSX, type Setter } from "solid-js";
 
-import { Button, Select, SidePanel, TextArea } from "@/app/element/ui";
+import { Button, IconButton, MenuTrigger, Select, SidePanel, TextArea } from "@/app/element/ui";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/misc-utils";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
+import { writeText } from "@/util/clipboard";
+
 import { KanbanAfterSection } from "./kanban-after";
+import { moveEntries } from "./kanban-board-picker";
+import { refOf } from "./kanban-boards";
 import { DrawerMedia } from "./kanban-media";
 import { agentStateWords, AgentChip } from "./kanban-card";
 import { columnOf, isFinishedColumn, isResearchKind, needsReason, requestedBy } from "./kanban-columns";
@@ -21,6 +25,7 @@ import type {
     KanbanActResult,
     KanbanAfter,
     KanbanAgent,
+    KanbanBoardInfo,
     KanbanEvent,
     KanbanTask,
     KanbanTaskDetail,
@@ -79,6 +84,8 @@ interface DrawerProps {
     task: KanbanTask;
     agents: KanbanAgent[];
     now: number;
+    /** Every board, for "Move to board…" (absent: the task can't be moved). */
+    boards?: KanbanBoardInfo[];
     onClose: () => void;
     onOpenAgent: (blockId: string) => void;
     onOpenTask: (id: string) => void;
@@ -109,6 +116,10 @@ interface DrawerState {
     runningAgents: () => KanbanAgent[];
     act: (req: KanbanActRequest) => Promise<KanbanActResult | null>;
     takeBack: (req: KanbanActRequest) => Promise<void>;
+    /** The board it would move to, waiting for the operator's yes because moving drops its dependencies. */
+    moving: Accessor<KanbanBoardInfo | null>;
+    setMoving: Setter<KanbanBoardInfo | null>;
+    moveToBoard: (b: KanbanBoardInfo) => Promise<void>;
 }
 
 function createDrawerState(props: DrawerProps): DrawerState {
@@ -187,10 +198,22 @@ function createDrawerState(props: DrawerProps): DrawerState {
         if (res?.ok) setGiveTo("");
     };
 
+    // Moving to another board: dependencies stay inside one board, so a task that has any asks first.
+    const [moving, setMoving] = createSignal<KanbanBoardInfo | null>(null);
+    const hasLinks = () => (t().card.after ?? []).length + (t().card.followers ?? []).length > 0;
+    const moveToBoard = async (b: KanbanBoardInfo) => {
+        if (hasLinks() && moving()?.slug !== b.slug) {
+            setMoving(b);
+            return;
+        }
+        const res = await act({ action: "move", board: b.slug, drop_deps: hasLinks() || undefined });
+        if (res) setMoving(null);
+    };
+
     return {
         props, t, detail, text, setText, startOn, setStartOn, busy, confirming, setConfirming, giveTo, setGiveTo,
         cancelBuild, setCancelBuild, openFollowers, docs, column, heldByAgent, otherAgents, specUnlocks,
-        runningAgents, act, takeBack,
+        runningAgents, act, takeBack, moving, setMoving, moveToBoard,
     };
 }
 
@@ -509,6 +532,42 @@ function CancelControls(props: { m: DrawerState }): JSX.Element {
     );
 }
 
+/** "Move to board…": the boards it isn't on. Not for a task an agent holds (release it first). */
+function MoveToBoardRows(props: { m: DrawerState }): JSX.Element {
+    const m = props.m;
+    const t = m.t;
+    const entries = () => moveEntries(m.props.boards ?? [], t().card.board ?? "", (b) => void m.moveToBoard(b));
+    return (
+        <Show when={entries().length > 0 && !m.heldByAgent()}>
+            <div class="kanban-drawer__row">
+                <MenuTrigger items={entries()} aria-label="Boards to move it to">
+                    <Button density="compact" icon="arrow-right-arrow-left" disabled={m.busy()} title="File this task on another board">
+                        Move to board…
+                    </Button>
+                </MenuTrigger>
+            </div>
+            <Show when={m.moving()}>
+                {(b) => (
+                    <div class="kanban-drawer__confirm" role="alert">
+                        <p class="kanban-drawer__reason">
+                            Dependencies stay inside one board, so moving it to {b().name} drops the tasks it starts after and the ones
+                            that start after it.
+                        </p>
+                        <div class="kanban-drawer__row">
+                            <Button density="compact" tone="danger" disabled={m.busy()} onClick={() => void m.moveToBoard(b())}>
+                                Move and drop them
+                            </Button>
+                            <Button density="compact" tone="quiet" disabled={m.busy()} onClick={() => m.setMoving(null)}>
+                                Leave it
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </Show>
+        </Show>
+    );
+}
+
 function DrawerActions(props: { m: DrawerState }): JSX.Element {
     return (
         <section class="kanban-drawer__actions" data-toast-avoid>
@@ -516,6 +575,7 @@ function DrawerActions(props: { m: DrawerState }): JSX.Element {
             <StartRows m={props.m} />
             <WordsBox m={props.m} />
             <MoveButtons m={props.m} />
+            <MoveToBoardRows m={props.m} />
         </section>
     );
 }
@@ -540,8 +600,18 @@ export function KanbanDrawer(props: DrawerProps): JSX.Element {
     return (
         <SidePanel
             class="kanban-drawer"
-            label={`Task ${m.t().card.num}`}
-            lead={<span class="kanban-card__num">#{m.t().card.num}</span>}
+            label={`Task ${refOf(m.t()).replace(/^#/, "")}`}
+            lead={
+                <>
+                    <span class="kanban-card__num">{refOf(m.t())}</span>
+                    <IconButton
+                        icon="copy"
+                        label={`Copy ${refOf(m.t())}`}
+                        density="compact"
+                        onClick={() => void writeText(refOf(m.t()))}
+                    />
+                </>
+            }
             title={m.t().title}
             onClose={m.props.onClose}
         >

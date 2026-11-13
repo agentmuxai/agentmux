@@ -7,13 +7,14 @@
 // §7.3). Nothing is fetched or subscribed while the section is hidden: the Swarm keeps the section
 // mounted.
 
-import { createSignal, type Accessor } from "solid-js";
+import { createMemo, createSignal, type Accessor } from "solid-js";
 
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
+import { viewOfBoard } from "./kanban-boards";
 import type { KanbanActRequest, KanbanActResult, KanbanBoard, KanbanTask, KanbanTaskDetail } from "./kanban-types";
 
 const POLL_MS = 15_000;
@@ -39,12 +40,17 @@ export function keepUnchanged(prev: KanbanBoard | null, next: KanbanBoard): Kanb
     };
     return {
         ...next,
+        // The boards too, so the panel's rows (and a name being typed in one) stay mounted across a refresh.
+        boards: next.boards && same(prev.boards ?? [], next.boards, (b) => b.id),
         tasks: same(prev.tasks, next.tasks, (t) => t.id),
         agents: same(prev.agents, next.agents, (a) => a.block_id),
     };
 }
 
 export class KanbanModel {
+    /** What srv answered: the tasks of every board. */
+    readonly everything: Accessor<KanbanBoard | null>;
+    /** The selected board's tasks, with every board's info and the agents. */
     readonly board: Accessor<KanbanBoard | null>;
     readonly error: Accessor<string | null>;
     private readonly setBoard: (b: KanbanBoard | null) => void;
@@ -55,10 +61,12 @@ export class KanbanModel {
     private inflight = false;
     private again = false;
 
-    constructor() {
-        const [board, setBoard] = createSignal<KanbanBoard | null>(null);
+    /** `selected` is the board the pane shows, by slug (none: the default board). */
+    constructor(selected: Accessor<string | null | undefined> = () => null) {
+        const [everything, setBoard] = createSignal<KanbanBoard | null>(null);
         const [error, setError] = createSignal<string | null>(null);
-        this.board = board;
+        this.everything = everything;
+        this.board = createMemo(() => viewOfBoard(everything(), selected()));
         this.error = error;
         this.setBoard = setBoard;
         this.setError = setError;
@@ -100,8 +108,9 @@ export class KanbanModel {
         }
         this.inflight = true;
         try {
-            const board = await RpcApi.KanbanListCommand(TabRpcClient, {});
-            this.setBoard(keepUnchanged(this.board(), board));
+            // Every board's tasks in one answer: the pane shows one, and counts what needs the operator on each.
+            const board = await RpcApi.KanbanListCommand(TabRpcClient, { board: "all" });
+            this.setBoard(keepUnchanged(this.everything(), board));
             this.setError(null);
         } catch (e) {
             this.setError(`Couldn't load the Kanban: ${String((e as Error)?.message ?? e)}`);
