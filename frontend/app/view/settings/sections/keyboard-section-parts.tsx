@@ -44,22 +44,22 @@ export function KeyboardToolbar(p: {
             <FilterInput
                 value={p.f.query()}
                 onInput={p.f.setQuery}
-                placeholder="Search by action or key"
-                ariaLabel="Search shortcuts by action or key"
+                placeholder={t("settings.keyboard.search.placeholder")}
+                ariaLabel={t("settings.keyboard.search.aria")}
                 inputRef={p.setSearchRef}
                 testId="kb-search"
             />
             <KeySearch f={p.f} platform={p.edit.platform} />
             <Select
                 class="setting-select"
-                ariaLabel="Category"
+                ariaLabel={t("settings.keyboard.category.aria")}
                 value={p.f.category()}
                 onChange={(v) => p.f.setCategory(v as CategoryFilter)}
-                options={[{ value: "all", label: "All categories" }, ...p.categories.map((c) => ({ value: c, label: c }))]}
+                options={[{ value: "all", label: t("settings.keyboard.category.all") }, ...p.categories.map((c) => ({ value: c, label: c }))]}
             />
             <label class="kb-toolbar-switch">
-                <Switch checked={p.f.changedOnly()} onChange={p.f.setChangedOnly} ariaLabel="Changed only" />
-                <span>Changed only</span>
+                <Switch checked={p.f.changedOnly()} onChange={p.f.setChangedOnly} ariaLabel={t("settings.keyboard.changedOnly")} />
+                <span>{t("settings.keyboard.changedOnly")}</span>
             </label>
             <Button
                 id={`setting-${KEYBOARD_SETTINGS.resetAll.id}`}
@@ -91,8 +91,8 @@ function IssueList(p: { issues: KeybindingIssue[]; edit: KeyboardEdit }): JSX.El
                     {(i) => (
                         <li class="kb-row-issue">
                             <span>{i.message}</span>
-                            <Button aria-label={`Remove entry ${i.index}`} onClick={() => p.edit.save(removeEntry(p.edit.entries(), i.index))}>
-                                Remove entry
+                            <Button aria-label={t("settings.keyboard.removeEntry.aria", { index: i.index })} onClick={() => p.edit.save(removeEntry(p.edit.entries(), i.index))}>
+                                {t("settings.keyboard.removeEntry")}
                             </Button>
                         </li>
                     )}
@@ -132,29 +132,29 @@ export function CommandLine(p: { c: () => CommandBindings; edit: KeyboardEdit; n
                 <span class="kb-row-label">{c().label}</span>
                 <code class="kb-row-id">{c().command}</code>
                 <Show when={c().changed}>
-                    <Pill tone="accent">Changed</Pill>
+                    <Pill tone="accent">{t("settings.keyboard.changed")}</Pill>
                 </Show>
             </div>
             <div class="kb-row-keys">
-                <Show when={!c().unbound} fallback={<span class="kb-row-unset">Not set</span>}>
+                <Show when={!c().unbound} fallback={<span class="kb-row-unset">{t("settings.keyboard.notSet")}</span>}>
                     <For each={labelsOf(c().keys, edit.platform)}>{(k) => <Kbd>{k}</Kbd>}</For>
                 </Show>
                 <Show when={c().changed && c().defaults.length > 0}>
-                    <span class="kb-row-default">Default: {labelsOf(c().defaults, edit.platform).join(", ")}</span>
+                    <span class="kb-row-default">{t("settings.keyboard.default", { keys: labelsOf(c().defaults, edit.platform).join(", ") })}</span>
                 </Show>
             </div>
             <div class="kb-row-actions">
-                <Button aria-label={`${c().unbound ? "Set key for" : "Edit keys of"} ${c().label}`} aria-expanded={recording()} onClick={() => setRecording(!recording())}>
-                    {c().unbound ? "Set key" : "Edit"}
+                <Button aria-label={c().unbound ? t("settings.keyboard.setKeyFor", { label: c().label }) : t("settings.keyboard.editKeysOf", { label: c().label })} aria-expanded={recording()} onClick={() => setRecording(!recording())}>
+                    {c().unbound ? t("settings.keyboard.setKey") : t("settings.keyboard.edit")}
                 </Button>
                 <Show when={c().changed}>
-                    <Button aria-label={`Reset ${c().label}`} onClick={() => act(resetCommand(edit.entries(), c().command, edit.platform))}>
-                        Reset
+                    <Button aria-label={t("settings.keyboard.reset.aria", { label: c().label })} onClick={() => act(resetCommand(edit.entries(), c().command, edit.platform))}>
+                        {t("settings.keyboard.reset")}
                     </Button>
                 </Show>
                 <Show when={!c().unbound}>
-                    <Button aria-label={`Unbind ${c().label}`} onClick={() => act(unbindCommand(edit.entries(), c().command, edit.platform))}>
-                        Unbind
+                    <Button aria-label={t("settings.keyboard.unbind.aria", { label: c().label })} onClick={() => act(unbindCommand(edit.entries(), c().command, edit.platform))}>
+                        {t("settings.keyboard.unbind")}
                     </Button>
                 </Show>
             </div>
@@ -180,14 +180,14 @@ export function GroupLine(p: { row: () => ShortcutRow; edit: KeyboardEdit }): JS
             <div class="kb-row" classList={{ "kb-row--changed": changed() > 0 }} data-kb-row data-group={p.row().id} tabIndex={-1}>
                 <div class="kb-row-main">
                     <span class="kb-row-label">{p.row().label}</span>
-                    <span class="kb-row-id">{p.row().commands.length} shortcuts</span>
+                    <span class="kb-row-id">{t("settings.keyboard.shortcuts.count", { count: p.row().commands.length })}</span>
                     <Show when={changed() > 0}>
-                        <Pill tone="accent">{changed()} changed</Pill>
+                        <Pill tone="accent">{t("settings.keyboard.changed.count", { count: changed() })}</Pill>
                     </Show>
                 </div>
                 <div class="kb-row-actions">
                     <Button aria-expanded={open()} onClick={() => setOpen(!open())}>
-                        {open() ? "Hide" : "Show"}
+                        {open() ? t("settings.keyboard.hide") : t("settings.keyboard.show")}
                     </Button>
                 </div>
             </div>
@@ -243,7 +243,7 @@ export function ShortcutList(p: { blocks: CategoryBlock[]; edit: KeyboardEdit })
 export function OtherEntries(p: { issues: KeybindingIssue[]; edit: KeyboardEdit }): JSX.Element {
     return (
         <Show when={p.issues.length > 0}>
-            <section class="kb-category" aria-label="Other entries">
+            <section class="kb-category" aria-label={t("settings.keyboard.group.otherEntries")}>
                 <SectionHeader label={t("settings.keyboard.group.otherEntries")} />
                 <ul class="kb-list" role="list">
                     <For each={p.issues}>
@@ -254,8 +254,8 @@ export function OtherEntries(p: { issues: KeybindingIssue[]; edit: KeyboardEdit 
                                     <span class="kb-row-issue">{i.message}</span>
                                 </div>
                                 <div class="kb-row-actions">
-                                    <Button aria-label={`Remove entry ${i.index}`} onClick={() => p.edit.save(removeEntry(p.edit.entries(), i.index))}>
-                                        Remove entry
+                                    <Button aria-label={t("settings.keyboard.removeEntry.aria", { index: i.index })} onClick={() => p.edit.save(removeEntry(p.edit.entries(), i.index))}>
+                                        {t("settings.keyboard.removeEntry")}
                                     </Button>
                                 </div>
                             </li>
