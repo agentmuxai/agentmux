@@ -42,7 +42,7 @@ pub const ALWAYS: &[&str] = &[
     "identity.account.move_agents", "identity.account.upsert", "identity.ensureaccountdir", "identity.self.unlink",
     "importagentfromclaw", "importagents", "install.cancel", "install.start", "install.uninstall", "installtool", "jobs.act", "jobs.reporters.add",
     "jobs.reporters.forget", "jobs.save",
-    "jobs.templates.approve", "jobs.templates.catalog.install", "jobs.templates.install", "jobs.templates.uninstall",
+    "jobs.templates.approve", "jobs.templates.catalog.install", "jobs.templates.install", "jobs.templates.make_drone", "jobs.templates.uninstall",
     "kanban.act", "linkagentidentity", "lspstart", "lspstop", "mcp.bind", "mcp.catalog.bind", "mcp.catalog.delete",
     "mcp.catalog.probe", "mcp.catalog.set_reach", "mcp.catalog.unbind", "mcp.catalog.upsert", "mcp.delete",
     "mcp.probe", "mcp.unbind", "mcp.upsert", "memory.write", "movescratchfile", "muxbus.cloudconfig",

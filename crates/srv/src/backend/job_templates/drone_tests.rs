@@ -156,6 +156,28 @@ fn rendering_fills_the_parameters_once_and_leaves_the_drones_own_references() {
 }
 
 #[test]
+fn values_that_form_a_reference_with_the_text_next_to_them_are_refused() {
+    let m = manifest(json!({
+        "params": { "type": "object", "properties": { "a": { "type": "string" }, "b": { "type": "string" } }, "required": ["a", "b"] }
+    }));
+    let render = |body: &str, a: &str, b: &str| {
+        let g = json!({ "nodes": [node("n", json!({ "kind": "message", "to": "x", "body": body }))], "edges": [] });
+        let pkg = parse(&m, Some(&g), None).unwrap();
+        let given = json!({ "a": a, "b": b }).as_object().cloned().unwrap();
+        graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given)
+    };
+    // Each value is clean alone; joined, they read as {{trigger.job.name}}.
+    let err = render("{{param.a}}{{param.b}}", "{", "{trigger.job.name}}").unwrap_err();
+    assert!(err.contains("forms {{"), "{err}");
+    // A value that ends or starts with a brace next to a brace of the template.
+    assert!(render("{{{param.a}}", "{trigger.job.name}}", "b").is_err(), "template brace + value brace");
+    assert!(render("{{param.a}}{{param.b}}", "x{", "{y").is_err(), "value, value");
+    // Braces that stay single, and the template's own references, are fine.
+    let ok = render("{{param.a}} {x} {{ask.response}} {{param.b}}", "{a}", "{b}").unwrap();
+    assert_eq!(ok.nodes[0].data["body"], "{a} {x} {{ask.response}} {b}");
+}
+
+#[test]
 fn a_drone_template_declares_no_secrets_yet() {
     let m = manifest(json!({
         "params": { "type": "object", "properties": { "t": { "type": "string", "format": "credential" } } },

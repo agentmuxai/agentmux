@@ -157,8 +157,9 @@ pub fn param_names(graph: &DroneGraph) -> Result<Vec<String>, String> {
 
 /// The graph with each `{{param.NAME}}` replaced by its parameter's value
 /// (the given one, else the default). The values go in once and are never read
-/// for placeholders, and a value that opens a `{{` is refused: it would be
-/// read by the drone's own templating at run time.
+/// for placeholders. A `{{` that a value contains, or that a value forms with the
+/// text next to it, is refused: the drone's own templating would read it at run
+/// time.
 pub fn render(graph: &DroneGraph, m: &JobTemplateManifest, given: &Map<String, Value>) -> Result<DroneGraph, String> {
     let params = manifest::resolve_params(m, given)?;
     if let Some((name, _)) = params.iter().find(|(_, v)| manifest::as_text(v).contains("{{")) {
@@ -169,11 +170,19 @@ pub fn render(graph: &DroneGraph, m: &JobTemplateManifest, given: &Map<String, V
         let id = node.id.clone();
         each_string(&mut node.data, &mut |s| {
             let mut text = String::with_capacity(s.len());
+            let mut inserted = Vec::new();
             for part in split_params(s)? {
                 match part {
                     Seg::Text(plain) => text.push_str(plain),
-                    Seg::Param(name) => text.push_str(&params.get(name).map(manifest::as_text).unwrap_or_default()),
+                    Seg::Param(name) => {
+                        let start = text.len();
+                        text.push_str(&params.get(name).map(manifest::as_text).unwrap_or_default());
+                        inserted.push(start..text.len());
+                    }
                 }
+            }
+            if opens_reference_in(&text, &inserted) {
+                return Err("a parameter value forms {{ with the text next to it: a drone would read it as a reference".to_string());
             }
             *s = text;
             Ok(())
@@ -181,4 +190,13 @@ pub fn render(graph: &DroneGraph, m: &JobTemplateManifest, given: &Map<String, V
         .map_err(|e| format!("node {id:?}: {e}"))?;
     }
     Ok(out)
+}
+
+/// Whether a `{{` in `text` takes in a byte of a value that was put in, which
+/// the template text alone would not have written.
+fn opens_reference_in(text: &str, inserted: &[std::ops::Range<usize>]) -> bool {
+    text.as_bytes()
+        .windows(2)
+        .enumerate()
+        .any(|(at, pair)| pair == b"{{" && inserted.iter().any(|r| at < r.end && at + 2 > r.start))
 }
