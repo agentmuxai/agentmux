@@ -41,6 +41,14 @@ export interface PillPane {
     hasBody: () => boolean;
     /** Place the tab beside this pane and mark where it landed. */
     place: (blockId: string, zone: PlaceZone) => string | false;
+    /** A release the layout's catcher got and places nothing for: the pane takes it as its own drop, if it takes the tab. */
+    release: (drop: PillRelease) => void;
+}
+
+/** A drop as the drag adapter gives it: what was dragged, and where and how it was released. */
+export interface PillRelease {
+    source: { data: Record<string | symbol, unknown> };
+    location: { current: { input: { clientX: number; clientY: number; altKey?: boolean } } };
 }
 
 const panes = new WeakMap<LayoutModel, Map<string, PillPane>>();
@@ -221,6 +229,21 @@ export function dropPill(model: LayoutModel, client: { x: number; y: number }): 
         });
     }, 0);
     return true;
+}
+
+/**
+ * The tab was released over the layout's catcher (PillCatcher.tsx). The layout places it (`dropPill`). Where it
+ * places nothing, the pointer had just come to a header or the middle of a body and the catcher still had it
+ * (the catcher lets go with its next sample, and the browser's next event): the pane under it gets no drop of
+ * its own, so the release goes to the pane that stands there in the layout, which joins the tab as it would
+ * have. A release that was already committed is not given twice.
+ */
+export function releasePill(model: LayoutModel, drop: PillRelease): void {
+    if (pillDragIn(model)?.dropped) return;
+    const client = { x: drop.location.current.input.clientX, y: drop.location.current.input.clientY };
+    if (dropPill(model, client)) return;
+    const hit = paneAt(model, client);
+    if (hit) panes.get(model)?.get(hit.nodeId)?.release(drop);
 }
 
 // The drag ended somewhere else (cancelled, or released outside the layout): nothing stays shown.

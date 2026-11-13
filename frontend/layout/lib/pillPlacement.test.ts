@@ -16,7 +16,7 @@ import { resetPaneSizeHoldForTests } from "@/app/platform/pane-size-hold";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { shownPx } from "@/layout/lib/liveReflow";
 import { pillDragIn, pillPlacingIn } from "@/layout/lib/pillDragState";
-import { beginPillPlacement, dropPill, followPill, paneReadsPill, registerPillPane } from "@/layout/lib/pillPlacement";
+import { beginPillPlacement, dropPill, followPill, paneReadsPill, registerPillPane, releasePill } from "@/layout/lib/pillPlacement";
 import { FlexDirection, type LayoutNode } from "@/layout/lib/types";
 import { setPlatform } from "@/util/platformutil";
 import type { SignalAtom } from "@/util/util";
@@ -187,7 +187,7 @@ describe("a tab that leaves other tabs behind", () => {
         vi.useFakeTimers();
         const m = layout(true);
         const place = vi.fn(() => "b");
-        registerPillPane(m, "b", { headerEl: { getBoundingClientRect: () => ({ height: 33 }) } as HTMLElement, hasBody: () => true, place });
+        registerPillPane(m, "b", { headerEl: { getBoundingClientRect: () => ({ height: 33 }) } as HTMLElement, hasBody: () => true, place, release: () => {} });
         beginPillPlacement(m, "a2", LEFT_OF_B);
         dropPill(m, LEFT_OF_B);
         vi.advanceTimersByTime(0);
@@ -243,7 +243,7 @@ describe("giving the drag back to the panes", () => {
 
     it("reads the header band where the pane stands in the layout, not where the reflow shows it", () => {
         const m = layout(true);
-        registerPillPane(m, "b", { headerEl: { getBoundingClientRect: () => ({ height: 33 }) } as HTMLElement, hasBody: () => true, place: () => false });
+        registerPillPane(m, "b", { headerEl: { getBoundingClientRect: () => ({ height: 33 }) } as HTMLElement, hasBody: () => true, place: () => false, release: () => {} });
         beginPillPlacement(m, "a2", LEFT_OF_B);
         expect(pillPlacingIn(m)).toBe(true);
         // Over b's header as the layout has it, although the reflow has moved b's tile to the right half.
@@ -266,6 +266,52 @@ describe("giving the drag back to the panes", () => {
         expect(pillPlacingIn(m)).toBe(false);
         vi.advanceTimersByTime(CLEARED_MS);
         expect(m.futureLayout()).toBeUndefined();
+    });
+});
+
+describe("a release the layout's catcher gets", () => {
+    const header = { getBoundingClientRect: () => ({ height: 33 }) } as HTMLElement;
+    const dropAt = (at: { x: number; y: number }) => ({ source: { data: { blockId: "a2" } }, location: { current: { input: { clientX: at.x, clientY: at.y } } } });
+
+    it("is placed by the layout where the tab becomes a pane, and no pane hears of it", () => {
+        vi.useFakeTimers();
+        const m = layout(true);
+        const release = vi.fn();
+        registerPillPane(m, "b", { headerEl: header, hasBody: () => true, place: () => "b", release });
+        beginPillPlacement(m, "a2", LEFT_OF_B);
+        releasePill(m, dropAt(LEFT_OF_B));
+        // A second drop event for the same release is not a second drop.
+        releasePill(m, dropAt(MIDDLE_OF_B));
+        vi.advanceTimersByTime(0);
+        expect(release).not.toHaveBeenCalled();
+        expect(h.payloadCleared).toBe(1);
+    });
+
+    it("goes to the pane that stands there where the tab would join it: the pointer had just left the edge", () => {
+        vi.useFakeTimers();
+        const m = layout(true);
+        const [b, c] = [vi.fn(), vi.fn()];
+        registerPillPane(m, "b", { headerEl: header, hasBody: () => true, place: () => "b", release: b });
+        registerPillPane(m, "c", { headerEl: header, hasBody: () => true, place: () => "c", release: c });
+        beginPillPlacement(m, "a2", LEFT_OF_B);
+        const drop = dropAt(MIDDLE_OF_B);
+        releasePill(m, drop);
+        expect(pillPlacingIn(m)).toBe(false);
+        expect(b).toHaveBeenCalledTimes(1);
+        expect(b).toHaveBeenCalledWith(drop);
+        expect(c).not.toHaveBeenCalled();
+    });
+
+    it("goes to that pane too when the placing had already ended and the catcher still got the release", () => {
+        vi.useFakeTimers();
+        const m = layout(true);
+        const release = vi.fn();
+        registerPillPane(m, "b", { headerEl: header, hasBody: () => true, place: () => "b", release });
+        beginPillPlacement(m, "a2", LEFT_OF_B);
+        followPill(m, MIDDLE_OF_B);
+        expect(pillPlacingIn(m)).toBe(false);
+        releasePill(m, dropAt(MIDDLE_OF_B));
+        expect(release).toHaveBeenCalledTimes(1);
     });
 });
 

@@ -13,7 +13,7 @@ import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { paneTabItemType } from "@/app/drag/drag-types";
 import { clearPillGhost, pillZone, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
 import { pillPlacingIn } from "@/layout/lib/pillDragState";
-import { beginPillPlacement, dropPill, followPill, paneReadsPill, registerPillPane } from "@/layout/lib/pillPlacement";
+import { beginPillPlacement, dropPill, followPill, paneReadsPill, registerPillPane, type PillRelease } from "@/layout/lib/pillPlacement";
 import type { DropDirection } from "@/layout/lib/types";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { edgeFlashArea } from "./drop-blink-clock";
@@ -339,7 +339,13 @@ export function useForeignTabDrop<T>(props: ForeignTabDropProps<T>, stripEl: () 
         });
         onCleanup(placement.end);
         const body = props.bodyDrop;
-        if (body) onCleanup(registerPillPane(body.model, paneKey, { headerEl: highlightEl, hasBody: body.hasBody, place: placeAndMark(body) }));
+        if (body) {
+            // A release the layout's catcher got where the tab joins a pane: this pane's drop, under its own rule.
+            const release = (drop: PillRelease) => {
+                if (canDropForeign(props, paneKey, drop.source.data)) dropForeign(props, paneKey, placement, endForeignHover, drop);
+            };
+            onCleanup(registerPillPane(body.model, paneKey, { headerEl: highlightEl, hasBody: body.hasBody, place: placeAndMark(body), release }));
+        }
         const { singlePill, follow } = placement;
         const cleanup = dropTargetForElements({
             element: el,

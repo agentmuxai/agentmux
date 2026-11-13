@@ -14,7 +14,7 @@ import { throttle } from "throttle-debounce";
 import { paneTabItemType } from "@/app/drag/drag-types";
 import type { LayoutModel } from "./layoutModel";
 import { pillPlacingIn } from "./pillDragState";
-import { dropPill, endPillPlacement, followPill } from "./pillPlacement";
+import { endPillPlacement, followPill, releasePill } from "./pillPlacement";
 
 /** As often as a pane drag is sampled (tilelayout-shared.tsx). */
 const SAMPLE_MS = 50;
@@ -33,9 +33,9 @@ export function PillCatcher(props: { layoutModel: LayoutModel }) {
                 sample.cancel({ upcomingOnly: true });
                 endPillPlacement(props.layoutModel);
             },
-            onDrop: ({ location }) => {
+            onDrop: ({ source, location }) => {
                 sample.cancel({ upcomingOnly: true });
-                dropPill(props.layoutModel, { x: location.current.input.clientX, y: location.current.input.clientY });
+                releasePill(props.layoutModel, { source, location });
             },
         });
         onCleanup(() => {

@@ -299,6 +299,31 @@ describe("PaneTabStrip bodyDrop", () => {
         expect(onReceiveForeignTab).not.toHaveBeenCalled();
     });
 
+    it("takes a release the layout's catcher passes on as its own drop: the tab joins", () => {
+        const { place, onReceiveForeignTab } = renderPane();
+        const [, , pane] = layout.registered[0] as [unknown, string, { release: (drop: unknown) => void }];
+        zone.current = { kind: "join" };
+
+        pane.release(pill());
+        vi.runAllTimers();
+
+        expect(payloadCalls).toEqual([null]);
+        expect(onReceiveForeignTab).toHaveBeenCalledWith("dragged");
+        expect(place).not.toHaveBeenCalled();
+    });
+
+    it("and refuses it under its own rule: this pane's only tab cannot be dropped on it", () => {
+        const { onReceiveForeignTab } = renderPane({ tabs: [TABS[0]] });
+        const [, , pane] = layout.registered[0] as [unknown, string, { release: (drop: unknown) => void }];
+        zone.current = { kind: "join" };
+
+        pane.release(pill({ blockId: "a", sourceNodeId: "pane-self" }));
+        vi.runAllTimers();
+
+        expect(payloadCalls).toEqual([]);
+        expect(onReceiveForeignTab).not.toHaveBeenCalled();
+    });
+
     it("dropping on a join zone joins the pane's tabs, as before", () => {
         const { config, place, onReceiveForeignTab } = renderPane();
         zone.current = { kind: "join" };
