@@ -23,6 +23,7 @@ pub enum BlockKind {
     Task,
     Notify,
     AppQuery,
+    Spawn,
 }
 
 impl BlockKind {
@@ -37,6 +38,7 @@ impl BlockKind {
             "task" => Some(Self::Task),
             "notify" => Some(Self::Notify),
             "app_query" => Some(Self::AppQuery),
+            "spawn" => Some(Self::Spawn),
             _ => None,
         }
     }

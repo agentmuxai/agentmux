@@ -8,5 +8,6 @@ pub mod condition;
 pub mod message;
 pub mod notify;
 pub mod response;
+pub mod spawn;
 pub mod task;
 pub mod variables;

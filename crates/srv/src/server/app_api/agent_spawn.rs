@@ -347,6 +347,30 @@ pub(crate) async fn spawn_for_job(
     model: Option<String>,
     account: Option<String>,
 ) -> Result<SpawnAgentResult, String> {
+    spawn_beside_leader(state, leader_uid, brief, model, account, true).await
+}
+
+/// Open a worker for a drone's Spawn block: the path of [`spawn_for_job`], but the person is told first,
+/// by the card with a countdown that goes ahead on its own, unless their settings already allow agents to start
+/// agents. A drone run isn't known to be one the operator started, so the block doesn't count as their approval.
+pub(crate) async fn spawn_for_drone(
+    state: &AppState,
+    leader_uid: &str,
+    brief: &str,
+    model: Option<String>,
+    account: Option<String>,
+) -> Result<SpawnAgentResult, String> {
+    spawn_beside_leader(state, leader_uid, brief, model, account, false).await
+}
+
+async fn spawn_beside_leader(
+    state: &AppState,
+    leader_uid: &str,
+    brief: &str,
+    model: Option<String>,
+    account: Option<String>,
+    operator_approved: bool,
+) -> Result<SpawnAgentResult, String> {
     let block_id = state
         .reactive_handler
         .block_for_uid(leader_uid)
@@ -363,7 +387,7 @@ pub(crate) async fn spawn_for_job(
         route: Default::default(),
         user_instruction: String::new(),
     };
-    spawn_with(state, leader, &req, true).await.map_err(|e| e.message)
+    spawn_with(state, leader, &req, operator_approved).await.map_err(|e| e.message)
 }
 
 /// The account and provider the next worker of a `spawn` job led by
