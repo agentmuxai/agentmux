@@ -441,6 +441,8 @@ import type { LspSendReq } from "@/types/rpc/LspSendReq";
 import type { LspStartReq } from "@/types/rpc/LspStartReq";
 import type { LspStartResult } from "@/types/rpc/LspStartResult";
 import type { LspStopReq } from "@/types/rpc/LspStopReq";
+import type { MakeDroneReq } from "@/types/rpc/MakeDroneReq";
+import type { MakeDroneResult } from "@/types/rpc/MakeDroneResult";
 import type { McpAgentBindingData } from "@/types/rpc/McpAgentBindingData";
 import type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
 import type { McpAgentScopeData } from "@/types/rpc/McpAgentScopeData";
@@ -1791,6 +1793,10 @@ export const GeneratedApi = {
   // command "jobs.templates.list"
   JobsTemplatesListCommand(client: RpcClient, opts?: RpcOpts): Promise<JobTemplatesResult> {
     return client.rpcCall("jobs.templates.list", {}, opts);
+  },
+  // command "jobs.templates.make_drone"
+  JobsTemplatesMakeDroneCommand(client: RpcClient, data: MakeDroneReq, opts?: RpcOpts): Promise<MakeDroneResult> {
+    return client.rpcCall("jobs.templates.make_drone", data, opts);
   },
   // command "jobs.templates.uninstall"
   JobsTemplatesUninstallCommand(

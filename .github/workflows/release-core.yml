@@ -22,16 +22,12 @@ name: Release (core)
 # the tag NAME: a tag deleted and made again at another commit during the signing
 # wait (see sign-release) must not change what is built, signed or run.
 #
-# The WinGet submission job is disabled (see "Phase 4" below, commented out,
-# 2026-08-12). The Microsoft Store job (`ms-store`) is off until the repository
-# variable MSSTORE_SUBMIT_ENABLED is 'true'; until then the Store is uploaded by
-# hand. WinGet's automated job never actually worked: `wingetcreate update` requires an
-# existing manifest in microsoft/winget-pkgs, which was never bootstrapped
-# via a first-time `wingetcreate new` submission, so every release back
-# through at least v0.54.14 failed this job identically
-# ("repos/microsoft/winget-pkgs/.../AgentMux was not found"). Re-enable once
-# a manifest actually exists there (or bootstrap one and switch back to
-# `update`).
+# The WinGet job (`winget`) is off until the repository variable
+# WINGET_SUBMIT_ENABLED is 'true'. `wingetcreate update` needs a manifest that already
+# exists in microsoft/winget-pkgs, which is the first-time `new` submission for
+# AgentMux.AI (see docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md): set the
+# variable once that submission has merged. The Microsoft Store job (`ms-store`) is
+# off until MSSTORE_SUBMIT_ENABLED is 'true'; until then the Store is uploaded by hand.
 #
 # See docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md and the correction
 # docs/specs/SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md for the full design, and
@@ -629,53 +625,83 @@ jobs:
       version: ${{ needs.gate.outputs.version }}
 
   # ── Phase 4: Distribution channels ────────────────────────────────────────
-  # WinGet automation never worked (see header comment above): its job body is
-  # kept for reference, fully commented out. The Microsoft Store job follows it.
-  # WinGet identifier corrected to AgentMux.AI 2026-09-10 (distinct from the
-  # already-published MSIX/Store identity AgentMux.AgentMux — see
-  # docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) so this job is
-  # ready to uncomment once that spec's bootstrap PR merges into
-  # microsoft/winget-pkgs. Still commented out here: `wingetcreate update`
-  # requires the manifest to already exist, which it doesn't yet.
-  # winget:
-  #   name: Submit WinGet update
-  #   needs: [gate, publish]
-  #   # microsoft/winget-create's release no longer ships a Linux binary (only
-  #   # wingetcreate.exe) — mirrors the ms-store job's runner below.
-  #   runs-on: windows-latest
-  #   continue-on-error: true
-  #   env:
-  #     VERSION: ${{ needs.gate.outputs.version }}
-  #   steps:
-  #     - name: Install wingetcreate
-  #       shell: pwsh
-  #       run: |
-  #         Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile wingetcreate.exe
+  # WinGet: opens the version-bump pull request in microsoft/winget-pkgs for the
+  # installer `publish` attached to the GitHub Release, with `wingetcreate update`.
+  # A moderator merges it; a release is on GitHub before it is in WinGet.
   #
-  #     - name: Submit WinGet manifest PR
-  #       shell: bash
-  #       env:
-  #         WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #       run: |
-  #         # Resolve the GitHub Release asset download URL directly — GitHub
-  #         # Releases is the source of truth (no separate CDN). package-installer.ps1
-  #         # produces AgentMux-<ver>-x64-setup.exe.
-  #         INSTALLER_URL=$(gh release view "v${VERSION}" \
-  #           --repo agentmuxai/agentmux \
-  #           --json assets \
-  #           --jq '.assets[] | select(.name | test("setup\\.exe$"; "i")) | .url' | head -1)
-  #         if [ -z "$INSTALLER_URL" ]; then
-  #           echo "❌ No setup.exe asset found in GitHub Release v${VERSION}" >&2
-  #           exit 1
-  #         fi
-  #         echo "WinGet installer URL: $INSTALLER_URL"
-  #         ./wingetcreate.exe update AgentMux.AI \
-  #           --version "${VERSION}" \
-  #           --urls "$INSTALLER_URL" \
-  #           --submit \
-  #           --token "$WINGET_TOKEN"
+  # Off until the repository variable WINGET_SUBMIT_ENABLED is 'true' (see the header:
+  # `update` fails until the AgentMux.AI manifest exists upstream). The PackageIdentifier
+  # is AgentMux.AI, distinct from the Store identity AgentMux.AgentMux (see
+  # docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md).
   #
+  # Not a need of `publish` or `sign-release`, and `continue-on-error`: a WinGet
+  # problem never changes whether a release that is already published went out.
+  # WINGET_TOKEN is the AgentMuxAI-bot token (public_repo); it is given to the one
+  # step that submits, and the run must be for the release tag.
+  winget:
+    name: Submit the WinGet update
+    needs: [gate, publish]
+    if: ${{ vars.WINGET_SUBMIT_ENABLED == 'true' && !cancelled() && needs.publish.result == 'success' }}
+    # microsoft/winget-create ships no Linux binary (only wingetcreate.exe).
+    runs-on: windows-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    env:
+      TAG: v${{ needs.gate.outputs.version }}
+      VERSION: ${{ needs.gate.outputs.version }}
+      # Pinned, with the digest GitHub shows for the asset: this job holds a token.
+      WINGETCREATE_URL: https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe
+      WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
+    steps:
+      - name: The run is for the release tag
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" != "tag" ] || [ "$REF_NAME" != "$TAG" ]; then
+            echo "::error::this run is for $REF_TYPE '$REF_NAME', not the release tag '$TAG'"
+            exit 1
+          fi
+
+      - name: Install wingetcreate (pinned)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri $env:WINGETCREATE_URL -OutFile wingetcreate.exe
+          $got = (Get-FileHash wingetcreate.exe -Algorithm SHA256).Hash
+          if ($got -ne $env:WINGETCREATE_SHA256.ToUpper()) {
+            Write-Error "wingetcreate.exe has SHA-256 $got, not the pinned $($env:WINGETCREATE_SHA256)"
+            exit 1
+          }
+
+      # The installer URL is the one the release published, so WinGet gets what
+      # GitHub has; wingetcreate downloads it and writes its hash into the manifest.
+      - name: Submit the WinGet manifest pull request
+        shell: bash
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "::error::the repository has no secret WINGET_TOKEN"
+            exit 1
+          fi
+          INSTALLER_URL=$(gh release view "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '[.assets[] | select(.name | test("-x64-setup\\.exe$"))] | if length == 1 then .[0].url else empty end')
+          if [ -z "$INSTALLER_URL" ]; then
+            echo "::error::expected exactly one -x64-setup.exe asset in release $TAG"
+            exit 1
+          fi
+          echo "WinGet installer URL: $INSTALLER_URL"
+          ./wingetcreate.exe update AgentMux.AI \
+            --version "$VERSION" \
+            --urls "$INSTALLER_URL" \
+            --submit \
+            --token "$WINGET_TOKEN"
+
   # The Microsoft Store: submits the MSIX that `publish` attached to the GitHub
   # Release, through the Store Developer CLI (`msstore`). The Store certifies it
   # after this; a release is on GitHub before it is in the Store.

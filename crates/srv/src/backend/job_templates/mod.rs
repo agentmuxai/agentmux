@@ -138,6 +138,8 @@ pub struct ApprovedTemplate {
     pub hash: String,
     pub manifest: JobTemplateManifest,
     pub brief: Option<String>,
+    /// A Drone template's graph, exactly as approved.
+    pub graph: Option<crate::drone::types::DroneGraph>,
     /// When the operator approved it, in ms.
     pub approved_at_ms: i64,
 }
@@ -423,6 +425,7 @@ impl JobTemplates {
             hash: pkg.hash,
             manifest: pkg.manifest,
             brief: pkg.brief,
+            graph: pkg.graph,
         })
     }
 

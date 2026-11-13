@@ -283,7 +283,7 @@ export function DragDropGroup(): JSX.Element {
                     <TextInput
                         class="setting-number setting-number--wide"
                         type="number" min={1}
-                        placeholder="unlimited"
+                        placeholder={t("settings.advanced.dndConcurrency.placeholder")}
                         value={(s()["dnd:concurrency"] as number) ?? ""}
                         onBlur={(e) => {
                             const raw = e.currentTarget.value.trim();

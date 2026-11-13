@@ -35,7 +35,6 @@ fn people() -> Value {
 }
 
 #[test]
-#[ignore = "module A"]
 fn map_and_filter_use_item_and_index() {
     assert_eq!(ok(json!([{ "op": "map", "expr": "item.name" }]), people()), json!(["Ada", "Bo", "Cy"]));
     assert_eq!(ok(json!([{ "op": "map", "expr": "item.age + index" }]), people()), json!([36, 26, 43]));
@@ -44,7 +43,6 @@ fn map_and_filter_use_item_and_index() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn pick_and_omit_work_on_an_object_and_on_every_object_of_a_list() {
     assert_eq!(ok(json!([{ "op": "pick", "fields": ["name"] }]), json!({ "name": "Ada", "age": 36 })), json!({ "name": "Ada" }));
     assert_eq!(ok(json!([{ "op": "omit", "fields": ["tags", "team"] }, { "op": "first" }]), people()), json!({ "name": "Ada", "age": 36 }));
@@ -52,7 +50,6 @@ fn pick_and_omit_work_on_an_object_and_on_every_object_of_a_list() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn sort_is_stable_and_can_be_descending() {
     assert_eq!(ok(json!([{ "op": "sort", "by": "item.age" }, { "op": "map", "expr": "item.name" }]), people()), json!(["Bo", "Ada", "Cy"]));
     assert_eq!(ok(json!([{ "op": "sort", "by": "item.age", "desc": true }, { "op": "map", "expr": "item.name" }]), people()), json!(["Cy", "Ada", "Bo"]));
@@ -60,7 +57,6 @@ fn sort_is_stable_and_can_be_descending() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn group_unique_slice_first_last_flatten() {
     let (ada, bo, cy) = (people()[0].clone(), people()[1].clone(), people()[2].clone());
     assert_eq!(ok(json!([{ "op": "group", "by": "item.team" }]), people()), json!({ "core": [ada, cy], "web": [bo] }));
@@ -76,7 +72,6 @@ fn group_unique_slice_first_last_flatten() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn join_split_and_merge() {
     assert_eq!(ok(json!([{ "op": "join", "sep": ", " }]), json!(["a", "b", "c"])), json!("a, b, c"));
     assert_eq!(ok(json!([{ "op": "join", "sep": "-" }]), json!([1, 2])), json!("1-2"));
@@ -85,7 +80,6 @@ fn join_split_and_merge() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn count_sum_min_max_and_exists() {
     assert_eq!(ok(json!([{ "op": "count" }]), people()), json!(3));
     assert_eq!(ok(json!([{ "op": "count" }]), json!({ "a": 1, "b": 2 })), json!(2));
@@ -103,7 +97,6 @@ fn count_sum_min_max_and_exists() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn the_expression_grammar_of_the_module_docs() {
     let one = |expr: &str, item: Value| ok(json!([{ "op": "map", "expr": expr }]), json!([item]))[0].clone();
     // arithmetic and its types
@@ -136,7 +129,6 @@ fn the_expression_grammar_of_the_module_docs() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn bad_expressions_and_ops_are_errors_naming_the_step() {
     let err = |ops: Value, input: Value| run(ops, input).unwrap_err();
     assert!(matches!(err(json!([{ "op": "map", "expr": "item +" }]), json!([1])), TransformError::Expr { index: 0, .. }), "a parse error");
@@ -148,7 +140,6 @@ fn bad_expressions_and_ops_are_errors_naming_the_step() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn there_is_no_way_to_write_a_loop_or_call_out() {
     for expr in [
         "exec('ls')",
@@ -168,7 +159,6 @@ fn there_is_no_way_to_write_a_loop_or_call_out() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn more_than_the_item_limit_in_fails_naming_the_items_bound() {
     let big: Vec<Value> = (0..=MAX_ITEMS).map(|i| json!(i)).collect();
     let err = run(json!([{ "op": "count" }]), Value::Array(big)).unwrap_err();
@@ -178,7 +168,6 @@ fn more_than_the_item_limit_in_fails_naming_the_items_bound() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn an_evaluation_over_the_operation_budget_fails_naming_the_operations_bound() {
     // 10,000 items through 11 maps is at least 110,000 element visits.
     let items: Vec<Value> = (0..MAX_ITEMS).map(|i| json!(i)).collect();
@@ -188,7 +177,6 @@ fn an_evaluation_over_the_operation_budget_fails_naming_the_operations_bound() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn an_output_over_the_state_cap_fails_naming_the_output_bound() {
     let word = "x".repeat(300);
     let items: Vec<Value> = (0..1_000).map(|_| json!(word)).collect();
@@ -197,7 +185,6 @@ fn an_output_over_the_state_cap_fails_naming_the_output_bound() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn a_hostile_regex_cannot_stall_it() {
     let started = std::time::Instant::now();
     let hay = format!("{}!", "a".repeat(5_000));
@@ -211,7 +198,6 @@ fn a_hostile_regex_cannot_stall_it() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn the_output_carries_the_taint_bits_of_the_chain() {
     let tainted = |ops: Value| evaluate(&chain(ops), &Tv::tainted(people())).unwrap();
     // A count over a tainted list is clean as data and derived.
@@ -236,7 +222,6 @@ fn the_output_carries_the_taint_bits_of_the_chain() {
 }
 
 #[test]
-#[ignore = "module A"]
 fn the_input_is_not_changed_and_the_same_chain_gives_the_same_answer() {
     let input = Tv::tainted(people());
     let t = chain(json!([{ "op": "sort", "by": "item.age", "desc": true }, { "op": "map", "expr": "item.name" }]));

@@ -827,6 +827,10 @@
             "send": "{}"
         },
         {
+            "command": "jobs.templates.make_drone",
+            "method": "JobsTemplatesMakeDroneCommand"
+        },
+        {
             "command": "jobs.templates.uninstall",
             "method": "JobsTemplatesUninstallCommand"
         },

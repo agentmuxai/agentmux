@@ -7,7 +7,10 @@
 //!
 //! **Module A of the engine.** The types, the bounds and [`taint_out`] are
 //! fixed here; [`evaluate`] is the module's job. Its acceptance tests are
-//! `transform_acceptance_tests.rs`.
+//! `transform_acceptance_tests.rs`. The language itself (the tokenizer, the
+//! parser and the evaluator) is in `expr.rs`, the operations are in `ops.rs`,
+//! and the module's own unit tests are in `tests.rs`; all three are private to
+//! this module.
 //!
 //! # Expression grammar
 //!
@@ -33,7 +36,9 @@
 //!   `map`, `filter` and the key expressions (`by`). A missing path is `null`,
 //!   never an error.
 //! * `a contains b`: a string contains a substring, or a list holds an element.
-//!   `a matches 're'`: the Rust `regex` crate (linear time) on a string.
+//!   `a matches 're'`: the Rust `regex` crate (linear time) on a string. The
+//!   pattern must be a string literal, compiled once when the chain is read, so
+//!   no element pays for a compile.
 //!   `a in_set [..]`: the list holds `a` (JSON equality).
 //! * `lower(s)`, `trunc(s, n)` (at most `n` characters), `default(x, d)` (`d`
 //!   when `x` is null), `exists(path)` (the path is not null). **No other
@@ -51,6 +56,12 @@ use serde_json::Value;
 
 use super::value::{join, Tv};
 
+mod expr;
+mod ops;
+
+use expr::State;
+use ops::apply;
+
 /// An input of at most this many items (§3.9).
 pub const MAX_ITEMS: usize = 10_000;
 /// An evaluation budget per node: one unit per element an operation visits and
@@ -58,6 +69,10 @@ pub const MAX_ITEMS: usize = 10_000;
 pub const MAX_OPERATIONS: u64 = 100_000;
 /// An output of at most the state cap, in bytes of JSON (§3.2).
 pub const MAX_OUTPUT_BYTES: usize = 256 * 1024;
+/// A compiled `matches` pattern may be at most this big: a pattern that would
+/// compile to more is an expression error, so a hostile one cannot make the
+/// compiler work without bound.
+const MAX_REGEX_BYTES: usize = 1024 * 1024;
 
 /// One step of a chain. A chain reads top to bottom, each result feeding the next.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -165,7 +180,11 @@ pub enum TransformError {
 pub fn taint_out(op: &TransformOp, input: &Tv) -> (bool, bool) {
     let carries_no_text = matches!(
         op,
-        TransformOp::Count | TransformOp::Sum { .. } | TransformOp::Min { .. } | TransformOp::Max { .. } | TransformOp::Exists { .. }
+        TransformOp::Count
+            | TransformOp::Sum { .. }
+            | TransformOp::Min { .. }
+            | TransformOp::Max { .. }
+            | TransformOp::Exists { .. }
     );
     let (tainted, derived) = join(&[input]);
     if carries_no_text && tainted {
@@ -180,7 +199,11 @@ pub fn taint_out(op: &TransformOp, input: &Tv) -> (bool, bool) {
 pub fn chain_taint(ops: &[TransformOp], input: &Tv) -> (bool, bool) {
     let mut bits = (input.tainted, input.derived);
     for op in ops {
-        let probe = Tv { v: Value::Null, tainted: bits.0, derived: bits.1 };
+        let probe = Tv {
+            v: Value::Null,
+            tainted: bits.0,
+            derived: bits.1,
+        };
         bits = taint_out(op, &probe);
     }
     bits
@@ -188,11 +211,62 @@ pub fn chain_taint(ops: &[TransformOp], input: &Tv) -> (bool, bool) {
 
 /// Run `t` over `input`. The output's bits are [`chain_taint`] of the chain.
 /// Every bound of §3.9 is checked and named in [`TransformError::Bound`].
-///
-/// **Module A.** Not written yet.
 pub fn evaluate(t: &Transform, input: &Tv) -> Result<Tv, TransformError> {
-    let _ = (t, input);
-    todo!("module A: the Transform evaluator (docs/specs/SPEC_DRONE_GENERAL_AUTOMATION_2026_11_11.md §3.9)")
+    let mut value = input.v.clone();
+    check_items(&value)?;
+    let mut state = State::default();
+    for (step, op) in t.ops.iter().enumerate() {
+        value = apply(op, &value, step, &mut state)?;
+        check_items(&value)?;
+        check_output(&value, step)?;
+    }
+    let (tainted, derived) = chain_taint(&t.ops, input);
+    Ok(Tv {
+        v: value,
+        tainted,
+        derived,
+    })
+}
+
+/// The item bound: an input list, or a list a step makes, of more than
+/// [`MAX_ITEMS`].
+fn check_items(value: &Value) -> Result<(), TransformError> {
+    match value {
+        Value::Array(items) if items.len() > MAX_ITEMS => Err(TransformError::Bound {
+            kind: BoundKind::Items,
+            limit: MAX_ITEMS as u64,
+        }),
+        _ => Ok(()),
+    }
+}
+
+/// The output bound, checked after every step so a runaway intermediate stops
+/// early rather than filling memory first.
+fn check_output(value: &Value, step: usize) -> Result<(), TransformError> {
+    let bytes = serde_json::to_vec(value)
+        .map_err(|error| op_step(step, &format!("the output cannot be measured: {error}")))?;
+    if bytes.len() > MAX_OUTPUT_BYTES {
+        Err(TransformError::Bound {
+            kind: BoundKind::Output,
+            limit: MAX_OUTPUT_BYTES as u64,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn op_step(step: usize, message: &str) -> TransformError {
+    TransformError::Op {
+        index: step,
+        message: message.to_string(),
+    }
+}
+
+fn expr_step(step: usize, message: String) -> TransformError {
+    TransformError::Expr {
+        index: step,
+        message,
+    }
 }
 
 /// The expressions an op carries, for the validator and the canvas.
@@ -200,9 +274,10 @@ pub fn expressions_of(op: &TransformOp) -> Vec<&str> {
     match op {
         TransformOp::Map { expr } | TransformOp::Filter { expr } => vec![expr.as_str()],
         TransformOp::Sort { by, .. } | TransformOp::Group { by } => vec![by.as_str()],
-        TransformOp::Unique { by } | TransformOp::Sum { by } | TransformOp::Min { by } | TransformOp::Max { by } => {
-            by.iter().map(String::as_str).collect()
-        }
+        TransformOp::Unique { by }
+        | TransformOp::Sum { by }
+        | TransformOp::Min { by }
+        | TransformOp::Max { by } => by.iter().map(String::as_str).collect(),
         TransformOp::Exists { expr } => expr.iter().map(String::as_str).collect(),
         _ => Vec::new(),
     }
@@ -236,86 +311,4 @@ pub fn op_names() -> BTreeMap<&'static str, &'static str> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn after(op: &TransformOp, input: &Tv) -> (bool, bool) {
-        taint_out(op, input)
-    }
-
-    /// The taint table of §3.9 and the derived-value rule of §4.5.
-    #[test]
-    fn the_taint_table() {
-        let tainted_list = Tv::tainted(json!(["a", "b"]));
-        let clean_list = Tv::clean(json!([1, 2]));
-        let derived_num = Tv::derived(json!(2));
-        // Results that cannot carry text are clean over tainted input, and derived.
-        for op in [
-            TransformOp::Count,
-            TransformOp::Sum { by: None },
-            TransformOp::Min { by: None },
-            TransformOp::Max { by: None },
-            TransformOp::Exists { expr: None },
-        ] {
-            assert_eq!(after(&op, &tainted_list), (false, true), "{op:?} over tainted");
-            assert_eq!(after(&op, &clean_list), (false, false), "{op:?} over clean");
-            assert_eq!(after(&op, &derived_num), (false, true), "{op:?} over derived");
-        }
-        // Everything else carries the input's bits.
-        for op in [
-            TransformOp::Map { expr: "item".into() },
-            TransformOp::Filter { expr: "true".into() },
-            TransformOp::Pick { fields: vec![] },
-            TransformOp::Omit { fields: vec![] },
-            TransformOp::Sort { by: "item".into(), desc: false },
-            TransformOp::Group { by: "item".into() },
-            TransformOp::Unique { by: None },
-            TransformOp::Slice { start: 0, end: None },
-            TransformOp::First,
-            TransformOp::Last,
-            TransformOp::Flatten,
-            TransformOp::Join { sep: ",".into() },
-            TransformOp::Split { sep: ",".into() },
-            TransformOp::Merge { with: json!({}) },
-        ] {
-            assert_eq!(after(&op, &tainted_list), (true, false), "{op:?} over tainted");
-            assert_eq!(after(&op, &clean_list), (false, false), "{op:?} over clean");
-            assert_eq!(after(&op, &derived_num), (false, true), "{op:?} over derived");
-        }
-    }
-
-    #[test]
-    fn a_chain_keeps_the_derivation_after_a_count() {
-        let tainted = Tv::tainted(json!(["a", "b"]));
-        let ops = [TransformOp::Filter { expr: "true".into() }, TransformOp::Count];
-        assert_eq!(chain_taint(&ops, &tainted), (false, true));
-        // A sum of a count is still derived; text never comes back.
-        let more = [TransformOp::Count, TransformOp::Sum { by: None }];
-        assert_eq!(chain_taint(&more, &tainted), (false, true));
-        assert_eq!(chain_taint(&ops, &Tv::clean(json!([1]))), (false, false));
-        assert_eq!(chain_taint(&[], &tainted), (true, false));
-    }
-
-    #[test]
-    fn a_chain_reads_from_and_writes_to_json() {
-        let t: Transform = serde_json::from_value(json!({ "ops": [
-            { "op": "filter", "expr": "item.n > 1" },
-            { "op": "sort", "by": "item.n", "desc": true },
-            { "op": "slice", "start": 0, "end": 2 },
-            { "op": "count" }
-        ] }))
-        .unwrap();
-        assert_eq!(t.ops.len(), 4);
-        assert_eq!(serde_json::from_value::<Transform>(serde_json::to_value(&t).unwrap()).unwrap(), t);
-        assert!(serde_json::from_value::<Transform>(json!({ "ops": [{ "op": "eval", "expr": "1" }] })).is_err(), "no op beyond the list");
-    }
-
-    #[test]
-    fn every_op_has_a_name_and_the_expressions_of_a_chain_can_be_listed() {
-        assert_eq!(op_names().len(), 19);
-        let ops = vec![TransformOp::Map { expr: "item.a".into() }, TransformOp::Sort { by: "item.b".into(), desc: false }, TransformOp::Count];
-        let exprs: Vec<&str> = ops.iter().flat_map(expressions_of).collect();
-        assert_eq!(exprs, ["item.a", "item.b"]);
-    }
-}
+mod tests;
