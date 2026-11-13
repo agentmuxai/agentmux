@@ -161,12 +161,20 @@ pub fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<St
     if creds.is_file() {
         return Some(claude_config_host_dir.to_string());
     }
-    tracing::warn!(
-        dir = %claude_config_host_dir,
-        "container agent: no {CLAUDE_CREDENTIALS_FILE} in the bound account's config dir — \
-         not mounting credentials (expected on macOS, where Claude Code stores them in the \
-         Keychain). The agent will start but will not be authenticated."
-    );
+    if cfg!(target_os = "macos") {
+        // Claude Code keeps this login in the Keychain; the container's start stages it (or stops with a message).
+        tracing::info!(
+            dir = %claude_config_host_dir,
+            "container agent: no {CLAUDE_CREDENTIALS_FILE} in the bound account's config dir — \
+             its Keychain login is staged for the container at start instead"
+        );
+    } else {
+        tracing::warn!(
+            dir = %claude_config_host_dir,
+            "container agent: no {CLAUDE_CREDENTIALS_FILE} in the bound account's config dir — \
+             not mounting credentials. The agent will start but will not be authenticated."
+        );
+    }
     None
 }
 

@@ -168,16 +168,16 @@ Verified live on **Windows / Docker Desktop**. The other two platforms are
 narrower than the first draft of this report claimed, and both were caught in
 review rather than by me:
 
-**macOS — still cannot authenticate, but no longer breaks.** Claude Code on
+**macOS — the login is staged from the Keychain (updated after #5918, #5930, #5936).** Claude Code on
 macOS keeps OAuth credentials in the encrypted Keychain and never writes
 `.credentials.json` at all (`identity/resolver/oauth_probe.rs` §77–121,
 [`docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`](../retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md)). An
 unguarded bind of a nonexistent source makes Docker refuse `create_container`,
-which would have turned "container agents cannot authenticate on macOS" into
-"container agents cannot START on macOS" — strictly worse than the bug being
-fixed. `credentials_dir_if_file_backed` therefore only offers a bind when the
-file actually exists, and logs why when it does not. Keychain-backed
-provisioning is separate, unstarted work.
+so `credentials_dir_if_file_backed` only offers a bind when the file actually
+exists. When it does not, the container's start reads that account's one Keychain
+entry, stages it as a file of srv's own, and writes a refresh back
+(`backend/container/keychain_credentials.rs`). With no login in the Keychain the
+first message stops before the image download and says how to sign in.
 
 **Linux at uid != 1000 — still cannot authenticate.** A bind preserves the host
 file's owner and mode (0600), while the image always execs as `agent`, uid 1000.
