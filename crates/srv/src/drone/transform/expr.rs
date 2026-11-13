@@ -15,6 +15,18 @@ use super::{
     MAX_REGEX_BYTES,
 };
 
+/// An expression's source may be at most this long. The grammar is small, and
+/// a bound keeps the tokenizer and parser work finite; the size of a `matches`
+/// pattern is bounded separately, where the pattern is compiled.
+const MAX_EXPRESSION_BYTES: usize = 64 * 1024;
+/// How deeply a source may nest `(`, `[`, `!` and `-`. The parser is
+/// recursive, so a source nested further is an expression error rather than a
+/// stack overflow.
+const MAX_NESTING_DEPTH: usize = 64;
+/// How deep an expression tree may be before evaluation stops: a chain such as
+/// `1 + 1 + ...` is not nested in the source but is deep in the tree.
+const MAX_EVAL_DEPTH: usize = 256;
+
 /// What one node's evaluation carries between elements: the budget it has
 /// spent and the `matches` patterns it has already compiled, so a constant
 /// pattern is compiled once rather than once per element.
@@ -237,19 +249,43 @@ fn function_arity(name: &str) -> Option<usize> {
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    depth: usize,
 }
 
 impl Parser {
     fn parse(source: &str) -> Result<Expr, String> {
+        if source.len() > MAX_EXPRESSION_BYTES {
+            return Err(format!(
+                "an expression may be at most {MAX_EXPRESSION_BYTES} bytes"
+            ));
+        }
         let mut parser = Self {
             tokens: tokenize(source)?,
             pos: 0,
+            depth: 0,
         };
         let expr = parser.expression()?;
         if parser.pos < parser.tokens.len() {
             return Err("a token is left over after the expression".to_string());
         }
         Ok(expr)
+    }
+
+    /// Count one level of nesting; past the limit the source is refused rather
+    /// than parsed until the stack runs out. An error abandons the parse, so a
+    /// depth is not given back on that path.
+    fn enter(&mut self) -> Result<(), String> {
+        self.depth += 1;
+        if self.depth > MAX_NESTING_DEPTH {
+            return Err(format!(
+                "an expression may nest at most {MAX_NESTING_DEPTH} levels"
+            ));
+        }
+        Ok(())
+    }
+
+    fn leave(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
     }
 
     fn peek(&self) -> Option<&Token> {
@@ -282,7 +318,10 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr, String> {
-        self.or()
+        self.enter()?;
+        let expr = self.or()?;
+        self.leave();
+        Ok(expr)
     }
 
     fn or(&mut self) -> Result<Expr, String> {
@@ -303,7 +342,10 @@ impl Parser {
 
     fn not(&mut self) -> Result<Expr, String> {
         if self.eat(Op::Bang) {
-            Ok(Expr::Not(Box::new(self.not()?)))
+            self.enter()?;
+            let inner = self.not();
+            self.leave();
+            Ok(Expr::Not(Box::new(inner?)))
         } else {
             self.comparison()
         }
@@ -358,7 +400,10 @@ impl Parser {
 
     fn unary(&mut self) -> Result<Expr, String> {
         if self.eat(Op::Minus) {
-            Ok(Expr::Negate(Box::new(self.unary()?)))
+            self.enter()?;
+            let inner = self.unary();
+            self.leave();
+            Ok(Expr::Negate(Box::new(inner?)))
         } else {
             self.atom()
         }
@@ -474,6 +519,7 @@ struct Eval<'a> {
     index: usize,
     step: usize,
     state: &'a mut State,
+    depth: usize,
 }
 
 impl<'a> Eval<'a> {
@@ -487,6 +533,18 @@ impl<'a> Eval<'a> {
 
     fn eval(&mut self, expr: &Expr) -> Result<Value, TransformError> {
         self.charge()?;
+        self.depth += 1;
+        if self.depth > MAX_EVAL_DEPTH {
+            return Err(self.fail(format!(
+                "an expression may be evaluated at most {MAX_EVAL_DEPTH} levels deep"
+            )));
+        }
+        let answer = self.eval_node(expr);
+        self.depth -= 1;
+        answer
+    }
+
+    fn eval_node(&mut self, expr: &Expr) -> Result<Value, TransformError> {
         match expr {
             Expr::Literal(value) => Ok(value.clone()),
             Expr::Path(path) => self.path(path),
@@ -676,6 +734,7 @@ pub(super) fn eval_at<'a>(
         index,
         step,
         state,
+        depth: 0,
     }
     .eval(ast)
 }
@@ -714,18 +773,17 @@ fn arithmetic(op: Op, left: &Value, right: &Value) -> Result<Value, String> {
         return Err("division by zero".to_string());
     }
     if let (Some(a), Some(b)) = (left.as_i64(), right.as_i64()) {
+        // `i64::MIN / -1` and `i64::MIN % -1` overflow; checked division
+        // returns `None` for them and the float path below handles the value.
         let integer = match op {
             Op::Plus => a.checked_add(b),
             Op::Minus => a.checked_sub(b),
             Op::Star => a.checked_mul(b),
-            Op::Slash => {
-                if a % b == 0 {
-                    Some(a / b)
-                } else {
-                    None
-                }
-            }
-            Op::Percent => Some(a % b),
+            Op::Slash => match a.checked_rem(b) {
+                Some(0) => a.checked_div(b),
+                _ => None,
+            },
+            Op::Percent => a.checked_rem(b),
             _ => None,
         };
         if let Some(value) = integer {

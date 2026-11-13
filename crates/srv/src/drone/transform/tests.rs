@@ -219,3 +219,53 @@ fn every_op_has_a_name_and_the_expressions_of_a_chain_can_be_listed() {
     let exprs: Vec<&str> = ops.iter().flat_map(expressions_of).collect();
     assert_eq!(exprs, ["item.a", "item.b"]);
 }
+
+#[test]
+fn an_expression_over_the_source_limit_is_an_error() {
+    let long = format!("item{}", " + 1".repeat(20_000));
+    assert!(
+        matches!(
+            one(&long, Value::Null),
+            Err(TransformError::Expr { index: 0, .. })
+        ),
+        "a source over the limit must not reach the tokenizer"
+    );
+}
+
+#[test]
+fn an_operator_chain_deeper_than_the_evaluation_limit_is_an_error() {
+    let chain = format!("{}1", "1 + ".repeat(1_000));
+    assert!(
+        matches!(
+            one(&chain, Value::Null),
+            Err(TransformError::Expr { index: 0, .. })
+        ),
+        "a left-deep chain must not recurse to the stack limit"
+    );
+}
+
+#[test]
+fn nesting_past_the_limit_is_an_error_not_a_crash() {
+    for source in [
+        format!("{}1{}", "(".repeat(200), ")".repeat(200)),
+        format!("{}1{}", "[".repeat(200), "]".repeat(200)),
+        format!("{}true", "!".repeat(200)),
+        format!("{}1", "-".repeat(200)),
+    ] {
+        assert!(
+            matches!(
+                one(&source, Value::Null),
+                Err(TransformError::Expr { index: 0, .. })
+            ),
+            "200 levels must be refused"
+        );
+    }
+}
+
+#[test]
+fn the_smallest_integer_against_minus_one_does_not_panic() {
+    let min = "(-9223372036854775807 - 1)";
+    let remainder = value(&format!("{min} % -1"), Value::Null);
+    assert_eq!(remainder.as_f64(), Some(0.0));
+    assert!(one(&format!("{min} / -1"), Value::Null).is_ok());
+}
