@@ -58,12 +58,25 @@ pub(in super::super) fn take_cap_end(block_id: &str) -> bool {
 }
 
 /// End the turn for `stuck`. The interrupt's `error_during_execution` result is the end we asked for, which
-/// the reader must not read as a failure. `false` when the interrupt could not be sent (the process is gone or its
-/// stdin is full, or `generation` is no longer the current process), in which case nobody is told: the turn did not end.
-pub(in super::super) fn end_the_turn(inner: &Mutex<PersistentInner>, generation: u64, block_id: &str, mstore: Option<&Arc<Store>>, stuck: &Stuck) -> bool {
+/// the reader must not read as a failure. What the agent was stuck doing when the turn ended; `None` when the
+/// interrupt could not be sent (the process is gone or its stdin is full, or `generation` is no longer the current
+/// process), in which case nobody is told: the turn did not end.
+pub(in super::super) fn end_the_turn(inner: &Mutex<PersistentInner>, generation: u64, block_id: &str, mstore: Option<&Arc<Store>>, stuck: &Stuck) -> Option<String> {
     if !interrupt_turn_of(inner, generation) {
-        return false;
+        return None;
     }
     crate::backend::blockcontroller::loop_stop::after_ending(block_id, mstore, stuck);
-    true
+    Some(stuck.describe())
+}
+
+/// Why a turn the spend cap ended stopped, as the transcript says it.
+pub(in super::super) const CAP_ENDED: &str = "the model route's daily spend cap was used";
+
+/// `line`, the `result` frame of a turn we ended, with our reason as its text: the CLI's own words for an interrupt
+/// are a generic "Agent encountered an error". The frame stays an error result, so the pane shows it as the turn's end.
+pub(in super::super) fn plain_end_frame(line: &str, why: &str) -> String {
+    let Ok(mut frame) = serde_json::from_str::<serde_json::Value>(line) else { return line.to_string() };
+    let Some(obj) = frame.as_object_mut() else { return line.to_string() };
+    obj.insert("result".to_string(), serde_json::Value::String(format!("Stopped by AgentMux: {why}.")));
+    frame.to_string()
 }

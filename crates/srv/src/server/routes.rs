@@ -615,6 +615,8 @@ fn muxspect_routes() -> Router<AppState> {
         .route("/api/v1/message-stats", get(message_stats_handler::handle_message_stats))
         // The recent messages between agents, ids and times only, for the Atlas map on open (`backend::message_flow`). Read-only.
         .route("/api/v1/message-flow", get(message_flow_handler::handle_message_flow))
+        // The recent task filings and hand-overs on the boards the caller sees, names and numbers only (`backend::task_flow`). Read-only.
+        .route("/api/v1/task-flow", get(task_flow_handler::handle_task_flow))
         // ClaimWork / ReleaseWork (same spec, §3.4): informational claims,
         // never a lock.
         // PostToChannel / ReadChannel: a repository's coordination channel
