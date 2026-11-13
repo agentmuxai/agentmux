@@ -53,6 +53,11 @@ pub enum NotifyKind {
     /// §15.2). Its key is the entry's (`vault:<id>`); the entry's label stands
     /// where an agent's name would.
     VaultExpiring,
+    /// A drone's Notify block told the operator something (`drone::executor::blocks::notify`,
+    /// SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md §4.2). Its key is `drone:<id>`, one per notification;
+    /// the block's own title stands where an agent's name would. Follows the master switch,
+    /// quiet hours and pause only: it has no per-kind setting yet.
+    DroneNote,
 }
 
 impl NotifyKind {
@@ -68,6 +73,7 @@ impl NotifyKind {
             NotifyKind::AccountUnavailable => Some("accountunavailable"),
             NotifyKind::JobFailed => Some("jobfailed"),
             NotifyKind::VaultExpiring => Some("vaultexpiring"),
+            NotifyKind::DroneNote => None,
             // Follows the master switch only: a shutdown the user can still
             // stop must not be silenceable per kind.
             NotifyKind::ShutdownPending => None,
@@ -86,7 +92,7 @@ impl NotifyKind {
             NotifyKind::MessageNeedsReview => 2_000,
             // The window is short: tell the user at once.
             // The episode's scan already waited for the failure to settle.
-            NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable | NotifyKind::JobFailed | NotifyKind::VaultExpiring => 0,
+            NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable | NotifyKind::JobFailed | NotifyKind::VaultExpiring | NotifyKind::DroneNote => 0,
             NotifyKind::Summary | NotifyKind::Test => 0,
         }
     }
@@ -120,7 +126,7 @@ impl NotifyKind {
             NotifyKind::Test => "test".to_string(),
             NotifyKind::CloudSignedOut => "cloud".to_string(),
             // One per account, or per job: the key already names it.
-            NotifyKind::AccountUnavailable | NotifyKind::JobFailed | NotifyKind::VaultExpiring => block_id.to_string(),
+            NotifyKind::AccountUnavailable | NotifyKind::JobFailed | NotifyKind::VaultExpiring | NotifyKind::DroneNote => block_id.to_string(),
         }
     }
 
@@ -135,6 +141,7 @@ impl NotifyKind {
                 | NotifyKind::AccountUnavailable
                 | NotifyKind::JobFailed
                 | NotifyKind::VaultExpiring
+                | NotifyKind::DroneNote
         )
     }
 
@@ -320,7 +327,7 @@ impl Family {
             Family::Shutdown => kind == NotifyKind::ShutdownPending,
             Family::Cloud => kind == NotifyKind::CloudSignedOut,
             Family::Account => kind == NotifyKind::AccountUnavailable,
-            Family::Job => kind == NotifyKind::JobFailed,
+            Family::Job => matches!(kind, NotifyKind::JobFailed | NotifyKind::DroneNote),
         }
     }
 }
@@ -457,6 +464,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         NotifyKind::AccountUnavailable => "An account can't run your agents".to_string(),
         NotifyKind::JobFailed => format!("Job failed: {agent_name}"),
         NotifyKind::VaultExpiring => format!("Expiring in the Vault: {agent_name}"),
+        NotifyKind::DroneNote => agent_name.to_string(),
     }
 }
 

@@ -4,4 +4,4 @@
  * Block (node) kinds for Phase 1. Phase 2 adds Function, Loop, Parallel,
  * Router, Subdrone. Stored as `kind` field on `FlowNode.data`.
  */
-export type BlockKind = "agent" | "condition" | "api" | "response" | "variables" | "message" | "task";
+export type BlockKind = "agent" | "condition" | "api" | "response" | "variables" | "message" | "task" | "notify";
