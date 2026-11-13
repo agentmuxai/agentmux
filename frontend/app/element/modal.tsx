@@ -78,6 +78,7 @@ import { Portal } from "solid-js/web";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 
 import { nudgeDismissControl } from "./modal-dismiss-nudge";
+import { fadeOutBackdrop } from "./modal-exit-fade";
 import { createBackdropDismiss, createModalCaret } from "./modal-caret";
 import { firstFocusable, lastFocusable } from "./modal-focus-trap";
 import { ModalTitleIdContext } from "./modal-parts";
@@ -293,7 +294,7 @@ export const Modal: Component<ModalProps> = (props) => {
     });
 
     onCleanup(() => {
-        if (mounted()) closeModal();
+        if (mounted()) closeModal(false);
     });
 
     const openModal = (): void => {
@@ -321,7 +322,9 @@ export const Modal: Component<ModalProps> = (props) => {
         caret.opened(resolved.scope, resolved.region);
     };
 
-    const closeModal = (): void => {
+    const closeModal = (fade = true): void => {
+        // The backdrop fades out instead of vanishing in one frame (modal-exit-fade.ts).
+        if (fade) fadeOutBackdrop(rootRef, mountNode);
         remove(id);
         stackEntry = null;
 
