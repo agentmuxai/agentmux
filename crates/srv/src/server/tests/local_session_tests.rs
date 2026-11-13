@@ -254,3 +254,61 @@ fn a_flood_of_refusals_holds_no_more_than_the_cap() {
     assert_eq!(last, MAX_FAILURES);
     assert_eq!(store.note_failure(now + secs(61)), 1, "a minute later they have all aged out");
 }
+
+/// Use does not make a session last for ever: a week after it was confirmed it ends, used or not.
+#[test]
+fn a_session_ends_a_week_after_it_was_confirmed_however_much_it_is_used() {
+    let store = SessionStore::default();
+    let now = Instant::now();
+    let g = signed_in(&store, now);
+    let id = SessionId::of_cookie(&g.cookie);
+    let hour = |n: u64| secs(n * 3600);
+    // Used every 11 hours, it stays live to the week's end...
+    let mut at = 0;
+    while at + 11 <= 7 * 24 {
+        at += 11;
+        assert!(store.admit(Some(&g.cookie), Some(&g.token), RouteClass::Both, now + hour(at)), "hour {at}");
+    }
+    assert!(store.is_live(id, now + SESSION_MAX_LIFE), "up to the limit");
+    // ...and not past it, to a request or to a socket's re-check.
+    assert!(!store.admit(Some(&g.cookie), Some(&g.token), RouteClass::Both, now + SESSION_MAX_LIFE + secs(1)));
+    assert!(!store.is_live(id, now + SESSION_MAX_LIFE + secs(1)));
+    assert_eq!(store.session_count(now + SESSION_MAX_LIFE + secs(1)), 0);
+    // A session confirmed later has its own week.
+    let later = now + SESSION_MAX_LIFE;
+    let g2 = signed_in(&store, later);
+    assert!(store.admit(Some(&g2.cookie), Some(&g2.token), RouteClass::Both, later + hour(11)));
+}
+
+#[test]
+fn signing_one_session_out_leaves_the_others() {
+    let store = SessionStore::default();
+    let now = Instant::now();
+    let (a, b) = (signed_in(&store, now), signed_in(&store, now));
+    let (ida, idb) = (SessionId::of_cookie(&a.cookie), SessionId::of_cookie(&b.cookie));
+    assert!(store.revoke(ida, now));
+    assert!(!store.admit(Some(&a.cookie), Some(&a.token), RouteClass::Both, now));
+    assert!(store.admit(Some(&b.cookie), Some(&b.token), RouteClass::Both, now));
+    assert!(!store.revoke(ida, now), "already out");
+    assert!(!store.revoke(SessionId::of_cookie("never granted"), now));
+    assert!(store.is_live(idb, now));
+}
+
+#[tokio::test]
+async fn only_the_socket_of_the_session_signed_out_hears_it() {
+    let store = std::sync::Arc::new(SessionStore::default());
+    let now = Instant::now();
+    let (a, b) = (signed_in(&store, now), signed_in(&store, now));
+    let (ida, idb) = (SessionId::of_cookie(&a.cookie), SessionId::of_cookie(&b.cookie));
+    let wait = |id: SessionId| {
+        let store = store.clone();
+        tokio::spawn(async move { store.ended(id).await })
+    };
+    let (waiting_a, waiting_b) = (wait(ida), wait(idb));
+    tokio::task::yield_now().await;
+    assert!(store.revoke(ida, Instant::now()));
+    tokio::time::timeout(Duration::from_secs(2), waiting_a).await.expect("told at once").unwrap();
+    tokio::task::yield_now().await;
+    assert!(!waiting_b.is_finished(), "the other browser's socket stays open");
+    waiting_b.abort();
+}

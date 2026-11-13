@@ -29,6 +29,9 @@ pub(crate) const CODE_LIFE: Duration = Duration::from_secs(60);
 pub(crate) const PENDING_LIFE: Duration = Duration::from_secs(60);
 /// A session ends after this long without a request.
 pub(crate) const SESSION_IDLE_LIFE: Duration = Duration::from_secs(12 * 60 * 60);
+/// A session ends this long after it was confirmed, however much it is used: a browser that is
+/// always open signs in again (with `agentmux-srv open`) once a week.
+pub(crate) const SESSION_MAX_LIFE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// Most codes and most pending sessions held at once; the oldest goes first.
 const MAX_HELD: usize = 64;
 /// Most refusals remembered at once (they are counted over a minute).
@@ -100,6 +103,8 @@ struct Pending {
 struct Session {
     token: Digest32,
     last_seen: Instant,
+    /// When the person confirmed it: [`SESSION_MAX_LIFE`] counts from here.
+    born: Instant,
 }
 
 #[derive(Default)]
@@ -235,7 +240,7 @@ impl SessionStore {
         }
         let grant = Grant { cookie: random_secret(), token: random_secret() };
         let cookie = digest(&grant.cookie);
-        inner.sessions.insert(cookie, Session { token: digest(&grant.token), last_seen: now });
+        inner.sessions.insert(cookie, Session { token: digest(&grant.token), last_seen: now, born: now });
         if let Some(p) = inner.pending.get_mut(&handle) {
             p.cookie = Some(cookie);
             p.outcome = Outcome::Granted(Some(grant));
@@ -299,6 +304,19 @@ impl SessionStore {
         n
     }
 
+    /// End one session (this browser's): the others stay. False when it was not live. A socket that
+    /// was upgraded with it hears that it ended.
+    pub(crate) fn revoke(&self, id: SessionId, now: Instant) -> bool {
+        let mut inner = self.lock();
+        prune(&mut inner, now);
+        let was_live = inner.sessions.remove(&id.0).is_some();
+        drop(inner);
+        if was_live {
+            self.revoked.send_modify(|logouts| *logouts += 1);
+        }
+        was_live
+    }
+
     /// Is this session still live? A socket that asks is in use, so it slides the idle limit.
     pub(crate) fn is_live(&self, id: SessionId, now: Instant) -> bool {
         let mut inner = self.lock();
@@ -348,7 +366,7 @@ fn prune(inner: &mut Inner, now: Instant) {
     for handle in stale {
         end_pending(inner, handle);
     }
-    inner.sessions.retain(|_, s| now.duration_since(s.last_seen) <= SESSION_IDLE_LIFE);
+    inner.sessions.retain(|_, s| now.duration_since(s.last_seen) <= SESSION_IDLE_LIFE && now.duration_since(s.born) <= SESSION_MAX_LIFE);
 }
 
 fn end_pending(inner: &mut Inner, handle: Digest32) {
