@@ -3,5 +3,6 @@
 
 pub mod blocks;
 pub mod engine;
+pub mod schedule;
 
 pub use engine::{run_drone, RunEvent};
