@@ -572,7 +572,7 @@
 // The tab's close is the kit's CloseButton (size "tab"): it shows on hover, attention and closing, below,
 // and always while it has keyboard focus (the kit shows it on :focus-visible).
 .pane-tab-close {
-    --ui-close-fg: inherit;
+    --ui-close-fg: currentColor;
     opacity: 0;
     transition: opacity var(--duration-decorative-instant) var(--ease-standard);
 }
