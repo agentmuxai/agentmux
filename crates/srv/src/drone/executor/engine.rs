@@ -184,6 +184,7 @@ async fn execute(
                 BlockKind::Message => blocks::message::run(node, &scope).await,
                 BlockKind::Task => blocks::task::run(node, &scope).await,
                 BlockKind::Notify => blocks::notify::run(node, &scope).await,
+                BlockKind::AppQuery => blocks::app_query::run(node, &scope).await,
             };
 
             match result {
