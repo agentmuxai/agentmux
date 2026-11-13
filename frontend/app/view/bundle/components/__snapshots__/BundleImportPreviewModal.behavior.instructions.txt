@@ -199,7 +199,7 @@
         "account(s):"
         "github (resolved), slack (not connected)"
     <div class="bundle-import-warnings-banner">
-      <button aria-label="Dismiss warnings" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button bundle-import-warnings-dismiss">
+      <button type="button" class="ui-close ui-close--sm bundle-import-warnings-dismiss" aria-label="Dismiss warnings">
         <i aria-hidden="true" class="fa-solid fa-xmark">
       <div class="bundle-import-warning-line">
         "first warning"
@@ -404,7 +404,7 @@
         "account(s):"
         "github (resolved), slack (not connected)"
     <div class="bundle-import-warnings-banner">
-      <button aria-label="Dismiss warnings" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button bundle-import-warnings-dismiss">
+      <button type="button" class="ui-close ui-close--sm bundle-import-warnings-dismiss" aria-label="Dismiss warnings">
         <i aria-hidden="true" class="fa-solid fa-xmark">
       <div class="bundle-import-warning-line">
         "first warning"
@@ -619,7 +619,7 @@
         "account(s):"
         "github (resolved), slack (not connected)"
     <div class="bundle-import-warnings-banner">
-      <button aria-label="Dismiss warnings" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button bundle-import-warnings-dismiss">
+      <button type="button" class="ui-close ui-close--sm bundle-import-warnings-dismiss" aria-label="Dismiss warnings">
         <i aria-hidden="true" class="fa-solid fa-xmark">
       <div class="bundle-import-warning-line">
         "first warning"
