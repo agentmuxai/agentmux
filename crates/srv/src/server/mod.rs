@@ -46,6 +46,7 @@ pub(crate) mod container_pane_snapshot;
 pub(crate) mod files_root;
 mod container_workspace;
 mod model_gateway_handlers;
+pub(crate) mod compact_backstop;
 pub(crate) mod spend_watch;
 mod container_tool_chunk;
 mod container_compaction_started;
