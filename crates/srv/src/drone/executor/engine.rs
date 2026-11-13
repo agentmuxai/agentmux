@@ -102,7 +102,6 @@ pub(super) async fn mark_state(
     g.insert(id.to_string(), state);
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::super::scheduler::over_run_cap;
@@ -142,8 +141,6 @@ mod tests {
             target_handle: None,
         }
     }
-
-
 
     #[tokio::test]
     async fn execute_preserves_started_at_in_block_state() {

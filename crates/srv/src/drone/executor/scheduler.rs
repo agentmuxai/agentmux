@@ -81,7 +81,7 @@ struct Scheduler<'a> {
     held: Vec<&'a FlowEdge>,
     /// How many times each guard has sent the run round its loop.
     rounds: HashMap<&'a str, u32>,
-    loop_started: HashMap<&'a str, Instant>,
+    loop_started: HashMap<String, Instant>,
     spent: f64,
     spent_by: HashMap<&'a str, f64>,
     history: HashMap<&'a str, VecDeque<Value>>,
@@ -219,6 +219,12 @@ impl<'a> Scheduler<'a> {
         if let Some(stopped) = over_run_cap(self.spent, self.run_cap_usd) {
             return Err(stopped);
         }
+        // A loop's time runs from the first block of its cycle, not from the
+        // first time its guard sends the run round.
+        let guards: Vec<String> = self.plan.cycle_of.iter().filter(|(g, group)| self.plan.guards.contains_key(*g) && group.contains(id)).map(|(g, _)| g.clone()).collect();
+        for guard in guards {
+            self.loop_started.entry(guard).or_insert_with(Instant::now);
+        }
         let output = self.run_block(node).await?;
         self.finished.insert(id);
         self.route(node, &output)
@@ -302,7 +308,6 @@ impl<'a> Scheduler<'a> {
         if let Some(guard) = self.plan.guards.get(id).cloned() {
             let goes_round = edges.iter().zip(&carry).any(|(e, c)| *c && guard.loop_edges.contains(&e.id));
             if goes_round {
-                self.loop_started.entry(id).or_insert_with(Instant::now);
                 if let Some(why) = self.loop_cap(id, &guard) {
                     match guard.on_cap {
                         OnCap::EndRun => return Err(why),
@@ -322,14 +327,16 @@ impl<'a> Scheduler<'a> {
                 }
             }
         }
-        for (edge, carries) in edges.into_iter().zip(carry) {
-            if self.plan.back_edges.contains(&edge.id) {
-                if carries {
-                    self.go_round(edge);
-                }
-            } else {
-                self.leave(edge, carries);
+        // Back-edges first: going round clears the decisions inside the loop, so
+        // an edge decided before it would be erased.
+        let (back, forward): (Vec<_>, Vec<_>) = edges.into_iter().zip(carry).partition(|(e, _)| self.plan.back_edges.contains(&e.id));
+        for (edge, carries) in back {
+            if carries {
+                self.go_round(edge);
             }
+        }
+        for (edge, carries) in forward {
+            self.leave(edge, carries);
         }
         Ok(())
     }

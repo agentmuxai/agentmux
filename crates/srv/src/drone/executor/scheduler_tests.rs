@@ -176,7 +176,47 @@ fn a_loops_cost_and_time_limits_end_it_with_their_reason() {
     let why = s.loop_cap("guard", &guard).unwrap();
     assert!(why.contains("the loop at guard spent $1.10, its cap of $1.00"), "{why}");
     s.spent_by.clear();
-    s.loop_started.insert("guard", Instant::now() - std::time::Duration::from_secs(6 * 60));
+    s.loop_started.insert("guard".to_string(), Instant::now() - std::time::Duration::from_secs(6 * 60));
     let why = s.loop_cap("guard", &guard).unwrap();
     assert!(why.contains("ran 6.0 minutes, its cap of 5 minutes"), "{why}");
+}
+
+#[tokio::test]
+async fn a_loops_clock_starts_with_the_first_block_of_its_cycle() {
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let states: States = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let graph = counting_loop("never", json!({ "max_minutes": 5 }), "unreached");
+    let plan = schedule::analyze(&graph).unwrap();
+    let mut s = Scheduler::new("r", &graph, plan, ExecutionScope::new(), None, &tx, &states);
+    s.enqueue("start", false);
+    s.step("start", false).await.unwrap();
+    assert!(s.loop_started.is_empty(), "the start block is not in the cycle");
+    s.step("step", false).await.unwrap();
+    assert!(s.loop_started.contains_key("guard"), "the first pass counts toward the loop's time, before the guard has gone round");
+}
+
+#[tokio::test]
+async fn a_block_with_a_forward_edge_and_a_back_edge_keeps_its_forward_edge() {
+    // b leads on to c inside the cycle and also back to the guard a; c leads back too.
+    let g = DroneGraph {
+        nodes: vec![
+            vars("start", "n", "x"),
+            node("a", json!({ "kind": "condition", "expr": "{{var.n}} == xxxx" })),
+            vars("b", "n", "{{var.n}}x"),
+            vars("c", "m", "y"),
+            response("done", "{{var.n}}"),
+        ],
+        edges: vec![
+            edge("e1", "start", "a", None),
+            edge("e2", "a", "b", Some("false")),
+            edge("e3", "a", "done", Some("true")),
+            edge("e4", "b", "c", None),
+            edge("e5", "b", "a", None),
+            edge("e6", "c", "a", None),
+        ],
+    };
+    // Two ways back into one guard is not a loop with a clear count, so only
+    // the edge's own fate is asserted: c is not skipped by the trip back.
+    let out = run(g).await;
+    assert!(out.times("c") >= 1, "c ran: its edge from b was not erased by the trip back");
 }
