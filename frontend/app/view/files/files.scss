@@ -34,6 +34,8 @@ $preview-hidden-to: 640px;
     --files-flex-name: 1;
     // The narrowest Name is drawn with every column shown; less once the header has dropped some (below).
     --files-min-name: 200px;
+    // A Name width set by dragging caps that minimum, so the column gives way in a thinner pane; none until then.
+    --files-w-name: 100vw;
 }
 
 // ── Toolbar ─────────────────────────────────────────────────────────────────
@@ -299,7 +301,7 @@ $preview-hidden-to: 640px;
     .ui-button.files-col-name {
         gap: 6px;
         flex: var(--files-flex-name);
-        min-width: min(var(--files-min-name), var(--files-w-name, 100vw));
+        min-width: min(var(--files-min-name), var(--files-w-name));
     }
 }
 
@@ -381,7 +383,7 @@ $preview-hidden-to: 640px;
     align-items: center;
     gap: 6px;
     flex: var(--files-flex-name);
-    min-width: min(var(--files-min-name), var(--files-w-name, 100vw));
+    min-width: min(var(--files-min-name), var(--files-w-name));
 }
 
 .files-col-modified {
