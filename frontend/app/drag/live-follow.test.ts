@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/util/logger", () => ({ Logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
 import { setPlatform } from "@/util/platformutil";
-import { beginLiveFollow, captureLiveFollow, endLiveFollow, resizeLiveFollow, type LiveFollowSpec } from "./live-follow";
+import { beginLiveFollow, captureLiveFollow, endLiveFollow, quietLiveFollow, resizeLiveFollow, type LiveFollowSpec } from "./live-follow";
 
 const spec: LiveFollowSpec = {
     sourceWindowLabel: "main",
@@ -24,6 +24,7 @@ function fakeApi() {
         liveFollowEnd: vi.fn(async () => {}),
         liveFollowResize: vi.fn(async (_args: unknown) => {}),
         liveFollowCapture: vi.fn(async (_args: unknown) => ({ staged: true })),
+        liveFollowQuiet: vi.fn(async (_args: { on: boolean }) => {}),
     };
 }
 
@@ -131,12 +132,29 @@ describe("live follow", () => {
         expect(api.liveFollowResize).toHaveBeenCalledTimes(2);
     });
 
+    it("turns a pane picture's quiet area off and on, in the order asked", async () => {
+        const api = fakeApi();
+        void quietLiveFollow(api, false);
+        await quietLiveFollow(api, true);
+        expect(api.liveFollowQuiet.mock.calls).toEqual([[{ on: false }], [{ on: true }]]);
+    });
+
+    it("a refused quiet area is only left as it was: the next one still goes out", async () => {
+        const api = fakeApi();
+        api.liveFollowQuiet.mockRejectedValueOnce(new Error("no picture"));
+        await quietLiveFollow(api, false);
+        await quietLiveFollow(api, true);
+        expect(api.liveFollowQuiet).toHaveBeenCalledTimes(2);
+    });
+
     it("does nothing off Windows", async () => {
         setPlatform("linux");
         const api = fakeApi();
         await beginLiveFollow(api, spec);
         endLiveFollow(api);
         await resizeLiveFollow(api, { width: 1, height: 1 });
+        await quietLiveFollow(api, false);
+        expect(api.liveFollowQuiet).not.toHaveBeenCalled();
         expect(api.liveFollowBegin).not.toHaveBeenCalled();
         expect(api.liveFollowEnd).not.toHaveBeenCalled();
         expect(api.liveFollowResize).not.toHaveBeenCalled();
