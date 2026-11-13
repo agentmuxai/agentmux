@@ -213,6 +213,31 @@ fn rule_from(from: &CaptureFrom) -> Result<Source, String> {
 /// and year when the card is settled).
 const CARD_KEYS: [(&str, &str); 7] = [("number", "number"), ("exp", "expiry"), ("exp_month", "exp_month"), ("exp_year", "exp_year"), ("cvc", "cvc"), ("name", "name"), ("zip", "zip")];
 
+/// A card's parts read from a page, by the keys a `parts` capture takes: the number as the main value and the rest
+/// beside it, ready for [`Capture::store`]. The page's parts are not cleaned out of an output, so they have no
+/// minimum length.
+pub fn card_found(values: BTreeMap<String, Zeroizing<String>>) -> Result<Found, String> {
+    let mut number = None;
+    let mut also = Vec::new();
+    for (key, value) in values {
+        let Some((_, part)) = CARD_KEYS.iter().find(|(k, _)| *k == key) else {
+            return Err(format!("a card has no {key:?}"));
+        };
+        if value.trim().is_empty() {
+            return Err(format!("the card's {key} is empty"));
+        }
+        let found = Found { value, printed: None, also: Vec::new() };
+        if *part == "number" {
+            number = Some(found);
+        } else {
+            also.push((*part, found));
+        }
+    }
+    let mut main = number.ok_or("a card needs its number")?;
+    main.also = also;
+    Ok(main)
+}
+
 /// A `parts` capture's sources: the card's number, and its other parts. Only a new card is made this way.
 fn card_parts(map: &BTreeMap<String, CaptureFrom>, into: &CaptureInto) -> Result<(Source, Vec<(&'static str, Source)>), String> {
     if into.id.is_some() || into.kind.as_deref().map(str::trim) != Some("card") {
