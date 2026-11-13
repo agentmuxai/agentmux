@@ -166,5 +166,44 @@ else
     bad "AppRun --version extracts and registers nothing" "found $(ls -A "$TMP/vhome/.local")"
 fi
 
+# ── 4. The desktop entry is registered under the channel the host advertises ──
+# After an in-app upgrade of a local-build channel the host keeps the recorded
+# channel (<AppImage>.agentmux-channel) while the shipped CHANNEL says stable;
+# registering the stable name left GNOME showing its cog. Extract the script's
+# own function so this cannot drift from it.
+CHFN="$TMP/channel-fn.sh"
+sed -n '/^desktop_channel() {/,/^}/p' "$APPRUN" > "$CHFN"
+[ -s "$CHFN" ] || { echo "  FAIL  could not extract desktop_channel from $APPRUN"; exit 1; }
+CD="$TMP/chdir"
+mkdir -p "$CD/usr/share/agentmux"
+printf 'stable\n' > "$CD/usr/share/agentmux/CHANNEL"
+chan() { # $1 = AGENTMUX_CHANNEL ("" unset), $2 = APPIMAGE ("" unset)
+    (
+        unset AGENTMUX_CHANNEL APPIMAGE
+        [ -n "$1" ] && export AGENTMUX_CHANNEL="$1"
+        [ -n "$2" ] && export APPIMAGE="$2"
+        this_dir="$CD"
+        # shellcheck disable=SC1090
+        . "$CHFN"
+        desktop_channel
+    )
+}
+AI="$TMP/AgentMux_9.9.9_amd64.AppImage"
+check_chan() { # name expected actual
+    if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected '$2', got '$3'"; fi
+}
+check_chan "no record: the build's own channel" stable "$(chan "" "$AI")"
+printf 'local-main-b28b7a-00a205a6\n' > "$AI.agentmux-channel"
+check_chan "an upgrade's record beside the AppImage wins over the build's" local-main-b28b7a-00a205a6 "$(chan "" "$AI")"
+check_chan "an explicit AGENTMUX_CHANNEL wins over the record" custom "$(chan custom "$AI")"
+printf '../evil/x\n' > "$AI.agentmux-channel"
+check_chan "a record that is not a plain channel name is ignored" stable "$(chan "" "$AI")"
+check_chan "outside an AppImage the record is not looked for" stable "$(chan "" "")"
+if grep -q 'CHANNEL="\$(desktop_channel)"' "$APPRUN"; then
+    ok "run_normally registers the desktop entry with desktop_channel"
+else
+    bad "run_normally registers the desktop entry with desktop_channel" "expected CHANNEL=\"\$(desktop_channel)\""
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
