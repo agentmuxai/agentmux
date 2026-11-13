@@ -565,21 +565,18 @@ async fn a_drone_action_runs_the_drone_and_closes_the_jobs_row_when_it_ends() {
     assert!(row.links["trigger"]["sha256"].as_str().is_some_and(|h| h.len() == 64), "{}", row.links);
 }
 
-/// A drone job takes no timeout, retries or cancel_other until a run can be stopped.
+/// A drone job takes no retries until a failed run can be run again. A timeout
+/// and cancel_other stop the run through the engine, so they are allowed.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_drone_job_refuses_policies_that_need_a_stoppable_run() {
+async fn a_drone_job_takes_a_timeout_and_cancel_other_but_not_retries() {
     let (state, owner, _) = state();
     let make = |policy: Value| definition(json!({ "trigger": { "kind": "manual" }, "action": { "kind": "drone", "drone_id": "d-1" }, "policy": policy }));
-    for policy in [
-        json!({ "timeout_minutes": 5 }),
-        json!({ "retries": 1 }),
-        json!({ "overlap": "cancel_other" }),
-    ] {
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({ "retries": 1 })))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    for policy in [json!({ "timeout_minutes": 5 }), json!({ "overlap": "cancel_other" }), json!({})] {
         let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(policy.clone()))).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{policy}: {v}");
+        assert_eq!(status, StatusCode::CREATED, "{policy}: {v}");
     }
-    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({})))).await;
-    assert_eq!(status, StatusCode::CREATED, "{v}");
 }
 
 /// Manual, one-time and interval triggers.
