@@ -176,6 +176,9 @@ pub(crate) async fn run<S: Server, T: Terminal>(server: &S, origin: &str, print:
 pub(crate) struct HttpServer {
     client: reqwest::Client,
     base: String,
+    bound: String,
+    key: String,
+    origin: String,
     channel: std::sync::Mutex<local_proof::Client>,
 }
 
@@ -188,6 +191,12 @@ impl HttpServer {
         let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(10)).build().expect("a plain http client");
         let bound = format!("127.0.0.1:{}", target.port);
         let base = format!("http://{bound}");
+        let channel = Self::hello(&client, &base, &bound, &target.key, &target.origin).await?;
+        Ok(HttpServer { client, base, bound, key: target.key.clone(), origin: target.origin.clone(), channel: std::sync::Mutex::new(channel) })
+    }
+
+    /// One hello: a channel srv has proved itself on, at the address `open` is talking to.
+    async fn hello(client: &reqwest::Client, base: &str, bound: &str, key: &str, origin: &str) -> Result<local_proof::Client, String> {
         let nonce = local_proof::new_nonce();
         let resp = client
             .post(format!("{base}/auth/hello"))
@@ -204,18 +213,18 @@ impl HttpServer {
         let (Some(channel), Some(srv_nonce), Some(declared), Some(proof)) = (text("channel"), text("nonce"), text("declared"), text("proof")) else {
             return Err(not_this_server());
         };
-        let channel = local_proof::Client::accept(target.key.as_bytes(), &nonce, &bound, local_proof::HelloReply { channel, nonce: srv_nonce, declared, proof })
+        let channel = local_proof::Client::accept(key.as_bytes(), &nonce, bound, local_proof::HelloReply { channel, nonce: srv_nonce, declared, proof })
             .map_err(|_| not_this_server())?;
         // The browser is opened only at an address this server proved is its own.
-        if target.origin != base && channel.declared() != Some(target.origin.as_str()) {
-            return Err(format!("--origin {} is not an address this server accepts (it accepts {base}{})", target.origin, channel.declared().map(|d| format!(" and {d}")).unwrap_or_default()));
+        if origin != base && channel.declared() != Some(origin) {
+            return Err(format!("--origin {origin} is not an address this server accepts (it accepts {base}{})", channel.declared().map(|d| format!(" and {d}")).unwrap_or_default()));
         }
-        Ok(HttpServer { client, base, channel: std::sync::Mutex::new(channel) })
+        Ok(channel)
     }
 
-    async fn post(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
-        let bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
-        let signed = self.channel.lock().unwrap_or_else(|e| e.into_inner()).sign("POST", path, &bytes);
+    /// One signed request, sent once: the status, the answer's proof, the answer and the request's number.
+    async fn send(&self, path: &str, bytes: &[u8]) -> Result<(reqwest::StatusCode, Option<String>, Vec<u8>, u64), String> {
+        let signed = self.channel.lock().unwrap_or_else(|e| e.into_inner()).sign("POST", path, bytes);
         let resp = self
             .client
             .post(format!("{}{path}", self.base))
@@ -223,21 +232,38 @@ impl HttpServer {
             .header(local_proof::CHANNEL_HEADER, &signed.channel)
             .header(local_proof::SEQ_HEADER, signed.seq.to_string())
             .header(local_proof::PROOF_HEADER, &signed.proof)
-            .body(bytes)
+            .body(bytes.to_vec())
             .send()
             .await
             .map_err(|_| format!("could not reach srv at {} (is it running, and is that its web port?)", self.base))?;
         let status = resp.status();
         let proof = resp.headers().get(local_proof::PROOF_HEADER).and_then(|v| v.to_str().ok()).map(str::to_string);
         let answer = resp.bytes().await.map_err(|_| "srv answered something unexpected".to_string())?;
-        if !status.is_success() {
-            return Err("srv did not accept this (it may have restarted: run `agentmux-srv open` again)".into());
+        Ok((status, proof, answer.to_vec(), signed.seq))
+    }
+
+    async fn post(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+        let bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
+        let mut begun_again = false;
+        loop {
+            let (status, proof, answer, seq) = self.send(path, &bytes).await?;
+            if !status.is_success() {
+                // The first request on a channel can find it replaced, when other callers' hellos filled srv's
+                // table between this one and the request: begin once more, then give up.
+                if seq == 1 && !begun_again {
+                    begun_again = true;
+                    let fresh = Self::hello(&self.client, &self.base, &self.bound, &self.key, &self.origin).await?;
+                    *self.channel.lock().unwrap_or_else(|e| e.into_inner()) = fresh;
+                    continue;
+                }
+                return Err("srv did not accept this (it may have restarted: run `agentmux-srv open` again)".into());
+            }
+            let proved = proof.is_some_and(|p| self.channel.lock().unwrap_or_else(|e| e.into_inner()).answer_ok(seq, status.as_u16(), &answer, &p));
+            if !proved {
+                return Err("srv's answer did not carry the proof of the key, so it was not used".into());
+            }
+            return serde_json::from_slice(&answer).map_err(|_| "srv answered something unexpected".to_string());
         }
-        let proved = proof.is_some_and(|p| self.channel.lock().unwrap_or_else(|e| e.into_inner()).answer_ok(signed.seq, status.as_u16(), &answer, &p));
-        if !proved {
-            return Err("srv's answer did not carry the proof of the key, so it was not used".into());
-        }
-        serde_json::from_slice(&answer).map_err(|_| "srv answered something unexpected".to_string())
     }
 }
 

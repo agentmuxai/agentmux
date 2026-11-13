@@ -324,3 +324,69 @@ async fn the_browser_is_opened_only_at_an_address_the_server_proved() {
     let bare = real_srv("").await;
     assert!(HttpServer::connect(&target(bare, Some("http://127.0.0.1:9191"))).await.is_err(), "nothing declared");
 }
+
+/// A server whose first `lose` channels are replaced before their first request arrives (other
+/// callers' hellos filled its table in between). Counts the hellos it answered.
+async fn flooded_srv(lose: usize) -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use axum::body::Bytes;
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::response::IntoResponse;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let channels = std::sync::Arc::new(Mutex::new(Channels::default()));
+    let hellos = std::sync::Arc::new(AtomicUsize::new(0));
+    let (c1, h1, c2) = (channels.clone(), hellos.clone(), channels.clone());
+    let app = axum::Router::new()
+        .route(
+            "/auth/hello",
+            axum::routing::post(move |axum::Json(v): axum::Json<serde_json::Value>| {
+                let (channels, hellos) = (c1.clone(), h1.clone());
+                async move {
+                    let n = hellos.fetch_add(1, Ordering::SeqCst);
+                    let mut store = channels.lock().unwrap();
+                    let h = store.hello(SECRET.as_bytes(), v["nonce"].as_str().unwrap_or_default(), &format!("127.0.0.1:{port}"), "", Instant::now()).unwrap();
+                    if n < lose {
+                        *store = Channels::default();
+                    }
+                    axum::Json(serde_json::json!({ "channel": h.channel, "nonce": h.nonce, "declared": "", "proof": h.proof }))
+                }
+            }),
+        )
+        .route(
+            "/auth/code",
+            axum::routing::post(move |headers: HeaderMap, body: Bytes| {
+                let channels = c2.clone();
+                async move {
+                    let get = |n: &str| headers.get(n).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+                    let seq = get(crate::server::local_proof::SEQ_HEADER).parse::<u64>().unwrap_or(0);
+                    let admitted = channels.lock().unwrap().admit(&get(crate::server::local_proof::CHANNEL_HEADER), seq, "POST", "/auth/code", &body, &get(crate::server::local_proof::PROOF_HEADER), Instant::now());
+                    match admitted {
+                        None => StatusCode::FORBIDDEN.into_response(),
+                        Some(a) => {
+                            let answer = serde_json::to_vec(&serde_json::json!({ "code": "abc" })).unwrap();
+                            let proof = crate::server::local_proof::response_proof(&a.key, a.seq, 200, &answer);
+                            ([(crate::server::local_proof::PROOF_HEADER, proof)], answer).into_response()
+                        }
+                    }
+                }
+            }),
+        );
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (port, hellos)
+}
+
+/// The first request on a new channel finds it replaced: `open` begins once more, and only once.
+#[tokio::test]
+async fn open_begins_again_once_when_its_first_request_is_refused() {
+    let (port, hellos) = flooded_srv(1).await;
+    let server = HttpServer::connect(&target(port, None)).await.unwrap();
+    assert_eq!(server.mint_code().await, Ok("abc".to_string()));
+    assert_eq!(hellos.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+    let (port, hellos) = flooded_srv(2).await;
+    let server = HttpServer::connect(&target(port, None)).await.unwrap();
+    let err = server.mint_code().await.unwrap_err();
+    assert!(err.contains("did not accept"), "{err}");
+    assert_eq!(hellos.load(std::sync::atomic::Ordering::SeqCst), 2, "one more hello, no more");
+}

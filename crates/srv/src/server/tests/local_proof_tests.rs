@@ -166,3 +166,45 @@ fn channels_expire_and_their_number_is_capped() {
     flood.hello(KEY, &new_nonce(), BOUND, "", t0 + CHANNEL_LIFE + secs(1)).unwrap();
     assert_eq!(flood.count(), 1);
 }
+
+/// A flood of hellos, which anyone may send, replaces channels that proved nothing, never one that
+/// has proved a request: the sign-in under way keeps its channel.
+#[test]
+fn a_flood_of_hellos_does_not_evict_a_channel_that_proved_a_request() {
+    let channels = Channels::default();
+    let now = Instant::now();
+    let nonce_c = new_nonce();
+    let h = channels.hello(KEY, &nonce_c, BOUND, "", now).unwrap();
+    let mut client = Client::accept(KEY, &nonce_c, BOUND, HelloReply { channel: h.channel, nonce: h.nonce, declared: String::new(), proof: h.proof }).unwrap();
+    let first = client.sign("POST", "/auth/code", b"{}");
+    assert!(channels.admit(&first.channel, first.seq, "POST", "/auth/code", b"{}", &first.proof, now).is_some());
+    for i in 0..(MAX_CHANNELS * 3) {
+        channels.hello(KEY, &new_nonce(), BOUND, "", now + Duration::from_millis(i as u64 + 1)).unwrap();
+    }
+    assert_eq!(channels.count(), MAX_CHANNELS);
+    let next = client.sign("POST", "/auth/pending", b"{}");
+    assert!(channels.admit(&next.channel, next.seq, "POST", "/auth/pending", b"{}", &next.proof, now).is_some(), "the proved channel is still there");
+}
+
+/// When every channel has proved a request, the oldest of all makes room.
+#[test]
+fn when_every_channel_has_proved_a_request_the_oldest_goes() {
+    let channels = Channels::default();
+    let t0 = Instant::now();
+    let mut clients = Vec::new();
+    for i in 0..MAX_CHANNELS {
+        let nonce_c = new_nonce();
+        let at = t0 + Duration::from_millis(i as u64);
+        let h = channels.hello(KEY, &nonce_c, BOUND, "", at).unwrap();
+        let mut c = Client::accept(KEY, &nonce_c, BOUND, HelloReply { channel: h.channel, nonce: h.nonce, declared: String::new(), proof: h.proof }).unwrap();
+        let s = c.sign("POST", "/auth/code", b"{}");
+        assert!(channels.admit(&s.channel, s.seq, "POST", "/auth/code", b"{}", &s.proof, at).is_some());
+        clients.push(c);
+    }
+    channels.hello(KEY, &new_nonce(), BOUND, "", t0 + Duration::from_millis(MAX_CHANNELS as u64)).unwrap();
+    assert_eq!(channels.count(), MAX_CHANNELS);
+    let oldest = clients[0].sign("POST", "/auth/code", b"{}");
+    assert!(channels.admit(&oldest.channel, oldest.seq, "POST", "/auth/code", b"{}", &oldest.proof, t0).is_none(), "the oldest was replaced");
+    let newest = clients[MAX_CHANNELS - 1].sign("POST", "/auth/code", b"{}");
+    assert!(channels.admit(&newest.channel, newest.seq, "POST", "/auth/code", b"{}", &newest.proof, t0).is_some());
+}

@@ -26,7 +26,7 @@ pub(crate) const PROOF_HEADER: &str = "x-am-proof";
 
 /// A channel lives this long: more than a sign-in takes (a minute for the browser, a minute for the answer).
 const CHANNEL_LIFE: Duration = Duration::from_secs(5 * 60);
-/// At most this many channels at once; a new one beyond it replaces the oldest.
+/// At most this many channels at once; a new one beyond it replaces the oldest that has proved nothing.
 const MAX_CHANNELS: usize = 256;
 
 type Hmac256 = Hmac<Sha256>;
@@ -117,8 +117,16 @@ impl Channels {
         let mut map = self.lock();
         map.retain(|_, c| now.duration_since(c.born) <= CHANNEL_LIFE);
         if map.len() >= MAX_CHANNELS {
-            if let Some(oldest) = map.iter().min_by_key(|(_, c)| c.born).map(|(id, _)| id.clone()) {
-                map.remove(&oldest);
+            // A caller without the key can never move a channel off 0, so a flood replaces channels
+            // that have proved nothing first; one that has proved a request goes only when all have.
+            let victim = map
+                .iter()
+                .filter(|(_, c)| c.last_seq == 0)
+                .min_by_key(|(_, c)| c.born)
+                .or_else(|| map.iter().min_by_key(|(_, c)| c.born))
+                .map(|(id, _)| id.clone());
+            if let Some(victim) = victim {
+                map.remove(&victim);
             }
         }
         let ck = ChannelKey(channel_key(key, nonce_c, &nonce_s, bound, declared));
