@@ -94,7 +94,7 @@ fn declared_tier(raw: Option<&str>) -> Option<crate::backend::reactive::types::J
 /// What is noted when a relay message arrives: it is remembered (a bare "got it" back is refused), and,
 /// as it shows the sender is reachable, a message queued to it is no longer watched for a reply.
 fn note_arrival(mstore: &Store, req: &InjectionRequest) {
-    crate::server::jekt_ack::remember_arrival(mstore, req);
+    crate::backend::ack_policy::remember_arrival(mstore, req);
     crate::muxbus::relay_watch::heard_from(req.source_agent.as_deref(), &req.target_agent);
 }
 

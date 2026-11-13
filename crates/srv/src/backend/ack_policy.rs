@@ -140,6 +140,24 @@ pub fn record(from: &str, to: &str, msg_id: Option<&str>, no_reply: bool) {
     p.record(from, to, msg_id, no_reply, agentmux_common::time::now_ms());
 }
 
+/// The agent a name, display binding, former slug or UID stands for, as one string, so a reply is
+/// matched to the message it answers whichever way each side addressed the other.
+pub(crate) fn canon(store: &crate::backend::storage::store::Store, name: &str) -> String {
+    crate::backend::agent_resolve::resolve_agent_id(store, name).unwrap_or_else(|_| name.to_string())
+}
+
+/// Remember a message arriving here (from another host, by the cloud relay, or with files), for the
+/// next reply's check. It is never refused: only the sender's own srv does that.
+pub(crate) fn remember_arrival(store: &crate::backend::storage::store::Store, req: &crate::backend::reactive::types::InjectionRequest) {
+    let Some(source) = req.source_agent.as_deref().filter(|s| !s.is_empty() && *s != "cron") else { return };
+    record(
+        &canon(store, source),
+        &canon(store, &req.target_agent),
+        req.request_id.as_deref(),
+        req.reply.as_deref() == Some("none"),
+    );
+}
+
 /// [`AckPolicy::asked_for_no_reply`] on the process-wide table.
 pub fn asked_for_no_reply(msg_id: &str) -> bool {
     let p = POLICY.lock().unwrap_or_else(|e| e.into_inner());
