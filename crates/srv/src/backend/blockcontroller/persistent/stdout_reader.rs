@@ -400,7 +400,7 @@ impl StdoutReader {
             return false;
         }
         if let Some(stuck) = self.loop_guard.observe(parsed) {
-            self.ended_by_guard = loop_stop::end_the_turn(&self.inner_read, &self.block_id_read, self.mstore_read.as_ref(), &stuck);
+            self.ended_by_guard = loop_stop::end_the_turn(&self.inner_read, self.my_generation_read, &self.block_id_read, self.mstore_read.as_ref(), &stuck);
         }
         false
     }

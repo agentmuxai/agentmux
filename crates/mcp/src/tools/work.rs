@@ -353,6 +353,7 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
         "attempt": attempt,
         "result": result_text,
         "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
+        "handback": segment == "release" && arguments.get("handback").and_then(|v| v.as_bool()).unwrap_or(false),
     });
     let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
         .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
@@ -381,6 +382,11 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
             // agent can pick it up when nobody ever will (Codex P2 on
             // PR #2902). The server reports the resulting state; trust
             // it rather than re-deriving the attempts rule here.
+            if segment == "release" && arguments.get("handback").and_then(|v| v.as_bool()).unwrap_or(false) {
+                return Ok(format!(
+                    "Handed {id} back to the pool: no attempt used, and an unnamed claim won't offer it to you again."
+                ));
+            }
             let resulting = serde_json::from_str::<Value>(&text)
                 .ok()
                 .and_then(|v| v.get("state").and_then(|s| s.as_str()).map(str::to_string))
@@ -389,8 +395,9 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
                 format!(
                     "Released {id}, and it has now used its final attempt — the item is \
                      parked as FAILED and will not be offered to any agent again. If it \
-                     still needs doing, enqueue a fresh item (ideally with what you \
-                     learned about why it kept failing)."
+                     still needs doing, Tasks retry reopens it (or enqueue a fresh item, ideally \
+                     with what you learned about why it kept failing). A task that is simply \
+                     outside your area is handed back with handback: true, which never parks it."
                 )
             } else {
                 format!("Released {id} back to the queue for another agent.")
