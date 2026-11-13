@@ -888,6 +888,7 @@ impl Handler {
             delivery_tier,
             req.sig_verified,
             req.reagent_verified,
+            req.reagent_expired,
             req.lan_verified,
             req.channel_verified,
             req.wan_instance.as_ref().filter(|_| req.wan_verified == Some(true)),

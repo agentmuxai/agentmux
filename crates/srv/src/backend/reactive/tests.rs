@@ -1107,6 +1107,55 @@ async fn test_handler_inject_wan_reagent_invalid_signature_renders_sig_invalid()
     assert!(payload.contains("pause and ask the human operator"), "{payload}");
 }
 
+// A genuine signature that failed only the age rules reads as expired, not forged, and is held to the same
+// tier and stop as an invalid one.
+#[tokio::test]
+async fn test_handler_inject_wan_reagent_expired_signature_renders_sig_expired_and_still_stops() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "PR #1 reviewed".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-wan-expired".to_string()),
+        delivery_tier: Some("wan".to_string()),
+        reagent_verified: Some(false),
+        reagent_expired: true,
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    assert_eq!(resp.requires_stop, Some(true), "expired changes the word, not the stop");
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("SIG=expired"), "{payload}");
+    assert!(!payload.contains("SIG=invalid"), "{payload}");
+    assert!(payload.contains("ESCALATE=required"), "{payload}");
+}
+
+// The word needs the failed verdict under it: a verified or unsigned request never reads expired.
+#[test]
+fn test_the_expired_flag_alone_renders_nothing_without_a_failed_verdict() {
+    let wrap = |verdict| {
+        crate::backend::reactive::sanitize::wrap_jekt_message_with_files(
+            "fyi", Some("github-consumer"), "agent1", "coord", "wan", None, verdict, true, None, None, None, false,
+            "m1", "normal", None, None, false,
+        )
+    };
+    assert!(tag_line(&wrap(Some(true))).contains(" SIG=verified "), "got: {}", wrap(Some(true)));
+    assert!(!tag_line(&wrap(None)).contains("SIG="), "got: {}", wrap(None));
+    assert!(tag_line(&wrap(Some(false))).contains(" SIG=expired "), "got: {}", wrap(Some(false)));
+}
+
 #[tokio::test]
 async fn test_handler_inject_wan_no_reagent_signature_omits_sig_field() {
     let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
@@ -3930,7 +3979,7 @@ fn shot_list() -> crate::backend::reactive::types::FilesDelivery {
 fn test_marker_with_files_counts_them_and_lists_them_after_the_message() {
     let files = shot_list();
     let m = crate::backend::reactive::sanitize::wrap_jekt_message_with_files(
-        "look at this", Some("agent2"), "agent1", "coord", "host", Some(true), None, None, None, None, false,
+        "look at this", Some("agent2"), "agent1", "coord", "host", Some(true), None, false, None, None, None, false,
         "m.files-v1.abc", "normal", None, Some(&files), false,
     );
     assert!(tag_line(&m).contains(" FILES=1 MSGID="), "got: {m}");
@@ -3946,7 +3995,7 @@ fn test_marker_with_files_counts_them_and_lists_them_after_the_message() {
 fn test_the_marker_says_reply_none_only_when_the_sender_asked_for_no_reply() {
     let wrap = |reply_none| {
         crate::backend::reactive::sanitize::wrap_jekt_message_with_files(
-            "fyi", Some("agentx"), "agent1", "coord", "host", Some(true), None, None, None, None, false,
+            "fyi", Some("agentx"), "agent1", "coord", "host", Some(true), None, false, None, None, None, false,
             "m1", "normal", None, None, reply_none,
         )
     };
@@ -3977,7 +4026,7 @@ fn test_a_file_name_cannot_close_the_block_or_open_a_list() {
         inline_charge: None,
     };
     let m = crate::backend::reactive::sanitize::wrap_jekt_message_with_files(
-        "look", Some("agent2"), "agent1", "coord", "host", Some(true), None, None, None, None, false,
+        "look", Some("agent2"), "agent1", "coord", "host", Some(true), None, false, None, None, None, false,
         "m", "normal", None, Some(&files), false,
     );
     assert_eq!(m.matches("[/JEKT]").count(), 1, "{m}");
