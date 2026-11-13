@@ -16,6 +16,7 @@ import type { AgentViewModel } from "./agent-model";
 import { createAgentViewControls, registerAgentViewControls } from "./agent-view-controls";
 import type { PaneFoundation } from "./agent-view-foundation";
 import { markResolvedAuthErrors } from "./failure/resolved-auth-errors";
+import { hiddenFill } from "./hooks/hidden-fill";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { useLiveFeedRollOff } from "./hooks/useLiveFeedRollOff";
 import { usePaneReveal } from "./hooks/usePaneReveal";
@@ -23,6 +24,7 @@ import { useResumePreflight } from "./hooks/useResumePreflight";
 import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
 import { injectGapRows, injectHistoryLink } from "./inject-history-link";
 import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume-preflight";
+import { useWindowHidden } from "./render-dormant";
 import { createTranscriptSettleLatch } from "./transcript-cursor";
 import { withoutPanelJekts } from "./messages/messages-state";
 import { deriveDisplayNodes, isForcedRow } from "./virtualization/verbosity";
@@ -33,6 +35,7 @@ export type HistoryAndFeed = ReturnType<typeof useHistoryAndFeed>;
 export function useHistoryAndFeed(found: PaneFoundation, model: AgentViewModel, agentId: string) {
     const { paneModel, outputFormat, agentName, agentAtoms, block, renderDormant } = found;
     const { log } = found.shell;
+    const windowHidden = useWindowHidden();
 
     // AgentDocumentView registers its viewState.markHistoryReady here on mount, so useHistoryPagination can signal
     // "history done" into the view state that gates the streaming buffer's enter animation.
@@ -57,7 +60,9 @@ export function useHistoryAndFeed(found: PaneFoundation, model: AgentViewModel, 
         restoreTurns: () =>
             liveFeed.liveFeedOn() && outputFormat() === "claude-stream-json" && Number.isFinite(liveFeed.liveFeedTurns) ? liveFeed.liveFeedTurns + 1 : undefined,
         restoreBytes: () => (liveFeed.liveFeedOn() ? LIVE_FEED_RESTORE_BYTES : undefined), // what the feed keeps, by size
-        fillPaused: () => renderDormant() || !liveFeed.followingBottom(), // see the option; a prewarming pane fills
+        // see the options; a prewarming pane fills, and so does a pane in a hidden tab (not in a hidden window) when memory allows
+        fillPaused: () => windowHidden() || !liveFeed.followingBottom() || (renderDormant() && !hiddenFill.allowed()),
+        fillHidden: renderDormant,
         onHistoryReady: () => {
             historyReadyFn?.();
             // A pane opens with K turns, not the load window's worth (§6.9).
@@ -110,7 +115,7 @@ export function useHistoryAndFeed(found: PaneFoundation, model: AgentViewModel, 
 
 /** What the pane shows: the document under the pane's view, kept saved. */
 export function useShownDocument(found: PaneFoundation, model: AgentViewModel, agentId: string, feed: HistoryAndFeed) {
-    const { paneModel, agentAtoms, renderDormant } = found;
+    const { paneModel, agentAtoms } = found;
     const { log } = found.shell;
     const { history, resumePreflight } = feed;
     const { gapsBefore, earlierHistoryAvailable, earlierTurnsKnown } = feed.liveFeed;
@@ -157,7 +162,7 @@ export function useShownDocument(found: PaneFoundation, model: AgentViewModel, a
         getDocument,
         getDetailsOpen: () => paneModel.state.detailsOpen,
         snapshotIsForeignBlock: () => history.snapshotIsForeignBlock(),
-        hidden: renderDormant, log,
+        log,
     });
 
     return { displayDocument, viewControls, shownDocument, getDocument };

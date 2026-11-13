@@ -9,12 +9,13 @@
 //   JS -> Rust:  fetch("http://127.0.0.1:{port}/ipc", { method: "POST", body: JSON.stringify({cmd, args}) })
 //   Rust -> JS:  frame.execute_javascript("window.dispatchEvent(new CustomEvent('agentmux-event', {detail: ...}))")
 //
-// Why HTTP over CEF ProcessMessage:
-//   - cef-rs does not wrap CefMessageRouter (C++ convenience class)
-//   - Building a custom ProcessMessage router requires RenderProcessHandler + V8 bindings
+// Why HTTP rather than CEF process messages for the commands:
 //   - fetch() is natural for async/await frontend code
 //   - Easy to debug: curl http://127.0.0.1:PORT/ipc -d '{"cmd":"get_platform"}'
 //   - axum is already in the tokio ecosystem
+// The one command the page sends every frame, `browser_panes_set_rects`, also
+// has a process-message lane (ipc_query.rs): a page whose window has it uses
+// that, and this route otherwise.
 
 use std::sync::Arc;
 
@@ -220,7 +221,7 @@ async fn route_command(
         "get_backend_info" => Ok(commands::backend::get_backend_info(state)),
         "get_health_signals" => Ok(crate::health_signals::snapshot(state)),
         "restart_backend" => commands::backend::restart_backend(state.clone()).await,
-        "close_window" => commands::window::close_window(state, args),
+        "close_window" | "close_request_seen" => commands::window::close_command(cmd, state, args),
         // Issue #2977 Workstream 1 — the tray's "Quit AgentMux". Explicit,
         // user-initiated shutdown that bypasses the background-service gate
         // (see `quit_app`'s doc for why the ordinary last-window path and
@@ -428,8 +429,7 @@ async fn route_command(
         "pool_window_ready" => commands::drag::pool_window_ready(state, args),
         "start_tab_drag_tracking" => commands::drag::start_tab_drag_tracking_blocking(state, args).await,
         "stop_tab_drag_tracking" => commands::drag::stop_tab_drag_tracking_blocking().await,
-        "live_follow_begin" => commands::live_follow::begin_blocking(state, args).await,
-        "live_follow_end" => commands::live_follow::end(),
+        "live_follow_begin" | "live_follow_end" | "live_follow_resize" | "live_follow_capture" => commands::live_follow::route(cmd, state, args).await,
         "pane_pool_window_ready" => commands::drag::pane_pool_window_ready(state, args),
         "tear_off_sc_move_handshake" => {
             // Wrap in spawn_blocking — the handler polls state.browsers
@@ -861,7 +861,7 @@ async fn route_command(
             .await
             .map_err(|e| format!("app_update_action: {e}"))?
         }
-        "store_update_install" | "store_update_check" | "store_update_came_back" => crate::commands::store_update::run(state, cmd, args).await,
+        "store_update_install" | "store_update_check" | "store_update_came_back" | "store_update_restart" | "store_update_working" | "store_update_raise" => crate::commands::store_update::run(state, cmd, args).await,
         "upgrade_request_decide" => {
             // The user's Upgrade now / Later on an agent's request to upgrade
             // AgentMux, relayed to srv as the host: no agent can approve its
@@ -1033,37 +1033,6 @@ async fn route_command(
                 }
             }
         }
-        "memory_adoption_request" => {
-            // Memory → Personal asks to adopt earlier accounts' memory for an agent
-            // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). This only
-            // opens the approval subwindow; see `memory_adoption`.
-            let window_label = args.get("window_label").and_then(|v| v.as_str()).unwrap_or("");
-            let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
-            let list_id = args.get("list_id").and_then(|v| v.as_str()).unwrap_or("");
-            let choices = args.get("choices").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-            let summary = args.get("summary").cloned().unwrap_or(serde_json::Value::Null);
-            if agent_id.is_empty() || list_id.is_empty() {
-                return Err("memory_adoption_request: agent_id and list_id are required".into());
-            }
-            crate::memory_adoption::request(state, window_label, agent_id, list_id, choices, summary)
-                .map(|approval_id| serde_json::json!({ "approval_id": approval_id }))
-        }
-        "memory_release_request" => {
-            // Release an agent's claim on a memory folder: only opens the
-            // approval subwindow; see `memory_adoption`.
-            let window_label = args.get("window_label").and_then(|v| v.as_str()).unwrap_or("");
-            let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
-            let list_id = args.get("list_id").and_then(|v| v.as_str()).unwrap_or("");
-            let Some(index) = args.get("index").and_then(|v| v.as_u64()) else {
-                return Err("memory_release_request: index is required".into());
-            };
-            let summary = args.get("summary").cloned().unwrap_or(serde_json::Value::Null);
-            if agent_id.is_empty() || list_id.is_empty() {
-                return Err("memory_release_request: agent_id and list_id are required".into());
-            }
-            crate::memory_adoption::request_release(state, window_label, agent_id, list_id, index, summary)
-                .map(|approval_id| serde_json::json!({ "approval_id": approval_id }))
-        }
         "ssh_approval_decide" => {
             // Only the SSH approval subwindow knows the approval_id; its
             // answer goes to srv's waiting request (`ssh_approval`).
@@ -1072,12 +1041,6 @@ async fn route_command(
             let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let checkbox = args.get("checkbox").and_then(|v| v.as_bool()).unwrap_or(false);
             Ok(serde_json::json!(crate::ssh_approval::decide(approval_id, approve, text, checkbox)))
-        }
-        "memory_adoption_decide" => {
-            // Only the approval subwindow knows the approval_id.
-            let approval_id = args.get("approval_id").and_then(|v| v.as_str()).unwrap_or("");
-            let approve = args.get("approve").and_then(|v| v.as_bool()).unwrap_or(false);
-            crate::memory_adoption::decide(state, approval_id, approve).await
         }
         "credential_approval_decide" => {
             // The human resolved the credential-approval subwindow —
@@ -1341,7 +1304,7 @@ fn focus_app(state: &Arc<AppState>, window_label: &str) {
         tracing::warn!("[ipc] focus_app: no browser found for label={}", window_label);
         return;
     };
-    if crate::pane_backend::views() {
+    if crate::pane_backend::window_is_views(state, &label) {
         crate::input_owner::views::select_app(state, &label);
     } else {
         #[cfg(target_os = "windows")]

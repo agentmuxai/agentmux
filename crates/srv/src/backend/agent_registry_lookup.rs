@@ -39,11 +39,16 @@ fn active_records_matching_slug(agent_id: &str) -> Option<Vec<NamedAgentRecord>>
 }
 
 /// The active registry record whose `instance_name` normalizes to the same
-/// slug as `agent_id` — **only if exactly one does**.
+/// slug as `agent_id` — **only if it names one agent**.
+///
+/// One record matching is one agent. Several records that all name one
+/// non-empty `definition_id` are also one agent, recorded more than once (the
+/// move to definition-id keys left the old record beside the new): the
+/// preferred record answers (see [`preferred`]).
 ///
 /// `None` when the registry is unavailable, unreadable, nothing matches, or
-/// **more than one record matches**. Callers treat the first three the same
-/// way (fall back to another source), so they are not distinguished.
+/// **records of different definitions match**. Callers treat the first three
+/// the same way (fall back to another source), so they are not distinguished.
 ///
 /// **Why ambiguity returns `None` rather than the first match** (reagentx P1,
 /// PR #3480): registry records are keyed by `instance_id`, and nothing
@@ -63,6 +68,11 @@ fn active_records_matching_slug(agent_id: &str) -> Option<Vec<NamedAgentRecord>>
 /// instead of refusing it.
 pub(crate) fn find_active_record_by_slug(agent_id: &str) -> Option<NamedAgentRecord> {
     let mut matches = active_records_matching_slug(agent_id)?;
+    // Records that all name one definition are one agent recorded more than once (an upgrade across the move to
+    // definition-id keys left the old record beside the new): not a collision, and the live one answers.
+    if matches.len() > 1 && same_definition(&matches) {
+        return Some(preferred(matches));
+    }
     match matches.len() {
         1 => matches.pop(),
         0 => None,
@@ -88,9 +98,37 @@ pub(crate) fn find_active_record_by_slug_and_definition(
     agent_id: &str,
     definition_id: &str,
 ) -> Option<NamedAgentRecord> {
-    active_records_matching_slug(agent_id)?
+    let of_definition: Vec<_> = active_records_matching_slug(agent_id)?.into_iter().filter(|r| r.data.definition_id == definition_id).collect();
+    (!of_definition.is_empty()).then(|| preferred(of_definition))
+}
+
+/// Whether every record names one non-empty definition: they are one agent, recorded more than once.
+fn same_definition(records: &[NamedAgentRecord]) -> bool {
+    let first = &records[0].data.definition_id;
+    !first.is_empty() && records.iter().all(|r| &r.data.definition_id == first)
+}
+
+/// The record to go by among several for one agent: the one whose instance holds a live lease, else the one launched
+/// last, else the newest made, else the lowest instance id (so the answer is the same on every call). `records` is not
+/// empty.
+fn preferred(records: Vec<NamedAgentRecord>) -> NamedAgentRecord {
+    let leases = crate::registry::resolve_shared_registry_dir().and_then(|dir| crate::registry::LeaseStore::open(&dir).ok());
+    // Read once per record: each read takes the instance's lease lock.
+    let live = |r: &NamedAgentRecord| {
+        leases.as_ref().is_some_and(|l| l.live_holder_other_than(&r.data.instance_id, "").ok().flatten().is_some())
+    };
+    records
         .into_iter()
-        .find(|r| r.data.definition_id == definition_id)
+        .map(|r| (live(&r), r))
+        .max_by(|(live_a, a), (live_b, b)| {
+            live_a
+                .cmp(live_b)
+                .then(a.data.last_launched_at_ms.cmp(&b.data.last_launched_at_ms))
+                .then(a.data.created_at_ms.cmp(&b.data.created_at_ms))
+                .then(b.data.instance_id.cmp(&a.data.instance_id))
+        })
+        .map(|(_, r)| r)
+        .expect("records is not empty")
 }
 
 /// Reconstruct an agent's absolute working directory from its registry record.
@@ -219,6 +257,56 @@ mod tests {
                 find_active_record_by_slug_and_definition("agenty", "def-nope").is_none(),
                 "an unmatched definition must not fall back to a slug-only guess"
             );
+        });
+    }
+    /// Two records of one definition (an agent recorded twice across the move to definition-id keys). `launched` is
+    /// each record's `last_launched_at_ms`.
+    fn with_pair<T>(launched: [i64; 2], f: impl FnOnce(&Registry) -> T) -> T {
+        with_registry(&[], || {
+            let registry = Registry::open(crate::registry::resolve_shared_registry_dir().unwrap()).unwrap();
+            for (i, at) in launched.into_iter().enumerate() {
+                let mut r = record(&format!("i{i}"), "Manpo");
+                r.data.definition_id = "def-manpo".to_string();
+                r.data.last_launched_at_ms = at;
+                registry.upsert(&r).unwrap();
+            }
+            f(&registry)
+        })
+    }
+
+    // The upgrade to 0.60.22 logged "registry slug collision ... matches 2" for an agent that was one: its old record
+    // and its new one named the same definition.
+    #[test]
+    fn two_records_of_one_definition_are_one_agent_and_the_one_launched_last_answers() {
+        with_pair([100, 200], |_| {
+            let found = find_active_record_by_slug("manpo").expect("one agent, not a collision");
+            assert_eq!(found.data.instance_id, "i1");
+            let scoped = find_active_record_by_slug_and_definition("manpo", "def-manpo").unwrap();
+            assert_eq!(scoped.data.instance_id, "i1", "the definition-scoped lookup picks the same record");
+        });
+        with_pair([200, 100], |_| {
+            assert_eq!(find_active_record_by_slug("manpo").unwrap().data.instance_id, "i0");
+        });
+        with_pair([100, 100], |_| {
+            assert_eq!(find_active_record_by_slug("manpo").unwrap().data.instance_id, "i0", "a tie is decided the same way every time");
+        });
+    }
+
+    #[test]
+    fn the_record_whose_instance_holds_a_live_lease_answers_before_the_one_launched_last() {
+        with_pair([100, 200], |registry| {
+            let leases = crate::registry::LeaseStore::open(registry.root()).unwrap();
+            let boot: std::sync::Arc<str> = std::sync::Arc::from("boot-live");
+            let _held = leases.claim("i0", &boot, "block-1", None).unwrap();
+            assert_eq!(find_active_record_by_slug("manpo").unwrap().data.instance_id, "i0", "the live one, though the other was launched later");
+        });
+    }
+
+    // Different definitions are different agents: collapsing them would hand one agent's history to another.
+    #[test]
+    fn records_of_different_definitions_are_still_a_collision() {
+        with_registry(&[("i1", "Manpo"), ("i2", "MANPO")], || {
+            assert!(find_active_record_by_slug("manpo").is_none());
         });
     }
 }

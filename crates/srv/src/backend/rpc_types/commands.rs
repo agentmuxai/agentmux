@@ -119,6 +119,10 @@ pub const COMMAND_BROWSER_GRANTS_SET: &str = "browsergrants.set";
 pub const COMMAND_BROWSER_GRANTS_PRESET: &str = "browsergrants.preset";
 /// Revoke a standing grant: calls in flight end and the strip comes down (the user only).
 pub const COMMAND_BROWSER_GRANTS_REVOKE: &str = "browsergrants.revoke";
+/// Let an agent use a page's camera, microphone, location or notifications on one site, until revoked (the user only).
+pub const COMMAND_BROWSER_GRANTS_PERMISSION_SET: &str = "browsergrants.permissionset";
+/// Revoke one site permission (the user only).
+pub const COMMAND_BROWSER_GRANTS_PERMISSION_REVOKE: &str = "browsergrants.permissionrevoke";
 /// Change the powers a standing grant carries (the user only).
 pub const COMMAND_BROWSER_GRANTS_POWERS: &str = "browsergrants.powers";
 /// Turn "Pause all agent browsing" on or off: every driven pane refuses agent calls. Anyone may
@@ -277,8 +281,7 @@ pub const COMMAND_LIST_AGENT_IDENTITIES: &str = "listagentidentities";
 /// Every (agent_id, account_id, provider) row across every agent — powers
 /// the since-removed "Identities" read-only rail (issue #1624 PR-C), which needs
 /// all agents' bindings up front rather than one `listagentidentities` call
-/// per row. Wraps `Store::agent_identity_list_all`, previously only used by
-/// the m0013/m0014 backfill migrations.
+/// per row. Wraps `Store::agent_identity_list_all`.
 pub const COMMAND_LIST_ALL_AGENT_IDENTITIES: &str = "listallagentidentities";
 
 // Bundles (v7 — agent personality / capability stack)
@@ -682,6 +685,8 @@ pub const COMMAND_AGENT_PEER_LABELS: &str = "agent.peer-labels";
 /// A person's pick in the model panel: moves the agent to a model on a route, or back to the harness's own sign-in.
 /// The operator's window only: the click is the approval of the spend.
 pub const COMMAND_AGENT_MODEL_SWITCH: &str = "agent.model.switch";
+/// The pane card's Raise and Reset buttons for an agent that reached its daily spend cap. The operator's window only.
+pub const COMMAND_AGENT_SPEND: &str = "agent.spend";
 /// A sign-in the window ran for an account completed: its agents' "signed
 /// out" ends (#2237). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_SIGNED_IN: &str = "identity.account.signed_in";
@@ -929,6 +934,10 @@ pub const COMMAND_NATIVE_MEMORY_ADOPTION_LIST: &str = "agent:memory:adoption_lis
 /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2 (phase M3c): the
 /// folders an agent has claimed, for the human "release this folder" action.
 pub const COMMAND_NATIVE_MEMORY_CLAIMS: &str = "agent:memory:claims";
+/// What the person confirmed in the Memory pane: adopt the chosen folders of an
+/// adoption list, or release a claimed folder. From the AgentMux window only.
+pub const COMMAND_NATIVE_MEMORY_ADOPT: &str = "agent:memory:adopt";
+pub const COMMAND_NATIVE_MEMORY_RELEASE: &str = "agent:memory:release";
 
 // ---- Client type constants ----
 

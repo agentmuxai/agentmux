@@ -17,16 +17,22 @@ pub fn install_state_hooks(state: &AppState) {
     // muxcode/antigravity on the host) can actually receive inter-agent
     // messages instead of having them dropped on a PTY fallback they reject.
     install_agent_turn_delivery(state);
+    // What is held for an agent waits while its pane has no controller yet (every resumed pane, at start).
+    crate::backend::reactive::controller_wait::set_has_controller(std::sync::Arc::new(|block_id: &str| crate::backend::blockcontroller::get_controller(block_id).is_some()));
 
     // Cron fires through the same in-process inject path (identity M4c-3);
     // before `cron_scheduler.start()` below, so no fire takes the HTTP
     // fallback.
     install_cron_delivery(state);
     crate::server::job_actions::install(state);
+    // The Drone blocks that act on AgentMux (App query, Message, Task, Spawn, Notify) reach it here.
+    crate::drone::host::install(state);
 
     // Durable jekt: replay messages held for an agent that was not running
     // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).
     crate::server::jekt_held::install(state);
+    // A routine message that came by the relay waits for a session gone cold, as a local one does (#2263).
+    crate::server::jekt_cold::install(state);
     // A parked agent no pane shows is sent the input held for it while its model API was out.
     crate::server::held_input::install(state);
 
@@ -156,6 +162,13 @@ pub async fn resume_unresolved_sagas(state: &AppState) {
     }
 }
 
+/// What agents spend through the model gateway is kept across restarts, and a cap reached is acted on
+/// (SPEC_ROUTE_AGENT_BRAKES_2026_11_10.md §3).
+fn spawn_spend_services(state: &AppState) {
+    backend::model_gateway::spend::attach(Arc::clone(&state.mstore));
+    crate::server::spend_watch::start(state.clone());
+}
+
 /// Starts the services that run beside the server and need the app state.
 pub fn spawn_state_services(state: &AppState) {
     // Keeps the host's copy of which panes agents own current (for its popup
@@ -163,6 +176,7 @@ pub fn spawn_state_services(state: &AppState) {
     crate::server::browser_host_sync::spawn(state.clone());
     // Every agent's runtime state is looked at and each change published (`agentruntime:changed:<id>`).
     crate::server::agent_runtime::spawn(state.clone());
+    spawn_spend_services(state);
     // Overlap notes (an agent editing a file another agent is also changing
     // is told who): the progress watcher's edits are checked from here on.
     backend::work_facts::overlap_notes::install(

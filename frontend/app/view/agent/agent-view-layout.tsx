@@ -12,6 +12,8 @@ import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { isStopping } from "@/app/store/agent-pane-state/types";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { isContainerAgentMode } from "@/util/runtime-kind";
 import { createSignal, Show, type Accessor, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
@@ -28,6 +30,8 @@ import { AgentPaneProviders } from "./agent-media";
 import { AgentBottomPanels } from "./components/AgentBottomPanels";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentComposerRegion, AgentTranscriptRegion, AgentViewPopoverHost } from "./components/AgentPaneRegions";
+import { AgentModelUndoneCard } from "./components/AgentModelUndoneCard";
+import { AgentSpendCard } from "./components/AgentSpendCard";
 import { AgentPreparingRow } from "./components/AgentPreparingRow";
 import { AgentProgressBar } from "./components/AgentProgressBar";
 import { AgentFindBandItem } from "./components/AgentFindBandItem";
@@ -35,11 +39,15 @@ import { AgentShellDrawer } from "./components/AgentShellDrawer";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { createMessagesPanelControls, MessagesPanelContext } from "./messages/messages-state";
 import { MessagesPanel } from "./messages/MessagesPanel";
+import { compactThenSwitch } from "./compact-then-switch";
+import { dismissModelUndone, readModelUndone, type ModelUndone } from "./model-undone";
+import { createSpendCards, dismissSpendStopped, resetSpendToday, setSpendCap } from "./spend-stopped";
 import { openOrFocusHistoryTab } from "./open-history-tab";
 import { countImages } from "./components/runtime-dropup-routes";
 import { AgentTopBand } from "./top-band/AgentTopBand";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { isForcedRow } from "./virtualization/verbosity";
+import { createSearchPaint, SearchPaintContext } from "./search/search-paint";
 
 /** The hook groups AgentPresentationView built, handed to the parts that draw them. */
 export interface AgentViewParts {
@@ -170,6 +178,8 @@ function AgentViewOverlays({ v }: { v: AgentViewParts }): JSX.Element {
                 matchIndex={input.search.currentIndex}
                 matchCount={input.search.matchCount}
                 searching={input.search.searching}
+                dim={input.search.dim}
+                onDimChange={input.search.setDim}
             />
         </>
     );
@@ -184,38 +194,71 @@ function AgentViewTranscript({ v }: { v: AgentViewParts }): JSX.Element {
     const { status } = v.turn;
     // The list's "content grew while the reader is scrolled up" state, for the New activity pill.
     const [newActivitySource, setNewActivitySource] = createSignal<Accessor<boolean>>(() => false);
+    const searchPaint = createSearchPaint(input.search);
     return (
-        <AgentTranscriptRegion
-            readiness={feed.readiness}
-            documentNodes={shown.shownDocument}
-            documentStateAtom={found.agentAtoms().documentStateAtom}
-            onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
-            onAgentErrorLogin={() => {
-                // The button says "Login Again", so it forces a fresh OAuth for every provider, like the failure
-                // row's. Seeding from the personal credential here would reuse a possibly equally stale token
-                // (retro-agent-auth-relogin-noop-2026-07-01).
-                found.shell.log("auth", "Login Again (inline error node) — forcing a fresh provider login");
-                void status.relogin();
-            }}
-            onLoadOlder={history.loadOlder}
-            loadingOlder={history.loadingOlder}
-            // The one paging gate: the list pages only while this is true.
-            hasOlderHistory={() => liveFeed.canPageOlder() && history.historyOffset() > 0}
-            followingRef={(f) => liveFeed.setFollowingBottom(f)}
-            newActivityRef={(a) => setNewActivitySource(() => a)}
-            scrollCommand={input.scroll.command}
-            scrollToBottomRef={(fn) => {
-                late.scrollToBottom = fn;
-            }}
-            highlightNodeId={input.search.highlightId}
-            registerHistoryReadyCallback={feed.registerHistoryReady}
-            zoomFactor={input.zoomFactor}
-            blockId={model.blockId}
-            layoutView={found.layoutView}
-            newActivityVisible={() => newActivitySource()()}
-            onJumpToNewActivity={() => late.scrollToBottom?.("new-activity-pill")}
-        />
+        <SearchPaintContext.Provider value={searchPaint}>
+            <AgentTranscriptRegion
+                readiness={feed.readiness}
+                documentNodes={shown.shownDocument}
+                documentStateAtom={found.agentAtoms().documentStateAtom}
+                onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
+                onAgentErrorLogin={() => {
+                    // The button says "Login Again", so it forces a fresh OAuth for every provider, like the failure
+                    // row's. Seeding from the personal credential here would reuse a possibly equally stale token
+                    // (retro-agent-auth-relogin-noop-2026-07-01).
+                    found.shell.log("auth", "Login Again (inline error node) — forcing a fresh provider login");
+                    void status.relogin();
+                }}
+                onLoadOlder={history.loadOlder}
+                loadingOlder={history.loadingOlder}
+                // The one paging gate: the list pages only while this is true.
+                hasOlderHistory={() => liveFeed.canPageOlder() && history.historyOffset() > 0}
+                followingRef={(f) => liveFeed.setFollowingBottom(f)}
+                newActivityRef={(a) => setNewActivitySource(() => a)}
+                scrollCommand={input.scroll.command}
+                scrollToBottomRef={(fn) => {
+                    late.scrollToBottom = fn;
+                }}
+                highlightNodeId={input.search.highlightId}
+                registerHistoryReadyCallback={feed.registerHistoryReady}
+                zoomFactor={input.zoomFactor}
+                blockId={model.blockId}
+                layoutView={found.layoutView}
+                newActivityVisible={() => newActivitySource()()}
+                onJumpToNewActivity={() => late.scrollToBottom?.("new-activity-pill")}
+            />
+        </SearchPaintContext.Provider>
     );
+}
+
+/**
+ * Compacts the conversation, then moves the agent: the card after a refused change and the model panel's rows share it,
+ * one at a time, and a switch that worked clears the card whichever of them asked.
+ */
+function compactThenSwitchFor(
+    blockId: string,
+    commands: { sendWithState: (text: string) => Promise<void> },
+    paneModel: { state: { lastCompactionBoundaryAt: number | null } }
+): (route: string, modelId: string) => Promise<void> {
+    let compacting = false;
+    return async (route, modelId) => {
+        if (compacting) throw new Error("A compaction is already running");
+        compacting = true;
+        try {
+            await compactThenSwitch({
+                compact: () => commands.sendWithState("/compact"),
+                boundaryAt: () => paneModel.state.lastCompactionBoundaryAt,
+                switchTo: async () => {
+                    const { failed } = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: blockId, route, model: modelId, restart: true });
+                    // Saved, but a pane that could not restart still runs the old model: the card stays and says so.
+                    if (failed.length > 0) throw new Error(`Saved, but the running pane did not switch: ${failed.join("; ")}`);
+                },
+            });
+            await dismissModelUndone(blockId);
+        } finally {
+            compacting = false;
+        }
+    };
 }
 
 /** Below the transcript: the panels, the preparing row, the composer strip and the composer. */
@@ -224,6 +267,8 @@ function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
     const { paneModel, block, provider, providerKey, meta, context } = found;
     const { commands, paneBusy } = sending;
     const { account } = failure;
+    const compactThenSwitchTo = compactThenSwitchFor(model.blockId, commands, paneModel);
+    const spendCards = createSpendCards(() => block()?.meta);
     return (
         <>
             {/* Login, decisions, questions, queue, recovery banners, activity dock,
@@ -254,6 +299,20 @@ function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
 
             {/* A container agent's container starting in the background (preparing.ts). */}
             <AgentPreparingRow nodes={shown.displayDocument} enabled={meta.isContainer} />
+            {/* A model change the new route refused on its first turn, which srv undid (model-undone.ts). */}
+            <AgentModelUndoneCard
+                card={() => readModelUndone(block()?.meta)}
+                onCompactThenSwitch={(card: ModelUndone) => compactThenSwitchTo(card.tried.route, card.tried.model)}
+                onDismiss={() => void dismissModelUndone(model.blockId)}
+            />
+            {/* An agent on a model route near or at its daily spend cap (spend-stopped.ts). */}
+            <AgentSpendCard
+                stopped={spendCards.stopped}
+                warning={spendCards.warning}
+                onRaise={(cap) => setSpendCap(model.blockId, cap)}
+                onReset={() => resetSpendToday(model.blockId)}
+                onDismiss={(card) => void dismissSpendStopped(model.blockId, card)}
+            />
 
             {/* The composer status strip: the activity ticker and the Log button (`detailsOpen` is reducer-owned). */}
             <AgentComposerStrip
@@ -281,6 +340,7 @@ function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
                 // "/compact" is deliberately not a registered SlashCommand (see AgentComposerStrip); it goes through
                 // sendWithState for the state it captures before TurnStart.
                 onCompact={() => void commands.sendWithState("/compact")}
+                onCompactThenSwitch={compactThenSwitchTo}
                 viewChip={viewChipLabel(shown.viewControls.resolved())}
                 viewOpen={shown.viewControls.popoverOpen()}
                 onOpenView={() => shown.viewControls.setPopoverOpen(!shown.viewControls.popoverOpen())}

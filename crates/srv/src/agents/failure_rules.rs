@@ -32,7 +32,7 @@ type Rule = fn(&Evidence<'_>) -> Option<AgentFailure>;
 /// The rules, most specific first. Order matters: rate-limit and overload are checked
 /// before usage-limit because the server-side rate-limit message
 /// literally contains "not your usage limit".
-pub(super) const RULES: [Rule; 15] = [
+pub(super) const RULES: [Rule; 16] = [
     turn_cap_frame,
     killed,
     rate_limited,
@@ -44,6 +44,7 @@ pub(super) const RULES: [Rule; 15] = [
     ambient_home,
     unprotected_config,
     not_authenticated,
+    route_credits,
     context_exceeded,
     turn_cap_text,
     usage_limit,
@@ -281,6 +282,20 @@ fn not_authenticated(ev: &Evidence<'_>) -> Option<AgentFailure> {
             FailureClass::Auth,
             "Not authenticated",
             "The API rejected the credentials (HTTP 401). Re-authenticate via the Identity tab or `claude /login`.",
+            false,
+        ));
+    }
+    None
+}
+
+/// The model route's key has no credits left (HTTP 402). Every agent on the route fails the same way until
+/// someone adds credits, so this is a `UsageLimit` with a title of its own (`ROUTE_CREDITS_TITLE`).
+fn route_credits(ev: &Evidence<'_>) -> Option<AgentFailure> {
+    if names_route_credits(&ev.hay) {
+        return Some(ev.failure(
+            FailureClass::UsageLimit,
+            ROUTE_CREDITS_TITLE,
+            "The model route this agent uses answered HTTP 402: its key has no credits left. Every agent on the route is stopped by it. Add credits to the route's key in the provider's account; messages wait and a turn tries again in a few minutes.",
             false,
         ));
     }

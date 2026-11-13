@@ -162,7 +162,7 @@ pub struct AgentDefinition {
     /// oauth-class agent with no bound account is always refused), no RPC
     /// sets it and no UI shows it. The column and this field stay only so
     /// the shared definition registry keeps the value older builds read
-    /// (m0017/m0018 grandfathered linkless agents to `1` there).
+    /// (linkless agents were grandfathered to `1` there by migrations since retired).
     /// SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md R10.
     #[serde(default)]
     #[ts(type = "number")]

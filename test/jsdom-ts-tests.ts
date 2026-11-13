@@ -60,6 +60,7 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/tab/tab-content-settled.test.ts",
     "frontend/app/tab/tab-tearoff-rpc.test.ts",
     "frontend/app/tab/tabbar-dnd.test.ts",
+    "frontend/app/util/hold-bottom-edge.test.ts",
     "frontend/app/util/menu-position.test.ts",
     "frontend/app/util/pointer-drag-state.test.ts",
     "frontend/app/util/submenu-hover.test.ts",

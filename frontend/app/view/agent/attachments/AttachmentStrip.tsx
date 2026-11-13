@@ -47,7 +47,10 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
             n,
             tiles().map((t) => t.kind),
         );
-    const layout = createMemo(() => trayLayout(tiles().length, width()));
+    // By value: a width change that fits the same number of tiles leaves `shown` and the "+N" tile alone.
+    const layout = createMemo(() => trayLayout(tiles().length, width()), undefined, {
+        equals: (a, b) => a.visible === b.visible && a.overflow === b.overflow,
+    });
     const shown = createMemo(() => (expanded() ? tiles() : tiles().slice(0, layout().visible)));
     const items = (): LightboxItem[] =>
         tiles().map((t) => ({ key: t.key, number: t.number, name: t.name, id: t.id, error: t.error }));
@@ -60,7 +63,12 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
                 ref={(el) => {
                     if (typeof ResizeObserver === "undefined") return;
                     ro?.disconnect();
-                    ro = new ResizeObserver((e) => setWidth(e[0]?.contentRect.width ?? 600));
+                    // A strip in a hidden pane reports no width; laying it out for 0 px would drop its tiles and mount them
+                    // again when the pane is shown, which a pane that flips between the two did every frame.
+                    ro = new ResizeObserver((e) => {
+                        const w = e[0]?.contentRect.width;
+                        if (w) setWidth(w);
+                    });
                     ro.observe(el);
                 }}
             >

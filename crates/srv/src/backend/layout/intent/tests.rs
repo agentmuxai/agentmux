@@ -663,6 +663,19 @@ fn legacy_minimize_fields_migrate_to_the_flag() {
     assert_eq!(migrate_legacy_minimize(&mut root), 0, "a current tree is untouched");
 }
 
+#[test]
+fn a_dissolved_column_with_a_corrupt_size_heals_to_its_siblings_mean() {
+    let mut dissolved = branch("d", FlexDirection::Column, vec![leaf("a", "ba")]);
+    dissolved.size = -0.0039;
+    dissolved.extra.insert("columnDissolve".into(), serde_json::json!({"targetColumnId": "x"}));
+    let mut other = leaf("o", "bo");
+    other.size = 300.0;
+    let mut root = branch("r", FlexDirection::Row, vec![dissolved, other]);
+    assert_eq!(migrate_legacy_minimize(&mut root), 1);
+    assert_eq!(root.children[0].size, 300.0, "the mean of the positive siblings, not the stolen total");
+    assert!(!root.children[0].minimized && root.children[0].extra.is_empty());
+}
+
 // ── Random sequences ───────────────────────────────────────────────────────
 //
 // One generator drives both the property test below and the vectors the

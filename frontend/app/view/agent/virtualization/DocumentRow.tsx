@@ -32,6 +32,8 @@ import { useNodePeek } from "../hooks/useNodePeek";
 import type { ContextDeliveryNode, DocumentNode, DocumentState, ShellNode, UserMessageNode } from "../../../agent-model/types";
 import { markRowMount } from "../../../agent-model/perf-probe";
 import { useTick } from "@/app/hook/useTick";
+import { createRowHighlights } from "../search/search-highlights";
+import { useSearchPaint } from "../search/search-paint";
 
 export interface DocumentRowProps {
     /**
@@ -133,6 +135,13 @@ function DocumentRowBody(props: DocumentRowProps): JSX.Element {
         return props.highlightNodeId?.() === props.node().id;
     };
 
+    // The search's paint (search/search-paint.ts): one boolean per row from the match set, read by node id so a
+    // recycled row is right on mount, and the words of a matching row painted as highlights.
+    const paint = useSearchPaint();
+    const isMatch = paint ? createMemo(() => paint.matches().has(props.node().id)) : undefined;
+    let rowEl: HTMLElement | undefined;
+    if (paint && isMatch) createRowHighlights(() => rowEl, paint, () => props.node().id, isMatch);
+
     // The `e` key flips the same set the row's own header click does: the
     // shared rule says which (virtualization/disclosure.ts), or that the row
     // isn't toggleable at all (normal user input, fixed rows).
@@ -155,11 +164,16 @@ function DocumentRowBody(props: DocumentRowProps): JSX.Element {
 
     return (
         <div
-            ref={props.ref}
+            ref={(el) => {
+                rowEl = el;
+                props.ref?.(el);
+            }}
             class="agent-document-row"
             classList={{
                 "agent-node-search-match": isSearchMatch(),
             }}
+            aria-current={isSearchMatch() ? "location" : undefined}
+            data-search-match={isMatch ? String(isMatch()) : undefined}
             data-node-id={props.node().id}
             // The kind of node, for the stylesheet (the user message has its own
             // enter motion) and for code that must read it from the DOM, without

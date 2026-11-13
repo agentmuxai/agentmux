@@ -340,7 +340,7 @@ pub struct AppState {
 
     /// Labels of the approval windows: subwindows opened by `open_subwindow`
     /// with one of the approval views (`commands::window::is_approval_view` —
-    /// the credential- and memory-adoption approval pages). They render that
+    /// the credential and SSH approval pages). They render that
     /// one view, never workspace panes, and the browser API never resolves a
     /// pane into them (#3681 review). Tracked by label rather than
     /// derived from `WindowKind::Subwindow`: floaters are recorded as
@@ -1381,7 +1381,7 @@ impl AppState {
             );
             return Err("the app is shutting down".to_string());
         }
-        Ok(())
+        crate::client::page_unreachable::check_reachable(self, caller)
     }
 
     /// Phase B.5e — authoritative instance-number lookup. Reads

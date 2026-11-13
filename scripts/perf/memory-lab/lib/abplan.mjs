@@ -21,7 +21,7 @@ export function parseAbArgs(argv) {
             if (v === undefined) throw new Error(`${raw} needs a value`);
             return v;
         };
-        const m = /^--(a|b)-(portable|srv|srv-commit|label|env|setting)$/.exec(raw);
+        const m = /^--(a|b)-(portable|srv|srv-commit|label|claude-version|env|setting)$/.exec(raw);
         if (m) {
             const [, side, what] = m;
             if (what === "env" || what === "setting") spec[side][what].push(value());
@@ -75,6 +75,7 @@ export function runArgs(run, spec) {
     const args = ["--portable", side.portable, "--label", run.label, "--out", spec.out];
     if (side.srv) args.push("--srv", side.srv);
     if (side.srvCommit) args.push("--srv-commit", side.srvCommit);
+    if (side.claudeVersion) args.push("--claude-version", side.claudeVersion);
     for (const pair of side.env) args.push("--env", pair);
     for (const pair of side.setting) args.push("--setting", pair);
     return [...args, ...spec.common];
@@ -85,6 +86,33 @@ export function outcomeOf(plan, finished) {
     const done = { a: [], b: [] };
     for (const run of plan) if (finished.has(run.label)) done[run.side].push(run.label);
     return { done, comparable: done.a.length > 0 && done.b.length > 0 };
+}
+
+/** A side that has failed this many runs, none finished, is not run again: its remaining runs would fail the same way. */
+export const GIVE_UP_AFTER = 2;
+
+/** Whether `run` is left out because its side has failed `GIVE_UP_AFTER` runs and finished none. `ran` is the runs made so far, with `ok`. */
+export function sideGivenUp(run, ran) {
+    const own = ran.filter((r) => r.side === run.side);
+    return own.length >= GIVE_UP_AFTER && own.every((r) => !r.ok);
+}
+
+/**
+ * In words, why a side could not be measured, for the job summary: nothing when it finished at least one run.
+ * `reasons` maps a run label to why it failed (the lab's own message); `skipped` are the labels not run.
+ */
+export function unrunnableSides(plan, outcome, reasons, skipped = [], commits = {}) {
+    const lines = [];
+    for (const side of ["a", "b"]) {
+        if (outcome.done[side].length > 0) continue;
+        const labels = plan.filter((r) => r.side === side).map((r) => r.label);
+        const first = labels.map((l) => reasons[l]).find(Boolean);
+        const tried = labels.filter((l) => !skipped.includes(l));
+        const who = `${side.toUpperCase()}${commits[side] ? ` (build ${commits[side].slice(0, 9)})` : ""}`;
+        const left = labels.length - tried.length;
+        lines.push(`${who} did not run: ${first ?? "no run wrote a result"} (${tried.length} run${tried.length === 1 ? "" : "s"} tried${left ? `, ${left} not tried after those failed` : ""}).`);
+    }
+    return lines;
 }
 
 /** The arguments of `compare.mjs` for the finished runs: both sides' result files, the markdown and json outputs, and the margins file when given. */

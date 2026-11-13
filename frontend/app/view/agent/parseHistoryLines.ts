@@ -118,6 +118,18 @@ export interface HistoryParserOptions {
 }
 
 /**
+ * Stamps a freshly-created node from its line's batch time when the wire frame carried no usable timestamp of its
+ * own. A jekt's timestamp is a required number its consumers add to, so one with no marker TS and no batch stamp
+ * (parsed without a sidecar) gets the load time, as it did before replays took the marker's.
+ */
+function stampNode(node: DocumentNode, stampMs: number | undefined): DocumentNode {
+    const ts = (node as { timestamp?: number }).timestamp;
+    if (ts != null && ts !== 0) return node;
+    if (stampMs != null) return { ...node, timestamp: stampMs } as DocumentNode;
+    return node.type === "jekt_message" ? { ...node, timestamp: Date.now() } : node;
+}
+
+/**
  * `parseHistoryLines`, resumable: one translator + parser whose state
  * carries across `feed` calls, so lines appended later continue open
  * text/thinking runs and pending tools, and counter ids never collide.
@@ -208,19 +220,12 @@ export class HistoryParser {
             const s = stamps?.[i];
             return typeof s === "number" && s > 0 ? s : undefined;
         };
-        // Stamp a freshly-created node from its line's batch time when the wire
-        // frame carried no usable timestamp of its own.
-        const stampIfMissing = (node: DocumentNode, stampMs: number | undefined): DocumentNode => {
-            if (stampMs == null) return node;
-            const ts = (node as { timestamp?: number }).timestamp;
-            if (ts != null && ts !== 0) return node;
-            return { ...node, timestamp: stampMs } as DocumentNode;
-        };
+        const stampIfMissing = stampNode;
         // Jekts the parser held while a text/thinking block streamed, released
         // once it ended — placed before the releasing event's node, as live
         // (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.2).
         const putReleased = (): void => {
-            for (const released of parser.drainReleased()) put(released, indexById.get(released.id));
+            for (const released of parser.drainReleased()) put(stampIfMissing(released, stampFor(lineIdx)), indexById.get(released.id));
         };
         // An in-place same-id replacement (tool_call → tool_result, accumulated
         // text deltas) must not wipe the stamp the node got when it was first

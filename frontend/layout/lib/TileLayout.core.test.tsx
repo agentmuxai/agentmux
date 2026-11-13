@@ -29,7 +29,7 @@ interface DisplayNodesProps {
     DisplayNode: (p: { layoutModel: unknown; node: unknown }) => JSX.Element;
 }
 interface OverlayProps {
-    effectiveOverlayTransform: () => JSX.CSSProperties | undefined;
+    layoutModel: unknown;
 }
 interface PlaceholderProps {
     style: JSX.CSSProperties;
@@ -81,6 +81,7 @@ vi.mock("./layoutModelHooks", () => ({
     useNodeModel: (_m: unknown, node: { id: string }) => h.nodeModels.get(node.id),
 }));
 vi.mock("./tilelayout-shared", () => ({
+    ClosedPaneGhosts: () => null,
     DisplayNodesWrapper: (p: DisplayNodesProps) => {
         h.displayNodes = p;
         return null;
@@ -101,10 +102,12 @@ vi.mock("./tile-drag", () => ({
     releaseTileDrag: (...a: unknown[]) => h.releaseTileDrag(...a),
 }));
 
-import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { tileItemType } from "@/app/drag/drag-types";
 import { createTileLayout, type TileLayoutPlatform } from "./TileLayout.core";
 import { DRAG_PREVIEW_HOVER_MS } from "./drag-preview-size";
+import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
+import { REFLOW_CLIP, REFLOW_TRANSFORM, type ReflowEntry } from "./liveReflow";
+import type { SettlingPass } from "./settlingPass";
 import { dragState } from "./tilelayout-drag-state";
 import { LayoutTreeActionType, type TileLayoutContents } from "./types";
 
@@ -118,8 +121,16 @@ function makeModel() {
     const [isResizing, setIsResizing] = createSignal(false);
     const [ready, setReady] = createSignal(false);
     const [handles, setHandles] = createSignal<Array<{ id: string }>>([]);
+    const [reflow, setReflow] = createSignal(new Map<string, ReflowEntry>());
+    const [tearOffOffered, setTearOffOffered] = createSignal(false);
+    const [pass, setPass] = createSignal<SettlingPass | undefined>(undefined);
     return {
         activeDrag,
+        tearOffOffered,
+        settlingPass: pass,
+        reflowFor: (id: string) => reflow().get(id),
+        liveReflowActive: () => reflow().size > 0,
+        liveReflowExpected: () => activeDrag(),
         overlayTransform: overlay,
         gapSizePx: gap,
         animationTimeS: animTime,
@@ -132,7 +143,7 @@ function makeModel() {
         treeReducer: vi.fn(),
         renderContent: vi.fn((nm: { content?: () => HTMLElement }) => nm.content?.() ?? document.createElement("div")),
         renderPreview: vi.fn(() => document.createElement("span")),
-        set: { setActiveDrag, setOverlay, setGap, setAnimTime, setMagnifiedId, setMagnifyMount, setIsResizing, setHandles },
+        set: { setActiveDrag, setOverlay, setGap, setAnimTime, setMagnifiedId, setMagnifyMount, setIsResizing, setHandles, setReflow, setTearOffOffered, setPass },
     };
 }
 
@@ -203,6 +214,7 @@ function mountWithTile(platform: MockPlatform) {
 }
 
 beforeEach(() => {
+    resetPaneCaptureGateForTests();
     h.model = makeModel();
     h.nodeModels = new Map([["n1", makeNodeModel()]]);
     h.draggable = [];
@@ -266,11 +278,11 @@ describe("createTileLayout: the layout", () => {
         expect([...container.querySelectorAll<HTMLElement>(".rh")].map((e) => e.dataset.id)).toEqual(["h2"]);
     });
 
-    it("gives the display nodes wrapper a DisplayNode, and the overlay wrapper the effective transform", () => {
+    it("gives the display nodes wrapper a DisplayNode, and the overlay wrapper the model", () => {
         mount(makePlatform());
         expect(typeof h.displayNodes!.DisplayNode).toBe("function");
         expect(h.displayNodes!.layoutModel).toBe(h.model);
-        expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "a" });
+        expect(h.overlay!.layoutModel).toBe(h.model);
     });
 
     describe("the overlay transform around a drag", () => {
@@ -281,40 +293,13 @@ describe("createTileLayout: the layout", () => {
             expect(h.placeholder!.style).toEqual({ top: "10000px", transform: "b" });
         });
 
-        it("holds the last in-drag transform for the exit fade after the drag ends, then lets go", () => {
-            vi.useFakeTimers();
+        it("lets the overlay go with the drag: nothing holds it in place after the release", () => {
             mount(makePlatform());
             h.model.set.setActiveDrag(true);
             h.model.set.setOverlay({ transform: "b" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "b" });
             h.model.set.setActiveDrag(false);
             h.model.set.setOverlay({ transform: "c" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "b" });
-            expect(h.placeholder!.style).toEqual({ top: "10000px", transform: "b" });
-            vi.advanceTimersByTime(DURATION_BASE_MS - 1);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "b" });
-            vi.advanceTimersByTime(1);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "c" });
-        });
-
-        it("a new drag during the hold takes the live transform again", () => {
-            vi.useFakeTimers();
-            mount(makePlatform());
-            h.model.set.setActiveDrag(true);
-            h.model.set.setActiveDrag(false);
-            h.model.set.setOverlay({ transform: "c" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "a" });
-            h.model.set.setActiveDrag(true);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "c" });
-            vi.advanceTimersByTime(DURATION_BASE_MS * 2);
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "c" });
-        });
-
-        it("holds nothing when no drag came before", () => {
-            vi.useFakeTimers();
-            mount(makePlatform());
-            h.model.set.setOverlay({ transform: "z" });
-            expect(h.overlay!.effectiveOverlayTransform()).toEqual({ transform: "z" });
+            expect(h.placeholder!.style).toEqual({ top: "10000px", transform: "c" });
         });
     });
 
@@ -393,13 +378,38 @@ describe("createTileLayout: a tile", () => {
         const nm = h.nodeModels.get("n1")!;
         expect(el.style.transform).toBe("translate(1px, 2px)");
         expect(el.style.width).toBe("10px");
-        for (const c of ["dragging", "tile-hidden", "tile-minimized", "tile-resize-skip"]) {
+        for (const c of ["dragging", "tile-hidden", "tile-minimized", "tile-resize-skip", "tile-entering"]) {
             expect(el.classList.contains(c)).toBe(false);
         }
         nm.set.setMinimized(true);
         expect(el.classList.contains("tile-minimized")).toBe(true);
         h.model.set.setMagnifiedId("other");
         expect(el.classList.contains("tile-hidden")).toBe(true);
+    });
+
+    it("fades in a pane that came or was restored, for as long as the settling pass names it", () => {
+        const { el } = mountWithTile(makePlatform());
+        const pass = (enters: string[], gliding: boolean): SettlingPass => ({ moves: new Map(), ghosts: [], enters, gliding });
+        h.model.set.setPass(pass(["other"], false));
+        expect(el.classList.contains("tile-entering")).toBe(false);
+        // While the pass stands at its start the pane is not drawn: its fade starts with the glide.
+        h.model.set.setPass(pass(["n1"], false));
+        expect(el.classList.contains("tile-entering")).toBe(false);
+        expect(el.style.opacity).toBe("0");
+        expect(el.style.transition).toBe("");
+        h.model.set.setPass(pass(["n1"], true));
+        expect(el.classList.contains("tile-entering")).toBe(true);
+        expect(el.style.opacity).toBe("1");
+        // A second pass that names it while it fades (another pane opened) is gliding too: not started again.
+        const sets = vi.spyOn(el.classList, "toggle");
+        h.model.set.setPass(pass(["n1", "other"], true));
+        expect(el.classList.contains("tile-entering")).toBe(true);
+        expect(sets).not.toHaveBeenCalled();
+        // The stylesheet's own length (the glide's), with nothing set on the tile.
+        expect(el.style.getPropertyValue("animation-duration")).toBe("");
+        h.model.set.setPass(undefined);
+        expect(el.classList.contains("tile-entering")).toBe(false);
+        expect(el.style.opacity).toBe("1");
     });
 
     it("skips laying out a minimized pane while the window resizes, and says it is behind", () => {
@@ -428,6 +438,109 @@ describe("createTileLayout: a tile", () => {
         const { el } = mountWithTile(makePlatform());
         expect(el.style.visibility).toBe("");
         expect(el.style.opacity).toBe("1");
+    });
+
+    describe("the live reflow of a pane drag (liveReflow.ts)", () => {
+        const rect = { left: 300, top: 0, width: 40, height: 20 };
+        const entry: ReflowEntry = { rect, box: { width: 40, height: 30 }, moved: false, leaving: false };
+
+        /** The tile's four edges, as its style carries them: left, top, right, bottom. */
+        const edgesOf = (el: HTMLElement) => ["l", "t", "r", "b"].map((edge) => el.style.getPropertyValue(`--reflow-${edge}`));
+
+        it("glides a tile that is still fading in: its edges' transition stands alone, with no opacity beside it", () => {
+            // A second pane opened while the first was fading in: the first is named by the pass and has a glide.
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setPass({ moves: new Map(), ghosts: [], enters: ["n1"], gliding: true });
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
+            expect(el.classList.contains("tile-entering")).toBe(true);
+            expect(el.style.transition).not.toContain("undefined");
+            expect(el.style.transition).not.toContain("opacity");
+            for (const edge of ["l", "t", "r", "b"]) {
+                expect(el.style.transition).toContain(`--reflow-${edge} var(--duration-base) ease-out`);
+            }
+            h.model.set.setPass(undefined);
+        });
+
+        it("gives a tile its future rect: its four edges glide, its place and crop are read from them, its size is set at once", () => {
+            const platform = makePlatform();
+            const { el, node } = mountWithTile(platform);
+            const before = node.additionalProps();
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
+            expect(edgesOf(el)).toEqual(["300px", "0px", "340px", "20px"]);
+            expect(el.style.transform).toBe(REFLOW_TRANSFORM);
+            // The tile is laid out at its box (here still its old height, under the closing crop) and shows its
+            // rect's size whatever the box is.
+            expect(el.style.width).toBe("40px");
+            expect(el.style.height).toBe("30px");
+            expect(el.style.getPropertyValue("clip-path")).toBe(REFLOW_CLIP);
+            // Only the edges glide. A transition on the transform would run on the compositor, apart from the
+            // crop; one on the place and one on the size would start again separately when a candidate changes.
+            for (const edge of ["l", "t", "r", "b"]) {
+                expect(el.style.transition).toContain(`--reflow-${edge} var(--duration-base) ease-out`);
+            }
+            expect(el.style.transition).not.toMatch(/(^|, )(transform|clip-path) /);
+            // Neither size is a transition: a size that animated would lay the pane out on every frame.
+            expect(el.style.transition).not.toContain("width");
+            expect(el.style.transition).not.toContain("height");
+            // The layout's own rect is untouched (it stays the drag's hit-test snapshot), and the platform's
+            // geometry signal, which follows that rect, never fires.
+            expect(node.additionalProps()).toBe(before);
+            expect(platform.onLeafGeometryChange).not.toHaveBeenCalled();
+        });
+
+        it("takes the rect's own size once the glide is over", () => {
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { ...entry, box: { width: 40, height: 20 } }]]));
+            expect(el.style.height).toBe("20px");
+            expect(edgesOf(el)).toEqual(["300px", "0px", "340px", "20px"]);
+        });
+
+        it("shows the dragged pane's own tile in its landing rect, unblurred and never hidden, so no slot is empty", () => {
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { ...entry, moved: true }]]));
+            expect(el.style.visibility).toBe("");
+            expect(edgesOf(el)).toEqual(["300px", "0px", "340px", "20px"]);
+            expect(el.style.filter).toBe("none");
+            // Another pane keeps whatever the stylesheet gives a dragged tile.
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
+            expect(el.style.filter).toBe("");
+        });
+
+        it("does not show a pane that is being torn off: its neighbours close over its slot (tearOffPreview.ts)", () => {
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { ...entry, leaving: true }]]));
+            expect(el.style.opacity).toBe("0");
+            // It fades over the glide's length, not the quicker fade of a tile that appears.
+            expect(el.style.transition).toContain("opacity var(--duration-base)");
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
+            expect(el.style.opacity).toBe("1");
+        });
+
+        it("drops the reflow's transform, size, crop and transition in one step when the reflow ends, so the drop does not glide twice", () => {
+            const { el } = mountWithTile(makePlatform());
+            h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
+            h.model.set.setReflow(new Map());
+            expect(el.style.transform).toBe("translate(1px, 2px)");
+            expect(el.style.width).toBe("10px");
+            expect(el.style.height).toBe("10px");
+            expect(el.style.getPropertyValue("clip-path")).toBe("");
+            expect(el.style.transition).not.toContain("--reflow-");
+            expect(el.style.visibility).toBe("");
+        });
+
+        it("carries a tile's own edges at rest, so the first glide starts from them and not from the origin", () => {
+            const { el, node } = mountWithTile(makePlatform());
+            node.set.setProps({
+                transform: { transform: "translate3d(7px,9px, 0)", width: "10px", height: "10px" },
+                rect: { left: 7.4, top: 9.6, width: 10, height: 10 },
+            });
+            expect(edgesOf(el)).toEqual(["7px", "9px", "17px", "19px"]);
+            // Its place and size stay the layout's own, and nothing glides.
+            expect(el.style.transform).toBe("translate3d(7px,9px, 0)");
+            expect(el.style.getPropertyValue("clip-path")).toBe("");
+            expect(el.style.transition).not.toContain("--reflow-");
+        });
     });
 
     describe("the platform's geometry hook", () => {
@@ -546,6 +659,33 @@ describe("createTileLayout: a tile", () => {
             expect(order).toEqual(["beforeStart", "start", "afterStart", "beforeDrop", "release", "afterDrop"]);
         });
 
+        it("marks the dragged tile's place as a tear-off while that is all the drag offers, and never in the pane's picture", () => {
+            const { cfg, el } = start();
+            h.model.set.setTearOffOffered(true);
+            expect(el.classList.contains("tear-off-offered")).toBe(false);
+            const captured = beginPaneCapture();
+            cfg.onDragStart();
+            // The picture is still being taken: the red would be in it.
+            expect(el.classList.contains("tear-off-offered")).toBe(false);
+            captured();
+            expect(el.classList.contains("tear-off-offered")).toBe(true);
+            // The layout showed a drop: the place is a dragged pane's again, for good.
+            h.model.set.setTearOffOffered(false);
+            expect(el.classList.contains("tear-off-offered")).toBe(false);
+            expect(el.classList.contains("dragging")).toBe(true);
+            cfg.onDrop();
+        });
+
+        it("blurs the dragged tile only once the pane's picture has been taken, so the picture is of the pane as it stood", () => {
+            const { cfg, el } = start();
+            const captured = beginPaneCapture();
+            cfg.onDragStart();
+            expect(el.classList.contains("dragging")).toBe(false);
+            captured();
+            expect(el.classList.contains("dragging")).toBe(true);
+            cfg.onDrop();
+        });
+
         it("works on a platform with no drag hooks", () => {
             const platform = makePlatform({
                 beforeDragStart: undefined,
@@ -661,6 +801,30 @@ describe("createTileLayout: a tile", () => {
             expect(h.toPng).not.toHaveBeenCalled();
             press(el.querySelector(".gap")!);
             await vi.waitFor(() => expect(h.toPng).toHaveBeenCalledTimes(1));
+        });
+
+        it("leaves an image it can't inline blank, and a failed picture is a warning, not an unhandled rejection", async () => {
+            const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+            const unhandled = vi.fn();
+            process.on("unhandledRejection", unhandled);
+            const img = document.createElement("img");
+            img.src = "https://example.com/favicon.ico";
+            const failed = new Event("error");
+            Object.defineProperty(failed, "target", { value: img });
+            h.toPng = vi.fn(async () => Promise.reject(failed));
+            const { el } = mountWithTile(makePlatform());
+            el.querySelector(".gap")!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+            await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+            await new Promise((r) => setTimeout(r, 0));
+            const options = h.toPng.mock.calls[0][1] as { imagePlaceholder: string; onImageErrorHandler: () => void };
+            expect(options.imagePlaceholder).toMatch(/^data:image\/gif;base64,/);
+            expect(options.onImageErrorHandler).toBeTypeOf("function");
+            expect(warn.mock.calls[0][0]).toBe(
+                "[drag-preview] no picture of the pane: error event on img https://example.com/favicon.ico"
+            );
+            expect(unhandled).not.toHaveBeenCalled();
+            process.off("unhandledRejection", unhandled);
+            warn.mockRestore();
         });
 
         it("is reused until the pane's size changes", async () => {

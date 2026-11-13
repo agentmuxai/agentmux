@@ -24,7 +24,7 @@
 
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { layoutBehind, markLayoutBehind, windowResizing } from "@/app/platform/window-resize";
-import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
+import { EASE_OUT } from "@/app/motion/tokens";
 import { gatingNodeIds } from "@/app/store/tab-reveal";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
@@ -34,10 +34,14 @@ import { onWindowDrag } from "@/app/drag/window-drag-events";
 import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
 import { Key } from "@/util/keyed";
 import { debounce } from "throttle-debounce";
+import { describeRejection } from "@/util/describe-rejection";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
+import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
+import { REFLOW_CLIP, REFLOW_EDGES, REFLOW_TRANSFORM, reflowEdges, shownPx } from "./liveReflow";
 import "./tilelayout.scss";
-import { LayoutNode, LayoutTreeActionType, ResizeHandleProps, TileLayoutContents } from "./types";
+import { LayoutNode, ResizeHandleProps, TileLayoutContents } from "./types";
+import { clearPlacement } from "./placementPreview";
 import { releaseTileDrag, startTileDrag } from "./tile-drag";
 import { dragState } from "./tilelayout-drag-state";
 import { createTileDragRegistrar } from "./tile-drag-registrar";
@@ -53,6 +57,7 @@ import {
     type DragPreviewSize,
 } from "./drag-preview-size";
 import {
+    ClosedPaneGhosts,
     DisplayNodesWrapper,
     MagnifiedPaneOverlay,
     NodeBackdrops,
@@ -164,49 +169,6 @@ type NodeModelOf = ReturnType<typeof useNodeModel>;
 
 type PreviewImage = { img: HTMLImageElement; size: DragPreviewSize } | null;
 
-function useHeldOverlayTransform(layoutModel: LayoutModel): () => JSX.CSSProperties | undefined {
-    const overlayTransform = () => layoutModel.overlayTransform();
-
-    // Issue #836: hold the on-screen overlayTransform for DURATION_BASE_MS after
-    // activeDrag flips false, so the Placeholder's inner-div exit fade
-    // (--duration-base, tilelayout.scss) stays visible. Without this, overlayTransform()
-    // recomputes the moment onDrop fires and moves the entire
-    // .placeholder-container off-screen (top = 2*height) before the
-    // .exiting CSS transition can play. We cache the last in-drag
-    // transform and serve it during the hold window, then release.
-    const [heldOverlayTransform, setHeldOverlayTransform] = createSignal<JSX.CSSProperties | undefined>(undefined);
-    const [overlayHold, setOverlayHold] = createSignal(false);
-    let overlayHoldTimer: ReturnType<typeof setTimeout> | null = null;
-    createEffect(() => {
-        const active = layoutModel.activeDrag();
-        const xf = overlayTransform();
-        if (active) {
-            // Drag in progress: cache the live transform and clear any pending release.
-            setHeldOverlayTransform(xf as JSX.CSSProperties);
-            if (overlayHoldTimer) { clearTimeout(overlayHoldTimer); overlayHoldTimer = null; }
-            setOverlayHold(false);
-        } else if (heldOverlayTransform()) {
-            // Drag just ended (or page initial state with no cached value, skip).
-            // Hold the last in-drag transform for DURATION_BASE_MS to match the Placeholder
-            // exit-fade duration, then release. A new drag during the hold window
-            // resets cleanly via the active branch above.
-            if (overlayHoldTimer) clearTimeout(overlayHoldTimer);
-            setOverlayHold(true);
-            overlayHoldTimer = setTimeout(() => {
-                setOverlayHold(false);
-                setHeldOverlayTransform(undefined);
-                overlayHoldTimer = null;
-            }, DURATION_BASE_MS);
-        }
-    });
-    onCleanup(() => { if (overlayHoldTimer) clearTimeout(overlayHoldTimer); });
-    // Effective transform for overlay-positioned surfaces: hold the last
-    // in-drag transform during the exit window, otherwise use the live one.
-    const effectiveOverlayTransform = (): JSX.CSSProperties | undefined =>
-        overlayHold() ? heldOverlayTransform() ?? undefined : (overlayTransform() as JSX.CSSProperties | undefined);
-    return effectiveOverlayTransform;
-}
-
 function useAnimateOnMount(platform: TileLayoutPlatform, layoutModel: LayoutModel): () => boolean {
     // Track animate state. The delay is per platform — see
     // `TileLayoutPlatform.animateDelayMs`.
@@ -235,7 +197,7 @@ function useCursorBoundsCheck(platform: TileLayoutPlatform, layoutModel: LayoutM
                 normalizedY <= 0 ||
                 normalizedY >= displayContainerRect.height
             ) {
-                layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+                clearPlacement(layoutModel);
             }
         }
     });
@@ -255,7 +217,6 @@ function tileLayout(
     ResizeHandleWrapper: (props: ResizeHandleWrapperProps) => JSX.Element
 ): JSX.Element {
     const layoutModel = useTileLayout(props.tabAtom, props.contents);
-    const effectiveOverlayTransform = useHeldOverlayTransform(layoutModel);
     const animate = useAnimateOnMount(platform, layoutModel);
 
     const gapSizePx = () => layoutModel.gapSizePx();
@@ -280,6 +241,7 @@ function tileLayout(
             class={clsx("tile-layout", props.contents.className, { animate: animate() })}
             style={tileStyle()}
         >
+            <ClosedPaneGhosts layoutModel={layoutModel} />
             <div
                 ref={(el) => {
                     (layoutModel.displayContainerRef as any).current = el;
@@ -294,8 +256,10 @@ function tileLayout(
             <NodeBackdrops layoutModel={layoutModel} />
             <MagnifiedPaneOverlay layoutModel={layoutModel} />
 
-            <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...effectiveOverlayTransform() }} />
-            <OverlayNodeWrapper layoutModel={layoutModel} effectiveOverlayTransform={effectiveOverlayTransform} />
+            {/* Both go with the drag: nothing of the landing zone plays after the release (Placeholder),
+                so the overlay is not held in place for it (it was, for an exit fade, since #836). */}
+            <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...(layoutModel.overlayTransform() as JSX.CSSProperties) }} />
+            <OverlayNodeWrapper layoutModel={layoutModel} />
         </div>
     );
 }
@@ -321,6 +285,16 @@ function useLeafGeometryNotify(platform: TileLayoutPlatform, layoutModel: Layout
         });
     }
 }
+
+/**
+ * How a pane's drag picture is rasterised. An image in the pane that can't be inlined (a browser pane's
+ * favicon from another origin, an avatar that is gone) is left blank; without this the rasteriser rejects
+ * with that image's `error` event and there is no picture at all.
+ */
+const PREVIEW_RASTER = {
+    imagePlaceholder: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",
+    onImageErrorHandler: () => {},
+};
 
 function useDragPreview(
     getTileNode: () => HTMLDivElement | undefined,
@@ -377,15 +351,19 @@ function useDragPreview(
             setPreviewImageGeneration(prevElGen);
             const seq = ++previewRequestSeq;
             // Loaded with the first drag preview, not at startup.
-            import("html-to-image").then(({ toPng }) => toPng(getPreviewRef())).then((url) => {
-                // A newer rasterisation was requested while this one was in
-                // flight — it measured the pane more recently, so drop this
-                // result rather than clobbering it.
-                if (seq !== previewRequestSeq) return;
-                const newImg = new Image();
-                newImg.src = url;
-                setPreviewImage({ img: newImg, size: measured });
-            });
+            import("html-to-image")
+                .then(({ toPng }) => toPng(getPreviewRef(), PREVIEW_RASTER))
+                .then((url) => {
+                    // A newer rasterisation was requested while this one was in
+                    // flight — it measured the pane more recently, so drop this
+                    // result rather than clobbering it.
+                    if (seq !== previewRequestSeq) return;
+                    const newImg = new Image();
+                    newImg.src = url;
+                    setPreviewImage({ img: newImg, size: measured });
+                })
+                // The drag then shows the picture it had, or the browser's own: nothing waits on this one.
+                .catch((e) => console.warn(`[drag-preview] no picture of the pane: ${describeRejection(e)}`));
         }
     };
 
@@ -573,14 +551,58 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // positioning is untouched. Mirrors `workspace.tsx`'s identical
     // visibility+opacity treatment for the whole-tab reveal gate.
     const isRevealGated = () => gatingNodeIds().has(props.node.id);
-    const tileStyle = createMemo<JSX.CSSProperties>(() => ({
-        ...(tileTransform() as JSX.CSSProperties),
-        visibility: isRevealGated() ? "hidden" : undefined,
-        opacity: shouldReduceMotion("transition") ? undefined : isRevealGated() ? 0 : 1,
-        transition: shouldReduceMotion("transition") ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
-    }));
+    // The live reflow of a pane drag (liveReflow.ts): every tile takes the rect the armed drop leaves it. Its
+    // size is set at once (`box`); its four edges glide, as registered properties (tilelayout.scss) that its
+    // transform and its clip are read from. Not a transition on the transform itself: that one runs on the
+    // compositor and a clip's on the main thread, and with the main thread busy laying the panes out the two
+    // came apart, a gap beside every pane. A tile carries its edges at rest too, so the first glide starts
+    // from them (docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md §3).
+    const reflow = () => props.layoutModel.reflowFor(props.node.id);
+    // A pane that came or was restored fades in at its rect while its neighbours glide aside (settlingPass.ts;
+    // `.tile-entering` in tilelayout.scss), over the glide's own length. It is not drawn until the glide
+    // starts (`waiting`): a pass stands at its start while the first frames lay the panes out, its neighbours
+    // still cover its place for that time, and a fade that ran through it would be over before they moved.
+    const enters = createMemo(() => props.layoutModel.settlingPass()?.enters.includes(props.node.id) ?? false);
+    const entering = createMemo(() => enters() && !!props.layoutModel.settlingPass()?.gliding);
+    const waiting = createMemo(() => enters() && !entering());
+    const tileStyle = createMemo<JSX.CSSProperties>(() => {
+        const entry = reflow();
+        const reduce = shouldReduceMotion("transition");
+        const own = addlProps()?.rect;
+        const shown = entry?.rect ?? (own && shownPx(own));
+        const style: JSX.CSSProperties = {
+            ...(tileTransform() as JSX.CSSProperties),
+            ...(shown && reflowEdges(shown)),
+            visibility: isRevealGated() ? "hidden" : undefined,
+            opacity: waiting() ? 0 : reduce ? undefined : isRevealGated() ? 0 : 1,
+            // No transition out of the wait: the fade is the animation's, and the two would both run.
+            transition: reduce || enters() ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
+            "animation-duration": entering() && reduce ? "var(--duration-fast)" : undefined,
+        };
+        if (!entry) return style;
+        // Essential spatial motion, so it glides under reduced motion too, shorter. The plain style takes over
+        // in the same batch as the drop's real rect, so nothing glides twice.
+        const timing = `var(${reduce ? "--duration-fast" : "--duration-base"}) ${EASE_OUT}`;
+        const glide = REFLOW_EDGES.map((edge) => `${edge} ${timing}`).join(", ");
+        return {
+            ...style,
+            transform: REFLOW_TRANSFORM,
+            WebkitTransform: REFLOW_TRANSFORM,
+            width: `${entry.box.width}px`,
+            height: `${entry.box.height}px`,
+            "clip-path": REFLOW_CLIP,
+            "will-change": "transform, clip-path",
+            // The dragged tile in its landing rect is the drop's own preview: not blurred as a dragged tile is.
+            filter: entry.moved ? "none" : undefined,
+            // A pane being torn off has left the layout: its neighbours close over its slot. It fades over
+            // the glide's own length (under reduced motion too), so its slot is never bare while they arrive.
+            ...(entry.leaving && { opacity: 0 }),
+            // The tile's own opacity transition rides along where it has one (none for a pane that is fading in).
+            transition: entry.leaving ? `${glide}, opacity ${timing}` : style.transition ? `${glide}, ${style.transition}` : glide,
+        };
+    });
 
-    return { skipsLayout, tileStyle };
+    return { skipsLayout, tileStyle, entering };
 }
 
 /**
@@ -644,15 +666,19 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
         );
     };
 
-    const { skipsLayout, tileStyle } = useTileStyle(props, nodeModel);
+    const { skipsLayout, tileStyle, entering } = useTileStyle(props, nodeModel);
 
     return (
         <div
             class={clsx("tile-node", {
-                dragging: isDragging(),
+                // Not while the pane's picture is still being taken: the picture would show the blur.
+                dragging: isDragging() && !paneCaptureInFlight(),
+                // The pane's own place until the layout first shows a drop or the tear-off: a release tears it off.
+                "tear-off-offered": isDragging() && !paneCaptureInFlight() && props.layoutModel.tearOffOffered(),
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
                 "tile-resize-skip": skipsLayout(),
+                "tile-entering": entering(),
             })}
             ref={tileNodeRef}
             id={props.node.id}

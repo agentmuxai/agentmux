@@ -36,7 +36,8 @@
 //!   (`browser_panes_set_rects`).
 //! - `zoom`: `zoom_in`/`zoom_out`/`step_zoom`, `next_zoom_factor`.
 //! - `clip`: focus + the Win32/X11 overlay-clip airspace workaround
-//!   (`set_pane_overlay_clip`, `focus`, `defocus_all`, `compute_pane_visible`).
+//!   (`set_pane_overlay_clip`, `focus`, `defocus_all`); `views_clip`: what a
+//!   Views pane shows under an overlay.
 
 use std::sync::Arc;
 
@@ -54,15 +55,9 @@ pub(crate) mod discard;
 pub(crate) mod media_grants;
 pub(crate) mod media_prompt;
 mod navigation;
-mod zoom;
-
-// `compute_pane_visible` is called from `browser_pane::creation_views` via
-// `crate::browser_panes::compute_pane_visible` — re-export so that external
-// path keeps resolving now that the definition lives in the `clip` submodule.
-// Same cfg gate as the definition (Linux only — macOS uses the hole-punch
-// mask, Windows uses SetWindowRgn; see `clip::compute_pane_visible`'s doc).
 #[cfg(not(target_os = "macos"))]
-pub(crate) use clip::compute_pane_visible;
+pub(crate) mod views_clip;
+mod zoom;
 
 /// Abstraction over the CEF-side operations `close()` performs on the host
 /// process. Production implements this over `&Arc<AppState>` and Win32;
@@ -305,19 +300,27 @@ impl BrowserPaneManager {
                         rect.x, rect.y, rect.width, rect.height
                     ),
                 );
-                let mut task = CreateBrowserPaneTask::new(
-                    state.clone(),
-                    block_id.to_string(),
-                    label,
-                    url.to_string(),
-                    rect,
-                    window_label.to_string(),
-                );
-                post_task(ThreadId::UI, Some(&mut task));
+                post_creation(state, block_id, label, url, rect, window_label);
                 Ok(())
             }
         }
     }
+}
+
+/// Start the creation of the pane that was just given its entry and `label`, on the UI thread.
+/// The pane's kind is decided here, where its label is made, so whoever asks for it before the
+/// task has run (a focus, a resize, a close) is answered as the task will build it.
+fn post_creation(state: &Arc<AppState>, block_id: &str, label: String, url: &str, rect: Rect, window_label: &str) {
+    crate::pane_backend::note_pane_created(state, &label, window_label);
+    let mut task = CreateBrowserPaneTask::new(
+        state.clone(),
+        block_id.to_string(),
+        label,
+        url.to_string(),
+        rect,
+        window_label.to_string(),
+    );
+    post_task(ThreadId::UI, Some(&mut task));
 }
 
 /// Whether a live pane's committed URL is already the page `requested` asks

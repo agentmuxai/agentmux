@@ -20,7 +20,7 @@ import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ClosingLabel } from "./closing-label";
-import { minimizeToHeader, useBlockConnection, useBodyContextMenu, useHeaderFit } from "./blockframe-hooks";
+import { minimizeToHeader, useBlockConnection, useBodyContextMenu, useHeaderFit, useHeaderScrollRange } from "./blockframe-hooks";
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -365,6 +365,23 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
     return <DeclIconButton decl={magnifyDecl()} className="block-frame-magnify" />;
 }
 
+/** The view's own end buttons. They live in the header's scrolling range
+ *  (#29325): unlike the window controls, they scroll with the tabs. */
+function AuxEndIcons(props: { viewModel: ViewModel; nodeModel: NodeModel }): JSX.Element {
+    const buttons = createMemo(() => util.useAtomValueSafe(props.viewModel?.endIconButtons));
+    const closing = () => props.nodeModel.isClosing?.() ?? false;
+    return (
+        <Show when={!closing() && (buttons()?.length ?? 0) > 0}>
+            {/* In the range now, so it no longer inherits .block-frame-end-icons' double-click
+                isolation: a double click on one of these must not magnify the pane. */}
+            <div class="block-frame-header-aux" style={{ display: "contents" }} onDblClick={(e) => e.stopPropagation()}>
+                <For each={buttons()}>{(button) => <DeclIconButton decl={button} className="block-frame-end-extra" />}</For>
+                <div class="block-frame-btn-separator block-frame-end-extra" aria-hidden="true" />
+            </div>
+        </Show>
+    );
+}
+
 function EndIcons(props: {
     viewModel: ViewModel;
     nodeModel: NodeModel;
@@ -377,9 +394,6 @@ function EndIcons(props: {
      *  to track a switch without remounting this component. */
     blockId: Accessor<string>;
 }): JSX.Element {
-    // createMemo so blockAtom reads inside endIconButtons() are tracked and
-    // the button array re-evaluates when the agent loads/unloads.
-    const endIconButtons = createMemo(() => util.useAtomValueSafe(props.viewModel?.endIconButtons));
     const magnified = () => props.nodeModel.isMagnified();
     const minimized = () => props.nodeModel.isMinimized();
     const ephemeral = () => props.nodeModel.isEphemeral();
@@ -413,18 +427,6 @@ function EndIcons(props: {
 
     return (
         <Show when={!closing()} fallback={<ClosingLabel tabs={props.nodeModel.closingTabs?.() ?? 1} />}>
-            <Show when={(endIconButtons()?.length ?? 0) > 0}>
-                <For each={endIconButtons()}>
-                    {(button) =>
-                        button.elemtype === "toggleiconbutton" ? (
-                            <DeclIconButton decl={button} className="block-frame-end-extra" />
-                        ) : (
-                            <DeclIconButton decl={button} className="block-frame-end-extra" />
-                        )
-                    }
-                </For>
-                <div class="block-frame-btn-separator block-frame-end-extra" aria-hidden="true" />
-            </Show>
             {/* No header mic on any pane. Agent panes put their mic beside the
                 composer (AgentFooter.tsx); terminals had one here, removed
                 because nobody speaks into a terminal. The terminal's
@@ -558,6 +560,8 @@ function BlockFrame_Header(
     const [headerHovering, setHeaderHovering] = createSignal(false);
     let headerRef: HTMLDivElement | undefined;
     useHeaderFit(() => headerRef);
+    // One horizontal range (#29325, SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md); the window controls stay pinned.
+    const headerScroll = useHeaderScrollRange(() => headerRef);
     const viewName = createMemo(() => {
         const bd = blockData();
         if (bd?.meta?.["frame:title"]) {
@@ -729,6 +733,12 @@ function BlockFrame_Header(
             onMouseLeave={() => setHeaderHovering(false)}
             style={headerStyle()}
         >
+            <div
+                class="block-frame-header-scroll"
+                ref={headerScroll.setRange}
+                classList={{ "has-more-left": headerScroll.moreLeft(), "has-more-right": headerScroll.moreRight() }}
+            >
+            <div class="block-frame-header-content">
             {preIconButtonElem()}
             {viewIconControlElem()}
             <Show
@@ -777,19 +787,24 @@ function BlockFrame_Header(
                     </div>
                 </Show>
             </div>
+            <div class="block-frame-header-spacer" aria-hidden="true" />
+            <AuxEndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} />
+            </div>
+            </div>
+            {/* Away from the scrolling range, so an overflow box can never clip or follow it. */}
             <AnchoredTooltip
                 anchor={() => headerRef ?? null}
                 visible={headerHovering() && tooltipHeaderElems().length > 0}
                 content={<>{tooltipHeaderElems()}</>}
             />
-            {/* The pane's grip, outside the scrolling tab strip, just left of
-                the pane controls. The header's whole-pane drag is vetoed for a
-                magnified or ephemeral pane (TileLayout.core.tsx canDrag); the
-                grip says so. */}
-            <Show when={!props.preview}>
-                <PaneGrip dragDisabled={props.nodeModel.isMagnified() || props.nodeModel.isEphemeral()} />
-            </Show>
             <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
+                {/* The pane's grip: first of the pinned controls, so it is the one just left of the window
+                    controls in every pane, to the right of the view's own buttons and their separator, and
+                    it never scrolls away with the range. The header's whole-pane drag is vetoed for a
+                    magnified or ephemeral pane (TileLayout.core.tsx canDrag); the grip says so. */}
+                <Show when={!props.preview}>
+                    <PaneGrip dragDisabled={props.nodeModel.isMagnified() || props.nodeModel.isEphemeral()} />
+                </Show>
                 <EndIcons
                     viewModel={props.viewModel}
                     nodeModel={props.nodeModel}

@@ -12,28 +12,33 @@ use super::{clear_dangling_focus_magnify, report_layout_violations};
 use crate::backend::layout::intent::migrate_legacy_minimize;
 use crate::state::State;
 
-/// Remove the leaves of `tab_id`'s tree whose block the tab doesn't own,
-/// then normalize the tree as a delete intent leaves it (legacy minimize
-/// migrated, balanced) and clear a focus/magnify id left pointing at nothing.
-/// A tree with nothing to remove is left exactly as loaded.
+/// Migrate the pre-display-mode minimize fields of `tab_id`'s tree, remove
+/// the leaves whose block the tab doesn't own, then normalize the tree as a
+/// delete intent leaves it (balanced) and clear a focus/magnify id left
+/// pointing at nothing. A tree with nothing to migrate or remove is left
+/// exactly as loaded. The window no longer migrates a tree itself: every tree
+/// it is given has been through here or through an intent.
+///
+/// `prune` is false when the tab's block ids could not be trusted (the blocks
+/// could not be read): the minimize fields are still migrated, no leaf is removed.
 ///
 /// Returns the events that persist the change (empty when nothing changed),
 /// with versions taken the way an intent's are.
-pub(crate) fn heal_loaded_layout(state: &mut State, tab_id: &str) -> Vec<Event> {
+pub(crate) fn heal_loaded_layout(state: &mut State, tab_id: &str, prune: bool) -> Vec<Event> {
     let Some(tab) = state.tabs.get_mut(tab_id) else { return Vec::new() };
     let owned: std::collections::HashSet<String> = tab.block_ids.iter().cloned().collect();
-    let pruned = crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &owned);
-    if pruned == 0 {
+    let migrated = tab.rootnode.as_mut().map_or(0, migrate_legacy_minimize);
+    let pruned = if prune { crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &owned) } else { 0 };
+    if migrated == 0 && pruned == 0 {
         return Vec::new();
     }
     if let Some(root) = tab.rootnode.as_mut() {
-        migrate_legacy_minimize(root);
         if let Err(e) = crate::backend::layout::balance_node(root) {
-            tracing::warn!(tab_id, error = %e, "layout heal: balance failed; keeping the pruned tree");
+            tracing::warn!(tab_id, error = %e, "layout heal: balance failed; keeping the healed tree");
         }
     }
     let (was_focused, was_magnified) = clear_dangling_focus_magnify(tab);
-    tracing::warn!(tab_id, pruned, "layout heal: removed leaves for blocks the tab doesn't own");
+    tracing::warn!(tab_id, migrated, pruned, "layout heal: migrated legacy minimize fields, removed leaves for blocks the tab doesn't own");
     report_layout_violations(tab_id, "bootstrap heal", &tab.rootnode);
     let new_tree = tab.rootnode.clone();
 

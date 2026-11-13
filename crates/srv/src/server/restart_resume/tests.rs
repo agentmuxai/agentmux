@@ -397,3 +397,42 @@ fn an_exit_before_the_resume_ran_carries_the_agents_still_waiting() {
     assert_eq!(with_pending(running, &pending), vec!["a".to_string(), "b".to_string(), "c".to_string()]);
     assert!(with_pending(Vec::new(), &[]).is_empty());
 }
+
+/// A container agent holds no process between turns, so its controller reports `init` or `done`, not `running`;
+/// it is still up, and the exit list must name it, or a restart leaves it wanted running and stopped (task #2283).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_idle_container_agent_is_up_at_exit_and_comes_back_past_its_idle_window() {
+    use crate::backend::agent_state::test_support::register_stub;
+    use crate::backend::blockcontroller::{delete_controller, BLOCK_CONTROLLER_PERSISTENT, BLOCK_CONTROLLER_SUBPROCESS, STATUS_DONE, STATUS_INIT};
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let container = resumable(&state, &tabs[0], "ag-container").await;
+    set_meta(&state, &container, serde_json::json!({ "agentMode": "container" }));
+    let native = resumable(&state, &tabs[0], "ag-native-idle").await;
+    let block_of = |block: &str| state.mstore.get::<obj::Block>(block).unwrap().unwrap();
+
+    for status in [STATUS_INIT, STATUS_DONE] {
+        register_stub(&container, BLOCK_CONTROLLER_SUBPROCESS, status, false);
+        register_stub(&native, BLOCK_CONTROLLER_PERSISTENT, status, false);
+        assert!(is_up(&block_of(&container)), "a container agent's controller is up while it waits ({status})");
+        assert!(!is_up(&block_of(&native)), "a persistent agent with no running process is not ({status})");
+    }
+    // A stop leaves the container agent's controller registered at `done`: stopped, not up.
+    register_stub(&container, BLOCK_CONTROLLER_SUBPROCESS, STATUS_DONE, false);
+    set_desired(&state.mstore, &container, DESIRED_STOPPED);
+    assert!(!is_up(&block_of(&container)), "a container agent stopped in this run is not up, whatever its controller says");
+    set_desired(&state.mstore, &container, DESIRED_RUNNING);
+    recorded_stopped(&state, &container);
+    assert!(!is_up(&block_of(&container)), "nor one recorded stopped, as a restart reads it");
+    set_desired(&state.mstore, &container, DESIRED_RUNNING);
+    delete_controller(&container);
+    delete_controller(&native);
+    assert!(!is_up(&block_of(&container)), "no controller: stopped");
+
+    // Quiet past a tiny idle window: left stopped without the list, resumed with it.
+    set_meta(&state, &container, serde_json::json!({ "agent:idle_stop_minutes": 0.0001 }));
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(candidates(&state).iter().all(|c| c.block_id != container), "past its window and not on the list");
+    let at_exit: HashSet<String> = ["ag-container"].map(String::from).into_iter().collect();
+    assert_eq!(candidates_with(&state, &at_exit).iter().filter(|c| c.block_id == container).count(), 1, "on the list");
+}

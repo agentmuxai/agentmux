@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { attentionLook, DIALOG_MESSAGE_MAX, dialogMessage, noticeText } from "./attention-kinds";
+import { attentionLook, chooserNoticeText, DIALOG_MESSAGE_MAX, dialogMessage, noticeText } from "./attention-kinds";
 
 const a = (over: Partial<BrowserAttention>): BrowserAttention => ({ id: "1", kind: "approval", ...over });
 
@@ -63,6 +63,24 @@ describe("noticeText", () => {
         expect(noticeText(a({ kind: "notice", popup: true, origin: "https://b.example", sites: ["https://a.example"] }))).toContain(
             "tried to open a window at b.example",
         );
+    });
+});
+
+describe("chooserNoticeText", () => {
+    it("tells the person a cancelled file chooser is theirs after Take over, and offers only Dismiss", () => {
+        const n = a({ kind: "notice", chooser: "choose a file" });
+        expect(chooserNoticeText(n)).toBe(
+            "The page asked to choose a file, but an agent drives this pane, so AgentMux cancelled it. Use Take over, then click again to choose a file yourself.",
+        );
+        expect(attentionLook(n)).toMatchObject({ agent: false, no: "Dismiss", text: chooserNoticeText(n) });
+        expect(attentionLook(n).yes).toBeUndefined();
+        expect(attentionLook(n).back).toBeFalsy();
+        expect(attentionLook(n).showUrl).toBeFalsy();
+    });
+
+    it("names several files and a folder in their own words", () => {
+        expect(chooserNoticeText(a({ kind: "notice", chooser: "choose several files" }))).toContain("to choose files,");
+        expect(chooserNoticeText(a({ kind: "notice", chooser: "choose a folder" }))).toContain("click again to choose a folder yourself");
     });
 });
 

@@ -13,7 +13,7 @@
 //! checks it as it checks any agent's LAN jekt
 //! (`SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`): it asks the LAN peers for the
 //! sender's public key, which this instance's `/agentmux/reactive/agent?id=`
-//! answers, pins it on first use, and marks the message `TRUST=lan-verified`.
+//! answers, pins it once a trusted install vouches for it, and marks the message `TRUST=lan-verified`.
 //! It claims no user authority: normal tier, from this instance, in its own
 //! words.
 

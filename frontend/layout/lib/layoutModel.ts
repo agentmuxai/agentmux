@@ -11,6 +11,8 @@ import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createMemo, createRoot, getOwner, on, runWithOwner, Owner } from "solid-js";
 import { chipDropRect } from "./chipPlaceholder";
 import { createPlacementPreview, type FutureLayout } from "./futureLayout";
+import { createLiveReflow, type ReflowEntry } from "./liveReflow";
+import { createSettlingPass, type SettlingPass } from "./settlingPass";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode, withDerivedNodeIds } from "./layoutNode";
 import { computeMoveNode } from "./layoutTree";
@@ -278,8 +280,24 @@ export class LayoutModel {
     placeholderTransform: () => CSSProperties;
     /** The layout the pending drag action leaves: the ghost is its moved pane's rect (futureLayout.ts). */
     futureLayout: () => FutureLayout | undefined;
+    /** The layout a tear-off of the dragged pane leaves, while the drag shows one (tearOffPreview.ts). */
+    tearOffLayout: () => FutureLayout | undefined;
+    /** Whether a release where the drag stands is all the drag has offered so far: the dragged pane's place says TEAR OFF (futureLayout.ts). */
+    tearOffOffered: () => boolean;
+    /** Whether the dragged pane's own place is a drop like any other now, where a release puts the pane back (futureLayout.ts). */
+    ownPlaceDrops: () => boolean;
     /** Outlines of every other pane's rect in that layout, while a drop is previewed. */
     placementWireframe: () => { id: string; style: CSSProperties }[];
+    /** The live reflow of a pane drag (liveReflow.ts): how a tile stands in for its future rect, or nothing. */
+    reflowFor: (nodeId: string) => ReflowEntry | undefined;
+    /** Whether the live reflow is showing a drop now. */
+    liveReflowActive: () => boolean;
+    /** Whether the live reflow is how the drag that is on shows its drops: the panes are the outline, so no wireframe and no dim. */
+    liveReflowExpected: () => boolean;
+    /** The dragged pane's landing rect once the panes stand in the drop being shown (liveReflow.ts). */
+    landingSettled: () => Dimensions | undefined;
+    /** The glide of the panes after one left outside a drag, while it runs (settlingPass.ts). */
+    settlingPass: () => SettlingPass | undefined;
     /**
      * CSS properties for the overlay container.
      */
@@ -583,10 +601,7 @@ export class LayoutModel {
                 )
             );
 
-            ({ futureLayout: this.futureLayout, placementWireframe: this.placementWireframe } = createPlacementPreview(this));
-            this.placeholderTransform = createMemo<CSSProperties>(() =>
-                this.getPlaceholderTransform(this.pendingTreeAction.throttledValueAtom())
-            );
+            this.createDropPreview();
 
             this.initializeFromMuxObject();
         });
@@ -676,6 +691,9 @@ export class LayoutModel {
             case LayoutTreeActionType.ClearPendingAction:
                 this.pendingTreeAction.throttledValueAtom._set(undefined);
                 break;
+            // The drop that leaves the pane where it was, committed (placementPreview.ts `showStay`): nothing to do.
+            case LayoutTreeActionType.Stay:
+                break;
             case LayoutTreeActionType.CommitPendingAction: {
                 const pendingAction = this.pendingTreeAction.currentValueAtom();
                 if (!pendingAction) {
@@ -744,8 +762,18 @@ export class LayoutModel {
     private observedContainerSize: Dimensions | undefined = undefined;
 
     getBoundingRect: () => Dimensions = () => {
-        return this.observedContainerSize ?? getBoundingRectImpl(this);
+        return this.observedContainerSize ?? this.splitterDragContainerSize() ?? getBoundingRectImpl(this);
     };
+
+    /**
+     * The container's size as measured when the splitter drag in progress began. A drag does not
+     * change the container, and measuring it again after each move's layout writes laid the whole
+     * page out on every pointer move (about 25 ms a move in a window of many panes).
+     */
+    private splitterDragContainerSize(): Dimensions | undefined {
+        const rect = this.resizeContext?.displayContainerRect;
+        return rect ? { top: 0, left: 0, width: rect.width, height: rect.height } : undefined;
+    }
 
     /**
      * The id of the focused node in the layout.
@@ -762,6 +790,32 @@ export class LayoutModel {
     /** @internal */
     validateMagnifiedNode(leafOrder: LeafOrderEntry[], addlProps: Record<string, LayoutNodeAdditionalProps>) {
         validateMagnifiedNodeImpl(this, leafOrder, addlProps);
+    }
+
+    /**
+     * The drag's drop preview, in the constructor's reactive owner: the layout the pending action leaves, the
+     * ghost, the wireframe (futureLayout.ts), the live reflow (liveReflow.ts) and its second source, the
+     * settling pass (settlingPass.ts).
+     */
+    private createDropPreview(): void {
+        const preview = createPlacementPreview(this);
+        ({
+            futureLayout: this.futureLayout,
+            placementWireframe: this.placementWireframe,
+            tearOffLayout: this.tearOffLayout,
+            tearOffOffered: this.tearOffOffered,
+            ownPlaceDrops: this.ownPlaceDrops,
+        } = preview);
+        // From the action as long as the layout is the one it was armed on, never from one the drop has just
+        // committed (futureLayout.ts `placementAction`).
+        this.placeholderTransform = createMemo<CSSProperties>(() => this.getPlaceholderTransform(preview.placementAction()));
+        this.settlingPass = createSettlingPass(this);
+        ({
+            reflowFor: this.reflowFor,
+            liveReflowActive: this.liveReflowActive,
+            liveReflowExpected: this.liveReflowExpected,
+            landingSettled: this.landingSettled,
+        } = createLiveReflow(this));
     }
 
     /**
@@ -967,6 +1021,10 @@ export class LayoutModel {
     onContainerResize = (_rect?: DOMRectReadOnly, entry?: ResizeObserverEntry) => {
         const box = entry?.borderBoxSize?.[0];
         this.observedContainerSize = box ? { top: 0, left: 0, width: box.inlineSize, height: box.blockSize } : undefined;
+        // The container changed size in the middle of a splitter drag: the drag goes on from the new measure.
+        if (this.resizeContext && this.displayContainerRef.current) {
+            this.resizeContext.displayContainerRect = this.displayContainerRef.current.getBoundingClientRect();
+        }
         try {
             onContainerResizeImpl(this);
         } finally {

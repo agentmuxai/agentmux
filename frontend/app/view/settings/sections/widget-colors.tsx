@@ -72,7 +72,6 @@ function WidgetColorRow(p: { manifest: PaneTabManifest }): JSX.Element {
                         label={`${p.manifest.label} color`}
                         value={selected()}
                         noneLabel="None"
-                        columns={17}
                         onSelect={pick}
                     />
                     <Button

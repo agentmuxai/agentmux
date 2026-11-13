@@ -9,7 +9,7 @@
  */
 
 import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { AMBIENT_BACKGROUND_MS, ambientFailingCount, watchAmbient } from "@/app/store/ambient-health";
+import { AMBIENT_BACKGROUND_MS, ambientFailingCount, ambientFailingTip, watchAmbient } from "@/app/store/ambient-health";
 import { getTotal, tokenUsageState } from "@/store/token-usage";
 import { formatCompactNumber } from "@/util/format-count";
 import { TokenBreakdownPopover } from "./TokenBreakdownPopover";
@@ -49,7 +49,7 @@ export const TokenUsageIndicator = (): JSX.Element => {
                 classList={{ "token-usage-indicator--idle": isZero() }}
                 onClick={handleToggle}
                 onKeyDown={handleKeyDown}
-                aria-label={failing() > 0 ? "Token usage, AgentMux internal calls failing, click for breakdown" : "Token usage, click for breakdown"}
+                aria-label={failing() > 0 ? "Token usage, AgentMux internal calls failing, click for what is failing" : "Token usage, click for breakdown"}
                 data-tip="Total tokens this session"
             >
                 <span class="token-usage-indicator-counts">
@@ -63,7 +63,7 @@ export const TokenUsageIndicator = (): JSX.Element => {
                     <span
                         class="token-usage-indicator-dot"
                         data-testid="ambient-failing-dot"
-                        {...tip(`AgentMux's own model calls: ${failing()} purpose${failing() === 1 ? "" : "s"} failing`, { label: true })}
+                        {...tip(ambientFailingTip(), { label: true })}
                     />
                 </Show>
             </button>

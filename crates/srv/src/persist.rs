@@ -32,6 +32,43 @@ fn is_parked(block: &Block) -> bool {
     crate::backend::obj::meta_get_bool(&block.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)
 }
 
+/// Whether `block` is a child of a block that is in the store (`parentoref` is `block:<id>`).
+fn is_sub_block_of_a_stored_block(block: &Block, stored: &[Block]) -> bool {
+    block.parentoref.strip_prefix("block:").is_some_and(|parent| stored.iter().any(|b| b.oid == parent))
+}
+
+/// Reports a stored block that is in no tab and is not parked, which the bootstrap skips. A block's own
+/// child (an agent pane's shell) is in no tab by design and lives with its parent, which may be parked:
+/// it is no orphan, the reducer never tracked it, and nothing is reported for it.
+fn report_block_in_no_tab(block: &Block, stored: &[Block]) {
+    if is_sub_block_of_a_stored_block(block, stored) {
+        return;
+    }
+    tracing::warn!(
+        target: "srv-persist",
+        "[srv-persist] bootstrap: block {} has no parent tab in reducer state — skipping",
+        block.oid
+    );
+}
+
+/// A row written by an earlier build can hold a leaf for a block the tab no longer owns, or the
+/// pre-display-mode minimize fields; heal it before any window loads it, and store the healed row
+/// through the same write an intent's events take. Without the block list nothing is pruned (the
+/// tabs' block ids are incomplete), but the minimize fields are still converted: that needs no blocks.
+fn heal_loaded_layouts(state: &mut State, mstore: &Store, blocks_loaded: bool) {
+    if !blocks_loaded {
+        tracing::warn!(target: "srv-persist", "[srv-persist] bootstrap: blocks could not be read; healing the layouts without pruning");
+    }
+    let tab_ids: Vec<String> = state.tabs.keys().cloned().collect();
+    for tab_id in tab_ids {
+        for ev in crate::reducer::heal_loaded_layout(state, &tab_id, blocks_loaded) {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(&ev, mstore) {
+                tracing::warn!(target: "srv-persist", tab_id = %tab_id, "[srv-persist] bootstrap: storing the healed layout failed: {}", e);
+            }
+        }
+    }
+}
+
 /// Phase E.2 / E.2b — load workspaces and their tabs from SQLite
 /// into the reducer state. Called once at srv startup before the
 /// IPC server starts accepting commands. Async because we're inside
@@ -176,22 +213,7 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
             },
         );
     }
-    // A row written by an earlier build can hold a leaf for a block the tab
-    // no longer owns; heal it now, before any window loads it, and store the
-    // healed row through the same write an intent's events take.
-    let tab_ids: Vec<String> = if blocks_loaded {
-        state.tabs.keys().cloned().collect()
-    } else {
-        tracing::warn!(target: "srv-persist", "[srv-persist] bootstrap: blocks could not be read; skipping the layout heal");
-        Vec::new()
-    };
-    for tab_id in tab_ids {
-        for ev in crate::reducer::heal_loaded_layout(&mut state, &tab_id) {
-            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(&ev, mstore) {
-                tracing::warn!(target: "srv-persist", tab_id = %tab_id, "[srv-persist] bootstrap: storing the healed layout failed: {}", e);
-            }
-        }
-    }
+    heal_loaded_layouts(&mut state, mstore, blocks_loaded);
     for block in &blocks {
         // Phase E.3 — recover each block's parent tab via reverse
         // lookup against `state.tabs` (NOT raw `tabs` from SQLite):
@@ -205,11 +227,7 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
             .map(|t| t.tab_id.clone())
             .or_else(|| is_parked(block).then(String::new))
         else {
-            tracing::warn!(
-                target: "srv-persist",
-                "[srv-persist] bootstrap: block {} has no parent tab in reducer state — skipping",
-                block.oid
-            );
+            report_block_in_no_tab(block, &blocks);
             continue;
         };
         state.blocks.insert(
@@ -300,5 +318,17 @@ mod tests {
         assert_eq!(s.blocks.get(&parked).map(|b| b.tab_id.as_str()), Some(""));
         assert!(!s.blocks.contains_key(&orphan));
         assert_eq!(s.tabs["t1"].block_ids, vec![shown]);
+    }
+
+    /// An agent pane's shell is a child of the agent's block, in no tab. With its parent in the store
+    /// (parked, here) it is not an orphan; with its parent gone it is.
+    #[test]
+    fn a_child_of_a_stored_block_is_not_an_orphan() {
+        let child = |parent: &str| Block { oid: "shell".into(), parentoref: parent.to_string(), ..Default::default() };
+        let stored = [Block { oid: "agent".into(), ..Default::default() }];
+        assert!(is_sub_block_of_a_stored_block(&child("block:agent"), &stored));
+        assert!(!is_sub_block_of_a_stored_block(&child("block:gone"), &stored));
+        assert!(!is_sub_block_of_a_stored_block(&child("tab:agent"), &stored));
+        assert!(!is_sub_block_of_a_stored_block(&child(""), &stored));
     }
 }

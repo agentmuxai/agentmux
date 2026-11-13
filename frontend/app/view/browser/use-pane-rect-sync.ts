@@ -66,6 +66,8 @@ export interface PaneRectSync {
     createPane: (url: string) => Promise<void>;
     syncPosition: () => void;
     paneRect: () => PaneRect;
+    /** Where the native page is now, in CSS px of the window, or none while it is collapsed or not made. Reactive. */
+    pageRectCss: Accessor<{ x: number; y: number; w: number; h: number } | undefined>;
 }
 
 /**
@@ -88,15 +90,8 @@ function releaseNativePane(blockId: string, token: symbol | null): boolean {
     return true;
 }
 
-/**
- * Syncs the native browser-pane HWND's position/size to this pane's
- * placeholder div, and owns pane creation. A native browser-pane HWND
- * can't be moved by CSS, so this polls (ResizeObserver + a safety-net
- * interval) and hands the window's `pane-rect-batcher` the placeholder's rect
- * whenever it changes, plus a settle loop after layout reflows
- * (docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md).
- */
-export function usePaneRectSync(params: {
+/** What `usePaneRectSync` is given. */
+export interface PaneRectSyncParams {
     model: BrowserViewModel;
     placeholderRef: () => HTMLDivElement | undefined;
     windowLabel: string;
@@ -108,8 +103,70 @@ export function usePaneRectSync(params: {
      *  its discard didn't happen), so no load will end the sleep. The view applies the
      *  same policy as for a loaded wake. Without it the sleep ends at once. */
     onWakeWithoutLoad?: () => void;
-}): PaneRectSync {
+    /**
+     * The page stays where it is, wherever its placeholder is drawn: an in-app drag has cut it away behind a
+     * picture, and the live reflow moves the pane's tile under it (liveReflow.ts). A page that was resized to
+     * every drop the drag passes over would lay itself out again each time, unseen. Hiding and showing still
+     * go through (a tab switched under the drag); the real rect is sent once this turns false.
+     */
+    held?: Accessor<boolean>;
+}
+
+/**
+ * Native browser-pane HWND settle on a layout change. `notifyPaneReflow()` opens a short window during which
+ * the pane's placeholder rect is sampled again each frame and pushed to the host (`syncPosition` dedupes, so
+ * unchanged frames are free), with one more after it closes, so the HWND lands exactly on the final rect.
+ */
+function settleOnPaneReflow(syncPosition: () => void): void {
+    let frame: number | null = null;
+    const sample = () => {
+        syncPosition();
+        if (paneReflowActive()) {
+            frame = requestAnimationFrame(sample);
+        } else {
+            frame = null;
+            syncPosition();
+        }
+    };
+    createEffect(() => {
+        if (paneReflowActive() && frame == null) frame = requestAnimationFrame(sample);
+    });
+    onCleanup(() => {
+        if (frame != null) cancelAnimationFrame(frame);
+    });
+}
+
+/**
+ * The hold is over (`held` turned false): the page goes to where its pane is now, and once more a frame
+ * later, when the tiles the drag had moved are back in their own places.
+ */
+function syncWhenReleased(held: Accessor<boolean>, syncPosition: () => void): void {
+    createEffect(
+        on(
+            held,
+            (now) => {
+                if (now) return;
+                syncPosition();
+                const frame = requestAnimationFrame(syncPosition);
+                onCleanup(() => cancelAnimationFrame(frame));
+            },
+            { defer: true },
+        ),
+    );
+}
+
+/**
+ * Syncs the native browser-pane HWND's position/size to this pane's
+ * placeholder div, and owns pane creation. A native browser-pane HWND
+ * can't be moved by CSS, so this polls (ResizeObserver + a safety-net
+ * interval) and hands the window's `pane-rect-batcher` the placeholder's rect
+ * whenever it changes, plus a settle loop after layout reflows
+ * (docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md).
+ */
+export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
     const { model, placeholderRef, windowLabel, diag } = params;
+    const held = params.held ?? (() => false);
+    const [pageRectCss, setPageRectCss] = createSignal<{ x: number; y: number; w: number; h: number } | undefined>(undefined);
     // A memo, so the sleep effect below runs when the pane goes to sleep or
     // wakes, not each time the sleep record is rewritten (marking it kept).
     const asleep = createMemo(params.asleep ?? (() => false));
@@ -197,7 +254,9 @@ export function usePaneRectSync(params: {
         // (pane-leaf-chrome keeps it mounted and only hides it with
         // `visibility`, which doesn't change this rect). Without this its
         // native page stayed drawn over whichever tab was active in the pane.
-        const rect = visibility() !== "active" ? { x: 0, y: 0, width: 0, height: 0 } : paneRect();
+        const shown = visibility() === "active";
+        if (shown && held() && lastSentRect && lastSentRect.width > 0 && lastSentRect.height > 0) return;
+        const rect = shown ? paneRect() : { x: 0, y: 0, width: 0, height: 0 };
         if (
             lastSentRect &&
             lastSentRect.x === rect.x &&
@@ -212,30 +271,13 @@ export function usePaneRectSync(params: {
         rects.set(model.blockId, rect);
         // Keep the overlay-clip short-circuit registry in sync with the
         // host's actual HWND rect. Cheap (two property reads + a Map write).
-        registerPaneRect(model.blockId, paneRectCss());
+        const css = paneRectCss();
+        registerPaneRect(model.blockId, css);
+        setPageRectCss(shown ? css : undefined);
     };
 
-    // Native browser-pane HWND settle on a layout change. `notifyPaneReflow()`
-    // opens a short window during which we re-sample this pane's placeholder
-    // rect per frame and push it to the host (syncPosition dedupes, so
-    // unchanged frames are free).
-    let reflowRAF: number | null = null;
-    const sampleReflowFrame = () => {
-        syncPosition();
-        if (paneReflowActive()) {
-            reflowRAF = requestAnimationFrame(sampleReflowFrame);
-        } else {
-            // One final settle frame so the HWND lands exactly on the final
-            // rect even if the last tick fired slightly early.
-            reflowRAF = null;
-            syncPosition();
-        }
-    };
-    createEffect(() => {
-        if (paneReflowActive() && reflowRAF == null) {
-            reflowRAF = requestAnimationFrame(sampleReflowFrame);
-        }
-    });
+    syncWhenReleased(held, syncPosition);
+    settleOnPaneReflow(syncPosition);
 
     // Set on unmount. `browser_pane_create` is async: if the view unmounts
     // (its tab switched away) while the create is still in flight, the
@@ -284,6 +326,7 @@ export function usePaneRectSync(params: {
             // layout changed while the async create was in-flight.
             notifyPaneReflow();
             registerPaneRect(model.blockId, paneRectCss());
+            if (visibility() === "active") setPageRectCss(paneRectCss());
             // The page exists now, so it can take the keyboard: if this pane
             // is the selected one (opened with focus, e.g. `muxsh web`), move
             // the caret into it, as terminal/editor panes do on mount. A
@@ -342,6 +385,7 @@ export function usePaneRectSync(params: {
         }
         ownerToken = null;
         lastSentRect = null;
+        setPageRectCss(undefined);
         setPaneCreated(false);
     };
     // Where the browser engine has the Discard API, sleep discards the page in
@@ -482,11 +526,7 @@ export function usePaneRectSync(params: {
             clearInterval(positionInterval);
             positionInterval = null;
         }
-        if (reflowRAF != null) {
-            cancelAnimationFrame(reflowRAF);
-            reflowRAF = null;
-        }
     });
 
-    return { paneCreated, createPane, syncPosition, paneRect };
+    return { paneCreated, createPane, syncPosition, paneRect, pageRectCss };
 }

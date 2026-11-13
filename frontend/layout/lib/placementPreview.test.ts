@@ -2,7 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearPlacement, previewPlacement, resetAllDropIntent, resetDropIntent } from "./placementPreview";
+import { beginDrag, endDrag } from "@/app/drag/drag-session";
+import {
+    clearPlacement,
+    LEAVE_GRACE_MS,
+    leavePlacement,
+    previewPlacement,
+    resetAllDropIntent,
+    resetDropIntent,
+} from "./placementPreview";
 import { dragState } from "./tilelayout-drag-state";
 import { DropDirection, LayoutTreeActionType } from "./types";
 
@@ -77,6 +85,69 @@ describe("previewPlacement", () => {
         clearPlacement(model, true);
         const { targetId } = previewPlacement(model, input("B", 40, 200));
         expect(targetId).toBe("B");
+    });
+
+    it("starts afresh when the tree changes under the drag", () => {
+        // Two panes, hit-tested against the model's own rects; then srv swaps their places mid-drag.
+        let shape = [
+            { id: "A", rect: { top: 0, left: 0, width: 400, height: 400 } },
+            { id: "B", rect: { top: 0, left: 400, width: 400, height: 400 } },
+        ];
+        const changing = {
+            treeState: { rootNode: undefined },
+            treeReducer: vi.fn(),
+            leafs: () => shape.map((s) => ({ id: s.id })),
+            getNodeRectById: (id: string) => shape.find((s) => s.id === id)?.rect,
+        } as never;
+        previewPlacement(changing, input("A", 40, 200));
+        // Still the same layout: a fast jump over B is held back by the tracker, as before.
+        expect(previewPlacement(changing, input("B", 3000, 3000)).targetId).toBe("A");
+        shape = [shape[1], shape[0]].map((s, i) => ({ ...s, rect: { ...s.rect, left: i * 400 } }));
+        // A new layout: the first sample on it arms at once, whatever was armed on the old one.
+        expect(previewPlacement(changing, input("B", 3000, 3000)).targetId).toBe("B");
+        resetDropIntent(changing);
+    });
+
+    const cleared = () => reducer.mock.calls.filter(([a]) => a.type === LayoutTreeActionType.ClearPendingAction).length;
+
+    it("keeps the drop shown when the pointer only crosses to the next pane's zones", () => {
+        vi.useFakeTimers();
+        beginDrag("tile");
+        previewPlacement(model, input("A", 40, 200));
+        // The leave of A's overlay, then B's first sample a frame later: nothing was cleared in between.
+        leavePlacement(model);
+        expect(cleared()).toBe(0);
+        vi.advanceTimersByTime(16);
+        previewPlacement(model, input("B", 44, 200));
+        vi.advanceTimersByTime(LEAVE_GRACE_MS * 2);
+        expect(cleared()).toBe(0);
+        endDrag("drop");
+    });
+
+    it("clears the drop once the pointer has really left: no sample within the grace", () => {
+        vi.useFakeTimers();
+        beginDrag("tile");
+        previewPlacement(model, input("A", 40, 200));
+        leavePlacement(model);
+        vi.advanceTimersByTime(LEAVE_GRACE_MS - 1);
+        expect(cleared()).toBe(0);
+        vi.advanceTimersByTime(1);
+        expect(cleared()).toBe(1);
+        endDrag("cancel");
+    });
+
+    it("clears at once what a grace still shows when the drag is over, and waits for nothing with no drag on", () => {
+        vi.useFakeTimers();
+        beginDrag("tile");
+        previewPlacement(model, input("A", 40, 200));
+        leavePlacement(model);
+        // A cancelled drag ends with a leave: its end clears the drop.
+        endDrag("cancel");
+        expect(cleared()).toBe(1);
+        vi.advanceTimersByTime(LEAVE_GRACE_MS * 2);
+        expect(cleared()).toBe(1);
+        leavePlacement(model);
+        expect(cleared()).toBe(2);
     });
 
     it("resets every tab's steadying at the end of a drag", () => {

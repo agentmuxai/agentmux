@@ -21,7 +21,7 @@ pub(crate) mod identity_ops;
 pub(crate) mod memory;
 pub(crate) mod op;
 mod disk_cleanup_op;
-mod log_ops;
+pub(crate) mod log_ops;
 pub(crate) mod receive;
 mod reclaim_op;
 mod upgrade_op;

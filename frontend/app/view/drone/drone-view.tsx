@@ -687,6 +687,10 @@ function nodeSummary(n: FlowNode): string {
             const who = ref.instanceName || ref.identityId || "blank";
             return `${who} · ${truncate(task)}`;
         }
+        case "message":
+            return `to ${(n.data["to"] as string) || "<no one>"} · ${truncate((n.data["body"] as string) ?? "")}`;
+        case "task":
+            return truncate((n.data["title"] as string) || "<no title>");
         case "api":
             return `${(n.data["method"] as string) ?? "GET"} ${truncate((n.data["url"] as string) ?? "")}`;
         case "condition":
@@ -722,6 +726,12 @@ export function nodeCopyEntries(n: FlowNode): CopyMenuEntry[] {
     switch (n.data.kind) {
         case "agent":
             entries.push({ label: "Copy task", value: str("task") });
+            break;
+        case "message":
+            entries.push({ label: "Copy message", value: str("body") });
+            break;
+        case "task":
+            entries.push({ label: "Copy title", value: str("title") }, { label: "Copy task text", value: str("body") });
             break;
         case "api":
             entries.push({ label: "Copy URL", value: str("url") }, { label: "Copy request body", value: str("body") });
@@ -818,6 +828,12 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                 </NodeField>
                 <AgentResultPanel model={p.model} blockId={p.node.id} />
             </Show>
+            <Show when={p.node.data.kind === "message"}>
+                <MessageFields node={p.node} update={update} />
+            </Show>
+            <Show when={p.node.data.kind === "task"}>
+                <TaskFields node={p.node} update={update} />
+            </Show>
             <Show when={p.node.data.kind === "api"}>
                 <NodeField label="Method">
                     <select
@@ -868,20 +884,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                 </NodeField>
             </Show>
             <Show when={p.node.data.kind === "response"}>
-                <NodeField label="Template">
-                    <TextArea
-                        variant="plain" class="drone-input drone-input--grow nodrag nowheel"
-                        ref={(el) => autoGrow(el)}
-                        value={(p.node.data["template"] as string) ?? ""}
-                        placeholder="Hello {{var.name}}!"
-                        onInput={(e) => {
-                            update({ template: e.currentTarget.value });
-                            autoGrow(e.currentTarget);
-                        }}
-                        onFocus={(e) => autoGrow(e.currentTarget)}
-                        onContextMenu={showTextInputContextMenu}
-                    />
-                </NodeField>
+                <NodeLongText node={p.node} update={update} label="Template" key="template" placeholder="Hello {{var.name}}!" />
             </Show>
             <Show when={p.node.data.kind === "variables"}>
                 <VariablesEditor
@@ -894,6 +897,55 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
         </div>
     );
 };
+
+/** A single-line text field of a node, written to `key` as it is typed. */
+const NodeText = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void; label: string; key: string; placeholder: string }): JSX.Element => (
+    <NodeField label={p.label}>
+        <TextInput
+            variant="plain" class="drone-input nodrag"
+            value={(p.node.data[p.key] as string) ?? ""}
+            onInput={(e) => p.update({ [p.key]: e.currentTarget.value })}
+            onContextMenu={showTextInputContextMenu}
+            placeholder={p.placeholder}
+        />
+    </NodeField>
+);
+
+/** A multi-line text field of a node, written to `key` as it is typed. */
+const NodeLongText = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void; label: string; key: string; placeholder: string }): JSX.Element => (
+    <NodeField label={p.label}>
+        <TextArea
+            variant="plain" class="drone-input drone-input--grow nodrag nowheel"
+            ref={(el) => autoGrow(el)}
+            value={(p.node.data[p.key] as string) ?? ""}
+            placeholder={p.placeholder}
+            onInput={(e) => {
+                p.update({ [p.key]: e.currentTarget.value });
+                autoGrow(e.currentTarget);
+            }}
+            onFocus={(e) => autoGrow(e.currentTarget)}
+            onContextMenu={showTextInputContextMenu}
+        />
+    </NodeField>
+);
+
+/** The Message block's fields: who gets it, and the text. */
+const MessageFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => (
+    <>
+        <NodeText node={p.node} update={p.update} label="To" key="to" placeholder="an agent's id (not a {{reference}})" />
+        <NodeLongText node={p.node} update={p.update} label="Message" key="body" placeholder="Run {{trigger.run}} failed" />
+    </>
+);
+
+/** The Task block's fields: the title, the text, who it is for, and the key that makes it one task per incident. */
+const TaskFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => (
+    <>
+        <NodeText node={p.node} update={p.update} label="Title" key="title" placeholder="Nightly failed at {{a.step}}" />
+        <NodeLongText node={p.node} update={p.update} label="Text" key="body" placeholder="What to look at" />
+        <NodeText node={p.node} update={p.update} label="For" key="target" placeholder="an agent's id; empty is the backlog" />
+        <NodeText node={p.node} update={p.update} label="Key" key="dedupe" placeholder="one task per key, e.g. {{a.workflow}}" />
+    </>
+);
 
 /** Compact label + control row rendered inside a node. */
 const NodeField = (p: { label: string; children: JSX.Element }): JSX.Element => (

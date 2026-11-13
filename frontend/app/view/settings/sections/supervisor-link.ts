@@ -8,7 +8,7 @@
 
 import { openOrFocusPaneIdByView } from "@/app/store/block-component-registry";
 import { requestSupervisorSettingsOpen } from "@/app/store/supervisor-settings-request";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
 /** Show the Supervisor's settings: the tab's Swarm on its Supervisor section, or a new one, panel open. */
 export async function openSupervisorSettings(): Promise<void> {
@@ -22,10 +22,10 @@ export async function openSupervisorSettings(): Promise<void> {
 }
 
 export const SUPERVISOR_SETTINGS = {
-    supervisor: {
+    supervisor: settingEntry({
         id: "agents.supervisor",
-        label: "Swarm Supervisor",
-        description: "Opens the Swarm's Supervisor settings: the switch, limits, wait before continuing, fleet budget and notices",
+        labelKey: "settings.supervisor.supervisor.label",
+        descriptionKey: "settings.supervisor.supervisor.description",
         section: "agents",
         keywords: [
             "supervisor",
@@ -49,5 +49,5 @@ export const SUPERVISOR_SETTINGS = {
             "supervisor:notify",
         ],
         opens: openSupervisorSettings,
-    },
+    }),
 } satisfies Record<string, SettingsIndexEntry>;

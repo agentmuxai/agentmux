@@ -433,8 +433,10 @@ partial list.
 | [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
 | [`SPEC_PANE_FILE_DROP_2026_05_30`](SPEC_PANE_FILE_DROP_2026_05_30.md) | SPEC: Drag-and-drop files into Terminal and Agent panes |
 | [`SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19`](SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19.md) | SPEC: Pane Header Height + Tab Active Indicator Edge-to-Edge |
+| [`SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10`](SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md) | SPEC: The pane header's horizontal scroll covers tabs, +, grip and aux controls (minimize stays pinned) |
 | [`SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21`](SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md) | SPEC: the pane header's tail color follows the pane, not the active tab |
 | [`SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21`](SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md) | SPEC: pane header informational text becomes a hover tooltip |
+| [`SPEC_PANE_REFLOW_GLIDE_2026_11_01`](SPEC_PANE_REFLOW_GLIDE_2026_11_01.md) | SPEC: Panes glide into place when the layout changes (close first), like the My agents rows |
 | [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
 | [`SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22`](SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md) | Selecting a pane should focus its input — not just opening one |
 | [`SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md) | SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane" |
@@ -663,6 +665,7 @@ partial list.
 | [`SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03`](SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03.md) | Spec: background updates, one "Restart to update" click |
 | [`SPEC_BASHWRAP_PER_AGENT_CWD_2026_10_18`](SPEC_BASHWRAP_PER_AGENT_CWD_2026_10_18.md) | SPEC: each agent's Bash calls keep their own working directory |
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
+| [`SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10`](SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10.md) | Spec: an agent can zoom a browser pane it drives |
 | [`SPEC_BROWSER_PANE_BYPASS_2026_10_16`](SPEC_BROWSER_PANE_BYPASS_2026_10_16.md) | SPEC: Bypass: the person lets the agent act without asking in one browser pane |
 | [`SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14`](SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14.md) | SPEC: Downloads in a browser pane open the system "Save as" dialog |
 | [`SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16`](SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16.md) | SPEC: agents fill forms inside iframes, with a visual fallback for what the snapshot can't see |
@@ -680,6 +683,7 @@ partial list.
 | [`SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20`](SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md) | Spec: The build slot — one heavy build or test at a time on a machine, enforced for agents' cargo |
 | [`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07`](SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md) | SPEC: A bundle holds instructions, context, skills, Global Memory and Personal Memory — not MCP servers |
 | [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
+| [`SPEC_CEF_156_UPGRADE_2026_11_10`](SPEC_CEF_156_UPGRADE_2026_11_10.md) | Spec: CEF milestone 156 |
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
 | [`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30`](SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md) | Spec: cheaper fleet messaging: a bulletin that never wakes, quota mode as a setting, no-ack messages, and a count |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
@@ -706,6 +710,8 @@ partial list.
 | [`SPEC_DOCUMENT_PANES_MERGE_DOCUMENT_TABS_2026_10_30`](SPEC_DOCUMENT_PANES_MERGE_DOCUMENT_TABS_2026_10_30.md) | Two Editor panes that end up as tabs of one pane merge into one Editor |
 | [`SPEC_DOCUMENT_TABS_2026_10_02`](SPEC_DOCUMENT_TABS_2026_10_02.md) | SPEC: Document tabs: one shared tab system for the documents inside a pane |
 | [`SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13`](SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md) | Drag space in the window and pane headers: does it need a grip? |
+| [`SPEC_DRONE_GENERAL_AUTOMATION_2026_11_11`](SPEC_DRONE_GENERAL_AUTOMATION_2026_11_11.md) | SPEC: Drone as a general automation tool: loops, state, sub-drones, a Run step, durable waits |
+| [`SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11`](SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md) | SPEC: Drone for real-world jobs: triggers across tiers, cloud nodes, and Drone as a job action |
 | [`SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21`](SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md) | Spec: The drop target lands inverted — a pane tab dragged over another pane's tab bar flashes once and then stays in the negative until the drag ends |
 | [`SPEC_DROP_THE_AGENT_STASH_2026_10_24`](SPEC_DROP_THE_AGENT_STASH_2026_10_24.md) | Spec: drop the agent Stash, and give each of its tabs a home it already half has |
 | [`SPEC_DURABLE_BINDINGS_2026_09_10`](SPEC_DURABLE_BINDINGS_2026_09_10.md) | Spec: Durable Bindings |
@@ -758,6 +764,7 @@ partial list.
 | [`SPEC_LAYOUT_FILES_2026_09_25`](SPEC_LAYOUT_FILES_2026_09_25.md) | SPEC: Layout files — "Layouts → Save layout…" and the `agentmux.layout` file format |
 | [`SPEC_LINUX_PACKAGES_XZ_2026_10_14`](SPEC_LINUX_PACKAGES_XZ_2026_10_14.md) | Spec: compress the Linux deb, rpm and portable tarball with xz |
 | [`SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24`](SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md) | Spec: upgrading a .deb or .rpm install from the app, and an apt/dnf repository |
+| [`SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06`](SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md) | SPEC: Live reflow while dragging a pane or pane tab (the end state for pane drag and drop) |
 | [`SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02`](SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02.md) | Spec: one ASCII animation per kind of long-running work |
 | [`SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) | SPEC: Pinned Activity Dock — Unified Long-Running Activities |
 | [`SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21`](SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21.md) | Spec: code in markdown on shiki, and the frontend libraries we can drop |
@@ -805,6 +812,7 @@ partial list.
 | [`SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25`](SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md) | SPEC: one resume gate, and native continuation across logins of the same identity |
 | [`SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13`](SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md) | SPEC: Resume phases: the "Given to the agent" card in its place, then the agent catches up and tells the user where it is |
 | [`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27`](SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md) | SPEC: one way to reveal a block — including a background tab in a multi-tab pane |
+| [`SPEC_ROUTE_AGENT_BRAKES_2026_11_10`](SPEC_ROUTE_AGENT_BRAKES_2026_11_10.md) | Route agent brakes: a spend cap, budgeted compaction and loop detection |
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01`](SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01.md) | settings.json lists every setting with its default commented out, kept 1-to-1 by a guard, safe to copy and paste |
@@ -844,6 +852,7 @@ partial list.
 | [`SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15`](SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md) | SPEC: upgrading AgentMux, for users and for agents |
 | [`SPEC_USER_DATA_SYNC_LAYER_2026_11_01`](SPEC_USER_DATA_SYNC_LAYER_2026_11_01.md) | SPEC: one sync layer for a user's own data: Kanban boards and Vaults across their machines, by LAN or AgentMux Cloud |
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
+| [`SPEC_VAULT_CARD_ENTRIES_FULL_CARD_DATA_AND_AUTOFILL_2026_11_08`](SPEC_VAULT_CARD_ENTRIES_FULL_CARD_DATA_AND_AUTOFILL_2026_11_08.md) | SPEC: Vault card entries hold a full card (number, expiry month and year, CVC, name, billing ZIP) that people and agents can store and fill |
 | [`SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28`](SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md) | SPEC: secrets nobody types. The Vault generates, captures, delivers and rotates them, and the browser saves, generates and fills sign-ins |
 | [`SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19`](SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md) | SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them |
 | [`SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06`](SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md) | SPEC: the Vault's feature set matches the secrets CLI: a reason and a history on every use and change, import from AWS Secrets Manager, verify and health |
@@ -981,7 +990,6 @@ partial list.
 | [`SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24`](SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md) | SPEC — Pane Minimize Refinements |
 | [`SPEC_PANE_OPEN_FOCUS_ROUTING_2026_09_16`](SPEC_PANE_OPEN_FOCUS_ROUTING_2026_09_16.md) | Typing should go into a pane the moment it opens (editor + terminal) |
 | [`SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11`](SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md) | Auto-discovery pane-overlay clipping (declarative `data-pane-overlay`) |
-| [`SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20`](SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md) | Pane Tear-Off — Mother Window Resize |
 | [`SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29`](SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md) | SPEC: Patched macOS CEF Framework — Release Pipeline + CI Wiring |
 | [`SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03`](SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md) | SPEC — Peek overlay: track mouse Y while pinned to the right |
 | [`SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION`](SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md) | Performance instrumentation + optimization strategy |
@@ -1347,6 +1355,7 @@ partial list.
 | [`SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14`](SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md) | Pre-launch auth — complete user stories + state machine |
 | [`SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15`](SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md) | MuxBus Delivery Hierarchy |
 | [`SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20`](SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md) | SPEC: MuxBus — GitHub PR review notifications (end-to-end MVP) |
+| [`SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20`](SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md) | Pane Tear-Off — Mother Window Resize |
 | [`SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14`](SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14.md) | SPEC: Persistence layer analysis — keep SQLite, or move? |
 | [`SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01`](SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md) | Saga + Reducer + IPC Architecture — Target End State |
 | [`TRACKING_WAN_JEKT_VERIFICATION_2026_09_25`](TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md) | TRACKING — WAN jekt verification (same-account, W3-S) |

@@ -16,6 +16,7 @@ use crate::backend::storage::identities::IdentityAccount;
 use crate::server::app_api::agent_spawn::{account_blocks, account_label_in};
 use crate::server::AppState;
 
+use super::resume::Failed;
 use super::{canonical, AccountEpisodeAgent, AccountMoveCandidate};
 
 /// `identity.account.move_agents`: move these panes' agents from one account
@@ -80,8 +81,10 @@ pub(super) fn candidates(state: &AppState, from: &str, provider: &str) -> Vec<Ac
 
 /// Link `agent_id` to `to` for `provider`: unlink its rows stored under an
 /// alias of the provider first (one would otherwise silently win at the next
-/// spawn), then link, then clear the failures its old account caused.
-pub(super) fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str) -> Result<(), String> {
+/// spawn), then link, then clear the failures its old account caused. Returns the panes among them whose turn
+/// failed on the login: they are told they are signed in once restarted on `to`, not here
+/// ([`super::resume::start`]).
+pub(super) fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str) -> Result<Vec<Failed>, String> {
     let before = super::failed_panes(&state.mstore, &state.identity_store, agent_id, provider);
     let links = state.identity_store.agent_identity_list_for_agent(agent_id).map_err(|e| e.to_string())?;
     for l in links.iter().filter(|l| l.provider != provider && canonical(&l.provider) == provider) {
@@ -92,8 +95,7 @@ pub(super) fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str)
     if let Some(watcher) = crate::backend::subagent_watcher::global() {
         watcher.recheck_all_watched_agents();
     }
-    super::after_rebind(&state.mstore, &state.event_bus, before, to);
-    Ok(())
+    Ok(super::rebind_clearing(&state.mstore, &state.event_bus, before, to, true).1)
 }
 
 /// Restart `block`'s process on the new link, keeping its conversation

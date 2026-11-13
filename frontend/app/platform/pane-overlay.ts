@@ -88,7 +88,7 @@ export function startHiddenTabWatcher(): void {
     });
 }
 
-interface OverlayRect {
+export interface OverlayRect {
     x: number;
     y: number;
     w: number;
@@ -470,6 +470,26 @@ export function __overlayRectCount(): number {
 /** Test-only: number of auto-discovered overlays with a rect. */
 export function __autoOverlayRectCount(): number {
     return autoOverlayRects.size;
+}
+
+/**
+ * `usePaneOverlay` for a hole that is not where its element is: the rect is given (CSS px of the window, as
+ * `getBoundingClientRect`), and none means no hole. For a browser pane's own page, cut away whole for the
+ * length of a drag (browser-view.tsx): the page stands still while its tile is drawn elsewhere by the live
+ * reflow, so the hole is the page's rect and not the tile's. It only clips: it takes no keys.
+ */
+export function usePaneOverlayRect(getRect: Accessor<OverlayRect | undefined>): void {
+    const id = nextOverlayId++;
+    const ownerShown = useOwnerShown();
+    createEffect(() => {
+        const rect = ownerShown() ? getRect() : undefined;
+        if (rect && rect.w > 0 && rect.h > 0) overlayRects.set(id, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+        else if (!dropOverlayRect(id)) return;
+        sendClip();
+    });
+    onCleanup(() => {
+        if (dropOverlayRect(id)) sendClip();
+    });
 }
 
 export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>, opts?: PaneOverlayOptions): void {

@@ -37,8 +37,6 @@
 <div class="browser-placeholder">
 <img class="browser-freeze-snapshot" alt="" src="data:image/png;base64,AAAA" style="top: 1px;">
 <div class="browser-drag-catcher">
-<div class="browser-drag-hole">
-</div>
 </div>
 </div>
 </div>
@@ -60,8 +58,6 @@
 <div class="browser-placeholder">
 <img class="browser-freeze-snapshot" alt="" src="data:image/png;base64,AAAA" style="top: 1px;">
 <div class="browser-drag-catcher">
-<div class="browser-drag-hole">
-</div>
 </div>
 </div>
 </div>

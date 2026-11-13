@@ -35,7 +35,7 @@ import { getAllBlockComponentModelEntries, getBlockComponentModel, getFocusedBlo
 import { MOS } from "@/app/store/global";
 import { fireAndForget } from "@/util/util";
 import { isModKey } from "@/util/platformutil";
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { batch, createSignal, onCleanup, onMount } from "solid-js";
 import { chromeZoomAtom, setChromeZoomSignal } from "./chrome-zoom";
 import { heldPaneZoom, holdPaneZoom, paneZoom, settlePaneZoom } from "./pane-zoom-local";
 import { captureZoomAnchor, lastPointer, type ZoomPoint } from "./zoom-anchor";
@@ -68,6 +68,8 @@ export function ratioStepOf(blockId: string, notches: number): number | undefine
 // Zoom indicator visibility (auto-hide after 1.5s)
 export const [zoomIndicatorVisibleAtom, setZoomIndicatorVisible] = createSignal<boolean>(false);
 export const [zoomIndicatorTextAtom, setZoomIndicatorText] = createSignal<string>("");
+/** The pane the amount belongs to, drawn centred on it; null for the window (All panes, the chrome zoom). */
+export const [zoomIndicatorTargetAtom, setZoomIndicatorTarget] = createSignal<string | null>(null);
 let zoomIndicatorTimeout: NodeJS.Timeout | null = null;
 
 function roundZoom(factor: number): number {
@@ -139,7 +141,7 @@ function setBlockZoom(blockId: string, factor: number, showIndicator: boolean = 
     // Suppressed by the all-panes stepper below, which shows one summary
     // toast for the whole gesture instead of one per pane.
     if (showIndicator) {
-        showZoomIndicator(`${Math.round(newZoom * 100)}%`);
+        showZoomIndicator(`${Math.round(newZoom * 100)}%`, blockId);
     }
     return newZoom;
 }
@@ -379,12 +381,17 @@ export function initChromeZoom(opts?: { fresh?: boolean }): void {
 
 // ── Shared helpers ────────────────────────────────────────────────
 
-export function showZoomIndicator(text: string): void {
+/** Show the amount for `blockId`'s pane, centred on it; with no block it is the window's, centred on the window. */
+export function showZoomIndicator(text: string, blockId: string | null = null): void {
     if (zoomIndicatorTimeout) {
         clearTimeout(zoomIndicatorTimeout);
     }
-    setZoomIndicatorText(text);
-    setZoomIndicatorVisible(true);
+    // One update, so a second pane's amount moves the box once, from where it was to the new pane.
+    batch(() => {
+        setZoomIndicatorTarget(blockId);
+        setZoomIndicatorText(text);
+        setZoomIndicatorVisible(true);
+    });
 
     zoomIndicatorTimeout = setTimeout(() => {
         setZoomIndicatorVisible(false);

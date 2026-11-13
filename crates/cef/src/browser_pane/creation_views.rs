@@ -75,24 +75,65 @@ use crate::state::AppState;
 /// (Views works in DIP, the page's CSS pixels); Linux and macOS use the rect as
 /// sent, as they always have.
 pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
+    let scale = views_scale(window);
+    let dip = |v: i32| (v as f64 / scale).round() as i32;
+    Rect { x: dip(rect.x), y: dip(rect.y), width: dip(rect.width), height: dip(rect.height) }
+}
+
+/// How many of the page's physical pixels one Views unit is in `window`: its display's scale on
+/// Windows, 1 on Linux and macOS (and for a window with no display).
+pub(crate) fn views_scale(window: Option<&Window>) -> f64 {
     #[cfg(target_os = "windows")]
     if let Some(scale) = window
         .and_then(|w| w.display())
         .map(|d| cef::ImplDisplay::device_scale_factor(&d) as f64)
         .filter(|s| *s > 0.0)
     {
-        let dip = |v: i32| (v as f64 / scale).round() as i32;
-        return Rect { x: dip(rect.x), y: dip(rect.y), width: dip(rect.width), height: dip(rect.height) };
+        return scale;
     }
     let _ = window;
-    rect.clone()
+    1.0
+}
+
+/// The two setters `place_at` calls on an overlay, so the order it calls them in has a test.
+#[cfg(any(not(target_os = "windows"), test))]
+pub(crate) trait OverlayPlace {
+    fn set_origin(&self, x: i32, y: i32);
+    fn set_extent(&self, width: i32, height: i32);
+}
+
+#[cfg(not(target_os = "windows"))]
+impl OverlayPlace for cef::OverlayController {
+    fn set_origin(&self, x: i32, y: i32) {
+        self.set_position(Some(&cef::Point { x, y }));
+    }
+    fn set_extent(&self, width: i32, height: i32) {
+        self.set_size(Some(&cef::Size { width, height }));
+    }
 }
 
 /// Put an overlay at `rect` (the page's physical pixels) in `window`.
+///
+/// Windows sets the whole rect in one call: CEF cuts it to the window once and moves the overlay once.
+/// Linux sets the two halves (`place_at`): `set_bounds` did nothing there when it was tried.
 pub(crate) fn place_overlay(controller: &cef::OverlayController, window: Option<&Window>, rect: &Rect) {
-    let dip = views_rect(window, rect);
-    controller.set_size(Some(&cef::Size { width: dip.width, height: dip.height }));
-    controller.set_position(Some(&cef::Point { x: dip.x, y: dip.y }));
+    let rect = views_rect(window, rect);
+    #[cfg(target_os = "windows")]
+    controller.set_bounds(Some(&rect));
+    #[cfg(not(target_os = "windows"))]
+    place_at(controller, &rect);
+}
+
+/// The origin first, then the size. CEF keeps an overlay inside its window by cutting each new bounds to
+/// the window's, and each setter keeps the other half of the bounds as they were cut. Size first, a pane
+/// that moves and grows in one step (a pane dropped elsewhere in the layout) took its new size at its old
+/// origin, was cut where that ran past the window's edge, and kept the cut size at its new origin: the
+/// page stayed short of its pane until the next layout change. With the origin first, the size is set
+/// where the pane ends up, so it is cut only if the rect itself is outside the window.
+#[cfg(any(not(target_os = "windows"), test))]
+fn place_at(controller: &impl OverlayPlace, rect: &Rect) {
+    controller.set_origin(rect.x, rect.y);
+    controller.set_extent(rect.width, rect.height);
 }
 
 /// Create a Views-based browser pane on the CEF UI thread, in `jar` (a named
@@ -510,6 +551,21 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     resize_browser_pane_view_inner(state, label, rect, true);
 }
 
+/// Where pane `label`'s `rect` goes in `window` as it is now. On Linux a rect the page laid out for an
+/// older window size moves with the window (`LayoutBase`): after the host has followed a resize, a
+/// late batch for the old size must not pull the pane back. Windows does not follow
+/// (`bounds::window_resized`), so there a rect is used as the page sent it.
+#[cfg(not(target_os = "macos"))]
+fn followed_rect(label: &str, window: Option<&Window>, rect: Rect) -> Rect {
+    #[cfg(target_os = "linux")]
+    if let (Some(base), Some(w)) = (crate::browser_panes::bounds::layout_base(label), window) {
+        let (width, height) = crate::browser_panes::bounds::window_client_px(w);
+        return base.predict(&rect, width, height);
+    }
+    let _ = (label, window);
+    rect
+}
+
 /// `resize_browser_pane_view`, without the Linux window layout when `layout`
 /// is false: the caller moves several panes and lays their window out once
 /// (`browser_panes::bounds::apply`). Returns the pane's window label if it
@@ -538,15 +594,12 @@ pub(crate) fn resize_browser_pane_view_inner(
     // macOS visibility is rect-only: overlays no longer hide the pane there —
     // the hole-punch mask (ui_tasks/pane_hole_mask.rs, applied by
     // SetPaneOverlayClipViewsTask) handles overlay occlusion while the pane
-    // stays visible. Consulting overlay state here (as compute_pane_visible
-    // does) would wrongly hide the whole pane on a resize that happens while
-    // a menu is open. Known spike gap: a resize/move under a STATIC open
+    // stays visible. Consulting overlay state here would wrongly hide the
+    // whole pane on a resize that happens while a menu is open. Known spike gap: a resize/move under a STATIC open
     // menu leaves the mask holes at their old pane-relative offset until the
     // next overlay-clip dispatch.
     #[cfg(target_os = "macos")]
     let visible = pane_rect.2 > 0 && pane_rect.3 > 0;
-    #[cfg(not(target_os = "macos"))]
-    let visible = crate::browser_panes::compute_pane_visible(state, &window_label, pane_rect);
 
     // On macOS, CEF's SetSize/SetPosition are permanent no-ops on NativeWidgetMacNSWindow,
     // and window.layout() triggers NativeWidgetMac::SetBounds() which resets the frame
@@ -605,33 +658,24 @@ pub(crate) fn resize_browser_pane_view_inner(
     #[cfg(not(target_os = "macos"))]
     {
         let window = state.windows.lock().get(&window_label).cloned();
-        // A rect the page laid out for an older window size moves with the
-        // window (`LayoutBase`): after the host has already followed a resize,
-        // a late batch for the old size must not pull the pane back.
-        let rect = match (crate::browser_panes::bounds::layout_base(label), window.as_ref()) {
-            (Some(base), Some(w)) => {
-                let (width, height) = crate::browser_panes::bounds::window_client_px(w);
-                base.predict(&rect, width, height)
-            }
-            _ => rect,
-        };
+        let rect = followed_rect(label, window.as_ref(), rect);
         place_overlay(&controller, window.as_ref(), &rect);
-        // Visibility = AND of the two independent hide reasons:
-        //  - Zero-area rect (frontend placed the placeholder in `display:none`
+        // What is shown has two independent reasons:
+        //  - A zero-area rect (the frontend put the placeholder in `display:none`
         //    when the tab is inactive → getBoundingClientRect reports 0×0).
-        //  - This pane's bounds intersect a registered overlay-clip rect for
-        //    its window (DOM modal/menu/tooltip is on top of it).
-        // Both are tracked in AppState; `compute_pane_visible` is the single
-        // authoritative answer, shared with `SetPaneOverlayClipViewsTask`.
-        // Without consulting overlay-clip state here, a positive-rect resize
-        // (e.g. user drags a splitter while a modal is open) would clobber
-        // the airspace's set_visible(0) — Codex review on PR #881.
-        // Only on a change: re-showing a shown pane is not free.
-        let shown = if visible { 1 } else { 0 };
-        if controller.is_visible() != shown {
-            controller.set_visible(shown);
-        }
-        if layout {
+        //  - What the app page has over the pane (a modal, a menu, a tooltip): the
+        //    overlay rects registered for its window, cut out of the pane.
+        // `views_clip::apply` answers both from AppState, here and in
+        // `SetPaneOverlayClipViewsTask`. Without the overlay rects here, a resize
+        // while a modal is open (a splitter drag) would show the pane over it
+        // (#881). The cut is in the overlay's own coordinates, so
+        // it is sent again now that the overlay has its new size.
+        let scale = views_scale(window.as_ref());
+        let placed = (rect.width, rect.height);
+        let visible = crate::browser_panes::views_clip::apply_placed(state, label, &window_label, &controller, pane_rect, placed, scale);
+        // Linux lays the window out for the move to show; on Windows setting the
+        // overlay's bounds is enough.
+        if layout && cfg!(target_os = "linux") {
             if let Some(window) = &window {
                 window.layout();
             }
@@ -671,6 +715,8 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
     state.browser_pane_physical_rects.lock().remove(label);
     crate::browser_panes::bounds::note_layout_base(label, None);
+    #[cfg(not(target_os = "macos"))]
+    crate::browser_panes::views_clip::forget(label);
     let Some((_, controller)) = entry else {
         tracing::debug!(
             label = %label,
@@ -723,3 +769,66 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     }
 }
 
+#[cfg(test)]
+mod place_tests {
+    use super::{place_at, OverlayPlace, Rect};
+    use std::cell::Cell;
+
+    /// An overlay as CEF keeps one: every new bounds is cut to the window's.
+    struct Overlay {
+        window: (i32, i32),
+        bounds: Cell<(i32, i32, i32, i32)>,
+    }
+
+    impl Overlay {
+        fn at(window: (i32, i32), bounds: (i32, i32, i32, i32)) -> Self {
+            Self { window, bounds: Cell::new(bounds) }
+        }
+        fn cut(&self, (x, y, w, h): (i32, i32, i32, i32)) {
+            let (right, bottom) = ((x + w).min(self.window.0), (y + h).min(self.window.1));
+            self.bounds.set((x, y, (right - x).max(0), (bottom - y).max(0)));
+        }
+    }
+
+    impl OverlayPlace for Overlay {
+        fn set_origin(&self, x: i32, y: i32) {
+            let (_, _, w, h) = self.bounds.get();
+            self.cut((x, y, w, h));
+        }
+        fn set_extent(&self, width: i32, height: i32) {
+            let (x, y, _, _) = self.bounds.get();
+            self.cut((x, y, width, height));
+        }
+    }
+
+    fn rect(x: i32, y: i32, width: i32, height: i32) -> Rect {
+        Rect { x, y, width, height }
+    }
+
+    /// The case from the report: a pane at the bottom right of a 2689 x 1470 window is dropped at the top,
+    /// narrower and taller. Size first, its height was cut to the window's bottom less its old top (769).
+    #[test]
+    fn a_pane_that_moves_and_grows_in_one_step_takes_its_whole_rect() {
+        let overlay = Overlay::at((2689, 1470), (1349, 701, 1334, 470));
+        place_at(&overlay, &rect(1349, 134, 661, 859));
+        assert_eq!(overlay.bounds.get(), (1349, 134, 661, 859));
+
+        let overlay = Overlay::at((2689, 1470), (1838, 134, 846, 1303));
+        place_at(&overlay, &rect(1349, 274, 1334, 603));
+        assert_eq!(overlay.bounds.get(), (1349, 274, 1334, 603), "wider, from an origin further right");
+    }
+
+    #[test]
+    fn a_pane_that_moves_and_shrinks_takes_its_whole_rect() {
+        let overlay = Overlay::at((2689, 1470), (0, 0, 1334, 1470));
+        place_at(&overlay, &rect(2000, 1000, 689, 470));
+        assert_eq!(overlay.bounds.get(), (2000, 1000, 689, 470));
+    }
+
+    #[test]
+    fn a_rect_past_the_window_is_cut_to_it() {
+        let overlay = Overlay::at((1000, 800), (0, 0, 500, 400));
+        place_at(&overlay, &rect(600, 500, 500, 400));
+        assert_eq!(overlay.bounds.get(), (600, 500, 400, 300));
+    }
+}

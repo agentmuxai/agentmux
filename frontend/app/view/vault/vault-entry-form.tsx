@@ -11,13 +11,23 @@ import { createStore, type SetStoreFunction } from "solid-js/store";
 
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
-import { Button, Field, TextArea as KitTextArea, Select, TextInput } from "@/app/element/ui";
+import { Button, Field, TextArea as KitTextArea, Pill, Select, Switch, TextInput } from "@/app/element/ui";
 import { browserProfiles, ensureBrowserProfiles } from "@/app/view/browser/browser-profiles";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { getPlatform } from "@/util/platformutil";
 import clsx from "clsx";
+import {
+    CARD_BRANDS,
+    cardBrand,
+    cardCvcLength,
+    cardDigits,
+    cardGroup,
+    cardLuhn,
+    expiryParts,
+    expiryYears,
+} from "./vault-card";
 import { kindsIn, type VaultInput, vaultKind, type VaultKind } from "./vault-kinds";
 import { firstSaveNotice } from "./vault-prompts";
 import { createEntry, updateEntry, vaultEntries } from "./vault-store";
@@ -152,6 +162,10 @@ function pick(src: Record<string, string>, inputs: VaultInput[]): Record<string,
 async function save(s: FormState) {
     const k = s.kind();
     if (!k) return;
+    if (k.name === "card" && !!s.parts.exp_month !== !!s.parts.exp_year) {
+        s.setError("Choose the expiry month and the year.");
+        return;
+    }
     s.setBusy(true);
     s.setError(null);
     try {
@@ -268,7 +282,9 @@ function FormFields({ s }: { s: FormState }) {
                     maxLength={200}
                 />
             </Field>
-            <For each={s.kind()?.parts ?? []}>{(p) => <PartRow s={s} p={p} />}</For>
+            <For each={(s.kind()?.parts ?? []).filter((p) => !p.legacy && p.name !== "exp_year")}>
+                {(p) => <PartRow s={s} p={p} />}
+            </For>
             <For each={(s.kind()?.fields ?? []).filter((f) => !f.kept && (!f.profile || !!s.fields.site?.trim()))}>
                 {(f) => <FieldRow s={s} f={f} />}
             </For>
@@ -283,7 +299,121 @@ function partHint(s: FormState, p: VaultInput): string | undefined {
     return p.name === s.main() ? "Required." : undefined;
 }
 
+/** The brand the number typed so far belongs to; before anything is typed, the saved card's. */
+function cardBrandOf(s: FormState): string {
+    const typed = s.parts.number ?? "";
+    return typed ? cardBrand(typed) : (s.editing?.fields.brand ?? "");
+}
+
+function CardNumberRow({ s, p }: { s: FormState; p: VaultInput }) {
+    const digits = () => cardDigits(s.parts.number ?? "");
+    return (
+        <Field label={p.label} layout="stacked" hint={partHint(s, p)}>
+            <div class="vault-part vault-card-number">
+                <TextInput
+                    inputmode="numeric"
+                    autocomplete="off"
+                    spellcheck={false}
+                    value={s.parts.number ?? ""}
+                    placeholder={s.editing && s.isSet(p.name) ? "•••• •••• •••• ••••" : p.placeholder}
+                    autofocus={!!s.request}
+                    onInput={(e) => s.setParts("number", cardGroup(e.currentTarget.value))}
+                />
+                <Show when={cardBrandOf(s)}>
+                    <Pill>{CARD_BRANDS[cardBrandOf(s)]}</Pill>
+                </Show>
+            </div>
+            <Show when={digits().length >= 12 && !cardLuhn(digits())}>
+                <div class="vault-card-warn" role="note">
+                    This number doesn't look right. You can still save it.
+                </div>
+            </Show>
+        </Field>
+    );
+}
+
+function CardCodeRow({ s, p }: { s: FormState; p: VaultInput }) {
+    const length = () => cardCvcLength(cardBrandOf(s));
+    return (
+        <Field
+            label={length() === 4 ? "Security code (CID, 4 digits)" : "Security code (CVC, 3 digits)"}
+            layout="stacked"
+            hint={partHint(s, p)}
+        >
+            <div class="vault-part">
+                <PartControl s={s} p={p} maxLength={length()} numeric />
+                <Show when={s.editing && s.isSet(p.name)}>
+                    <Button
+                        density="compact"
+                        tone="quiet"
+                        pressed={!!s.clear[p.name]}
+                        onClick={() => s.setClear(p.name, !s.clear[p.name])}
+                    >
+                        Clear
+                    </Button>
+                </Show>
+            </div>
+        </Field>
+    );
+}
+
+const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
+/** The parts an expiry is kept in: the month, the year, and the older single one. */
+const EXPIRY_PARTS = ["exp_month", "exp_year", "expiry"];
+
+/** A month and a year to choose from. A saved card shows its own, read from the plain expiry date. */
+function CardExpiryRow({ s }: { s: FormState }) {
+    const saved = () => expiryParts(s.editing?.fields.expires);
+    const month = () => s.parts.exp_month || saved()?.month || "";
+    const year = () => s.parts.exp_year || saved()?.year || "";
+    const years = () => {
+        const list = expiryYears().map(String);
+        return year() && !list.includes(year()) ? [year(), ...list] : list;
+    };
+    const choose = (m: string, y: string) => {
+        s.setParts("exp_month", m);
+        s.setParts("exp_year", y);
+    };
+    // A saved expiry can be taken off: both parts and the older single one go, and with them the reminders.
+    const cleared = () => !!s.clear.exp_month;
+    const toggleClear = () => {
+        const on = !cleared();
+        for (const name of EXPIRY_PARTS) s.setClear(name, on);
+        if (on) choose("", "");
+    };
+    return (
+        <Field label="Expiry" layout="stacked" hint={cleared() ? "Will be cleared." : undefined}>
+            <div class="vault-part vault-card-expiry">
+                <Select
+                    ariaLabel="Expiry month"
+                    value={cleared() ? "" : month()}
+                    disabled={cleared()}
+                    onChange={(m) => choose(m, year())}
+                    options={[{ value: "", label: "Month" }, ...MONTHS.map((m) => ({ value: m, label: m }))]}
+                />
+                <Select
+                    ariaLabel="Expiry year"
+                    value={cleared() ? "" : year()}
+                    disabled={cleared()}
+                    onChange={(y) => choose(month(), y)}
+                    options={[{ value: "", label: "Year" }, ...years().map((y) => ({ value: y, label: y }))]}
+                />
+                <Show when={s.editing && EXPIRY_PARTS.some((name) => s.isSet(name))}>
+                    <Button density="compact" tone="quiet" pressed={cleared()} onClick={toggleClear}>
+                        Clear
+                    </Button>
+                </Show>
+            </div>
+        </Field>
+    );
+}
+
 function PartRow({ s, p }: { s: FormState; p: VaultInput }) {
+    if (s.kindName() === "card") {
+        if (p.name === "number") return <CardNumberRow s={s} p={p} />;
+        if (p.name === "exp_month") return <CardExpiryRow s={s} />;
+        if (p.name === "cvc") return <CardCodeRow s={s} p={p} />;
+    }
     return (
         <Field label={p.label} layout="stacked" hint={partHint(s, p)}>
             <div class="vault-part">
@@ -303,7 +433,9 @@ function PartRow({ s, p }: { s: FormState; p: VaultInput }) {
     );
 }
 
-function PartControl({ s, p }: { s: FormState; p: VaultInput }) {
+function PartControl(props: { s: FormState; p: VaultInput; maxLength?: number; numeric?: boolean }) {
+    // `maxLength` follows the card's brand as the number is typed, so it is read from props, not taken apart.
+    const { s, p } = props;
     return (
         <Show
             when={p.multiline}
@@ -312,6 +444,8 @@ function PartControl({ s, p }: { s: FormState; p: VaultInput }) {
                     type="password"
                     autocomplete="new-password"
                     spellcheck={false}
+                    maxLength={props.maxLength}
+                    inputmode={props.numeric ? "numeric" : undefined}
                     value={s.parts[p.name] ?? ""}
                     placeholder={s.editing && s.isSet(p.name) ? "••••••••" : p.placeholder}
                     disabled={s.clear[p.name]}
@@ -336,29 +470,49 @@ function FieldRow({ s, f }: { s: FormState; f: VaultInput }) {
         <Field
             label={f.label}
             layout="stacked"
-            description={f.profile ? "Only this profile's tabs are offered it." : undefined}
+            description={
+                f.profile
+                    ? "Only this profile's tabs are offered it."
+                    : f.toggle
+                      ? "The card an agent fills when it doesn't name one."
+                      : undefined
+            }
         >
             <Show
-                when={!f.profile}
+                when={!f.toggle}
                 fallback={
-                    <Select
-                        value={s.fields[f.name] || "personal"}
-                        onChange={(v) => s.setFields(f.name, v)}
-                        options={profileChoices(s.fields.profile)}
+                    <Switch
+                        checked={s.fields[f.name] === "yes"}
+                        onChange={(on) => s.setFields(f.name, on ? "yes" : "")}
                     />
                 }
             >
                 <Show
-                    when={f.multiline}
+                    when={!f.profile}
                     fallback={
-                        <TextInput
-                            value={s.fields[f.name] ?? ""}
-                            placeholder={f.placeholder}
-                            onInput={(e) => s.setFields(f.name, e.currentTarget.value)}
+                        <Select
+                            value={s.fields[f.name] || "personal"}
+                            onChange={(v) => s.setFields(f.name, v)}
+                            options={profileChoices(s.fields.profile)}
                         />
                     }
                 >
-                    <TextArea label={f.label} value={s.fields[f.name] ?? ""} onInput={(v) => s.setFields(f.name, v)} />
+                    <Show
+                        when={f.multiline}
+                        fallback={
+                            <TextInput
+                                value={s.fields[f.name] ?? ""}
+                                placeholder={f.placeholder}
+                                onInput={(e) => s.setFields(f.name, e.currentTarget.value)}
+                            />
+                        }
+                    >
+                        <TextArea
+                            label={f.label}
+                            value={s.fields[f.name] ?? ""}
+                            onInput={(v) => s.setFields(f.name, v)}
+                        />
+                    </Show>
                 </Show>
             </Show>
         </Field>

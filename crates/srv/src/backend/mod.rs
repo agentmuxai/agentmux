@@ -58,6 +58,7 @@ pub mod fleet_feed;
 pub mod fleet_source;
 pub mod narrated_events;
 pub mod pending_background_pids;
+pub mod mcp_config_file;
 pub mod mcp_health;
 pub mod mcp_health_meta;
 pub mod message_origin;
@@ -228,6 +229,8 @@ pub mod bulletin;
 pub mod cold_hold;
 /// Google connectors: Calendar, Drive and Gmail for agents, called by srv.
 pub mod google;
+/// A model route out of credits (HTTP 402): every agent on it is stopped, and each lead is told once.
+pub mod route_credits;
 /// A leader hears when its workers end a turn without reporting, fail or stop.
 pub mod worker_notes;
 

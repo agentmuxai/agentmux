@@ -8,6 +8,7 @@ import { balanceNode, walkNodes } from "./layoutNode";
 import { HeaderHeightPx, MinimizedRowSlotWidthPx } from "./layoutMinimize";
 import { isEffectivelyMinimized, reportLayoutViolations } from "./layoutInvariants";
 import { resolveRowSlipTargets } from "./layoutSlip";
+import { settleTreeChange } from "./settlingPass";
 import {
     FlexDirection,
     LayoutNode,
@@ -270,6 +271,8 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
         // minimized, showing "Restore" on an expanded pane.
         const newMinimizedIds = new Set(newLeafs.filter((l) => l.minimized).map((l) => l.id));
         batch(() => {
+            // Before the write: a pane that left starts the others' glide from the rects they show now.
+            settleTreeChange(model, sortedLeafs, newAdditionalProps);
             model.setter(model.leafs, sortedLeafs);
             model.setter(model.leafOrder, model.treeState.leafOrder);
             model.setter(model.additionalProps, newAdditionalProps);

@@ -9,12 +9,14 @@
 //! upstream, streams the answer back, and counts what each agent used ([`spend`], [`usage`]).
 
 pub mod ask;
+pub mod cap;
 pub mod catalog;
 pub mod launch;
 pub mod request;
 pub mod spend;
 pub mod switch;
 pub mod token;
+pub mod trial;
 pub mod usage;
 
 /// The path prefix the gateway is served under; the route id and the harness's own path follow.

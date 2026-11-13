@@ -243,7 +243,8 @@ describe("locateKeyframes", () => {
 });
 
 describe("showLocateFlash", () => {
-    function fakeHost(animate?: (kf: unknown, o: unknown) => any) {
+    /** `shown`: the opacity of each flash overlay already on the host. */
+    function fakeHost(animate?: (kf: unknown, o: unknown) => any, shown: string[] = []) {
         const el: any = {
             className: "",
             attrs: {} as Record<string, string>,
@@ -255,7 +256,11 @@ describe("showLocateFlash", () => {
         };
         const host: any = {
             children: [] as any[],
-            ownerDocument: { createElement: () => el },
+            ownerDocument: {
+                createElement: () => el,
+                defaultView: { getComputedStyle: (old: { opacity: string }) => old },
+            },
+            querySelectorAll: () => shown.map((opacity) => ({ opacity })),
             appendChild(c: any) { this.children.push(c); },
         };
         return { host, el };
@@ -274,6 +279,16 @@ describe("showLocateFlash", () => {
         expect(el.removed).toBe(false);
         anim.onfinish();
         expect(el.removed).toBe(true);
+    });
+
+    it("over a flash still showing, starts at that one's strength, so a replay never dips to a bare pane", () => {
+        const animate = vi.fn(() => ({}));
+        showLocateFlash(fakeHost(animate, ["0.62"]).host, { light: false, reduced: false });
+        expect(animate).toHaveBeenLastCalledWith(locateKeyframes(0.62), { duration: LOCATE_TOTAL_MS });
+        expect(locateKeyframes(0.62).map((k) => k.opacity)).toEqual([0.62, 1, 1, 0]);
+        // The strongest of them, and never more than a whole flash.
+        showLocateFlash(fakeHost(animate, ["0.2", "0.9", "1.4"]).host, { light: false, reduced: false });
+        expect(animate).toHaveBeenLastCalledWith(locateKeyframes(1), { duration: LOCATE_TOTAL_MS });
     });
 
     it("a light theme gets the lighter wash; the motion policy drops the ring", () => {

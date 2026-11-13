@@ -33,14 +33,15 @@ pub(crate) async fn handle_work_act(
     };
     let claimed = body.get("agent_id").and_then(Value::as_str).unwrap_or_default().to_string();
     let mstore = state.mstore.clone();
-    let slug = tokio::task::spawn_blocking(move || super::actor::proven_slug(&mstore, &uid, &claimed)).await.ok().flatten();
+    let proving = uid.clone();
+    let slug = tokio::task::spawn_blocking(move || super::actor::proven_slug(&mstore, &proving, &claimed)).await.ok().flatten();
     let Some(slug) = slug else {
         return (StatusCode::FORBIDDEN, Json(json!({ "error": "FORBIDDEN: the token's agent doesn't answer to that agent_id" }))).into_response();
     };
     if let Some(target) = body.get("target").cloned() {
         body["agent"] = target;
     }
-    match act_as(&state, body, &Actor::agent(&slug)).await {
+    match act_as(&state, body, &Actor::agent(&slug).with_uid(&uid)).await {
         Ok(v) => Json(v).into_response(),
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
     }

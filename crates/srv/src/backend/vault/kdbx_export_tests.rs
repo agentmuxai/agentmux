@@ -73,7 +73,7 @@ fn every_kind_leaves_as_a_keepass_entry_and_comes_back_as_the_same_entry() {
 
     let card = by("Company card");
     assert_eq!(card.kind, "card");
-    for (part, want) in [("number", "4111111111111111"), ("expiry", "12/30"), ("cvc", "123"), ("name", "A DOE")] {
+    for (part, want) in [("number", "4111111111111111"), ("exp_month", "12"), ("exp_year", "2030"), ("cvc", "123"), ("name", "A DOE")] {
         assert_eq!(card.parts[part], want, "card {part}");
     }
     let bank = by("Checking");

@@ -29,14 +29,14 @@
 //! remain are evidence only — `0007`'s and `0002`'s helpers decide from the
 //! data (`consolidate_looks_incomplete`, `block_zones_look_incomplete`) and
 //! are content-idempotent, `0003`'s helper ignores its marker and re-asserts
-//! its invariant every run — and `m0000_bootstrap` consults them only
-//! together with those content checks when stamping a pre-framework install.
+//! its invariant every run. The bootstrap that stamped a pre-framework
+//! install from them, and the migrations older than the upgrade floor (0.55.0),
+//! are retired: an install that old is told to install the floor first.
 //!
 //! # Migrations freeze copies of live logic on purpose
 //!
 //! Some migrations carry verbatim copies of helpers that also exist in live
-//! code: `m0017_ambient_login_grandfather` mirrors ~35 lines of
-//! `backend/blockcontroller/core.rs`; `m0020_agent_color_backfill` and
+//! code: `m0020_agent_color_backfill` and
 //! `m0021_backfill_agent_bundles` mirror 25–30 lines each of
 //! `backend/storage/mcp_servers.rs` and `def_registry_mirror.rs`. That is
 //! deliberate, not accidental duplication. A migration must produce the same
@@ -47,26 +47,11 @@
 //! to the copy — `// frozen copy of <path>::<fn> as of <version>` — so the
 //! next reader can tell a freeze from a drift.
 
-mod m0000_bootstrap;
-mod m0001_legacy_data_dir;
 mod m0002_block_zones_v1;
 mod m0003_template_sessions_v1;
-mod m0004_registry_from_sqlite;
-mod m0005_registry_source_bases;
-mod m0006_definitions_global;
 mod m0007_agents_consolidate;
-mod m0008_default_bundle;
-mod m0009_transcript_backfill;
-mod m0010_session_ids;
 mod m0011_shared_store_backfill;
-mod m0012_dedup_identity_accounts;
-mod m0013_agent_direct_bindings;
-mod m0014_agent_direct_bindings_rerun;
-mod m0015_seed_starter_skills;
 mod m0016_seed_starter_mcp_servers;
-mod m0017_ambient_login_grandfather;
-mod m0018_ambient_login_registry;
-mod m0019_repair_malformed_secret_ref;
 mod m0020_agent_color_backfill;
 mod m0021_backfill_agent_bundles;
 mod m0022_identity_store_links_backfill;
@@ -100,8 +85,11 @@ mod backup;
 mod gate;
 mod prepare;
 mod runner;
+mod schema_probe;
 #[cfg(test)]
 mod phase5_tests;
+
+pub(crate) use schema_probe::table_exists;
 
 pub use gate::data_needs_preparing;
 pub use gate::refuse_if_real_home_would_move;
@@ -236,26 +224,11 @@ pub trait Migration: Send + Sync {
 // separate "retire" pass once the minimum supported upgrade path clears them.
 
 static REGISTRY: &[&(dyn Migration + Sync)] = &[
-    &m0000_bootstrap::M0000Bootstrap,
-    &m0001_legacy_data_dir::M0001LegacyDataDir,
     &m0002_block_zones_v1::M0002BlockZonesV1,
     &m0003_template_sessions_v1::M0003TemplateSessionsV1,
-    &m0004_registry_from_sqlite::M0004RegistryFromSqlite,
-    &m0005_registry_source_bases::M0005RegistrySourceBases,
-    &m0006_definitions_global::M0006DefinitionsGlobal,
     &m0007_agents_consolidate::M0007AgentsConsolidate,
-    &m0008_default_bundle::M0008DefaultBundle,
-    &m0009_transcript_backfill::M0009TranscriptBackfill,
-    &m0010_session_ids::M0010SessionIds,
     &m0011_shared_store_backfill::M0011SharedStoreBackfill,
-    &m0012_dedup_identity_accounts::M0012DedupIdentityAccounts,
-    &m0013_agent_direct_bindings::M0013AgentDirectBindings,
-    &m0014_agent_direct_bindings_rerun::M0014AgentDirectBindingsRerun,
-    &m0015_seed_starter_skills::M0015SeedStarterSkills,
     &m0016_seed_starter_mcp_servers::M0016SeedStarterMcpServers,
-    &m0017_ambient_login_grandfather::M0017AmbientLoginGrandfather,
-    &m0018_ambient_login_registry::M0018AmbientLoginRegistry,
-    &m0019_repair_malformed_secret_ref::M0019RepairMalformedSecretRef,
     &m0020_agent_color_backfill::M0020AgentColorBackfill,
     &m0021_backfill_agent_bundles::M0021BackfillAgentBundles,
     &m0022_identity_store_links_backfill::M0022IdentityStoreLinksBackfill,

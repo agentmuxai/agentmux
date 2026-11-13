@@ -186,7 +186,25 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // gateway that is where the container is pointed.
     crate::backend::container::listener::point_env_at_listener(&mut out);
     point_gateway_at_srv(&mut out);
+    // What this machine has for the container's pre-push hook to ask, said only here (see [`publish_guard_marker`]).
+    // An AgentMux that predates the check sets none, which the hook says out loud.
+    out.retain(|(k, _)| k != crate::identity::gh_agent_token::PUBLISH_GUARD_ENV);
+    let installed = crate::identity::gh_agent_token::installed().is_some();
+    let marker = publish_guard_marker(installed, installed && crate::backend::publish_guard::container_scan_ready());
+    out.push((crate::identity::gh_agent_token::PUBLISH_GUARD_ENV.to_string(), marker.to_string()));
     out
+}
+
+/// The marker's value: `1` where gh-agent's own hooks can judge a container's push (the hook asks srv),
+/// `older-gh-agent` where gh-agent is installed but cannot (the hook refuses a push to a GitHub repository and
+/// says how to fix the host), `0` where there is no gh-agent (the hook does nothing and says nothing, and never refuses a push for want
+/// of an answer).
+fn publish_guard_marker(gh_agent_installed: bool, can_judge: bool) -> &'static str {
+    match (gh_agent_installed, can_judge) {
+        (false, _) => "0",
+        (true, true) => "1",
+        (true, false) => "older-gh-agent",
+    }
 }
 
 /// A model-route agent's `ANTHROPIC_BASE_URL` names srv's gateway at the host's address; in a container it
@@ -286,7 +304,7 @@ mod tests {
         for old in ["/agentmux/reactive/inject", "/agentmux/work/claim", "/agentmux/work/7f3a/ask", "/api/v1/self", "/api/v1/agent/tool-chunk", "/api/v1/agent/compaction-started", "/health"] {
             assert!(!route_needs_identity(old), "{old}");
         }
-        for new in ["/api/v1/agent/memory/session-start/part", "/api/v1/agent/memory/write", "/api/v1/agent/dev_server/register", "/api/v1/github/token", "/api/v1/vault", "/api/v1/ui/browser/open", "/api/v1/ui/screenshot", "/agentmux/cron", "/api/v1/agent/open", "/agentmux/work/7f3a/hold"] {
+        for new in ["/api/v1/agent/memory/session-start/part", "/api/v1/agent/memory/write", "/api/v1/agent/dev_server/register", "/api/v1/github/token", "/api/v1/github/push-scan", "/api/v1/vault", "/api/v1/ui/browser/open", "/api/v1/ui/screenshot", "/agentmux/cron", "/api/v1/agent/open", "/agentmux/work/7f3a/hold"] {
             assert!(route_needs_identity(new), "{new}");
         }
     }
@@ -341,6 +359,25 @@ mod tests {
         let own: HashMap<String, String> = [("ANTHROPIC_BASE_URL".to_string(), "https://proxy.example/anthropic".to_string())].into_iter().collect();
         let own: HashMap<_, _> = container_exec_env("cc-block-own", &own).into_iter().collect();
         assert_eq!(own["ANTHROPIC_BASE_URL"], "https://proxy.example/anthropic", "an address that is not the gateway is left alone");
+    }
+
+    #[test]
+    fn the_publish_guard_marker_is_srvs_to_say_once_and_is_one_only_where_the_guard_can_judge() {
+        let ask = |own: &str| {
+            let env: HashMap<String, String> = [("AGENTMUX_PUBLISH_GUARD".to_string(), own.to_string())].into_iter().collect();
+            container_exec_env("cc-block-guard", &env).into_iter().filter(|(k, _)| k == "AGENTMUX_PUBLISH_GUARD").map(|(_, v)| v).collect::<Vec<_>>()
+        };
+        let installed = crate::identity::gh_agent_token::installed().is_some();
+        let want = vec![publish_guard_marker(installed, installed && crate::backend::publish_guard::container_scan_ready()).to_string()];
+        assert_eq!(ask("1"), want, "once, and not carried in from the agent's own environment");
+        assert_eq!(ask("0"), want);
+    }
+
+    #[test]
+    fn the_marker_says_which_of_three_a_machine_is() {
+        assert_eq!(publish_guard_marker(false, false), "0", "no gh-agent: nothing to ask");
+        assert_eq!(publish_guard_marker(true, true), "1", "gh-agent that can judge a push");
+        assert_eq!(publish_guard_marker(true, false), "older-gh-agent", "gh-agent that cannot: said out loud, not silent");
     }
 
     #[test]

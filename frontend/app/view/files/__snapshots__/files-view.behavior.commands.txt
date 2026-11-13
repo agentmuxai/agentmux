@@ -51,8 +51,6 @@ model.setStatus({"text":"Couldn't copy to the clipboard","tone":"error"})
 model.copyToClipboard("copy", ["<b.txt>"])
 files:copy -> true
 clipboard writes: ["/home/a/src\n/home/a/a.md\n/home/a/b.txt\n/home/a/pic.png\n/home/a/run.exe","/home/a/b.txt","/home/a/b.txt"]
-mentionInAgent(["<b.txt>"])
-files:mention -> true
 files:editPath -> true
 path box open: true focused=true
 files:filter -> true

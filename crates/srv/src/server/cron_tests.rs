@@ -267,7 +267,7 @@ async fn refused_definitions_say_why() {
     let (state, owner, _) = state();
     let cases = [
         (definition(json!({ "trigger": { "kind": "event", "source": "github" } })), "trigger kind event is available in a later version"),
-        (definition(json!({ "action": { "kind": "drone", "drone_id": "d" } })), "action kind drone is available in a later version"),
+        (definition(json!({ "action": { "kind": "drone", "drone_id": " " } })), "action: drone needs a drone_id"),
         (definition(json!({ "policy": { "approval": "operator" } })), "policy.approval"),
         (definition(json!({ "trigger": { "kind": "cron", "cron": "*/5 * * * *" } })), "at most every 15 minutes"),
         (definition(json!({ "template": { "id": "agentmux.not-installed", "version": "1.0.0" } })), "template"),
@@ -518,6 +518,68 @@ async fn a_spawn_action_runs_only_for_the_operators_job_with_a_running_leader() 
     (job.created_by, job.created_by_uid) = ("operator".into(), String::new());
     let ActionOutcome::Failed(why) = crate::server::job_actions::run_action(&state, job, "r1").await else { panic!() };
     assert!(why.contains("leader isn't running"), "{why}");
+}
+
+/// A drone action runs the job's drone with the job as its trigger, ends the
+/// job's row when the drone ends, and runs only for the operator's job.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_action_runs_the_drone_and_closes_the_jobs_row_when_it_ends() {
+    use crate::backend::cron::ActionOutcome;
+    use crate::drone::storage::DroneStore;
+    let (state, _, _) = state();
+    let drone: crate::drone::types::DroneDefinition = serde_json::from_value(json!({
+        "id": "", "name": "Echo", "created_at": 0, "updated_at": 0,
+        "graph": { "nodes": [{
+            "id": "r1", "position": { "x": 0, "y": 0 },
+            "data": { "kind": "response", "template": "{{trigger.kind}} of {{trigger.job.name}}" }
+        }], "edges": [] }
+    }))
+    .unwrap();
+    let drone = crate::server::drone_handlers::upsert_drone(&state, drone).unwrap();
+
+    let mut job = crate::backend::cron::test_job("j-dr", "Nightly echo", "", "", "uid-jobs-owner");
+    job.action_kind = "drone".into();
+    job.action = json!({ "kind": "drone", "drone_id": drone.id });
+    let ledger = state.cron_scheduler.runs().unwrap().clone();
+    let crate::backend::jobs::Begin::Run(run_id) = ledger.begin_cron(&job, "manual", None, "operator") else { panic!("no ledger row") };
+
+    let ActionOutcome::Failed(why) = crate::server::job_actions::run_action(&state, job.clone(), &run_id).await else { panic!() };
+    assert!(why.contains("made by an agent doesn't run yet"), "{why}");
+    assert!(state.mstore.drone_runs_for(&drone.id, 10).unwrap().is_empty(), "nothing ran");
+
+    (job.created_by, job.created_by_uid) = ("operator".into(), String::new());
+    assert_eq!(crate::server::job_actions::run_action(&state, job.clone(), &run_id).await, ActionOutcome::Drone);
+    let mut row = state.identity_store.job_run_get(&run_id).unwrap().unwrap();
+    for _ in 0..100 {
+        if row.ended_at_ms.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        row = state.identity_store.job_run_get(&run_id).unwrap().unwrap();
+    }
+    assert_eq!((row.state.as_str(), row.infra.as_str()), ("finished", "ok"), "{row:?}");
+    let runs = state.mstore.drone_runs_for(&drone.id, 10).unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(row.links["drone_run_id"], runs[0].id.as_str());
+    assert_eq!(runs[0].output, format!("manual of {}", job.name));
+    assert!(row.links["trigger"]["sha256"].as_str().is_some_and(|h| h.len() == 64), "{}", row.links);
+}
+
+/// A drone job takes no timeout, retries or cancel_other until a run can be stopped.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_job_refuses_policies_that_need_a_stoppable_run() {
+    let (state, owner, _) = state();
+    let make = |policy: Value| definition(json!({ "trigger": { "kind": "manual" }, "action": { "kind": "drone", "drone_id": "d-1" }, "policy": policy }));
+    for policy in [
+        json!({ "timeout_minutes": 5 }),
+        json!({ "retries": 1 }),
+        json!({ "overlap": "cancel_other" }),
+    ] {
+        let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(policy.clone()))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{policy}: {v}");
+    }
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({})))).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
 }
 
 /// Manual, one-time and interval triggers.

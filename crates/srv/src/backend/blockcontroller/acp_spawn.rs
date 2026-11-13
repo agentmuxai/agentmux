@@ -20,6 +20,21 @@ struct AcpStdoutReader {
     mstore_clone: Option<Arc<Store>>,
     event_bus_clone: Option<Arc<EventBus>>,
     global_output_zone: Option<String>,
+    /// What the brakes have seen of this process's output.
+    watch: Mutex<Brakes>,
+}
+
+/// The agent's context size, in tokens, at which its leader is told how much each call now reads. Once per level and process.
+const CONTEXT_NOTICES: [u64; 2] = [300_000, 600_000];
+
+/// The brakes' state for one ACP process (`docs/specs/SPEC_ROUTE_AGENT_BRAKES_2026_11_10.md` sections 5 and 12).
+#[derive(Default)]
+struct Brakes {
+    loop_guard: crate::agents::loop_guard::LoopGuard,
+    /// The guard ended this turn with `session/cancel`; it sees the turn's end before it looks again.
+    ended_by_guard: bool,
+    /// How many of [`CONTEXT_NOTICES`] the leader has been told.
+    context_told: usize,
 }
 
 /// What one line of output turned out to be, for how it is written to the pane.
@@ -33,6 +48,9 @@ struct LineState {
     /// An error that ended the turn: a turn end follows it, since the error itself doesn't say
     /// whether other prompts are still running.
     turn_ended_by_error: bool,
+    /// The line answered the last prompt still running: the turn is over. A rejected steering prompt sent while an
+    /// earlier one runs is an answer too, but the turn goes on.
+    turn_over: bool,
 }
 
 impl AcpController {
@@ -174,6 +192,7 @@ impl AcpController {
             mstore_clone,
             event_bus_clone,
             global_output_zone,
+            watch: Default::default(),
         };
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
@@ -306,9 +325,70 @@ impl AcpStdoutReader {
             let loaded = self.advance_handshake(&json, &mut state);
             self.on_session(&json, loaded);
             self.on_prompt_resolved(&json, &mut state);
+            if !state.replaying && !state.recovered_error {
+                self.watch_for_loops(&json, &state);
+                self.watch_context(&json);
+            }
         }
 
         self.append_line(&line, &state);
+    }
+
+    /// Feeds the line to the loop guard and ends the turn with `session/cancel` when it says the agent is stuck (the same
+    /// brake the Claude controller has: `blockcontroller/loop_stop.rs`).
+    fn watch_for_loops(&self, json: &serde_json::Value, state: &LineState) {
+        let mut brakes = self.watch.lock().unwrap();
+        let is_answer = json.get("id").is_some() && (json.pointer("/result/stopReason").is_some() || json.get("error").is_some());
+        if is_answer {
+            // Only the answer to the last prompt running ends the turn: the guard's count and its cancel survive a
+            // steering prompt the agent rejects while an earlier one goes on.
+            if state.turn_over {
+                brakes.loop_guard.observe_acp(json);
+                brakes.ended_by_guard = false;
+            }
+            return;
+        }
+        if brakes.ended_by_guard {
+            return;
+        }
+        if let Some(stuck) = brakes.loop_guard.observe_acp(json) {
+            brakes.ended_by_guard = self.cancel_turn();
+            if brakes.ended_by_guard {
+                crate::backend::blockcontroller::loop_stop::after_ending(&self.block_id_stdout, self.mstore_clone.as_ref(), &stuck);
+            }
+        }
+    }
+
+    /// `session/cancel` for the open session. `false` when there is none or the agent's stdin is gone or full.
+    fn cancel_turn(&self) -> bool {
+        let inner = self.inner_clone.lock().unwrap();
+        let (Some(tx), Some(session_id)) = (inner.stdin_tx.as_ref(), inner.session_id.as_ref()) else { return false };
+        let cancel = serde_json::json!({ "jsonrpc": "2.0", "method": "session/cancel", "params": { "sessionId": session_id } });
+        tx.try_send(cancel.to_string()).is_ok()
+    }
+
+    /// The agent's `usage_update` says how much its conversation holds. An ACP harness has no knob AgentMux can set for
+    /// it, so its leader is told, held and never waking it, when it passes a level.
+    fn watch_context(&self, json: &serde_json::Value) {
+        let Some(update) = json.pointer("/params/update").filter(|u| u.get("sessionUpdate").and_then(|k| k.as_str()) == Some("usage_update")) else { return };
+        let Some(used) = update.get("used").and_then(|u| u.as_u64()) else { return };
+        let level = CONTEXT_NOTICES.iter().filter(|at| used >= **at).count();
+        {
+            let mut brakes = self.watch.lock().unwrap();
+            if level <= brakes.context_told {
+                return;
+            }
+            brakes.context_told = level;
+        }
+        let Some(mstore) = self.mstore_clone.clone() else { return };
+        let (block_id, size) = (self.block_id_stdout.clone(), update.get("size").and_then(|s| s.as_u64()));
+        tokio::task::spawn_blocking(move || {
+            let Some(agent) = crate::identity::resolver::block_agent_id(&mstore, &block_id) else { return };
+            let name = mstore.agent_def_get(&agent).ok().flatten().map(|d| d.name).unwrap_or_else(|| agent.clone());
+            let window = size.map(|s| format!(" of its {}K window", s / 1000)).unwrap_or_default();
+            let note = format!("{name}'s conversation holds {}K tokens{window}; every call reads all of it, and AgentMux has no context budget for this harness.", used / 1000);
+            crate::backend::worker_notes::tell_leader_held(&mstore, &agent, &note, &format!("acp-context-{block_id}"));
+        });
     }
 
     fn reply_to_agent_request(&self, json: &serde_json::Value) {
@@ -535,6 +615,7 @@ impl AcpStdoutReader {
             if turn_is_over && json.get("error").is_some() {
                 state.turn_ended_by_error = true;
             }
+            state.turn_over = turn_is_over;
             if turn_is_over {
                 self.health_clone.set_active_turn(false);
                 // Publish the flip so live controllerstatus
@@ -602,5 +683,101 @@ impl AcpStdoutReader {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod brake_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn reader() -> (AcpStdoutReader, mpsc::Receiver<String>) {
+        let c = AcpController::new("tab".into(), "brake-block".into(), None, None, None, None);
+        let (tx, rx) = mpsc::channel(32);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("sess-1".into());
+        }
+        let reader = AcpStdoutReader {
+            block_id_stdout: "brake-block".into(),
+            broker_clone: None,
+            filestore_clone: None,
+            inner_clone: c.inner.clone(),
+            health_clone: c.health_monitor.clone(),
+            rpc_id_clone: c.next_rpc_id.clone(),
+            outstanding_prompt_ids_clone: c.outstanding_prompt_ids.clone(),
+            mstore_clone: None,
+            event_bus_clone: None,
+            global_output_zone: None,
+            watch: Default::default(),
+        };
+        (reader, rx)
+    }
+
+    fn failing_round(r: &AcpStdoutReader, n: usize) {
+        let call = json!({ "jsonrpc": "2.0", "method": "session/update", "params": { "update": { "sessionUpdate": "tool_call", "toolCallId": format!("c{n}"), "title": "web_fetch", "status": "in_progress", "rawInput": { "url": "https://x.test" } } } });
+        let ended = json!({ "jsonrpc": "2.0", "method": "session/update", "params": { "update": { "sessionUpdate": "tool_call_update", "toolCallId": format!("c{n}"), "status": "failed" } } });
+        r.handle_line(call.to_string());
+        r.handle_line(ended.to_string());
+    }
+
+    #[tokio::test]
+    async fn the_fifth_identical_failing_call_cancels_the_turn_once_and_the_next_turn_is_watched_again() {
+        let (r, mut rx) = reader();
+        for n in 1..=4 {
+            failing_round(&r, n);
+        }
+        assert!(rx.try_recv().is_err(), "four failures are not a loop");
+        failing_round(&r, 5);
+        let cancel: serde_json::Value = serde_json::from_str(&rx.try_recv().expect("session/cancel")).unwrap();
+        assert_eq!((cancel["method"].as_str(), cancel["params"]["sessionId"].as_str(), cancel.get("id")), (Some("session/cancel"), Some("sess-1"), None), "a notification for the open session");
+        for n in 6..=9 {
+            failing_round(&r, n);
+        }
+        assert!(rx.try_recv().is_err(), "once per turn, not at every failure after it");
+        // The agent answers the prompt with `cancelled`: the turn is over and the guard looks again.
+        r.handle_line(json!({ "jsonrpc": "2.0", "id": 3, "result": { "stopReason": "cancelled" } }).to_string());
+        for n in 10..=14 {
+            failing_round(&r, n);
+        }
+        assert!(rx.try_recv().is_ok(), "the next turn's loop is cut too");
+    }
+
+    /// A steering prompt the agent rejects while an earlier prompt still runs answers a prompt, but the turn goes on: the
+    /// guard keeps what it counted, and a turn it already cancelled is not cancelled again (#47457).
+    #[tokio::test]
+    async fn a_rejected_steering_prompt_does_not_reset_the_guard_while_the_turn_goes_on() {
+        let (r, mut rx) = reader();
+        r.outstanding_prompt_ids_clone.lock().unwrap().extend([3, 4]);
+        for n in 1..=4 {
+            failing_round(&r, n);
+        }
+        r.handle_line(json!({ "jsonrpc": "2.0", "id": 4, "error": { "code": -32000, "message": "busy" } }).to_string());
+        assert!(rx.try_recv().is_err(), "four failures are not a loop");
+        failing_round(&r, 5);
+        assert!(rx.try_recv().is_ok(), "the four counted before the rejection still count");
+        r.outstanding_prompt_ids_clone.lock().unwrap().insert(5);
+        r.handle_line(json!({ "jsonrpc": "2.0", "id": 5, "error": { "code": -32000, "message": "busy" } }).to_string());
+        for n in 6..=10 {
+            failing_round(&r, n);
+        }
+        assert!(rx.try_recv().is_err(), "the turn was cancelled once and a rejected prompt does not cancel it again");
+        // The last prompt running answers: the turn is over and the guard looks again.
+        r.handle_line(json!({ "jsonrpc": "2.0", "id": 3, "result": { "stopReason": "cancelled" } }).to_string());
+        for n in 11..=15 {
+            failing_round(&r, n);
+        }
+        assert!(rx.try_recv().is_ok(), "the next turn is watched");
+    }
+
+    #[tokio::test]
+    async fn nothing_is_watched_while_a_loaded_session_replays() {
+        let (r, mut rx) = reader();
+        r.inner_clone.lock().unwrap().loading_session = Some("old".into());
+        for n in 1..=6 {
+            failing_round(&r, n);
+        }
+        assert!(rx.try_recv().is_err(), "an earlier conversation's failures are history, not a loop");
     }
 }

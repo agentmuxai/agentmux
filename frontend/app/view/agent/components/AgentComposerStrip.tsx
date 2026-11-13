@@ -51,10 +51,10 @@ import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
 import { shortenEmail } from "@/app/view/identity/identity-model";
 import { compactionCountdownText, contextTitle, ctxBand } from "./context-bandwidth";
-import { computeComposerRows, computeStatsInline, orderKeysForEdgePriority, type ComposerRow } from "./composer-row-layout";
+import { computeComposerRows, computeStatsInline, orderKeysForEdgePriority, rowsCost, type ComposerRow } from "./composer-row-layout";
 import { useBlockStats } from "@/app/hook/useBlockStats";
 import { BlockStatsBadge } from "@/element/blockstats";
-import { accountInitial, shortContextText } from "./composer-forms";
+import { ACCOUNT_BUDGETS, accountInitial, middleTruncate, shortContextText } from "./composer-forms";
 import { useSlotForms } from "./composer-forms-probes";
 import { useStatsZone } from "./composer-stats-zone";
 import { isContainerAgentMode, parseRuntimeKind } from "@/util/runtime-kind";
@@ -159,6 +159,8 @@ interface AgentComposerStripProps {
      * already takes today.
      */
     onCompact?: () => void;
+    /** Compacts the conversation, then moves the agent to the model on the route: the model panel's rows for a model too small for it. */
+    onCompactThenSwitch?: (route: string, model: string) => Promise<void>;
     /** The View chip's text (the pane's view: "Standard", "Replies · this pane"); none while the pane shows everything. */
     viewChip?: string | null;
     /** The View popover is open, for the chip's expanded state. */
@@ -173,7 +175,9 @@ type Slot = {
     side: Side;
     interactive: boolean;
     compact?: boolean;
-    render: (rowSide: Side, compact: Accessor<boolean>) => JSX.Element;
+    /** Character budgets between the full and compact forms, widest first (composer-forms.ts `ACCOUNT_BUDGETS`). */
+    budgets?: readonly number[];
+    render: (rowSide: Side, compact: Accessor<boolean>, budget?: Accessor<number | undefined>) => JSX.Element;
 };
 
 /** The pieces of the props the slots and the layout both read. */
@@ -283,6 +287,7 @@ function runtimeSlot(props: AgentComposerStripProps): Slot {
                 lastReplyModel={props.lastReplyModel}
                 contextTokens={props.contextTokens}
                 conversationImages={props.conversationImages}
+                compactThenSwitch={props.onCompactThenSwitch}
             />
         ),
     };
@@ -311,19 +316,30 @@ function authSlot(props: AgentComposerStripProps): Slot {
         // flipping it with every turn would reorder the strip.
         interactive: true,
         compact: true,
-        render: (_rowSide, compact) => {
+        budgets: ACCOUNT_BUDGETS,
+        render: (_rowSide, compact, budget) => {
             const authed = () => props.authStatus === "authenticated";
             const hasOthers = () => !!props.canSwitchAccount && !!props.onSwitchAccount;
             // srv holds a switch asked for in a turn until it ends (agent.account.switch).
             const busy = () => !!props.loading || props.compacting != null;
             const canSwitch = () => hasOthers();
-            const label = () => {
-                const base = accountKnown(props) ? (props.authEmail ? shortenEmail(props.authEmail) : "Account") : !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
-                return props.pendingAccountLabel ? `${base} → ${shortenEmail(props.pendingAccountLabel)}` : base;
+            // `cut` shortens an address: the full form cuts it to 22 characters, the budgeted form starts from the
+            // whole address, so an address is cut once, not twice.
+            const labelWith = (cut: (email: string) => string) => {
+                const base = accountKnown(props) ? (props.authEmail ? cut(props.authEmail) : "Account") : !authed() ? "Not logged in" : props.authEmail ? cut(props.authEmail) : "Logged in";
+                return props.pendingAccountLabel ? `${base} → ${cut(props.pendingAccountLabel)}` : base;
             };
+            const label = () => labelWith(shortenEmail);
             // Tight: the dot and one letter, the whole label in the tooltip and the accessible name. Signed out
             // keeps a mark of its own, as "N" for "Not logged in" would read as a name.
-            const shown = () => (compact() ? (props.authStatus === "unauthenticated" ? "!" : accountInitial(label())) : label());
+            // With room to spare it shows the address cut in the middle instead ("taylo…@mail.dev"), by the budget
+            // the strip gives it; a switch pending ("a@x → b@y") has no middle form and keeps the letter.
+            const shown = () => {
+                if (!compact()) return label();
+                if (props.authStatus === "unauthenticated") return "!";
+                const room = props.pendingAccountLabel ? undefined : budget?.();
+                return room === undefined ? accountInitial(label()) : middleTruncate(labelWith((email) => email), room);
+            };
             const title = () => {
                 if (!authed() && !accountKnown(props)) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";
                 const base = accountKnown(props)
@@ -793,9 +809,9 @@ function buildRows(visible: Slot[], widths: Record<string, number>, width: numbe
     return rows.map((r) => ({ left: expand(r.left), right: expand(r.right) }));
 }
 
-/** How many rows these slots make at these widths (what the forms are chosen by). */
+/** What these slots' layout costs at these widths: its rows, and a half more for each that overflows (what the forms are chosen by). */
 function rowCountFor(list: Slot[], widths: Record<string, number>, width: number, gapPx: number): number {
-    return buildRows(visibleSlots(list, widths), widths, width, gapPx).length;
+    return rowsCost(buildRows(visibleSlots(list, widths), widths, width, gapPx), widths, gapPx, width);
 }
 
 function measuredLayout(
@@ -923,7 +939,8 @@ function createLayout(
 function createSlotRenderer(
     slotByKey: Accessor<Map<string, Slot>>,
     refs: StripRefs,
-    compactKeys: Accessor<Set<string>>
+    compactKeys: Accessor<Set<string>>,
+    budgets: Accessor<Record<string, number>>
 ): (key: string, rowSide: Side) => JSX.Element {
     const renderSlot = (key: string, rowSide: Side) => {
         // untrack: see `slotByKey`'s own doc comment above — without
@@ -932,7 +949,7 @@ function createSlotRenderer(
         // reconstructing e.g. AgentRuntimeDropup, resetting its own
         // open/selectedOptIndex signals) on every `slots()` recompute,
         // defeating the point of keying by string at all.
-        const rendered = untrack(() => slotByKey().get(key)?.render(rowSide, () => compactKeys().has(key)));
+        const rendered = untrack(() => slotByKey().get(key)?.render(rowSide, () => compactKeys().has(key), () => budgets()[key]));
         return (
             // `display: contents` (agent-composer-strip-slot-measure,
             // _composer-strip.scss) — invisible to layout, so this
@@ -1128,7 +1145,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     const precedingRowIndices = createMemo(() => rows().slice(0, -1).map((_, i) => i));
     const lastRowIndex = createMemo(() => rows().length - 1);
 
-    const renderSlot = createSlotRenderer(slotByKey, refs, forms.compactKeys);
+    const renderSlot = createSlotRenderer(slotByKey, refs, forms.compactKeys, forms.budgets);
 
     return (
         <StripView props={props} refs={refs} rows={rows} statsInline={statsInline} statsZone={statsZone} precedingRowIndices={precedingRowIndices} lastRowIndex={lastRowIndex} renderSlot={renderSlot} probes={forms.probes} />

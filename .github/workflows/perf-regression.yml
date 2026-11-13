@@ -137,8 +137,14 @@ jobs:
           RUNS: ${{ inputs.runs || '4' }}
           PANES: ${{ inputs.panes || '12' }}
           ROUNDS: ${{ inputs.rounds || '10' }}
+          A_CLAUDE: ${{ steps.plan.outputs.a-claude }}
+          B_CLAUDE: ${{ steps.plan.outputs.b-claude }}
         run: |
-          node scripts/perf/memory-lab/ab.mjs --a-portable "$A_PORTABLE" --b-portable "$B_PORTABLE" \
+          # Each side's stand-in Claude goes where that build's srv looks for it (the version it pins), not where this checkout's does.
+          pins=()
+          [ -n "$A_CLAUDE" ] && pins+=(--a-claude-version "$A_CLAUDE")
+          [ -n "$B_CLAUDE" ] && pins+=(--b-claude-version "$B_CLAUDE")
+          node scripts/perf/memory-lab/ab.mjs --a-portable "$A_PORTABLE" --b-portable "$B_PORTABLE" "${pins[@]}" \
             --a-label a --b-label b --runs "$RUNS" --out perf-out \
             --margins scripts/perf/memory-lab/budget.json \
             -- --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333 --open-agents 3 --heavy-turns 1 --heavy-kb 600
@@ -151,9 +157,12 @@ jobs:
           RUNS: ${{ inputs.runs || '4' }}
           PANES: ${{ inputs.panes || '12' }}
           ROUNDS: ${{ inputs.rounds || '10' }}
+          B_CLAUDE: ${{ steps.plan.outputs.b-claude }}
         run: |
+          pins=()
+          [ -n "$B_CLAUDE" ] && pins+=(--claude-version "$B_CLAUDE")
           for n in $(seq 1 "$RUNS"); do
-            node scripts/perf/memory-lab/run.mjs --portable "$B_PORTABLE" --label "b$n" \
+            node scripts/perf/memory-lab/run.mjs --portable "$B_PORTABLE" --label "b$n" "${pins[@]}" \
               --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333 --open-agents 3 --heavy-turns 1 --heavy-kb 600 --out perf-out
           done
           node scripts/perf/memory-lab/spread.mjs perf-out/b*/result.json --md perf-out/spread.md
@@ -173,8 +182,13 @@ jobs:
         env:
           PANES: ${{ inputs.panes || '12' }}
           ROUNDS: ${{ inputs.rounds || '10' }}
+          A_CLAUDE: ${{ steps.plan.outputs.a-claude }}
+          B_CLAUDE: ${{ steps.plan.outputs.b-claude }}
         run: |
-          node scripts/perf/memory-lab/ab.mjs --a-portable "$A_PORTABLE" --b-portable "$B_PORTABLE"             --a-label a --b-label b --runs 1 --order ba --out perf-confirm             --margins scripts/perf/memory-lab/budget.json             -- --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333 --open-agents 3 --heavy-turns 1 --heavy-kb 600
+          pins=()
+          [ -n "$A_CLAUDE" ] && pins+=(--a-claude-version "$A_CLAUDE")
+          [ -n "$B_CLAUDE" ] && pins+=(--b-claude-version "$B_CLAUDE")
+          node scripts/perf/memory-lab/ab.mjs --a-portable "$A_PORTABLE" --b-portable "$B_PORTABLE" "${pins[@]}"             --a-label a --b-label b --runs 1 --order ba --out perf-confirm             --margins scripts/perf/memory-lab/budget.json             -- --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333 --open-agents 3 --heavy-turns 1 --heavy-kb 600
 
       # The comparison over every run that finished, first matrix and confirmation pair together. Without a confirmation
       # it is the first matrix again.
@@ -237,6 +251,7 @@ jobs:
           if [ -f perf-out/compare-all.md ]; then args+=(--compare perf-out/compare-all.md)
           elif [ -f perf-out/compare.md ]; then args+=(--compare perf-out/compare.md); fi
           [ -f perf-out/spread.md ] && args+=(--spread perf-out/spread.md)
+          [ -f perf-out/ab.json ] && args+=(--ab perf-out/ab.json)
           node scripts/perf/memory-lab/nightly.mjs report "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Tonight's line goes into the history file (the standard workload only), and the trend (charts, drift) into the summary.
@@ -286,10 +301,12 @@ jobs:
             perf-confirm/*/result.json
             perf-confirm/*/summary.md
             perf-confirm/*/instance.log
+            perf-confirm/*/invalid-run-*.txt
             perf-out/spread.md
             perf-out/*/result.json
             perf-out/*/summary.md
             perf-out/*/instance.log
+            perf-out/*/invalid-run-*.txt
           if-no-files-found: warn
           retention-days: 90
 

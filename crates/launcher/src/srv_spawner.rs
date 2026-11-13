@@ -335,7 +335,7 @@ pub async fn spawn_srv(
     let attempt = || spawn_srv_once(launcher_exe_dir, paths, srv_pipe_path, job_handle, sink, restart_id);
     #[cfg(not(target_os = "windows"))]
     let attempt = || spawn_srv_once(launcher_exe_dir, paths, srv_pipe_path, sink, restart_id);
-    match attempt().await {
+    let started = match attempt().await {
         Err(SrvSpawnError::NeedsPrepare(reason)) => {
             crate::log(&format!("srv: data needs preparing ({reason}); running migrate --prepare"));
             #[cfg(target_os = "windows")]
@@ -350,7 +350,12 @@ pub async fn spawn_srv(
             }
         }
         other => other,
+    };
+    // The tray's Quit asks this srv who is working (`quit_ask`).
+    if let Ok((result, _)) = &started {
+        crate::quit_ask::srv_is_at(&result.web_endpoint, &result.auth_key);
     }
+    started
 }
 
 /// Spawn srv as a child of the launcher, assigned to launcher's

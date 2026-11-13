@@ -11,6 +11,9 @@
 
 pub mod aws_import;
 pub mod capture;
+pub mod card;
+pub mod card_fill;
+pub mod card_target;
 pub mod expiry;
 pub mod files;
 pub mod generate;
@@ -224,6 +227,60 @@ fn drop_empty(parts: &mut Parts) {
     parts.0.retain(|_, v| !v.is_empty());
 }
 
+/// A card saved as the default takes the flag from the Vault's other cards: at most one has it.
+/// Runs after the save has committed, so a failure here is the caller's to log, not to fail the save
+/// with: the card is saved, and a card picker that finds two defaults takes the one saved last.
+fn keep_one_default(store: &Store, kind: &str, vault_id: &str, id: &str, fields: &BTreeMap<String, String>) -> Result<(), String> {
+    if kind != card::KIND || fields.get(card::DEFAULT).map(String::as_str) != Some("yes") {
+        return Ok(());
+    }
+    let rows = store.vault_list().map_err(|e| format!("couldn't list the cards: {e}"))?;
+    let mut failed = Vec::new();
+    for row in rows.into_iter().filter(|r| r.id != id && r.kind == card::KIND && r.vault_id == vault_id) {
+        let mut other: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+        if other.remove(card::DEFAULT).is_none() {
+            continue;
+        }
+        let cleared = serde_json::to_string(&other).map_err(|e| e.to_string()).and_then(|json| store.vault_set_fields(&row.id, &json).map_err(|e| e.to_string()));
+        if let Err(e) = cleared {
+            failed.push(format!("{}: {e}", row.id));
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("couldn't clear the default flag of {}", failed.join("; ")))
+    }
+}
+
+/// A card whose sealed value was swapped for another (a restored version, a rotated number) gets its
+/// brand and expiry date worked out again from the parts it holds now. The parts themselves are not rewritten.
+pub(crate) fn resettle_card(store: &Store, id: &str) -> Result<(), String> {
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    if row.kind != card::KIND {
+        return Ok(());
+    }
+    let key = seal::key(false)?;
+    let mut parts = seal::open(&key, &row.id, &row.sealed)?;
+    let before: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    let mut fields = before.clone();
+    card::settle(card::KIND, &mut fields, &mut parts)?;
+    if fields != before {
+        let json = serde_json::to_string(&fields).map_err(|e| e.to_string())?;
+        store.vault_set_fields(&row.id, &json).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// A part as a fill or a command asks for it: a card's older `expiry` is read from its month and year when it has no such part.
+fn part_of(kind: &str, parts: &Parts, part: &str) -> Option<String> {
+    if kind == card::KIND {
+        card::part_value(parts, part)
+    } else {
+        parts.get(part).map(str::to_string)
+    }
+}
+
 /// A readable id that never changes: the kind and the label, e.g.
 /// `ssn-alex`, unique with a number when taken. No `.`: P3 names a part as
 /// `<id>.<part>`.
@@ -345,6 +402,7 @@ fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Resu
     drop_empty(&mut entry.parts);
     let mut fields = trimmed(std::mem::take(&mut entry.fields));
     signins::settle_profile(kind.name, &mut fields);
+    card::settle(kind.name, &mut fields, &mut entry.parts)?;
     validate(kind, &entry.label, &fields, &entry.tags, &entry.parts)?;
     if entry.parts.get(kind.parts[0]).is_none() {
         return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));
@@ -366,6 +424,9 @@ fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Resu
         vault_id: vault_id.to_string(),
     };
     store.vault_insert(&row).map_err(|e| e.to_string())?;
+    if let Err(e) = keep_one_default(store, kind.name, vault_id, &id, &fields) {
+        tracing::warn!(entry = %id, error = %e, "vault: the new default card is saved, but another card still has the default flag");
+    }
     Ok((id, label))
 }
 
@@ -464,6 +525,7 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
             zeroize::Zeroize::zeroize(&mut old);
         }
     }
+    card::settle(kind.name, &mut fields, &mut parts)?;
     let label = change.label.trim().to_string();
     let old_fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
     let target = match (old_fields.get(expiry::FIELD), fields.get(expiry::FIELD)) {
@@ -483,6 +545,9 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     // transaction: a capture or restore that landed meanwhile is never lost.
     if !store.vault_update_kept(&changed, &was, kept.as_ref()).map_err(|e| e.to_string())? {
         return Err(format!("{label} changed while you were editing it, so nothing was saved: open it again"));
+    }
+    if let Err(e) = keep_one_default(store, kind.name, &changed.vault_id, &changed.id, &fields) {
+        tracing::warn!(entry = %changed.id, error = %e, "vault: the new default card is saved, but another card still has the default flag");
     }
     record(store, &changed.id, &label, PERSON, if replaced { "replaced" } else { "changed" }, &target, "done");
     Ok(())
@@ -631,8 +696,8 @@ pub fn value_for_fill(store: &Store, id: &str, created_at: i64, part: &str) -> R
     }
     let key = seal::key(false)?;
     let parts = seal::open(&key, &row.id, &row.sealed)?;
-    let value = parts.get(part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
-    Ok(zeroize::Zeroizing::new(value.to_string()))
+    let value = part_of(&row.kind, &parts, part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
+    Ok(zeroize::Zeroizing::new(value))
 }
 
 /// A part's value for a command: the current value, or the version `t` names
@@ -646,8 +711,8 @@ pub fn value_for_command(store: &Store, t: &FillTarget) -> Result<zeroize::Zeroi
     let (_, sealed) = versions::sealed_version(store, &row, which)?;
     let key = seal::key(false)?;
     let parts = seal::open(&key, &row.id, &sealed)?;
-    let value = parts.get(t.part).ok_or_else(|| format!("{}'s {which} value has no {}", row.label, t.part))?;
-    Ok(zeroize::Zeroizing::new(value.to_string()))
+    let value = part_of(&row.kind, &parts, t.part).ok_or_else(|| format!("{}'s {which} value has no {}", row.label, t.part))?;
+    Ok(zeroize::Zeroizing::new(value))
 }
 
 pub fn delete(store: &Store, id: &str) -> Result<(), String> {

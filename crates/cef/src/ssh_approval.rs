@@ -9,7 +9,7 @@
 //! Not a modal in the main window, and not answered through srv's own
 //! services: every agent holds srv's auth key, and anything in the main window
 //! outside a pane is reachable by every agent's `UIClick`/`UIQuery` (the same
-//! reasoning as `credential_broker` and `memory_adoption`). So srv asks the
+//! reasoning as `credential_broker`). So srv asks the
 //! host over the host's own IPC server (`POST /agentmux/approval/ask`, the
 //! host's IPC token, which no agent has) and waits; the host opens an
 //! approval subwindow, which the browser API never resolves a pane into; only

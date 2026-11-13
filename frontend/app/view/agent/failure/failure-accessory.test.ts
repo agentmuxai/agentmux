@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { failureToRow, isTransient, type FailureActions, type FailureViewState } from "./failure-accessory";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
+import { ROUTE_CREDITS_TITLE } from "@/app/store/agent-unavailable";
 
 const mkFailure = (overrides: Partial<AgentFailure> = {}): AgentFailure => ({
     code: "unknown_non_zero",
@@ -109,6 +110,12 @@ describe("failureToRow", () => {
         const row = failureToRow(mkFailure({ code: "usage_limit" }), mkView(), mkActions());
         const trust = action(row, "Accounts (switch / upgrade)");
         expect(trust?.primary).toBe(true);
+    });
+
+    it("a route out of credits offers Retry, not an account switch that would change nothing (#47477)", () => {
+        const row = failureToRow(mkFailure({ code: "usage_limit", title: ROUTE_CREDITS_TITLE }), mkView(), mkActions());
+        expect(action(row, "Accounts (switch / upgrade)")).toBeUndefined();
+        expect(action(row, "Retry now")?.primary).toBe(true);
     });
 
     it("context_exceeded → New session (not a resume-retry that would re-fail)", () => {

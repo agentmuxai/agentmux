@@ -10,8 +10,7 @@ use serde_json::json;
 
 use crate::backend::blockcontroller;
 use crate::backend::reactive::{registry as agent_registry, AgentRegistration, InjectionRequest};
-use crate::backend::subagent_watcher;
-use crate::backend::base;
+use crate::backend::{base, subagent_watcher};
 
 use super::AppState;
 
@@ -63,6 +62,8 @@ pub(super) enum ForwardOutcome {
     /// The peer refused the jekt's files for a reason no other candidate
     /// would change (`jekt_files::refused`): end the search with its answer.
     Refused(serde_json::Value),
+    /// The request went out and no answer came in time (a peer that polls fine but does not take the message).
+    NoAnswer,
 }
 
 /// The single implementation of "POST this injection to a peer srv and echo it
@@ -84,7 +85,7 @@ pub(super) enum ForwardOutcome {
 /// arrived. All three now require `success: true`. No real peer is affected:
 /// `InjectionResponse::success` is a plain `bool` with no
 /// `skip_serializing_if`, so a genuine AgentMux srv always sends it.
-async fn forward_inject_to_peer(
+pub(super) async fn forward_inject_to_peer(
     state: &AppState,
     req: &InjectionRequest,
     forwarded_req: &InjectionRequest,
@@ -166,15 +167,8 @@ async fn forward_inject_to_peer(
             ForwardOutcome::Inconclusive
         }
         Err(e) => {
-            tracing::warn!(
-                target = %req.target_agent,
-                error = %e,
-                url = %forward_url,
-                kind = peer.kind,
-                channel,
-                "inject forward: transport failure — candidate may be stale"
-            );
-            ForwardOutcome::Stale
+            tracing::warn!(target = %req.target_agent, error = %e, url = %forward_url, kind = peer.kind, channel, timed_out = e.is_timeout(), "inject forward: transport failure, candidate may be stale");
+            if e.is_timeout() { ForwardOutcome::NoAnswer } else { ForwardOutcome::Stale }
         }
     }
 }
@@ -352,7 +346,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     };
     let observed_key = match lan_signer::resolve(state, &claimed).await {
         lan_signer::SignerKey::Pinned(key) => key,
-        lan_signer::SignerKey::Unknown => return,
+        lan_signer::SignerKey::Unknown | lan_signer::SignerKey::Unproven => return,
         lan_signer::SignerKey::Refused => {
             req.lan_verified = Some(false);
             return;
@@ -377,8 +371,9 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     lan_v2::claim_uid(state, req, &claimed, &observed_key).await;
 }
 
-mod channel_v2;
+mod channel_v2; mod detached;
 mod forward_tiers;
+pub(super) mod peer_hold;
 pub(crate) mod lan_signer;
 mod registration_flags;
 pub(crate) mod former_slug;
@@ -643,7 +638,7 @@ pub(super) async fn handle_reactive_inject(
         "reactive inject request received"
     );
     let caller_uid = super::caller::attributed_uid(caller.as_deref());
-    Json(deliver(&state, auth_via, &caller_uid, req).await)
+    Json(detached::deliver_to_completion(&state, auth_via, &caller_uid, req).await)
 }
 
 /// Deliver an inject — verify, try this instance, then forward
@@ -673,15 +668,9 @@ pub(crate) async fn deliver(
         return super::jekt_files::with_count(serde_json::to_value(&resp).unwrap_or_default(), &req);
     }
 
-    // The target is here but its spawn gate refused (not signed in). That is
-    // recoverable, so hold it for sign-in instead of failing it
-    // (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md Phase 0 item 4).
-    // No other tier can run it either: the agent lives on this instance.
-    if resp.error.as_deref().is_some_and(super::jekt_held::is_spawn_gate_refusal) {
-        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin, &mut replay).await {
-            return held;
-        }
-        return super::jekt_hold::needs_login_refusal(serde_json::to_value(&resp).unwrap_or_default());
+    // The target is here but not signed in, or its pane has no controller yet: held, not failed.
+    if let Some(answer) = super::jekt_hold::hold_for_refusal_here(state, auth_via, &req, &resp, &mut replay).await {
+        return answer;
     }
 
     // 2. On "agent not found", check cross-instance file registry and forward.
@@ -862,7 +851,7 @@ pub(crate) async fn route_for_absent(
 /// The relay's lease answer as a route: hold here unless it says another
 /// install runs the agent or cannot say; an unreachable relay holds here
 /// (there is no relay to send through anyway).
-fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
+pub(super) fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
     use crate::muxbus::wan_lease::Holder;
     match answer {
         Holder::Free | Holder::Yours | Holder::Unreachable => AbsentRoute::HoldHere,
@@ -1136,7 +1125,7 @@ pub(super) async fn handle_reactive_register(
                 None
             })
     };
-    if let Some(refusal) = super::pane_binding::register_refusal(&state, caller.as_deref(), uid.as_deref(), &sent_name, &req.agent_id).await {
+    if let Some(refusal) = super::pane_binding::register_refusal(&state, caller.as_deref(), &req.block_id, uid.as_deref(), &sent_name, &req.agent_id).await {
         return refusal;
     }
     // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24

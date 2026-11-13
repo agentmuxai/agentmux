@@ -39,7 +39,7 @@ impl Act<'_> {
         // An agent sees only the boards whose agent list has it; the operator sees them all.
         if !self.actor.is_operator {
             if let Some((board, _)) = self.state.work_store.work_task_board(&task.item.id).map_err(|e| e.to_string())? {
-                if !board.visible_to(&self.actor.name, "") {
+                if !board.visible_to(&self.actor.name, &self.actor.uid) {
                     return Err("no such task".to_string());
                 }
             }
@@ -119,12 +119,21 @@ impl Act<'_> {
         Ok(json!({ "ok": true }))
     }
 
+    /// Refuse a task for an agent its board's agent list leaves out: it would be handed a payload
+    /// it can't see on the board.
+    fn receiver_sees_board(&self, work_id: &str, agent: &str, uid: &str) -> Result<(), String> {
+        match self.state.work_store.work_task_board(work_id).map_err(|e| e.to_string())? {
+            Some((b, _)) if !b.visible_to(agent, uid) => Err(format!("{agent} isn't on board {}: its agent list leaves {agent} out", b.slug)),
+            _ => Ok(()),
+        }
+    }
+
     /// Move the task to another board (`board`): a new task there with the next number, the original
     /// closed with a pointer. An agent sees only the boards its agent list has it on.
     fn move_to_board(&self, to: &str) -> Result<Value, String> {
         let Act { state, req, actor, now, .. } = *self;
         let t = self.task()?;
-        let who = (!actor.is_operator).then_some((actor.name.as_str(), ""));
+        let who = (!actor.is_operator).then_some((actor.name.as_str(), actor.uid.as_str()));
         crate::server::work_tasks::pick_board(state, Some(to), who, true)?;
         if let Some((from, _)) = state.work_store.work_task_board(&t.item.id).map_err(|e| e.to_string())? {
             if who.is_some_and(|(a, u)| !from.visible_to(a, u)) {
@@ -151,6 +160,9 @@ impl Act<'_> {
         let id = &t.item.id;
         if let Some(agent) = req.agent.as_deref() {
             let (name, uid) = target_of(state, regs, agent);
+            if !name.is_empty() {
+                self.receiver_sees_board(&t.item.id, &name, &uid)?;
+            }
             if !store.work_assign(id, &name, &uid, now).map_err(|e| e.to_string())? {
                 return Err("only a waiting task can be moved to another agent".into());
             }
@@ -186,6 +198,7 @@ impl Act<'_> {
             return Err(format!("{} isn't running", reg.agent_id));
         }
         let uid = reg.uid.clone().unwrap_or_default();
+        self.receiver_sees_board(&t.item.id, &reg.agent_id, &uid)?;
         let started = store
             .work_start_for(&t.item.id, &reg.agent_id, &uid, now, LEASE_MS)
             .map_err(|e| e.to_string())?

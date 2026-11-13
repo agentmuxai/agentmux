@@ -21,17 +21,23 @@
 //!   through its usual Views resize, all in the one task.
 //! - The IPC call returns once its rects have been applied, or after
 //!   `APPLY_WAIT` if the UI thread is busy, so the page's next batch follows
-//!   the host's pace without ever waiting on a stuck UI thread.
+//!   the host's pace without ever waiting on a stuck UI thread. A batch that
+//!   came over the process-message lane (`ipc_query.rs`) is answered by the
+//!   UI task that applies it: its reply reaches the page through the UI
+//!   thread anyway, so a cap would gain it nothing.
 //! - A pane is moved only while it is live and still in the window that sent
 //!   the batch: a rect from a window a pane was torn off from is dropped.
-//! - On every platform the host also moves shown panes itself when their window
-//!   resizes, ahead of the page (`LayoutBase`): Windows `follow_window_resize`
-//!   (from the window's `WM_SIZE`), macOS `follow_window_resize`, Linux `window_resized`.
+//! - The host also moves shown panes itself when their window resizes, ahead
+//!   of the page (`LayoutBase`): Windows child-window panes `follow_window_resize`
+//!   (from the window's `WM_SIZE`), macOS `follow_window_resize`, Linux
+//!   `window_resized`. Not Windows Views panes: they wait for the page's rects
+//!   (`window_resized` says why).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::Duration;
 
+use cef::wrapper::message_router::BrowserSideCallback;
 use cef::*;
 use parking_lot::Mutex;
 use tokio::sync::oneshot;
@@ -184,11 +190,19 @@ pub(crate) fn follow_window_resize(state: &Arc<AppState>, window_label: &str) {
     }
 }
 
-/// The window's size changed (Linux, and Windows in Views pane mode): move its shown panes to where the page
+/// The window's size changed (Linux): move its shown panes to where the page
 /// will put them, without waiting for it, and lay the window out once. The
 /// page's own rects for the new size replace the guess (`apply`). UI thread
 /// only.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+///
+/// Windows Views panes are not moved this way. There the window's page can be
+/// several frames behind the window in a fast resize (90 to 110 ms a frame
+/// when it was measured), longer than the window's compositor waits for it
+/// (`pane_backend::append_surface_deadline`). A pane placed for the new size
+/// then showed outside the border the page was still drawing at the old one.
+/// Moved only by the page's own rects, a pane and its border come from the
+/// same layout.
+#[cfg(target_os = "linux")]
 pub(crate) fn window_resized(state: &Arc<AppState>, window_label: &str, window: &Window) {
     let started = std::time::Instant::now();
     let (width, height) = window_client_px(window);
@@ -216,6 +230,10 @@ pub(crate) fn window_resized(state: &Arc<AppState>, window_label: &str, window: 
         };
         let to = base.predict(&Rect { x, y, width: w, height: h }, width, height);
         crate::browser_pane::creation_views::place_overlay(&controller, Some(window), &to);
+        // An overlay's clip is not adjusted when the overlay is resized: with a menu over the pane
+        // its cut would be of the old size until the page's next rects (#7063).
+        let scale = crate::browser_pane::creation_views::views_scale(Some(window));
+        super::views_clip::apply_placed(state, &label, window_label, &controller, (x, y, w, h), (to.width, to.height), scale);
         moved += 1;
     }
     if moved > 0 {
@@ -231,18 +249,18 @@ pub(crate) fn window_resized(state: &Arc<AppState>, window_label: &str, window: 
 }
 
 /// Each window's client size when `window_resized` last saw it, by label.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "linux")]
 static CLIENT_SIZES: LazyLock<Mutex<HashMap<String, (i32, i32)>>> = LazyLock::new(Default::default);
 
 /// The window `window_label` is gone: forget its size.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub(crate) fn forget_window(window_label: &str) {
     CLIENT_SIZES.lock().remove(window_label);
 }
 
 /// `window`'s client area in physical pixels: what the page's viewport
 /// measures (`innerWidth * devicePixelRatio`).
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub(crate) fn window_client_px(window: &Window) -> (i32, i32) {
     let scale = window.display().map(|d| d.device_scale_factor()).filter(|s| *s > 0.0).unwrap_or(1.0) as f64;
     let client = window.client_area_bounds_in_screen();
@@ -440,6 +458,29 @@ fn drop_superseded(
         .collect()
 }
 
+/// Who waits for a batch to be applied: the HTTP call (`set_rects`), or the
+/// page's query over the process-message lane (`ipc_query.rs`).
+pub(crate) enum Waiter {
+    Channel(oneshot::Sender<()>),
+    Query(Arc<StdMutex<dyn BrowserSideCallback>>),
+}
+
+impl Waiter {
+    /// The batch is applied (or dropped): tell whoever waits.
+    fn answer(self) {
+        match self {
+            Waiter::Channel(tx) => {
+                let _ = tx.send(());
+            }
+            Waiter::Query(callback) => {
+                if let Ok(cb) = callback.lock() {
+                    cb.success_str("true");
+                }
+            }
+        }
+    }
+}
+
 /// A window's rects waiting for the UI thread, and who is waiting on them.
 #[derive(Default)]
 struct Pending {
@@ -447,7 +488,7 @@ struct Pending {
     /// Each with what its batch was laid out against; installed with the
     /// rect, so a window resize never reads a rect against another's base.
     rects: Vec<(PaneBounds, Option<LayoutBase>)>,
-    waiters: Vec<oneshot::Sender<()>>,
+    waiters: Vec<Waiter>,
     /// A UI task for this window is posted and hasn't run yet.
     scheduled: bool,
 }
@@ -456,14 +497,9 @@ struct Pending {
 struct PendingByWindow(HashMap<String, Pending>);
 
 impl PendingByWindow {
-    /// Merge `rects` into `window`'s pending set. Returns the receiver that
-    /// fires once they are applied, and whether the caller must post a task.
-    fn enqueue(
-        &mut self,
-        window: &str,
-        rects: Vec<PaneBounds>,
-        base: Option<LayoutBase>,
-    ) -> (oneshot::Receiver<()>, bool) {
+    /// Merge `rects` into `window`'s pending set, with who waits for them.
+    /// Returns whether the caller must post a task.
+    fn enqueue(&mut self, window: &str, rects: Vec<PaneBounds>, base: Option<LayoutBase>, waiter: Waiter) -> bool {
         let p = self.0.entry(window.to_string()).or_default();
         for r in rects {
             match p.rects.iter_mut().find(|(e, _)| e.block_id == r.block_id) {
@@ -471,11 +507,10 @@ impl PendingByWindow {
                 None => p.rects.push((r, base)),
             }
         }
-        let (tx, rx) = oneshot::channel();
-        p.waiters.push(tx);
+        p.waiters.push(waiter);
         let post = !p.scheduled;
         p.scheduled = true;
-        (rx, post)
+        post
     }
 
     /// Everything pending for `window`; a later batch schedules a new task.
@@ -485,6 +520,44 @@ impl PendingByWindow {
 }
 
 static PENDING: LazyLock<Mutex<PendingByWindow>> = LazyLock::new(Default::default);
+
+/// Queue `window_label`'s batch for the UI thread and make sure a task will
+/// apply it; `waiter` is answered when it has been, or at once when a newer
+/// batch has already replaced every rect in it.
+pub(crate) fn queue(
+    state: &Arc<AppState>,
+    window_label: &str,
+    rects: Vec<PaneBounds>,
+    base: Option<LayoutBase>,
+    order: Option<RectsOrder>,
+    waiter: Waiter,
+) {
+    // The order check and the merge into the pending rects are one step under PENDING: a
+    // batch that is checked first is merged first, so an older one can't overwrite a newer
+    // rect between the two. (Always PENDING, then NEWEST_BATCH.)
+    let post = {
+        let mut pending = PENDING.lock();
+        let rects = drop_superseded(&mut NEWEST_BATCH.lock(), window_label, rects, order);
+        if rects.is_empty() {
+            drop(pending);
+            waiter.answer();
+            return;
+        }
+        pending.enqueue(window_label, rects, base, waiter)
+    };
+    if post {
+        let mut task = ApplyPaneBoundsTask::new(state.clone(), window_label.to_string());
+        if post_task(ThreadId::UI, Some(&mut task)) == 0 {
+            // No UI thread to run it (shutting down): drop what's pending
+            // so the window isn't left marked scheduled with no task, and
+            // answer every waiter now.
+            tracing::warn!(window = window_label, "[pane-bounds] post_task failed; dropping pending rects");
+            for w in PENDING.lock().take(window_label).waiters {
+                w.answer();
+            }
+        }
+    }
+}
 
 impl BrowserPaneManager {
     /// Move `window_label`'s panes to `rects` in one UI-thread step. Resolves
@@ -497,29 +570,8 @@ impl BrowserPaneManager {
         base: Option<LayoutBase>,
         order: Option<RectsOrder>,
     ) {
-        // The order check and the merge into the pending rects are one step under PENDING: a
-        // batch that is checked first is merged first, so an older one can't overwrite a newer
-        // rect between the two. (Always PENDING, then NEWEST_BATCH.)
-        let (applied, post) = {
-            let mut pending = PENDING.lock();
-            let rects = drop_superseded(&mut NEWEST_BATCH.lock(), window_label, rects, order);
-            if rects.is_empty() {
-                return;
-            }
-            pending.enqueue(window_label, rects, base)
-        };
-        if post {
-            let mut task = ApplyPaneBoundsTask::new(state.clone(), window_label.to_string());
-            if post_task(ThreadId::UI, Some(&mut task)) == 0 {
-                // No UI thread to run it (shutting down): drop what's pending
-                // so the window isn't left marked scheduled with no task, and
-                // answer every waiter now.
-                tracing::warn!(window = window_label, "[pane-bounds] post_task failed; dropping pending rects");
-                for w in PENDING.lock().take(window_label).waiters {
-                    let _ = w.send(());
-                }
-            }
-        }
+        let (tx, applied) = oneshot::channel();
+        queue(state, window_label, rects, base, order, Waiter::Channel(tx));
         let _ = tokio::time::timeout(APPLY_WAIT, applied).await;
     }
 }
@@ -535,7 +587,7 @@ wrap_task! {
             let pending = PENDING.lock().take(&self.window_label);
             apply(&self.state, &self.window_label, &pending.rects);
             for w in pending.waiters {
-                let _ = w.send(());
+                w.answer();
             }
         }
     }
@@ -558,8 +610,9 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     if live.is_empty() {
         return;
     }
+    let views = crate::pane_backend::window_is_views(state, window_label);
     #[cfg(target_os = "windows")]
-    if !crate::pane_backend::views() {
+    if !views {
         apply_windows(state, window_label, &live);
         // A pane laid out at 0×0 is on a tab that isn't the visible one; the
         // input owner gives the app the keyboard if that pane had it.
@@ -576,7 +629,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     // owner gives the app the keyboard if that pane had it. macOS reports a
     // shown pane later, once its overlay window is on screen and can take key
     // status (SetPaneBoundsViewsTask, which this resize posts).
-    if crate::pane_backend::views() {
+    if views {
         for (r, _) in &live {
             let collapsed = r.width <= 0 || r.height <= 0;
             if collapsed || cfg!(not(target_os = "macos")) {
@@ -585,14 +638,15 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
         }
     }
     // Linux: move every pane, then lay the window out once, not once per pane.
+    // Windows Views panes need no layout: setting an overlay's bounds moves it.
     #[cfg(any(target_os = "linux", target_os = "windows"))]
-    if crate::pane_backend::views() {
+    if views {
         let mut moved = false;
         for (r, label) in &live {
             moved |= crate::browser_pane::creation_views::resize_browser_pane_view_inner(state, label, r.rect(), false)
                 .is_some();
         }
-        if moved {
+        if moved && cfg!(target_os = "linux") {
             if let Some(window) = state.windows.lock().get(window_label).cloned() {
                 window.layout();
             }
@@ -771,28 +825,40 @@ mod tests {
         assert!(parse_set_rects_args(&serde_json::json!({ "window_label": "main" })).is_err());
     }
 
+    /// A waiter nobody listens to.
+    fn w() -> Waiter {
+        Waiter::Channel(oneshot::channel().0)
+    }
+
     #[test]
     fn posts_one_task_per_window_until_it_runs() {
         let mut p = PendingByWindow::default();
-        let (_a, post_a) = p.enqueue("main", vec![b("x", 1)], None);
-        let (_b, post_b) = p.enqueue("main", vec![b("y", 2)], None);
-        let (_c, post_c) = p.enqueue("floating-1", vec![b("z", 3)], None);
+        let post_a = p.enqueue("main", vec![b("x", 1)], None, w());
+        let post_b = p.enqueue("main", vec![b("y", 2)], None, w());
+        let post_c = p.enqueue("floating-1", vec![b("z", 3)], None, w());
         assert!(post_a);
         assert!(!post_b);
         assert!(post_c);
         p.take("main");
-        let (_d, post_d) = p.enqueue("main", vec![b("x", 4)], None);
+        let post_d = p.enqueue("main", vec![b("x", 4)], None, w());
         assert!(post_d);
     }
 
     #[test]
     fn a_newer_rect_replaces_a_panes_pending_one_in_place() {
         let mut p = PendingByWindow::default();
-        let _ = p.enqueue("main", vec![b("x", 1), b("y", 2)], None);
-        let _ = p.enqueue("main", vec![b("x", 9)], None);
+        p.enqueue("main", vec![b("x", 1), b("y", 2)], None, w());
+        p.enqueue("main", vec![b("x", 9)], None, w());
         let taken = p.take("main");
         assert_eq!(taken.rects, vec![(b("x", 9), None), (b("y", 2), None)]);
         assert_eq!(taken.waiters.len(), 2);
+    }
+
+    #[test]
+    fn answering_a_channel_waiter_fires_its_receiver() {
+        let (tx, mut rx) = oneshot::channel();
+        Waiter::Channel(tx).answer();
+        assert_eq!(rx.try_recv(), Ok(()));
     }
 
     fn t(r: Rect) -> (i32, i32, i32, i32) {
@@ -839,9 +905,9 @@ mod tests {
     fn each_pending_rect_keeps_its_own_batch_s_layout_base() {
         let mut p = PendingByWindow::default();
         let newer = LayoutBase::parse(&serde_json::json!({ "viewport": { "width": 900, "height": 800 } }));
-        let _ = p.enqueue("main", vec![b("x", 1), b("y", 1)], Some(base()));
-        let _ = p.enqueue("main", vec![b("y", 2)], newer);
-        let _ = p.enqueue("main", vec![b("z", 3)], None);
+        p.enqueue("main", vec![b("x", 1), b("y", 1)], Some(base()), w());
+        p.enqueue("main", vec![b("y", 2)], newer, w());
+        p.enqueue("main", vec![b("z", 3)], None, w());
         assert_eq!(
             p.take("main").rects,
             vec![(b("x", 1), Some(base())), (b("y", 2), newer), (b("z", 3), None)]
@@ -944,10 +1010,12 @@ mod tests {
     #[test]
     fn taking_wakes_every_waiter() {
         let mut p = PendingByWindow::default();
-        let (mut rx1, _) = p.enqueue("main", vec![b("x", 1)], None);
-        let (mut rx2, _) = p.enqueue("main", vec![b("y", 2)], None);
+        let (tx1, mut rx1) = oneshot::channel();
+        let (tx2, mut rx2) = oneshot::channel();
+        p.enqueue("main", vec![b("x", 1)], None, Waiter::Channel(tx1));
+        p.enqueue("main", vec![b("y", 2)], None, Waiter::Channel(tx2));
         for w in p.take("main").waiters {
-            w.send(()).unwrap();
+            w.answer();
         }
         assert!(rx1.try_recv().is_ok());
         assert!(rx2.try_recv().is_ok());

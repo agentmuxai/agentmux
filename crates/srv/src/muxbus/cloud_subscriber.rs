@@ -41,7 +41,14 @@ use crate::muxbus::delivery_status;
 
 mod delivery;
 pub(crate) mod live_names;
+#[cfg(test)]
+mod recovery_tests;
+mod session;
+mod sign_in;
+mod supervisor;
 use delivery::{claim_and_deliver, PendingResp};
+use session::{SessionLimits, Watchdog};
+use sign_in::{refreshed_same_account, token_for_loop, usable_or_refreshable, wait_for_sign_in};
 
 // The relay's WebSocket endpoint has its own domain, and the handshake is at
 // the domain root: no path suffix. The relay side is designed in the private
@@ -186,7 +193,12 @@ impl CloudSubscriber {
         if GLOBAL_SUBSCRIBER.set(subscriber).is_err() {
             return; // already initialized
         }
-        tokio::spawn(run_loop(mstore, agents, ctrl_rx));
+        // The loop owns the receiver while it runs; a replacement takes it over.
+        let ctrl_rx = Arc::new(tokio::sync::Mutex::new(ctrl_rx));
+        tokio::spawn(supervisor::supervise_loop(move || {
+            let (mstore, agents, ctrl_rx) = (mstore.clone(), agents.clone(), ctrl_rx.clone());
+            tokio::spawn(async move { run_loop(mstore, agents, &mut *ctrl_rx.lock().await).await })
+        }));
     }
 
     /// Notify the WS loop that a new agent is registered locally.
@@ -294,12 +306,9 @@ impl CloudSubscriber {
 async fn run_loop(
     mstore: Arc<Store>,
     agents: Arc<Mutex<HashSet<String>>>,
-    mut ctrl_rx: mpsc::UnboundedReceiver<CtrlMsg>,
+    mut ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>,
 ) {
-    let http = reqwest::Client::builder()
-        .user_agent(super::relay::USER_AGENT)
-        .build()
-        .unwrap_or_default();
+    let http = session::http_client();
     let mut delay_secs = RECONNECT_DELAY_SECS;
 
     // Register this credential with the global broker scheduler once, up
@@ -389,7 +398,7 @@ async fn run_loop(
                         // the last-known-good credential in the store is
                         // left untouched rather than overwritten with a
                         // failed/partial result.
-                        let refreshed = crate::muxbus::pkce::refresh_token(&current, &http)
+                        let refreshed = crate::muxbus::host_adopt::refresh(&current, discovered.as_ref(), &http)
                             .await
                             .map_err(classify_refresh_token_error)?;
                         if !refreshed_same_account(&current, &refreshed) {
@@ -485,7 +494,7 @@ async fn run_loop(
             delay_secs = RECONNECT_DELAY_SECS;
             continue;
         }
-        let token = match load_valid_token(&mstore, &scheduler).await {
+        let token = match token_for_loop(&mstore, &scheduler).await {
             Some(t) => t,
             None if !has_stored_creds => {
                 // Nothing usable: the broker now knows (NeedsReauth), and the
@@ -529,7 +538,7 @@ async fn run_loop(
 
         let session_start = std::time::Instant::now();
 
-        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &mstore, &http).await {
+        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &mstore, &http, SessionLimits::default()).await {
             Ok(()) => {
                 // Apply the same >30s healthy-session guard as the error branch: a server
                 // that immediately closes after handshake must not suppress back-off.
@@ -572,52 +581,13 @@ async fn run_loop(
     }
 }
 
-/// A loaded sign-in that can be used now or refreshed: a valid access token,
-/// or a refresh token (all a torn sign-in keeps, see `storage::muxbus`).
-fn usable_or_refreshable(c: &crate::muxbus::MuxBusCredentials) -> bool {
-    c.is_valid() || !c.refresh_token.is_empty()
-}
-
-/// Whether a refresh came back for the account the saved sign-in names. A
-/// torn set could pair a refresh token with another account's row; a row
-/// with no account recorded (an older sign-in) can't be checked.
-fn refreshed_same_account(current: &crate::muxbus::MuxBusCredentials, refreshed: &crate::muxbus::MuxBusCredentials) -> bool {
-    if current.user_sub.is_empty() {
-        return true;
-    }
-    let sub = crate::muxbus::pkce::token_sub(&refreshed.id_token);
-    let sub = if sub.is_empty() { crate::muxbus::pkce::token_sub(&refreshed.access_token) } else { sub };
-    sub == current.user_sub
-}
-
-/// Park until a sign-in (`ReloadToken`) or `recheck` elapses, whichever comes
-/// first. AddAgent/RemoveAgent drain without waking it: they already updated
-/// the `agents` set the next connection subscribes from.
-async fn wait_for_sign_in(ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>, recheck: Duration) {
-    let sleep = tokio::time::sleep(recheck);
-    tokio::pin!(sleep);
-    loop {
-        tokio::select! {
-            _ = &mut sleep => return,
-            msg = ctrl_rx.recv() => match msg {
-                Some(CtrlMsg::ReloadToken) => return,
-                Some(CtrlMsg::AddAgent(_) | CtrlMsg::RemoveAgent(_)) => {}
-                // Closed: nothing can wake us early; wait out the recheck.
-                None => {
-                    (&mut sleep).await;
-                    return;
-                }
-            }
-        }
-    }
-}
-
 async fn connect_and_run(
     token: &str,
     agents: Arc<Mutex<HashSet<String>>>,
     ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>,
     mstore: &Arc<Store>,
     http: &reqwest::Client,
+    limits: SessionLimits,
 ) -> Result<(), String> {
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
 
@@ -655,7 +625,7 @@ async fn connect_and_run(
     let request = ClientRequestBuilder::new(uri)
         .with_header("Authorization", format!("Bearer {}", token));
 
-    let connected = super::ws_connect::connect(request).await;
+    let connected = super::ws_connect::connect_within(request, limits.connect).await;
     crate::connectivity::report_ws_connect(crate::connectivity::Service::Muxbus, connected.as_ref().err());
     let (ws_stream, _) = connected.map_err(|e| format!("connect: {e}"))?;
 
@@ -692,9 +662,12 @@ async fn connect_and_run(
     let mut catch_up_interval = tokio::time::interval(CATCH_UP_EVERY);
     catch_up_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     catch_up_interval.tick().await; // the connect-time pull above was the first
+    let mut watchdog = Watchdog::new(limits).await;
 
     loop {
         tokio::select! {
+            why = watchdog.silent() => return Err(why),
+
             _ = live_names::registrations_changed() => {
                 live_names::subscribe_live(handler).await;
             }
@@ -777,6 +750,9 @@ async fn connect_and_run(
 
             // Incoming WebSocket message from cloud
             msg = read.next() => {
+                if matches!(msg, Some(Ok(_))) {
+                    watchdog.heard();
+                }
                 match msg {
                     None => return Ok(()), // server closed
                     Some(Err(e)) => return Err(format!("ws recv: {e}")),
@@ -818,18 +794,7 @@ async fn connect_and_run(
                         }
                     }
                     Some(CtrlMsg::RemoveAgent(id)) => {
-                        // The agent went away here: let another instance have it.
-                        {
-                            let (id, base, token, http, mstore, agents) =
-                                (id.clone(), base.to_string(), token.to_string(), http.clone(), mstore.clone(), agents.clone());
-                            tokio::spawn(async move {
-                                let token = shared_token_now(&mstore, &token).await;
-                                // Skip if it was subscribed again meanwhile: its
-                                // fresh claim must not be released (Codex P2, #3897).
-                                let still_gone = || !agents.lock().unwrap().contains(&id);
-                                super::wan_lease::release(&base, &id, &token, &http, still_gone).await
-                            });
-                        }
+                        session::release_in_background(id.clone(), base.to_string(), token.to_string(), http.clone(), mstore.clone(), agents.clone());
                         let msg = serde_json::to_string(&ClientMsg::SubscribeRemove { agents: vec![id] })
                             .unwrap_or_default();
                         let _ = write.send(Message::Text(msg.into())).await;
@@ -2152,7 +2117,7 @@ mod tests {
         let session = tokio::spawn({
             let (agents, mstore) = (Arc::clone(&agents), Arc::clone(&mstore));
             async move {
-                super::connect_and_run("test-token", agents, &mut ctrl_rx, &mstore, &reqwest::Client::new()).await
+                super::connect_and_run("test-token", agents, &mut ctrl_rx, &mstore, &reqwest::Client::new(), super::SessionLimits::default()).await
             }
         });
 

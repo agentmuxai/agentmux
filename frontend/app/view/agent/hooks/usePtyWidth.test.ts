@@ -45,6 +45,7 @@ vi.mock("@/app/store/mps", () => {
 });
 vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
 
+import { holdPaneSizes, resetPaneSizeHoldForTests } from "@/app/platform/pane-size-hold";
 import { usePtyWidth, __test__ } from "./usePtyWidth";
 
 const { DEBOUNCE_MS } = __test__;
@@ -89,6 +90,56 @@ describe("isRetryableResizeError", () => {
 });
 
 // ── Readiness gate + retry (integration) ───────────────────────────────────
+
+describe("settledResize: the width is not measured during a pane drag's live reflow", () => {
+    const drag = {};
+    beforeEach(() => {
+        vi.useFakeTimers();
+        resetPaneSizeHoldForTests();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it("measures once the size has settled", () => {
+        const compute = vi.fn();
+        const { onResize } = __test__.settledResize(compute);
+        onResize();
+        onResize();
+        vi.advanceTimersByTime(DEBOUNCE_MS - 1);
+        expect(compute).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(compute).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a resize from just before the drag from measuring in it: its wait runs out during the hold", () => {
+        const compute = vi.fn();
+        const { onResize } = __test__.settledResize(compute);
+        onResize();
+        holdPaneSizes(drag, true);
+        vi.advanceTimersByTime(DEBOUNCE_MS * 2);
+        expect(compute).not.toHaveBeenCalled();
+        holdPaneSizes(drag, false);
+        expect(compute).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a resize during the drag back until its end, and forgets one that waits when the pane goes", () => {
+        const compute = vi.fn();
+        const { onResize, stop } = __test__.settledResize(compute);
+        holdPaneSizes(drag, true);
+        onResize();
+        vi.advanceTimersByTime(DEBOUNCE_MS * 2);
+        expect(compute).not.toHaveBeenCalled();
+        holdPaneSizes(drag, false);
+        vi.advanceTimersByTime(DEBOUNCE_MS);
+        expect(compute).toHaveBeenCalledTimes(1);
+        // The pane goes while a measurement waits on the next drag.
+        onResize();
+        holdPaneSizes(drag, true);
+        vi.advanceTimersByTime(DEBOUNCE_MS);
+        stop();
+        holdPaneSizes(drag, false);
+        expect(compute).toHaveBeenCalledTimes(1);
+    });
+});
 
 describe("usePtyWidth readiness gate", () => {
     let el: HTMLDivElement;

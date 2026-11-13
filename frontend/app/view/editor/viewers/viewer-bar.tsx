@@ -10,6 +10,7 @@
  */
 
 import { IconButton, SegmentedControl } from "@/app/element/ui";
+import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { For, Show, type JSX } from "solid-js";
 import { VIEWER_LABELS, type ViewerId } from "./viewer-choice";
 
@@ -57,7 +58,7 @@ export function ViewerBar(props: ViewerBarProps): JSX.Element {
                     )}
                 </Show>
                 <Show when={props.onReveal}>
-                    {(reveal) => <IconButton icon="folder-open" density="compact" label="Reveal in folder" onClick={() => reveal()()} />}
+                    {(reveal) => <IconButton icon="folder-open" density="compact" label={revealInFileManagerLabel()} onClick={() => reveal()()} />}
                 </Show>
                 <Show when={props.onOpenWithSystem}>
                     {(open) => <IconButton icon="arrow-up-right-from-square" density="compact" label="Open with the system's app" onClick={() => open()()} />}

@@ -1,5 +1,167 @@
 # AgentMux Version History
 
+## 0.60.25 — 2026-11-11
+
+- The merge queue runs vitest on the combined tree, so a JavaScript test broken only by two PRs together stops the second one instead of main
+- A published release that kept a local build's data channel through an upgrade is shown as a release: peers, the network pill and App version say what kind of build it is from the build itself, and show the channel as where its data is
+- Browser: an agent can zoom a pane it drives (zoom: factor, width, fit, reset), and a click that cannot land says why (outside the visible area, cut off by a container, covered by something) and suggests it
+- The agent pane's hover panel (time and tokens) no longer swallows the scroll wheel: over a panel with nothing to scroll the wheel moves the transcript
+- A running tool's Thinking... placeholder is now one output line tall, so the pane no longer jumps when the first line of output replaces it
+- The nightly performance check installs its stand-in Claude where each build's own srv looks for it, so the older build is no longer unable to run, and a side that cannot run is named in the job summary with the reason.
+- Migrations: retire the migrations older than the 0.55.0 upgrade floor (bootstrap stamping, legacy data dir, registry and transcript backfills, dedup, ambient-login grandfather, secret-ref repair) and the helpers only they used
+- The Editor's file tree gives way in a narrow pane instead of pushing the document, its tabs and the viewer bar out past the pane's edge
+- Settings → Agents has an Agent view block: the default for what an agent pane shows, a Full / Standard / Replies preset and one row per kind of row
+- A click on the dimmed area of a pane whose question is waiting for you only selects the pane and no longer answers the question as no; closing a pane's dialog no longer leaves the keyboard with nothing focused
+- Settings reads its section names, the Appearance section, the Language row and the search text from the dictionary, so they can be translated (#21624)
+- Settings reads the Animations page and the Animations, Window, Browser and Terminal setting names from the dictionary, so they can be translated (#21624)
+- The Windows, Linux and macOS builds use the CEF 156.0.8078.88 runtimes (Chromium 156), with the fork's patches carried over; spec docs/specs/SPEC_CEF_156_UPGRADE_2026_11_10.md
+- CI: the Linux package steps retry apt and wait for the Ubuntu mirrors to resolve, so a short network outage no longer fails a PR run
+- A message held for an agent is no longer tried, and counted as refused, while its pane has no controller yet after a restart; a message sent in that window is held and delivered when the agent is up
+- Quitting on Windows no longer waits three seconds for a watchdog when the last window's close was counted after its own hide event, and the log no longer calls that quit a reducer desync
+- A browser pane dropped elsewhere in the layout takes its new size at once on Linux (its page no longer stays short of the pane, black beside it, until the next layout change)
+- Agent pane search: a dim mode that fades the rows that do not match, and the matching words highlighted
+- After a crash, each window that reopens shows the tabs and agents it had, where it used to open empty with the old window listed as closed
+- Closing a window with Alt+F4 or from the taskbar now warns first when it would stop working agents, as the window's own close button does
+- The pane header's grip sits just left of minimize in every pane, right of an agent pane's own buttons and their separator
+- The composer's model panel no longer times out on an agent with a big transcript: it uses the counted images and counts in the background
+- Agent pane search finds the words of session dividers, errors, day dividers and ambient notes
+- CI: a hung apt call costs one attempt, not the job: shorter limits, a hard kill, and a timeout on every apt step
+- A window with many panes resizes more smoothly: pane headers and the status bar are fitted to their width together, and are only measured while nothing has to change
+- An agent on the DeepSeek Harness (ACP) gets the loop guard, a context notice to its leader, and Agents list says its spend is not measured
+- Agents fresh starts a new session for an agent on any ACP harness, and Agents compact on one says to use it
+- Overlay browser panes on Windows (AGENTMUX_PANE_BACKEND=views) stay inside their borders while the window is resized: they move with the page's own layout, in one step
+- CI: in the merge queue a hung apt install gets one retry (shorter queue limits, 12-minute step)
+- The tray's Quit now warns first when agents are in the middle of a turn, naming them, like closing a window does
+- Overlay browser panes on Windows (AGENTMUX_PANE_BACKEND=views): a browser pane in a floating window shows its page
+- Dragging a splitter between panes is smoother in a window with many panes, and a resize of several panes is no longer redrawn from the stored layout over a rounding difference
+- A browser pane's page title no longer becomes the app window's title (Linux, and Windows with overlay panes), and with overlay panes on Windows (AGENTMUX_PANE_BACKEND=views) a click in a page selects its pane
+- After the person signs in again, an agent whose last turn failed on the expired login is told and answers with where it stands, without being asked
+- Drone gets two new blocks: Message sends an agent a note and Task files a Kanban task, both quoting anything that came from outside
+- A container agent's push to a public GitHub repository is checked by the host's publish guard before it is sent (the push's commit messages, added paths and added lines go to srv as data; nothing on the host reads the container's clone)
+- Split the session handlers' register function into named recent-sessions steps and session-zone functions with direct tests, no behaviour change
+- After an account move, a signed-out agent is told it is signed in only once its pane has restarted on the new account
+- Kanban boards: an agent a board's list names by UID can act on that board's tasks (edit, move, cancel and the rest)
+- Kanban: clicking through tasks no longer repaints the whole pane or resets the list's scroll
+- Fix a session test that assumed a forward slash in a joined path, which failed on Windows
+- When a pane closes, the other panes glide into its place and its frame fades, instead of every pane jumping at once (Animations Off keeps the jump)
+- The Vault stores a full payment card: the number, expiry month and year, security code, name and billing ZIP, with the brand worked out, a default card, expiry reminders and a card form in the pane
+- A pane in a hidden tab loads its older history in idle moments before the tab is first shown, so a window-tab switch no longer ends with the view replaced by older content a few hundred milliseconds later; a show cover that lifts at its cap is logged
+- Cloud messages come back by themselves after a network fault: a stuck sign-in refresh can no longer freeze the cloud connection, a silent connection is closed and remade, and a dead connection loop is restarted
+- A message to a stopped agent is held even when the sender stops waiting, and a send srv did not answer says whether it was sent
+- A hidden pane's queued history-fill page checks again, when its turn comes, that the pane is still hidden and the person is not typing or scrolled up, so a late prepend cannot move what they are reading
+
+## 0.60.24 — 2026-11-11
+
+- Split the bundle form's per-provider instructions into a state file and view parts, behaviour unchanged (BundleProviderInstructionsSection 155 -> 42 lines)
+- Split the Remotes pane's card details into view parts, behaviour unchanged (Detail 154 -> 19 lines)
+- Confirming a Remotes action (add a host, remove or install the helper, end a session) or a system tool install is asked over the pane you clicked in, not in a separate approval window
+- Adopting an agent's earlier memory, or releasing its claim on a memory folder, is confirmed over the Memory pane you clicked in, not in a separate approval window
+- fix(agents): keep an agent's .mcp.json out of a user's project and never write keys there (#3680)
+- Browser snapshot gives a ref (shown as clickable) to elements a page makes clickable with a script but that are not buttons, such as a div with a click handler
+- The Windows and Linux builds use the CEF 154.0.8037.98 runtime, with Chromium's security fixes from 154.0.8037.58 to .98
+- A route agent now stops at a daily spend cap: $20 per agent and $100 per route (the day is kept across restarts), the gateway refuses with a 402, its leader is told at 50%, the pane warns at 80% and the turn ends at 100%; a leader raises or resets the cap with Agents update spend_cap_usd
+- A running agent that has fallen out of the registry is put back within a minute, so messages, conversations and transcripts reach it again
+- The container image notes, the Build cache section and the Environment panel read their text from the dictionary, so they can be translated (#21624)
+- A question from a pane that is not an agent's (Remotes, Memory) is named by the pane in the waiting toast and list, not as "An agent asks for your consent", and the memory questions' buttons use the standard accent tone
+- An agent on a model route shows what it has used today against its cap as a chip on its Swarm card and in Agents list; at 80% its pane says so, and at the cap a card offers Raise, Reset today and Dismiss
+- A message in an agent's history shows when it was written in its hover panel (with the date when it is not from today), not "just now" for every replayed jekt (#47389)
+- Pane drag with layout:livereflow on: every pane takes its real size and place for the drop being aimed at, so nothing is cropped, stretched or left blank; terminals keep their size until the drag ends; the pane in hand is no longer blurred or padded with a blank band
+- A mermaid diagram that fails to render no longer leaves a column in the page that shrinks the app
+- Hovering the composer's CPU and memory readout no longer makes its panel flicker
+- A LAN agent name's key moves on its own only on a certificate from the install that vouched for it, retired keys are refused as retired, and the pin screen says why
+- A dev frontend that can't be reached no longer reloads the window in a loop or cycles pool windows: the window waits quietly, reloads when the address answers, and a dev build quits if it stays gone
+- An urgent resend replaces the held copy of a relayed message even when the relay put its lateness prefix on the held one
+- The composer's account chip shows the email cut in the middle when there is room, instead of one letter
+- A person can allow a page's camera, microphone, location or notifications on one site for an agent for good, from Settings > Agents on sites > Page permissions; each first use is still in the Audit view
+- The macOS release job's time limit is 240 minutes, and its long silent build prints a progress line every five minutes
+- The macOS release build logs the time of each phase and writes the table to the job summary
+- Revoking or changing a standing browser permission or grant now says so when the settings file could not be written, instead of showing it removed while the file still allows it
+- The macOS build uses the CEF 154.0.8037.98 runtime, with Chromium's security fixes since .58
+- A download an agent's own browser pane saves into its workspace is now one row in the Audit view (site, file, size), and a pane in the Personal profile keeps the Save As dialog
+- Browser: a click is judged by the element's accessible name as well as its own text, so a committing button whose name comes from a title, an image or a child's label asks for approval; a click whose name can't be read asks too
+- Microsoft Store installs: an update the Store lists is offered even when Windows reports it with the installed version; the panel no longer answers 'no newer version' for it
+- A question that opens in a pane you are not in (from srv, an agent or a web page) no longer takes the keyboard from the pane you are typing in: it waits, shows in the waiting toast, and takes the caret when you go to its pane
+- Every click, key press or focus change that takes 48 ms or more is logged with what was acted on (pane view, element role, no content), so slow interactions show in the log.
+- Hovering or pressing a pane's header no longer logs an unhandled error when the pane holds an image that can't be copied into its drag picture (a browser pane's favicon); the picture is made without that image
+- The slow-interaction log line shows the slowest event of an interaction, not the first one that crossed 48 ms.
+- A hidden pane's attachment strips keep their tiles instead of re-laying them out on every resize report, and a press in a system-info chart no longer forces a layout.
+- A text file attached to a message no longer blanks its agent pane while its thumbnail loads; with several attachments this could repeat every frame and stall the window
+- Split the Files preview panel into a state file and view parts, with no change to what it shows
+- The Swarm lists an agent once: a second pane of the agent that was closed because the agent is open elsewhere no longer gets its own row
+- Messaging an agent no longer routes to a stale second pane of it: a second pane's register is refused while the agent's own pane holds it, and a broadcast copy that only the relay queued is reported as queued_unconfirmed, not delivered
+- Split the Memory file view into a state file and view parts, with no change to what it shows
+- A signed-in AgentMux Cloud install moves to the sign-in host the cloud publishes the first time a refresh works there, and the build's fallback sign-in pair is current; a published host that fails changes nothing
+- Split the hover tooltip into a state file and a thin component, with no change to how it shows
+- srv no longer warns at start that an agent pane's built-in shell has no tab: it belongs to the agent's pane, and nothing was lost
+- The Files pane's right-click menu no longer offers Attach to an agent or Mention in agent (and Alt+K is gone); every Reveal action names the platform's own file manager
+- A dev build whose page had already loaded now quits 5 minutes after its dev server stops answering, like one whose page failed to load
+- The composer's model panel logs a failed request and says in the Model section why the other models could not be read
+- The composer's CPU and memory readout goes compact in a narrow pane instead of running past its edge, and no longer shows a help cursor
+- fix(agents): resolve relative MCP config paths and give the doctor its path (#47385, #47392)
+- A spend stop or warning that is a day old goes at the UTC midnight, and an agent that left its model route loses its spend chip
+- Dragging a pane: the other panes now move live to show where it will land (on by default; layout:livereflow false turns it off), and holding a pane over its own slot closes the layout over it to show the release will tear it off into a window
+- Startup cleanup: the duplicate-column ALTER loops, the table-exists probes and the pending-migration count each have one implementation
+- A flaky history-fill test no longer takes an earlier test's leftover fill for its own.
+- Layout: srv converts the pre-display-mode minimize fields once when it loads a tree, and the window no longer carries its own copy of the conversion
+
+## 0.60.23 — 2026-11-10
+
+- Update rustls to 0.23.46 (TLS 1.3 key update, buffering, flush and Debug-output fixes)
+- Nightly Linux test leg no longer killed by the runner: swap, line-tables-only debug and the srv test binary built alone, as in PR CI
+- The frontend builds with Vite 8 (Rolldown) instead of Vite 6
+- A jekt held for a stopped or unavailable agent is delivered with the agent's name in its TO= marker, not its uid
+- Agent output renders with mermaid 12 and Shiki 4
+- Agent CLIs AgentMux downloads itself move to goose 1.58.0, Grok 1.0.77 and Muse 1.4.14
+- Update the bundled SQLite and its Rust binding (rusqlite 0.39 to 0.41.1)
+- Update the OS credential store dependency (keyring 2 to keyring-core 1 with per-platform stores); stored credentials are found as before
+- A worker spawned onto a model route no longer inherits its leader's Claude model, so its first turn is not rejected with a 400 on reasoning effort
+- Dragging the window edge is smoother with several agent tabs open in a pane: the tabs you are not looking at wait until the drag settles
+- The My Agents grid no longer forces a layout on every frame while you drag the window edge
+- The network panel puts the LAN state diamond on the LAN discovery line, lines the host list up with the panel's labels, and keeps each host's expander independent (with a test)
+- A routine message from a proven LAN peer is held for a cold session like a local one, and the cold hold's log says why it let each other message through
+- A route agent that is thinking no longer shows as idle in the Swarm while its turn is active
+- Split the editor handlers' register function into named file, scratch and agent-config functions with direct tests, no behaviour change
+- Add a smoke test for the container developer image: tools, pinned Rust, cargo check and task dev on a virtual screen
+- The model panel counts the images in an agent's whole conversation, and switching to a model that cannot read them is refused
+- Provider logos: OpenRouter, xAI, Ollama and Meta get their own marks, and the small vendor badge gets a light ring so Zhipu/Qwen read at 100%
+- A message to an agent of a LAN peer that is down is held for 24 hours and delivered when the peer returns, instead of being dropped by the cloud relay after 30 minutes
+- DeepSeek Harness: an agent restarted on a Node.js older than 24.9.0 is told what to update instead of failing with dsh's own startup error
+- Pane drag: a fast sweep across the window no longer moves the drop ghost until the pointer slows, and a layout changed under a drag restarts the target choice
+- A pane's cover log now names the agent, says what a long cover waits on once a second, and logs why a pane's view went away, so a pane that goes black can be traced
+- A routine message that arrives by the cloud relay is held for a cold session like a local or LAN one
+- Kanban boards: a task with no card follows the default board's agent list, Tasks start and a move refuse an agent the board leaves out, and backlog reminders skip boards the agent can't see
+- The agent turn-errored sound is a softer triangle tone, no longer far louder than the others
+- Pane drag on Windows: the pane's own picture follows the cursor from the first move, inside the window and out, with no translucent ghost at any point; the faint shell drag picture no longer shows over the desktop or other windows, and a long-held drag opens the torn-off window on the picture that was shown
+- A test of the standing-grant audit row no longer depends on how many rows earlier tests left in the audit log
+- A change of an agent's model route or model is kept only after its first turn works; a turn the new place refuses puts the agent back where it was
+- Clicking into another agent pane's input box no longer lags: the window keyboard-focus reclaim does nothing when focus is already on the app
+- A message held for a LAN peer's agent is dropped, not sent, when its 24-hour hold ran out while the replay was looking for the agent
+- Pane drag: behind the layout:livereflow setting, the other panes glide to where the drop leaves them while a pane is dragged, and the dragged pane's tile is hidden (live reflow phase 2, DOM panes)
+- One agent recorded twice in the registry is no longer reported as a slug collision at startup; the record with a live lease answers
+- The pane header scrolls as one range: tabs, the +, the grip and the aux controls together, with the window controls pinned
+- Clicking into another agent pane's input box is as quick as clicking its body: the text-selection drag guard no longer restyles the whole window on every press and release
+- Fix two macOS nightly test failures: an install whose program exits non-zero no longer counts as installed, and the login pty tests no longer lose output to a fast-exiting child
+- A model change refused on its first turn is undone when it moved the agent onto its own sign-in, and only the relaunched pane settles it
+- Fix task dev exit 58 on Windows: resolve a runnable ninja and drop a stale CEF CMake cache
+- The agent pane says when a model change was refused and undone, and a model too small for the conversation can be picked with Compact, then switch
+- A new agent made with Agents spawn or Agents create runs in a container by default when the harness has a container image and Docker answers; the setting agents:defaultruntime set to native turns it off
+- A reopened agent pane keeps its tool rows closed instead of mounting every held preview at once, and a quiet window over 600 MB gets its garbage collected without a reload (#46547)
+- Microsoft Store installs: log each Store update check (state, version, time) and say when a release is published but the Store has not listed it for this PC yet, with an Open Store page button
+- A page's file chooser that is cancelled in a pane an agent drives now shows the person a notice saying why and to use Take over
+- Browser panes keep up with the chrome around them on a shift-resize: the page sends their rects to the host over a CEF process message instead of HTTP, with HTTP kept as the fallback
+- A route agent on a model with a 1M window compacts at 300K tokens instead of near the end of the window, so it stops re-reading a million tokens every turn
+- A widget or palette click on a singleton pane already open in the current tab flashes that pane instead of doing nothing visible
+- Presence status, claims and other calls that find the caller's pane now find it for an agent whose pane was resumed and is missing from the registry
+- A route or Claude agent that repeats the same failing call five times, or repeats the same thought, has its turn ended and is told; a Tasks call without attempt now says which attempt to pass
+- The company name is written AgentMux Corp, with no period, in LEGAL.md, SECURITY.md, the Windows file properties' company name, package metadata and the third-party notices
+- A closing tool shell no longer unsubscribes its agent's running pane from cloud messages, so review and CI notices aren't lost
+- Pane drag with layout:livereflow on: the dragged pane glides into its landing slot so no part of the layout is left empty, and on Windows the pane's picture in hand takes the landing slot's size, cut or padded, never stretched
+- The restart splash shows one Window paint row when the page can't load, and says why, instead of adding a row per retry
+- A pane that goes blank under the logo now logs whether the Suspense fallback or the transcript's show-cover was up, and for how long (#43938)
+- The New agent screens (the picker, the create form, the harness cards, the in-app login panel and the free sign-up guide) read their text from the language dictionary
+- The build's Shiki theme-trimming plugin matches Shiki 4's bundle-web.mjs, so main's vitest is green again
+- A LAN agent name is pinned automatically only when a trusted install's certificate vouches for its key; a first key nobody vouched for stays unproven until it is accepted on the pin screen
+
 ## 0.60.22 — 2026-11-09
 
 - An agent with the Enter and Space power on a granted site can press Enter and Space in a browser pane, taken as the click they are: a form's default button, a button, a link or a checkbox, checked like any click

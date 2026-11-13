@@ -24,6 +24,10 @@ use crate::server::AppState;
 /// input price, because a prompt cache belongs to one model.
 const REREAD_WARNING_TOKENS: u32 = 50_000;
 
+/// What a conversation is taken to need after `/compact`: the summary, the system prompt and the tool definitions. A
+/// model whose context is smaller than the conversation can still take it compacted when its context is above this.
+const COMPACTED_TOKENS: u32 = 40_000;
+
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentModelPanelReq {
@@ -55,6 +59,9 @@ pub struct AgentModelPanelModel {
     pub current: bool,
     /// Why it cannot be picked, or absent.
     pub unavailable: Option<String>,
+    /// Why the conversation has to be compacted before this model can take it (it holds more than the model's context,
+    /// and a compacted one fits), or absent. The row is offered as "Compact, then switch".
+    pub compact_first: Option<String>,
     /// About what the switch costs in re-reading the conversation at this model's input price, when it is large.
     pub reread_cost_usd: Option<f64>,
 }
@@ -172,8 +179,48 @@ fn unavailable(route: &Route, model: &Model, key_present: bool, images: u32) -> 
     None
 }
 
+/// Whether a conversation of `tokens` fits the model's context: as it is, only once compacted (`Some` with the sizes, to
+/// say so), or not even then.
+#[derive(Debug, PartialEq, Eq)]
+enum Fit {
+    Yes,
+    AfterCompact(String),
+    No(String),
+}
+
+fn kilo(tokens: u32) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M", f64::from(tokens) / 1_000_000.0).replace(".0M", "M")
+    } else {
+        format!("{}K", tokens.div_ceil(1000))
+    }
+}
+
+fn fit(context: u32, tokens: u32) -> Fit {
+    if tokens <= context {
+        return Fit::Yes;
+    }
+    let sizes = format!("the conversation ({}) is larger than this model's context ({})", kilo(tokens), kilo(context));
+    if context > COMPACTED_TOKENS {
+        Fit::AfterCompact(sizes)
+    } else {
+        Fit::No(format!("{sizes}, even compacted"))
+    }
+}
+
 fn panel_model(route: &Route, model: &Model, current: Option<&Choice>, key_present: bool, req: &AgentModelPanelReq) -> AgentModelPanelModel {
     let tokens = req.conversation_tokens.unwrap_or(0);
+    let is_current = current.is_some_and(|c| c.route == route.id && c.model == model.id);
+    let mut unavailable = unavailable(route, model, key_present, req.images.unwrap_or(0));
+    // The model the agent runs now is never made unpickable by its own size: it is where the conversation already is.
+    let mut compact_first = None;
+    if unavailable.is_none() && !is_current {
+        match fit(model.context, tokens) {
+            Fit::Yes => {}
+            Fit::AfterCompact(why) => compact_first = Some(why),
+            Fit::No(why) => unavailable = Some(why),
+        }
+    }
     AgentModelPanelModel {
         id: model.id.to_string(),
         label: model.label.to_string(),
@@ -184,15 +231,39 @@ fn panel_model(route: &Route, model: &Model, current: Option<&Choice>, key_prese
         thinking: model.thinking,
         images: model.images,
         default: model.id == route.default_model,
-        current: current.is_some_and(|c| c.route == route.id && c.model == model.id),
-        unavailable: unavailable(route, model, key_present, req.images.unwrap_or(0)),
+        current: is_current,
+        unavailable,
+        compact_first,
         reread_cost_usd: (tokens >= REREAD_WARNING_TOKENS).then(|| f64::from(tokens) / 1_000_000.0 * model.price_in),
     }
+}
+
+/// The images in the agent's conversation, as its transcript lists them: the pane's own count only sees the feed it has
+/// loaded, and a text-only model chosen for a conversation that still holds an image fails on it. 0 when it is not known.
+fn images_in_conversation(def: &AgentDefinition) -> u32 {
+    let Some(gfs) = crate::backend::agent_session::global_transcript_store() else { return 0 };
+    let zone = crate::backend::agent_session::agent_current_zone(&def.id);
+    crate::backend::transcript::images::count_in_zone(gfs, &zone).unwrap_or_else(|e| {
+        tracing::warn!(agent = %def.slug, error = %e, "model panel: the images in the conversation were not counted");
+        0
+    })
+}
+
+/// The images in the conversation as far as they are known without reading the transcript, and the count started in the
+/// background for the next time. The first count of a big agent's transcript takes longer than the panel's request has,
+/// and a panel that times out shows the harness's own models alone. 0 when it is not known.
+fn images_known(def: &AgentDefinition) -> u32 {
+    let Some(gfs) = crate::backend::agent_session::global_transcript_store() else { return 0 };
+    let zone = crate::backend::agent_session::agent_current_zone(&def.id);
+    crate::backend::transcript::images::warm(gfs, &zone);
+    crate::backend::transcript::images::counted(&zone).unwrap_or(0)
 }
 
 fn panel(state: &AppState, req: &AgentModelPanelReq) -> Result<AgentModelPanel, String> {
     let def = agent_of_block(state, &req.blockid)?;
     let harness = state.id_store.resolve_effective_provider_id(&def);
+    // The pane's count is a hint: the larger of the two is the one to go by. The switch counts exactly before it moves.
+    let req = &AgentModelPanelReq { images: Some(req.images.unwrap_or(0).max(images_known(&def))), ..req.clone() };
     let current = launch::choice_of(&state.mstore, &def.id);
     let routes = catalog::ROUTES
         .iter()
@@ -216,11 +287,23 @@ fn panel(state: &AppState, req: &AgentModelPanelReq) -> Result<AgentModelPanel, 
     })
 }
 
+/// A model that cannot read the images in the conversation is refused, with the reason the panel gives for it. A route or
+/// model that does not validate is left to the switch, which says so.
+fn refuse_unreadable(harness: &str, route: &str, model: &str, images: u32) -> Result<(), String> {
+    match catalog::validate(harness, route, model) {
+        Ok((r, m)) => unavailable(r, m, true, images).map_or(Ok(()), Err),
+        Err(_) => Ok(()),
+    }
+}
+
 fn switch_model(state: &AppState, req: &AgentModelSwitchReq) -> Result<AgentModelSwitchResult, String> {
     let def = agent_of_block(state, &req.blockid)?;
     let harness = state.id_store.resolve_effective_provider_id(&def);
     let route = req.route.trim();
     let target = if route.is_empty() { Target::OwnLogin } else { Target::Route { route, model: req.model.trim() } };
+    if let Target::Route { route, model } = target {
+        refuse_unreadable(&harness, route, model, images_in_conversation(&def))?;
+    }
     let moved = switch::move_to(&state.mstore, &def.id, &harness, target, |r| route_key::present(&state.identity_store, r.key_label))?;
     if !moved.changed() || !req.restart {
         return Ok(AgentModelSwitchResult { changed: moved.changed(), restarted: 0, failed: Vec::new() });
@@ -240,6 +323,21 @@ pub(crate) fn restart_panes(state: &AppState, def_id: &str) -> (u32, Vec<String>
     (restarted, failed)
 }
 
+/// A request slower than this is worth a line in the log: the panel is waiting for it with its harness models showing.
+const SLOW_REQUEST_MS: u128 = 2_000;
+
+/// What became of a request from the window. Nothing else records it: a refused or failed one reaches only the pane, and
+/// the pane had nothing to say about a panel it could not read.
+fn logged<T>(command: &str, block: &str, started: std::time::Instant, result: Result<T, String>) -> Result<T, String> {
+    let ms = started.elapsed().as_millis();
+    match &result {
+        Err(error) => tracing::warn!(command, block, ms = ms as u64, %error, "model panel: the request failed"),
+        Ok(_) if ms >= SLOW_REQUEST_MS => tracing::warn!(command, block, ms = ms as u64, "model panel: the request was slow"),
+        Ok(_) => {}
+    }
+    result
+}
+
 /// Both commands are the window's: an agent may change its own model through `Agents update`, which stays on its
 /// route and is counted against its hourly limit.
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -247,8 +345,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_AGENT_MODEL_PANEL, move |req: AgentModelPanelReq, ctx| {
         let s = s.clone();
         async move {
-            ctx.operator_only("only the AgentMux window reads the model panel")?;
-            tokio::task::spawn_blocking(move || panel(&s, &req)).await.map_err(|e| e.to_string())?
+            let (block, started) = (req.blockid.clone(), std::time::Instant::now());
+            let result = match ctx.operator_only("only the AgentMux window reads the model panel") {
+                Ok(()) => tokio::task::spawn_blocking(move || panel(&s, &req)).await.map_err(|e| format!("the panel request panicked: {e}")).and_then(|r| r),
+                Err(refused) => Err(refused),
+            };
+            logged(COMMAND_AGENT_MODEL_PANEL, &block, started, result)
         }
     });
     let s = state.clone();
@@ -261,8 +363,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_AGENT_MODEL_SWITCH, move |req: AgentModelSwitchReq, ctx| {
         let s = s.clone();
         async move {
-            ctx.operator_only("only a person moves an agent to a model route, because it spends their key")?;
-            tokio::task::spawn_blocking(move || switch_model(&s, &req)).await.map_err(|e| e.to_string())?
+            let (block, started) = (req.blockid.clone(), std::time::Instant::now());
+            let result = match ctx.operator_only("only a person moves an agent to a model route, because it spends their key") {
+                Ok(()) => tokio::task::spawn_blocking(move || switch_model(&s, &req)).await.map_err(|e| format!("the switch request panicked: {e}")).and_then(|r| r),
+                Err(refused) => Err(refused),
+            };
+            logged(COMMAND_AGENT_MODEL_SWITCH, &block, started, result)
         }
     });
 }
@@ -273,6 +379,13 @@ mod tests {
 
     fn req(tokens: Option<u32>, images: Option<u32>) -> AgentModelPanelReq {
         AgentModelPanelReq { blockid: "b".into(), conversation_tokens: tokens, images }
+    }
+
+    #[test]
+    fn a_logged_request_answers_as_it_did() {
+        let now = std::time::Instant::now();
+        assert_eq!(logged("c", "b", now, Ok::<_, String>(3)), Ok(3));
+        assert_eq!(logged::<u8>("c", "b", now, Err("no agent runs in block b".into())), Err("no agent runs in block b".to_string()));
     }
 
     #[test]
@@ -299,6 +412,15 @@ mod tests {
     }
 
     #[test]
+    fn a_switch_to_a_model_that_cannot_read_the_conversations_images_is_refused_with_the_panels_reason() {
+        let pro = "deepseek/deepseek-v4-pro-0813";
+        assert_eq!(refuse_unreadable("claude", "openrouter", pro, 2).unwrap_err(), "can't read images (2 in this conversation)");
+        assert!(refuse_unreadable("claude", "openrouter", pro, 0).is_ok(), "no image, no refusal");
+        assert!(refuse_unreadable("claude", "openrouter", "deepseek/deepseek-v4.1-flash-1017", 2).is_ok(), "this one reads images");
+        assert!(refuse_unreadable("claude", "openrouter", "nobody/retired", 2).is_ok(), "the switch says what is wrong with it");
+    }
+
+    #[test]
     fn a_big_conversation_shows_what_re_reading_it_costs() {
         let route = catalog::route("openrouter").unwrap();
         let flash = route.model("deepseek/deepseek-v4.1-flash-1017").unwrap();
@@ -315,5 +437,35 @@ mod tests {
         let on = Choice { route: "openrouter".into(), model: flash.id.into() };
         assert!(panel_model(route, flash, Some(&on), true, &req(None, None)).current);
         assert!(!panel_model(route, flash, None, true, &req(None, None)).current);
+    }
+
+    #[test]
+    fn sizes_read_in_thousands_and_in_millions_to_one_decimal() {
+        assert_eq!(kilo(40_000), "40K");
+        assert_eq!(kilo(1_000_000), "1M");
+        assert_eq!(kilo(1_048_576), "1M");
+        assert_eq!(kilo(1_500_000), "1.5M");
+    }
+
+    #[test]
+    fn a_conversation_larger_than_a_models_context_is_offered_compacted_when_that_would_fit() {
+        assert_eq!(fit(1_000_000, 200_000), Fit::Yes);
+        assert_eq!(fit(128_000, 128_000), Fit::Yes, "exactly the size");
+        assert_eq!(fit(128_000, 200_000), Fit::AfterCompact("the conversation (200K) is larger than this model's context (128K)".into()));
+        assert_eq!(fit(32_000, 100_000), Fit::No("the conversation (100K) is larger than this model's context (32K), even compacted".into()));
+        assert_eq!(fit(40_000, 100_000), Fit::No("the conversation (100K) is larger than this model's context (40K), even compacted".into()), "no room left over for the work");
+    }
+
+    #[test]
+    fn a_model_too_small_for_the_conversation_is_offered_compacted_and_the_current_one_is_left_alone() {
+        let route = catalog::route("openrouter").unwrap();
+        let flash = route.model("deepseek/deepseek-v4.1-flash-1017").unwrap();
+        let over = req(Some(flash.context + 1), None);
+        let offered = panel_model(route, flash, None, true, &over);
+        assert!(offered.unavailable.is_none() && offered.compact_first.is_some(), "{offered:?}");
+        let on = Choice { route: "openrouter".into(), model: flash.id.into() };
+        let running = panel_model(route, flash, Some(&on), true, &over);
+        assert!(running.current && running.unavailable.is_none() && running.compact_first.is_none(), "{running:?}");
+        assert!(panel_model(route, flash, None, true, &req(Some(10_000), None)).compact_first.is_none());
     }
 }

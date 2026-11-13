@@ -64,10 +64,11 @@ on:
   pull_request:
   push:
     branches: [main]
-  # The merge queue's run on each group's commit: the fast gates only, so a
-  # check that depends on the rest of main (the size ratchet, the specs index,
-  # a rename in one PR and a call in another) sees what will actually land.
-  # docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md §5 Phase 1.
+  # The merge queue's run on each group's commit: the fast gates and the tests that
+  # read the tree, so a check that depends on the rest of main (the size ratchet, the
+  # specs index, a rename in one PR and a call in another, a vitest guard over the
+  # installed packages) sees what will actually land.
+  # docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md §5 Phases 1, 7 and 8.
   merge_group:
     types: [checks_requested]
 
@@ -174,15 +175,16 @@ jobs:
             echo "::notice::running all checks — $1"
           }
 
-          # A merge queue group: the fast gates only (SPEC_CI_MERGE_QUEUE_AND_FAST_GATES
-          # §5 Phases 1 and 7): docs gates in full, the test targets built on ubuntu and the
-          # tests that read the source tree run, tsc
-          # and the generated-file checks on one frontend leg. Tests ran on each
-          # PR and run again on the push to main.
+          # A merge queue group: the fast gates and the tests that read the tree
+          # (SPEC_CI_MERGE_QUEUE_AND_FAST_GATES §5 Phases 1, 7 and 8): docs gates in full,
+          # the test targets built on ubuntu and the Rust tests that read the source tree
+          # run, and both frontend legs run in full (tsc, the generated-file checks and
+          # vitest). The rest of the Rust tests ran on each PR and run again on the push
+          # to main.
           if [ "${{ github.event_name }}" = "merge_group" ]; then
             printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\nversion_only=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
-            printf 'rust_os=["ubuntu-latest"]\nfrontend_shards=[1]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
-            echo "::notice::merge queue: fast gates only"
+            printf 'rust_os=["ubuntu-latest"]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
+            echo "::notice::merge queue: fast gates and the tests that read the tree"
             exit 0
           fi
 
@@ -202,7 +204,7 @@ jobs:
           FILES=""
           if RAW="$(gh api \
                "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-               --paginate --jq '.[] | {filename, patch}' 2>/dev/null)"; then
+               --paginate --jq '.[] | {filename, patch, previous_filename}' 2>/dev/null)"; then
             FILES="$(printf '%s' "$RAW" | jq -s '.')" || FILES=""
           fi
 
@@ -279,7 +281,11 @@ jobs:
     # 35 keeps the original intent — bound a genuine runner-pool hang well
     # under GitHub s 360-minute default — while leaving ~80% headroom over the
     # slowest observed healthy run rather than 5%.
-    timeout-minutes: 35
+    #
+    # The ubuntu leg gets 50 (the nextest step's two attempts are limited to 25 + 15 minutes and end it by
+    # themselves): the job's own limit used to come first and, on a runner that had stopped answering, was only
+    # enforced after the service's grace period (2026-11-12: a 35-minute job was cancelled after 40).
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 50 || 35 }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -387,9 +393,22 @@ jobs:
         # weaken the gate: everything installed here comes from the Ubuntu
         # archive, and `apt-get install` below still fails loudly if a package
         # cannot be found.
+        # A hung apt call must cost this step, not the job's 35 minutes; scripts/ci-apt.sh bounds each attempt, this bounds the step.
+        # In the queue the script gets a smaller budget, resolver wait and per-attempt limits: one timed-out install (90 s
+        # plus the kill) and the 45 s pause still fit the 150 s budget, so a hang costs a retry; the worst case, every call
+        # hanging, is about 10 minutes and fits the step's 12.
+        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 12 || 20 }}
+        env:
+          CI_APT_BUDGET: ${{ needs.changes.outputs.queue == 'true' && 150 || 600 }}
+          CI_APT_DNS_WAIT: ${{ needs.changes.outputs.queue == 'true' && 60 || 180 }}
+          CI_APT_UPDATE_LIMIT: ${{ needs.changes.outputs.queue == 'true' && 60 || 120 }}
+          CI_APT_INSTALL_LIMIT: ${{ needs.changes.outputs.queue == 'true' && 90 || 240 }}
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
-          sudo apt-get update || echo "apt-get update reported errors; continuing (install is the real gate)"
+          # scripts/ci-apt.sh retries both apt calls, and waits for the Ubuntu mirrors to resolve first: on
+          # 2026-11-11 a resolver outage failed the same step on four runs (one of them in the merge queue)
+          # after 11 minutes of apt's own timeouts. A refresh that never works only warns here; the install fails.
+          bash scripts/ci-apt.sh update
           # libwayland-dev/libxkbcommon-dev: agentmux-launcher's Linux splash
           # (smithay-client-toolkit). libdbus-1-dev/pkg-config/libxcb1-dev:
           # agentmux-mcp's xcap (screen capture) needs dbus-1.pc AND -lxcb on
@@ -398,7 +417,7 @@ jobs:
           # of installing libgtk-3-dev (a CEF-only need, dropped with this
           # split; GTK pulls in the X11/xcb stack transitively), not because
           # anything here actually needs GTK itself.
-          sudo apt-get install -y libwayland-dev libxkbcommon-dev libdbus-1-dev pkg-config libxcb1-dev
+          bash scripts/ci-apt.sh install -y libwayland-dev libxkbcommon-dev libdbus-1-dev pkg-config libxcb1-dev
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -457,41 +476,37 @@ jobs:
         if: matrix.os != 'windows-latest'
         env:
           IN_QUEUE: ${{ needs.changes.outputs.queue }}
-        # A queue run of this step takes about 7 minutes. One stalled for 40 (#6238's group, the
-        # runner gave no log), until the queue gave up and dropped the PR. Fail a stalled one at 15
-        # so the PR is dropped sooner and can be queued again.
-        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 15 || 35 }}
+          # The attempt limits: a PR run takes 13 to 18 minutes (7 in the queue); a stalled attempt is ended at
+          # about twice that and tried once more, which reuses what it built. The step's limit is the two together
+          # and the job's (below) is just over it, so a stall is ended by the script and not by the job.
+          CI_ATTEMPT1_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 720 || 1500 }}
+          CI_ATTEMPT2_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 480 || 900 }}
+        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 22 || 42 }}
         # The build's warnings go to a file for the ts-rs check below, which used
         # to read them off a separate `cargo check`; pipefail keeps a failing
         # build or test failing the step.
         shell: bash
+        # scripts/ci-nextest-run.sh holds the story of the stalls (the runner out of memory and swap, with no log)
+        # and what it does about them: a resource trace in a file, a watchdog, a limit per attempt, one retry.
+        # The runner has 16 GB and cargo compiled agentmux-srv twice at once, each rustc growing to ~8 GB, until the
+        # unit test binary was built first on its own; even alone rustc reaches ~14 GB on the test crate (hence the
+        # extra swap above).
+        run: bash scripts/ci-nextest-run.sh
+      # What a stalled or failed step leaves: the 5-second resource trace (the script's watchdog also prints why it
+      # killed a process), and the kernel's out-of-memory lines.
+      - name: Keep the resource trace of a failed test step
+        if: ${{ always() && (failure() || cancelled()) && matrix.os == 'ubuntu-latest' }}
+        shell: bash
         run: |
-          # This step used to die ~4 minutes in, with no error from rustc, "The runner has received a
-          # shutdown signal" and exit 143, on about 1 ubuntu run in 9. The 5-second trace below showed
-          # why: the runner has 16 GB, and cargo compiled the agentmux-srv crate twice at once (as the
-          # binary that srv's integration tests start via CARGO_BIN_EXE_agentmux-srv, and as the unit
-          # test binary), each rustc growing to ~8 GB until the machine swapped and the runner went.
-          # The unit test binary is built first, on its own, so the two never overlap; the run below
-          # then builds the binary and the small integration tests. Same package list in both, so the
-          # features cargo resolves, and so what the second reuses, are the same. Even alone, rustc
-          # reaches ~14 GB on the test crate (with or without debug info), hence the extra swap above.
-          (while true; do
-            echo "[resources] $(free -m | awk 'NR==2{printf "mem_used=%dMB mem_avail=%dMB ", $3, $7} NR==3{printf "swap_used=%dMB", $3}') disk_root_avail=$(df -m --output=avail / | tail -1 | tr -d ' ')MB top=$(ps -eo rss=,comm= --sort=-rss | head -1 | awk '{printf "%s:%dMB", $2, $1/1024}')"
-            sleep 5
-          done) &
-          monitor=$!
-          trap 'kill $monitor 2>/dev/null' EXIT
-          crates="-p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats"
-          if [ "$IN_QUEUE" = true ]; then
-            # The queue builds only what its tests need: srv's unit tests (where most guards are),
-            # mcp's unit tests and common's one integration test. The other crates keep the
-            # cheaper check (srv's own is covered by its test build).
-            cargo check --tests -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee "$RUNNER_TEMP/nextest-build.log"
-            cargo nextest run --profile queue -p agentmux-common -p agentmux-srv -p agentmux-mcp --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$RUNNER_TEMP/nextest-build.log"
-            exit 0
-          fi
-          cargo nextest run --no-run $crates --bin agentmux-srv 2>&1 | tee "$RUNNER_TEMP/nextest-build.log"
-          cargo nextest run --profile ci $crates 2>&1 | tee -a "$RUNNER_TEMP/nextest-build.log"
+          { echo "--- kernel log, memory lines"; sudo dmesg -T 2>/dev/null | grep -i -E "out of memory|oom|killed process" | tail -n 30; } >> "$RUNNER_TEMP/resource-trace.log" || true
+      - name: Upload the resource trace
+        if: ${{ always() && (failure() || cancelled()) && matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-resource-trace-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/resource-trace.log
+          retention-days: 7
+          if-no-files-found: ignore
       # nextest does not run doctests. Only these three have a library target.
       - name: cargo test --doc (CEF-free crates)
         if: matrix.os != 'windows-latest' && needs.changes.outputs.queue != 'true'
@@ -519,18 +534,6 @@ jobs:
       - name: RPC bindings are current
         if: matrix.os == 'ubuntu-latest'
         run: bash scripts/check-rpc-bindings.sh --check-only
-
-      # Three checks the gate above CANNOT make: it verifies a generated file
-      # exists per type and is current with the Rust, which a file can be while
-      # still describing a wire format nobody speaks. Each of these was written
-      # after the same defect got past review more than once. Pure node, no
-      # extra toolchain, runs in under a second.
-      # See scripts/check-rpc-codegen-hygiene.mjs.
-      # Ubuntu only — pure node over generated files, platform-independent, so
-      # a second run on Windows adds nothing but time.
-      - name: RPC codegen hygiene
-        if: matrix.os == 'ubuntu-latest'
-        run: node scripts/check-rpc-codegen-hygiene.mjs
 
       # ts-rs ignores a serde attribute item it can't parse, so the generated
       # TypeScript can silently disagree with the wire (a lost rename caused the
@@ -980,6 +983,13 @@ jobs:
       - name: prune-dev-builds self-test
         run: bash scripts/prune-dev-builds.test.sh
 
+      # `task dev` on Windows used to die inside cef-dll-sys with exit status 58
+      # because WinGet's ninja "Links" alias is a symlink native CMake cannot
+      # start, and a failed configure had cached it in CMakeCache.txt. Fake
+      # uname/PATH let this run anywhere. Kanban #31442
+      - name: ensure-ninja self-test
+        run: bash scripts/ensure-ninja.test.sh
+
       # bundle:windows refuses a CEF runtime that isn't the pinned tracer-off
       # build (a tracer-on libcef.dll deadlocks the app at a random later
       # moment). These are the ways that guard could wrongly pass.
@@ -1022,6 +1032,15 @@ jobs:
       # docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md
       - name: Anonymous-pull check self-test
         run: bash scripts/check-anonymous-pull.test.sh
+
+      # The apt retry script every workflow that installs system packages calls; its own tests replace
+      # sudo, apt-get, getent and sleep, so no package is installed and no wait is real.
+      - name: apt retry script self-test
+        run: bash scripts/ci-apt.test.sh
+
+      # The nextest step's stall handling: which attempt statuses are retried, and when memory counts as gone.
+      - name: nextest step script self-test
+        run: bash scripts/ci-nextest-run.test.sh
 
       - name: Input-handler layout-read gate
         run: bash tools/lint/check-input-handler-layout-reads.sh
@@ -1140,6 +1159,16 @@ jobs:
       - name: generated broker event types are current
         if: matrix.shard == 1
         run: node scripts/gen-mux-events.mjs --check
+      # Three checks the bindings gate (check-rpc-bindings.sh, rust job) CANNOT make: it verifies a generated
+      # file exists per type and is current with the Rust, which a file can be while still describing a wire
+      # format nobody speaks. Each of these was written after the same defect got past review more than once.
+      # Pure node over the committed generated files and frontend/app, no toolchain, under a second. It lives in
+      # this job, not the rust one, because it reads only the frontend: a PR that changes nothing else skips the
+      # Rust legs (scripts/ci-classify-changes.mjs, R8) and this check must still run for it.
+      # See scripts/check-rpc-codegen-hygiene.mjs.
+      - name: RPC codegen hygiene
+        if: matrix.shard == 1
+        run: node scripts/check-rpc-codegen-hygiene.mjs
       # settings-template.jsonc (what a new install's settings.json starts from) is what
       # scripts/gen-settings-template.mjs writes from schema/settings.json.
       - name: generated settings template is current
@@ -1170,8 +1199,9 @@ jobs:
       - name: Theme-aware color lint (no hardcoded Tailwind palette colors)
         if: matrix.shard == 2
         run: npm run lint:theme-colors
+      # Also in the merge queue: a vitest test can read the source tree or the installed packages (the
+      # i18n and colour ratchets, Shiki's bundle), so it can fail on two PRs that each passed it alone.
       - name: vitest run
-        if: ${{ needs.changes.outputs.queue != 'true' }}
         run: npx vitest run --shard=${{ matrix.shard }}/2
 
   # Single context for branch protection to point at, instead of pinning

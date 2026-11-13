@@ -58,6 +58,10 @@ pub struct DeleteDroneReq {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct RunDroneReq {
     pub drone_id: String,
+    /// What the run starts with, read as `{{trigger.*}}`. At most 64 KB.
+    #[serde(default)]
+    #[ts(type = "unknown", optional)]
+    pub input: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
@@ -282,19 +286,54 @@ fn spawn_run_drain(
     });
 }
 
+/// The most a run's input may hold, as JSON. It lives in the run's memory
+/// and the ledger keeps only its hash and size (real-world jobs spec D11).
+pub(crate) const MAX_INPUT_BYTES: usize = 64 * 1024;
+
 /// `rundrone`: reads the drone definition from id_store (global), writes the
 /// run rows to mstore (per-channel).
 pub(crate) async fn start_drone_run(state: &AppState, cmd: RunDroneReq) -> Result<RunResp, String> {
+    let run_id = launch_run(state, &cmd.drone_id, cmd.input.unwrap_or_default(), None, None).await?;
+    Ok(RunResp { run_id })
+}
+
+/// Start the run a job's `drone` action asks for. `job_run_id` is the job
+/// run's row in the ledger, which runs until the drone does; `run_cap_usd` is
+/// the job's per-run cap, which ends the run before its next block once its
+/// Agent blocks have spent it. Returns the Drone run's id.
+pub(crate) async fn start_job_drone_run(
+    state: &AppState,
+    drone_id: &str,
+    trigger: serde_json::Value,
+    (job_run_id, run_cap_usd): (&str, Option<f64>),
+) -> Result<String, String> {
+    launch_run(state, drone_id, trigger, Some(job_run_id), run_cap_usd).await
+}
+
+/// Start a run of `drone_id` with `trigger` as its input. With a
+/// `job_run_id` the ledger row is that job run's; without one the run
+/// gets a `manual` row of its own.
+async fn launch_run(
+    state: &AppState,
+    drone_id: &str,
+    trigger: serde_json::Value,
+    job_run_id: Option<&str>,
+    run_cap_usd: Option<f64>,
+) -> Result<String, String> {
+    let size = trigger.to_string().len();
+    if size > MAX_INPUT_BYTES {
+        return Err(format!("rundrone: the input is {size} bytes; at most {MAX_INPUT_BYTES}"));
+    }
     let ledger = state.cron_scheduler.runs().cloned();
     let wf = state
         .id_store
-        .drone_get(&cmd.drone_id)
+        .drone_get(drone_id)
         .map_err(|e| format!("rundrone: {e}"))?
         .ok_or_else(|| {
-            format!("rundrone: drone {} not found", cmd.drone_id)
+            format!("rundrone: drone {drone_id} not found")
         })?;
     let started_at = now_ms();
-    let handle = run_drone(wf.id.clone(), wf.graph.clone())
+    let handle = run_drone(wf.id.clone(), wf.graph.clone(), trigger.clone(), run_cap_usd)
         .await
         .map_err(|e| format!("rundrone: {e}"))?;
     let run_id = handle.run_id.clone();
@@ -303,14 +342,19 @@ pub(crate) async fn start_drone_run(state: &AppState, cmd: RunDroneReq) -> Resul
     insert_run_placeholder(state, &run_id, &drone_id, started_at)?;
 
     // The run ledger's row (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md
-    // §3.2): a manual run, linked to this one, closed by the drain.
-    let ledger_run = ledger
-        .as_ref()
-        .and_then(|l| l.drone_started(&run_id, &drone_id, &wf.name, started_at).map(|id| (l.clone(), id)));
+    // §3.2): the job run's own, or a manual run, linked to this one and
+    // closed by the drain.
+    let ledger_run = ledger.as_ref().and_then(|l| match job_run_id {
+        Some(job_run) => {
+            l.drone_attached(job_run, &run_id, &trigger, started_at);
+            Some((l.clone(), job_run.to_string()))
+        }
+        None => l.drone_started(&run_id, &drone_id, &wf.name, started_at, &trigger).map(|id| (l.clone(), id)),
+    });
 
     spawn_run_drain(state, handle, drone_id, started_at, ledger_run);
 
-    Ok(RunResp { run_id })
+    Ok(run_id)
 }
 
 /// `listdroneruns`.
@@ -521,7 +565,7 @@ mod tests {
     #[tokio::test]
     async fn start_drone_run_of_an_unknown_drone_is_an_error() {
         let state = crate::server::tests::test_state();
-        let err = start_drone_run(&state, RunDroneReq { drone_id: "ghost".into() }).await.unwrap_err();
+        let err = start_drone_run(&state, RunDroneReq { drone_id: "ghost".into(), input: None }).await.unwrap_err();
         assert_eq!(err, "rundrone: drone ghost not found");
     }
 
@@ -531,7 +575,7 @@ mod tests {
     async fn start_drone_run_leaves_a_run_row_before_it_returns() {
         let state = crate::server::tests::test_state();
         let saved = upsert_drone(&state, drone_named("runs")).unwrap();
-        let resp = start_drone_run(&state, RunDroneReq { drone_id: saved.id.clone() }).await.unwrap();
+        let resp = start_drone_run(&state, RunDroneReq { drone_id: saved.id.clone(), input: None }).await.unwrap();
         let runs = state.mstore.drone_runs_for(&saved.id, 10).unwrap();
         assert!(runs.iter().any(|r| r.id == resp.run_id), "the run row exists: {runs:?}");
     }

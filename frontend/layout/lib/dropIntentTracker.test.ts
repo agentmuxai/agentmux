@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { DropIntentTracker, type Candidate } from "./dropIntentTracker";
+import { DEFAULT_TRACKER, DropIntentTracker, type Candidate } from "./dropIntentTracker";
 import { DropDirection } from "./types";
 
 const a = (direction: DropDirection): Candidate => ({ targetId: "A", direction });
@@ -44,11 +44,37 @@ describe("DropIntentTracker", () => {
         expect(step.flushAt).toBe(50 + 120);
     });
 
-    it("arms a candidate held for the dwell even while moving fast", () => {
+    it("arms a candidate held for the dwell while the pointer moves at an aiming pace", () => {
         const tracker = new DropIntentTracker();
         tracker.step("d", 100, 100, 0, a(DropDirection.Left));
-        tracker.step("d", 300, 100, 50, b(DropDirection.Left));
-        const step = tracker.step("d", 600, 100, 200, b(DropDirection.Left));
+        // 0.6 px/ms: faster than slow, slower than fast.
+        tracker.step("d", 130, 100, 50, b(DropDirection.Left));
+        const step = tracker.step("d", 220, 100, 200, b(DropDirection.Left));
+        expect(step.armed).toEqual(b(DropDirection.Left));
+    });
+
+    it("a fast sweep arms nothing from its samples, however long it lasts", () => {
+        const tracker = new DropIntentTracker();
+        tracker.step("d", 100, 100, 0, a(DropDirection.Left));
+        let last: ReturnType<DropIntentTracker["step"]> | undefined;
+        // 2 px/ms across the window for a second, over pane B and then C.
+        for (let i = 1; i <= 20; i++) {
+            const raw = i < 10 ? b(DropDirection.Left) : { targetId: "C", direction: DropDirection.Left };
+            last = tracker.step("d", 100 + i * 100, 100, i * 50, raw);
+            expect(last.armed).toEqual(a(DropDirection.Left));
+        }
+        // Each sample pushes the dwell out: the candidate arms only once the samples stop.
+        expect(last!.flushAt).toBe(1000 + 120);
+        expect(tracker.armWaiting()).toEqual({ targetId: "C", direction: DropDirection.Left });
+    });
+
+    it("after a sweep, slowing down arms at once", () => {
+        const tracker = new DropIntentTracker();
+        tracker.step("d", 100, 100, 0, a(DropDirection.Left));
+        for (let i = 1; i <= 10; i++) tracker.step("d", 100 + i * 100, 100, i * 50, b(DropDirection.Left));
+        // Two slow samples bring the speed estimate under the aiming pace.
+        tracker.step("d", 1102, 100, 600, b(DropDirection.Left));
+        const step = tracker.step("d", 1104, 100, 700, b(DropDirection.Left));
         expect(step.armed).toEqual(b(DropDirection.Left));
     });
 
@@ -85,8 +111,15 @@ describe("DropIntentTracker", () => {
     });
 
     it("with no dwell, a candidate a margin away arms at once", () => {
-        const tracker = new DropIntentTracker({ marginPx: 8, dwellMs: 0, slowPxPerMs: 0.35, staleMs: 1500 });
+        const tracker = new DropIntentTracker({ marginPx: 8, dwellMs: 0, slowPxPerMs: 0.35, fastPxPerMs: Infinity, staleMs: 1500 });
         tracker.step("d", 100, 100, 0, a(DropDirection.Left));
         expect(tracker.step("d", 300, 100, 50, b(DropDirection.Left)).armed).toEqual(b(DropDirection.Left));
+    });
+
+    it("with the fast gate off, a fast pointer arms by dwell as before", () => {
+        const tracker = new DropIntentTracker({ ...DEFAULT_TRACKER, fastPxPerMs: Infinity });
+        tracker.step("d", 100, 100, 0, a(DropDirection.Left));
+        tracker.step("d", 300, 100, 50, b(DropDirection.Left));
+        expect(tracker.step("d", 600, 100, 200, b(DropDirection.Left)).armed).toEqual(b(DropDirection.Left));
     });
 });

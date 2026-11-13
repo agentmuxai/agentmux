@@ -45,7 +45,7 @@
     &[data-fit="min"] .block-frame-default-header-tabstrip,
     &[data-fit="trim"] .block-frame-end-extra:not(.block-frame-end-keep),
     &[data-fit="min"] .block-frame-end-extra:not(.block-frame-end-keep),
-    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close):not(.block-frame-end-keep) {
+    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close):not(.block-frame-end-keep):not(.pane-grip) {
         display: none;
     }
 
@@ -229,7 +229,11 @@
         }
     }
 
-    .block-frame-end-icons {
+    // The aux group is the same controls in a different home: it lives inside the header's
+    // scrolling range (#29325), which needs display: contents on it, so the sizes and the
+    // separator rule below must reach it too.
+    .block-frame-end-icons,
+    .block-frame-header-aux {
         display: flex;
         flex-shrink: 0;
 

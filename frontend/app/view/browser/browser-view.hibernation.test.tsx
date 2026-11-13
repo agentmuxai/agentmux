@@ -13,7 +13,7 @@
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createSignal, onCleanup } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeTestHostApi } from "@/app/host/test-host";
 
@@ -32,7 +32,13 @@ vi.mock("@/app/block/pane-tab-visibility", () => ({ usePaneTabVisibility: () => 
 vi.mock("@/app/workspace/window-tab-visibility", () => ({ useWindowTabId: () => "t1" }));
 vi.mock("@/store/global", () => ({ getSettingsKeyAtom: (k: string) => () => state.settings[k] }));
 vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: (v: string) => state.log.push(`open pane ${v}`) }));
-vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
+// The drag hole draws nothing: it registers the page's own rect. The log says when, and with what.
+vi.mock("@/app/platform/pane-overlay", () => ({
+    usePaneOverlayRect: (rect: () => unknown) => {
+        state.log.push(`hole cut at ${JSON.stringify(rect())}`);
+        onCleanup(() => state.log.push("hole released"));
+    },
+}));
 vi.mock("@/app/motion/motion", () => ({ scaledMs: (ms: number) => ms, shouldReduceMotion: () => state.reduceMotion }));
 vi.mock("./use-pane-rect-sync", () => ({
     usePaneRectSync: (p: unknown) => {
@@ -62,7 +68,7 @@ vi.mock("./driven-by-strip", () => ({ DrivenByStrip: (p: { agent: string }) => <
 vi.mock("./give-back-strip", () => ({ NoDriverStrips: () => <div class="stub-no-driver" /> }));
 vi.mock("./browser-attention", () => ({ BrowserAttentionBanner: (p: { attention: () => { kind: string } }) => <div class="stub-attention" data-kind={p.attention().kind} /> }));
 vi.mock("./browser-popups", () => ({ BrowserPopupNotes: () => <div class="stub-popups" /> }));
-vi.mock("@/app/drag/drag-session", () => ({ isAnyUnderway: () => (globalThis as any).__underway() }));
+vi.mock("@/app/drag/drag-session", () => ({ ELEMENT_DRAG_KINDS: [], isAnyUnderway: () => (globalThis as any).__underway() }));
 vi.mock("@/app/element/BrainSpinner", () => ({ BrainSpinner: (p: { class?: string }) => <i class={`stub-brain ${p.class ?? ""}`} /> }));
 vi.mock("./hibernation", async (importOriginal) => {
     const real = await importOriginal<typeof import("./hibernation")>();
@@ -110,7 +116,12 @@ function mount(o: Opts = {}) {
     const [visible, setVisible] = createSignal(o.visible ?? true);
     (globalThis as any).__visibility = () => (visible() ? "active" : "hidden");
     const [paneCreated, setPaneCreated] = createSignal(o.paneCreated ?? false);
-    (globalThis as any).__rectSync = { paneCreated, createPane: async () => {}, paneRect: () => null };
+    (globalThis as any).__rectSync = {
+        paneCreated,
+        createPane: async () => {},
+        paneRect: () => null,
+        pageRectCss: () => ({ x: 10, y: 60, w: 300, h: 160 }),
+    };
     const [underway, setUnderway] = createSignal(false);
     (globalThis as any).__underway = underway;
     (globalThis as any).__dragSnapshot = () => o.dragSnapshot ?? null;
@@ -471,6 +482,35 @@ describe("waking and sleeping", () => {
         v.setVisible(true);
         await v.settle();
         await expect(out()).toMatchFileSnapshot(snap("card-diag"));
+    });
+
+    it("a wake that begins while an earlier wake's load is still in flight ends when that load ends", async () => {
+        // The 2026-11-12 stuck card: a hover wake was abandoned before its page finished, which left loading
+        // true; showing the pane woke it again, loading was set true again (no change), and then went false.
+        const v = mount({ visible: false, sleep: {}, paneCreated: true });
+        pressTabPill("t1");
+        await v.settle(200);
+        v.step("the page starts loading and does not finish");
+        v.setLoading(true);
+        await v.settle(10_000);
+        v.probe("abandoned, still loading");
+        v.step("shown: woken again while loading");
+        v.setVisible(true);
+        await v.settle(300);
+        v.step("the load ends");
+        v.setLoading(false);
+        await v.settle();
+        v.probe("loaded");
+        await expect(out()).toMatchFileSnapshot(snap("wake-while-loading"));
+    });
+
+    it("a shown pane whose wake never sees its load end is woken after two minutes, card gone", async () => {
+        const v = mount({ visible: true, sleep: {}, paneCreated: true });
+        await v.settle(119_000);
+        v.probe("119 s, still waking");
+        await v.settle(2_000);
+        v.probe("121 s");
+        await expect(out()).toMatchFileSnapshot(snap("wake-stuck-bound"));
     });
 });
 
@@ -906,6 +946,7 @@ describe("the pane's markup", () => {
         await v.settle();
         lines.push(`## drag over\n${markup(v.container.querySelector(".browser-drag-catcher"))}`);
         vi.unstubAllGlobals();
+        lines.push(`## the hole\n${state.log.filter((l) => l.startsWith("hole")).join("\n")}`);
         await expect(lines.join("\n") + "\n").toMatchFileSnapshot(snap("drag-catcher"));
     });
 
@@ -954,6 +995,7 @@ describe("the pane's markup", () => {
                 `rect keys ${Object.keys(state.rect).sort().join(",")}`,
                 `rect.model is model ${state.rect.model === v.model}`,
                 `drag keys ${Object.keys(state.drag).sort().join(",")}`,
+                `rect.held follows the drag ${state.rect.held()} ${(v.setUnderway(true), state.rect.held())}`,
             ];
             await expect(lines.join("\n") + "\n" + out()).toMatchFileSnapshot(snap("hook-args"));
         } finally {

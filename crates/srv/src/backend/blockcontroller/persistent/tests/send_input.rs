@@ -3667,6 +3667,18 @@ async fn a_result_from_a_replaced_process_touches_nothing() {
     assert!(!inner.restart_pending);
 }
 
+/// A model change whose first turn was refused is undone at that turn's boundary, and the harness is restarted on the old
+/// place: the boundary commits the restart token, which is what lets the kill arm bring the replacement up.
+#[tokio::test]
+async fn an_undone_model_change_commits_a_restart_at_the_boundary() {
+    let (c, _rx) = busy_controller();
+    PersistentSubprocessController::restart_at_boundary_locked(&mut c.inner.lock().unwrap());
+    assert_eq!(boundary(&c, 0), Some(true));
+    let inner = c.inner.lock().unwrap();
+    assert!(inner.restart_pending);
+    assert_eq!(inner.config_restart_generation, Some(0), "the replacement is brought up, not left to a later message");
+}
+
 /// A boundary ends the turn and writes nothing. The deferred restart applies
 /// only with nothing queued — killing the process then would strand the entry
 /// — and stays pending for the next boundary otherwise.

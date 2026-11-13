@@ -44,6 +44,7 @@ import { historyPin, type TranscriptSettleLatch } from "../transcript-cursor";
 import type { DocumentState, FilterState, LogFn } from "../../../agent-model/types";
 import { endHistoryLoad } from "@/app/store/agent-document-store";
 import { logAgentOpenRest, markAgentOpen } from "../open-trace";
+import { hiddenFill } from "./hidden-fill";
 import { linesBytes, planFill, runHistoryFill } from "./history-fill";
 import { OPEN_TAIL_BYTES, readOpenTail, startsAtTurn, type OpenTailResult } from "./open-tail";
 
@@ -122,13 +123,16 @@ export interface UseHistoryPaginationOptions {
      */
     restoreBytes?: () => number | undefined;
     /**
-     * The background history fill waits while this is true: the pane can't be
-     * seen (a hidden tab or pane-stack member), or the reader has scrolled off
-     * the bottom. At the bottom a prepend above the rows changes nothing on
-     * screen; scrolled up it would move them, and the view's anchoring covers
-     * only a prepend it starts itself (a scroll-up's `loadOlder`).
+     * The background history fill waits while this is true: the pane's window
+     * can't be seen, a hidden tab's pane is not allowed to fill now
+     * (hidden-fill.ts), or the reader has scrolled off the bottom. At the
+     * bottom a prepend above the rows changes nothing on screen; scrolled up it
+     * would move them, and the view's anchoring covers only a prepend it starts
+     * itself (a scroll-up's `loadOlder`).
      */
     fillPaused?: () => boolean;
+    /** The pane's tab is hidden now: its fill pages run one at a time with the other hidden panes' (hidden-fill.ts). */
+    fillHidden?: () => boolean;
 }
 
 export interface UseHistoryPagination {
@@ -193,13 +197,6 @@ const SNAPSHOT_SCHEMA_VERSION_V1 = 1;
 const SNAPSHOT_SCHEMA_VERSION_V2 = 2;
 /** Version written by writeSnapshotNow. */
 export const SNAPSHOT_SCHEMA_VERSION = SNAPSHOT_SCHEMA_VERSION_V2;
-/**
- * The most held-open row ids a snapshot keeps (the newest). A row held open
- * keeps its text in memory, so a restore can't open an unbounded set; ids
- * only, so the snapshot stays small. Additive: an older build ignores the field.
- */
-export const MAX_SAVED_HELD = 40;
-
 /**
  * Render viewport: lines loaded on restore. Not a storage cap — see §2 of spec.
  * At most srv's per-read cap (`blockfile:read_range` returns ≤ 10,000 lines
@@ -485,18 +482,13 @@ async function openHistory(opts: UseHistoryPaginationOptions, s: HistoryState): 
 function applySnapshotOverlay(opts: UseHistoryPaginationOptions, snapshot: any): void {
     const ds = snapshot.documentState;
     if (!ds || !opts.onSnapshotOverlay) return;
-    const restoredHeld: string[] = Array.isArray(ds.heldOpenNodeIds)
-        ? ds.heldOpenNodeIds.filter((id: unknown): id is string => typeof id === "string").slice(-MAX_SAVED_HELD)
-        : [];
     opts.onSnapshotOverlay({
         documentState: {
             collapsedNodes: new Set<string>(ds.collapsedNodeIds ?? []),
             pinnedNodes: new Set<string>(ds.pinnedNodeIds ?? []),
-            // What the pane had open when it was last hidden or closed
-            // (a few ids at most, `MAX_SAVED_HELD`); nothing for a
-            // snapshot without them, so restored history renders collapsed.
-            heldOpenNodes: new Set<string>(restoredHeld),
-            restoredHeldNodes: restoredHeld.length > 0 ? new Set<string>(restoredHeld) : undefined,
+            // Restored history renders collapsed: a row held open keeps its whole preview in the page, and
+            // opening a pane with 40 of them cost ~20 000 elements and ~0.5 GB for the few seconds they stayed.
+            heldOpenNodes: new Set<string>(),
             scrollPosition: typeof ds.scrollPosition === "number" ? ds.scrollPosition : 0,
             filter: ds.filter ?? DEFAULT_FILTER_STATE,
         },
@@ -650,6 +642,7 @@ async function fillRest(opts: UseHistoryPaginationOptions, s: HistoryState, gen:
         return;
     }
     let fillBytes = 0;
+    const holding = () => opts.fillPaused?.() === true || msSinceLastInput() < FILL_QUIET_MS;
     const out = await runHistoryFill({
         plan,
         pageLines: OLDER_PAGE_LINES,
@@ -657,7 +650,18 @@ async function fillRest(opts: UseHistoryPaginationOptions, s: HistoryState, gen:
         page: async (maxLines) => {
             try {
                 const budget = Number.isFinite(plan.budgetBytes) ? Math.max(1, plan.budgetBytes - fillBytes) : undefined;
-                const page = await exclusive(s, () => fetchOlderPage(opts, s, maxLines, { expectGen: gen, tailBytes: budget, alignFloor: plan.floorLine }));
+                const read = () => exclusive(s, () => fetchOlderPage(opts, s, maxLines, { expectGen: gen, tailBytes: budget, alignFloor: plan.floorLine }));
+                // A hidden pane's page can wait behind other panes' pages: by its turn the pane may have been shown and scrolled
+                // up, or the person may be typing, and a prepend then would move what they read. The loop looks again instead.
+                let held = false;
+                const page = await (opts.fillHidden?.()
+                    ? hiddenFill.run(async () => {
+                          if (!s.mounted) return null;
+                          held = holding();
+                          return held ? null : read();
+                      })
+                    : read());
+                if (held) return { lines: 0, bytes: 0, held: true };
                 if (!page) return null;
                 fillBytes += page.bytes;
                 return { lines: page.lines, bytes: page.bytes, last: page.trimmed };
@@ -667,7 +671,7 @@ async function fillRest(opts: UseHistoryPaginationOptions, s: HistoryState, gen:
             }
         },
         stopped: () => !s.mounted,
-        holding: () => opts.fillPaused?.() === true || msSinceLastInput() < FILL_QUIET_MS,
+        holding,
         idle: whenIdle,
         wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     });

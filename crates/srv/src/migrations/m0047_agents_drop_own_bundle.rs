@@ -28,7 +28,7 @@ use rusqlite::params;
 
 use crate::backend::storage::store::{Bundle, Store};
 
-use super::m0046_remove_empty_agent_bundles::{holds_nothing, is_abf_name, remove_empty_unreferenced, table_exists};
+use super::m0046_remove_empty_agent_bundles::{holds_nothing, is_abf_name, has_table, remove_empty_unreferenced};
 use super::{Migration, MigrationContext, MigrationError, MigrationScope};
 
 pub struct M0047AgentsDropOwnBundle;
@@ -54,7 +54,7 @@ fn bound_agents(store: &Store) -> Result<Vec<Bound>, String> {
 /// Whether skills are bound to the bundle in this channel's store.
 fn has_skill_refs(store: &Store, bundle_id: &str) -> bool {
     let conn = store.conn().lock().unwrap();
-    table_exists(&conn, "db_bundle_skills_ref")
+    has_table(&conn, "db_bundle_skills_ref")
         && conn
             .query_row("SELECT COUNT(*) FROM db_bundle_skills_ref WHERE bundle_id = ?1", params![bundle_id], |r| r.get::<_, i64>(0))
             .map(|n| n > 0)

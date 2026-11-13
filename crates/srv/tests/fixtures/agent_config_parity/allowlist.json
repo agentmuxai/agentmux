@@ -59,6 +59,10 @@
       "why": "A hint for the in-container MCP and bashwrap, which are not given signing keys."
     },
     {
+      "path": "AGENTMUX_PUBLISH_GUARD",
+      "why": "What the container's pre-push hook should do on this host (1 ask, older-gh-agent refuse, 0 nothing): srv says it for a container turn only, since a native agent's own gh-agent hook guards its push."
+    },
+    {
       "path": "AGENTMUX_VERSION",
       "why": "Which AgentMux this is: a container exec does not go through pane_env, so srv adds it."
     },

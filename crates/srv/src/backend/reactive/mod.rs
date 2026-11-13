@@ -12,6 +12,7 @@
 pub mod activity_watcher;
 pub mod action_audit;
 pub mod audit_store;
+pub mod controller_wait;
 pub mod cli_native_audit;
 mod turn_audit;
 pub mod handler;
@@ -22,6 +23,7 @@ mod rate_limiter;
 pub mod registry;
 pub mod sanitize;
 mod sensitive_audit;
+mod system_turn;
 pub mod sent_audit;
 pub mod transcript_request;
 pub mod types;
@@ -77,11 +79,13 @@ pub fn is_unavailable_refusal(error: &str) -> bool {
 }
 
 /// Whether a delivery error is worth retrying shortly, as is: the target is
-/// still absent, rate-limited, its queue is full, or it is starting,
-/// restarting or stopping ("… try again shortly"). Shared by the held-jekt
-/// replay and the cron scheduler's pending fires, which must agree.
+/// still absent, rate-limited, its queue is full, it is starting,
+/// restarting or stopping ("… try again shortly"), or its pane is open and
+/// its controller is not there yet (`controller_wait`). Shared by the
+/// held-jekt replay and the cron scheduler's pending fires, which must agree.
 pub fn is_transient_delivery_error(error: &str) -> bool {
     error.starts_with("agent not found")
+        || controller_wait::is_no_controller(error)
         || error.contains("rate limit")
         || error.contains("queue is full")
         || error.contains("try again shortly")

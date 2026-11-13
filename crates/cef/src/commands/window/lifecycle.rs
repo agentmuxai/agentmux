@@ -135,6 +135,15 @@ pub fn quit_app(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "closing": labels.len() }))
 }
 
+/// `close_window`, and `close_request_seen`: the page's word that it got an OS close's request
+/// ([`super::close_ask`]). Its own close, when it makes one, is a `close_window`.
+pub fn close_command(cmd: &str, state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    if cmd == "close_request_seen" {
+        return Ok(super::close_ask::seen(args));
+    }
+    close_window(state, args)
+}
+
 /// Close the window. Args: optional `{ "label": string }`; defaults to "main".
 /// Routes by label via `resolve_window_hwnd` — without that the floater
 /// (owned, drawn above its owner in Z-order) would always swallow the
@@ -142,6 +151,8 @@ pub fn quit_app(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
 /// visible top-level of the process.
 pub fn close_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    // Decided: whatever this close runs into on its way is not asked about again.
+    super::close_ask::approve(label);
 
     // Report the logical window-close to the launcher so the frontend's window
     // count ("(N)" next to the version) decrements. `on_before_close` — the only

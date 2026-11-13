@@ -125,16 +125,24 @@ impl<'a> Decider<'a> {
 /// message to another agent arrives as that agent's, never as the operator's.
 pub(crate) struct Actor {
     pub name: String,
+    /// The agent's UID when the request proved it: a board's agent list may name it instead of the slug.
+    pub uid: String,
     pub is_operator: bool,
 }
 
 impl Actor {
     pub(crate) fn operator() -> Self {
-        Actor { name: OPERATOR.to_string(), is_operator: true }
+        Actor { name: OPERATOR.to_string(), uid: String::new(), is_operator: true }
     }
 
     pub(crate) fn agent(name: &str) -> Self {
-        Actor { name: name.to_string(), is_operator: false }
+        Actor { name: name.to_string(), uid: String::new(), is_operator: false }
+    }
+
+    /// The same agent, with the UID its token proved.
+    pub(crate) fn with_uid(mut self, uid: &str) -> Self {
+        self.uid = uid.to_string();
+        self
     }
 
     /// The history's actor kind.
@@ -180,7 +188,7 @@ pub(crate) async fn send_back_task(
         Some(reg) => {
             let m = store.work_send_back(&t.item.id, now, LEASE_MS).map_err(|e| e.to_string())?.ok_or("it moved meanwhile")?;
             let msg = send_back_text(t, by, reason);
-            let from = Actor { name: by.actor.to_string(), is_operator: by.kind == OPERATOR };
+            let from = Actor { name: by.actor.to_string(), uid: String::new(), is_operator: by.kind == OPERATOR };
             if let Err(e) = tell(state, &reg, &from, msg).await {
                 tracing::info!(error = %e, "kanban: send-back not delivered");
             }

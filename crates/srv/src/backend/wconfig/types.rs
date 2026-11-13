@@ -293,6 +293,11 @@ pub struct SettingsType {
     #[serde(rename = "window:reducedmotion", default, skip_serializing_if = "is_false")]
     pub window_reduced_motion: bool,
 
+    /// Live reflow while a pane is dragged: the other panes glide to where the drop leaves them, instead of a
+    /// landing rectangle (SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06). The frontend reads it. Absent is on.
+    #[serde(rename = "layout:livereflow", default, skip_serializing_if = "Option::is_none")]
+    pub layout_live_reflow: Option<bool>,
+
     /// Animations: which choice the Settings page shows (system, off, quick, smooth, slow or custom).
     /// Absent is smooth. The frontend reads it (SPEC_ANIMATIONS_SETTINGS_PAGE_2026_11_01).
     #[serde(rename = "animation:preset", default, skip_serializing_if = "Option::is_none")]

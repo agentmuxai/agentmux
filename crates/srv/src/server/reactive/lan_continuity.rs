@@ -7,6 +7,10 @@
 //! for the key with a certificate, and this machine already trusts that
 //! install. Anything else stays refused.
 //!
+//! The same certificate is what makes a name's FIRST pin: a name with no pin is pinned only when a
+//! trusted install vouches for the key it shows ([`on_first_contact`]); an unvouched first key is
+//! never pinned by itself and its messages stay unproven until the person accepts it.
+//!
 //! The sending half is [`issue_cert`]: the lookup answer for an agent carries
 //! `lan_cert`, a [`WanKeyRecord`] (channel `lan`) signed by the install's own
 //! key. The receiving half is [`move_if_vouched`], called when the name pin
@@ -20,6 +24,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde_json::json;
 
 use super::AppState;
+use crate::backend::storage::lan_peer_pin_installs::PinInstall;
 
 /// The channel a LAN key's certificate names.
 pub(crate) const CERT_CHANNEL: &str = "lan";
@@ -73,9 +78,30 @@ pub(super) async fn on_mismatch(state: &AppState, claimed: &str, observed_key: &
     }
 }
 
+/// A name has no pin and shows `observed_key`: pin it only if a trusted install vouches for it. `true`
+/// means carry on verifying under the (new) pin. `false` leaves the name unpinned and the message
+/// unproven, and keeps the key for the pin screen, which asks the person once to accept it.
+pub(super) async fn on_first_contact(state: &AppState, claimed: &str, observed_key: &[u8]) -> bool {
+    let cert = state.lan_discovery.cached_lan_cert(claimed);
+    match move_if_vouched(state, claimed, observed_key, cert.as_ref(), "automatic", false).await {
+        Ok(_) => true,
+        Err(why) => {
+            super::lan_refusals::first_contact_with(claimed, &BASE64.encode(observed_key), cert, Some(why));
+            false
+        }
+    }
+}
+
 /// Put this install's certificate for `public_key_b64` into a lookup answer as `lan_cert`.
 pub(super) fn add_cert(state: &AppState, agent: &str, public_key_b64: &str, answer: &mut serde_json::Map<String, serde_json::Value>) {
     if let Some(cert) = issue_cert(state, agent, public_key_b64) {
+        // The agent's own word that this install hosts it: another install can wrap the public key in a
+        // certificate of its own, but cannot sign for the agent.
+        let pair = state.mstore.agent_lan_key_ensure(agent).ok().filter(|p| p.public_key == public_key_b64);
+        let private = pair.and_then(|p| BASE64.decode(p.private_key).ok());
+        if let Some(sig) = private.and_then(|k| agentmux_common::lan_install_binding::sign_lan_install_binding(&k, agent, &cert.instance_id, cert.issued_at)) {
+            answer.insert("lan_install_sig".to_string(), json!(sig));
+        }
         answer.insert("lan_cert".to_string(), json!(cert));
     }
 }
@@ -109,7 +135,6 @@ pub(crate) fn check_cert(cert: &WanKeyRecord, agent: &str, observed_key: &[u8], 
 /// knows to be revoked is trusted by neither way, and a pin does not outlive a
 /// revocation the directory holds.
 pub(crate) async fn instance_trust(state: &AppState, instance_id: &str) -> Result<Path, String> {
-    use crate::muxbus::wan_verify::{instance_is_live_install, instance_is_revoked, Directory, GLOBAL_BUDGET};
     let wan = state.mstore.wan_identity().or_else(crate::backend::storage::wan_identity::global);
     if let Some(wan) = &wan {
         let known = wan.known_instance_get(instance_id).map_err(|e| format!("the known installs could not be read: {e}"))?;
@@ -125,6 +150,36 @@ pub(crate) async fn instance_trust(state: &AppState, instance_id: &str) -> Resul
             .any(|p| p.instance_id == instance_id),
         None => false,
     };
+    within(DIRECTORY_WAIT, pinned, instance_id, ask_directory(state, wan.as_deref(), instance_id, pinned)).await
+}
+
+/// How long a check of a message from another machine waits on the account's directory: the sign-in token
+/// (which can sit behind a refresh that hangs) and the lookups. The sender gives up on its forward after
+/// 10 s, so a longer wait only ends in a lost message (task #2512).
+const DIRECTORY_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// `asking`, within `wait`. Past it the answer is exactly what it is when the directory cannot be asked at all (no
+/// sign-in): a pinned install is trusted as pinned (`Path::PinnedInstance`), claiming nothing from a lookup that did
+/// not happen, and an unpinned one is not trusted, with the reason. An install already known locally to be revoked
+/// was refused before this was asked.
+async fn within(wait: std::time::Duration, pinned: bool, instance_id: &str, asking: impl std::future::Future<Output = Result<Path, String>>) -> Result<Path, String> {
+    match tokio::time::timeout(wait, asking).await {
+        Ok(answer) => answer,
+        Err(_) => {
+            tracing::warn!(instance = %instance_id, pinned, wait_secs = wait.as_secs_f32(), "lan check: the account's directory did not answer in time; going on without it");
+            if pinned {
+                Ok(Path::PinnedInstance)
+            } else {
+                Err("the install is not pinned here and the account's directory did not answer in time".to_string())
+            }
+        }
+    }
+}
+
+/// [`instance_trust`]'s asks of the account's directory: the token, the revocation of a pinned install, the
+/// listing of an unpinned one.
+async fn ask_directory(state: &AppState, wan: Option<&crate::backend::storage::wan_identity::WanIdentityStore>, instance_id: &str, pinned: bool) -> Result<Path, String> {
+    use crate::muxbus::wan_verify::{instance_is_live_install, instance_is_revoked, Directory, GLOBAL_BUDGET};
     let token = match crate::broker::get_global() {
         Some(scheduler) => crate::muxbus::cloud_subscriber::load_valid_token(&state.id_store, &scheduler).await,
         None => None,
@@ -134,7 +189,7 @@ pub(crate) async fn instance_trust(state: &AppState, instance_id: &str) -> Resul
     if pinned {
         if let Some(dir) = &dir {
             if instance_is_revoked(dir, instance_id).await == Some(true) {
-                if let Some(wan) = &wan {
+                if let Some(wan) = wan {
                     remember_revoked(wan, instance_id, agentmux_common::time::now_secs());
                 }
                 return Err("the install is revoked".to_string());
@@ -166,7 +221,8 @@ fn unvouched() -> std::sync::MutexGuard<'static, HashMap<(String, String), (i64,
     UNVOUCHED.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Move `agent`'s name pin to `observed_key` if `cert` vouches for it. The UID
+/// Move `agent`'s name pin to `observed_key` if `cert` vouches for it; for a name with no pin, make its
+/// first pin the same way. The UID
 /// pins beside the name pin go with the old key and are set again by the next
 /// message that verifies under the new one (`lan_peer_pubkey_pin_replace`).
 /// Returns what vouched, or why nothing did. `by` is who asked, for the audit
@@ -184,7 +240,12 @@ pub(crate) async fn move_if_vouched(
 ) -> Result<Path, String> {
     let now = agentmux_common::time::now_secs();
     let observed_b64 = BASE64.encode(observed_key);
-    let marker = (agent.to_lowercase(), observed_b64.clone());
+    // A key the name moved off is not taken back, whoever asks and whatever certificate comes with it.
+    if let Some(why) = retired_reason(state, agent, observed_key) {
+        return Err(why);
+    }
+    // Per certifying install too: one install's refusal says nothing of another's certificate for the same key.
+    let marker = (agent.to_lowercase(), format!("{observed_b64}|{}", cert.map_or("", |c| c.instance_id.as_str())));
     // Asked a moment ago and not vouched: say the same reason again, without asking again.
     if !force {
         if let Some((_, why)) = unvouched().get(&marker).filter(|(at, _)| now - at < RECHECK_AFTER_SECS) {
@@ -205,7 +266,10 @@ pub(crate) async fn move_if_vouched(
             }
         }
     }
-    let (path, cert, (old, old_since)) = result?;
+    let (path, cert, pinned) = result?;
+    let Some((old, old_since)) = pinned else {
+        return pin_first(state, agent, &observed_b64, &cert, path, by);
+    };
     // Kept from the later of now and the certificate's own time: with the host's clock ahead of
     // ours, an older certificate of the same host (still inside the freshness window) is then
     // older than this pin too, and cannot move it back.
@@ -226,6 +290,8 @@ pub(crate) async fn move_if_vouched(
         };
     }
     super::lan_refusals::clear(agent);
+    bind_to(state, agent, &observed_b64, &cert);
+    retire(state, agent, &old, &cert.instance_id);
     let entry = json!({
         "action": "continuity",
         "kind": "lan",
@@ -240,23 +306,146 @@ pub(crate) async fn move_if_vouched(
     Ok(path)
 }
 
+/// First contact: pinned only now that a trusted install vouched, and bound to that install. `get_or_set`
+/// keeps whichever key got there first, so a concurrent first contact cannot be overwritten from an older check.
+fn pin_first(state: &AppState, agent: &str, observed_b64: &str, cert: &WanKeyRecord, path: Path, by: &str) -> Result<Path, String> {
+    let since = agentmux_common::time::now_secs().max(cert.issued_at);
+    let held = state.mstore.lan_peer_pubkey_pin_get_or_set_at(agent, observed_b64, since).map_err(|e| format!("the pin could not be set: {e}"))?;
+    if held != observed_b64 {
+        return Err("another key was pinned for the name while this one was being checked; it was not pinned".to_string());
+    }
+    super::lan_refusals::clear(agent);
+    bind_to(state, agent, observed_b64, cert);
+    audit(&json!({
+        "action": "first-pin",
+        "kind": "lan",
+        "agent": agent.to_lowercase(),
+        "to": fingerprint(observed_b64),
+        "by": by,
+        "vouched_by": { "instance": cert.instance_id, "host": cert.host_hint, "path": path.as_str(), "issued_at": cert.issued_at },
+    }));
+    Ok(path)
+}
+
+/// Record that the install behind `cert` vouched for the key `agent` is pinned to. Best effort: a pin left
+/// unbound is bound by the next message that verifies under it ([`bind_after_verified`]) and moves by hand until then.
+fn bind_to(state: &AppState, agent: &str, key_b64: &str, cert: &WanKeyRecord) {
+    if !agent_says_hosted_by(state, agent, key_b64, cert) {
+        return;
+    }
+    let install = PinInstall { instance_id: cert.instance_id.clone(), host_hint: cert.host_hint.clone() };
+    if let Err(e) = state.mstore.lan_pin_bind(agent, key_b64, &install, agentmux_common::time::now_secs()) {
+        tracing::warn!(agent_id = %agent, error = %e, "LAN pin could not be bound to its install");
+    }
+}
+
+/// Whether the agent itself, under the key `key_b64`, says the install behind `cert` hosts it: the statement
+/// the host adds to its lookup answer. A certificate alone proves only that some trusted install wrapped the
+/// key in one, which any of the account's installs can do for a public key it merely saw.
+fn agent_says_hosted_by(state: &AppState, agent: &str, key_b64: &str, cert: &WanKeyRecord) -> bool {
+    let (Some(sig), Ok(key)) = (state.lan_discovery.cached_lan_install_sig(agent), BASE64.decode(key_b64)) else { return false };
+    let Ok(key) = <[u8; 32]>::try_from(key.as_slice()) else { return false };
+    agentmux_common::lan_install_binding::verify_lan_install_binding(&key, agent, &cert.instance_id, cert.issued_at, &sig)
+}
+
+/// Remember that `agent` moved off `old_b64`, so a message signed with it later is refused as retired.
+pub(crate) fn retire(state: &AppState, agent: &str, old_b64: &str, by: &str) {
+    if let Err(e) = state.mstore.lan_retired_put(agent, &fingerprint(old_b64), agentmux_common::time::now_secs(), by) {
+        tracing::warn!(agent_id = %agent, error = %e, "LAN retired key could not be recorded");
+    }
+}
+
+/// Why `observed_key` is refused when `agent` once moved off it, in a sentence; `None` if it never did.
+pub(crate) fn retired_reason(state: &AppState, agent: &str, observed_key: &[u8]) -> Option<String> {
+    let retired = state.mstore.lan_retired_get(agent, &fingerprint(&BASE64.encode(observed_key))).ok()??;
+    let day = chrono::DateTime::from_timestamp(retired.retired_at, 0).unwrap_or_default().format("%Y-%m-%d");
+    Some(format!("this key was retired on {day} by {}: the name moved to another key, and a retired key is not taken back", retired.retired_by))
+}
+
+/// A message just verified under `agent`'s pinned key (`key`). If the pin is bound to no install yet, bind it
+/// to the install behind the certificate the peer shows for exactly that key, when this machine trusts that
+/// install. Binding on a verified message keeps it as strong as the pin: a certificate alone proves nothing,
+/// since anyone can wrap a public key in a certificate of an install of their own.
+pub(crate) async fn bind_after_verified(state: &AppState, agent: &str, key: &[u8]) {
+    let key_b64 = BASE64.encode(key);
+    if !matches!(state.mstore.lan_peer_pubkey_pin_since(agent), Ok(Some((k, _))) if k == key_b64) {
+        return;
+    }
+    if !matches!(state.mstore.lan_pin_installed(agent), Ok(None)) {
+        return;
+    }
+    let Some(cert) = state.lan_discovery.cached_lan_cert(agent) else { return };
+    if !agent_says_hosted_by(state, agent, &key_b64, &cert) {
+        return;
+    }
+    let now = agentmux_common::time::now_secs();
+    // Not asked again for a minute after an install that is not trusted, as for an unvouched key.
+    let marker = (agent.to_lowercase(), format!("bind:{}", cert.instance_id));
+    if unvouched().get(&marker).is_some_and(|(at, _)| now - at < RECHECK_AFTER_SECS) {
+        return;
+    }
+    if check_cert(&cert, agent, key, 0, now).is_ok() && instance_trust(state, &cert.instance_id).await.is_ok() {
+        bind_to(state, agent, &key_b64, &cert);
+        return;
+    }
+    let mut seen = unvouched();
+    seen.retain(|_, (at, _)| now - *at < RECHECK_AFTER_SECS);
+    if seen.len() < MAX_UNVOUCHED {
+        seen.insert(marker, (now, String::new()));
+    }
+}
+
 async fn vouch(
     state: &AppState,
     agent: &str,
     observed_key: &[u8],
     cert: Option<&WanKeyRecord>,
     now: i64,
-) -> Result<(Path, WanKeyRecord, (String, i64)), String> {
+) -> Result<(Path, WanKeyRecord, Option<(String, i64)>), String> {
     let cert = cert.ok_or("the peer sent no certificate for the key")?;
-    let pinned = state
-        .mstore
-        .lan_peer_pubkey_pin_since(agent)
-        .map_err(|e| format!("the pin could not be read: {e}"))?
-        .ok_or("the name is not pinned")?;
-    check_cert(cert, agent, observed_key, pinned.1, now).map_err(str::to_string)?;
+    // `None`: the name has no pin yet, and this certificate is what would make its first one.
+    let pinned = state.mstore.lan_peer_pubkey_pin_since(agent).map_err(|e| format!("the pin could not be read: {e}"))?;
+    check_cert(cert, agent, observed_key, pinned.as_ref().map_or(0, |p| p.1), now).map_err(str::to_string)?;
     let path = instance_trust(state, &cert.instance_id).await?;
+    if pinned.is_some() {
+        bound_install_allows(state, agent, &cert.instance_id).await?;
+    }
     // The pin this check was made against: the move is conditional on it still being the pin.
     Ok((path, cert.clone(), pinned))
+}
+
+/// A pin moves only on the say of the install that vouched for it, or one that install handed over to (it
+/// signed a revocation naming the new one as its successor). A pin bound to no install yet does not move on
+/// its own: it binds on the next verified message, and until then a person accepts the key.
+async fn bound_install_allows(state: &AppState, agent: &str, certifying: &str) -> Result<(), String> {
+    let bound = state.mstore.lan_pin_installed(agent).map_err(|e| format!("the pin's install could not be read: {e}"))?;
+    let Some(bound) = bound else {
+        return Err("the pin is not bound to an install yet: it binds when the agent next sends a message that verifies under it, and until then the new key is accepted by hand".to_string());
+    };
+    if bound.instance_id == certifying || handed_over(state, &bound.instance_id, certifying).await {
+        return Ok(());
+    }
+    Err(format!(
+        "the pin was vouched for by the install on {} and only that install, or one it handed over to, can move it: a certificate from another install does not",
+        if bound.host_hint.is_empty() { "another host" } else { bound.host_hint.as_str() }
+    ))
+}
+
+/// Whether the account's directory holds a revocation `from` signed that names `to` as its successor.
+async fn handed_over(state: &AppState, from: &str, to: &str) -> bool {
+    tokio::time::timeout(DIRECTORY_WAIT, handed_over_asking(state, from, to)).await.unwrap_or(false)
+}
+
+async fn handed_over_asking(state: &AppState, from: &str, to: &str) -> bool {
+    use crate::muxbus::wan_verify::{instance_handed_over_to, Directory, GLOBAL_BUDGET};
+    let token = match crate::broker::get_global() {
+        Some(scheduler) => crate::muxbus::cloud_subscriber::load_valid_token(&state.id_store, &scheduler).await,
+        None => None,
+    };
+    let base_url = crate::muxbus::relay::rest_base_url();
+    let Some(token) = token.as_ref() else { return false };
+    let dir = Directory { base_url: &base_url, http: &state.http_client, token, budget: &GLOBAL_BUDGET };
+    instance_handed_over_to(&dir, from).await.is_some_and(|successor| successor == to)
 }
 
 /// A short fingerprint of a base64 key: enough to tell two keys apart on a

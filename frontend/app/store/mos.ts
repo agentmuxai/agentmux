@@ -81,8 +81,23 @@ function GetObject<T>(oref: string): Promise<T> {
     return retryTransient(() => callBackendService("object", "GetObject", [oref], true));
 }
 
-function debugLogBackendCall(methodName: string, durationStr: string, args: any[]) {
-    durationStr = "| " + durationStr;
+/** Calls made on a timer while a panel is open (the instance panel asks every 2 s). A fast answer is not news: it goes
+ *  to the debug level, which the host drops by default, so a panel left open does not bury the log (#47484). */
+const POLLED_METHODS = new Set(["window.ListClosedWindows", "window.PlaceWindowSlots"]);
+/** A polled call slower than this is logged at INFO again: a slow srv is worth seeing. */
+const POLLED_SLOW_MS = 250;
+
+/** The console method a finished backend call is logged with. */
+function backendCallLogLevel(methodName: string, durationMs: number): "log" | "debug" {
+    return POLLED_METHODS.has(methodName) && durationMs < POLLED_SLOW_MS ? "debug" : "log";
+}
+
+function debugLogBackendCall(methodName: string, durationMs: number, args: any[]) {
+    const durationStr = "| " + durationMs + "ms";
+    if (backendCallLogLevel(methodName, durationMs) === "debug") {
+        console.debug("[service]", methodName, durationStr);
+        return;
+    }
     if (methodName == "object.UpdateObject" && args.length > 0) {
         console.log("[service] object.UpdateObject", args[0].otype, args[0].oid, durationStr, args[0]);
         return;
@@ -149,8 +164,7 @@ function callBackendService(service: string, method: string, args: any[], noUICo
             if (respData == null) return null;
             if (respData.updates != null) updateMuxObjects(respData.updates);
             if (respData.error != null) throw new Error(`call ${methodName} error: ${respData.error}`);
-            const durationStr = Date.now() - startTs + "ms";
-            debugLogBackendCall(methodName, durationStr, args);
+            debugLogBackendCall(methodName, Date.now() - startTs, args);
             return respData.data;
         });
 }
@@ -457,6 +471,11 @@ function getMuxObjectCacheStats(): { totalEntries: number; pinnedEntries: number
     return { totalEntries: muxObjectValueCache.size, pinnedEntries, totalRefCount };
 }
 
+/** Non-reactive read of an object already in the cache: undefined when it is not (it never starts a fetch). */
+function peekMuxObject<T extends MuxObj>(oref: string): T | undefined {
+    return getMuxObjectValue<T>(oref, false)?.getData().value;
+}
+
 /** Non-reactive read — returns the current value without tracking. */
 function getObjectValue<T extends MuxObj>(oref: string): T {
     const wov = getMuxObjectValue<T>(oref);
@@ -475,6 +494,7 @@ function setObjectValue<T extends MuxObj>(value: T, pushToServer?: boolean) {
 }
 
 export {
+    backendCallLogLevel,
     callBackendService,
     getObjectValue,
     getMuxObjectAtom,
@@ -482,6 +502,7 @@ export {
     getMuxObjectLoadingAtom,
     loadAndPinMuxObject,
     makeORef,
+    peekMuxObject,
     reloadMuxObject,
     resyncMuxObjects,
     setObjectValue,

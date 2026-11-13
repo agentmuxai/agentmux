@@ -86,7 +86,7 @@ function parseArgs(argv) {
             continue;
         }
         const key = raw.replace(/^--/, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-        if (!raw.startsWith("--") || !(key in a || ["portable", "label", "memtree", "exe", "srv", "srvCommit", "diskLoad", "diskLoadCapGb"].includes(key))) throw new Error(`unknown argument ${raw}`);
+        if (!raw.startsWith("--") || !(key in a || ["portable", "label", "memtree", "exe", "srv", "srvCommit", "diskLoad", "diskLoadCapGb", "claudeVersion"].includes(key))) throw new Error(`unknown argument ${raw}`);
         const value = argv[++i];
         if (value === undefined) throw new Error(`${raw} needs a value`);
         a[key] = num.has(key) ? Number(value) : value;
@@ -357,7 +357,7 @@ async function attempt(args, ctx) {
         if (!(await portBelongsTo(args.port, memtree, instance.pid))) {
             throw new Error(`CDP port ${args.port} isn't answered by the instance the lab started (the instance took another port, or something else answers there)`);
         }
-        installScript(home, script);
+        installScript(home, script, args.claudeVersion);
         driver = await connect(args.port, home, join(dir, "work"));
         await driver.setupAccount();
         // What the app says it was given: a setting its build doesn't know is dropped from the full config, and that shows here instead of the run passing as a baseline.

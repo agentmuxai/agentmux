@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! What each agent has used through the gateway today, counted from the usage in each response times
-//! the route's price table. In memory: it starts again with srv, and the day is the UTC day.
+//! the route's price table. The live table is in memory; once [`attach`] has been called every change is also
+//! written to the history store (`storage::spend_day`) and the last two days are read back at start, so an srv
+//! restart does not start the day again. The day is the UTC day.
 
 use super::catalog::Model;
 use crate::agents::types::TokenCounts;
+use crate::backend::storage::spend_day::SpendDayRow;
+use crate::backend::storage::store::Store;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Spend {
@@ -16,9 +20,100 @@ pub struct Spend {
     pub cost_usd: f64,
 }
 
-fn table() -> &'static Mutex<HashMap<(String, i64), Spend>> {
-    static TABLE: OnceLock<Mutex<HashMap<(String, i64), Spend>>> = OnceLock::new();
+/// One agent's day on one route, with the highest alert level already sent for the agent's day.
+#[derive(Debug, Clone, Default)]
+struct Day {
+    spend: Spend,
+    alerted: u8,
+}
+
+/// Agent, route and UTC day.
+type DayKey = (String, String, i64);
+
+fn table() -> &'static Mutex<HashMap<DayKey, Day>> {
+    static TABLE: OnceLock<Mutex<HashMap<DayKey, Day>>> = OnceLock::new();
     TABLE.get_or_init(Default::default)
+}
+
+enum Write {
+    Save(SpendDayRow),
+    Clear(String, i64),
+}
+
+/// The writer thread's inbox, once [`attach`] has started it. A change is queued, not written, so a response
+/// settling (on the stream's task) never waits on SQLite.
+fn writer() -> &'static OnceLock<mpsc::Sender<Write>> {
+    static WRITER: OnceLock<mpsc::Sender<Write>> = OnceLock::new();
+    &WRITER
+}
+
+fn row_of(key: &DayKey, day: &Day) -> SpendDayRow {
+    let t = &day.spend.tokens;
+    SpendDayRow {
+        agent_id: key.0.clone(),
+        route: key.1.clone(),
+        day: key.2,
+        requests: day.spend.requests,
+        input: t.input,
+        output: t.output,
+        cache_creation: t.cache_creation,
+        cache_read: t.cache_read,
+        cost_usd: day.spend.cost_usd,
+        alerted: day.alerted,
+    }
+}
+
+fn queue(write: Write) {
+    if let Some(tx) = writer().get() {
+        let _ = tx.send(write);
+    }
+}
+
+/// Reads the last two days back from `store` into the live table, keeping what the table already holds.
+/// Returns the number of rows read.
+pub fn restore(store: &Store, now_ms: i64) -> usize {
+    let rows = match store.spend_day_load(day(now_ms) - 1) {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!(error = %e, "model gateway: the spend of earlier days could not be read; today starts at zero");
+            return 0;
+        }
+    };
+    let mut table = table().lock().unwrap();
+    let n = rows.len();
+    for r in rows {
+        let spend = Spend {
+            requests: r.requests,
+            tokens: TokenCounts { input: r.input, output: r.output, cache_creation: r.cache_creation, cache_read: r.cache_read, ..Default::default() },
+            cost_usd: r.cost_usd,
+        };
+        table.entry((r.agent_id, r.route, r.day)).or_insert(Day { spend, alerted: r.alerted });
+    }
+    n
+}
+
+/// Keeps the day's table in `store` from now on: reads the last two days, then writes each change from a thread of its own.
+pub fn attach(store: Arc<Store>) {
+    let restored = restore(&store, agentmux_common::time::now_ms());
+    let (tx, rx) = mpsc::channel::<Write>();
+    if writer().set(tx).is_err() {
+        return;
+    }
+    tracing::info!(rows = restored, "model gateway: the day's spend is kept in the history store");
+    let spawned = std::thread::Builder::new().name("gateway-spend".into()).spawn(move || {
+        for write in rx {
+            let done = match write {
+                Write::Save(row) => store.spend_day_save(&row),
+                Write::Clear(agent, d) => store.spend_day_clear(&agent, d).map(|_| ()),
+            };
+            if let Err(e) = done {
+                tracing::warn!(error = %e, "model gateway: a day of spend was not written");
+            }
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "model gateway: the spend writer did not start; the day is kept in memory only");
+    }
 }
 
 /// Provider-reported spend per agent since its current process started (see
@@ -71,10 +166,10 @@ pub fn cost(model: &Model, tokens: &TokenCounts) -> f64 {
         + per_m(tokens.output, model.price_out)
 }
 
-/// Adds one response to the agent's day and returns that response's cost: the
+/// Adds one response to the agent's day on `route` and returns that response's cost: the
 /// provider's own charge when the response reported one (`actual`), else the
 /// price table's estimate.
-pub fn record(agent: &str, model: &Model, tokens: &TokenCounts, actual: Option<f64>, now_ms: i64) -> f64 {
+pub fn record(agent: &str, route: &str, model: &Model, tokens: &TokenCounts, actual: Option<f64>, now_ms: i64) -> f64 {
     let actual = actual.filter(|c| c.is_finite() && *c >= 0.0);
     let cost = actual.unwrap_or_else(|| cost(model, tokens));
     // A route agent's session total holds every response of its own, priced by
@@ -93,14 +188,17 @@ pub fn record(agent: &str, model: &Model, tokens: &TokenCounts, actual: Option<f
     }
     let mut table = table().lock().unwrap();
     let day_now = day(now_ms);
-    table.retain(|(_, d), _| *d >= day_now - 1);
-    let entry = table.entry((agent.to_string(), day_now)).or_default();
-    entry.requests += 1;
-    entry.tokens.input += tokens.input;
-    entry.tokens.output += tokens.output;
-    entry.tokens.cache_creation += tokens.cache_creation;
-    entry.tokens.cache_read += tokens.cache_read;
-    entry.cost_usd += cost;
+    // This agent's old days go; another agent's are dropped when it records, and `today` never reads them.
+    table.retain(|(a, _, d), _| a != agent || *d >= day_now - 1);
+    let key = (agent.to_string(), route.to_string(), day_now);
+    let entry = table.entry(key.clone()).or_default();
+    entry.spend.requests += 1;
+    entry.spend.tokens.input += tokens.input;
+    entry.spend.tokens.output += tokens.output;
+    entry.spend.tokens.cache_creation += tokens.cache_creation;
+    entry.spend.tokens.cache_read += tokens.cache_read;
+    entry.spend.cost_usd += cost;
+    queue(Write::Save(row_of(&key, entry)));
     cost
 }
 
@@ -130,9 +228,80 @@ pub fn rewrite_result_total(line: &str, agent: &str) -> Option<String> {
     Some(frame.to_string())
 }
 
-/// The agent's use so far today.
+/// The agent's use so far today, over every route it used.
 pub fn today(agent: &str, now_ms: i64) -> Spend {
-    table().lock().unwrap().get(&(agent.to_string(), day(now_ms))).cloned().unwrap_or_default()
+    let d = day(now_ms);
+    let mut sum = Spend::default();
+    for (_, one) in table().lock().unwrap().iter().filter(|((a, _, day), _)| a == agent && *day == d) {
+        sum.requests += one.spend.requests;
+        sum.cost_usd += one.spend.cost_usd;
+        sum.tokens.input += one.spend.tokens.input;
+        sum.tokens.output += one.spend.tokens.output;
+        sum.tokens.cache_creation += one.spend.tokens.cache_creation;
+        sum.tokens.cache_read += one.spend.tokens.cache_read;
+    }
+    sum
+}
+
+/// The agents that have a day of spend today.
+pub fn agents_today(now_ms: i64) -> Vec<String> {
+    let d = day(now_ms);
+    let mut agents: Vec<String> = table().lock().unwrap().keys().filter(|(_, _, day)| *day == d).map(|(a, _, _)| a.clone()).collect();
+    agents.sort();
+    agents.dedup();
+    agents
+}
+
+/// What every agent has spent on `route` so far today.
+pub fn route_today_usd(route: &str, now_ms: i64) -> f64 {
+    let d = day(now_ms);
+    table().lock().unwrap().iter().filter(|((_, r, day), _)| r == route && *day == d).map(|(_, one)| one.spend.cost_usd).sum()
+}
+
+/// The highest alert level (0, 50, 80 or 100) already sent for the agent's day.
+pub fn alerted(agent: &str, now_ms: i64) -> u8 {
+    let d = day(now_ms);
+    table().lock().unwrap().iter().filter(|((a, _, day), _)| a == agent && *day == d).map(|(_, one)| one.alerted).max().unwrap_or(0)
+}
+
+/// Records the alert level sent for the agent's day, on each of its rows so it survives a restart. A raised cap sets it
+/// back down to where the day now stands.
+pub fn set_alerted(agent: &str, level: u8, now_ms: i64) {
+    let d = day(now_ms);
+    let mut table = table().lock().unwrap();
+    let mut any = false;
+    for (key, one) in table.iter_mut().filter(|((a, _, day), _)| a == agent && *day == d) {
+        one.alerted = level;
+        queue(Write::Save(row_of(key, one)));
+        any = true;
+    }
+    // An agent refused by its route's cap has spent nothing of its own today: its level lives on a row with no route.
+    if !any && level > 0 {
+        let key = (agent.to_string(), String::new(), d);
+        let one = Day { alerted: level, ..Default::default() };
+        queue(Write::Save(row_of(&key, &one)));
+        table.insert(key, one);
+    }
+}
+
+/// Zeroes the agent's day (a spend that was wrong): its rows are removed, here and in the store. Returns the
+/// dollars that were counted.
+pub fn reset_today(agent: &str, now_ms: i64) -> f64 {
+    let d = day(now_ms);
+    let mut removed = 0.0;
+    // The clear is queued before the lock is let go, so a response settling at the same time cannot queue its row ahead of
+    // it: the writer would then delete spend that is still counted here.
+    let mut table = table().lock().unwrap();
+    table.retain(|(a, _, day), one| {
+        let gone = a == agent && *day == d;
+        if gone {
+            removed += one.spend.cost_usd;
+        }
+        !gone
+    });
+    queue(Write::Clear(agent.to_string(), d));
+    drop(table);
+    removed
 }
 
 #[cfg(test)]
@@ -144,9 +313,9 @@ mod tests {
     fn a_response_is_priced_by_the_models_table_and_summed_per_agent_and_day() {
         let model = catalog::route("openrouter").unwrap().model("deepseek/deepseek-v4.1-flash-1017").unwrap();
         let used = TokenCounts { input: 1_000_000, output: 500_000, cache_read: 2_000_000, ..Default::default() };
-        let one = record("spend-agent", model, &used, None, 1_000);
+        let one = record("spend-agent", "openrouter", model, &used, None, 1_000);
         assert!((one - (0.15 + 0.30 + 0.006)).abs() < 1e-9, "{one}");
-        record("spend-agent", model, &used, None, 2_000);
+        record("spend-agent", "openrouter", model, &used, None, 2_000);
         let sum = today("spend-agent", 3_000);
         assert_eq!((sum.requests, sum.tokens.output), (2, 1_000_000));
         assert!((sum.cost_usd - 2.0 * one).abs() < 1e-9);
@@ -162,22 +331,22 @@ mod tests {
     fn a_providers_own_charge_is_used_and_summed_per_session() {
         let model = catalog::route("openrouter").unwrap().model("deepseek/deepseek-v4.1-flash-1017").unwrap();
         let used = TokenCounts { input: 1_000_000, ..Default::default() };
-        let one = record("spend-route", model, &used, Some(0.004), 1_000);
+        let one = record("spend-route", "openrouter", model, &used, Some(0.004), 1_000);
         assert!((one - 0.004).abs() < 1e-12, "{one}");
         assert_eq!(session_usd("spend-route"), Some(0.004));
-        record("spend-route", model, &used, Some(0.006), 2_000);
+        record("spend-route", "openrouter", model, &used, Some(0.006), 2_000);
         assert!((session_usd("spend-route").unwrap() - 0.010).abs() < 1e-12);
         assert!((today("spend-route", 3_000).cost_usd - 0.010).abs() < 1e-12);
         // A route response that reported no charge (an interrupted stream) is
         // priced by the route's table and still counts, rather than vanishing
         // from the pane's session figure.
         let estimate = cost(model, &used);
-        record("spend-route", model, &used, None, 3_000);
+        record("spend-route", "openrouter", model, &used, None, 3_000);
         let total = session_usd("spend-route").unwrap();
         assert!((total - (0.010 + estimate)).abs() < 1e-12, "{total}");
         reset_session("spend-route");
         assert_eq!(session_usd("spend-route"), None, "a new process starts its own total");
-        record("spend-route", model, &used, None, 4_000);
+        record("spend-route", "openrouter", model, &used, None, 4_000);
         assert_eq!(session_usd("spend-route"), None, "and a costless response alone does not make one");
     }
 
@@ -185,14 +354,14 @@ mod tests {
     fn a_route_agents_result_totals_are_rewritten_to_the_providers_charge() {
         let model = catalog::route("openrouter").unwrap().model("deepseek/deepseek-v4.1-flash-1017").unwrap();
         let used = TokenCounts { input: 1_000_000, ..Default::default() };
-        record("spend-rewrite", model, &used, Some(0.0042), 1_000);
+        record("spend-rewrite", "openrouter", model, &used, Some(0.0042), 1_000);
         let line = r#"{"type":"result","total_cost_usd":97.41,"cost_usd":97.41,"num_turns":1}"#;
         let out = rewrite_result_total(line, "spend-rewrite").expect("rewritten");
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["total_cost_usd"].as_f64(), Some(0.0042));
         assert_eq!(v["cost_usd"].as_f64(), Some(0.0042), "the first frame's turn cost is the whole total");
         // A second turn: the total is cumulative, the turn figure is the rise.
-        record("spend-rewrite", model, &used, Some(0.0058), 2_000);
+        record("spend-rewrite", "openrouter", model, &used, Some(0.0058), 2_000);
         let out = rewrite_result_total(line, "spend-rewrite").expect("rewritten");
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         let total = v["total_cost_usd"].as_f64().unwrap();
@@ -202,5 +371,40 @@ mod tests {
         assert_eq!(v["num_turns"].as_u64(), Some(1), "the rest of the frame is untouched");
         assert!(rewrite_result_total(r#"{"type":"assistant"}"#, "spend-rewrite").is_none(), "not a result frame");
         assert!(rewrite_result_total(line, "spend-estimate-only").is_none(), "no provider charge: unchanged");
+    }
+
+    #[test]
+    fn a_day_is_summed_over_routes_and_a_routes_over_agents_and_it_comes_back_from_the_store() {
+        let model = catalog::route("openrouter").unwrap().model("deepseek/deepseek-v4.1-flash-1017").unwrap();
+        let used = TokenCounts { input: 1_000_000, ..Default::default() };
+        let now = agentmux_common::time::now_ms();
+        record("spend-sum-a", "route-x", model, &used, Some(1.5), now);
+        record("spend-sum-a", "route-y", model, &used, Some(0.5), now);
+        record("spend-sum-b", "route-x", model, &used, Some(2.0), now);
+        assert!((today("spend-sum-a", now).cost_usd - 2.0).abs() < 1e-12, "both routes count for the agent");
+        assert!((route_today_usd("route-x", now) - 3.5).abs() < 1e-12, "both agents count for the route");
+        assert_eq!(alerted("spend-sum-a", now), 0);
+        set_alerted("spend-sum-a", 50, now);
+        assert_eq!(alerted("spend-sum-a", now), 50);
+        assert!(agents_today(now).contains(&"spend-sum-a".to_string()));
+        set_alerted("spend-sum-none", 100, now);
+        assert_eq!(alerted("spend-sum-none", now), 100, "kept for an agent with no spend of its own");
+        assert_eq!(today("spend-sum-none", now), Spend::default());
+
+        // What was saved is what a restart reads back: the rows the table would write, loaded into a store.
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        for (key, one) in table().lock().unwrap().iter().filter(|((a, _, _), _)| a == "spend-sum-a") {
+            store.spend_day_save(&row_of(key, one)).unwrap();
+        }
+        table().lock().unwrap().retain(|(a, _, _), _| a != "spend-sum-a");
+        assert_eq!(today("spend-sum-a", now), Spend::default());
+        assert_eq!(restore(&store, now), 2);
+        assert!((today("spend-sum-a", now).cost_usd - 2.0).abs() < 1e-12);
+        assert_eq!(alerted("spend-sum-a", now), 50, "the alert already sent is not sent again after a restart");
+
+        let removed = reset_today("spend-sum-a", now);
+        assert!((removed - 2.0).abs() < 1e-12);
+        assert_eq!(today("spend-sum-a", now), Spend::default());
+        assert!((today("spend-sum-b", now).cost_usd - 2.0).abs() < 1e-12, "another agent's day is untouched");
     }
 }

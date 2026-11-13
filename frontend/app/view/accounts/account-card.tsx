@@ -29,6 +29,7 @@ import { SERVICE_CATALOG } from "./accounts-catalog";
 import type { MuxBusController } from "./AgentMuxConnectPanel";
 import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "./muxbus-session";
 import { canReconnect, clientModeTag, oauthNote, partlyGrantedLine } from "./oauth-account-state";
+import { githubKindShort } from "./github-account-copy";
 import { brandForProvider } from "./provider-brand";
 
 const STATUS: Record<AccountStatus, { tone: StatusTone; label: string }> = {
@@ -138,7 +139,7 @@ export function AccountCard(props: {
         return shown && shown !== accountLabel(a()) ? shown : brand();
     };
     const meta = () => {
-        const out: JSX.Element[] = [<span>{KIND_SHORT[a().kind] ?? a().kind}</span>];
+        const out: JSX.Element[] = [<span>{githubKindShort(a()) ?? KIND_SHORT[a().kind] ?? a().kind}</span>];
         const tag = clientModeTag(a());
         if (tag) out.push(<Pill class="account-card-tag">{tag}</Pill>);
         if (props.usedBy > 0) out.push(<span>{`Used by ${props.usedBy} ${props.usedBy === 1 ? "agent" : "agents"}`}</span>);

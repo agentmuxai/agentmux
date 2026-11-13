@@ -11,6 +11,9 @@
 //! the old one. The relay REST base (`relay::rest_base_url`) stays the root of
 //! trust; everything else comes from the document it serves, with today's
 //! compiled values as the fallback.
+//!
+//! The desktop follows a document only to hosts that are AgentMux's own: every host it names (`api`, `ws`, `console`,
+//! `cognito.domain`) must be on the list for the base it was fetched from ([`HostRule`]).
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -24,6 +27,83 @@ pub const DISCOVERY_PATH: &str = "/.well-known/agentmux-cloud.json";
 const CACHE_TTL: Duration = Duration::from_secs(300);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The hosts a document fetched from the production relay may name: exact names, not a suffix, so a sub-name nobody
+/// listed is never trusted.
+///
+/// These lists are a contract with the cloud. An installed build refuses every host that is not on its own list, so
+/// a host the cloud wants to publish later has to be in a released build first. A change here is a change to what
+/// every installed build follows: test it (`the_host_lists_are_pinned`) and release it before the cloud uses it.
+pub const PRODUCTION_HOSTS: &[&str] = &[
+    "auth.agentmux.ai",
+    "cloud.agentmux.ai",
+    "muxbus.agentmux.ai",
+    "muxbus-ws.agentmux.ai",
+    "auth.muxbus.agentmux.ai",
+];
+
+/// The names that exist under `staging.agentmux.ai`, for a document fetched from the staging relay. The lists hold
+/// only names that exist.
+pub const STAGING_HOSTS: &[&str] = &[
+    "auth.staging.agentmux.ai",
+    "cloud.staging.agentmux.ai",
+    "muxbus.staging.agentmux.ai",
+    "muxbus-ws.staging.agentmux.ai",
+];
+
+/// Which hosts a document may name, decided by the relay base it was fetched from.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+enum HostRule {
+    /// The production list. Also what a value that never went through [`parse`] gets: the strictest.
+    #[default]
+    Production,
+    Staging,
+    /// A plain-http base: a local relay for tests and development. Any host.
+    Local,
+    /// Any other https base (set by hand): that base's own host, and the two lists.
+    Own(String),
+}
+
+/// The host of an `https`/`wss` URL, lower-cased, if it is a bare host name: no credentials in it and no port other
+/// than the scheme's own.
+fn bare_host(url: &str) -> Option<String> {
+    let url = url::Url::parse(url).ok()?;
+    if !url.username().is_empty() || url.password().is_some() || url.port().is_some() {
+        return None;
+    }
+    Some(url.host_str()?.to_ascii_lowercase())
+}
+
+impl HostRule {
+    fn for_base(rest_base: &str) -> HostRule {
+        if rest_base.starts_with("http://") {
+            return HostRule::Local;
+        }
+        match bare_host(rest_base) {
+            Some(host) if PRODUCTION_HOSTS.contains(&host.as_str()) => HostRule::Production,
+            Some(host) if STAGING_HOSTS.contains(&host.as_str()) => HostRule::Staging,
+            Some(host) => HostRule::Own(host),
+            None => HostRule::Production,
+        }
+    }
+
+    /// Whether the host `url` names may be followed.
+    fn allows(&self, url: &str) -> bool {
+        if *self == HostRule::Local {
+            return true;
+        }
+        let Some(host) = bare_host(url) else {
+            return false;
+        };
+        let host = host.as_str();
+        match self {
+            HostRule::Production => PRODUCTION_HOSTS.contains(&host),
+            HostRule::Staging => STAGING_HOSTS.contains(&host),
+            HostRule::Own(own) => host == own || PRODUCTION_HOSTS.contains(&host) || STAGING_HOSTS.contains(&host),
+            HostRule::Local => true,
+        }
+    }
+}
+
 /// What the cloud publishes. Only the fields srv uses; others are ignored.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct CloudSettings {
@@ -35,6 +115,17 @@ pub struct CloudSettings {
     #[serde(default)]
     pub console: String,
     pub cognito: CognitoSettings,
+    /// Which hosts this document may name, from the base it was fetched from. Set by [`parse`].
+    #[serde(skip)]
+    rule: HostRule,
+}
+
+impl CloudSettings {
+    /// Whether the host `url` names is one this document may send a sign-in or a token to. The check at the point of
+    /// use, whatever [`parse`] did.
+    pub fn allows_host_of(&self, url: &str) -> bool {
+        self.rule.allows(url)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -80,22 +171,42 @@ pub fn check_identity_provider(
 }
 
 /// Parse and check a discovery document. `None` for anything srv shouldn't
-/// act on: another format version, a missing field, or a URL that isn't
+/// act on: another format version, a missing field, a URL that isn't
 /// https/wss (plain http/ws only when the relay itself is plain http, i.e. a
-/// local dev relay).
+/// local dev relay), or a host that is not AgentMux's own (see [`HostRule`]).
 pub fn parse(body: &str, rest_base: &str) -> Option<CloudSettings> {
-    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    check(body, rest_base).ok()
+}
+
+/// [`parse`], saying why a document is refused. The reason names a field, never a value.
+fn check(body: &str, rest_base: &str) -> Result<CloudSettings, String> {
+    let value: serde_json::Value = serde_json::from_str(body).map_err(|_| "not JSON".to_string())?;
     if value.get("version").and_then(|v| v.as_u64()) != Some(1) {
-        return None;
+        return Err("not a version 1 document".to_string());
     }
-    let settings: CloudSettings = serde_json::from_value(value).ok()?;
+    let mut settings: CloudSettings = serde_json::from_value(value).map_err(|_| "a field is missing".to_string())?;
     let local = rest_base.starts_with("http://");
     let secure = |url: &str, scheme: &str, dev: &str| url.starts_with(scheme) || (local && url.starts_with(dev));
     let ok = secure(&settings.api, "https://", "http://")
         && secure(&settings.ws, "wss://", "ws://")
         && secure(&settings.cognito.domain, "https://", "http://")
         && !settings.cognito.client_id.is_empty();
-    ok.then_some(settings)
+    if !ok {
+        return Err("a URL scheme or the client id is not acceptable".to_string());
+    }
+    settings.rule = HostRule::for_base(rest_base);
+    let named = [
+        ("api", &settings.api),
+        ("ws", &settings.ws),
+        ("console", &settings.console),
+        ("cognito.domain", &settings.cognito.domain),
+    ];
+    for (field, url) in named {
+        if !url.is_empty() && !settings.rule.allows(url) {
+            return Err(format!("{field} names a host that is not AgentMux's own"));
+        }
+    }
+    Ok(settings)
 }
 
 struct Cache {
@@ -146,11 +257,13 @@ async fn fetch(http: &reqwest::Client, base: &str) -> Option<CloudSettings> {
         return None;
     }
     let body = resp.text().await.ok()?;
-    let parsed = parse(&body, base);
-    if parsed.is_none() {
-        tracing::warn!(url = %url, "cloud discovery: document rejected (version, fields or URL schemes); using defaults");
+    match check(&body, base) {
+        Ok(settings) => Some(settings),
+        Err(why) => {
+            tracing::warn!(url = %url, reason = %why, "cloud discovery: document refused; using defaults");
+            None
+        }
     }
-    parsed
 }
 
 /// Where the cloud subscriber connects: the published WebSocket URL, else the
@@ -178,7 +291,7 @@ pub fn resolve_login(
     supplied_domain: &str,
     supplied_client_id: &str,
 ) -> Result<(String, String), String> {
-    if let Some(s) = discovered {
+    if let Some(s) = discovered.filter(|s| s.allows_host_of(&s.cognito.domain)) {
         return Ok((s.cognito.domain.clone(), s.cognito.client_id.clone()));
     }
     if !supplied_domain.is_empty() && !supplied_client_id.is_empty() {
@@ -204,17 +317,20 @@ mod tests {
 
     const DOC: &str = r#"{
         "version": 1,
-        "api": "https://muxbus.example.test",
-        "ws": "wss://muxbus-ws.example.test",
-        "console": "https://cloud.example.test",
-        "cognito": { "domain": "https://auth.example.test", "clientId": "abc123", "region": "us-east-1", "userPoolId": "us-east-1_X" },
+        "api": "https://muxbus.agentmux.ai",
+        "ws": "wss://muxbus-ws.agentmux.ai",
+        "console": "https://cloud.agentmux.ai",
+        "cognito": { "domain": "https://auth.agentmux.ai", "clientId": "abc123", "region": "us-east-1", "userPoolId": "us-east-1_X" },
         "someFutureField": true
     }"#;
 
+    /// The compiled production relay base.
+    const BASE: &str = "https://muxbus.agentmux.ai";
+
     #[test]
     fn a_version_1_document_parses_and_ignores_unknown_fields() {
-        let s = parse(DOC, "https://muxbus.example.test").unwrap();
-        assert_eq!(s.ws, "wss://muxbus-ws.example.test");
+        let s = parse(DOC, BASE).unwrap();
+        assert_eq!(s.ws, "wss://muxbus-ws.agentmux.ai");
         assert_eq!(s.cognito.client_id, "abc123");
         assert_eq!(s.cognito.user_pool_id, "us-east-1_X");
         assert!(s.cognito.identity_providers.is_empty(), "an older document has no provider list");
@@ -223,16 +339,16 @@ mod tests {
     #[test]
     fn the_published_identity_providers_parse() {
         let doc = DOC.replace("\"region\"", "\"identityProviders\": [\"Google\", \"SignInWithApple\"], \"region\"");
-        let s = parse(&doc, "https://muxbus.example.test").unwrap();
+        let s = parse(&doc, BASE).unwrap();
         assert_eq!(s.cognito.identity_providers, vec!["Google", "SignInWithApple"]);
     }
 
     #[test]
     fn a_sign_in_provider_must_be_known_and_published() {
-        let old = parse(DOC, "https://muxbus.example.test").unwrap();
+        let old = parse(DOC, BASE).unwrap();
         let google_only = parse(
             &DOC.replace("\"region\"", "\"identityProviders\": [\"Google\"], \"region\""),
-            "https://muxbus.example.test",
+            BASE,
         )
         .unwrap();
         assert_eq!(check_identity_provider(Some(&google_only), None), Ok(None));
@@ -248,7 +364,7 @@ mod tests {
 
     #[test]
     fn other_versions_and_incomplete_documents_are_ignored() {
-        let base = "https://muxbus.example.test";
+        let base = BASE;
         assert!(parse(&DOC.replace("\"version\": 1", "\"version\": 2"), base).is_none());
         assert!(parse(&DOC.replace("\"clientId\": \"abc123\"", "\"clientId\": \"\""), base).is_none());
         assert!(parse(r#"{"version":1,"api":"https://a","ws":"wss://b"}"#, base).is_none());
@@ -258,34 +374,134 @@ mod tests {
     #[test]
     fn insecure_urls_are_refused_except_from_a_local_dev_relay() {
         let plain = DOC.replace("wss://muxbus-ws", "ws://muxbus-ws");
-        assert!(parse(&plain, "https://muxbus.example.test").is_none());
+        assert!(parse(&plain, BASE).is_none());
         assert!(parse(&plain, "http://localhost:3100").is_some());
-        let plain_auth = DOC.replace("https://auth", "http://auth");
-        assert!(parse(&plain_auth, "https://muxbus.example.test").is_none());
+        let plain_auth = DOC.replace("https://auth.agentmux.ai", "http://auth.agentmux.ai");
+        assert!(parse(&plain_auth, BASE).is_none());
     }
 
     #[test]
     fn login_uses_the_published_pair_else_the_builds_else_errors() {
-        let s = parse(DOC, "https://muxbus.example.test").unwrap();
+        let s = parse(DOC, BASE).unwrap();
         assert_eq!(
             resolve_login(Some(&s), "https://compiled", "compiled-id").unwrap(),
-            ("https://auth.example.test".to_string(), "abc123".to_string())
+            ("https://auth.agentmux.ai".to_string(), "abc123".to_string())
         );
         assert_eq!(
             resolve_login(None, "https://compiled", "compiled-id").unwrap(),
             ("https://compiled".to_string(), "compiled-id".to_string())
         );
         assert!(resolve_login(None, "https://compiled", "").is_err());
+        assert!(resolve_login(None, "", "compiled-id").is_err(), "half a pair is no pair");
         assert!(resolve_login(None, "", "").is_err());
     }
 
     #[test]
     fn a_sign_in_from_another_client_is_superseded_only_when_the_cloud_says_so() {
-        let s = parse(DOC, "https://muxbus.example.test").unwrap();
+        let s = parse(DOC, BASE).unwrap();
         assert!(client_id_superseded(Some(&s), "old-client"));
         assert!(!client_id_superseded(Some(&s), "abc123"));
         assert!(!client_id_superseded(None, "old-client"), "no document: can't tell");
         assert!(!client_id_superseded(Some(&s), ""), "no recorded client id: can't tell");
+    }
+
+    #[test]
+    fn the_host_lists_are_pinned() {
+        // A host added here is followed by every build that has it and refused by every build that does not.
+        assert_eq!(
+            PRODUCTION_HOSTS,
+            ["auth.agentmux.ai", "cloud.agentmux.ai", "muxbus.agentmux.ai", "muxbus-ws.agentmux.ai", "auth.muxbus.agentmux.ai"]
+        );
+        assert_eq!(
+            STAGING_HOSTS,
+            [
+                "auth.staging.agentmux.ai",
+                "cloud.staging.agentmux.ai",
+                "muxbus.staging.agentmux.ai",
+                "muxbus-ws.staging.agentmux.ai"
+            ]
+        );
+    }
+
+    #[test]
+    fn every_listed_host_is_accepted_in_every_field_it_may_be_published_in() {
+        for host in PRODUCTION_HOSTS {
+            let doc = DOC
+                .replace("https://muxbus.agentmux.ai", &format!("https://{host}"))
+                .replace("wss://muxbus-ws.agentmux.ai", &format!("wss://{host}"))
+                .replace("https://cloud.agentmux.ai", &format!("https://{host}"))
+                .replace("https://auth.agentmux.ai", &format!("https://{host}"));
+            assert!(parse(&doc, BASE).is_some(), "{host}");
+        }
+    }
+
+    #[test]
+    fn a_document_naming_another_host_in_any_field_is_refused() {
+        let other = "other.example.test";
+        for (field, doc) in [
+            ("api", DOC.replace("https://muxbus.agentmux.ai", &format!("https://{other}"))),
+            ("ws", DOC.replace("wss://muxbus-ws.agentmux.ai", &format!("wss://{other}"))),
+            ("console", DOC.replace("https://cloud.agentmux.ai", &format!("https://{other}"))),
+            ("cognito.domain", DOC.replace("https://auth.agentmux.ai", &format!("https://{other}"))),
+        ] {
+            assert!(parse(&doc, BASE).is_none(), "{field}");
+            let why = check(&doc, BASE).unwrap_err();
+            assert!(why.starts_with(field) && !why.contains(other), "the reason names the field, not the host: {why}");
+        }
+    }
+
+    #[test]
+    fn a_host_is_matched_exactly_not_by_its_suffix_and_without_credentials_or_a_port() {
+        for bad in [
+            "https://evil.auth.agentmux.ai",
+            "https://auth.agentmux.ai.evil.test",
+            "https://agentmux.ai",
+            "https://xauth.agentmux.ai",
+            "https://auth.agentmux.ai@evil.test",
+            "https://evil.test@auth.agentmux.ai",
+            "https://auth.agentmux.ai:8443",
+            "https://auth.staging.agentmux.ai",
+            "https://auth.agentmux.ai.",
+        ] {
+            let doc = DOC.replace("https://auth.agentmux.ai", bad);
+            assert!(parse(&doc, BASE).is_none(), "{bad}");
+        }
+        // The host name's letter case and a path do not matter; the name does.
+        assert!(parse(&DOC.replace("https://auth.agentmux.ai", "https://AUTH.AgentMux.ai/login"), BASE).is_some());
+        assert!(parse(&DOC.replace("https://auth.agentmux.ai", "https://auth.agentmux.ai:443"), BASE).is_some());
+    }
+
+    #[test]
+    fn the_list_is_chosen_by_the_base_the_document_came_from() {
+        let staging = DOC.replace(".agentmux.ai", ".staging.agentmux.ai");
+        // Staging names from a staging base; production names from a production base; never across.
+        assert!(parse(&staging, "https://muxbus.staging.agentmux.ai").is_some());
+        assert!(parse(&staging, BASE).is_none());
+        assert!(parse(DOC, "https://muxbus.staging.agentmux.ai").is_none());
+        // Either name of an environment's relay picks that environment's list: muxbus.X today, cloud.X later.
+        assert!(parse(DOC, "https://cloud.agentmux.ai").is_some());
+        assert!(parse(&staging, "https://cloud.staging.agentmux.ai").is_some());
+        assert!(parse(DOC, "https://cloud.staging.agentmux.ai").is_none());
+        assert!(parse(&staging, "https://cloud.agentmux.ai").is_none());
+        // A plain-http base is a local relay: any host, as before.
+        assert!(parse(&DOC.replace("https://auth.agentmux.ai", "http://127.0.0.1:9000"), "http://localhost:3100").is_some());
+        // Another https base set by hand: its own host and the two lists, nothing else.
+        let own = "https://relay.example.test";
+        assert!(parse(&DOC.replace("https://muxbus.agentmux.ai", own), own).is_some());
+        assert!(parse(&DOC.replace("https://muxbus.agentmux.ai", "https://other.example.test"), own).is_none());
+        assert!(parse(&DOC.replace("https://auth.agentmux.ai", "https://auth.example.test"), own).is_none());
+    }
+
+    #[test]
+    fn a_sign_in_never_starts_at_a_host_that_is_not_the_documents_to_name() {
+        // Whatever `parse` let through, the host is checked again where it is used.
+        let mut s = parse(DOC, BASE).unwrap();
+        s.cognito.domain = "https://other.example.test".to_string();
+        assert_eq!(
+            resolve_login(Some(&s), "https://compiled", "compiled-id").unwrap(),
+            ("https://compiled".to_string(), "compiled-id".to_string()),
+            "the compiled pair keeps working"
+        );
     }
 
     /// A relay that answers every request with `status` and `body`.
@@ -330,8 +546,8 @@ mod tests {
 
     #[test]
     fn a_failed_fetch_keeps_the_last_good_document() {
-        let old = parse(DOC, "https://muxbus.example.test").unwrap();
-        let new = parse(&DOC.replace("abc123", "def456"), "https://muxbus.example.test").unwrap();
+        let old = parse(DOC, BASE).unwrap();
+        let new = parse(&DOC.replace("abc123", "def456"), BASE).unwrap();
         assert_eq!(keep_last_good(Some(&old), None), Some(old.clone()));
         assert_eq!(keep_last_good(Some(&old), Some(new.clone())), Some(new));
         assert_eq!(keep_last_good(None, None), None);

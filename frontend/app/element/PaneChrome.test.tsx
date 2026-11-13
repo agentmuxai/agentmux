@@ -1519,6 +1519,50 @@ describe("renderPaneChromeShell — locate flash", () => {
         await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(2));
     });
 
+    it("a click replays the flash while the last is still on screen, which fades on until the new one starts", async () => {
+        render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: () => true }), <div>content</div>) as any);
+        emitPaneLocate("b1", { again: true });
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(1));
+        // The next click comes mid-flash and has to wait for its turn (three flashes a second at most).
+        slotWait = 120;
+        emitPaneLocate("b1", { again: true });
+        await new Promise((r) => setTimeout(r, 40));
+        expect(showLocateFlash).toHaveBeenCalledTimes(1);
+        expect(stopLocateFlash).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(2));
+        expect(stopLocateFlash).toHaveBeenCalledTimes(1);
+        // And again, with no wait at all.
+        slotWait = 0;
+        emitPaneLocate("b1", { again: true });
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(3));
+        expect(stopLocateFlash).toHaveBeenCalledTimes(2);
+    });
+
+    it("a click while the pane is still waiting to be seen is the same flash", async () => {
+        const [focused, setFocused] = createSignal(false);
+        render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: focused }), <div>content</div>) as any);
+        emitPaneLocate("b1", { again: true });
+        emitPaneLocate("b1", { again: true });
+        setFocused(true);
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(1));
+        await settle();
+        expect(showLocateFlash).toHaveBeenCalledTimes(1);
+    });
+
+    it("a replay the pane is left before it starts leaves the old flash to end by itself", async () => {
+        const [focused, setFocused] = createSignal(true);
+        render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: focused }), <div>content</div>) as any);
+        emitPaneLocate("b1", { again: true });
+        await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(1));
+        slotWait = 200;
+        emitPaneLocate("b1", { again: true });
+        setFocused(false);
+        // The pane lost focus: nothing marks it, and the flash that was carrying on is stopped with the rest.
+        expect(stopLocateFlash).toHaveBeenCalled();
+        await new Promise((r) => setTimeout(r, 250));
+        expect(showLocateFlash).toHaveBeenCalledTimes(1);
+    });
+
     it("a pane that never became visible lets the next request start afresh", async () => {
         const [focused, setFocused] = createSignal(false);
         render(() => renderPaneChromeShell(fakeNodeModel({ isFocused: focused }), <div>content</div>) as any);

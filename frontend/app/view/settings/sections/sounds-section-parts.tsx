@@ -4,6 +4,7 @@
 // The groups of Settings → Sounds & Notifications (sounds-section.tsx lays them out): the notification sounds, the
 // tool-call tones, the waiting tone and the shutdown warning. Each group is its rows, returned as a fragment.
 
+import { t } from "@/app/i18n/i18n";
 import { Select } from "@/app/element/ui";
 import { Show, type JSX } from "solid-js";
 
@@ -145,7 +146,7 @@ export function ToolTonesGroup(): JSX.Element {
     const toolTonesEnabled = () => s()["notify:tooltones:enabled"] !== false;
     return (
         <>
-            <SectionHeader label="Tool-call tones" />
+            <SectionHeader label={t("settings.sounds.group.toolCallTones")} />
             <SettingRow
                 id={SOUNDS_SETTINGS.toolTonesEnabled.id}
                 label={SOUNDS_SETTINGS.toolTonesEnabled.label}
@@ -191,7 +192,7 @@ export function WaitingToneGroup(): JSX.Element {
     const waitingToneEnabled = () => s()["notify:sound:agent.waiting.for.input"] !== false;
     return (
         <>
-            <SectionHeader label="Waiting for input" />
+            <SectionHeader label={t("settings.sounds.group.waitingForInput")} />
             <SettingRow
                 id={SOUNDS_SETTINGS.waitingToneEnabled.id}
                 label={SOUNDS_SETTINGS.waitingToneEnabled.label}
@@ -243,7 +244,7 @@ export function WaitingToneGroup(): JSX.Element {
 export function ShutdownWarningGroup(): JSX.Element {
     return (
         <>
-            <SectionHeader label="Shutdown warning" />
+            <SectionHeader label={t("settings.sounds.group.shutdownWarning")} />
             <SettingRow
                 id={SOUNDS_SETTINGS.shutdownToneEnabled.id}
                 label={SOUNDS_SETTINGS.shutdownToneEnabled.label}

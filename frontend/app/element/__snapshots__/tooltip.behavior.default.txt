@@ -1,0 +1,129 @@
+-- mount a
+-- closed
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+-- hover a
+claimOpen tip1 register=true
+isWarm tip1 -> false
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- hovering, 0 ms: open, not yet visible
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- 39 ms pass
+-- 39 ms
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- 1 ms pass
+-- 40 ms: visible, not placed
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- the popover is placed
+-- placed
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 1; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- leave a
+-- left
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- 99 ms pass
+-- 99 ms after leaving
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- 1 ms pass
+popover removed
+releaseOpen tip1
+-- 100 ms after leaving: closed
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+-- hover a
+claimOpen tip1 register=true
+isWarm tip1 -> true
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- hovered again at once: warm, so no rest
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- the popover is placed
+-- leave a
+popover removed
+releaseOpen tip1
+-- 500 ms pass
+-- hover a
+claimOpen tip1 register=true
+isWarm tip1 -> false
+popover mounted placement=top gutter=10 hideUntilPlaced=true shellClass="anchored-popover--tooltip" anchor=div.
+-- hovered after the warm time: rests again
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"
+-- 40 ms pass
+-- visible again
+<body>
+  <div>
+    <div>
+      <span>
+        "a"
+    <div data-popover="" class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl" style="opacity: 0; transition: opacity var(--duration-instant) var(--ease-out);">
+      <span>
+        "a"
+        "content"

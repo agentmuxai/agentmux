@@ -38,11 +38,7 @@ pub(super) fn marker_says_done(
 
 /// True when `db_agent_definitions` exists at all.
 pub(super) fn definitions_table_exists(conn: &Connection) -> Result<bool, StoreError> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_agent_definitions')",
-        [],
-        |row| row.get(0),
-    )?)
+    Ok(crate::migrations::table_exists(conn, "db_agent_definitions")?)
 }
 
 /// Pass 1 + 2 — definitions.
@@ -183,11 +179,7 @@ pub(super) fn load_instances(tx: &Transaction) -> Result<Vec<InstanceRow>, Store
     // Order by created_at DESC so the FIRST instance we see for a
     // given user-cloned def is the most recent (the spec wants
     // most-recent bindings to win on collision).
-    let insts_exist: bool = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_agent_instances')",
-        [],
-        |row| row.get(0),
-    )?;
+    let insts_exist = crate::migrations::table_exists(tx, "db_agent_instances")?;
     if !insts_exist {
         return Ok(Vec::new());
     }

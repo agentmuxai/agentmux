@@ -10,7 +10,13 @@
 import { createSignal } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { summarizeAmbientOutcomes, type AmbientOutcomeSummary, type AmbientOutcomes } from "./ambient-outcomes";
+import {
+    describeFailingTip,
+    summarizeAmbientOutcomes,
+    type AmbientFailure,
+    type AmbientOutcomeSummary,
+    type AmbientOutcomes,
+} from "./ambient-outcomes";
 
 /** How often the indicator asks while the popover is closed. */
 export const AMBIENT_BACKGROUND_MS = 60_000;
@@ -19,11 +25,18 @@ export const AMBIENT_OPEN_MS = 5_000;
 
 const [outcomes, setOutcomes] = createSignal<AmbientOutcomes | null>(null);
 const [failed, setFailed] = createSignal(false);
+const [failures, setFailures] = createSignal<ReadonlyArray<AmbientFailure>>([]);
 
 /** `null` until some call has ended at least once. */
 export const ambientSummary = (): AmbientOutcomeSummary | null => summarizeAmbientOutcomes(outcomes());
 /** How many purposes are failing. */
 export const ambientFailingCount = (): number => ambientSummary()?.unhealthyCount ?? 0;
+/** The latest failure of each purpose for each agent pane, newest first; empty until srv names any. */
+export const ambientFailures = failures;
+/** What the dot says is failing, in plain words, with the pane when srv names it. */
+export const ambientFailingTip = (): string => describeFailingTip(ambientSummary(), failures());
+/** Replace the failures the dot and the popover name. */
+export const setAmbientFailures = setFailures;
 /** The last ask failed. The counts stay: a failed ask says nothing about them. */
 export const ambientAskFailed = failed;
 

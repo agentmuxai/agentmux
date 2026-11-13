@@ -55,3 +55,17 @@
     min-width: 3.5rem;
     justify-content: flex-end;
 }
+
+
+// A narrow Settings pane: the name keeps the row's width and the Pinned / More / Hidden control goes under it, instead
+// of the name shrinking to one letter beside the arrows and the control.
+@container settings (max-width: 479px) {
+    .widget-bar-row {
+        grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+
+        > .ui-segmented {
+            grid-column: 2 / -1;
+            justify-self: start;
+        }
+    }
+}

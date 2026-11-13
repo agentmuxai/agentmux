@@ -62,13 +62,7 @@ const CARD_COLUMNS: [&str; 2] = [
 pub(crate) fn apply_schema(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(super::work_board::SCHEMA)?;
     conn.execute_batch(SCHEMA)?;
-    for stmt in CARD_COLUMNS {
-        if let Err(e) = conn.execute_batch(stmt) {
-            if !e.to_string().contains("duplicate column") {
-                return Err(e.into());
-            }
-        }
-    }
+    super::migrations::apply_additive_columns(conn, CARD_COLUMNS)?;
     conn.execute_batch(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_work_cards_board_num
              ON db_work_cards(board_id, board_num) WHERE board_id <> '';
@@ -830,13 +824,17 @@ fn slug_free(conn: &Connection, slug: &str, except: &str, now_ms: i64) -> Result
 
 /// SQL: the card `c` is on a board an agent may work on (not archived, and its list is empty or
 /// has the agent). `id` and `uid` are the placeholders the caller bound for the agent's id and
-/// UID. A card with no board yet counts as visible (an older build's, numbered on first sight).
+/// UID. A card with no board yet (an older build's, numbered on first sight) is on the default
+/// board; with no default board at all it counts as visible.
 pub(crate) fn card_visible_to_agent(id: &str, uid: &str) -> String {
     format!(
-        "(c.board_id IS NULL OR c.board_id = '' OR EXISTS (
-            SELECT 1 FROM db_boards b WHERE b.id = c.board_id AND b.archived = 0
+        "(EXISTS (
+            SELECT 1 FROM db_boards b
+             WHERE b.id = COALESCE(NULLIF(c.board_id, ''), (SELECT id FROM db_boards WHERE is_default = 1 LIMIT 1))
+               AND b.archived = 0
                AND (b.agents = '' OR instr(b.agents, '\"' || {id} || '\"') > 0
-                    OR ({uid} <> '' AND instr(b.agents, '\"' || {uid} || '\"') > 0))))"
+                    OR ({uid} <> '' AND instr(b.agents, '\"' || {uid} || '\"') > 0)))
+         OR (COALESCE(c.board_id, '') = '' AND NOT EXISTS (SELECT 1 FROM db_boards WHERE is_default = 1)))"
     )
 }
 

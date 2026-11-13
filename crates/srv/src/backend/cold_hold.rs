@@ -62,6 +62,10 @@ pub fn why_not_routine(req: &InjectionRequest, proven_peer: bool) -> Option<&'st
         Some("its sender is not proven")
     } else if req.files.is_some() {
         Some("it carries files")
+    } else if req.files_delivery.is_some() {
+        // Its files were dropped, with a note saying why (malformed, over the limits, a signature that did
+        // not match). A held row has nowhere to keep the note, so the message is delivered with it now.
+        Some("its files were dropped and a note says why")
     } else if req.is_transcript_request {
         Some("it asks for a transcript")
     } else if matches!(req.jekt_tier, Some(JektTier::Sensitive)) {
@@ -226,6 +230,9 @@ mod tests {
         assert_eq!(why_not_routine(&unproven, false), Some("its sender is not proven"));
         assert_eq!(why_not_routine(&unproven, true), None, "a proven peer on another machine may wait too");
         assert_eq!(why_not_routine(&transcript, false), Some("it asks for a transcript"));
+        let mut dropped = routine();
+        dropped.files_delivery = Some(Default::default());
+        assert_eq!(why_not_routine(&dropped, true), Some("its files were dropped and a note says why"));
     }
 
     #[test]

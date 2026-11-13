@@ -6,7 +6,7 @@
 //!
 //! Runs exactly once per channel, tracked in that channel's `db_migrations`
 //! table — NOT gated on "is the catalog currently empty," for the same
-//! reason `m0015_seed_starter_skills` isn't: that gate can't distinguish
+//! reason the retired starter-skills seed wasn't: that gate can't distinguish
 //! "never seeded" from "seeded then the user deleted every starter server on
 //! purpose," which would silently resurrect the defaults on the next restart
 //! after a full deletion. The migration framework's once-ever-per-channel
@@ -14,8 +14,8 @@
 //! marked applied, it never runs again for that channel regardless of what
 //! the user does to the catalog afterward.
 //!
-//! `up()` checks for an existing name collision first (same self-heal as
-//! m0015) and treats it as "already seeded" rather than inserting — guards
+//! `up()` checks for an existing name collision first (the same self-heal
+//! the starter-skills seed had) and treats it as "already seeded" rather than inserting — guards
 //! against any future retired startup-seed path leaving the six starter
 //! names present before this migration ever ran.
 //!
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn self_heals_when_starter_servers_already_exist_from_a_prior_run() {
-        // Mirrors m0015's equivalent test: guards against any future
+        // Guards against any future
         // retired startup-seed path leaving starter-server names present
         // before this migration ever ran. Simulate that pre-existing state
         // directly and confirm `up()` succeeds as a no-op instead of

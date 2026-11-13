@@ -133,10 +133,12 @@ fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, prov
     let label = account_label_in(to, all);
     let mut result = AgentAccountSwitchResult { status: AccountSwitchStatus::Switched, account_id: to.id.clone(), account_label: label.clone(), restarted: 0, failed: Vec::new() };
     let linked = relink(state, def_id, &to.id, provider);
+    let signed_out = linked.clone().unwrap_or_default();
+    let mut restarted_ok: Vec<&str> = Vec::new();
     let request_id = uuid::Uuid::new_v4().to_string();
     let reason = format!("switched to {label}");
     for block in blocks {
-        let outcome = linked.clone().and_then(|()| {
+        let outcome = linked.clone().and_then(|_| {
             refresh_auth_env(state, block, to, provider);
             if now && busy(state, &block.oid) {
                 stop_turn(block);
@@ -154,10 +156,14 @@ fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, prov
             Some(&reason),
         );
         match outcome {
-            Ok(()) => result.restarted += 1,
+            Ok(()) => {
+                result.restarted += 1;
+                restarted_ok.push(&block.oid);
+            }
             Err(e) => result.failed.push(e),
         }
     }
+    tell_signed_out(actor, signed_out, &restarted_ok);
     if blocks.is_empty() {
         if let Err(e) = linked {
             result.failed.push(e);
@@ -170,6 +176,23 @@ fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, prov
     tracing::info!(agent = %actor, def_id = %def_id, restarted = result.restarted, failed = result.failed.len(), "agent.account.switch: switched an agent's account");
     super::refresh_soon();
     result
+}
+
+/// Tell the panes of `signed_out` (whose last turn failed on the login the move left) that they are signed in, now
+/// that each has restarted on the new account: before the restart the note would reach the old process, still on the
+/// expired login, and mark a turn active that defers or kills the restart. A pane that didn't restart is not told: it
+/// keeps its failure's notice and runs on the new account when it next starts. The login-expiry failover tells its own
+/// interrupted panes ([`super::login_expiry::resume`]).
+fn tell_signed_out(actor: &str, signed_out: Vec<super::resume::Failed>, restarted: &[&str]) {
+    super::resume::start(panes_to_tell(actor, signed_out, restarted), agentmux_common::time::now_ms());
+}
+
+/// The panes of `signed_out` to tell: those in `restarted`, and none when `actor` is the login-expiry failover.
+pub(super) fn panes_to_tell(actor: &str, signed_out: Vec<super::resume::Failed>, restarted: &[&str]) -> Vec<super::resume::Failed> {
+    if actor == super::failover::ACTOR_EXPIRED {
+        return Vec::new();
+    }
+    signed_out.into_iter().filter(|f| restarted.contains(&f.block_id.as_str())).collect()
 }
 
 /// One agent's outcome in an `all limited` switch.

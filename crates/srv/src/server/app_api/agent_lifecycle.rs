@@ -50,6 +50,12 @@ pub(super) struct Actor {
     slug: String,
 }
 
+impl Actor {
+    pub(super) fn uid(&self) -> &str {
+        &self.uid
+    }
+}
+
 pub(super) fn actor_of(state: &AppState, caller: Option<&Caller>, action: &str) -> Result<Actor, Refusal> {
     let Some(uid) = caller.and_then(Caller::uid) else {
         return Err(refuse(

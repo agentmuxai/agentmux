@@ -304,6 +304,84 @@ async fn a_sign_in_leaves_a_usage_limit_alone() {
     cleanup(&[&block]);
 }
 
+/// The panes a sign-in answers are the ones whose last turn failed on the login, named with when it failed,
+/// so each is told once (task #2458): a pane that did not fail, a usage limit and another account's pane are not.
+#[tokio::test]
+async fn a_sign_in_names_only_the_panes_whose_turn_failed_on_the_login() {
+    let state = test_state();
+    let tab = new_tab(&state).await;
+    let mut failed = failure("auth", None, None);
+    failed["atMs"] = json!(1_700_000_000_000u64);
+    let signed_out = pane(&state, &tab, "r1", "Signed-out", "acct-a", Some(failed), false).await;
+    let fine = pane(&state, &tab, "r2", "Fine", "acct-a", None, false).await;
+    let limited = pane(&state, &tab, "r3", "Limited", "acct-a", Some(failure("usage_limit", Some(agentmux_common::time::now_ms_u64() + 60_000), Some("five_hour"))), false).await;
+    let elsewhere = pane(&state, &tab, "r4", "Elsewhere", "acct-b", Some(failure("auth", None, None)), false).await;
+
+    let told = clear_signed_out_panes(&state.mstore, &state.identity_store, &state.event_bus, "acct-a");
+    assert_eq!(told, vec![Failed { block_id: signed_out.clone(), failed_at_ms: Some(1_700_000_000_000) }]);
+    assert!(clear_signed_out_panes(&state.mstore, &state.identity_store, &state.event_bus, "acct-a").is_empty(), "the failure is cleared: a second report of the sign-in names no one");
+    assert!(stored_failure(&state, &limited).is_some() && stored_failure(&state, &elsewhere).is_some());
+    cleanup(&[&signed_out, &fine, &limited, &elsewhere]);
+}
+
+/// Only a move to a login known to work tells the agent it is signed in (task #2458): not an unlink (no account
+/// at all), not a key nobody has checked.
+#[tokio::test]
+async fn only_a_move_to_a_working_login_tells_the_agent_it_is_signed_in() {
+    let state = test_state();
+    let tab = new_tab(&state).await;
+    let moved = pane(&state, &tab, "t1", "Moved", "old", Some(failure("auth", None, None)), false).await;
+    let unlinked = pane(&state, &tab, "t2", "Unlinked", "old", Some(failure("auth", None, None)), false).await;
+    let unchecked = pane(&state, &tab, "t3", "Unchecked", "old", Some(failure("auth", None, None)), false).await;
+    let before = |agent: &str| failed_panes(&state.mstore, &state.identity_store, agent, "claude");
+
+    assert_eq!(after_rebind_telling(&state.mstore, &state.event_bus, before("t2"), "", true), 1, "an unlink clears the failure");
+    assert_eq!(after_rebind_telling(&state.mstore, &state.event_bus, before("t3"), "new", false), 1, "an unchecked key clears it too");
+    assert_eq!(after_rebind_telling(&state.mstore, &state.event_bus, before("t1"), "new", true), 1);
+    for _ in 0..50 {
+        if crate::backend::reactive::held_notes::attach(&moved, "x").0.contains("Signed in again at") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    // A pane with no controller keeps the note for its next turn; only the moved pane has one.
+    let (moved_next, _g1) = crate::backend::reactive::held_notes::attach(&moved, "x");
+    let (unlinked_next, _g2) = crate::backend::reactive::held_notes::attach(&unlinked, "x");
+    let (unchecked_next, _g3) = crate::backend::reactive::held_notes::attach(&unchecked, "x");
+    assert!(!unlinked_next.contains("Signed in again"), "{unlinked_next}");
+    assert!(!unchecked_next.contains("Signed in again"), "{unchecked_next}");
+    assert!(moved_next.contains("Signed in again at"), "{moved_next}");
+    assert!(stored_failure(&state, &moved).is_none() && stored_failure(&state, &unlinked).is_none() && stored_failure(&state, &unchecked).is_none());
+    cleanup(&[&moved, &unlinked, &unchecked]);
+}
+
+/// A move restarts its panes after the relink, so the relink only clears the failure and names the pane
+/// (task #2481): telling it there would reach the old process, still on the expired login.
+#[tokio::test]
+async fn a_move_names_the_signed_out_pane_at_the_relink_but_tells_it_only_after_the_restart() {
+    let state = test_state();
+    let tab = new_tab(&state).await;
+    let mut failed = failure("auth", None, None);
+    failed["atMs"] = json!(1_700_000_000_000u64);
+    let moved = pane(&state, &tab, "u1", "Moved-later", "old", Some(failed), false).await;
+    let before = failed_panes(&state.mstore, &state.identity_store, "u1", "claude");
+
+    let (cleared, signed_out) = rebind_clearing(&state.mstore, &state.event_bus, before, "new", true);
+    assert_eq!(cleared, 1);
+    assert_eq!(signed_out, vec![Failed { block_id: moved.clone(), failed_at_ms: Some(1_700_000_000_000) }]);
+    assert!(stored_failure(&state, &moved).is_none(), "the failure is cleared at the relink");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let (next, _guard) = crate::backend::reactive::held_notes::attach(&moved, "x");
+    assert!(!next.contains("Signed in again"), "nothing told it before the restart: {next}");
+
+    // After the restart, only a pane that restarted is told, and not when the failover tells it itself.
+    let ids = [moved.as_str()];
+    assert_eq!(switch::panes_to_tell("operator", signed_out.clone(), &ids), signed_out);
+    assert!(switch::panes_to_tell("operator", signed_out.clone(), &[]).is_empty(), "a pane that didn't restart is not told");
+    assert!(switch::panes_to_tell(failover::ACTOR_EXPIRED, signed_out, &ids).is_empty(), "login_expiry::resume tells its own");
+    cleanup(&[&moved]);
+}
+
 /// A sign-in to one account says nothing about another.
 #[tokio::test]
 async fn a_sign_in_leaves_another_accounts_panes_alone() {

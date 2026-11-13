@@ -10,6 +10,8 @@ use std::sync::Arc;
 use cef::*;
 use crate::state::AppState;
 use super::get_window_on_ui;
+#[cfg(target_os = "windows")]
+use super::main_focus::{find_main_render_widget, main_focus_already_held, pane_outer_hwnds, reclaim_allowed};
 
 // ── Deferred load_url (used by on_before_popup to avoid UI-thread deadlock)
 //
@@ -466,12 +468,10 @@ wrap_task! {
 /// turns `CloseWindowTask` into a silent no-op — the window simply stays open
 /// (caught live 2026-07-09, first verification pass of this fix).
 ///
-/// Also arms the WRR quit watchdog: a Views park is a *move*, not a
-/// hide/destroy, so it can produce ZERO further win-events — with nothing to
-/// re-run the quit gate, even a fully-correct registered count would sit
-/// unread forever. The watchdog re-check is idempotent and stands down if any
-/// window is still visible, so arming it while other windows remain open is
-/// harmless.
+/// Last, it re-runs the quit gate with the corrected count and arms the WRR
+/// quit watchdog (`win_event::after_parking_close`): a Views park is a *move*,
+/// not a hide/destroy, so it can produce ZERO further win-events, and nothing
+/// else would read the count again.
 ///
 /// Launcher/srv cleanup is NOT duplicated here: the `close_window` RPC
 /// already sent `report_window_closed`, and `demote_srv_cleanup` already ran
@@ -519,7 +519,7 @@ pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str)
         // process is quitting and WRR still resolves it for logging.
         state.evict_window_hwnd(label);
     }
-    crate::wrr::win_event::arm_quit_watchdog(state.count_live_user_windows());
+    crate::wrr::win_event::after_parking_close(state.count_live_user_windows());
 }
 
 /// Pillar 2 Phase 2 (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §2.4) — uniform
@@ -717,11 +717,6 @@ pub(crate) fn begin_drain_and_cascade(state: &Arc<AppState>, reason: crate::stat
             );
         }
     }
-}
-
-pub fn post_close_window(state: &Arc<AppState>, label: &str) {
-    let mut task = CloseWindowTask::new(state.clone(), label.to_string());
-    post_task(ThreadId::UI, Some(&mut task));
 }
 
 // ── Memory-pressure → frontend banner event ────────────────────────────────
@@ -1719,7 +1714,7 @@ wrap_task! {
                 Some(&mut client_ref),
                 Some(&cef_url),
                 Some(&settings),
-                None,
+                crate::ipc_query::app_extra_info().as_mut(),
                 request_context.as_mut(),
                 Some(&mut bv_delegate),
             );
@@ -1922,6 +1917,7 @@ wrap_task! {
                 }
             }
 
+            #[cfg(not(target_os = "windows"))]
             if let Some(host) = browser.host() {
                 host.set_focus(1);
                 tracing::info!("[main-focus-reclaim] host.set_focus(1) on label={}", label);
@@ -1950,30 +1946,23 @@ wrap_task! {
                 //    picks the pane's render widget → infinite focus storm.
                 //
                 // Phase H.2.b — reducer-aware iteration with fallback.
-                let pane_outer_hwnds: Vec<*mut std::ffi::c_void> = {
-                    let mut hwnds: Vec<*mut std::ffi::c_void> = self
-                        .state
-                        .list_browsers()
-                        .into_iter()
-                        .filter(|(k, _)| k.starts_with("browser-pane-"))
-                        .filter_map(|(_, b)| {
-                            b.host().and_then(|h| {
-                                let wh = h.window_handle();
-                                if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
-                            })
-                        })
-                        .collect();
-                    for h in crate::browser_pane::hwnd::pane_outer_hwnds_from_context() {
-                        if !hwnds.contains(&h) {
-                            hwnds.push(h);
-                        }
-                    }
-                    hwnds
-                };
+                let pane_outer_hwnds = pane_outer_hwnds(&self.state);
+
+                let render = views_top_hwnd
+                    .and_then(|top| unsafe { find_main_render_widget(top, &pane_outer_hwnds) });
+                // Nothing to reclaim when the main page's render widget already holds Win32 focus (main_focus.rs).
+                if main_focus_already_held(render) {
+                    tracing::debug!(label = %label, "[main-focus-reclaim] skipped: the main render widget already has focus");
+                    return;
+                }
+
+                if let Some(host) = browser.host() {
+                    host.set_focus(1);
+                    tracing::info!("[main-focus-reclaim] host.set_focus(1) on label={}", label);
+                }
 
                 match views_top_hwnd {
                     Some(top_hwnd) => unsafe {
-                        let render = find_main_render_widget(top_hwnd, &pane_outer_hwnds);
                         let target = render.unwrap_or(top_hwnd);
                         windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(target as _);
                         tracing::info!(
@@ -2002,93 +1991,6 @@ wrap_task! {
             self.state.browser_panes.defocus_all(&self.state);
         }
     }
-}
-
-/// Whether `MainFocusReclaimTask` may act on a window whose top-level HWND is
-/// `target_root`, given the foreground window's root. Only the foreground
-/// window: reclaiming in any other window would activate it. A target whose
-/// top-level can't be resolved keeps the old behaviour (nothing to activate).
-#[cfg(target_os = "windows")]
-fn reclaim_allowed(target_root: Option<isize>, foreground_root: isize) -> bool {
-    match target_root {
-        None => true,
-        Some(t) => t == foreground_root,
-    }
-}
-
-#[cfg(all(test, target_os = "windows"))]
-mod reclaim_tests {
-    use super::reclaim_allowed;
-
-    #[test]
-    fn reclaims_in_the_foreground_window() {
-        assert!(reclaim_allowed(Some(0x100), 0x100));
-    }
-
-    #[test]
-    fn never_reclaims_in_a_background_window() {
-        assert!(!reclaim_allowed(Some(0x100), 0x200));
-    }
-
-    #[test]
-    fn never_reclaims_when_no_window_of_ours_is_foreground() {
-        assert!(!reclaim_allowed(Some(0x100), 0));
-    }
-
-    #[test]
-    fn keeps_the_old_behaviour_when_the_target_window_is_unknown() {
-        assert!(reclaim_allowed(None, 0x200));
-    }
-}
-
-/// Walk descendants of `root` and return the first Chrome_RenderWidgetHostHWND
-/// whose ancestor chain does NOT pass through any of `pane_outer_hwnds`.
-/// Panes are siblings of main under the Views top-level, so without this
-/// filter the walk would happily pick a pane's render widget.
-#[cfg(target_os = "windows")]
-unsafe fn find_main_render_widget(
-    root: *mut std::ffi::c_void,
-    pane_outer_hwnds: &[*mut std::ffi::c_void],
-) -> Option<*mut std::ffi::c_void> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumChildWindows, GetClassNameW, GetParent,
-    };
-
-    struct Finder<'a> {
-        found: *mut std::ffi::c_void,
-        panes: &'a [*mut std::ffi::c_void],
-    }
-    let mut finder = Finder { found: std::ptr::null_mut(), panes: pane_outer_hwnds };
-
-    unsafe extern "system" fn cb(hwnd: *mut std::ffi::c_void, lparam: isize) -> i32 {
-        let finder = &mut *(lparam as *mut Finder);
-        let mut buf = [0u16; 64];
-        let n = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
-        if n > 0 {
-            let class = String::from_utf16_lossy(&buf[..n as usize]);
-            if class == "Chrome_RenderWidgetHostHWND" {
-                // Walk ancestors; if we pass through any pane outer HWND,
-                // this widget belongs to a pane, not main.
-                let mut descends_from_pane = false;
-                let mut cursor = GetParent(hwnd);
-                while !cursor.is_null() {
-                    if finder.panes.iter().any(|p| *p == cursor) {
-                        descends_from_pane = true;
-                        break;
-                    }
-                    cursor = GetParent(cursor);
-                }
-                if !descends_from_pane {
-                    finder.found = hwnd;
-                    return 0; // stop
-                }
-            }
-        }
-        1
-    }
-
-    EnumChildWindows(root, Some(cb), &mut finder as *mut _ as isize);
-    if finder.found.is_null() { None } else { Some(finder.found) }
 }
 
 // ── SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 Phase 1 — UI-thread probe ───

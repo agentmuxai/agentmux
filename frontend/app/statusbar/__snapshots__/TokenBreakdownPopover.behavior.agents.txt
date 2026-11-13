@@ -72,8 +72,3 @@ watchAmbient 5000
     <div class="token-usage-breakdown-footer">
       <button type="button" class="ui-button ui-tone-danger ui-density-compact">
         "Reset counter"
-  <div data-stand="ConfirmModal" data-open="false" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
-    <span data-cb="onConfirm">
-      "confirm"
-    <span data-cb="onCancel">
-      "cancel"

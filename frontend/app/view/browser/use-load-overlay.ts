@@ -115,7 +115,10 @@ function useLoadClock(p: { model: BrowserViewModel; sl: PaneSleep; paneCreated: 
             if (!requested) loadClockFrom = 0;
             if (!requested || !paneCreated()) return;
             loadClockFrom = sl.wakeStartedAt();
-            sawLoading = false;
+            // A load already in flight when the wake begins (an earlier wake was abandoned before its page
+            // finished) is set to true again with no change, so nothing would arm the clock and the wake
+            // would never end. That load's end is this wake's end.
+            sawLoading = model.loadingAtom();
         }),
     );
     createEffect(

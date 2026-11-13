@@ -5,6 +5,7 @@ pub mod agent_credentials;
 pub mod cloud_subscriber;
 pub mod delivery_status;
 pub mod discovery;
+pub mod host_adopt;
 pub mod github_broker;
 pub mod install_presence;
 pub mod wan_lease;
@@ -86,7 +87,8 @@ mod tests {
         let doc = format!(
             r#"{{"version":1,"api":"https://a.test","ws":"wss://b.test","cognito":{{"domain":"https://c.test","clientId":"{client_id}"}}}}"#
         );
-        discovery::parse(&doc, "https://a.test").unwrap()
+        // A local relay's document may name any host.
+        discovery::parse(&doc, "http://localhost:3100").unwrap()
     }
 
     #[test]

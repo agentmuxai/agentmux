@@ -38,6 +38,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { onCleanup, onMount, type Accessor } from "solid-js";
+import { deferWhileSizesHeld } from "@/app/platform/pane-size-hold";
 
 export interface UsePtyWidthOpts {
     blockId: string;
@@ -103,6 +104,27 @@ function isRetryableResizeError(msg: string): boolean {
     return msg.includes("controller is not running") || msg.includes("no controller for block");
 }
 
+/**
+ * A resize callback that runs `compute` once the size has settled (`DEBOUNCE_MS`). Not during a pane drag's
+ * live reflow: the CLI is told its width once, when the drag ends (pane-size-hold.ts). Held at both ends: a
+ * resize that arrives during the drag waits, and so does one from just before it whose wait runs out in it
+ * (it would measure the width of a drop that may never be made).
+ */
+function settledResize(compute: () => void): { onResize: () => void; stop: () => void } {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settled = deferWhileSizesHeld(compute);
+    const onResize = deferWhileSizesHeld(() => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(settled, DEBOUNCE_MS);
+    });
+    const stop = () => {
+        if (timer) clearTimeout(timer);
+        onResize.cancel();
+        settled.cancel();
+    };
+    return { onResize, stop };
+}
+
 export function usePtyWidth(opts: UsePtyWidthOpts): void {
     onMount(() => {
         const el = opts.elementRef();
@@ -111,7 +133,6 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
         if (typeof ResizeObserver === "undefined") return;
 
         let lastCols = -1;
-        let timer: ReturnType<typeof setTimeout> | undefined;
 
         // Readiness gate. The backend's `send_input` rejects a resize with
         // "controller is not running" until the controller's input channel
@@ -188,10 +209,8 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
             }
         };
 
-        const observer = new ResizeObserver(() => {
-            if (timer) clearTimeout(timer);
-            timer = setTimeout(compute, DEBOUNCE_MS);
-        });
+        const settle = settledResize(compute);
+        const observer = new ResizeObserver(settle.onResize);
         // observe() delivers an initial notification with the current size, so
         // the at-mount width is captured here (deferred via the gate above) —
         // no separate initial timer needed.
@@ -218,7 +237,7 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
             });
 
         onCleanup(() => {
-            if (timer) clearTimeout(timer);
+            settle.stop();
             observer.disconnect();
             unsubStatus();
         });
@@ -230,6 +249,7 @@ export const __test__ = {
     computeCols,
     computeTermSizeFromEl,
     isRetryableResizeError,
+    settledResize,
     CELL_WIDTH_RATIO,
     MIN_COLS,
     DEBOUNCE_MS,

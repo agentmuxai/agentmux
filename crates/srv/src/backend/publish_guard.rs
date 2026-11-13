@@ -220,6 +220,31 @@ pub fn hooks_dir_for(env: &HashMap<String, String>, process: impl Fn(&str) -> Op
     is_guard_hooks_dir(&dir).then_some(dir)
 }
 
+/// The first gh-agent (major, minor) that can judge a container's push from data (`gh-agent scan-push`).
+const SCAN_PUSH_FROM: (u64, u64) = (0, 13);
+
+/// The (major, minor) version a hook gh-agent wrote names in its header line
+/// (`# gh-agent publish guard: written by gh-agent 0.13.0; do not edit ...`).
+pub fn hooks_written_by(pre_push: &str) -> Option<(u64, u64)> {
+    let rest = pre_push.split("written by gh-agent ").nth(1)?;
+    let version = rest.split(|c: char| c == ';' || c.is_whitespace()).next()?;
+    let mut parts = version.split('.').map(|p| p.chars().take_while(char::is_ascii_digit).collect::<String>().parse::<u64>().ok());
+    Some((parts.next()??, parts.next()??))
+}
+
+/// Whether the hooks in `dir` are gh-agent's guard, written by a gh-agent that can judge a container's push.
+pub fn scan_ready_in(dir: &Path) -> bool {
+    let Ok(pre_push) = std::fs::read_to_string(dir.join("pre-push")) else { return false };
+    pre_push.contains(MARKER) && hooks_written_by(&pre_push).is_some_and(|v| v >= SCAN_PUSH_FROM)
+}
+
+/// Whether this machine has a publish guard that can judge a container agent's push: gh-agent's own hooks
+/// directory is in place and was written by a gh-agent new enough for it. Read from that directory, not from
+/// whatever program is called `gh-agent` on the path, and with no program run.
+pub fn container_scan_ready() -> bool {
+    hooks_dir_for(&HashMap::new(), |k| std::env::var(k).ok()).is_some_and(|dir| scan_ready_in(&dir))
+}
+
 /// Point `core.hooksPath` at `hooks_dir` in `env`, an overlay on `process`.
 pub fn apply_publish_guard_in(env: &mut HashMap<String, String>, hooks_dir: &Path, process: impl Fn(&str) -> Option<String>) {
     let entries = git_config_entries(|k| env.get(k).cloned().or_else(|| process(k)), HOOKS_PATH_KEY, &hooks_dir.to_string_lossy());
@@ -249,6 +274,31 @@ pub fn apply_publish_guard(env: &mut HashMap<String, String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_version_in_a_hook_header_is_read() {
+        let hook = |v: &str| format!("#!/bin/sh\n# gh-agent publish guard: written by gh-agent {v}; do not edit (gh-agent hooks-path rewrites it)\n");
+        assert_eq!(hooks_written_by(&hook("0.13.0")), Some((0, 13)));
+        assert_eq!(hooks_written_by(&hook("0.12.5")), Some((0, 12)));
+        assert_eq!(hooks_written_by(&hook("1.0.0-beta.1")), Some((1, 0)));
+        assert_eq!(hooks_written_by("#!/bin/sh\nexit 0\n"), None);
+        assert_eq!(hooks_written_by(&hook("x.y")), None);
+    }
+
+    #[test]
+    fn a_container_scan_needs_gh_agents_own_hooks_from_a_gh_agent_that_can_judge_a_push() {
+        let dir = std::env::temp_dir().join(format!("scan-ready-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |text: &str| std::fs::write(dir.join("pre-push"), text).unwrap();
+        assert!(!scan_ready_in(&dir.join("missing")), "no hooks directory");
+        write("#!/bin/sh\n# gh-agent publish guard: written by gh-agent 0.12.5; x\n");
+        assert!(!scan_ready_in(&dir), "a gh-agent older than the scan");
+        write("#!/bin/sh\n# gh-agent publish guard: written by gh-agent 0.13.0; x\n");
+        assert!(scan_ready_in(&dir));
+        write("#!/bin/sh\n# another tool: written by gh-agent 0.13.0; x\n");
+        assert!(!scan_ready_in(&dir), "not the guard's own hook");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()

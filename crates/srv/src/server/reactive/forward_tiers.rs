@@ -27,6 +27,8 @@ pub(super) struct Tiers<'a> {
     files_too_old: bool,
     /// A former name's agent, or a display name's, runs as its slug (`former_slug`).
     alias: Option<String>,
+    /// The LAN peer was sent the message and gave no answer in time.
+    silent_peer: bool,
 }
 
 impl<'a> Tiers<'a> {
@@ -76,6 +78,7 @@ impl<'a> Tiers<'a> {
             candidate_seen: false,
             files_too_old: false,
             alias,
+            silent_peer: false,
         }
     }
 
@@ -152,7 +155,7 @@ impl<'a> Tiers<'a> {
                     // #2350 — this previously returned unconditionally
                     // whenever the body parsed, regardless of success, so a
                     // stale same-channel entry never reached a later tier).
-                    ForwardOutcome::Stale => {
+                    ForwardOutcome::Stale | ForwardOutcome::NoAnswer => {
                         if former_slug::may_evict(&found_as, req)
                             && agent_registry::should_evict_on_forward_failure(&entry)
                         {
@@ -241,7 +244,7 @@ impl<'a> Tiers<'a> {
                     // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
                     // Evicting only this channel's entry lets the loop try the
                     // next candidate.
-                    ForwardOutcome::Stale => {
+                    ForwardOutcome::Stale | ForwardOutcome::NoAnswer => {
                         if former_slug::may_evict(&found_as, req)
                             && agent_registry::should_evict_on_forward_failure(&entry)
                         {
@@ -301,7 +304,7 @@ impl<'a> Tiers<'a> {
                 self.forwarded_req.clone(),
                 &peer_url,
             );
-            match forward_inject_to_peer(
+            let outcome = forward_inject_to_peer(
                 state,
                 req,
                 &lan_forwarded,
@@ -321,8 +324,9 @@ impl<'a> Tiers<'a> {
                     },
                 },
             )
-            .await
-            {
+            .await;
+            self.silent_peer = matches!(outcome, ForwardOutcome::NoAnswer);
+            match outcome {
                 ForwardOutcome::Delivered(body) | ForwardOutcome::Refused(body) => {
                     return Some(body)
                 }
@@ -336,7 +340,7 @@ impl<'a> Tiers<'a> {
                 // candidate (Codex P1 on #3632): the message may still be
                 // held. Only an inconclusive answer leaves the target
                 // possibly alive there.
-                ForwardOutcome::Stale => {
+                ForwardOutcome::Stale | ForwardOutcome::NoAnswer => {
                     state.lan_discovery.evict_agent(&req.target_agent);
                 }
                 ForwardOutcome::Inconclusive => self.candidate_seen = true,
@@ -388,6 +392,13 @@ impl<'a> Tiers<'a> {
                 .await,
             );
         }
+        // A peer that answers its polls but not this message: kept here and sent again by the replay
+        // (`peer_hold`), not left to the relay's 30 minutes (task #2512).
+        if self.silent_peer && !self.candidate_seen {
+            if let Some(held) = peer_hold::hold_for_silent_peer(state, auth_via, req, resp).await {
+                return Some(held);
+            }
+        }
         if !self.candidate_seen
             && route_for_absent(state, auth_via, req, resp).await == AbsentRoute::HoldHere
         {
@@ -401,6 +412,13 @@ impl<'a> Tiers<'a> {
             )
             .await
             {
+                return Some(held);
+            }
+        }
+        // An agent of a LAN peer that is down: kept here for 24 h, not left to the relay's 30 minutes
+        // (`peer_hold`).
+        if !self.candidate_seen {
+            if let Some(held) = peer_hold::hold_for_down_peer(state, auth_via, req, resp).await {
                 return Some(held);
             }
         }

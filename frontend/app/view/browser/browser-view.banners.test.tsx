@@ -31,7 +31,7 @@ vi.mock("./browser-nav-bar", () => ({ BrowserNavBar: () => <div class="stub-nav"
 vi.mock("./browser-signin-offer", () => ({ BrowserSigninOffer: () => null, BrowserSigninPending: () => null }));
 vi.mock("./download-strip", () => ({ DownloadStrip: () => null }));
 vi.mock("./driven-by-strip", () => ({ ActionLogStrip: () => null, DrivenByStrip: () => null }));
-vi.mock("@/app/drag/drag-session", () => ({ isAnyUnderway: () => false }));
+vi.mock("@/app/drag/drag-session", () => ({ ELEMENT_DRAG_KINDS: [], isAnyUnderway: () => false }));
 vi.mock("@/app/element/BrainSpinner", () => ({ BrainSpinner: () => null }));
 
 import { BrowserViewComponent } from "./browser-view";
@@ -169,6 +169,14 @@ describe("the attention banner", () => {
         const v = mount({ attention: att({ kind: "notice", url: "https://x.example", why: "no" }), canGoBack: false });
         const back = [...v.container.querySelectorAll(".browser-attention-actions button")].find((b) => b.textContent?.trim() === "Back") as HTMLButtonElement;
         expect(back.disabled).toBe(true);
+    });
+
+    it("a cancelled file chooser says why and how to answer it, with Dismiss and no Back or Allow", () => {
+        const v = mount({ attention: att({ kind: "notice", chooser: "choose a file" }) });
+        const banner = v.banner() as HTMLElement;
+        expect(banner.textContent).toContain("The page asked to choose a file, but an agent drives this pane, so AgentMux cancelled it. Use Take over");
+        const labels = [...banner.querySelectorAll(".browser-attention-actions button")].map((b) => b.textContent?.trim());
+        expect(labels).toEqual(["Dismiss"]);
     });
 
     it("is gone when nothing is asked", () => {

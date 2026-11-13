@@ -191,7 +191,7 @@ pub(crate) async fn identity_account_upsert(
 
     let account = account_to_store(state, &req, &account_id, &masked_tail, &status);
     store_account(state, &account, is_new).await?;
-    link_account(state, &def_id, &account_id, &req.provider, is_new).await?;
+    link_account(state, &def_id, (&account_id, valid), &req.provider, is_new).await?;
     announce_account(state, &req.agent_id, &account_id, valid);
 
     Ok(IdentityAccountUpsertResult {
@@ -285,7 +285,7 @@ async fn delete_secret(account_id: &str) {
 /// an unlink that succeeds followed by a link that fails would permanently drop
 /// the agent's existing provider link with no compensation (the
 /// failure branch below only cleans up for is_new accounts).
-async fn link_account(state: &AppState, def_id: &str, account_id: &str, provider: &str, is_new: bool) -> Result<(), String> {
+async fn link_account(state: &AppState, def_id: &str, (account_id, valid): (&str, bool), provider: &str, is_new: bool) -> Result<(), String> {
     // Read before the link changes (see COMMAND_LINK_AGENT_IDENTITY):
     // a pane left over from an earlier sign-in still carries that
     // account's usage limit, which must not outlive the move.
@@ -303,7 +303,8 @@ async fn link_account(state: &AppState, def_id: &str, account_id: &str, provider
         }
         return Err(format!("identity.account.upsert: link: {e}"));
     }
-    crate::server::account_episodes::after_rebind(&state.mstore, &state.event_bus, failed, account_id);
+    // An agent whose last turn failed on the old login is told it is signed in only if this key passed its check.
+    crate::server::account_episodes::after_rebind_telling(&state.mstore, &state.event_bus, failed, account_id, valid);
     Ok(())
 }
 
@@ -528,6 +529,35 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
         let tail = crate::identity::key_validator::masked_tail(&token);
         let outcome = crate::identity::key_validator::validate(&acct.provider, &token).await;
         return Ok(proven(account_id, IdentityAccountValidateResult::of(outcome, tail)));
+    }
+    // A CLI sign-in keeps its tokens in its own credentials file, with no stored key to check at the
+    // provider: say what the file reads instead of failing on the missing key (#47468).
+    if let crate::backend::storage::identities::SecretRef::OAuthConfigDir { dir } = &acct.secret_ref {
+        let provider = crate::backend::providers::resolve_provider_alias(&acct.provider);
+        let Some(probe) = crate::identity::resolver::probe_oauth_status(provider, dir, agentmux_common::time::now_ms()) else {
+            return Ok(IdentityAccountValidateResult {
+                valid: false,
+                status: acct.status.clone(),
+                masked_tail: String::new(),
+                error: Some("validate does not apply: this is a CLI sign-in with no stored key, and its credentials cannot be read here".to_string()),
+            });
+        };
+        use crate::identity::resolver::OAuthProbeStatus;
+        // Only an unexpired token proves the login: an expired access token is the very thing a pane
+        // was refused on, and a pass here clears its agents' signed-out state.
+        let valid = probe == OAuthProbeStatus::Valid;
+        let error = match probe {
+            OAuthProbeStatus::Valid => None,
+            OAuthProbeStatus::Expired => Some("this is a CLI sign-in with no stored key: its access token has expired and renews the next time the CLI uses it".to_string()),
+            OAuthProbeStatus::NeedsReauth => Some("this is a CLI sign-in with no stored key: its credentials file holds no token, so it needs a sign-in".to_string()),
+        };
+        let result = IdentityAccountValidateResult { valid, status: probe.as_str().to_string(), masked_tail: String::new(), error };
+        // Only Claude's probe reads the token's expiry; the others call a refresh token or key valid
+        // whatever its age, which does not prove a pane's refused login works.
+        if provider != "claude" {
+            return Ok(result);
+        }
+        return Ok(proven(account_id, result));
     }
     let aid = account_id.to_string();
     let plaintext = tokio::task::spawn_blocking(move || crate::identity::secret_store::get(&aid))

@@ -503,6 +503,16 @@
     font-family: inherit;
 }
 
+// In a narrow pane an entry's name wraps to a second line before it is cut: the names share a long prefix
+// ("AgentMux Operator Config: ..."), so cut at one line they read the same (#47506).
+@container section-pane (max-width: 359px) {
+    .memory-file-card-title--plain {
+        @include mixins.truncate-lines(2);
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+}
+
 .memory-file-card-badge--warning {
     border-color: color-mix(in srgb, var(--warning-color) 50%, var(--border-color));
     color: var(--warning-text-color);

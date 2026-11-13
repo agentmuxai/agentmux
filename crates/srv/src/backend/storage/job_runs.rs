@@ -84,14 +84,7 @@ pub(crate) fn apply_schema(conn: &rusqlite::Connection) -> Result<(), StoreError
     conn.execute_batch(SCHEMA)?;
     conn.execute_batch(super::job_incidents::SCHEMA)?;
     conn.execute_batch(super::job_cloud::SCHEMA)?;
-    for stmt in JOB_RUNS_COLUMNS {
-        if let Err(e) = conn.execute_batch(stmt) {
-            if !e.to_string().contains("duplicate column") {
-                return Err(e.into());
-            }
-        }
-    }
-    Ok(())
+    super::migrations::apply_additive_columns(conn, JOB_RUNS_COLUMNS)
 }
 
 pub(super) const COLS: &str = "id, job_id, job_source, job_name, template_id, template_version, trigger_kind, \

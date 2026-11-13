@@ -13,6 +13,11 @@
 //! can make (input in the window, a waiting agent, a modal, a drag, and every
 //! recycle blocker) and either recycles itself or declines with
 //! `recycle_declined`, which holds the window back for the idle time.
+//!
+//! A window that is only quiet (a minute, not ten) and big gets the garbage
+//! collection alone, now and then: a closed tool preview leaves its nodes
+//! detached until a collection frees them, and nothing else triggers one while
+//! the window sits unused (docs/reports/REPORT_HISTORY_OPEN_RENDERER_MEMORY_2026_11_10.md).
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -41,6 +46,10 @@ pub(crate) struct Limits {
     pub between: Duration,
     /// A window's baseline is its size this long after its last load.
     pub baseline_after: Duration,
+    /// How long a window must have been out of use before its garbage is collected (no reload).
+    pub tidy_quiet: Duration,
+    /// At most one such collection per window in this long.
+    pub tidy_every: Duration,
 }
 
 impl Limits {
@@ -52,6 +61,8 @@ impl Limits {
         per_window: Duration::from_secs(60 * 60),
         between: Duration::from_secs(60),
         baseline_after: Duration::from_secs(60),
+        tidy_quiet: Duration::from_secs(60),
+        tidy_every: Duration::from_secs(10 * 60),
     };
 
     /// The spec's limits, with test-only overrides for the memory lab
@@ -92,11 +103,13 @@ pub(crate) struct Track {
     pub last_active: Instant,
     pub last_request: Option<Instant>,
     pub declined_until: Option<Instant>,
+    /// The last time the window's garbage was collected for being quiet and big.
+    pub last_tidy: Option<Instant>,
 }
 
 impl Track {
     fn new(now: Instant) -> Track {
-        Track { loaded_at: now, baseline_mb: None, last_active: now, last_request: None, declined_until: None }
+        Track { loaded_at: now, baseline_mb: None, last_active: now, last_request: None, declined_until: None, last_tidy: None }
     }
 }
 
@@ -140,6 +153,22 @@ pub(crate) fn decide(
                 && (s.minimized || now.duration_since(t.last_active) >= idle_for)
                 && t.last_request.is_none_or(|at| now.duration_since(at) >= limits.per_window)
                 && t.declined_until.is_none_or(|until| now >= until)
+        })
+        .max_by_key(|s| s.mb)
+        .map(|s| s.label.clone())
+}
+
+/// The window to collect garbage in now, if any: big enough to matter (the
+/// recycle floor), quiet for `tidy_quiet` (a minimized window is), and not
+/// collected within `tidy_every`. The largest when several qualify. Pure, for the tests.
+pub(crate) fn pick_tidy(now: Instant, samples: &[Sample], tracks: &HashMap<String, Track>, limits: &Limits) -> Option<String> {
+    samples
+        .iter()
+        .filter(|s| {
+            let Some(t) = tracks.get(&s.label) else { return false };
+            s.mb.is_some_and(|mb| mb >= limits.min_mb)
+                && (s.minimized || now.duration_since(t.last_active) >= limits.tidy_quiet)
+                && t.last_tidy.is_none_or(|at| now.duration_since(at) >= limits.tidy_every)
         })
         .max_by_key(|s| s.mb)
         .map(|s| s.label.clone())
@@ -249,6 +278,28 @@ fn collect_garbage(state: &Arc<AppState>, label: &str) {
     });
 }
 
+/// Collect garbage in the quiet window `pick_tidy` names, once per `tidy_every`. No reload: the page keeps
+/// everything, and the collection frees what closed previews left detached.
+fn tidy(state: &Arc<AppState>, limits: &Limits, samples: &[Sample], now: Instant, enabled: impl Fn() -> bool) {
+    let label = {
+        let mut g = GOVERNOR.lock().unwrap();
+        let Some(label) = pick_tidy(now, samples, &g.tracks, limits) else { return };
+        // Marked before the collection, so a window that can't be reached is not retried every minute.
+        if let Some(t) = g.tracks.get_mut(&label) {
+            t.last_tidy = Some(now);
+        }
+        label
+    };
+    if !enabled() {
+        return;
+    }
+    let before = samples.iter().find(|s| s.label == label).and_then(|s| s.mb);
+    collect_garbage(state, &label);
+    std::thread::sleep(Duration::from_secs(2));
+    let after = super::recycle::renderer_mb(state, &label);
+    tracing::info!(target: "recycle", label, before_mb = before, after_gc_mb = after, "[recycle] {label} quiet: collected garbage");
+}
+
 fn tick(state: &Arc<AppState>, limits: &Limits) {
     let now = Instant::now();
     let samples: Vec<Sample> = app_windows(state)
@@ -261,12 +312,13 @@ fn tick(state: &Arc<AppState>, limits: &Limits) {
         update_tracks(now, &samples, &crate::input_owner::registry::is_active, &mut g.tracks, limits);
         decide(now, &samples, &g.tracks, limits, pressure, g.last_any_request)
     };
-    let Some(label) = pick else { return };
-    if host_dialog_open() {
-        return;
-    }
     // Read live, so turning it off takes effect at the next tick.
-    if !crate::app::window_settings::read_window_bool_setting("window:autorecycle", true) {
+    let enabled = || !host_dialog_open() && crate::app::window_settings::read_window_bool_setting("window:autorecycle", true);
+    let Some(label) = pick else {
+        tidy(state, limits, &samples, now, enabled);
+        return;
+    };
+    if !enabled() {
         return;
     }
     let before = samples.iter().find(|s| s.label == label).and_then(|s| s.mb);
@@ -339,6 +391,7 @@ mod tests {
             last_active: now - idle,
             last_request: None,
             declined_until: None,
+            last_tidy: None,
         }
     }
 
@@ -404,6 +457,38 @@ mod tests {
         let big_base = one("main", Track { baseline_mb: Some(500), ..track(n, 3 * MIN) });
         assert_eq!(decide(n, &[sample("main", 700)], &big_base, &Limits::SPEC, PressureLevel::Warn, None), None, "Warn keeps 2x");
         assert_eq!(decide(n, &[sample("main", 700)], &big_base, &Limits::SPEC, PressureLevel::Critical, None).as_deref(), Some("main"), "Critical drops it");
+    }
+
+    #[test]
+    fn a_quiet_big_window_gets_its_garbage_collected_without_waiting_for_the_idle_time() {
+        let n = now();
+        let quiet = one("main", track(n, 2 * MIN));
+        assert_eq!(decide(n, &[sample("main", 900)], &quiet, &Limits::SPEC, PressureLevel::Normal, None), None, "not idle enough to recycle");
+        assert_eq!(pick_tidy(n, &[sample("main", 900)], &quiet, &Limits::SPEC).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn no_collection_for_a_small_window_one_in_use_or_one_just_collected() {
+        let n = now();
+        let quiet = one("main", track(n, 2 * MIN));
+        assert_eq!(pick_tidy(n, &[sample("main", 590)], &quiet, &Limits::SPEC), None, "under the floor");
+        let in_use = one("main", track(n, Duration::from_secs(30)));
+        assert_eq!(pick_tidy(n, &[sample("main", 900)], &in_use, &Limits::SPEC), None, "used 30 s ago");
+        let min = Sample { minimized: true, ..sample("main", 900) };
+        assert_eq!(pick_tidy(n, &[min], &in_use, &Limits::SPEC).as_deref(), Some("main"), "minimized counts as quiet");
+        let done = one("main", Track { last_tidy: Some(n - 5 * MIN), ..track(n, 2 * MIN) });
+        assert_eq!(pick_tidy(n, &[sample("main", 900)], &done, &Limits::SPEC), None, "collected 5 min ago");
+        let again = one("main", Track { last_tidy: Some(n - 10 * MIN), ..track(n, 2 * MIN) });
+        assert_eq!(pick_tidy(n, &[sample("main", 900)], &again, &Limits::SPEC).as_deref(), Some("main"), "10 min later");
+        let unmeasured = Sample { mb: None, ..sample("main", 0) };
+        assert_eq!(pick_tidy(n, &[unmeasured], &quiet, &Limits::SPEC), None);
+    }
+
+    #[test]
+    fn of_several_quiet_windows_the_largest_is_collected_first() {
+        let n = now();
+        let tracks = HashMap::from([("main".to_string(), track(n, 2 * MIN)), ("window-2".to_string(), track(n, 2 * MIN))]);
+        assert_eq!(pick_tidy(n, &[sample("main", 700), sample("window-2", 1200)], &tracks, &Limits::SPEC).as_deref(), Some("window-2"));
     }
 
     #[test]

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentmux.ai/schema/agentmux-job.v1.schema.json",
   "title": "AgentMux job definition (jobVersion 1)",
-  "description": "Something that runs by itself: a trigger, an action, a policy and an owner. Unknown fields are refused. The kinds reserved for later versions (trigger event, action drone, approval other than none) are part of the shape and refused when sent. See docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md section 5.1.",
+  "description": "Something that runs by itself: a trigger, an action, a policy and an owner. Unknown fields are refused. The kinds reserved for later versions (trigger event, approval other than none) are part of the shape and refused when sent. See docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md section 5.1.",
   "type": "object",
   "required": ["jobVersion", "name", "trigger", "action"],
   "additionalProperties": false,

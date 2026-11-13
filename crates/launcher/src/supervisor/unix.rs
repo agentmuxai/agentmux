@@ -653,9 +653,9 @@ pub(crate) async fn run_unix(
                     log(&format!("CEF host killed by signal {} (crash) — entering crash-budget relaunch", sig));
                 }
                 let code = status.code().unwrap_or(1);
-                if code == 0 {
-                    log("CEF host exited cleanly (code 0) — shutting down");
-                    break 0;
+                if code == 0 || super::is_sandbox_unavailable_exit(code) {
+                    log(&super::final_host_exit_line(code));
+                    break code;
                 }
                 // Classify system-OOM (wait it out) vs a genuine host fault
                 // (existing fast budget), mirroring run_windows. SPEC_MEMORY_

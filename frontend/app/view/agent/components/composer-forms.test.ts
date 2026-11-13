@@ -3,7 +3,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import { COMPACT_ORDER, accountInitial, chooseCompactKeys, shortContextText } from "./composer-forms";
+import {
+    ACCOUNT_BUDGETS,
+    COMPACT_ORDER,
+    accountInitial,
+    chooseCompactKeys,
+    chooseMiddleBudget,
+    middleTruncate,
+    shortContextText,
+} from "./composer-forms";
 
 // The strip at about 420 px: the runtime trigger, the account, the context reading with Compact, and Shell.
 const FULL = { runtime: 168, auth: 152, ctx: 256, hostShell: 72 };
@@ -73,6 +81,29 @@ describe("chooseCompactKeys", () => {
     });
 });
 
+describe("chooseCompactKeys with a row that overflows", () => {
+    // The readout beside the context reading is one unit that is never split, so the strip stays one row at every
+    // choice; what changes is how far that row overruns the strip (the cost the strip passes as `rowCount`).
+    const full = { ctx: 110, stats: 64 };
+    const compact = { ctx: 76, stats: 56 };
+    const costAt = (width: number) => (widths: Record<string, number>) => {
+        const total = (widths.ctx ?? 0) + (widths.stats ?? 0) + 8;
+        return 1 + Math.min(1, Math.max(0, total - width) / width) / 2;
+    };
+
+    it("collapses what brings the row nearer the strip, though the row count never changes", () => {
+        expect([...chooseCompactKeys(["ctx", "stats"], full, compact, costAt(117))].sort()).toEqual(["ctx", "stats"]);
+    });
+
+    it("collapses only the readout when that alone brings the row inside", () => {
+        expect([...chooseCompactKeys(["ctx", "stats"], full, { ctx: 110, stats: 56 }, costAt(175))]).toEqual(["stats"]);
+    });
+
+    it("keeps both full when the row fits", () => {
+        expect(chooseCompactKeys(["ctx", "stats"], full, compact, costAt(400)).size).toBe(0);
+    });
+});
+
 describe("shortContextText", () => {
     it("is the reading without its spaces and its .0", () => {
         expect(shortContextText("392k / 1.0m")).toBe("392k/1m");
@@ -96,5 +127,56 @@ describe("accountInitial", () => {
     it("has a mark when there is no letter", () => {
         expect(accountInitial("…")).toBe("?");
         expect(accountInitial("")).toBe("?");
+    });
+});
+
+
+describe("middleTruncate", () => {
+    it("leaves a label that fits as it is", () => {
+        expect(middleTruncate("ada@mail.dev", 15)).toBe("ada@mail.dev");
+    });
+
+    it("keeps the start of the local part and the whole domain when the domain fits", () => {
+        expect(middleTruncate("taylor.morgan@mail.dev", 15)).toBe("taylo…@mail.dev");
+        expect(middleTruncate("taylor.morgan@mail.dev", 12)).toBe("ta…@mail.dev");
+    });
+
+    it("keeps the start of the address when the domain doesn't fit", () => {
+        expect(middleTruncate("taylor.morgan@mail.dev", 9)).toBe("taylor.m…");
+        expect(middleTruncate("taylor.morgan@mail.dev", 7)).toBe("taylor…");
+    });
+
+    it("cuts a long address once, from the whole address: one ellipsis, as many characters as the budget allows", () => {
+        const cut = middleTruncate("jonathan.ross@anthropic.com", 9);
+        expect(cut).toBe("jonathan…");
+        expect(cut.match(/…/g)).toHaveLength(1);
+    });
+
+    it("cuts a label with no address to its start", () => {
+        expect(middleTruncate("Not logged in", 9)).toBe("Not logg…");
+    });
+
+    it("never returns more than the budget", () => {
+        for (const budget of ACCOUNT_BUDGETS) {
+            expect(middleTruncate("someone.long.name@example.org", budget).length).toBeLessThanOrEqual(budget);
+        }
+    });
+});
+
+describe("chooseMiddleBudget", () => {
+    // The account's width at a budget: 8 px a character and a 30 px dot.
+    const widthAt = (budget: number) => 30 + budget * 8;
+
+    it("takes the widest budget that keeps the rows", () => {
+        expect(chooseMiddleBudget(ACCOUNT_BUDGETS, widthAt, (w) => w <= 140)).toBe(12);
+        expect(chooseMiddleBudget(ACCOUNT_BUDGETS, widthAt, (w) => w <= 200)).toBe(15);
+    });
+
+    it("takes none when even the narrowest doesn't fit, so the account shows its letter", () => {
+        expect(chooseMiddleBudget(ACCOUNT_BUDGETS, widthAt, (w) => w <= 70)).toBeUndefined();
+    });
+
+    it("skips a budget that was not measured", () => {
+        expect(chooseMiddleBudget(ACCOUNT_BUDGETS, (b) => (b === 9 ? 100 : undefined), () => true)).toBe(9);
     });
 });

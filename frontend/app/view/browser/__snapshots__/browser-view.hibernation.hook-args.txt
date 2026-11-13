@@ -1,7 +1,8 @@
 window label win-2
-rect keys asleep,diag,model,onWakeWithoutLoad,placeholderRef,windowLabel
+rect keys asleep,diag,held,model,onWakeWithoutLoad,placeholderRef,windowLabel
 rect.model is model true
 drag keys diag,model,paneCreated,paneRect,placeholderRef,unavailable
+rect.held follows the drag false true
 diag view-mount window_label=win-2 initial-urlAtom="https://example.com/page"
 register pane
 diag [hibernate] wake-start why=show visible=true

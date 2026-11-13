@@ -28,6 +28,7 @@ import {
     scopeLabel,
     takeReconnectRequest,
 } from "./oauth-account-state";
+import { GITHUB_APP_CAN, GITHUB_APP_CANNOT } from "./github-account-copy";
 import { GithubInstallationsSection } from "./GithubInstallationsSection";
 import { GoogleServicesSection } from "./GoogleServicesSection";
 import { OAuthConnectPanel } from "./OAuthConnectPanel";
@@ -121,6 +122,8 @@ function SignInDetails(props: { account: Account }): JSX.Element {
                 <GoogleServicesSection account={a()} />
             </Show>
             <Show when={isBrokeredGithub(a()) && a().status !== "needs_reauth"}>
+                <div class="identity-detail-hint">{GITHUB_APP_CAN}</div>
+                <div class="identity-detail-hint">{GITHUB_APP_CANNOT}</div>
                 <GithubInstallationsSection />
             </Show>
         </>

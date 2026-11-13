@@ -25,13 +25,16 @@ impl BrowserPaneManager {
     }
 
     pub fn resize(&self, block_id: &str, rect: Rect, state: &Arc<AppState>) {
+        // An agent's zoom follows the pane's size (it fits the viewport to the pane).
+        crate::browser_api::zoom::on_pane_resized(state, block_id, (rect.width, rect.height));
         // Windows: resize the wrapper (its own WM_SIZE handler cascades to
         // CEF's child automatically — see browser_pane::wrapper) instead of
         // SetWindowPos-ing CEF's HWND directly. Still need the live Browser
         // to call notify_move_or_resize_started (a CEF-side hint, unrelated
         // to which HWND owns the actual on-screen rect).
+        let views = crate::pane_backend::pane_is_views(state, block_id);
         #[cfg(target_os = "windows")]
-        if let Some(browser) = self.live_browser(state, block_id).filter(|_| !crate::pane_backend::views()) {
+        if let Some(browser) = self.live_browser(state, block_id).filter(|_| !views) {
             let resized = state
                 .live_browser_pane_label(block_id)
                 .and_then(|label| crate::browser_pane::wrapper::peek_wrapper_hwnd(&label))
@@ -53,7 +56,7 @@ impl BrowserPaneManager {
         // Linux/macOS — Views path. The pane is a CefBrowserView in the main
         // window's view hierarchy; resizing is `View::set_bounds` in DIP. Must
         // run on the CEF UI thread (set_bounds is UI-thread-only).
-        if crate::pane_backend::views() {
+        if views {
             let label = match state.live_browser_pane_label(block_id) {
                 Some(l) => l,
                 None => return, // pane already closed or never created

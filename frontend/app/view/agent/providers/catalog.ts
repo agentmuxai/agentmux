@@ -802,6 +802,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
+        // Keep the minimum in step with DSH_MIN_NODE in crates/srv/src/backend/blockcontroller/acp_prelaunch.rs, which
+        // refuses to restart an already-installed dsh agent on an older Node.
         systemPrereqs: [{ ...NODE_PREREQ, minVersion: "24.9.0" }, NPM_PREREQ],
     },
     aider: {

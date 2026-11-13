@@ -202,8 +202,8 @@ pub(super) fn recover_and_seed(
         recorder.sync_all();
     }
 
-    // No starter Skills are seeded: migrations::m0015_seed_starter_skills is
-    // retired, and 0041 removed the ones it had left in existing catalogs.
+    // No starter Skills are seeded: the migration that did is retired, and
+    // 0041 removed the ones it had left in existing catalogs.
     // The skills AgentMux ships are a different thing: a few, each created once and then the
     // user's (`backend::builtin_skills`).
     backend::builtin_skills::seed_on_startup(identity_store);

@@ -2,9 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 .palette-swatches {
+    --palette-cols: 8;
     display: grid;
     grid-template-columns: repeat(var(--palette-cols, 8), 18px);
     gap: var(--space-1);
+}
+
+.palette-swatches--with-none {
+    --palette-cols: 9;
 }
 
 .palette-swatch-anchor {

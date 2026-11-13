@@ -1,11 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
-import { isAnyUnderway } from "@/app/drag/drag-session";
+import { createEffect, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { ELEMENT_DRAG_KINDS, isAnyUnderway } from "@/app/drag/drag-session";
+import { beginPageCut } from "@/app/drag/page-cut-gate";
 import { hostHas } from "@/util/host-caps";
 import { getApi } from "@/util/app-api";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { usePaneOverlayRect, type OverlayRect } from "@/app/platform/pane-overlay";
 import { useModalLayer } from "@/element/modal-layer";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import type { BrowserViewModel } from "./browser-model";
@@ -35,11 +36,9 @@ import { tip } from "@/app/element/tip";
 // (use-drag-snapshot.ts).
 const DRAG_SNAPSHOT_CAP_MS = 500;
 
-// The in-app (pragmatic) drags: a whole pane, a Window Tab, a Pane Tab, an
-// Editor or Media document tab. The page is a native window drawn above the
-// DOM and can't see them, so the catcher below is shown from each one's start
-// until its source releases it.
-const ELEMENT_DRAG_KINDS = ["tile", "window-tab", "pane-tab", "doc-tab"] as const;
+// The page is a native window drawn above the DOM and can't see the in-app
+// drags (`ELEMENT_DRAG_KINDS`), so the catcher below is shown from each one's
+// start until its source releases it.
 
 /**
  * Covers the page for the length of an in-app drag (a pane, a Pane Tab, a
@@ -52,15 +51,33 @@ const ELEMENT_DRAG_KINDS = ["tile", "window-tab", "pane-tab", "doc-tab"] as cons
  * so the catcher first shows a snapshot of the page and only opens the hole
  * once that has painted, or after DRAG_SNAPSHOT_CAP_MS. The snapshot is
  * static; a drag is short.
+ *
+ * The hole is the page's own rect (`pageRect`), not this element's: the page is held where it was for the
+ * drag (use-pane-rect-sync.ts `held`) while the live reflow draws the pane's tile, picture and all, wherever
+ * the drop would put it. The reflow waits for the cut (page-cut-gate.ts), two frames after the hole is asked
+ * for, which is when the host has applied it.
  */
-function BrowserDragCatcher(props: { takeSnapshot: () => Promise<DragSnapshot | null> }): JSX.Element {
+function BrowserDragCatcher(props: {
+    takeSnapshot: () => Promise<DragSnapshot | null>;
+    pageRect: Accessor<OverlayRect | undefined>;
+}): JSX.Element {
     const [snapshot, setSnapshot] = createSignal<DragSnapshot | null>(null);
     const [holeOpen, setHoleOpen] = createSignal(false);
     const cap = setTimeout(() => setHoleOpen(true), DRAG_SNAPSHOT_CAP_MS);
+    const cut = beginPageCut();
     let disposed = false;
+    let cutFrame = 0;
     onCleanup(() => {
         disposed = true;
         clearTimeout(cap);
+        cancelAnimationFrame(cutFrame);
+        cut();
+    });
+    createEffect(() => {
+        if (!holeOpen()) return;
+        cutFrame = requestAnimationFrame(() => {
+            cutFrame = requestAnimationFrame(cut);
+        });
     });
     void props.takeSnapshot().then((s) => {
         if (disposed) return;
@@ -81,18 +98,17 @@ function BrowserDragCatcher(props: { takeSnapshot: () => Promise<DragSnapshot | 
                 />
             </Show>
             <Show when={holeOpen()}>
-                <BrowserDragHole />
+                <BrowserDragHole pageRect={props.pageRect} />
             </Show>
         </div>
     );
 }
 
-/** The hole itself: registered through `usePaneOverlay` rather than
- *  `data-pane-overlay` so it also works off Windows. */
-function BrowserDragHole(): JSX.Element {
-    let el: HTMLDivElement | undefined;
-    usePaneOverlay(() => el);
-    return <div class="browser-drag-hole" ref={el} />;
+/** The hole itself: the page's own rect, registered through `usePaneOverlayRect` rather than
+ *  `data-pane-overlay` so it also works off Windows. It draws nothing. */
+function BrowserDragHole(props: { pageRect: Accessor<OverlayRect | undefined> }): JSX.Element {
+    usePaneOverlayRect(props.pageRect);
+    return null;
 }
 
 /**
@@ -206,6 +222,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         diag,
         asleep: () => sl.sleeping() && !sl.wakeRequested(),
         onWakeWithoutLoad: () => sl.wakeWithoutLoad(),
+        held: () => isAnyUnderway(ELEMENT_DRAG_KINDS),
     });
     const freeze = useFreezeFrame({
         model,
@@ -266,6 +283,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     wakeStartedAt={sl.wakeStartedAt}
                     loadingOverlay={loadingOverlay}
                     takeSnapshot={dragSnapshot.take}
+                    pageRect={rectSync.pageRectCss}
                 />
             </div>
         </div>
@@ -281,6 +299,7 @@ function BrowserPageOverlays(props: {
     wakeStartedAt: Accessor<number>;
     loadingOverlay: LoadingOverlay;
     takeSnapshot: () => Promise<DragSnapshot | null>;
+    pageRect: Accessor<OverlayRect | undefined>;
 }): JSX.Element {
     const { model, freeze, sleepCard, loadingOverlay } = props;
     return (
@@ -335,7 +354,7 @@ function BrowserPageOverlays(props: {
                 </Show>
             </Show>
             <Show when={isAnyUnderway(ELEMENT_DRAG_KINDS)}>
-                <BrowserDragCatcher takeSnapshot={props.takeSnapshot} />
+                <BrowserDragCatcher takeSnapshot={props.takeSnapshot} pageRect={props.pageRect} />
             </Show>
         </>
     );

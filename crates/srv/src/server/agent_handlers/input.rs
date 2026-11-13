@@ -766,10 +766,14 @@ mod tests {
             pairs.iter().map(|(k, v)| (k.to_string(), serde_json::Value::String(v.to_string()))).collect()
         };
         let stale = || {
-            std::collections::HashMap::from([("AGENTMUX_AGENT_WORKDIR".to_string(), "C:/stale".to_string())])
+            std::collections::HashMap::from([
+                ("AGENTMUX_AGENT_WORKDIR".to_string(), "C:/stale".to_string()),
+                ("AGENTMUX_MCP_CONFIG".to_string(), "C:/stale/.mcp.json".to_string()),
+            ])
         };
 
         let workdir = |e: &std::collections::HashMap<String, String>| std::path::PathBuf::from(&e["AGENTMUX_AGENT_WORKDIR"]);
+        let config = |e: &std::collections::HashMap<String, String>| std::path::PathBuf::from(&e["AGENTMUX_MCP_CONFIG"]);
         let ws = std::env::temp_dir().join("clamk-0612a");
         let ws_str = ws.to_string_lossy().into_owned();
 
@@ -777,29 +781,39 @@ mod tests {
             let mut e = stale();
             super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", mode), ("cmd:cwd", &ws_str)]));
             assert_eq!(workdir(&e), ws, "{mode}");
+            assert_eq!(config(&e), crate::backend::mcp_config_file::config_path(&ws_str), "{mode}");
         }
         // No agentMode is a host agent, srv's default.
         let mut e = stale();
         super::carry_agent_workdir_env(&mut e, &meta(&[("cmd:cwd", &ws_str)]));
         assert_eq!(workdir(&e), ws);
+        assert_eq!(config(&e), crate::backend::mcp_config_file::config_path(&ws_str));
 
         // Exported as the absolute path the process starts in: a relative
         // cwd resolves against srv's own cwd, `~` against the home dir.
         let mut e = stale();
         super::carry_agent_workdir_env(&mut e, &meta(&[("cmd:cwd", "projects/foo")]));
         assert_eq!(workdir(&e), std::env::current_dir().unwrap().join("projects/foo"));
+        assert_eq!(
+            config(&e),
+            crate::backend::mcp_config_file::config_path(&std::env::current_dir().unwrap().join("projects/foo").to_string_lossy()),
+            "a relative cwd gives the same config path on both sides"
+        );
         if let Some(home) = dirs::home_dir() {
             let mut e = stale();
             super::carry_agent_workdir_env(&mut e, &meta(&[("cmd:cwd", "~/.agentmux/agents/x-0930a")]));
             assert_eq!(workdir(&e), home.join(".agentmux/agents/x-0930a"));
+            assert_eq!(config(&e), home.join(".agentmux/agents/x-0930a/.mcp.json"));
         }
 
         let mut e = stale();
         super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", "container"), ("cmd:cwd", &ws_str)]));
         assert!(!e.contains_key("AGENTMUX_AGENT_WORKDIR"), "container");
+        assert!(!e.contains_key("AGENTMUX_MCP_CONFIG"), "a container doctor uses the mounted path");
         let mut e = stale();
         super::carry_agent_workdir_env(&mut e, &meta(&[("agentMode", "host"), ("cmd:cwd", "  ")]));
         assert!(!e.contains_key("AGENTMUX_AGENT_WORKDIR"), "no cwd");
+        assert!(!e.contains_key("AGENTMUX_MCP_CONFIG"), "no cwd, no config");
     }
 
     #[test]

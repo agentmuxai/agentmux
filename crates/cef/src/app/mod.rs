@@ -42,7 +42,7 @@ pub(crate) use monitor::display_work_area_at;
 #[cfg(target_os = "linux")]
 pub(crate) use monitor::primary_work_area;
 #[cfg(target_os = "windows")]
-pub use monitor::{dpi_scale_at, get_monitor_work_area_physical};
+pub use monitor::{dpi_scale_at, get_monitor_work_area_physical, window_work_area_physical};
 #[cfg(target_os = "linux")]
 pub use window_settings::{install_linux_window_properties_override, SELECTED_OZONE_PLATFORM};
 pub(crate) use window_settings::read_window_transparent_setting;
@@ -295,16 +295,6 @@ wrap_window_delegate! {
             }
         }
 
-        // Windows in Views pane mode: the panes follow the window as on Linux.
-        #[cfg(target_os = "windows")]
-        fn on_window_bounds_changed(&self, window: Option<&mut Window>, _new_bounds: Option<&Rect>) {
-            if let (Some((state, label)), Some(window)) = (&self.window_registration, window) {
-                if crate::pane_backend::views() {
-                    crate::browser_panes::bounds::window_resized(state, label, window);
-                }
-            }
-        }
-
         #[cfg(target_os = "linux")]
         fn on_window_bounds_changed(&self, window: Option<&mut Window>, new_bounds: Option<&Rect>) {
             if let (Some((state, label)), Some(window)) = (&self.window_registration, window) {
@@ -353,7 +343,8 @@ wrap_window_delegate! {
             // a destroyed window to silently no-op or worse.
             if let Some((state, label)) = self.window_registration.as_ref() {
                 state.windows.lock().remove(label);
-                #[cfg(any(target_os = "linux", target_os = "windows"))]
+                crate::commands::window::close_ask::forget(label);
+                #[cfg(target_os = "linux")]
                 crate::browser_panes::bounds::forget_window(label);
                 tracing::info!(
                     window_label = %label,
@@ -384,6 +375,15 @@ wrap_window_delegate! {
                     label_owned.as_str()
                 }
             };
+            // A close nobody here decided on came from the OS (Alt+F4, the taskbar, the window
+            // manager): the window's page is asked first, as its own close button asks.
+            if let Some((state, label)) = self.window_registration.as_ref() {
+                use crate::commands::window::close_ask;
+                if close_ask::os_close(state, label) == close_ask::OsClose::Ask {
+                    crate::client::dlog(&format!("can_close({label}): held back, the page is asked"));
+                    return 0;
+                }
+            }
             let browser_view = self.browser_view.borrow();
             let Some(browser_view) = browser_view.as_ref() else {
                 crate::client::dlog(&format!(
@@ -1304,7 +1304,7 @@ wrap_browser_process_handler! {
                     client.as_mut(),
                     Some(&url),
                     Some(&settings),
-                    None,
+                    crate::ipc_query::app_extra_info().as_mut(),
                     None,
                     Some(&mut delegate),
                 );

@@ -179,7 +179,7 @@ fn worker_of_block(mstore: &Store, block_id: &str) -> Option<Worker> {
 }
 
 /// The open panes (in a tab) of definition `def_id`.
-fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
+pub(crate) fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
     let Ok(tabs) = mstore.get_all::<Tab>() else {
         return Vec::new();
     };
@@ -211,6 +211,10 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
     if matches!(ev, WorkerEvent::Asked { .. })
         && crate::backend::agent_state::current_state(mstore, block_id) != Some(crate::backend::agent_state::AgentState::Waiting)
     {
+        return None;
+    }
+    // A route out of credits stops every agent on it: its leads are told once for the route (`route_credits`).
+    if matches!(ev, WorkerEvent::Failed { title, .. } if title == crate::agents::failure::ROUTE_CREDITS_TITLE) {
         return None;
     }
     let worker = worker_of_block(mstore, block_id)?;
@@ -379,14 +383,30 @@ fn note_target(block_id: &str) -> Option<String> {
         .map(|r| r.uid.clone().filter(|u| !u.is_empty()).unwrap_or(r.agent_id.clone()))
 }
 
+/// The first open pane of the lead of the agent `def_id` (its seat's lead, on this machine), if it has one.
+fn leader_pane_of(mstore: &Store, def_id: &str) -> Option<String> {
+    let lead = crate::backend::agent_seat::effective_seat_by_id(mstore, def_id)
+        .and_then(|seat| seat.lead)
+        .filter(|lead| !crate::backend::agent_seat::is_remote_lead(lead));
+    lead.and_then(|lead| live_panes_of(mstore, &lead).into_iter().next())
+}
+
+/// Like [`tell_leader`], for a note that asks nothing: it joins the leader's turn if one is running, else waits under
+/// `key` for the next one (a second note under the same key replaces the first). It never starts a turn.
+pub(crate) fn tell_leader_held(mstore: &Store, def_id: &str, body: &str, key: &str) -> bool {
+    let Some(leader_block) = leader_pane_of(mstore, def_id) else {
+        return false;
+    };
+    let text = format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(body));
+    crate::backend::blockcontroller::system_note_into_turn_or_hold(&leader_block, key, &text);
+    true
+}
+
 /// Tell the lead of the agent `def_id` something about it, as an `[AgentMux]` note: its seat's lead (a
 /// spawned worker's is its leader) when that agent is on this machine and has a pane open. `false` when
 /// nobody was told: it reports to the operator, its lead is on another machine, or its pane is not open.
 pub(crate) fn tell_leader(mstore: &Store, def_id: &str, body: &str) -> bool {
-    let lead = crate::backend::agent_seat::effective_seat_by_id(mstore, def_id)
-        .and_then(|seat| seat.lead)
-        .filter(|lead| !crate::backend::agent_seat::is_remote_lead(lead));
-    let Some(leader_block) = lead.and_then(|lead| live_panes_of(mstore, &lead).into_iter().next()) else {
+    let Some(leader_block) = leader_pane_of(mstore, def_id) else {
         return false;
     };
     let Some(target) = note_target(&leader_block) else {

@@ -14,6 +14,7 @@ import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "
 import { modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
 import { AgentMuxConnectBody, type MuxBusController } from "./AgentMuxConnectPanel";
 import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
+import { GITHUB_GH_AGENT_NOTE, githubStatusLine } from "./github-account-copy";
 
 export function AddAccountSection(props: {
     tile: ServiceTile;
@@ -58,12 +59,18 @@ export function AddAccountSection(props: {
             <Show when={tile.id === "agentmux"}>
                 <AgentMuxConnectBody muxbus={props.muxbus} />
             </Show>
+            <Show when={tile.id === "github"}>
+                <div class="accounts-add-status">
+                    <p>{githubStatusLine(model.accountsByProvider().get("github") ?? [])}</p>
+                    <p class="accounts-add-status-note">{GITHUB_GH_AGENT_NOTE}</p>
+                </div>
+            </Show>
             <Show when={tile.id !== "agentmux" && mode() === null}>
                 <div class="accounts-chooser accounts-chooser--inline">
                     <div class="accounts-chooser-modes">
                         <For each={tile.authModes}>
                             {(m) => {
-                                const label = modeLabel(m);
+                                const label = modeLabel(m, tile.id);
                                 return (
                                     <Button tone="neutral" class="accounts-chooser-mode" onClick={() => pick(m)}>
                                         <span class="accounts-chooser-mode-title">{label.title}</span>

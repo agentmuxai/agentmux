@@ -3,7 +3,7 @@
 /**
  * `agent:memory:adoption_list` — the agent's memory folders under its
  * earlier accounts, offered for adoption
- * (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). Adopting one goes
- * through the host's confirmation window, not an RPC.
+ * (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). Adopting one is
+ * `agent:memory:adopt`, which only the AgentMux window may call.
  */
 export type CommandNativeMemoryAdoptionListData = { agent_id: string, };

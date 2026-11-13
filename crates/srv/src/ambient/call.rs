@@ -202,7 +202,7 @@ impl Slot {
             Err(error) => {
                 let outcome = super::outcome::classify_error(&error, self.cancel.is_cancelled());
                 tracing::debug!(purpose = self.purpose.tag, entity = %self.entity_id, error = %error, "ambient call failed");
-                super::outcome::record_timed(self.purpose.tag, &self.entity_id, outcome, None, Some(timing));
+                super::outcome::record_timed(self.purpose.tag, &self.entity_id, outcome, Some(error.as_str()), Some(timing));
                 Reply { text: String::new(), tokens: None, error: Some(error) }
             }
             Ok((raw, tokens)) => {

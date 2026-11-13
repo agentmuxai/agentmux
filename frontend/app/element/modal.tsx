@@ -78,14 +78,14 @@ import { Portal } from "solid-js/web";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 
 import { nudgeDismissControl } from "./modal-dismiss-nudge";
-import { firstFocusable, initialFocusTarget, lastFocusable } from "./modal-focus-trap";
+import { createBackdropDismiss, createModalCaret } from "./modal-caret";
+import { firstFocusable, lastFocusable } from "./modal-focus-trap";
 import { ModalTitleIdContext } from "./modal-parts";
 import { acquireRegionLock, releaseRegionLock } from "./modal-region-lock";
 import { push, remove, isReachable, type StackEntry } from "./modal-stack";
 
 import { IconButton } from "./ui";
 import "./modal.scss";
-import { focusManager } from "@/app/store/focusManager";
 
 export { ModalHeader, ModalBody, ModalFooter } from "./modal-parts";
 
@@ -227,7 +227,11 @@ export const Modal: Component<ModalProps> = (props) => {
 
     let panelRef: HTMLDivElement | undefined;
     let rootRef: HTMLDivElement | undefined;
-    let previousFocus: HTMLElement | null = null;
+    // Taking the caret on open and giving it back on close (modal-caret.ts).
+    const caret = createModalCaret(
+        () => panelRef,
+        () => props.initialFocus
+    );
 
     // Cached on open so close targets exactly what open acquired, even
     // if focus / context moved meanwhile.
@@ -293,7 +297,7 @@ export const Modal: Component<ModalProps> = (props) => {
     });
 
     const openModal = (): void => {
-        previousFocus = (document.activeElement as HTMLElement) ?? null;
+        caret.remember();
 
         const resolved = resolveScope();
         mountNode = resolved.mount;
@@ -314,19 +318,7 @@ export const Modal: Component<ModalProps> = (props) => {
         push(stackEntry);
 
         setMounted(true);
-
-        // Focus resolution — next frame so the Portal has rendered.
-        requestAnimationFrame(() => {
-            if (!panelRef) return;
-            let target: HTMLElement | null = null;
-            if (typeof props.initialFocus === "function") {
-                target = props.initialFocus();
-            } else if (props.initialFocus) {
-                target = props.initialFocus;
-            }
-            if (!target) target = initialFocusTarget(panelRef);
-            (target ?? panelRef).focus();
-        });
+        caret.opened(resolved.scope, resolved.region);
     };
 
     const closeModal = (): void => {
@@ -341,21 +333,7 @@ export const Modal: Component<ModalProps> = (props) => {
 
         setMounted(false);
         setPortalMount(null);
-
-        // Restore focus on the next tick so Solid's cleanup has finished
-        // and the previously-focused element isn't immediately moved by
-        // an unrelated reactive update.
-        queueMicrotask(() => {
-            if (previousFocus && previousFocus.isConnected && typeof previousFocus.focus === "function") {
-                previousFocus.focus();
-            } else {
-                // The opener is gone (the modal confirmed closing the pane it
-                // was opened from): the caret goes to the selection, not <body>.
-                // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1.
-                focusManager.ensureSelectionFocused("modal-closed");
-            }
-            previousFocus = null;
-        });
+        caret.closed();
     };
 
     // Key handling. ESC fires on the *reachable topmost* — modals lower
@@ -371,19 +349,17 @@ export const Modal: Component<ModalProps> = (props) => {
 
     // Backdrop handling. Only acts when this modal is the reachable
     // topmost. When `closeOnBackdropClick` is false the click does not
-    // dismiss — it nudges the panel's `[data-modal-dismiss]` control.
-    const handleBackdropClick = (ev: MouseEvent): void => {
+    // dismiss — it nudges the panel's `[data-modal-dismiss]` control. The
+    // press that takes the person to a waiting modal's pane does neither.
+    const backdrop = createBackdropDismiss(caret.waiting, (ev) => {
         if (!stackEntry || !isReachable(stackEntry)) return;
         // Only the backdrop itself, not a click bubbling up from the
         // panel. The panel is a sibling of the backdrop, so the simplest
         // correct test is `target === currentTarget`.
         if (ev.target !== ev.currentTarget) return;
-        if (props.closeOnBackdropClick === false) {
-            nudgeDismissControl(panelRef);
-            return;
-        }
+        if (props.closeOnBackdropClick === false) return nudgeDismissControl(panelRef);
         props.onClose();
-    };
+    });
 
     // Sentinel focus trap. Focusing a sentinel bounces focus to the
     // opposite end of the panel so Tab and Shift+Tab both wrap inside
@@ -434,7 +410,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             onKeyDown={handleKeyDown}
                         >
                             <ModalPaneOverlayClip getEl={() => rootRef} />
-                            <div class="modal-backdrop" onClick={handleBackdropClick} />
+                            <div class="modal-backdrop" onPointerDown={backdrop.press} onClick={backdrop.click} />
                             <span
                                 class="modal-focus-sentinel"
                                 tabindex="0"

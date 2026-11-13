@@ -31,8 +31,8 @@ const SIZE_EPS = 1e-4;
  * `minimized` display-mode flag (geometry derived at render, stored size never
  * touched — see `RESEARCH_PANE_MINIMIZE_BEST_PRACTICES_2026_07_16.md` §7).
  * The legacy markers (`minimizedSize`/`slipMinimize`/`columnDissolve`) are
- * still recognized so unmigrated persisted trees stay guarded until
- * `rebuildMinimizedSet` migrates them at load.
+ * still recognized so a tree that carries them stays guarded; srv migrates them
+ * when it loads a tree, so the window should not see any.
  *
  * No other writer may resize, move, swap, or split a locked node, and no
  * resize handle is rendered on its edges.

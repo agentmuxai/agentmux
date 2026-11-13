@@ -12,7 +12,7 @@ vi.mock("@/app/i18n/i18n", () => ({
     get SHIPPED_LOCALES() {
         return state.shipped;
     },
-    t: (key: string) => ({ "settings.language.beta": "Beta", "settings.language.system": "Same as the system" })[key] ?? key,
+    t: (key: string) => ({ "settings.language.beta": "Beta", "settings.language.system": "Same as the system", "settings.language.label": "Language" })[key] ?? key,
 }));
 
 import { languageChoices, languageLabel, LanguageRow } from "./language-row";

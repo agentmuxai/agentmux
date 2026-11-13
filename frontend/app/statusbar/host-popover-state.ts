@@ -8,10 +8,10 @@
 
 import { getApi, type LanDiscoverability, type LanFirewall } from "@/store/global";
 import { createSignal, type Accessor } from "solid-js";
+import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { type PopoverAnchor } from "@/app/element/anchored-popover";
 import { type MuxBusController } from "@/app/view/accounts/AgentMuxConnectPanel";
 import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "@/app/view/accounts/muxbus-session";
-import { isLinux, isMacOS } from "@/util/platformutil";
 import type { LanInstance } from "@/types/rpc/LanInstance";
 
 export type HostInfo = {
@@ -51,8 +51,7 @@ export interface HostPopoverPanelProps {
 export function createHostPanel(props: HostPopoverPanelProps) {
     // Data-path link → OS file manager. Errors surface inline (a headless
     // Linux box with no handler would otherwise look like a dead link).
-    const fileManagerLabel = () =>
-        isMacOS() ? "Reveal in Finder" : isLinux() ? "Open in file manager" : "Show in File Explorer";
+    const fileManagerLabel = revealInFileManagerLabel;
     const [openDirError, setOpenDirError] = createSignal<string | null>(null);
     const openDataDir = async () => {
         setOpenDirError(null);

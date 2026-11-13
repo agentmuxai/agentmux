@@ -1419,7 +1419,38 @@ mod capture_cred_baseline_tests {
 mod spawn_login_pty_tests {
     use super::spawn_login_pty_unix;
     use std::collections::HashMap;
-    use std::io::{BufRead, BufReader, Read};
+    use std::io::{BufRead, BufReader, Read, Write};
+
+    /// Run `script` in `sh` on a login pty and return what it printed and how it exited. After the
+    /// script the child waits for a line from us, so its side of the pty stays open until we have
+    /// read: macOS throws away output nobody has read when the last slave fd closes, and a child
+    /// that printed and exited first lost it whenever the test thread was slow to get to the read.
+    fn run_on_pty(script: &str) -> (String, std::process::ExitStatus) {
+        let env: HashMap<String, String> = HashMap::new();
+        let script = format!("{script}; echo pty-test-done; read _");
+        let (mut child, master) =
+            spawn_login_pty_unix("/bin/sh", &["-c".to_string(), script], &env).expect("spawn on pty");
+        let mut release = master.try_clone().expect("clone master");
+        // The reader owns the master until the child is reaped: closing the master first leaves a
+        // session leader that is still exiting stuck on macOS.
+        let mut reader = BufReader::new(master);
+        let mut out = String::new();
+        let mut line = String::new();
+        while matches!(reader.read_line(&mut line), Ok(n) if n > 0) {
+            if line.trim_end() == "pty-test-done" {
+                break;
+            }
+            out.push_str(line.trim_end());
+            out.push('\n');
+            line.clear();
+        }
+        let _ = release.write_all(b"\n");
+        // Drain to EOF so the child isn't blocked on a full pty buffer, then reap.
+        let mut rest = String::new();
+        let _ = reader.read_to_string(&mut rest);
+        let status = child.wait().expect("wait child");
+        (out, status)
+    }
 
     // Exercises the hand-rolled PTY spawn end to end: openpty → pre_exec
     // (signal reset, setsid, TIOCSCTTY, close_range fd hygiene) → exec →
@@ -1430,27 +1461,9 @@ mod spawn_login_pty_tests {
     // libcef-interposition proof is in the retro.
     #[test]
     fn spawns_program_on_pty_and_captures_stdout() {
-        let env: HashMap<String, String> = HashMap::new();
-        let (mut child, master) = spawn_login_pty_unix(
-            "/bin/echo",
-            &["hello-from-pty".to_string()],
-            &env,
-        )
-        .expect("spawn on pty");
-
-        let mut reader = BufReader::new(master.try_clone().expect("clone master"));
-        let mut line = String::new();
-        reader.read_line(&mut line).expect("read pty line");
-        assert!(
-            line.contains("hello-from-pty"),
-            "expected child stdout on the pty, got {line:?}"
-        );
-
-        // Drain to EOF so the child isn't blocked on a full pty buffer, then reap.
-        let mut rest = String::new();
-        let _ = reader.read_to_string(&mut rest);
-        let status = child.wait().expect("wait child");
-        assert!(status.success(), "echo should exit 0, got {status:?}");
+        let (out, status) = run_on_pty("echo hello-from-pty");
+        assert!(out.contains("hello-from-pty"), "expected child stdout on the pty, got {out:?}");
+        assert!(status.success(), "the child should exit 0, got {status:?}");
     }
 
     // fd hygiene: an inherited, explicitly non-CLOEXEC fd ≥ 3 must NOT be
@@ -1474,15 +1487,7 @@ mod spawn_login_pty_tests {
             libc::fcntl(leaked, libc::F_SETFD, flags & !libc::FD_CLOEXEC);
         }
 
-        let env: HashMap<String, String> = HashMap::new();
-        let script = format!("test -e /proc/self/fd/{leaked} && echo LEAKED || echo CLEAN");
-        let (mut child, master) =
-            spawn_login_pty_unix("/bin/sh", &["-c".to_string(), script], &env)
-                .expect("spawn on pty");
-
-        let mut out = String::new();
-        let _ = BufReader::new(master).read_to_string(&mut out);
-        let _ = child.wait();
+        let (out, _) = run_on_pty(&format!("test -e /proc/self/fd/{leaked} && echo LEAKED || echo CLEAN"));
         assert!(
             out.contains("CLEAN") && !out.contains("LEAKED"),
             "fd {leaked} leaked into the child; hygiene failed. child said: {out:?}"
@@ -1508,17 +1513,7 @@ mod spawn_login_pty_tests {
     // Claude's `auth login` runs its interactive flow instead of bailing).
     #[test]
     fn child_stdin_is_a_tty() {
-        let env: HashMap<String, String> = HashMap::new();
-        let (mut child, master) = spawn_login_pty_unix(
-            "/bin/sh",
-            &["-c".to_string(), "test -t 0 && echo IS_TTY || echo NO_TTY".to_string()],
-            &env,
-        )
-        .expect("spawn on pty");
-
-        let mut out = String::new();
-        let _ = BufReader::new(master).read_to_string(&mut out);
-        let _ = child.wait();
+        let (out, _) = run_on_pty("test -t 0 && echo IS_TTY || echo NO_TTY");
         assert!(out.contains("IS_TTY"), "child stdin should be a tty, got {out:?}");
     }
 }

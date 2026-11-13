@@ -61,7 +61,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { setLastInputForTests } from "@/app/store/last-input";
 import { sleep } from "@/util/util";
 import { __resetOpenTailForTests } from "./open-tail";
-import { isRetriableHistoryError, MAX_SAVED_HELD, useHistoryPagination } from "./useHistoryPagination";
+import { isRetriableHistoryError, useHistoryPagination } from "./useHistoryPagination";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 let dispose: (() => void) | null = null;
@@ -109,6 +109,14 @@ const flush = async () => {
 
 const logged = (m: { log: ReturnType<typeof vi.fn> }, text: string | RegExp) =>
     m.log.mock.calls.some((c) => (typeof text === "string" ? c[1] === text : text.test(String(c[1]))));
+
+/**
+ * Waits for THIS mount's fill to write its closing line. Not for `hub.endLoad`: the hub is one mock for the whole file, and
+ * a fill an earlier test left behind (paused, then stopped by that test's unmount) calls it up to a few hundred ms later,
+ * in the middle of the next test.
+ */
+const fillEnded = (m: { log: ReturnType<typeof vi.fn> }) =>
+    vi.waitFor(() => expect(logged(m, /^background fill \w+: /)).toBe(true), { timeout: 6000 });
 
 const count = (n: number, over: Record<string, unknown> = {}) =>
     vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: n, ...over } as never);
@@ -504,23 +512,18 @@ describe("a snapshot read for the agent", () => {
         const overlay = m.onSnapshotOverlay.mock.calls[0][0];
         expect([...overlay.documentState.collapsedNodes]).toEqual(["a"]);
         expect([...overlay.documentState.pinnedNodes]).toEqual(["p"]);
-        expect([...overlay.documentState.heldOpenNodes]).toEqual(["h1", "h2"]);
-        expect([...overlay.documentState.restoredHeldNodes]).toEqual(["h1", "h2"]);
+        expect(overlay.documentState.heldOpenNodes.size).toBe(0); // the held ids are not brought back
         expect(overlay.documentState.scrollPosition).toBe(42);
         expect(overlay.documentState.filter).toEqual({ showThinking: true });
         expect(overlay.detailsOpen).toBe(true);
     });
 
-    it("keeps the newest few held rows, and fills in what the snapshot left out", async () => {
-        const held = Array.from({ length: MAX_SAVED_HELD + 5 }, (_, i) => `h${i}`);
-        snapshot(v2({ highWaterMark: 100, documentState: { heldOpenNodeIds: held, scrollPosition: "x" } }));
+    it("fills in what the snapshot left out", async () => {
+        snapshot(v2({ highWaterMark: 100, documentState: { scrollPosition: "x" } }));
         range();
         const m = open();
         await flush();
         const ds = m.onSnapshotOverlay.mock.calls[0][0].documentState;
-        expect(ds.heldOpenNodes.size).toBe(40);
-        expect(ds.heldOpenNodes.has("h5")).toBe(true);
-        expect(ds.heldOpenNodes.has("h4")).toBe(false);
         expect(ds.scrollPosition).toBe(0);
         expect(ds.filter).toEqual({
             showThinking: false,
@@ -530,13 +533,6 @@ describe("a snapshot read for the agent", () => {
             showOutgoing: true,
         });
         expect(m.onSnapshotOverlay.mock.calls[0][0].detailsOpen).toBeUndefined();
-
-        dispose?.();
-        dispose = null;
-        snapshot(v2({ highWaterMark: 100, documentState: {} }));
-        const none = open();
-        await flush();
-        expect(none.onSnapshotOverlay.mock.calls[0][0].documentState.restoredHeldNodes).toBeUndefined();
     });
 
     it("applies no overlay for a snapshot without document state, and still opens", async () => {
@@ -984,7 +980,7 @@ describe("the background fill's account of itself", () => {
     it("logs and records the pages it loaded, then lets go of the tool chunks it held", async () => {
         range({ offset: undefined });
         const m = fill();
-        await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
+        await fillEnded(m);
         expect(logged(m, /^background fill done: \d+ pages, \d+ lines, \d+ bytes in \d+ ms$/)).toBe(true);
         expect(hub.rest).toHaveBeenCalledWith("blk-1", "done", {
             pages: expect.any(Number),
@@ -1001,7 +997,7 @@ describe("the background fill's account of itself", () => {
     it("hands its pages over unloaded, and a scroll-up's page loaded", async () => {
         range({ offset: undefined });
         const m = fill();
-        await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
+        await fillEnded(m);
         const pages = m.docEvents.filter((e) => e.type === "HistoryLoaded");
         expect(pages.length).toBeGreaterThan(1);
         for (const p of pages.slice(1)) expect(p.unloadResults).toBe(true);
@@ -1010,7 +1006,7 @@ describe("the background fill's account of itself", () => {
     it("logs a page it could not read, and ends", async () => {
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockRejectedValue(new Error("read broke"));
         const m = fill();
-        await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
+        await fillEnded(m);
         const failure = m.log.mock.calls.find((c) => String(c[1]).startsWith("background history load failed"));
         expect(failure?.[1]).toBe("background history load failed: read broke");
         expect(failure?.[2]).toBe("warn");
@@ -1025,8 +1021,8 @@ describe("the background fill's account of itself", () => {
             return 1;
         });
         range({ offset: undefined });
-        fill();
-        await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
+        const m = fill();
+        await fillEnded(m);
         expect(seen[0]).toEqual({ timeout: 500 });
     });
 
@@ -1080,7 +1076,7 @@ describe("the background fill's account of itself", () => {
                 ? { lines: Array.from({ length: req.limit }, (_, i) => delta(i)), stream: "b:blk-1", gen: "g1" }
                 : { lines: [], gen_mismatch: true }) as never);
         const m = fill();
-        await vi.waitFor(() => expect(hub.endLoad).toHaveBeenCalled(), { timeout: 6000 });
+        await fillEnded(m);
         expect(m.hook.historyOffset()).toBe(5_000);
         expect(m.docEvents.filter((e) => e.type === "HistoryLoaded")).toHaveLength(1);
     });

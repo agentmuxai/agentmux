@@ -73,6 +73,7 @@ pub const AGENT_ENV: &[EnvSpec] = &[
     spec("AGENTMUX_BUILD", Rewrite, "which AgentMux this is: a container exec does not go through pane_env, so srv adds it"),
     spec("AGENTMUX_INSTANCE_CHANNEL", Rewrite, "which AgentMux this is: set only when srv runs in a named channel; as AGENTMUX_VERSION"),
     spec("AGENTMUX_IN_CONTAINER", Rewrite, "a hint for the in-container MCP and bashwrap, which are not given signing keys"),
+    spec("AGENTMUX_PUBLISH_GUARD", Rewrite, "set to 1 where this machine's gh-agent can judge a container's push, older-gh-agent where it cannot, 0 where there is no gh-agent, for the container's pre-push hook; any value the agent carried is replaced"),
     spec("CHOKIDAR_USEPOLLING", Rewrite, "file watchers poll where the workspace is a file-sharing mount that sends no change events (Docker Desktop)"),
     spec("CHOKIDAR_INTERVAL", Rewrite, "as CHOKIDAR_USEPOLLING"),
     spec("WATCHPACK_POLLING", Rewrite, "as CHOKIDAR_USEPOLLING"),
@@ -88,6 +89,7 @@ pub const AGENT_ENV: &[EnvSpec] = &[
     spec("TEMP", HostOnly, "a host temp folder"),
     spec("TMP", HostOnly, "a host temp folder"),
     spec("AGENTMUX_AGENT_WORKDIR", HostOnly, "the host path of the agent's workspace; srv sets it for host agents only"),
+    spec("AGENTMUX_MCP_CONFIG", HostOnly, "the host path of the agent's MCP config; a container doctor uses the bind-mounted copy"),
     spec("CLAUDE_CODE_SHELL_PREFIX", HostOnly, "a host path; the image's own wrapper may predate prefix mode"),
 ];
 

@@ -29,6 +29,13 @@ const show = (items: NativeContextMenuItem[]) => showJsContextMenu(items, { x: 0
 const item = (label: string, extra: Partial<NativeContextMenuItem> = {}): NativeContextMenuItem => ({ id: label, label, ...extra });
 
 describe("JS context menu icons", () => {
+    it("tints a row's icon with its own colour, and leaves the label and other rows' icons alone", () => {
+        show([item("Terminal", { icon: "terminal", iconColor: "#ff8800" }), item("Copy", { icon: "copy" })]);
+        expect(slot("Terminal")!.style.getPropertyValue("--menu-icon-color")).toBe("#ff8800");
+        expect(slot("Copy")!.style.getPropertyValue("--menu-icon-color")).toBe("");
+        expect(row("Terminal").querySelector<HTMLElement>(".label")!.style.color).toBe("");
+    });
+
     it("draws a row's icon first, in the shared slot, hidden from assistive tech", () => {
         show([item("Copy", { icon: "copy" })]);
         const icon = slot("Copy")!;

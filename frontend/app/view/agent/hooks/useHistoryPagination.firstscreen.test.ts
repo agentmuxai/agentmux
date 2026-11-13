@@ -34,8 +34,9 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { sleep } from "@/util/util";
 import { createTranscriptSettleLatch, TranscriptCursor } from "../transcript-cursor";
 import { beginAgentOpen, finishAgentOpen, openTraceEnv, resetAgentOpenTracesForTests } from "../open-trace";
+import { hiddenFill } from "./hidden-fill";
 import { __resetOpenTailForTests, type OpenTailResult } from "./open-tail";
-import { MAX_SAVED_HELD, OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, useHistoryPagination } from "./useHistoryPagination";
+import { OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, useHistoryPagination } from "./useHistoryPagination";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 let dispose: (() => void) | null = null;
@@ -165,14 +166,12 @@ describe("first screen", () => {
         expect([...overlay.documentState.collapsedNodes]).toEqual(["x"]);
         expect([...overlay.documentState.pinnedNodes]).toEqual(["y"]);
         expect(overlay.detailsOpen).toBe(true);
-        // A snapshot without held ids brings none back.
         expect(overlay.documentState.heldOpenNodes.size).toBe(0);
-        expect(overlay.documentState.restoredHeldNodes).toBeUndefined();
     });
 
-    it("held ids in the snapshot come back as held and as restored (the newest few, strings only)", async () => {
+    it("held ids an older snapshot carries are not brought back: a restored pane opens every row closed", async () => {
         const onSnapshotOverlay = vi.fn();
-        const many = Array.from({ length: MAX_SAVED_HELD + 5 }, (_, i) => `h${i}`);
+        const many = Array.from({ length: 45 }, (_, i) => `h${i}`);
         openTail.mockResolvedValue(
             tailOf(3, 100, {
                 snapshot: JSON.stringify({
@@ -186,8 +185,8 @@ describe("first screen", () => {
         mount({ onSnapshotOverlay });
         await flush();
         const ds = onSnapshotOverlay.mock.calls[0][0].documentState;
-        expect([...ds.heldOpenNodes]).toEqual(many.slice(-MAX_SAVED_HELD));
-        expect([...ds.restoredHeldNodes]).toEqual(many.slice(-MAX_SAVED_HELD));
+        expect(ds.heldOpenNodes.size).toBe(0);
+        expect(ds).not.toHaveProperty("restoredHeldNodes");
     });
 });
 
@@ -516,6 +515,24 @@ describe("the rest of the restore window", () => {
         const { hook } = mount();
         await flush();
         release();
+        await sleep(600);
+        expect(RpcApi.BlockfileReadRangeCommand).not.toHaveBeenCalled();
+        fillPaused.value = false;
+        await vi.waitFor(() => expect(hook().historyOffset()).toBeLessThan(FLOOR_END - 3), { timeout: 4000 });
+    });
+
+    it("does not read for a hidden pane's page that waited behind another pane's, when the pane was shown and scrolled meanwhile", async () => {
+        openTail.mockResolvedValue(tailOf(3, FLOOR_END));
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation(async () => page(2));
+        let unblock!: () => void;
+        const blocker = hiddenFill.run(() => new Promise<void>((resolve) => (unblock = resolve)));
+        const { hook } = mount({ fillHidden: () => true });
+        await flush();
+        release();
+        await sleep(300); // the loop has asked for its page, which is queued behind the blocker
+        fillPaused.value = true; // the pane is shown and scrolled up while it waits
+        unblock();
+        await blocker;
         await sleep(600);
         expect(RpcApi.BlockfileReadRangeCommand).not.toHaveBeenCalled();
         fillPaused.value = false;

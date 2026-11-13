@@ -64,23 +64,35 @@ pub fn get_monitor_work_area(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
 /// (reagent P1 on PR #1652). Returns `(left, top, width, height)`.
 #[cfg(target_os = "windows")]
 pub fn get_monitor_work_area_physical(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
-    use windows_sys::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
-    };
+    use windows_sys::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
     unsafe {
         let point = windows_sys::Win32::Foundation::POINT { x: px, y: py };
-        let hmonitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
-        if hmonitor.is_null() {
-            return None;
-        }
-        let mut info: MONITORINFO = std::mem::zeroed();
-        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-        if GetMonitorInfoW(hmonitor, &mut info) == 0 {
-            return None;
-        }
-        let rc = info.rcWork;
-        Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
+        work_area_physical_of(MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY))
     }
+}
+
+/// The work area, in physical pixels, of the monitor the window `hwnd` is on, or is nearest to: `(left, top,
+/// width, height)`. A window keeps its monitor while something of it is carried to the next one, where the
+/// monitor under a point changes at the edge.
+#[cfg(target_os = "windows")]
+pub fn window_work_area_physical(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
+    use windows_sys::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
+    unsafe { work_area_physical_of(MonitorFromWindow(hwnd as _, MONITOR_DEFAULTTONEAREST)) }
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn work_area_physical_of(hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR) -> Option<(i32, i32, i32, i32)> {
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO};
+    if hmonitor.is_null() {
+        return None;
+    }
+    let mut info: MONITORINFO = std::mem::zeroed();
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    if GetMonitorInfoW(hmonitor, &mut info) == 0 {
+        return None;
+    }
+    let rc = info.rcWork;
+    Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
 }
 
 /// Effective DPI scale (1.0 == 96 DPI == 100%) of the monitor under `(px, py)`

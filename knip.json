@@ -8,7 +8,8 @@
         "test/fixtures/fake-xterm/server.mjs",
         "test/fixtures/fake-form/server.mjs",
         "test/fixtures/fake-upload/server.mjs",
-        "frontend/**/*.{darwin,linux}.{ts,tsx}"
+        "frontend/**/*.{darwin,linux}.{ts,tsx}",
+        "frontend/web-host/web-host-module.ts"
     ],
     "ignore": ["docs/examples/**"],
     "ignoreFiles": [

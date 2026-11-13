@@ -1,33 +1,27 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+//! The session RPCs: `listrecentsessions` (the My Agents list, `recent.rs`) and the agent-anchored session zone
+//! (`zone.rs`). `register` only wires each command to its named function.
 
 use std::sync::Arc;
 
-
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    COMMAND_LIST_RECENT_SESSIONS, CommandListRecentSessionsData,
-    ListRecentSessionsResult, RecentSessionRow,
-    // Option E (PR 1 of 2) — agent-anchored session zones.
-    COMMAND_AGENT_SESSION_READ, COMMAND_AGENT_SESSION_WRITE_STATE,
-    COMMAND_AGENT_SESSION_APPEND_OUTPUT, COMMAND_AGENT_SESSION_ARCHIVE,
-    COMMAND_AGENT_SESSION_LIST_ARCHIVES,
-    CommandAgentSessionReadData, AgentSessionReadResult,
-    CommandAgentSessionWriteStateData, AgentSessionWriteStateResult,
-    CommandAgentSessionAppendOutputData, AgentSessionAppendOutputResult,
-    CommandAgentSessionArchiveData, AgentSessionArchiveResult,
-    CommandAgentSessionListArchivesData, AgentArchiveRow,
+    CommandAgentSessionAppendOutputData, CommandAgentSessionArchiveData, CommandAgentSessionListArchivesData,
+    CommandAgentSessionReadData, CommandAgentSessionWriteStateData, COMMAND_AGENT_SESSION_APPEND_OUTPUT,
+    COMMAND_AGENT_SESSION_ARCHIVE, COMMAND_AGENT_SESSION_LIST_ARCHIVES, COMMAND_AGENT_SESSION_READ,
+    COMMAND_AGENT_SESSION_WRITE_STATE, COMMAND_LIST_RECENT_SESSIONS,
 };
-use crate::backend::storage::store::{AgentIdentityLink, AgentInstance, IdentityAccount};
 
-use super::super::actor::require_own_transcript;
 use super::super::AppState;
-use super::read_session_preview;
+
+mod recent;
+mod zone;
 
 /// At-most-once-per-process-lifetime claim set for definition-summary
 /// generation attempts triggered from `listrecentsessions` — see the call
-/// site below and `db_agent_activity_summaries` (OBJECT_SCHEMA_VERSION
+/// site in `recent.rs` and `db_agent_activity_summaries` (OBJECT_SCHEMA_VERSION
 /// v28). `HashSet::insert` returns `true` only the first time a given
 /// `definition_id` is claimed; every later call for the same id (a repeat
 /// poll of "My Agents") sees `false` and does not re-spawn.
@@ -38,786 +32,68 @@ fn definition_summary_attempted() -> &'static std::sync::Mutex<std::collections:
 }
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // ---- Recent sessions (cascade follow-up 2026-05-23) ----
-    //
-    // listrecentsessions — joins `db_agent_instances` with the
-    // filestore `output.state.json` snapshot for each instance's
-    // block_id_hint, producing a preview + node count so the
-    // AgentPicker can show actual conversation context instead of just
-    // metadata. Sort key is the snapshot modts (last activity)
-    // descending; rows without a snapshot fall back to the instance
-    // started_at and are de-prioritized. Cap at 20 rows.
-    //
-    // The reattach mechanism is the existing continuation flow:
-    // continueOfInstanceId + workDirOverride (see PR #977). This RPC
-    // is a more discoverable surface for finding sessions to continue
-    // — particularly orphaned ones whose pane crashed.
-    let mstore = state.mstore.clone();
-    let id_store_lrs = state.id_store.clone();
-    let identity_store_lrs = state.identity_store.clone();
-    let filestore = state.filestore.clone();
-    let broker_lrs = state.broker.clone();
-    // `Value` request: a malformed one means the defaults (unwrap_or_default).
+    register_recent_sessions(engine, state);
+    register_session_zone(engine, state);
+}
+
+fn register_recent_sessions(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let deps = recent::RecentSessionsDeps {
+        mstore: state.mstore.clone(),
+        id_store: state.id_store.clone(),
+        identity_store: state.identity_store.clone(),
+        filestore: state.filestore.clone(),
+        broker: state.broker.clone(),
+    };
+    // `Value` request: a malformed one means the defaults.
     engine.register_typed(COMMAND_LIST_RECENT_SESSIONS, move |data: serde_json::Value, _ctx| {
-        let mstore = mstore.clone();
-        let id_store = id_store_lrs.clone();
-        let identity_store = identity_store_lrs.clone();
+        let deps = deps.clone();
+        async move { recent::list_recent_sessions(&deps, data).await }
+    });
+}
+
+fn register_session_zone(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let filestore = state.filestore.clone();
+    engine.register_typed(COMMAND_AGENT_SESSION_READ, move |cmd: CommandAgentSessionReadData, _ctx| {
         let filestore = filestore.clone();
-        let broker = broker_lrs.clone();
-        async move {
-                let t0 = std::time::Instant::now();
-                let cmd: CommandListRecentSessionsData =
-                    serde_json::from_value(data).unwrap_or_default();
-                let limit = if cmd.limit == 0 {
-                    20
-                } else {
-                    cmd.limit.min(100)
-                };
-                // Tracks which of this handler's data sources degraded to
-                // empty this call. Every source below used to `.map_err(..)?`
-                // — one bad row anywhere aborted the ENTIRE "My Agents" list,
-                // and that exact failure mode has already broken it to an
-                // empty list at least twice in production (PR #2296's oauth
-                // serde-tag mismatch; see
-                // retro-my-agents-fresh-channel-regression-2026_07_27 (never committed to this repo)
-                // §4/§9 rec 1). A single malformed row must degrade THAT
-                // source only, not the whole response — logged here so the
-                // next incident's log can actually show what happened
-                // (§9 rec 3), unlike this retro's investigation, which had
-                // no way to tell whether this handler ran at all.
-                let mut degraded: Vec<&'static str> = Vec::new();
-                // Pull up to ~10x the requested cap so we can post-
-                // filter by snapshot presence + identity_id without
-                // running out of candidates. 10x is a safety margin
-                // and stays well inside the 200 default of
-                // instance_list_named.
-                let raw_limit = (limit * 10).max(50).min(500);
-
-                // Identity filter is pushed INTO `instance_list_named`
-                // (codex P2 #3 on PR #1096): when a chain has
-                // continuations under different accounts, the
-                // ranking must run on identity-matching rows so the
-                // newest match wins. Post-query filtering would drop
-                // the chain entirely if the newest row used a
-                // different identity, even when older rows match.
-                let identity_filter = cmd
-                    .identity_id
-                    .as_deref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty());
-
-                // "My Agents" sources from the cross-version REGISTRY when it's
-                // available, so agents created in ANY build / channel / version
-                // appear here — not just this instance's local SQLite sessions
-                // (the live mirror, registry_mirror.rs, keeps the registry current
-                // for global workspaces). Falls back to local SQLite when the
-                // registry couldn't be resolved (CI / odd envs). Cross-channel rows
-                // arrive as synthetic instances (no live block); the per-instance
-                // snapshot enrichment below lights up the ones that ALSO ran here.
-                let instances: Vec<AgentInstance> = match mstore.shared_agent_registry() {
-                    Some(reg) => {
-                        let agents_root = mstore.registry_agents_base();
-                        let mut records = match reg.list_active() {
-                            Ok(v) => v,
-                            Err(e) => {
-                                tracing::warn!(
-                                    error = %e,
-                                    "listrecentsessions: registry list_active failed — \
-                                     degrading to local-only instances for this call"
-                                );
-                                degraded.push("registry");
-                                Vec::new()
-                            }
-                        };
-                        if let Some(idf) = identity_filter {
-                            records.retain(|r| r.data.identity_id.as_deref() == Some(idf));
-                        }
-                        // Dedup by (definition_id, instance_name) keeping the newest
-                        // launch — the registry read path lacks SQLite's chain-root
-                        // collapse, so two fresh heads of one logical agent would
-                        // otherwise double up. Sort newest-first within each group,
-                        // collapse, then re-sort by recency.
-                        records.sort_by(|a, b| {
-                            a.data
-                                .definition_id
-                                .cmp(&b.data.definition_id)
-                                .then_with(|| a.data.instance_name.cmp(&b.data.instance_name))
-                                .then_with(|| {
-                                    b.data.last_launched_at_ms.cmp(&a.data.last_launched_at_ms)
-                                })
-                        });
-                        records.dedup_by(|a, b| {
-                            a.data.definition_id == b.data.definition_id
-                                && a.data.instance_name == b.data.instance_name
-                        });
-                        records.sort_by(|a, b| {
-                            b.data.last_launched_at_ms.cmp(&a.data.last_launched_at_ms)
-                        });
-                        records.truncate(raw_limit);
-                        // Local agents in PICKER mode (include_continuations=true):
-                        // collapses each chain to one row AND surfaces orphan
-                        // continuations (head hard-deleted) as their own root, so
-                        // they don't vanish from "My Agents" (reagent P2). Indexed by
-                        // (definition_id, instance_name) — the SAME key the registry
-                        // dedup uses — keeping the newest, so overlay AND the
-                        // local-only append agree on identity (reagent P1).
-                        let local = mstore
-                            .instance_list_named(raw_limit, None, identity_filter, true)
-                            .unwrap_or_else(|e| {
-                                tracing::warn!(
-                                    error = %e,
-                                    "listrecentsessions: local instance_list_named failed — \
-                                     degrading to registry-only instances for this call"
-                                );
-                                degraded.push("local_instances");
-                                Vec::new()
-                            });
-                        let mut local_by_key: std::collections::HashMap<
-                            (String, String),
-                            AgentInstance,
-                        > = std::collections::HashMap::new();
-                        for li in local {
-                            let key = (li.definition_id.clone(), li.instance_name.clone());
-                            match local_by_key.get(&key) {
-                                Some(e) if e.started_at >= li.started_at => {}
-                                _ => {
-                                    local_by_key.insert(key, li);
-                                }
-                            }
-                        }
-                        let mut out: Vec<AgentInstance> = records
-                            .into_iter()
-                            .map(|rec| {
-                                let d = rec.data;
-                                let key = (d.definition_id.clone(), d.instance_name.clone());
-                                if let Some(li) = local_by_key.get(&key) {
-                                    // Defense-in-depth (SPEC_PANE_CLOSE_REOPEN_
-                                    // CONTINUITY_GUARANTEE_2026_07_27.md §4.1):
-                                    // the local row is normally the fresher
-                                    // source (persist_session_id keeps it live
-                                    // as of that spec), but fall back to the
-                                    // registry's session_id when the local one
-                                    // is empty rather than surfacing an empty
-                                    // session id the picker's reattach flow
-                                    // would silently treat as "start fresh."
-                                    // Correct regardless of whether the
-                                    // primary live-write fix is in place for
-                                    // this particular row (e.g. it predates
-                                    // that change, or the write raced/failed).
-                                    if li.session_id.is_empty() {
-                                        if let Some(ref registry_sid) = d.session_id {
-                                            if !registry_sid.is_empty() {
-                                                let mut merged = li.clone();
-                                                merged.session_id = registry_sid.clone();
-                                                return merged;
-                                            }
-                                        }
-                                    }
-                                    return li.clone();
-                                }
-                                // Reconstruct the absolute workdir from the record's
-                                // source base (v3) or the current channel (legacy).
-                                let working_directory = match d.source_agents_base.as_deref() {
-                                    Some(src) => std::path::Path::new(src)
-                                        .join(&d.working_dir)
-                                        .to_string_lossy()
-                                        .to_string(),
-                                    None => match agents_root.as_ref() {
-                                        Some(root) => root
-                                            .join(&d.working_dir)
-                                            .to_string_lossy()
-                                            .to_string(),
-                                        None => d.working_dir.clone(),
-                                    },
-                                };
-                                AgentInstance {
-                                    id: d.instance_id,
-                                    definition_id: d.definition_id,
-                                    parent_instance_id: String::new(),
-                                    block_id: String::new(),
-                                    session_id: d.session_id.unwrap_or_default(),
-                                    status: "available".to_string(),
-                                    github_context: String::new(),
-                                    started_at: d.last_launched_at_ms,
-                                    ended_at: 0,
-                                    created_at: d.created_at_ms,
-                                    identity_id: d.identity_id.unwrap_or_default(),
-                                    memory_id: d.memory_id.unwrap_or_default(),
-                                    instance_name: d.instance_name,
-                                    working_directory,
-                                    display_hidden: false,
-                                }
-                            })
-                            .collect();
-                        // APPEND local-only agents — those whose (definition_id,
-                        // instance_name) no registry record represents (created
-                        // before the live mirror could register them, or orphan
-                        // continuations). Keyed identically to the dedup, so a deduped
-                        // agent's local head never re-appears as a duplicate row.
-                        let have_keys: std::collections::HashSet<(String, String)> = out
-                            .iter()
-                            .map(|i| (i.definition_id.clone(), i.instance_name.clone()))
-                            .collect();
-                        for (key, li) in local_by_key {
-                            if !have_keys.contains(&key) {
-                                out.push(li);
-                            }
-                        }
-                        out
-                    }
-                    None => mstore
-                        .instance_list_named(raw_limit, None, identity_filter, true)
-                        .unwrap_or_else(|e| {
-                            tracing::warn!(
-                                error = %e,
-                                "listrecentsessions: local instance_list_named failed \
-                                 (no shared registry attached) — degrading to empty list"
-                            );
-                            degraded.push("local_instances");
-                            Vec::new()
-                        }),
-                };
-
-                let defs = mstore.agent_def_list().unwrap_or_else(|e| {
-                    tracing::warn!(
-                        error = %e,
-                        "listrecentsessions: agent_def_list failed — degrading to empty \
-                         (rows will show \"(missing definition)\")"
-                    );
-                    degraded.push("agent_defs");
-                    Vec::new()
-                });
-                // Identity display names resolve off the direct
-                // agent<->account links now (db_agent_identity_links /
-                // db_accounts), not the retired bundle tables — see
-                // SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md
-                // §4 item 1. Bulk-fetched once and grouped by definition_id
-                // rather than queried per-row.
-                let agent_identity_links = identity_store.agent_identity_list_all().unwrap_or_else(|e| {
-                    tracing::warn!(
-                        error = %e,
-                        // Fires alongside degraded.push("identity_links")
-                        // below; the row loop then leaves the account line
-                        // empty (a failed lookup is not "No auth").
-                        "listrecentsessions: agent_identity_list_all failed — degrading to \
-                         empty (rows will show no account line)"
-                    );
-                    degraded.push("identity_links");
-                    Vec::new()
-                });
-                let accounts = id_store.identity_list(None).unwrap_or_else(|e| {
-                    // The exact call PR #2296 broke (an oauth secret_ref serde-tag
-                    // mismatch aborted this and, before this hardening, the whole
-                    // handler with it) — now degrades in isolation instead.
-                    tracing::warn!(
-                        error = %e,
-                        "listrecentsessions: identity_list failed — degrading to empty \
-                         (the global mirror fills in what it can; a link it cannot resolve shows no account line)"
-                    );
-                    degraded.push("accounts");
-                    Vec::new()
-                });
-                // The global mirror, read only when a link points at an account
-                // this channel's store does not hold (an isolated channel).
-                let own_ids: std::collections::HashSet<&str> = accounts.iter().map(|a| a.id.as_str()).collect();
-                let mut mirror_failed = false;
-                let mirror_accounts: Vec<IdentityAccount> =
-                    if agent_identity_links.iter().any(|l| !own_ids.contains(l.account_id.as_str())) {
-                        identity_store.identity_list(None).unwrap_or_else(|e| {
-                            tracing::warn!(error = %e, "listrecentsessions: the global account mirror could not be read");
-                            mirror_failed = true;
-                            Vec::new()
-                        })
-                    } else {
-                        Vec::new()
-                    };
-                let account_names = super::account_label::names_by_id(&accounts, &mirror_accounts);
-                let mut unresolved_links = 0usize;
-                let mut links_by_agent: std::collections::HashMap<&str, Vec<&AgentIdentityLink>> =
-                    std::collections::HashMap::new();
-                for link in &agent_identity_links {
-                    links_by_agent
-                        .entry(link.agent_id.as_str())
-                        .or_default()
-                        .push(link);
-                }
-                let memories = id_store.bundle_list().unwrap_or_else(|e| {
-                    tracing::warn!(
-                        error = %e,
-                        "listrecentsessions: bundle_list failed — degrading to empty \
-                         (rows will show \"(missing memory)\")"
-                    );
-                    degraded.push("memories");
-                    Vec::new()
-                });
-
-                // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
-                // §4: when `agent_identity_list_all()` itself failed above,
-                // `links_by_agent` is empty for EVERY definition_id — not
-                // just the ones that genuinely have no bound identity —
-                // so every row would otherwise read "No auth", making a
-                // source failure indistinguishable from a legitimate state.
-                // The same goes for a failed accounts lookup that the global
-                // mirror could not make up for: a link resolving to nothing
-                // then proves nothing. Computed once, outside the loop: these
-                // sources only ever degrade before the loop starts, not per-row.
-                let degraded_lookups = super::account_label::Degraded {
-                    links: degraded.contains(&"identity_links"),
-                    accounts: degraded.contains(&"accounts") && (mirror_failed || mirror_accounts.is_empty()),
-                };
-
-                // Build rows. Hits filestore once per instance; with
-                // raw_limit ≤ 500 and stat() being a single indexed
-                // SQLite query, the per-call cost is dominated by
-                // the eventual snapshot read for the top-20.
-                let mut rows: Vec<RecentSessionRow> = Vec::with_capacity(instances.len());
-                // What each agent was last asked comes from its global transcript
-                // (keyed by agent id), not from this channel's per-block
-                // snapshot, so a closed pane, an agent never launched here and a
-                // registry-only row all get a real preview.
-                let histories = crate::backend::agent_session::history_summary::read_histories(
-                    instances.iter().map(|i| i.definition_id.clone()).collect(),
-                )
-                .await;
-                if histories
-                    .values()
-                    .any(|h| matches!(h, crate::backend::agent_session::history_summary::HistoryRead::Failed))
-                {
-                    degraded.push("transcript");
-                }
-                for inst in instances {
-                    // Consolidation Phase 3b: `definition_id` is the agent's
-                    // own id, so its own row answers every display question
-                    // (name, provider, model, type, created_at) — those are
-                    // the agent's current values, which may well have drifted
-                    // from the template it was launched off.
-                    let def = defs.iter().find(|d| d.id == inst.definition_id);
-                    // The template it came from, used ONLY for the identity-
-                    // link fallback below (empty `parent_id` for an agent that
-                    // was never cloned from one).
-                    let template = def
-                        .filter(|d| !d.parent_id.is_empty())
-                        .and_then(|d| defs.iter().find(|t| t.id == d.parent_id));
-                    // The agent's own account links, falling back to the
-                    // template's. `db_agent_identity_links`' FK now targets
-                    // `db_agents` (Phase 3c, #3088) — a launch-only agent
-                    // CAN hold a link of its own — but nothing writes one
-                    // there yet: the Agent Setup modal, the only identity
-                    // binding UI, only ever targets a template or user
-                    // agent's own definition id. Until a launch-scoped
-                    // binding path exists, this fallback stays exactly as
-                    // necessary as it was before the FK moved; removing it
-                    // now would just make a launched agent's identity
-                    // silently disappear. Retire alongside that writer path
-                    // (Phase 3d).
-                    let links_key = match links_by_agent.get(inst.definition_id.as_str()) {
-                        Some(_) => inst.definition_id.as_str(),
-                        None => template
-                            .map(|t| t.id.as_str())
-                            .unwrap_or(inst.definition_id.as_str()),
-                    };
-                    let line = super::account_label::account_line(
-                        links_by_agent.get(links_key).map(|v| v.as_slice()),
-                        &account_names,
-                        degraded_lookups,
-                    );
-                    unresolved_links += line.unresolved;
-                    let identity_name = line.text;
-                    let memory_name = if inst.memory_id.is_empty() {
-                        "(vanilla CLI)".to_string()
-                    } else {
-                        memories
-                            .iter()
-                            .find(|m| m.id == inst.memory_id)
-                            .map(|m| m.name.clone())
-                            .unwrap_or_else(|| "(missing memory)".to_string())
-                    };
-
-                    // Stat first (cheap) — gives us the modts for
-                    // sorting. Only fetch the full content if the
-                    // snapshot exists.
-                    //
-                    // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
-                    // §5: `Ok(None)` (the block genuinely never wrote a
-                    // snapshot) and `Err(_)` (a transient filestore I/O
-                    // error, lock contention, DB read failure) used to
-                    // collapse into the same `_ =>` arm — a real error on a
-                    // row that DOES have history rendered identically to
-                    // "never had one," silently. Split so the row can carry
-                    // that distinction downstream instead of losing it here.
-                    use crate::backend::agent_session::history_summary::HistoryRead;
-                    // `node_count` is 0 here: counting messages would mean reading
-                    // the whole transcript, so the tile shows none rather than a
-                    // guess.
-                    let transcript_row = |h: &crate::backend::agent_session::history_summary::AgentHistory| {
-                        (
-                            true,
-                            if h.last_activity_ms > 0 { h.last_activity_ms } else { inst.started_at },
-                            h.last_user_message.clone(),
-                            0usize,
-                            false,
-                        )
-                    };
-                    let from_transcript = match histories.get(&inst.definition_id) {
-                        Some(HistoryRead::Transcript(h)) => Some(transcript_row(h)),
-                        Some(HistoryRead::Failed) => Some((false, inst.started_at, String::new(), 0usize, true)),
-                        // The agent's zone in the shared store is corrupt
-                        // (`transcript::damage`): this channel's own copy of the
-                        // conversation, kept under the pane's block id, answers.
-                        Some(HistoryRead::Damaged) => {
-                            if inst.block_id.is_empty() {
-                                None
-                            } else {
-                                match crate::backend::agent_session::history_summary::read_block_history(&filestore, &inst.block_id) {
-                                    HistoryRead::Transcript(h) => Some(transcript_row(&h)),
-                                    HistoryRead::NoTranscript => None,
-                                    HistoryRead::Failed | HistoryRead::Damaged => Some((false, inst.started_at, String::new(), 0usize, true)),
-                                }
-                            }
-                        }
-                        // No transcript: fall back to this channel's per-block
-                        // snapshot, which old builds wrote.
-                        Some(HistoryRead::NoTranscript) | None => None,
-                    };
-                    let (has_snapshot, last_active_at, mut preview, node_count, snapshot_check_failed) =
-                        if let Some(t) = from_transcript {
-                            t
-                        } else if inst.block_id.is_empty() {
-                            (false, inst.started_at, String::new(), 0usize, false)
-                        } else {
-                            match filestore.stat(&inst.block_id, "output.state.json") {
-                                Ok(Some(file)) => {
-                                    let modts = if file.modts > 0 {
-                                        file.modts
-                                    } else {
-                                        inst.started_at
-                                    };
-                                    let (preview, node_count) = read_session_preview(
-                                        &filestore,
-                                        &inst.block_id,
-                                    );
-                                    (true, modts, preview, node_count, false)
-                                }
-                                Ok(None) => (false, inst.started_at, String::new(), 0usize, false),
-                                Err(e) => {
-                                    tracing::warn!(
-                                        error = %e,
-                                        definition_id = %inst.definition_id,
-                                        block_id = %inst.block_id,
-                                        "listrecentsessions: filestore.stat(output.state.json) failed — \
-                                         row will report snapshot_check_failed instead of silently \
-                                         looking like it never had a snapshot"
-                                    );
-                                    if !degraded.contains(&"snapshot_stat") {
-                                        degraded.push("snapshot_stat");
-                                    }
-                                    (false, inst.started_at, String::new(), 0usize, true)
-                                }
-                            }
-                        };
-
-                    // No structured snapshot to preview — fall back to a
-                    // once-per-definition, on-demand Haiku summary of the
-                    // instance's raw terminal output (see
-                    // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
-                    // §5a). Only meaningful for a LOCAL row with a real
-                    // block_id — a cross-channel row's synthetic empty
-                    // block_id has no local raw output to summarize either,
-                    // so it's left alone (still shows the plain fallback
-                    // text, which is accurate for that case: this channel
-                    // genuinely has nothing).
-                    if !has_snapshot && !inst.block_id.is_empty() {
-                        match mstore.agent_activity_summary_get(&inst.definition_id) {
-                            Ok(Some(existing)) if !existing.summary.is_empty() => {
-                                preview = existing.summary;
-                            }
-                            // `insert` returns `true` only the FIRST time this
-                            // definition_id is claimed for this process's
-                            // lifetime — mirrors `SubagentWatcher.naming_triggered`'s
-                            // "claim once regardless of success/failure"
-                            // pattern (reagent P1, PR #2786). Without this,
-                            // `ambient::gateway().admit()` alone only
-                            // coalesces CONCURRENT triggers, not sequential
-                            // ones — a definition that can never be
-                            // summarized (no cmd meta, no raw output, CLI
-                            // failure) would otherwise be re-spawned on
-                            // EVERY subsequent listrecentsessions call (tab
-                            // visibility regain, agents:changed refetch, …)
-                            // forever. A successful generation is unaffected
-                            // by this gate: it persists to
-                            // db_agent_activity_summaries, which the branch
-                            // above already checks first.
-                            // `Ok(Some(existing))` with an empty `summary`
-                            // shouldn't occur in normal operation (a row is
-                            // only ever inserted once generation succeeds —
-                            // see the table's own doc comment) but is
-                            // handled the same as `Ok(None)` regardless,
-                            // rather than relying on that invariant to make
-                            // the match exhaustive.
-                            Ok(None) | Ok(Some(_))
-                                if definition_summary_attempted().lock().unwrap().insert(inst.definition_id.clone()) =>
-                            {
-                                // Fire-and-forget: generation (a real Haiku
-                                // CLI round-trip) must not block this
-                                // response.
-                                let mstore_bg = mstore.clone();
-                                let filestore_bg = filestore.clone();
-                                let broker_bg = broker.clone();
-                                let definition_id_bg = inst.definition_id.clone();
-                                let block_id_bg = inst.block_id.clone();
-                                let provider_id_bg = def.map(|d| d.provider.clone()).unwrap_or_default();
-                                tokio::spawn(async move {
-                                    let result = crate::ambient::tasks::generate_definition_activity_summary(
-                                        &mstore_bg,
-                                        &filestore_bg,
-                                        &broker_bg,
-                                        &definition_id_bg,
-                                        &block_id_bg,
-                                        &provider_id_bg,
-                                    )
-                                    .await;
-                                    // reagent P2, PR #2786: at minimum, log the
-                                    // spend so it's observable — no UI-facing
-                                    // total exists for ANY background-triggered
-                                    // ambient call today (dispatch_name/
-                                    // subagent_name via trigger_eager_naming,
-                                    // generate_recovered_title all
-                                    // discard their own returned tokens the
-                                    // same way; only the live, RPC-response
-                                    // pull paths — session:activity_summary,
-                                    // session:next_prompt_suggestion — thread
-                                    // usage to the frontend, since only they
-                                    // have a response channel to thread it
-                                    // through). A real aggregate sink for
-                                    // background ambient spend is a separate,
-                                    // cross-cutting follow-up, not scoped to
-                                    // this one call site.
-                                    if let Some(generated) = result {
-                                        if let Some(tokens) = generated.tokens {
-                                            tracing::debug!(
-                                                definition_id = %definition_id_bg,
-                                                ?tokens,
-                                                "listrecentsessions: definition activity summary generated"
-                                            );
-                                        }
-                                    }
-                                });
-                            }
-                            Ok(None) | Ok(Some(_)) => {
-                                // Already attempted this process lifetime —
-                                // no-op, same as any other row without a
-                                // persisted summary.
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    error = %e,
-                                    definition_id = %inst.definition_id,
-                                    "listrecentsessions: agent_activity_summary_get failed — \
-                                     row keeps its plain fallback preview text"
-                                );
-                                if !degraded.contains(&"activity_summary") {
-                                    degraded.push("activity_summary");
-                                }
-                            }
-                        }
-                    }
-
-                    rows.push(RecentSessionRow {
-                        instance_id: inst.id,
-                        instance_name: inst.instance_name,
-                        definition_id: inst.definition_id.clone(),
-                        definition_name: def
-                            .map(|d| d.name.clone())
-                            .unwrap_or_else(|| "(missing definition)".to_string()),
-                        provider: def.map(|d| d.provider.clone()).unwrap_or_default(),
-                        model_vendor_base_url: def.map(|d| d.model_vendor_base_url.clone()).unwrap_or_default(),
-                        working_directory: inst.working_directory,
-                        identity_id: inst.identity_id,
-                        identity_name,
-                        memory_id: inst.memory_id,
-                        memory_name,
-                        block_id_hint: inst.block_id,
-                        // Surface the CLI-captured session id so the
-                        // picker reattach can `--resume <sid>` on the
-                        // FIRST turn of the new block. Without this
-                        // the new subprocess starts a fresh session
-                        // and the CLI re-injects the startup context.
-                        session_id: inst.session_id,
-                        preview,
-                        node_count,
-                        last_active_at,
-                        has_snapshot,
-                        snapshot_check_failed,
-                        agent_created_at: def.map(|d| d.created_at).unwrap_or(0),
-                        started_at: inst.started_at,
-                        agent_type: def.map(|d| d.agent_type.clone()).unwrap_or_default(),
-                        seat: crate::backend::agent_seat::summary_in(&mstore, &defs, &inst.definition_id),
-                    });
-                }
-
-                // Sort: rows with a snapshot first (descending by
-                // modts), then no-snapshot rows by started_at desc.
-                // This keeps live conversations at the top while
-                // still surfacing legacy rows.
-                rows.sort_by(|a, b| match (a.has_snapshot, b.has_snapshot) {
-                    (true, true) | (false, false) => {
-                        b.last_active_at.cmp(&a.last_active_at)
-                    }
-                    (true, false) => std::cmp::Ordering::Less,
-                    (false, true) => std::cmp::Ordering::Greater,
-                });
-                rows.truncate(limit);
-
-                // Command-level completion trace (retro §9 rec 3) — the
-                // prior incident's own log had no way to show whether this
-                // RPC ran, succeeded, or returned degraded data; this line
-                // answers all three going forward. `degraded` is non-empty
-                // only when at least one source above fell back to empty —
-                // an all-clear call logs an empty list here.
-                tracing::info!(
-                    rows = rows.len(),
-                    degraded = ?degraded,
-                    // Links to an account this store cannot find (deleted, or an
-                    // unparseable secret_ref skipped by identity_list): those
-                    // agents show "No auth", and this says how many.
-                    unresolved_account_links = unresolved_links,
-                    elapsed_ms = t0.elapsed().as_millis() as u64,
-                    "listrecentsessions: completed"
-                );
-
-                // `degraded` must also reach the CALLER, not just the log
-                // (reagent P1 on PR #2327): once every source degrades to
-                // empty instead of erroring the whole RPC, a transport-level
-                // success/failure check can no longer tell "genuinely zero
-                // agents" apart from "a source failed and we got nothing" —
-                // the exact ambiguity this hardening exists to close, just
-                // pushed from the RPC layer down into the response body.
-                // See ListRecentSessionsResult's own doc comment.
-                let result = ListRecentSessionsResult {
-                    rows,
-                    degraded: degraded.iter().map(|s| s.to_string()).collect(),
-                };
-                Ok(result)
-        }
+        async move { zone::read_session(&filestore, &cmd) }
     });
 
-    // ---- agent:session:read ----
-    let filestore = state.filestore.clone();
-    engine.register_typed(
-        COMMAND_AGENT_SESSION_READ,
-        move |cmd: CommandAgentSessionReadData, _ctx| {
-            let filestore = filestore.clone();
-            async move {
-                let (content, modts) =
-                    crate::backend::agent_session::read_session_state(&filestore, &cmd.definition_id)
-                        .map_err(|e| format!("agent:session:read: {e}"))?;
-                Ok(AgentSessionReadResult { content, modts })
-            }
-        },
-    );
+    let (filestore, mstore) = (state.filestore.clone(), state.mstore.clone());
+    engine.register_typed(COMMAND_AGENT_SESSION_WRITE_STATE, move |cmd: CommandAgentSessionWriteStateData, ctx| {
+        let (filestore, mstore) = (filestore.clone(), mstore.clone());
+        async move { zone::write_state(&filestore, &mstore, &ctx, &cmd) }
+    });
 
-    // ---- agent:session:write_state ----
-    let filestore = state.filestore.clone();
-    let mstore = state.mstore.clone();
-    engine.register_typed(
-        COMMAND_AGENT_SESSION_WRITE_STATE,
-        move |cmd: CommandAgentSessionWriteStateData, ctx| {
-            let filestore = filestore.clone();
-            let mstore = mstore.clone();
-            async move {
-                require_own_transcript(&ctx, &mstore, &cmd.definition_id, "an agent's session state")?;
-                let bytes = cmd.content.as_bytes();
-                let bytes_written = bytes.len() as u64;
-                crate::backend::agent_session::write_session_state(
-                    &filestore,
-                    &cmd.definition_id,
-                    bytes,
-                )
-                .map_err(|e| format!("agent:session:write_state: {e}"))?;
-                Ok(AgentSessionWriteStateResult { bytes_written })
-            }
-        },
-    );
+    let (filestore, mstore) = (state.filestore.clone(), state.mstore.clone());
+    engine.register_typed(COMMAND_AGENT_SESSION_APPEND_OUTPUT, move |cmd: CommandAgentSessionAppendOutputData, ctx| {
+        let (filestore, mstore) = (filestore.clone(), mstore.clone());
+        async move { zone::append_output(&filestore, &mstore, &ctx, &cmd) }
+    });
 
-    // ---- agent:session:append_output ----
-    let filestore = state.filestore.clone();
-    let mstore = state.mstore.clone();
-    engine.register_typed(
-        COMMAND_AGENT_SESSION_APPEND_OUTPUT,
-        move |cmd: CommandAgentSessionAppendOutputData, ctx| {
-            let filestore = filestore.clone();
-            let mstore = mstore.clone();
-            async move {
-                require_own_transcript(&ctx, &mstore, &cmd.definition_id, "an agent's transcript")?;
-                let bytes_written = crate::backend::agent_session::append_session_output(
-                    &filestore,
-                    &cmd.definition_id,
-                    &cmd.line,
-                )
-                .map_err(|e| format!("agent:session:append_output: {e}"))?;
-                Ok(AgentSessionAppendOutputResult { bytes_written })
-            }
-        },
-    );
+    let (filestore, mstore) = (state.filestore.clone(), state.mstore.clone());
+    engine.register_typed(COMMAND_AGENT_SESSION_ARCHIVE, move |cmd: CommandAgentSessionArchiveData, ctx| {
+        let (filestore, mstore) = (filestore.clone(), mstore.clone());
+        async move { zone::archive(&filestore, &mstore, &ctx, &cmd) }
+    });
 
-    // ---- agent:session:archive ----
     let filestore = state.filestore.clone();
-    let mstore = state.mstore.clone();
-    engine.register_typed(
-        COMMAND_AGENT_SESSION_ARCHIVE,
-        move |cmd: CommandAgentSessionArchiveData, ctx| {
-            let filestore = filestore.clone();
-            let mstore = mstore.clone();
-            async move {
-                require_own_transcript(&ctx, &mstore, &cmd.definition_id, "an agent's session")?;
-                let result =
-                    crate::backend::agent_session::archive_session(&filestore, &cmd.definition_id)
-                        .map_err(|e| format!("agent:session:archive: {e}"))?;
-                let (archive_zoneid, archived_at_ms) = match result {
-                    Some((z, ts)) => (z, ts),
-                    None => (String::new(), 0),
-                };
-                Ok(AgentSessionArchiveResult {
-                    archive_zoneid,
-                    archived_at_ms,
-                })
-            }
-        },
-    );
-
-    // ---- agent:session:list_archives ----
-    let filestore = state.filestore.clone();
-    engine.register_typed(
-        COMMAND_AGENT_SESSION_LIST_ARCHIVES,
-        move |cmd: CommandAgentSessionListArchivesData, _ctx| {
-            let filestore = filestore.clone();
-            async move {
-                let summaries = crate::backend::agent_session::list_archives(
-                    &filestore,
-                    &cmd.definition_id,
-                    cmd.limit,
-                )
-                .map_err(|e| format!("agent:session:list_archives: {e}"))?;
-                let rows: Vec<AgentArchiveRow> = summaries
-                    .into_iter()
-                    .map(|s| AgentArchiveRow {
-                        archive_zoneid: s.archive_zoneid,
-                        archived_at_ms: s.archived_at_ms,
-                        preview: s.preview,
-                        node_count: s.node_count,
-                    })
-                    .collect();
-                Ok(rows)
-            }
-        },
-    );
+    engine.register_typed(COMMAND_AGENT_SESSION_LIST_ARCHIVES, move |cmd: CommandAgentSessionListArchivesData, _ctx| {
+        let filestore = filestore.clone();
+        async move { zone::list_archives(&filestore, &cmd) }
+    });
 }
+
+#[cfg(test)]
+mod characterization_tests;
+
+#[cfg(test)]
+mod direct_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::store::AgentDefinition;
-    use crate::backend::rpc_types::RpcMessage;
+    use crate::backend::storage::store::{AgentDefinition, AgentInstance};
+    use crate::backend::rpc_types::{ListRecentSessionsResult, RpcMessage};
     use crate::registry::{
         DefinitionRecord, DefinitionRecordV1, DefinitionStore, NamedAgentRecord,
         NamedAgentRecordV1, Registry,

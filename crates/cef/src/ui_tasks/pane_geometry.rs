@@ -100,10 +100,10 @@ wrap_task! {
                 "[browser-pane] views: SetPaneBoundsViewsTask: CEF bounds (macos)"
             );
 
-            // Linux: CEF Views sizing works; show immediately.
+            // Linux and Windows: CEF Views sizing works; show it now, less what the app page has over it.
             #[cfg(not(target_os = "macos"))]
             {
-                controller.set_visible(1);
+                crate::browser_panes::views_clip::refresh(&self.state, &self.label, &self.window_label, &controller, Some((x, y, width, height)));
                 if let Some(main_browser) = self.state.get_browser(&self.window_label) {
                     if let Some(host) = main_browser.host() { host.set_focus(1); }
                 }

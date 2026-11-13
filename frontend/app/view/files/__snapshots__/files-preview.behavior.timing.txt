@@ -1,0 +1,92 @@
+-- select a.txt
+-- 149 ms in: nothing read yet
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-empty">
+    "Select a file to preview it."
+-- select b.txt
+-- 149 ms after the second selection: still nothing read
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-empty">
+    "Select a file to preview it."
+fetchMediaRange /home/me/b.txt 0-262143 {"blockId":"blk-1"}
+-- 150 ms: loading
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="text" class="files-preview-code">
+      "hello"
+-- b.txt read
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="text" class="files-preview-code">
+      "hello"
+-- select a.png (read stays open)
+abort /home/me/b.txt
+fetchMediaBlob /home/me/a.png {"maxBytes":26214400,"blockId":"blk-1"}
+-- a.png loading
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-empty">
+    "Loading…"
+-- select b.txt before a.png answers
+abort /home/me/a.png
+fetchMediaRange /home/me/b.txt 0-262143 {"blockId":"blk-1"}
+-- b.txt again
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="text" class="files-preview-code">
+      "hello"
+-- a.png answers late
+createObjectURL blob:img-1
+revokeObjectURL blob:img-1
+-- late image dropped
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="text" class="files-preview-code">
+      "hello"
+-- select image
+abort /home/me/b.txt
+fetchMediaBlob /home/me/c.png {"maxBytes":26214400,"blockId":"blk-1"}
+createObjectURL blob:img-2
+-- image
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-media">
+    <img src="blob:img-2" alt="c.png">
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+-- select text after image
+abort /home/me/c.png
+fetchMediaRange /home/me/d.txt 0-262143 {"blockId":"blk-1"}
+revokeObjectURL blob:img-2
+-- text after image
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="text" class="files-preview-code">
+      "hello"
+-- select image again
+abort /home/me/d.txt
+fetchMediaBlob /home/me/e.png {"maxBytes":26214400,"blockId":"blk-1"}
+createObjectURL blob:img-3
+-- image again
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-media">
+    <img src="blob:img-3" alt="e.png">
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+-- select nothing selected
+abort /home/me/e.png
+revokeObjectURL blob:img-3
+-- nothing selected
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-empty">
+    "Select a file to preview it."
+-- select image once more
+fetchMediaBlob /home/me/f.png {"maxBytes":26214400,"blockId":"blk-1"}
+createObjectURL blob:img-4
+-- image once more
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-media">
+    <img src="blob:img-4" alt="f.png">
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+-- unmount
+abort /home/me/f.png
+revokeObjectURL blob:img-4

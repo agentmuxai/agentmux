@@ -473,7 +473,8 @@ describe("AgentComposerStrip — compact forms", () => {
         expect(probes.getAttribute("aria-hidden")).toBe("true");
         expect(probes.hasAttribute("inert")).toBe(true);
         expect(probes.closest(".agent-composer-strip-rows")).toBeNull();
-        expect(probes.querySelectorAll("[data-probe]").length).toBe(6);
+        // Three slots in two forms each, and the account's four middle forms (composer-forms.ts ACCOUNT_BUDGETS).
+        expect(probes.querySelectorAll("[data-probe]").length).toBe(6 + 4);
     });
 });
 

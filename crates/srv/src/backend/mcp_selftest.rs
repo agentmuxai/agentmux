@@ -106,9 +106,10 @@ fn is_bundled(prefix: &str, bundled: Option<&Path>) -> bool {
     bundled.is_some_and(|b| b == Path::new(prefix))
 }
 
-/// The agent's `.mcp.json`: `cmd:cwd` may be a default folder stored as `~/.agentmux/agents/<slug>`.
+/// The agent's MCP config: `cmd:cwd` may be a default folder stored as `~/.agentmux/agents/<slug>`
+/// (the file is in it), or a user's project (the config is AgentMux's relocated one, #3680).
 fn mcp_json_path(cwd: &str) -> std::path::PathBuf {
-    crate::backend::base::expand_home_dir_safe(cwd).join(".mcp.json")
+    crate::backend::mcp_config_file::config_path(cwd)
 }
 
 /// Probe the `agentmux` entry of the `.mcp.json` at `path` through `prefix`.
@@ -173,7 +174,9 @@ mod tests {
         assert!(!path.starts_with("~"), "{}", path.display());
         assert_eq!(path.file_name().unwrap(), ".mcp.json");
         assert!(path.parent().unwrap().ends_with("x-0930a"), "{}", path.display());
-        assert_eq!(mcp_json_path("/work/a"), Path::new("/work/a").join(".mcp.json"));
+        // A user's project gets the config outside it, under AgentMux's data root (#3680).
+        let relocated = mcp_json_path("/work/a");
+        assert!(!relocated.starts_with("/work/a"), "{}", relocated.display());
     }
 
     #[test]

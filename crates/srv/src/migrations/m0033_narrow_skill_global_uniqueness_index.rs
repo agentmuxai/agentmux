@@ -163,12 +163,7 @@ impl Migration for M0033NarrowSkillGlobalUniquenessIndex {
         }
         let conn = Connection::open(&path)
             .map_err(|e| MigrationError(format!("narrow_skill_global_uniqueness_index: open identity store: {e}")))?;
-        let has_table: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_skills')",
-                [],
-                |row| row.get(0),
-            )
+        let has_table = crate::migrations::table_exists(&conn, "db_skills")
             .map_err(|e| MigrationError(format!("narrow_skill_global_uniqueness_index: probe db_skills: {e}")))?;
         if !has_table {
             // Older-than-v6 store: db_skills doesn't exist yet. Nothing to

@@ -18,6 +18,7 @@ import type { AgentRuntimeDropupProps, OptionRow } from "./runtime-dropup-option
 
 /** The pane meta key srv writes at every launch with the model that really answers; absent off a route. */
 export const ROUTE_MODEL_META_KEY = "agent:route_model";
+const SWITCH_TIMEOUT_MS = 120_000;
 
 const ATTACHMENT_NODES: ReadonlySet<string> = new Set(["user_message", "jekt_message", "system_note"]);
 
@@ -32,6 +33,7 @@ export function countImages(nodes: ReadonlyArray<{ type: string; attachments?: R
 /** The row value of "go back to where the agent was". */
 export const BACK_VALUE = "back";
 const ROUTE_PREFIX = "route:";
+const COMPACT_PREFIX = "compact:";
 
 export interface PaneRouteModel {
     route: string;
@@ -51,10 +53,22 @@ export function routeModelOf(meta: Record<string, unknown> | undefined): PaneRou
 /** A route model's row value. A route id has no colon, so the model id is whatever follows the second one. */
 export const routeValue = (route: string, model: string) => `${ROUTE_PREFIX}${route}:${model}`;
 
+/** The row value of a model picked by compacting the conversation first. */
+export const compactValue = (route: string, model: string) => `${COMPACT_PREFIX}${route}:${model}`;
+
 /** The route and model a row value names, or null for a harness model or the Back row. */
 export function parseRouteValue(value: string): { route: string; model: string } | null {
-    if (!value.startsWith(ROUTE_PREFIX)) return null;
-    const rest = value.slice(ROUTE_PREFIX.length);
+    return parsePrefixed(value, ROUTE_PREFIX);
+}
+
+/** The route and model a "Compact, then switch" row value names, or null. */
+export function parseCompactValue(value: string): { route: string; model: string } | null {
+    return parsePrefixed(value, COMPACT_PREFIX);
+}
+
+function parsePrefixed(value: string, prefix: string): { route: string; model: string } | null {
+    if (!value.startsWith(prefix)) return null;
+    const rest = value.slice(prefix.length);
     const i = rest.indexOf(":");
     return i > 0 ? { route: rest.slice(0, i), model: rest.slice(i + 1) } : null;
 }
@@ -65,6 +79,7 @@ const tokens = (n: number) => (n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(1)}M
 /** What a route model's row says under its name: the reason it cannot be picked, else its size, price and what it does. */
 export function routeModelNote(m: AgentModelPanelModel, conversationTokens: number | null | undefined): string {
     if (m.unavailable) return m.unavailable;
+    if (m.compact_first) return `${m.compact_first}: compacts it first, then switches`;
     const abilities = [m.tools && "tools", m.thinking && "thinking", m.images && "images"].filter(Boolean).join(", ");
     const line = `${tokens(m.context)} context · ${money(m.price_in)} in / ${money(m.price_out)} out per million${abilities ? ` · ${abilities}` : ""}`;
     return !m.current && m.reread_cost_usd != null && conversationTokens
@@ -79,8 +94,8 @@ export function routeRows(panel: AgentModelPanel, conversationTokens: number | n
         rows: route.models.map(
             (m): OptionRow => ({
                 section: "model",
-                value: routeValue(route.id, m.id),
-                label: m.label,
+                value: m.compact_first ? compactValue(route.id, m.id) : routeValue(route.id, m.id),
+                label: m.compact_first ? `${m.label} · Compact, then switch` : m.label,
                 description: routeModelNote(m, conversationTokens),
                 detail: m.unavailable ?? undefined,
                 current: m.current,
@@ -109,9 +124,18 @@ export function backRow(panel: AgentModelPanel): OptionRow | null {
     };
 }
 
+/** What the Model section says when srv's routes could not be read, so the harness's own models alone are not taken for "no routes". */
+export const readFailureNote = (reason: string) => `Other models: couldn't be read: ${reason}`;
+
+function reasonOf(e: unknown): string {
+    const text = (e instanceof Error ? e.message : String(e)).replace(/^FORBIDDEN:\s*/, "").trim();
+    return text.length > 140 ? `${text.slice(0, 139)}\u2026` : text || "no reason given";
+}
+
 /** The panel's answer for the pane's agent, fetched when the panel opens, and the pick that moves the agent. */
 export function createRoutePanel(props: AgentRuntimeDropupProps) {
     const [panel, setPanel] = createSignal<AgentModelPanel | null>(null);
+    const [failure, setFailure] = createSignal<string | null>(null);
 
     const refresh = async () => {
         if (props.providerId !== "claude" || !props.blockId) return;
@@ -123,15 +147,19 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
                     images: props.conversationImages?.() ?? null,
                 })
             );
-        } catch {
-            // An srv without the command, or an agent that is not running: the panel shows the harness's own models only.
+            setFailure(null);
+        } catch (e) {
+            // The panel shows the harness's own models only, and says why the others are missing.
+            console.warn("model panel: the routes could not be read", e);
             setPanel(null);
+            setFailure(reasonOf(e));
         }
     };
 
     /** Moves the agent to `route`/`model` (an empty route is the harness's own sign-in). The agent restarts after its turn. */
     const moveTo = async (route: string, model: string, restart: boolean): Promise<AgentModelSwitchResult> => {
-        const result = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: props.blockId, route, model, restart });
+        // srv counts the conversation's images before it moves, which reads a big transcript whole the first time: more than the default 5 s.
+        const result = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: props.blockId, route, model, restart }, { timeout: SWITCH_TIMEOUT_MS });
         await refresh();
         return result;
     };
@@ -139,5 +167,5 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
     /** Whether srv has the agent on a route: the saved choice, which a running pane only adopts at its next launch. */
     const onSavedRoute = () => panel()?.routes.some((r) => r.models.some((m) => m.current)) ?? false;
 
-    return { panel, refresh, moveTo, onSavedRoute };
+    return { panel, failure, refresh, moveTo, onSavedRoute };
 }

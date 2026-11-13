@@ -25,6 +25,14 @@
     opacity: 0.5;
 }
 
+// The channel a peer keeps its data in. A local build's is long and has no spaces:
+// let it break anywhere, right-aligned under the row's other values.
+.lan-peer-data-channel {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
+}
+
 .lan-peer-warn {
     color: var(--warning-text-color);
 }

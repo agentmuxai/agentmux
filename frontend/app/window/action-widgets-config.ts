@@ -56,6 +56,15 @@ export function widgetEntryColor(widget: WidgetConfigType, role: PaneColorRole):
     return widgetRoleColor(widget.blockdef?.meta?.view, isLight, role);
 }
 
+/**
+ * The colour of a widget's icon in the "+" menus: the entry's colour at full strength (the "identity" role, the
+ * one its pane's header and focus ring use), read when the menu is built so a change in Settings > Appearance >
+ * Widget colors, or of the theme, shows the next time it opens. None for a widget set to no colour.
+ */
+export function widgetMenuIconColor(widget: WidgetConfigType): string | undefined {
+    return widgetEntryColor(widget, "identity");
+}
+
 /** A top-bar widget icon's style: the entry's color, faintly. */
 export function widgetIconStyle(widget: WidgetConfigType): JSX.CSSProperties {
     const tint = widgetEntryColor(widget, "widgetTint");
@@ -293,7 +302,7 @@ export function buildPaneWidgetMenuItems(
     const toLeafItem = (widget: WidgetConfigType): ContextMenuItem | null => {
         const view = widget.blockdef?.meta?.["view"] as string | undefined;
         if (!view || NON_PANE_WIDGET_VIEWS.has(view)) return null;
-        return { label: widget.label ?? "Unnamed", icon: widget.icon, click: () => onSelect(widget.blockdef) };
+        return { label: widget.label ?? "Unnamed", icon: widget.icon, iconColor: widgetMenuIconColor(widget), click: () => onSelect(widget.blockdef) };
     };
 
     const grouped = getEffectiveGroupedChildKeys(wmap, settings);
@@ -314,7 +323,7 @@ export function buildPaneWidgetMenuItems(
                 .map(toLeafItem)
                 .filter((item): item is ContextMenuItem => item != null);
             if (submenu.length > 0) {
-                items.push({ label: widget.label ?? "Unnamed", icon: widget.icon, type: "submenu", submenu });
+                items.push({ label: widget.label ?? "Unnamed", icon: widget.icon, iconColor: widgetMenuIconColor(widget), type: "submenu", submenu });
             }
             continue;
         }

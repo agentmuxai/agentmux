@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
+use super::choice_facts::{add_option_owners, describe_scope};
 use super::combobox;
 pub(super) use super::hidden_choices::hidden_choices;
 use super::dates;
@@ -137,38 +138,9 @@ pub(super) async fn page_now(cdp: &mut CdpSession, before: &str) -> Option<Value
 
 // ── Functions run on the element (`this`) in the isolated world ────────────
 
-/// Scroll into view and report the centre, in viewport coordinates.
-const CLICK_POINT: &str = r#"function () {
-  // A checkbox or radio the page hides (display: none) behind a label drawn
-  // as the box has no box of its own: click its label, at a point where the
-  // label itself is hit, not a link or button inside it.
-  const choice = this.tagName === "INPUT" && /^(checkbox|radio)$/i.test(this.type);
-  if (choice && this.getClientRects().length === 0) {
-    const label = Array.from(this.labels || []).find(l => l.getClientRects().length > 0);
-    if (!label) return { error: "the element is not visible" };
-    label.scrollIntoView({ block: "center", inline: "center" });
-    const doc = label.ownerDocument;
-    const clear = (x, y) => {
-      const at = doc.elementFromPoint(x, y);
-      if (!at || !label.contains(at)) return false;
-      for (let n = at; n && n !== label; n = n.parentElement) {
-        if (n.matches("a[href], button, select, textarea, input, [role=button], [role=link]")) return false;
-      }
-      return true;
-    };
-    for (const el of [label, ...label.querySelectorAll("*")]) {
-      const r = el.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) continue;
-      const x = r.left + r.width / 2, y = r.top + r.height / 2;
-      if (clear(x, y)) return { x, y };
-    }
-    return { error: "the label of this checkbox is covered by something else; ask the user to tick it" };
-  }
-  this.scrollIntoView({ block: "center", inline: "center" });
-  const r = this.getBoundingClientRect();
-  if (r.width === 0 && r.height === 0) return { error: "the element is not visible" };
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-}"#;
+/// Scroll into view and report where to click, in viewport coordinates, or why a click can't land
+/// (`scripts/click_point.js`).
+const CLICK_POINT: &str = include_str!("scripts/click_point.js");
 
 /// Focus and select the current contents, so inserted text replaces them.
 pub(super) const PREPARE_FILL: &str = r#"function () {
@@ -243,7 +215,7 @@ const SELECT_OPTION: &str = r#"function (want) {
 /// form's non-secret values (spec §5.4). The element's name and the
 /// description its text may carry are told apart by `scripts/click_label.js`.
 const COMMIT_INFO: &str = concat!(
-    r#"function () {
+    r#"function (axName) {
   const clickLabel = "#,
     include_str!("scripts/click_label.js"),
     r#";
@@ -269,12 +241,12 @@ const COMMIT_INFO: &str = concat!(
   }
   // A link fetches unless its name says it commits; a download or a file:
   // link never does (scripts/click_label.js).
-  const { name, description, committing, why } = clickLabel(this.getAttribute("aria-label"), labelledBy, this.innerText || this.value || "", {
+  const { name, description, committing, why, unreadable } = clickLabel(this.getAttribute("aria-label"), labelledBy, this.innerText || this.value || "", {
     submits,
     link: !!link,
     download: !!link && link.hasAttribute("download"),
     fileHref: /^file:/i.test(action),
-  });
+  }, axName);
   const fields = [];
   const secret = el => {
     const ty = (el.type || "").toLowerCase();
@@ -355,7 +327,7 @@ const COMMIT_INFO: &str = concat!(
   }
   const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
   const fingerprint = JSON.stringify([action, form ? [formGet("method"), formGet("enctype"), formGet("target")] : null, sub, this.outerHTML, link ? link.outerHTML : null, sent]);
-  return { committing, why, name, description, action, fields, fingerprint, secrets };
+  return { committing, why, unreadable: !!unreadable, name, description, action, fields, fingerprint, secrets };
 }"#
 );
 
@@ -513,6 +485,7 @@ pub(super) async fn page_url(cdp: &mut CdpSession) -> String {
 }
 
 async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
+    let (x, y) = super::zoom::scale_point(cdp.label(), x, y);
     for event_type in ["mouseMoved", "mousePressed", "mouseReleased"] {
         let (button, buttons) = if event_type == "mouseMoved" { ("none", 0) } else { ("left", 1) };
         call(
@@ -555,14 +528,25 @@ pub(super) async fn check_click(
     let unclassified = |e: String| {
         format!("couldn't tell whether this click submits something, so it wasn't made ({e}); ask the user to click it")
     };
-    let info = call_on(cdp, obj, COMMIT_INFO, vec![]).await.map_err(unclassified)?;
+    // The accessible name too (`click_label.js`): the element's own text and aria-label miss a name that comes
+    // from a title, an image's alt or a child's label, and a click is named the same whichever way its ref
+    // was found. `null` (the lookup failed) is passed on, and a click with no name of its own then asks.
+    let ax_name = super::accessible_name::of(cdp, obj).await.map_or(Value::Null, Value::String);
+    let info = call_on(cdp, obj, COMMIT_INFO, vec![ax_name]).await.map_err(unclassified)?;
     let committing = info
         .get("committing")
         .and_then(|v| v.as_bool())
         .ok_or_else(|| unclassified("no answer from the page".to_string()))?;
     let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let unreadable = info.get("unreadable").and_then(|v| v.as_bool()).unwrap_or(false);
     let ask = json!({
-        "what": if name.is_empty() { format!("Click a button that submits a form{in_a_frame}") } else { format!("Click \"{name}\"{in_a_frame}") },
+        "what": if unreadable {
+            format!("Click an element whose name could not be read{in_a_frame}")
+        } else if name.is_empty() {
+            format!("Click a button that submits a form{in_a_frame}")
+        } else {
+            format!("Click \"{name}\"{in_a_frame}")
+        },
         // Shown under `what`, and judged with it: srv's payment check
         // reads both (scripts/click_label.js).
         "description": info.get("description").and_then(|v| v.as_str()).unwrap_or(""),
@@ -633,8 +617,32 @@ async fn explain_unclickable(cdp: &mut CdpSession, object_id: &str, error: Strin
     if attached == Some(false) {
         "the page changed since the snapshot (the element is gone); take a new snapshot".to_string()
     } else {
-        error
+        tidy_click_error(&error)
     }
+}
+
+/// The page's words in a click's answer (`scripts/click_point.js` sends them whole between U+0001 and U+0002):
+/// a secret the page shows once masked first, then shortened, so no piece of one gets through.
+pub(super) fn tidy_click_error(error: &str) -> String {
+    const KEPT: usize = 80;
+    let mut out = String::with_capacity(error.len().min(512));
+    let mut rest = error;
+    while let Some(start) = rest.find('\u{1}') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let (text, tail) = after.find('\u{2}').map_or((after, ""), |end| (&after[..end], &after[end + 1..]));
+        let masked = agentmux_common::shown_once::mask(text);
+        match masked.char_indices().nth(KEPT) {
+            Some((cut, _)) => {
+                out.push_str(&masked[..cut]);
+                out.push('…');
+            }
+            None => out.push_str(&masked),
+        }
+        rest = tail;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The secret-field guard for typing into whatever has focus (spec §5.1),
@@ -697,7 +705,7 @@ pub(super) const MAX_DESCRIBES: usize = 600;
 async fn page_nodes(cdp: &mut CdpSession, tree: &Value, include_hidden: bool) -> (Vec<Value>, usize) {
     let mut nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
     snapshot::add_hidden_choices(&mut nodes, &hidden_choices(cdp, None).await);
-    let cut = if include_hidden { 0 } else { visibility::prune(&mut nodes, &visibility::capture(cdp).await) };
+    let cut = visibility::apply(&mut nodes, &visibility::capture(cdp).await, include_hidden);
     (nodes, cut)
 }
 
@@ -772,29 +780,7 @@ pub async fn snapshot_route(
         },
         None => scope,
     };
-    let mut facts = HashMap::new();
-    let role_of = |n: &Value| n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    // A scoped snapshot renders only its subtree, so it looks up facts only there.
-    let in_scope: Vec<&Value> = match scope {
-        Some(b) => snapshot::subtree(&nodes, b),
-        None => nodes.iter().collect(),
-    };
-    let wanted = in_scope
-        .iter()
-        .copied()
-        .filter(|n| snapshot::VALUE_ROLES.contains(&role_of(n).as_str()))
-        .chain(in_scope.iter().copied().filter(|n| role_of(n) == "button"));
-    for n in wanted {
-        if facts.len() >= MAX_DESCRIBES {
-            break;
-        }
-        if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
-            if let Some(f) = describe_markup(&mut cdp, b).await {
-                let name = n.pointer("/name/value").and_then(|v| v.as_str()).unwrap_or("");
-                facts.insert(b, f.with_label(name));
-            }
-        }
-    }
+    let facts = describe_scope(&mut cdp, &nodes, scope).await;
     let url = page_url(&mut cdp).await;
     // A scope by name has no reference to prefix with: its references are
     // numbered like a find's, which can't clash with any other.
@@ -880,13 +866,15 @@ pub async fn find_route(
     let mut nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
     let hidden = hidden_choices(&mut cdp, None).await;
     snapshot::add_hidden_choices(&mut nodes, &hidden);
-    visibility::prune(&mut nodes, &visibility::capture(&mut cdp).await);
+    visibility::apply(&mut nodes, &visibility::capture(&mut cdp).await, false);
     let needs_facts = |n: &&Value| {
         let role = n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("");
         snapshot::VALUE_ROLES.contains(&role) || role == "button"
     };
     let mut facts = HashMap::new();
-    for n in snapshot::find_candidates(&nodes, q).into_iter().filter(needs_facts).take(MAX_FIND_DESCRIBES) {
+    let candidates = snapshot::find_candidates(&nodes, q);
+    add_option_owners(&mut cdp, &nodes, &candidates, &mut facts, MAX_FIND_DESCRIBES).await;
+    for n in candidates.into_iter().filter(needs_facts).take(MAX_FIND_DESCRIBES) {
         if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
             if let Some(f) = describe_markup(&mut cdp, b).await {
                 let name = n.pointer("/name/value").and_then(|v| v.as_str()).unwrap_or("");
@@ -1233,13 +1221,34 @@ mod tests {
     }
 
     #[test]
+    fn a_click_error_shows_the_pages_words_masked_then_shortened() {
+        let secret = "Xy8Q~abcDEF1234ghijKLmnoPQRstu.vwxYZ0123";
+        let e = format!("not clicked: <button \"\u{1}Copy\u{2}\"> is covered by <div \"\u{1}{secret} (copy it now)\u{2}\"> (try Browser zoom)");
+        let got = tidy_click_error(&e);
+        assert!(!got.contains(secret), "{got}");
+        assert!(!got.contains("Xy8Q"), "no piece of it either: {got}");
+        assert!(got.contains("<button \"Copy\">"), "{got}");
+        assert!(got.contains("[secret: shown once"), "{got}");
+        assert!(got.ends_with("(try Browser zoom)"), "{got}");
+        assert!(!got.contains('\u{1}') && !got.contains('\u{2}'));
+        // A long ordinary text is shortened, on a character boundary.
+        let long = format!("not clicked: <div \"\u{1}{}\u{2}\">", "é".repeat(300));
+        let got = tidy_click_error(&long);
+        assert!(got.contains(&"é".repeat(80)) && !got.contains(&"é".repeat(81)), "{got}");
+        // An answer with no markers is as it was, and an unclosed marker does not lose the rest.
+        assert_eq!(tidy_click_error("the element is not visible"), "the element is not visible");
+        assert_eq!(tidy_click_error("a \u{1}b"), "a b");
+    }
+
+    #[test]
     fn the_click_label_rule_is_spliced_into_commit_info_whole() {
         // click_label.js is one function expression assigned to `clickLabel`
         // (its own tests run it); COMMIT_INFO is still one function.
-        assert!(COMMIT_INFO.starts_with("function () {\n  const clickLabel = // Copyright"));
-        assert!(COMMIT_INFO.contains("function clickLabel(ariaLabel, labelledBy, text, el) {"));
+        assert!(COMMIT_INFO.starts_with("function (axName) {\n  const clickLabel = // Copyright"));
+        assert!(COMMIT_INFO.contains("function clickLabel(ariaLabel, labelledBy, text, el, axName) {"));
         assert!(COMMIT_INFO.contains("}\n;\n  const t = "), "the rule ends before the rest of the function");
-        assert!(COMMIT_INFO.contains("const { name, description, committing, why } = clickLabel("));
+        assert!(COMMIT_INFO.contains("const { name, description, committing, why, unreadable } = clickLabel("));
+        assert!(COMMIT_INFO.contains("}, axName);"), "the accessible name reaches the rule");
         assert!(COMMIT_INFO.trim_end().ends_with('}'));
     }
 

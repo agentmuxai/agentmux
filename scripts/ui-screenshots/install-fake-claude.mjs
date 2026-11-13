@@ -67,12 +67,14 @@ export function homeProblem(home, realHome = join(homedir(), ".agentmux")) {
     return norm(home) === norm(realHome) ? "it is this machine's own ~/.agentmux" : null;
 }
 
-/** Installs the stand-in into `home`'s CLI folder; returns that folder. */
-export function installFakeClaude(home, script = join(here, "fake-claude", "conversation.json")) {
+/**
+ * Installs the stand-in into `home`'s CLI folder; returns that folder. `version` is the Claude version the instance's
+ * srv pins: this checkout's by default, but a build made earlier pins an older one and looks for the stand-in there.
+ */
+export function installFakeClaude(home, script = join(here, "fake-claude", "conversation.json"), version = pinnedClaudeVersion()) {
     const problem = homeProblem(home);
     if (problem) throw new Error(`${home}: ${problem}; use a capture instance's own data folder`);
     if (!existsSync(join(home, "shared"))) throw new Error(`no shared folder under ${home}: start the capture instance once first`);
-    const version = pinnedClaudeVersion();
     const dir = join(home, "shared", "cli", "claude", version);
     const pkg = join(dir, "node_modules", PACKAGE_DIR);
     const bin = join(dir, "node_modules", ".bin");

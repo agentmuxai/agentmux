@@ -26,12 +26,12 @@ mod drag_stash;
 mod events;
 mod health_signals;
 mod ipc;
+mod ipc_query;
 mod launcher_event_bridge;
 mod launcher_ipc;
 // Not #[cfg]-gated at the mod-declaration level like macos_compat/macos_menu
-// below — this module deliberately mixes OS-agnostic pure logic (unit
-// tested on any host) with target_os = "linux"-gated OS interaction
-// (internally gated within the file itself). See its own doc comment.
+// below — this module deliberately mixes OS-agnostic pure logic (unit tested on
+// any host) with target_os = "linux"-gated OS interaction (gated within the file). See its own doc comment.
 mod linux_sandbox;
 mod logging;
 mod parent_process;
@@ -42,7 +42,6 @@ mod memory_pressure;
 mod browser_pane;
 mod pane_backend;
 mod credential_broker;
-mod memory_adoption;
 mod ssh_approval;
 #[cfg(target_os = "windows")]
 mod floating_pane;
@@ -300,6 +299,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
             // the user asked to FIX it, not to run without a sandbox;
             // never auto-disable on their behalf).
             while !linux_sandbox::probe_userns_available() {
+                linux_sandbox::stop_if_nobody_can_answer();
                 match linux_sandbox::show_userns_blocked_dialog() {
                     SandboxDialogChoice::FixNow => {
                         let helper = linux_sandbox::resolve_helper_script_path();
@@ -360,16 +360,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
                     SandboxDialogChoice::Cancel => {
                         std::process::exit(1);
                     }
-                    SandboxDialogChoice::NoDialogToolAvailable => {
-                        eprintln!(
-                            "AgentMux: the sandbox is blocked by a system AppArmor policy \
-                             (common on newer Ubuntu), and no dialog tool (zenity/kdialog) is \
-                             available to ask how to proceed. Set AGENTMUX_UNSAFE_NOSANDBOX=1 \
-                             to run without the sandbox, or see docs/linux.md for how to \
-                             install the proper fix."
-                        );
-                        std::process::exit(1);
-                    }
+                    SandboxDialogChoice::NoDialogToolAvailable => linux_sandbox::exit_no_dialog_tool(),
                 }
             }
         }

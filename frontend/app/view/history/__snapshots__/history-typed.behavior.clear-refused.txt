@@ -5,10 +5,10 @@ rpc AgentInputHistory agent=0123456789abcdef before=undefined limit=200
 <div>
   <div class="warden-history-typed">
     <div class="warden-history-bar">
-      <select class="ui-input ui-density-compact" aria-label="Agent">
+      <select class="ui-input ui-density-compact warden-history-select" aria-label="Agent">
         <option value="0123456789abcdef">
           "01234567"
-      <span class="ui-filter">
+      <span class="ui-filter warden-history-filter">
         <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
         <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Search what was typed" aria-label="Search what was typed">
       <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
@@ -28,12 +28,12 @@ rpc AgentInputHistory agent=0123456789abcdef before=undefined limit=200
           <th>
       <tbody>
         <tr data-entry="1">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1060000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="hello" aria-description="hello">
               "hello"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
     <div class="warden-manager-footnote">
@@ -45,10 +45,10 @@ cache clear agent=0123456789abcdef
 <div>
   <div class="warden-history-typed">
     <div class="warden-history-bar">
-      <select class="ui-input ui-density-compact" aria-label="Agent">
+      <select class="ui-input ui-density-compact warden-history-select" aria-label="Agent">
         <option value="0123456789abcdef">
           "01234567"
-      <span class="ui-filter">
+      <span class="ui-filter warden-history-filter">
         <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
         <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Search what was typed" aria-label="Search what was typed">
       <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
@@ -69,12 +69,12 @@ cache clear agent=0123456789abcdef
           <th>
       <tbody>
         <tr data-entry="1">
-          <td class="warden-history-typed-when">
+          <td class="warden-history-typed-when warden-history-cell-wide" data-label="When">
             "when:1060000"
-          <td>
+          <td class="warden-history-cell-wide">
             <div class="warden-history-typed-text" data-hover-tip="hello" aria-description="hello">
               "hello"
-          <td class="warden-history-actions">
+          <td class="warden-history-actions warden-history-cell-wide">
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
     <div class="warden-manager-footnote">

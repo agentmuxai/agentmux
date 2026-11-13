@@ -5,8 +5,9 @@
 ## painted
 <div class="browser-drag-catcher">
 <img class="browser-freeze-snapshot" alt="" src="data:image/png;base64,BBBB" style="top: 2px; width: 10px;">
-<div class="browser-drag-hole">
-</div>
 </div>
 ## drag over
 (absent)
+## the hole
+hole cut at {"x":10,"y":60,"w":300,"h":160}
+hole released

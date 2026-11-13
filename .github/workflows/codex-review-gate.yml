@@ -67,10 +67,16 @@ jobs:
     # non-Codex review or comment) must not join the group. At workflow level
     # it did, and cancelled the push's evaluation a second earlier -- the new
     # head got no status and the PR showed a failed `evaluate` (#3556).
-    # Every run re-reads the PR's current state, so only the latest matters.
+    # Every run re-reads the PR's current state, so only the latest matters: the runs of one PR go one after another
+    # (oldest first, so the newest writes last), and none is cancelled while it runs. cancel-in-progress used to end
+    # the run that was working: Codex posts a review and a comment a second apart, the comment's run cancelled the
+    # review's, and a cancelled `evaluate` stayed on the PR's head (a pull_request_review run belongs to the head; an
+    # issue_comment run belongs to the default branch's commit, where nobody looks) as a failed check that was never
+    # re-run, turned the PR's merge state to UNSTABLE, and sent its author "CI CANCELLED - no verdict". Only a run
+    # still waiting for the group is dropped when a newer one arrives, which needs three events at once.
     concurrency:
       group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:

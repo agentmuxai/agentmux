@@ -24,6 +24,8 @@ use super::error::StoreError;
 mod object_schema;
 mod store_schema;
 
+pub(in crate::backend::storage) use object_schema::apply_additive_columns;
+
 /// `user_version` stamped into `~/.agentmux/shared/store.db` after
 /// `run_shared_store_schema`. Versioned independently from `objects.db`.
 ///   v1 — initial: identity accounts/bundles/bindings/links, memory
@@ -115,7 +117,7 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        explicit per-agent opt-in to the CLI's global (ambient) login when
 ///        no oauth-class account resolves at spawn (layer 3 of
 ///        SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3). Defaults
-///        to 0 (fail-by-default); the m0017 data migration grandfathers
+///        to 0 (fail-by-default); a data migration (since retired) grandfathered
 ///        pre-existing linkless agents to 1.
 ///   v13 — db_agent_credentials: per-agent M2M muxbus credential, mirroring
 ///        db_muxbus_credentials' presence in both schemas — id_store falls
@@ -471,7 +473,14 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        so nothing that copies catalog rows changes. Both default 0: a
 ///        catalog server reaches only the agents it is bound to.
 ///        `SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md` §2.1.
-pub const OBJECT_SCHEMA_VERSION: i64 = 44;
+///   v45 — db_lan_pin_installs: the install whose certificate vouched for a LAN
+///        name pin's key (instance id and host hint), kept beside the pin so a
+///        key moves only on that install's say; and db_lan_retired_keys: the
+///        fingerprints a name has moved off, with when and by whom, so a message
+///        signed with one is refused as retired. Tables of their own beside
+///        `db_lan_peer_pubkey_pins`, so that table's rows and readers are
+///        unchanged. See `storage/lan_peer_pin_installs.rs`.
+pub const OBJECT_SCHEMA_VERSION: i64 = 45;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -537,7 +546,7 @@ const LEGACY_INDEX_DROPS: &[&str] = &[
 /// forward in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md —
 /// `db_agent_identity_links`/`db_accounts` is the sole credential-
 /// resolution path (`identity/resolver/inject.rs::resolve_bindings_for_instance`),
-/// confirmed via the already-applied `m0013`/`m0014` backfill migrations
+/// confirmed by the direct-link backfill migrations, since retired
 /// (see SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md §6/§8a).
 const DEAD_TABLE_DROPS: &[&str] = &[
     "db_workflow_definitions",
@@ -591,20 +600,10 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
 /// a parent table is renamed, so the agent/identity cascades survive.
 fn adopt_legacy_table_names(conn: &Connection) -> Result<(), StoreError> {
     for (legacy, current) in LEGACY_TABLE_RENAMES {
-        let legacy_exists: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-            [legacy],
-            |row| row.get(0),
-        )?;
-        if legacy_exists == 0 {
+        if !crate::migrations::table_exists(conn, legacy)? {
             continue;
         }
-        let current_exists: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-            [current],
-            |row| row.get(0),
-        )?;
-        if current_exists == 1 {
+        if crate::migrations::table_exists(conn, current)? {
             // Both present — only reachable on a deliberate
             // downgrade-roundtrip dev DB (flat build → pre-flatten build,
             // which re-creates the legacy name → flat build again). The
@@ -879,7 +878,7 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
     // insert rows without these columns (NULL = not counted) and write
     // without maintaining them, which the counter detects. "duplicate
     // column" is expected when another instance added them first.
-    for stmt in &[
+    apply_additive_columns(conn, [
         "ALTER TABLE db_wave_file ADD COLUMN gen TEXT",
         "ALTER TABLE db_wave_file ADD COLUMN lines INTEGER",
         "ALTER TABLE db_wave_file ADD COLUMN lines_size INTEGER",
@@ -894,13 +893,7 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
         // deleted and re-created is a different incarnation even if every
         // other column (and the creation millisecond) comes out the same.
         "ALTER TABLE db_wave_file ADD COLUMN incarnation BLOB",
-    ] {
-        if let Err(e) = conn.execute_batch(stmt) {
-            if !e.to_string().contains("duplicate column") {
-                return Err(e.into());
-            }
-        }
-    }
+    ])?;
     // `rev` is maintained by triggers, not by this code's writes, because
     // triggers are part of the database: they fire for every connection,
     // including older builds that know nothing about the counter. Any write

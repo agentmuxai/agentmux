@@ -1,0 +1,81 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, it } from "vitest";
+
+import type { Account } from "@/app/view/identity/identity-model";
+
+import { modeLabel } from "./accounts-catalog";
+import { githubActsAs, githubKindLabel, githubKindShort, githubStatusLine, isGithubToken } from "./github-account-copy";
+
+type Probe = Pick<Account, "provider" | "kind" | "context">;
+const acct = (kind: Account["kind"], context: Record<string, unknown> = {}, provider = "github"): Probe =>
+    ({ provider, kind, context }) as Probe;
+
+describe("the GitHub choices", () => {
+    it("say what each one is, and other providers keep their own labels", () => {
+        expect(modeLabel("oauth", "github").title).toBe("Use AgentMux's GitHub App");
+        expect(modeLabel("oauth", "github").sub).toContain("muxagent[bot]");
+        expect(modeLabel("key", "github").title).toBe("Add a personal access token");
+        expect(modeLabel("key", "github").sub).toContain("act as you");
+        expect(modeLabel("oauth", "google").title).toBe("Connect with OAuth");
+        expect(modeLabel("key", "openai").title).toBe("Add API key / token");
+        expect(modeLabel("key").title).toBe("Add API key / token");
+    });
+});
+
+describe("a GitHub account in words", () => {
+    it("is the App when the broker made it, and a token for a token or an older API key", () => {
+        expect(githubKindLabel(acct("oauth", { broker: true }))).toBe("AgentMux's GitHub App");
+        expect(githubKindShort(acct("oauth", { broker: true }))).toBe("GitHub App");
+        for (const kind of ["pat", "api_key"] as const) {
+            expect(isGithubToken(acct(kind))).toBe(true);
+            expect(githubKindLabel(acct(kind))).toBe("Personal access token");
+            expect(githubKindShort(acct(kind))).toBe("Token");
+        }
+    });
+
+    it("keeps the general label for a sign-in made with the person's own client, and for other providers", () => {
+        expect(githubKindLabel(acct("oauth", { oauth_client: { mode: "byo" } }))).toBeNull();
+        expect(githubKindShort(acct("oauth"))).toBeNull();
+        expect(githubKindLabel(acct("api_key", {}, "openai"))).toBeNull();
+        expect(isGithubToken(acct("api_key", {}, "openai"))).toBe(false);
+    });
+
+    it("says who agents act as", () => {
+        expect(githubActsAs(acct("oauth", { broker: true }))).toContain("muxagent[bot]");
+        expect(githubActsAs(acct("pat", { github_login: "octo" }))).toBe("Agents act on GitHub as @octo with this token.");
+        expect(githubActsAs(acct("pat"))).toBe("Agents act on GitHub as you with this token.");
+        expect(githubActsAs(acct("oauth", { oauth_client: { mode: "byo" } }))).toBeNull();
+        expect(githubActsAs(acct("api_key", {}, "openai"))).toBeNull();
+    });
+});
+
+describe("the GitHub section's status line", () => {
+    const acc = (kind: Account["kind"], context: Record<string, unknown> = {}, status = "valid") =>
+        ({ provider: "github", kind, context, status }) as Pick<Account, "provider" | "kind" | "context" | "status">;
+
+    it("says which way agents reach GitHub now", () => {
+        expect(githubStatusLine([])).toContain("Not connected");
+        expect(githubStatusLine([acc("pat")])).toContain("Using your personal access token");
+        expect(githubStatusLine([acc("oauth", { broker: true })])).toContain("muxagent[bot]");
+    });
+
+    it("prefers the App when it works, and says so when it needs reconnecting", () => {
+        expect(githubStatusLine([acc("pat"), acc("oauth", { broker: true })])).toContain("Connected through AgentMux's GitHub App");
+        const stale = acc("oauth", { broker: true }, "needs_reauth");
+        expect(githubStatusLine([stale])).toContain("needs to be reconnected");
+        expect(githubStatusLine([acc("pat"), stale])).toContain("needs to be reconnected");
+    });
+
+    it("recognises a sign-in made with the person's own OAuth client", () => {
+        const own = acc("oauth", { oauth_client: { mode: "byo" } });
+        expect(githubStatusLine([own])).toContain("Connected with your own GitHub sign-in");
+        expect(githubStatusLine([own])).not.toContain("Not connected");
+        expect(githubStatusLine([acc("pat"), own])).toContain("personal access token");
+    });
+
+    it("ignores other providers' accounts", () => {
+        expect(githubStatusLine([{ provider: "openai", kind: "api_key", context: {}, status: "valid" } as never])).toContain("Not connected");
+    });
+});

@@ -28,11 +28,13 @@ use axum::Router;
 
 use crate::state::AppState;
 
+pub mod accessible_name;
 pub mod act;
 pub mod capture;
 pub mod capture_download;
 pub mod cdp;
 pub mod chooser_files;
+pub mod clickable;
 pub mod combobox;
 pub mod dates;
 pub mod file_chooser;
@@ -60,9 +62,12 @@ pub mod terminal;
 pub mod text_read;
 pub mod types;
 pub mod visibility;
+pub mod choice_facts;
+pub mod vault_card_form;
 pub mod vault_fill;
 pub mod vault_slots;
 pub mod wait;
+pub mod zoom;
 
 /// Register `/agentmux/browser/*` routes on the given axum Router.
 /// Called from `ipc::start_ipc_server` alongside the existing
@@ -86,6 +91,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/wait_for", post(wait::wait_for_route))
         .route("/agentmux/browser/field_info", post(vault_fill::field_info_route))
         .route("/agentmux/browser/vault_fill", post(vault_fill::vault_fill_route))
+        .route("/agentmux/browser/card_form", post(vault_card_form::card_form_route))
         .route("/agentmux/browser/signin_fill", post(signin_fill::signin_fill_route))
         .route("/agentmux/browser/signup_fill", post(signup_fill::signup_fill_route))
         .route("/agentmux/browser/capture_value", post(capture::capture_value_route))
@@ -103,6 +109,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/back", post(routes::back))
         .route("/agentmux/browser/forward", post(routes::forward))
         .route("/agentmux/browser/reload", post(routes::reload))
+        .route("/agentmux/browser/zoom", post(zoom::zoom_route))
         .route("/agentmux/browser/owned_panes", post(routes::owned_panes))
         .route("/agentmux/browser/dialog_answer", post(routes::dialog_answer))
         .route("/agentmux/browser/renderer_map", post(routes::renderer_map))

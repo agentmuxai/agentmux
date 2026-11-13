@@ -97,8 +97,9 @@ impl BrowserPaneManager {
         crate::client::downloads::forget_pane(block_id);
         // The page is going: its references (and a Vault fill's, which rides on them) end with it.
         state.browser_api.ref_tables.forget(block_id);
+        let views = crate::pane_backend::label_is_views(&label);
         #[cfg(target_os = "windows")]
-        if !crate::pane_backend::views() {
+        if !views {
             crate::input_owner::windows::pane_closing(state, block_id);
             let ops = AppStateCloseOps(state);
             Self::close_with(&label, &ops);
@@ -113,15 +114,13 @@ impl BrowserPaneManager {
         // CompleteBrowserPaneClose has removed it, so it can't report the pane
         // gone; a stale entry would leave the old window owning a pane that a
         // redock recreates elsewhere.
-        if crate::pane_backend::views() {
+        if views {
             crate::input_owner::views::pane_closing(state, block_id);
             crate::input_owner::views::pane_gone(state, block_id);
-        }
-        // Linux/macOS — Views path. Marshal the BrowserView detach onto the
-        // CEF UI thread (remove_child_view is UI-thread-only); the underlying
-        // Browser's on_before_close fires asynchronously and clears
-        // state.browsers via the existing callback (callbacks::on_before_close_browser_pane).
-        if crate::pane_backend::views() {
+            // Marshal the BrowserView detach onto the CEF UI thread
+            // (remove_child_view is UI-thread-only); the underlying Browser's
+            // on_before_close fires asynchronously and clears state.browsers via
+            // the existing callback (callbacks::on_before_close_browser_pane).
             let mut task = DetachBrowserPaneViewTask::new(state.clone(), label.clone());
             cef::post_task(cef::ThreadId::UI, Some(&mut task));
         }
@@ -166,9 +165,14 @@ impl BrowserPaneManager {
     /// the FFI side-effects that follow.
     #[cfg(any(target_os = "windows", test))]
     fn close_with(label: &str, ops: &dyn BrowserPaneCloseOps) {
-        if let Some(hwnd) = ops.take_browser_hwnd(label) {
-            ops.destroy_hwnd(hwnd);
-            tracing::info!(label, "pane wrapper destroy dispatched");
+        match ops.take_browser_hwnd(label) {
+            Some(hwnd) => {
+                ops.destroy_hwnd(hwnd);
+                tracing::info!(label, "pane wrapper destroy dispatched");
+            }
+            // No window was made for the pane (its creation stopped early) or it is gone already:
+            // no close of a browser follows to forget the pane's kind (`drain_closed_label`).
+            None => crate::pane_backend::forget_pane(label),
         }
     }
 
@@ -219,12 +223,11 @@ impl BrowserPaneManager {
             crate::client::downloads::forget_pane(&block_id);
             state.browser_api.ref_tables.forget(&block_id);
             // As in close(): the async on_before_close drain also destroys the pane HWND.
-            #[cfg(target_os = "windows")]
-            if !crate::pane_backend::views() {
-                crate::input_owner::windows::pane_gone(state, &block_id);
-            }
-            if crate::pane_backend::views() {
+            if crate::pane_backend::label_is_views(label) {
                 crate::input_owner::views::pane_gone(state, &block_id);
+            } else {
+                #[cfg(target_os = "windows")]
+                crate::input_owner::windows::pane_gone(state, &block_id);
             }
             // PR #6 H.7 kick — see `close()` for rationale. The
             // on_before_close path is the async drain; pool refill that
@@ -236,6 +239,9 @@ impl BrowserPaneManager {
             // block_id was Closing. Replay it (now Fresh).
             self.replay_pending_create(state, out.pending_browser_pane_create_to_replay);
         }
+        // The browser is gone and this was its last callback: nothing asks which kind the pane was
+        // again. Outside the block above, which an explicit `close()` has already emptied.
+        crate::pane_backend::forget_pane(label);
     }
 
     /// Replay a browser-pane create that the reducer deferred while `block_id`

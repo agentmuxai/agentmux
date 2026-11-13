@@ -185,7 +185,7 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
         // `state.backend_window_ids` (B.5 step a) is sole authority;
         // we just send the report and the shadow update populates
         // the host-side projection.
-        tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
+        super::close_ask::page_registered(state, label, window_id);
         crate::launcher_ipc::report_backend_window_id_registered(
             label.to_string(),
             window_id.to_string(),

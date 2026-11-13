@@ -53,6 +53,17 @@ pub async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<Str
     crate::server::cli_handlers::locate_provider_cli(provider_id).await.map(|l| l.path)
 }
 
+/// How a recovery call ended, for the sweep that decides when to try again.
+#[derive(Debug)]
+pub(crate) enum Recovery {
+    /// Nothing ran: no conversation in the digest, no CLI path, or superseded.
+    NotRun,
+    /// The CLI could not run, exited badly or timed out.
+    Failed,
+    /// The CLI answered; `text` is `None` when the model had nothing usable to say.
+    Done(Generated),
+}
+
 /// A session title recovered from the session's recent activity, for an agent
 /// that has none — called by the background sweep in
 /// `backend::reactive::activity_watcher`, which writes an accepted result to
@@ -67,30 +78,42 @@ pub async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<Str
 /// the *same* `block_id` — the sweep loop's tick counter is sufficient; it
 /// doesn't need to correlate with the pull path's per-turn generation.
 ///
-/// Returns `None` when there's nothing to summarize yet, the block/CLI path
-/// isn't resolvable, this call was superseded, or the CLI failed — the
-/// caller treats all of these as "no summary this tick."
+/// [`Recovery::NotRun`] when there's nothing to summarize yet, the block/CLI path
+/// isn't resolvable or this call was superseded; [`Recovery::Failed`] when the
+/// CLI failed, so the sweep can wait before it tries this block again.
 pub(crate) async fn generate_recovered_title(
     mstore: &Store,
     filestore: &crate::backend::storage::filestore::FileStore,
     block_id: &str,
     generation: u64,
     word_target: u32,
-) -> Option<Generated> {
+) -> Recovery {
     let word_target = word_target.max(3).min(20);
 
-    let slot = call::admit(&purpose::ACTIVITY_SUMMARY_PUSHED, block_id, generation).await?;
+    let Some(slot) = call::admit(&purpose::ACTIVITY_SUMMARY_PUSHED, block_id, generation).await else {
+        return Recovery::NotRun;
+    };
 
-    let block: Block = mstore.get(block_id).ok().flatten()?;
+    let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else {
+        return Recovery::NotRun;
+    };
     let Some(digest) = digest::read_recent_activity_digest(filestore, mstore, block_id) else {
         slot.abandon(super::outcome::Outcome::EmptyDigest);
-        return None;
+        return Recovery::NotRun;
     };
-    let target = CliTarget::from_meta(&block.meta)?;
+    let Some(target) = CliTarget::from_meta(&block.meta) else {
+        return Recovery::NotRun;
+    };
 
     let prompt = prompt::build_session_title_prompt("", None, Some(&digest), word_target);
     let limits = validate::title_limits(word_target);
-    finish(slot.run(&target, &prompt, |raw| judge_line(raw, |t| validate::accept_line(t, &limits))).await)
+    let reply = slot.run(&target, &prompt, |raw| judge_line(raw, |t| validate::accept_line(t, &limits))).await;
+    match reply.error.as_deref() {
+        // A newer request replaced this one: not a failure of the CLI.
+        Some(error) if error.starts_with("cancelled") => Recovery::NotRun,
+        Some(_) => Recovery::Failed,
+        None => finish(reply).map_or(Recovery::NotRun, Recovery::Done),
+    }
 }
 
 /// Generate (and persist) a short activity summary for a definition whose

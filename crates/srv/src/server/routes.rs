@@ -736,6 +736,7 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
         .route("/api/v1/host/browser_permission", post(crate::server::browser_permission::handle_host_browser_permission))
         .route("/api/v1/ui/browser/dialogs", post(crate::server::browser_dialog::handle_ui_browser_dialogs))
+        .route("/api/v1/ui/browser/zoom", post(crate::server::browser_zoom::handle_ui_browser_zoom))
         .route("/api/v1/host/browser_popup", post(ui_handlers::handle_host_browser_popup))
         .route("/api/v1/host/browser_popup_window", post(ui_handlers::handle_host_browser_popup_window))
         .route("/api/v1/ui/browser/navigate", post(ui_handlers::handle_ui_browser_navigate))
@@ -762,6 +763,7 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/agent/remote/op", post(super::remote_ops::send::handle_agent_remote_op))
         .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
         .route("/api/v1/app/health", get(super::remote_ops::app_ops::handle_health))
+        .route("/api/v1/app/logs", get(super::remote_ops::log_ops::handle_local_logs))
         .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
 }
 
@@ -787,6 +789,13 @@ fn agent_self_and_fleet_routes() -> Router<AppState> {
         // The GitHub App's installation token for an agent's git and gh, through
         // agentmux-bashwrap (identity::github_tokens).
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
+        // A container agent's push, judged as data by the host's publish guard (a container's pre-push hook).
+        .route(
+            "/api/v1/github/push-scan",
+            post(app_api::push_scan::handle_push_scan).layer(axum::extract::DefaultBodyLimit::max(app_api::push_scan::MAX_BODY_BYTES)),
+        )
+        // A container agent's `gh pr merge`, run by the host's gh-agent: the container's own token cannot write contents.
+        .route("/api/v1/github/pr-merge", post(app_api::pr_merge::handle_pr_merge))
         .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
         // An agent sets or clears seats, several at once; recorded under its name.
         .merge(agent_definition_routes())
@@ -862,6 +871,8 @@ fn forward_messaging_and_work_routes() -> Router<AppState> {
             "/agentmux/agents/self/keys",
             get(agent_self_keys::handle_agent_self_keys),
         )
+        // What the launcher asks before the tray's Quit.
+        .route("/agentmux/quit-question", get(super::quit_question::handle_quit_question))
         .route("/agentmux/work", get(work_queue::handle_work_list))
         .route("/agentmux/work/boards", get(work_boards::handle_boards_list))
         // Kanban: an agent's decision on a task in review (signed, not a token).

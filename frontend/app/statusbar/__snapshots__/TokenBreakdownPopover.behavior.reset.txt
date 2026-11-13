@@ -40,14 +40,17 @@ watchAmbient 5000
       <div class="token-usage-breakdown-cache-rate" data-hover-tip="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown." aria-description="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown.">
         "80"
         "% of input served from cache"
-    <div class="token-usage-breakdown-footer">
-      <button type="button" class="ui-button ui-tone-danger ui-density-compact">
-        "Reset counter"
-  <div data-stand="ConfirmModal" data-open="true" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
-    <span data-cb="onConfirm">
-      "confirm"
-    <span data-cb="onCancel">
-      "cancel"
+    <div class="token-usage-breakdown-footer" data-confirming="true">
+      <div class="token-usage-breakdown-confirm" role="group" aria-label="Reset token counter?">
+        <div class="token-usage-breakdown-confirm-text">
+          <strong>
+            "Reset token counter?"
+          "This clears the running total for the current session. Per-pane Worked stats stay unchanged."
+        <div class="token-usage-breakdown-confirm-actions">
+          <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+            "Cancel"
+          <button type="button" class="ui-button ui-tone-danger ui-density-compact">
+            "Reset"
 -- cancelled
 <div>
   <div data-stand="AnchoredPopover" data-placement="top-end" data-class="token-usage-breakdown" data-role="dialog" data-label="Token usage breakdown" data-style="{\"width\":\"320px\"}">
@@ -92,11 +95,6 @@ watchAmbient 5000
     <div class="token-usage-breakdown-footer">
       <button type="button" class="ui-button ui-tone-danger ui-density-compact">
         "Reset counter"
-  <div data-stand="ConfirmModal" data-open="false" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
-    <span data-cb="onConfirm">
-      "confirm"
-    <span data-cb="onCancel">
-      "cancel"
 onClose
 -- reset
 <div>
@@ -114,8 +112,3 @@ onClose
     <div class="token-usage-breakdown-footer">
       <button type="button" class="ui-button ui-tone-danger ui-density-compact" disabled="">
         "Reset counter"
-  <div data-stand="ConfirmModal" data-open="false" data-title="Reset token counter?" data-description="This clears the running total for the current session. Per-pane Worked stats stay unchanged." data-confirm-label="Reset" data-destructive="true">
-    <span data-cb="onConfirm">
-      "confirm"
-    <span data-cb="onCancel">
-      "cancel"

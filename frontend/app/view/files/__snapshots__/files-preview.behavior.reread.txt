@@ -1,0 +1,76 @@
+-- select text
+fetchMediaRange /home/me/main.rs 0-262143 {"blockId":"blk-1"}
+-- text
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="rust" class="files-preview-code">
+      "hello"
+-- same entry again (nothing changes)
+abort /home/me/main.rs
+fetchMediaRange /home/me/main.rs 0-262143 {"blockId":"blk-1"}
+-- not read again
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="rust" class="files-preview-code">
+      "hello"
+-- select modified time changed
+abort /home/me/main.rs
+fetchMediaRange /home/me/main.rs 0-262143 {"blockId":"blk-1"}
+-- modified time changed
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="rust" class="files-preview-code">
+      "hello"
+-- select size changed
+abort /home/me/main.rs
+fetchMediaRange /home/me/main.rs 0-262143 {"blockId":"blk-1"}
+-- size changed
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-text">
+    <pre data-highlighted="" data-lang="rust" class="files-preview-code">
+      "hello"
+-- select read fails with an Error
+abort /home/me/main.rs
+fetchMediaRange /home/me/gone.txt 0-262143 {"blockId":"blk-1"}
+-- read fails with an Error
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-file files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "gone.txt"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <div class="files-preview-facts">
+      "404 Not Found"
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open with default app"
+-- select read fails with a string
+abort /home/me/gone.txt
+fetchMediaRange /home/me/odd.txt 0-262143 {"blockId":"blk-1"}
+-- read fails with a string
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-file files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "odd.txt"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <div class="files-preview-facts">
+      "plain failure"
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open with default app"
+-- select image read fails
+abort /home/me/odd.txt
+fetchMediaBlob /home/me/bad.png {"maxBytes":26214400,"blockId":"blk-1"}
+-- image read fails
+<aside class="files-preview" aria-label="Preview">
+  <div class="files-preview-card">
+    <i class="fa fa-file files-preview-icon" aria-hidden="true">
+    <div class="files-preview-name">
+      "bad.png"
+    <div class="files-preview-facts">
+      "2.0 KB · T1700000000000"
+    <div class="files-preview-facts">
+      "image refused"
+    <button type="button" class="ui-button ui-tone-neutral files-button">
+      "Open with default app"

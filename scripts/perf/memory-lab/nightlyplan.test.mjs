@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { mergesOf, pickBuilds, planMarkdown } from "./lib/nightlyplan.mjs";
+import { mergesOf, notComparedMarkdown, pickBuilds, planMarkdown } from "./lib/nightlyplan.mjs";
 
 const run = (id, sha, createdAt, portable = true) => ({ id, sha, createdAt, portable });
 
@@ -76,5 +76,29 @@ describe("what was merged between the builds", () => {
         expect(md).toContain("- `fffffffff` fix: x (#1)");
         expect(planMarkdown({ a: null, b, merges: null, reason: "no older nightly still has its portable: B is measured alone" })).toContain("**A:** none");
         expect(planMarkdown({ a, b, merges: { total: 0, shown: [], truncated: false } })).toContain("Nothing was merged");
+    });
+});
+
+describe("the part of the page for a night where a side did not run", () => {
+    const plan = { a: { sha: "a8da0848e0123" }, b: { sha: "b4fa1c400" } };
+    const labels = ["a1", "b1", "a2", "b2"].map((label) => ({ label, side: label[0] }));
+
+    it("names the side, its build and the lab's reason, and says nothing was judged", () => {
+        const ab = {
+            plan: labels,
+            outcome: { done: { a: [], b: ["b1", "b2"] }, comparable: false },
+            reasons: { a1: "12 of 12 agents never played their turn", a2: "12 of 12 agents never played their turn" },
+            skipped: [],
+        };
+        const md = notComparedMarkdown(ab, plan);
+        expect(md).toContain("### Not compared");
+        expect(md).toContain("Nothing was measured as better or worse tonight.");
+        expect(md).toContain("- A (build a8da0848e) did not run: 12 of 12 agents never played their turn (2 runs tried).");
+    });
+
+    it("is empty when the runs compared, when B ran alone, or when the lab wrote nothing", () => {
+        expect(notComparedMarkdown({ plan: labels, outcome: { done: { a: ["a1"], b: ["b1"] }, comparable: true } }, plan)).toBe("");
+        expect(notComparedMarkdown(null, plan)).toBe("");
+        expect(notComparedMarkdown({}, plan)).toBe("");
     });
 });

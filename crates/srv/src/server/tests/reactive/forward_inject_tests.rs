@@ -171,3 +171,17 @@ async fn an_unreachable_peer_is_stale() {
     let out = forward_inject_to_peer(&state, &r, &r, peer(&url)).await;
     assert!(matches!(out, ForwardOutcome::Stale), "expected Stale");
 }
+
+/// A peer that takes the connection and never answers is `NoAnswer`, not `Stale` (task #2512): it is up, so the
+/// message is kept to be sent again rather than handed to a relay that drops it after 30 minutes.
+#[tokio::test]
+async fn a_peer_that_never_answers_is_no_answer() {
+    let mut state = test_state();
+    state.http_client = reqwest::Client::builder().timeout(std::time::Duration::from_millis(150)).build().unwrap();
+    // The kernel completes the connection from its backlog; nothing reads it.
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", silent.local_addr().unwrap());
+    let r = req();
+    let out = forward_inject_to_peer(&state, &r, &r, peer(&url)).await;
+    assert!(matches!(out, ForwardOutcome::NoAnswer), "expected NoAnswer");
+}

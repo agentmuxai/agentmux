@@ -7,7 +7,6 @@
 
 import { registerPaneCommandRunner } from "@/app/keybindings";
 import { onCleanup } from "solid-js";
-import { mentionInAgent } from "./files-agent-mention";
 import { closeOwnTab } from "./files-open";
 import { errorText } from "./files-model";
 import { selectAll } from "./files-selection";
@@ -81,9 +80,6 @@ export function useFilesCommands(fv: FilesLocal, win: FilesWindow, opening: File
                 return true;
             case "files:editPath":
                 fv.startEditingPath();
-                return true;
-            case "files:mention":
-                mentionInAgent(model, model.selectedEntries());
                 return true;
             case "files:newFolder":
                 void model.createNew("dir");

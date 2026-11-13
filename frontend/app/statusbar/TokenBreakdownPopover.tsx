@@ -5,7 +5,7 @@
  * TokenBreakdownPopover — click-opened popover anchored under the
  * TokenUsageIndicator. Lists per-agent totals (tokens, turns, cost), a
  * collapsed "AgentMux internal" row for ambient/background usage, a
- * grand total row, and a destructive-gated "Reset counter" action.
+ * grand total row, and a "Reset counter" action that asks inside the panel.
  * Clicking a real agent row focuses that agent's pane.
  *
  * Renders through AnchoredPopover (positioning, chrome zoom, dismiss, the
@@ -15,7 +15,6 @@
 
 import { type JSX } from "solid-js";
 import { AnchoredPopover } from "@/app/element/anchored-popover";
-import { ConfirmModal } from "@/element/confirm-modal";
 import { BreakdownFooter, BreakdownHeader, BreakdownRows } from "./token-breakdown-parts";
 import { createTokenBreakdown, type TokenBreakdownPopoverProps } from "./token-breakdown-state";
 
@@ -42,15 +41,6 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                 <BreakdownRows s={s} />
                 <BreakdownFooter s={s} />
             </AnchoredPopover>
-            <ConfirmModal
-                open={s.confirmingReset()}
-                title="Reset token counter?"
-                description="This clears the running total for the current session. Per-pane Worked stats stay unchanged."
-                confirmLabel="Reset"
-                destructive={true}
-                onConfirm={s.handleConfirmReset}
-                onCancel={() => s.setConfirmingReset(false)}
-            />
         </>
     );
 };

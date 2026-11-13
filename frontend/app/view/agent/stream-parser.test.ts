@@ -701,6 +701,18 @@ describe("heldTiming", () => {
         expect(heldTiming({ TS: "1000000" }, 42)).toEqual({ timestamp: 42 });
         expect(heldTiming({ TS: "0", HELD_FOR: "5" }, 42)).toEqual({ timestamp: 42 });
     });
+
+    // A replayed frame has no time of its own (`deliveredAt` undefined): the replay time is not its time.
+    test("a replayed jekt shows its marker's send time, never the replay time", () => {
+        expect(heldTiming({ TS: "1000000" }, undefined)).toEqual({ timestamp: 1_000_000_000 });
+        expect(heldTiming({ TS: "1000000", HELD_FOR: "60" }, undefined)).toEqual({ timestamp: 1_000_000_000, heldForSecs: 60 });
+    });
+
+    test("a replayed jekt with no usable TS has no time, so the batch stamp can fill it", () => {
+        expect(heldTiming({}, undefined)).toEqual({});
+        expect(heldTiming({ TS: "0" }, undefined)).toEqual({});
+        expect(heldTiming({ TS: "x" }, undefined)).toEqual({});
+    });
 });
 
 // SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.2 — ToolBlock renders the

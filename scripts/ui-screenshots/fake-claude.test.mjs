@@ -6,12 +6,12 @@
 // installer. The stand-in runs as a real process here, as srv runs it.
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PICKER_AGENTS, SHOT_AGENT, setup, shots as agentShots } from "./agent-shots.mjs";
-import { homeProblem, pinnedClaudeVersion, posixShim, windowsShim } from "./install-fake-claude.mjs";
+import { COMPLETE_MARKER, homeProblem, installFakeClaude, pinnedClaudeVersion, posixShim, windowsShim } from "./install-fake-claude.mjs";
 import conversation from "./fake-claude/conversation.json" with { type: "json" };
 
 const CLI = join(__dirname, "fake-claude", "cli.mjs");
@@ -123,6 +123,16 @@ describe("install-fake-claude", () => {
         const src = 'npm_package: "@other/cli",\n pinned_version: "9.9.9",\n npm_package: "@anthropic-ai/claude-code",\n // note\n pinned_version: "2.1.288",';
         expect(pinnedClaudeVersion(src)).toBe("2.1.288");
         expect(() => pinnedClaudeVersion("nothing here")).toThrow(/pinned_version/);
+    });
+
+    it("installs under the version it is given: a build made before a pin moved looks for the old one", () => {
+        const home = mkdtempSync(join(tmpdir(), "fake-claude-home-"));
+        mkdirSync(join(home, "shared"));
+        const dir = installFakeClaude(home, undefined, "2.1.288");
+        expect(dir.replace(/\\/g, "/")).toMatch(/shared\/cli\/claude\/2\.1\.288$/);
+        expect(existsSync(join(dir, COMPLETE_MARKER))).toBe(true);
+        // without a version it is this checkout's pin
+        expect(installFakeClaude(home).replace(/\\/g, "/")).toContain(`/claude/${pinnedClaudeVersion()}`);
     });
 
     it("writes a shim in the shape srv's .cmd parser accepts", () => {

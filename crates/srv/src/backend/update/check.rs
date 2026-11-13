@@ -116,6 +116,16 @@ pub struct AppUpdateStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub install_first: Option<String>,
+    /// Rises with every change srv makes to this status. The answer to a click and the event for a later change
+    /// reach a window in either order, so a window keeps the one with the higher `rev`. Unix ms, pushed up when
+    /// two changes share a millisecond; 0 from an srv that doesn't say.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[ts(optional, as = "Option<f64>")]
+    pub rev: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// A release file, as GitHub lists it.
@@ -128,6 +138,18 @@ pub struct ReleaseAsset {
     pub url: String,
     /// Lowercase hex.
     pub sha256: String,
+}
+
+/// One agent a restart waits for (`update::restart`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WaitingOn {
+    /// The agent's name, as it is addressed; empty for a pane that has none.
+    pub agent: String,
+    /// Why it is waited for. `turn`: it is in the middle of a turn. A turn that is held up says by what:
+    /// `network_retry` (its request to the model got no answer and is being tried again) or `api_retry` (the
+    /// model's API answered with an error and the request is being tried again).
+    pub why: String,
 }
 
 /// Where a download of a release stands.
@@ -158,6 +180,11 @@ pub struct DownloadStatus {
     /// While `waiting`: how many agents are still in a turn.
     #[serde(default)]
     pub waiting_for: u32,
+    /// While `waiting`: those agents, one entry each ([`WaitingOn`]). Never empty then: with nobody to wait
+    /// for, the state is `restarting`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<WaitingOn>>")]
+    pub waiting_on: Vec<WaitingOn>,
     /// While `waiting` or `restarting`: what agents left running that the
     /// restart stops, a line each ("Agent-1: an AgentMux instance (`task
     /// dev`), running 9 h"; `background_work`).
@@ -180,6 +207,7 @@ impl AppUpdateStatus {
             can_download: false,
             download: None,
             install_first: None,
+            rev: 0,
         }
     }
 }
@@ -296,6 +324,7 @@ pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms
         install: kind.label().to_string(),
         asset,
         download: None,
+        rev: 0,
     }
 }
 
@@ -593,6 +622,7 @@ fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdate
                     folder: None,
                     installer: kept.then(|| staged.display().to_string()),
                     waiting_for: 0,
+                    waiting_on: Vec::new(),
                     stopping: Vec::new(),
                 }
             })
@@ -617,6 +647,11 @@ fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdate
     });
 }
 
+/// The `rev` of the change after the one numbered `last`, made at `now_ms`: the time, and always higher than `last`.
+fn rev_after(last: u64, now_ms: u64) -> u64 {
+    now_ms.max(last + 1)
+}
+
 /// Replace what srv knows with what `change` makes of it (`None`: leave it),
 /// in one step under the lock, and tell every window when it changed.
 /// Whether it was replaced.
@@ -627,10 +662,14 @@ fn update(
     let Some(lock) = STATUS.get() else { return false };
     let next = {
         let mut cur = lock.write();
-        let Some(next) = change(&cur) else { return false };
+        let Some(mut next) = change(&cur) else { return false };
         // A new check time alone is news to every window: the panel shows
         // when the last check was, whoever asked for it.
+        next.rev = cur.rev;
         let same = next == *cur;
+        if !same {
+            next.rev = rev_after(cur.rev, agentmux_common::time::now_ms_u64());
+        }
         // Download progress is news to a window, not to the log.
         let step = |s: &AppUpdateStatus| (s.state.clone(), s.latest.clone(), s.download.as_ref().map(|d| d.state.clone()));
         if step(&cur) != step(&next) {
@@ -655,6 +694,13 @@ fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_change_gets_a_higher_rev_than_the_one_before() {
+        assert_eq!(rev_after(0, 1_000), 1_000);
+        assert_eq!(rev_after(1_000, 1_000), 1_001, "two changes in one millisecond");
+        assert_eq!(rev_after(1_001, 900), 1_002, "a clock that went back");
+    }
 
     fn release(tag: &str) -> Release {
         Release {
@@ -838,6 +884,7 @@ mod tests {
             folder: None,
             installer: None,
             waiting_for: 0,
+            waiting_on: Vec::new(),
             stopping: Vec::new(),
         };
         let newer = status_for("0.59.26", "stable", &release("v0.59.28"), 9, &InstallKind::Unknown);

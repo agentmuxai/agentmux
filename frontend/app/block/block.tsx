@@ -22,7 +22,6 @@ import {
 } from "@/app/store/pane-tab-registry";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getApi } from "@/util/app-api";
-import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { registerPaneMounted } from "@/app/store/pane-content-holds";
 import { createPaneReadiness, PANE_REVEAL_BOUND_MS, type PaneReadinessPhase } from "@/app/store/pane-readiness";
@@ -38,11 +37,13 @@ import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
-import { logCoverPhases } from "./pane-cover-log";
+import { BlockSuspenseSpinner } from "./BlockSuspenseSpinner";
+import { PaneViewBoundary } from "./PaneViewBoundary";
+import { agentNameOf, logBlockCover } from "./pane-cover-log";
 import { MissingWidget } from "./missing-widget";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
@@ -383,18 +384,14 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
                     style={blockContentStyle()}
                 >
                     <ErrorBoundary>
-                        {/* A view that suspends AFTER the pane is live (a
-                            `createResource` refetch, say) still needs something on
-                            screen — this is the one loading affordance that is NOT
-                            about initial assembly, so it is not folded into the
-                            cover. But while the pane IS still assembling the cover
-                            is already up over this exact box, and rendering a
-                            spinner underneath it is the "two brains at once" case
-                            the consolidation exists to remove, so suppress it for
-                            that window. See SPEC_PANE_LOADING_CONSOLIDATION §5.3. */}
-                        <Suspense fallback={<Show when={!covered?.()}><BrainSpinner /></Show>}>
+                        {/* A view that suspends AFTER the pane is live stays where it is, with
+                            its size and scroll (PaneViewBoundary); a read that stays pending
+                            gets a mark over it. Not folded into the cover (not initial
+                            assembly), but suppressed while the cover is up over this box:
+                            "two brains at once". SPEC_PANE_LOADING_CONSOLIDATION §5.3. */}
+                        <PaneViewBoundary fallback={<Show when={!covered?.()}><BlockSuspenseSpinner blockId={nodeModel.blockId} agent={() => agentNameOf(blockData())} /></Show>}>
                             <PaneView blockId={nodeModel.blockId} blockRef={blockRef} contentRef={contentRef} viewType={blockViewType()} viewModel={viewModel} />
-                        </Suspense>
+                        </PaneViewBoundary>
                     </ErrorBoundary>
                 </div>
             </PaneModalHost>
@@ -684,7 +681,7 @@ function Block(props: BlockProps): JSX.Element {
     // One cover, two sources: the controller until it goes live, this block's
     // own re-cover cycle afterwards.
     const coverPhase = (): PaneReadinessPhase => (readiness.phase() === "live" ? reCoverPhase() : readiness.phase());
-    logCoverPhases(props.nodeModel.blockId, { controller: readiness.phase, reCover: reCoverPhase });
+    logBlockCover(props.nodeModel.blockId, readiness, reCoverPhase, blockData, windowTabDisplayed);
 
     // Cross-fade the cover out on top of the real content instead of an instant
     // hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3/§4

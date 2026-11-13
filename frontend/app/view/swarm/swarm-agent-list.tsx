@@ -14,6 +14,7 @@ import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { For, Show, createEffect, createMemo, type Accessor, type JSX } from "solid-js";
 import { phaseToDisplayStatus } from "./swarm-display-status";
+import { closedSecondPanes, paneIdentity } from "./swarm-duplicate-panes";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { lastActiveMs } from "./swarm-last-active";
 import { collectClearableRows, type AgentTreeNode, type SwarmViewModel } from "./swarm-model";
@@ -55,17 +56,35 @@ export interface SwarmAgents {
     filter: SwarmFilterState;
 }
 
+/** The list's rows, and the blocks left out of them: an agent's closed second pane (swarm-duplicate-panes.ts). */
+interface Listing {
+    rows: AgentTreeNode[];
+    hidden: ReadonlySet<string>;
+}
+
+const NOTHING_LISTED: Listing = { rows: [], hidden: new Set() };
+
+function oneRowPerAgent(rows: AgentTreeNode[]): Listing {
+    const hidden = closedSecondPanes(
+        rows.flatMap((n) =>
+            n.blockId ? [paneIdentity(n.blockId, MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", n.blockId))()?.meta)] : []
+        )
+    );
+    return { rows: hidden.size === 0 ? rows : rows.filter((n) => !n.blockId || !hidden.has(n.blockId)), hidden };
+}
+
 export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): SwarmAgents {
     // A Swarm pane nobody can see (another window tab, or a pane tab behind its
     // siblings) keeps its last list and rebuilds once when it is shown: every
     // agent event rebuilt every Swarm pane in the window, hidden ones included
     // (150 to 380 rebuilds a minute across four panes in one busy window).
-    const tree = createMemo<AgentTreeNode[]>((prev) => {
-        if (ctx.visibility() !== "active") return prev ?? [];
-        const rows = model.buildTree();
+    const listing = createMemo<Listing>((prev) => {
+        if (ctx.visibility() !== "active") return prev ?? NOTHING_LISTED;
+        const listed = oneRowPerAgent(model.buildTree());
         selectTrace.rebuilt();
-        return rows;
+        return listed;
     });
+    const tree = createMemo(() => listing().rows);
     // The list is keyed by block id, so a rebuild with the same agents updates the
     // rows in place; only an agent joining or leaving adds or removes a row.
     const keyedRows = createMemo(() => {
@@ -86,7 +105,9 @@ export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): 
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
     // Every created agent's runtime state, for the ones with no pane (store/agent-runtime.ts).
     const runtime = sharedAgentRuntime();
-    const stopped = createMemo(() => agentsWithoutRow(runtime.rows(), new Set(localKeys())));
+    // srv's record of a running agent can name its closed second pane (the record follows the newest pane and
+    // stays on it after srv closes it), and that agent has a row: its hidden pane counts as listed.
+    const stopped = createMemo(() => agentsWithoutRow(runtime.rows(), new Set([...localKeys(), ...listing().hidden])));
     const selectableKeys = createMemo(() => [
         ...localKeys(),
         ...remote().flatMap((r) => (r.section.stale ? [] : [remoteAgentKey(r.section, r.agent)])),

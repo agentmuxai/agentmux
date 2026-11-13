@@ -8,6 +8,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { accountStatus } from "@/app/view/accounts/account-card";
 import { OAuthAccountSection } from "@/app/view/accounts/OAuthAccountSection";
+import { githubActsAs, githubKindLabel } from "@/app/view/accounts/github-account-copy";
 import { brandForProvider, isCliOAuthProvider } from "@/app/view/accounts/provider-brand";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { ProviderLogo } from "@/element/ProviderLogo";
@@ -375,7 +376,8 @@ function ProviderFields({ s }: { s: PanelState }) {
                         : ""
                 }`}
             />
-            <DetailField label="Kind" value={KIND_LABELS[account.kind]} />
+            <DetailField label="Kind" value={githubKindLabel(account) ?? KIND_LABELS[account.kind]} />
+            <Show when={githubActsAs(account)}>{(line) => <div class="identity-detail-hint">{line()}</div>}</Show>
         </>
     );
 }

@@ -112,6 +112,16 @@ const BUILD_CHANNEL_DEFAULT: &str = match option_env!("AGENTMUX_BUILD_CHANNEL_DE
     None => "stable",
 };
 
+#[cfg(not(target_os = "macos"))]
+fn pane_clip() -> bool {
+    crate::browser_panes::views_clip::reported()
+}
+
+#[cfg(target_os = "macos")]
+fn pane_clip() -> bool {
+    false
+}
+
 /// Get details for the About modal.
 pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
     let version = env!("CARGO_PKG_VERSION");
@@ -134,6 +144,9 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
         // Which kind of browser pane this process creates (`pane_backend`): the page freezes a
         // frame under a menu that hides a Views pane.
         "paneBackend": if crate::pane_backend::views() { "views" } else { "hwnd" },
+        // Whether a Views pane under a menu is cut around it and stays live (`views_clip::reported`),
+        // so the page freezes no frame for it. macOS masks its panes without this.
+        "paneClip": pane_clip(),
         "arch": std::env::consts::ARCH,
         "backendEndpoints": {
             "ws": endpoints.ws_endpoint,

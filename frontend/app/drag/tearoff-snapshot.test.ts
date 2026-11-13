@@ -14,6 +14,7 @@ const shots = vi.hoisted(() => ({
     calls: [] as string[],
     next: null as null | Promise<{ jpeg_base64: string }>,
     drawn: [] as number[][],
+    page: "browser-page" as string | null,
 }));
 vi.mock("@/app/store/global", () => ({
     MOS: {
@@ -27,7 +28,7 @@ vi.mock("@/app/store/global", () => ({
         browserPanes: {
             screenshot: (blockId: string) => {
                 shots.calls.push(`browser:${blockId}`);
-                return Promise.resolve({ png_base64: "browser-page" });
+                return shots.page === null ? Promise.reject(new Error("no page")) : Promise.resolve({ png_base64: shots.page });
             },
         },
         windows: {
@@ -89,6 +90,7 @@ beforeEach(() => {
     shots.views = {};
     shots.next = null;
     shots.drawn = [];
+    shots.page = "browser-page";
     resetTearOffSnapshotForTests();
     stubImagePipeline();
 });
@@ -111,6 +113,20 @@ describe("tear-off snapshot", () => {
         expect(shots.drawn).toEqual([[20, 40, 600, 400, 0, 0, 600, 400]]);
     });
 
+    it("a picture older than the age limit is dropped, unless the live follow has been showing it", async () => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        mountPane("b1");
+        prewarmTearOffSnapshot("b1", { x: 60, y: 35 });
+        vi.advanceTimersByTime(30_000);
+        expect(await takeTearOffSnapshot("b1")).toBeUndefined();
+
+        vi.setSystemTime(new Date(0));
+        prewarmTearOffSnapshot("b1", { x: 60, y: 35 });
+        expect(await peekTearOffSnapshot("b1", 500)).toBeDefined();
+        vi.advanceTimersByTime(30_000);
+        expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
+    });
+
     it("shows a pane's picture to the live follow with the grab and size, and leaves it for the tear-off", async () => {
         mountPane("b1", { left: 10, top: 20, width: 300, height: 200 });
         prewarmTearOffSnapshot("b1", { x: 60, y: 35 });
@@ -130,12 +146,55 @@ describe("tear-off snapshot", () => {
         expect(await peekTearOffSnapshot("b2", 50)).toBeUndefined();
     });
 
-    it("a native browser pane is captured from its own page, not the window's", async () => {
-        mountPane("b1");
-        shots.views.b1 = "browser";
+    /** A browser pane at 10,20 300x200 whose page's placeholder is drawn at 10,60 300x160 (under a 40px header and address bar). */
+    function mountBrowserPane(blockId: string) {
+        mountPane(blockId);
+        shots.views[blockId] = "browser";
+        const ph = document.createElement("div");
+        ph.className = "browser-placeholder";
+        ph.checkVisibility = () => true;
+        ph.getBoundingClientRect = () => ({ left: 10, top: 60, width: 300, height: 160, right: 310, bottom: 220, x: 10, y: 60, toJSON() {} }) as DOMRect;
+        document.querySelector(`[data-blockid="${blockId}"]`)!.appendChild(ph);
+    }
+
+    it("a native browser pane is the window's crop (its header and address bar) with its own page drawn where the page stands", async () => {
+        mountBrowserPane("b1");
+        shots.page = btoa("page-jpeg");
+        prewarmTearOffSnapshot("b1", { x: 60, y: 35 });
+        expect(await peekTearOffSnapshot("b1", 500)).toEqual({
+            picture: btoa("cropped-pane"),
+            grab: { x: 50, y: 15 },
+            size: { width: 300, height: 200 },
+        });
+        expect(shots.calls.sort()).toEqual(["browser:b1", "main"]);
+        const page = [window.innerWidth * 2, window.innerHeight * 2];
+        expect(shots.drawn).toEqual([
+            // The pane, at 2 device px per CSS px.
+            [20, 40, 600, 400, 0, 0, 600, 400],
+            // The whole page picture into the placeholder: 40 CSS px down the pane, 300 by 160.
+            [0, 0, ...page, 0, 80, 600, 320],
+        ]);
+    });
+
+    it("a browser pane whose page gives no picture (asleep, not loaded) is the pane as the window shows it", async () => {
+        mountBrowserPane("b1");
+        shots.page = null;
+        prewarmTearOffSnapshot("b1");
+        expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
+        expect(shots.drawn).toEqual([[20, 40, 600, 400, 0, 0, 600, 400]]);
+    });
+
+    it("a browser pane the window could not picture, or with no placeholder drawn, is its page alone", async () => {
+        mountBrowserPane("b1");
+        shots.next = Promise.reject(new Error("no capture"));
         prewarmTearOffSnapshot("b1");
         expect(await takeTearOffSnapshot("b1")).toBe("browser-page");
-        expect(shots.calls).toEqual(["browser:b1"]);
+        shots.next = null;
+        mountPane("b2");
+        shots.views.b2 = "browser";
+        prewarmTearOffSnapshot("b2");
+        expect(await takeTearOffSnapshot("b2")).toBe("browser-page");
+        expect(shots.drawn).toEqual([]);
     });
 
     it("a background browser tab mounted in the same pane doesn't make the active tab a browser", async () => {

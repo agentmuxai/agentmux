@@ -6,6 +6,7 @@
 // (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3, §5).
 
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { t } from "@/app/i18n/i18n";
 import { PaletteSwatches } from "@/app/components/palette-swatches";
 import { Button, IconButton, Switch, TextInput } from "@/app/element/ui";
 import { normalizeKeepAwakeSite } from "@/app/view/browser/hibernation";
@@ -20,60 +21,55 @@ import {
     userProfiles,
 } from "@/app/view/browser/browser-profiles";
 import { ProfileBadge } from "@/app/view/browser/browser-profile-menu";
-import type { SettingsIndexEntry } from "../settings-model";
+import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 import { settingsAtom } from "@/app/store/global";
 import { NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 import { AGENT_SITE_GRANTS_SETTING, AgentSiteGrants } from "./agent-site-grants";
 import { browserPauseAll, setAgentBrowsingPaused, startBrowserPauseAll } from "@/app/store/browser-pause-all";
 
 export const BROWSER_SETTINGS = {
-    profiles: {
+    profiles: settingEntry({
         id: "browser.profiles",
-        label: "Browser profiles",
-        description:
-            "Each profile keeps its own sign-ins, cookies and site data, so one site can be open as two accounts side by side. Open a tab in one from the Profile button in a browser pane. Personal is the one every tab started with; it can't be removed. An agent can browse as a profile only if you switch on \"Agents may use it\" for that profile; on Windows it can also use an Incognito tab.",
+        labelKey: "settings.browser.profiles.label",
+        descriptionKey: "settings.browser.profiles.description",
         section: "browser",
         keywords: ["profile", "profiles", "account", "accounts", "sign in", "cookies", "incognito", "identity", "work", "agent", "agents"],
-    },
-    searchSuggestions: {
+    }),
+    searchSuggestions: settingEntry({
         id: "browser.search_suggestions",
-        label: "Search suggestions while typing",
-        description:
-            "The address bar also asks your search engine for suggestions as you type, as Chrome does, which sends it what you type before you press Enter. Incognito tabs never ask, as in Chrome. Turn it off to keep suggestions to this computer (your history and the addresses you typed).",
+        labelKey: "settings.browser.searchSuggestions.label",
+        descriptionKey: "settings.browser.searchSuggestions.description",
         section: "browser",
         keywords: ["autocomplete", "suggestions", "address bar", "omnibox", "google", "search", "privacy", "browser:searchsuggestions"],
-    },
-    hibernate: {
+    }),
+    hibernate: settingEntry({
         id: "browser.hibernate",
-        label: "Hibernate hidden browser panes",
-        description:
-            "A browser pane out of sight for a while goes to sleep: its page is put away to free its memory, often 100 to 200 MB, and loads again when you're about to look at it, with a note while it restores. It comes back with its back/forward history, scroll position and anything typed into it, on browser engines that support it; on older ones it loads fresh. Never a pane an agent is using, one playing or capturing media, one with something typed into it, or a local dev server.",
+        labelKey: "settings.browser.hibernate.label",
+        descriptionKey: "settings.browser.hibernate.description",
         section: "browser",
         keywords: ["hibernate", "sleep", "sleeping", "memory", "discard", "tabs", "browser:hibernate"],
-    },
-    hibernateAfter: {
+    }),
+    hibernateAfter: settingEntry({
         id: "browser.hibernate_after",
-        label: "Minutes hidden before it sleeps",
-        description: "Sooner when the computer is low on memory: 5 minutes, then 1.",
+        labelKey: "settings.browser.hibernateAfter.label",
+        descriptionKey: "settings.browser.hibernateAfter.description",
         section: "browser",
         keywords: ["hibernate", "sleep", "minutes", "delay", "browser:hibernateafter"],
-    },
-    keepAwakeSites: {
+    }),
+    keepAwakeSites: settingEntry({
         id: "browser.keep_awake_sites",
-        label: "Sites that never sleep",
-        description:
-            "Browser panes on these sites stay awake however long they are hidden. A site covers its subdomains (example.com covers mail.example.com); write an address with https:// to keep just that one.",
+        labelKey: "settings.browser.keepAwakeSites.label",
+        descriptionKey: "settings.browser.keepAwakeSites.description",
         section: "browser",
         keywords: ["hibernate", "sleep", "keep awake", "never", "sites", "exceptions", "browser:keepawakesites"],
-    },
-    pauseAll: {
+    }),
+    pauseAll: settingEntry({
         id: "browser.pause_all",
-        label: "Pause all agent browsing",
-        description:
-            "An emergency stop: while it is on, every browser pane an agent drives refuses every call the agent makes, and the clocks of auto-approve grants stand still. It stays on after a restart until you turn it off here, in the status bar or from the command palette.",
+        labelKey: "settings.browser.pauseAll.label",
+        descriptionKey: "settings.browser.pauseAll.description",
         section: "browser",
         keywords: ["pause", "stop", "agent", "agents", "browsing", "emergency", "freeze", "resume", "auto-approve"],
-    },
+    }),
     agentSites: AGENT_SITE_GRANTS_SETTING,
 } satisfies Record<string, SettingsIndexEntry>;
 
@@ -84,7 +80,7 @@ function KeepAwakeSites(props: { sites: string[] }): JSX.Element {
     const add = () => {
         const site = normalizeKeepAwakeSite(draft());
         if (!site) {
-            setError(`"${draft().trim()}" isn't a site: write a host like example.com, or an address.`);
+            setError(t("settings.browser.keepAwake.notASite", { site: draft().trim() }));
             return;
         }
         setError(null);
@@ -98,12 +94,12 @@ function KeepAwakeSites(props: { sites: string[] }): JSX.Element {
     return (
         <div class="browser-keepawake">
             <Show when={props.sites.length > 0}>
-                <ul class="browser-keepawake-list" aria-label="Sites that never sleep">
+                <ul class="browser-keepawake-list" aria-label={t("settings.browser.keepAwakeSites.label")}>
                     <For each={props.sites}>
                         {(site) => (
                             <li class="browser-keepawake-site">
                                 <span>{site}</span>
-                                <IconButton icon="xmark" label={`Let ${site} sleep again`} density="compact" onClick={() => remove(site)} />
+                                <IconButton icon="xmark" label={t("settings.browser.keepAwake.letSleep", { site })} density="compact" onClick={() => remove(site)} />
                             </li>
                         )}
                     </For>
@@ -112,8 +108,8 @@ function KeepAwakeSites(props: { sites: string[] }): JSX.Element {
             <div class="browser-profile-add">
                 <TextInput
                     detached
-                    aria-label="Site to keep awake"
-                    placeholder="example.com"
+                    aria-label={t("settings.browser.keepAwake.siteInput")}
+                    placeholder={"example.com"}
                     value={draft()}
                     onInput={(e) => setDraft(e.currentTarget.value)}
                     onKeyDown={(e) => {
@@ -121,7 +117,7 @@ function KeepAwakeSites(props: { sites: string[] }): JSX.Element {
                     }}
                 />
                 <Button icon="plus" disabled={!draft().trim()} onClick={add}>
-                    Add site
+                    {t("settings.browser.keepAwake.add")}
                 </Button>
             </div>
             <Show when={error()}>
@@ -133,11 +129,53 @@ function KeepAwakeSites(props: { sites: string[] }): JSX.Element {
     );
 }
 
+/**
+ * The Delete button of a profile row. It asks once more on the button itself: delete closes the profile's tabs
+ * and signs it out. Its saved passwords may exist nowhere else, so they move to Personal unless the person
+ * deletes them too (Vault spec §9.4).
+ */
+function DeleteProfile(props: { profile: BrowserProfile; run: (f: () => Promise<void>) => Promise<void> }): JSX.Element {
+    const [confirming, setConfirming] = createSignal(false);
+    let confirmTimer: ReturnType<typeof setTimeout> | undefined;
+    const saved = () => profileSignins(props.profile.id);
+    const remove = (deleteSignins = false) => {
+        if (!confirming()) {
+            setConfirming(true);
+            confirmTimer = setTimeout(() => setConfirming(false), saved() > 0 ? 10000 : 5000);
+            return;
+        }
+        clearTimeout(confirmTimer);
+        setConfirming(false);
+        void props.run(() => deleteBrowserProfile(props.profile.id, deleteSignins));
+    };
+    const signinsWord = () => t("settings.browser.profile.signins", { count: saved() });
+    const deleteLabel = () =>
+        confirming() ? t("settings.browser.profile.deleteConfirm", { name: props.profile.name }) : t("settings.browser.profile.delete");
+    return (
+        <Show
+            when={confirming() && saved() > 0}
+            fallback={
+                <Button tone={confirming() ? "danger" : "quiet"} icon="trash" onClick={() => remove()}>
+                    {deleteLabel()}
+                </Button>
+            }
+        >
+            <div class="browser-profile-delete" role="group" aria-label={t("settings.browser.profile.deleteGroup", { name: props.profile.name, signins: signinsWord() })}>
+                <span>{t("settings.browser.profile.deleteAsk", { name: props.profile.name, signins: signinsWord() })}</span>
+                <Button tone="danger" onClick={() => remove(false)}>
+                    {t("settings.browser.profile.moveToPersonal")}
+                </Button>
+                <Button tone="quiet" onClick={() => remove(true)}>
+                    {t("settings.browser.profile.deleteThemToo")}
+                </Button>
+            </div>
+        </Show>
+    );
+}
+
 function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
     const [name, setName] = createSignal(props.profile.name);
     const [error, setError] = createSignal<string | null>(null);
-    const [confirming, setConfirming] = createSignal(false);
-    let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 
     const run = async (f: () => Promise<void>) => {
         setError(null);
@@ -152,21 +190,8 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
         if (next && next !== props.profile.name) void run(() => updateBrowserProfile(props.profile.id, { name: next }));
         else setName(props.profile.name);
     };
-    // Delete asks once more on the button itself: it closes the profile's tabs
-    // and signs it out. Its saved passwords may exist nowhere else, so they move
-    // to Personal unless the person deletes them too (Vault spec §9.4).
-    const saved = () => profileSignins(props.profile.id);
-    const remove = (deleteSignins = false) => {
-        if (!confirming()) {
-            setConfirming(true);
-            confirmTimer = setTimeout(() => setConfirming(false), saved() > 0 ? 10000 : 5000);
-            return;
-        }
-        clearTimeout(confirmTimer);
-        setConfirming(false);
-        void run(() => deleteBrowserProfile(props.profile.id, deleteSignins));
-    };
-    const signinsWord = () => (saved() === 1 ? "1 saved sign-in" : `${saved()} saved sign-ins`);
+    const agentsUseLabel = () =>
+        props.profile.owner_agent ? t("settings.browser.profile.otherAgentsMayUse") : t("settings.browser.profile.agentsMayUse");
 
     return (
         <div class="browser-profile-row">
@@ -175,13 +200,13 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
                 when={!props.profile.owner_agent}
                 fallback={
                     <span class="browser-profile-fixed">
-                        {props.profile.name} <span class="browser-profile-agent-tag">agent</span>
+                        {props.profile.name} <span class="browser-profile-agent-tag">{t("settings.browser.profile.agentTag")}</span>
                     </span>
                 }
             >
                 <TextInput
                     detached
-                    aria-label={`Name of ${props.profile.name}`}
+                    aria-label={t("settings.browser.profile.nameOf", { name: props.profile.name })}
                     value={name()}
                     maxLength={40}
                     onInput={(e) => setName(e.currentTarget.value)}
@@ -192,7 +217,7 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
                     }}
                 />
                 <PaletteSwatches
-                    label={`Colour of ${props.profile.name}`}
+                    label={t("settings.browser.profile.colourOf", { name: props.profile.name })}
                     value={props.profile.color}
                     onSelect={(slot) => slot && void run(() => updateBrowserProfile(props.profile.id, { color: slot.hex }))}
                 />
@@ -200,29 +225,12 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
             <label class="browser-profile-agents">
                 <Switch
                     checked={props.profile.agents_allowed}
-                    ariaLabel={`Agents may use ${props.profile.name}`}
+                    ariaLabel={t("settings.browser.profile.agentsMayUseName", { name: props.profile.name })}
                     onChange={(on) => void run(() => updateBrowserProfile(props.profile.id, { agents_allowed: on }))}
                 />
-                <span>{props.profile.owner_agent ? "Other agents may use it" : "Agents may use it"}</span>
+                <span>{agentsUseLabel()}</span>
             </label>
-            <Show
-                when={confirming() && saved() > 0}
-                fallback={
-                    <Button tone={confirming() ? "danger" : "quiet"} icon="trash" onClick={() => remove()}>
-                        {confirming() ? `Delete ${props.profile.name} and sign out?` : "Delete"}
-                    </Button>
-                }
-            >
-                <div class="browser-profile-delete" role="group" aria-label={`Delete ${props.profile.name}: its ${signinsWord()}`}>
-                    <span>Delete {props.profile.name}? It has {signinsWord()} in the Vault.</span>
-                    <Button tone="danger" onClick={() => remove(false)}>
-                        Move them to Personal
-                    </Button>
-                    <Button tone="quiet" onClick={() => remove(true)}>
-                        Delete them too
-                    </Button>
-                </div>
-            </Show>
+            <DeleteProfile profile={props.profile} run={run} />
             <Show when={error()}>
                 <div class="settings-config-error" role="alert">
                     {error()}
@@ -246,10 +254,9 @@ function AgentProfiles(): JSX.Element {
     return (
         <Show when={agentProfiles().length > 0}>
             <div class="setting-devices-description">
-                Each agent browses as a profile of its own by default, so its sign-ins stay from one pane to the next. Deleting one signs that
-                agent out everywhere; it gets a fresh one the next time it opens a browser.
+                {t("settings.browser.profile.agentsNote")}
             </div>
-            <div class="browser-profile-list" aria-label="Agents' profiles">
+            <div class="browser-profile-list" aria-label={t("settings.browser.profile.agentsListLabel")}>
                 <For each={agentProfiles()}>{(p) => <ProfileRow profile={p} />}</For>
             </div>
         </Show>
@@ -334,15 +341,15 @@ export function BrowserSection(): JSX.Element {
                         <span class="browser-profile-badge browser-profile-badge-personal" aria-hidden="true">
                             <i class="fa-solid fa-user" />
                         </span>
-                        <span class="browser-profile-fixed">Personal</span>
+                        <span class="browser-profile-fixed">{t("settings.browser.profile.personal")}</span>
                     </div>
                     <ProfileRows />
                 </div>
                 <div class="browser-profile-add">
                     <TextInput
                         detached
-                        aria-label="New profile name"
-                        placeholder="New profile name"
+                        aria-label={t("settings.browser.profile.newName")}
+                        placeholder={t("settings.browser.profile.newName")}
                         value={newName()}
                         maxLength={40}
                         onInput={(e) => setNewName(e.currentTarget.value)}
@@ -351,7 +358,7 @@ export function BrowserSection(): JSX.Element {
                         }}
                     />
                     <Button icon="plus" disabled={!newName().trim()} onClick={() => void add()}>
-                        Add profile
+                        {t("settings.browser.profile.add")}
                     </Button>
                 </div>
                 <Show when={error()}>

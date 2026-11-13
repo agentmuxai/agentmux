@@ -109,6 +109,27 @@ describe("the attention toast", () => {
         expect(h.last().message).toBe("asks you a question (in another window)");
     });
 
+    it("says pane, not agent, for a pane that is not an agent's", () => {
+        const remotes = item("r1", { name: "Connectors · Remotes", what: "asks you to confirm", color: undefined, pane: true });
+        const one = buildToast(
+            [remotes],
+            () => {},
+            () => {}
+        );
+        expect(one).toMatchObject({
+            title: "Connectors · Remotes",
+            message: "asks you to confirm",
+            actions: [{ label: "Go to pane", actionKey: "attention:go:r1" }],
+        });
+        const mixed = buildToast(
+            [remotes, item("b1")],
+            () => {},
+            () => {}
+        );
+        expect(mixed.title).toBe("2 panes need you");
+        expect(mixed.actions!.map((a) => a.label)).toEqual(["Go to Connectors · Remotes", "Go to Agent-b1"]);
+    });
+
     it("groups several into one toast, rewritten in place, with a link per agent and the rest counted", () => {
         const h = harness();
         h.wait(START_GRACE_MS);

@@ -1,0 +1,103 @@
+-- empty
+<div>
+  <div class="bundle-view-provider-instructions">
+    <datalist id="abf-known-providers">
+      <option value="alpha">
+      <option value="mid">
+      <option value="zeta">
+    <span data-stand="Button" class="bundle-view-provider-instruction-add" data-icon="plus">
+      "Add provider override"
+Button "Add provider override" click
+onChange {}
+focusWhenRendered input ""
+-- a blank row
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <div class="bundle-view-provider-instruction-warn">
+        "Provider key cannot be empty."
+        "This row will not be saved until you name it."
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="">
+    <datalist id="abf-known-providers">
+      <option value="alpha">
+      <option value="mid">
+      <option value="zeta">
+    <span data-stand="Button" class="bundle-view-provider-instruction-add" data-icon="plus">
+      "Add provider override"
+onChange {"claude":""}
+onChange {"claude":" be brief \n"}
+-- named and filled
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="  claude ">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value=" be brief \n">
+    <datalist id="abf-known-providers">
+      <option value="alpha">
+      <option value="mid">
+      <option value="zeta">
+    <span data-stand="Button" class="bundle-view-provider-instruction-add" data-icon="plus">
+      "Add provider override"
+Button "Add provider override" click
+onChange {"claude":" be brief \n"}
+focusWhenRendered input ""
+onChange {"claude":" be brief \n","codex":""}
+onChange {"claude":" be brief \n","codex":"be thorough"}
+-- two rows
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="  claude ">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value=" be brief \n">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="codex">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="be thorough">
+    <datalist id="abf-known-providers">
+      <option value="alpha">
+      <option value="mid">
+      <option value="zeta">
+    <span data-stand="Button" class="bundle-view-provider-instruction-add" data-icon="plus">
+      "Add provider override"
+showTextInputContextMenu
+showTextInputContextMenu
+Button "Remove" click
+onChange {"codex":"be thorough"}
+-- the first removed
+<div>
+  <div class="bundle-view-provider-instructions">
+    <div class="bundle-view-provider-instruction-row">
+      <div class="bundle-view-provider-instruction-head">
+        <input data-stand="TextInput" data-variant="plain" class="bundle-view-input" list="abf-known-providers" placeholder="Provider (e.g. claude)" data-value="codex">
+        <span data-stand="Button" class="bundle-view-provider-instruction-remove" data-title="Remove this provider override">
+          "Remove"
+      <textarea data-stand="TextArea" data-variant="plain" class="bundle-view-textarea" rows="5" placeholder="Instructions used only when this bundle runs on this provider." data-value="be thorough">
+    <datalist id="abf-known-providers">
+      <option value="alpha">
+      <option value="mid">
+      <option value="zeta">
+    <span data-stand="Button" class="bundle-view-provider-instruction-add" data-icon="plus">
+      "Add provider override"
+Button "Remove" click
+onChange {}
+-- none left
+<div>
+  <div class="bundle-view-provider-instructions">
+    <datalist id="abf-known-providers">
+      <option value="alpha">
+      <option value="mid">
+      <option value="zeta">
+    <span data-stand="Button" class="bundle-view-provider-instruction-add" data-icon="plus">
+      "Add provider override"

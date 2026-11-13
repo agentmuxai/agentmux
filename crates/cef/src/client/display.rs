@@ -247,31 +247,29 @@ impl AgentMuxHandler {
             self.popup_titles.insert(b.identifier(), title_str.clone());
             popup_title(b, &title_str)
         });
+        let pane_block = browser
+            .as_ref()
+            .filter(|_| self.is_browser_pane)
+            .and_then(|b| crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b));
         match popup {
             Some(t) => set_popup_window_title(&mut browser, &t),
+            // A Views pane's page names its pane (the event below), never a window: its browser
+            // reports the app window as its own, so the page's title became the window's (seen
+            // on Linux, and on Windows with Views panes).
+            None if pane_block.as_deref().is_some_and(|b| crate::pane_backend::pane_is_views(&self.state, b)) => {}
             None => set_window_title(&mut browser, had_title.then_some(display_title_str.as_str())),
         }
 
         // Emit live title to frontend for browser panes.
-        if self.is_browser_pane {
-            if let Some(b) = browser.as_ref() {
-                if let Some(block_id) =
-                    crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)
-                {
-                    let block_id_short: String = block_id.chars().take(7).collect();
-                    tracing::info!(
-                        "[browser-pane:diag][{}] emit-title-change title={:?}",
-                        block_id_short,
-                        title_str,
-                    );
-                    crate::events::emit_browser_pane_event(
-                        &self.state,
-                        &block_id,
-                        "browser-pane-title-change",
-                        &serde_json::json!({ "block_id": block_id, "title": title_str }),
-                    );
-                }
-            }
+        if let Some(block_id) = pane_block {
+            let block_id_short: String = block_id.chars().take(7).collect();
+            tracing::info!("[browser-pane:diag][{}] emit-title-change title={:?}", block_id_short, title_str);
+            crate::events::emit_browser_pane_event(
+                &self.state,
+                &block_id,
+                "browser-pane-title-change",
+                &serde_json::json!({ "block_id": block_id, "title": title_str }),
+            );
         }
     }
 

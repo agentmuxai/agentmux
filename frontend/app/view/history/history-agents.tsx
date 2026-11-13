@@ -96,7 +96,7 @@ function useAgentsList(props: HistoryAgentsProps): AgentsList {
 
 const AgentsBar = (props: { list: AgentsList }): JSX.Element => (
     <div class="warden-history-bar">
-        <FilterInput value={props.list.filter()} onInput={props.list.setFilter} placeholder="Filter agents" />
+        <FilterInput class="warden-history-filter" value={props.list.filter()} onInput={props.list.setFilter} placeholder="Filter agents" />
         <Button tone="quiet" density="compact" icon="rotate" busy={props.list.refreshing()} onClick={() => void props.list.refresh()}>
             Refresh
         </Button>
@@ -107,7 +107,7 @@ const AgentsBar = (props: { list: AgentsList }): JSX.Element => (
 const AgentNameCell = (props: { id: string; row: Accessor<AgentRow>; sessions: Accessor<Sessions | undefined>; list: AgentsList }): JSX.Element => {
     const a = () => props.row().agent;
     return (
-        <td>
+        <td class="warden-history-cell-wide">
             <span class="warden-history-agent" style={{ "padding-left": `${props.row().depth * 1.25}em` }}>
                 <IconButton
                     icon={props.sessions() ? "chevron-down" : "chevron-right"}
@@ -140,11 +140,11 @@ const AgentRowItem = (props: { id: string; list: AgentsList }): JSX.Element => {
         <>
             <tr data-agent={props.id} data-deleted={a().deleted ? "" : undefined}>
                 <AgentNameCell id={props.id} row={row} sessions={sessions} list={props.list} />
-                <td>{a().provider || <span class="warden-manager-dim">—</span>}</td>
-                <td class="warden-history-num">{formatBytes(a().current_bytes + a().archive_bytes)}</td>
-                <td class="warden-history-num">{a().archives || <span class="warden-manager-dim">—</span>}</td>
-                <td>{a().last_active_ms ? `${formatAge(ageMs(a().last_active_ms, now()))} ago` : "—"}</td>
-                <td class="warden-history-actions">
+                <td data-label="Provider">{a().provider || <span class="warden-manager-dim">—</span>}</td>
+                <td class="warden-history-num" data-label="History">{formatBytes(a().current_bytes + a().archive_bytes)}</td>
+                <td class="warden-history-num" data-label="Archived">{a().archives || <span class="warden-manager-dim">—</span>}</td>
+                <td data-label="Last active">{a().last_active_ms ? `${formatAge(ageMs(a().last_active_ms, now()))} ago` : "—"}</td>
+                <td class="warden-history-actions warden-history-cell-wide">
                     <Button tone="quiet" density="compact" onClick={() => props.list.openHistory(a())}>
                         Open history
                     </Button>
@@ -246,12 +246,16 @@ const SessionList = (props: { sessions: Sessions }): JSX.Element => (
                                 <For each={s.data!.sessions}>
                                     {(x) => (
                                         <tr data-session={x.session_id}>
-                                            <td class="warden-manager-mono">{x.session_id.slice(0, 8)}</td>
-                                            <td>{formatWhen(x.first_ms)}</td>
-                                            <td>{formatWhen(x.last_ms)}</td>
-                                            <td class="warden-history-num">{formatBytes(x.bytes)}</td>
-                                            <td>{x.archived ? "Archived" : "Current"}</td>
-                                            <td class="warden-manager-mono warden-manager-dim warden-history-cwd" {...tip(x.cwd)}>
+                                            <td class="warden-manager-mono warden-history-cell-wide">{x.session_id.slice(0, 8)}</td>
+                                            <td data-label="Started">{formatWhen(x.first_ms)}</td>
+                                            <td data-label="Last">{formatWhen(x.last_ms)}</td>
+                                            <td class="warden-history-num" data-label="Size">{formatBytes(x.bytes)}</td>
+                                            <td data-label="Where">{x.archived ? "Archived" : "Current"}</td>
+                                            <td
+                                                class="warden-manager-mono warden-manager-dim warden-history-cwd warden-history-cell-wide"
+                                                data-label="Folder"
+                                                {...tip(x.cwd)}
+                                            >
                                                 {x.cwd || "—"}
                                             </td>
                                         </tr>

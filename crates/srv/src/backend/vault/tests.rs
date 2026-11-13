@@ -231,3 +231,111 @@ fn generate_refuses_weak_rules_and_stores_nothing() {
     assert!(generate_entry(&s, req, "Agent2-6").is_err());
     assert_eq!(s.vault_count().unwrap(), 0);
 }
+
+fn card(label: &str, p: &[(&str, &str)], f: &[(&str, &str)]) -> NewEntry {
+    let mut all = vec![("number", "4111 1111 1111 1111")];
+    all.extend_from_slice(p);
+    NewEntry {
+        kind: "card".into(),
+        label: label.into(),
+        fields: f.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        tags: vec![],
+        parts: parts(&all),
+    }
+}
+
+fn opened(s: &Store, id: &str) -> BTreeMap<String, String> {
+    let row = s.vault_get(id).unwrap().unwrap();
+    seal::open(&seal::test_key(), id, &row.sealed).unwrap().0.clone()
+}
+
+fn fields_of(s: &Store, id: &str) -> BTreeMap<String, String> {
+    serde_json::from_str(&s.vault_get(id).unwrap().unwrap().fields).unwrap()
+}
+
+#[test]
+fn a_card_is_saved_with_its_number_as_digits_and_its_brand_and_expiry_date_in_the_open() {
+    let s = store();
+    let id = create(&s, card("Visa", &[("exp_month", "3"), ("exp_year", "27"), ("cvc", "123"), ("zip", " 94107 ")], &[("brand", "amex")])).unwrap();
+    let sealed = opened(&s, &id);
+    assert_eq!(sealed["number"], "4111111111111111");
+    assert_eq!((sealed["exp_month"].as_str(), sealed["exp_year"].as_str(), sealed["zip"].as_str()), ("03", "2027", "94107"));
+    let fields = fields_of(&s, &id);
+    assert_eq!(fields["brand"], "visa", "the brand is worked out, not taken from the caller");
+    assert_eq!(fields["expires"], "2027-03-31");
+    let row = s.vault_get(&id).unwrap().unwrap();
+    for secret in ["4111", "123", "94107"] {
+        assert!(!row.fields.contains(secret), "{secret} is in the plain fields: {}", row.fields);
+    }
+    let (pane, _) = list_for_pane(&s).unwrap();
+    assert_eq!(pane[0].tail, "1111");
+    assert!(pane[0].parts_set.iter().any(|p| p == "exp_month"));
+}
+
+#[test]
+fn the_older_expiry_is_read_into_a_month_and_year_and_still_fills_as_expiry() {
+    let s = store();
+    let id = create(&s, card("Visa", &[("expiry", "12/2030"), ("cvc", "123")], &[])).unwrap();
+    let sealed = opened(&s, &id);
+    assert_eq!((sealed.get("exp_month").map(String::as_str), sealed.get("exp_year").map(String::as_str), sealed.get("expiry")), (Some("12"), Some("2030"), None));
+    assert_eq!(fields_of(&s, &id)["expires"], "2030-12-31");
+    let created = s.vault_get(&id).unwrap().unwrap().created_at;
+    assert_eq!(value_for_fill(&s, &id, created, "expiry").unwrap().as_str(), "12/30", "a fill that asks for the older part gets it from the month and year");
+    assert!(value_for_fill(&s, &id, created, "zip").is_err());
+}
+
+#[test]
+fn a_card_with_an_expiry_nobody_can_read_keeps_it_as_it_was() {
+    let s = store();
+    let id = create(&s, card("Gift", &[("expiry", "someday")], &[])).unwrap();
+    assert_eq!(opened(&s, &id)["expiry"], "someday");
+    assert!(!fields_of(&s, &id).contains_key("expires"));
+}
+
+#[test]
+fn a_bad_month_or_year_is_refused_and_nothing_is_saved() {
+    let s = store();
+    for (m, y) in [("13", "2030"), ("3", "1999")] {
+        let err = create(&s, card("Visa", &[("exp_month", m), ("exp_year", y)], &[])).unwrap_err();
+        assert!(err.contains("expiry"), "{err}");
+    }
+    assert_eq!(s.vault_count().unwrap(), 0);
+}
+
+#[test]
+fn a_change_keeps_the_expiry_it_is_not_given_and_follows_a_new_number() {
+    let s = store();
+    let id = create(&s, card("Visa", &[("exp_month", "03"), ("exp_year", "2027")], &[])).unwrap();
+    let change = |p: Parts| EntryChange { id: id.clone(), label: "Visa".into(), fields: fields_of(&s, &id), tags: vec![], parts: p, clear: vec![] };
+    update(&s, change(parts(&[("number", "5555 5555 5555 4444")]))).unwrap();
+    let sealed = opened(&s, &id);
+    assert_eq!((sealed["number"].as_str(), sealed["exp_month"].as_str(), sealed["exp_year"].as_str()), ("5555555555554444", "03", "2027"));
+    let fields = fields_of(&s, &id);
+    assert_eq!((fields["brand"].as_str(), fields["expires"].as_str()), ("mastercard", "2027-03-31"));
+    update(&s, change(parts(&[("exp_month", "11"), ("exp_year", "2029")]))).unwrap();
+    assert_eq!(fields_of(&s, &id)["expires"], "2029-11-30");
+}
+
+#[test]
+fn only_one_card_in_a_vault_is_the_default() {
+    let s = store();
+    let a = create(&s, card("Visa A", &[], &[("default", "yes")])).unwrap();
+    assert_eq!(fields_of(&s, &a)["default"], "yes");
+    let b = create(&s, card("Visa B", &[], &[("default", "yes")])).unwrap();
+    assert!(!fields_of(&s, &a).contains_key("default"), "the flag moved to the newer one");
+    assert_eq!(fields_of(&s, &b)["default"], "yes");
+    let c = create(&s, card("Visa C", &[], &[])).unwrap();
+    assert_eq!(fields_of(&s, &b)["default"], "yes", "a card saved without it takes nothing");
+    let mut fields = fields_of(&s, &c);
+    fields.insert("default".into(), "yes".into());
+    update(&s, EntryChange { id: c.clone(), label: "Visa C".into(), fields, tags: vec![], parts: Parts::default(), clear: vec![] }).unwrap();
+    assert!(!fields_of(&s, &b).contains_key("default"));
+    assert_eq!(fields_of(&s, &c)["default"], "yes");
+}
+
+#[test]
+fn a_default_that_is_not_yes_is_dropped() {
+    let s = store();
+    let id = create(&s, card("Visa", &[], &[("default", "true")])).unwrap();
+    assert!(!fields_of(&s, &id).contains_key("default"));
+}

@@ -222,9 +222,13 @@ pub struct Unavailable {
 }
 
 impl Unavailable {
-    /// "Out of quota until Sun 7:00 PM", "Out of quota" or "Needs sign-in",
-    /// in this machine's time zone.
+    /// "Out of quota until Sun 7:00 PM", "Out of quota", "Route out of credits" or
+    /// "Needs sign-in", in this machine's time zone. A route out of credits is not a plan's
+    /// quota, and its time is only when a message may try the route again (#47477).
     pub fn reason(&self) -> String {
+        if self.state == AgentState::Limited && self.title == crate::agents::failure::ROUTE_CREDITS_TITLE {
+            return "Route out of credits".to_string();
+        }
         match (self.state, self.resets_at_ms.and_then(|ms| chrono::DateTime::from_timestamp_millis(ms as i64))) {
             (AgentState::SignedOut, _) => "Needs sign-in".to_string(),
             (_, Some(t)) => format!("Out of quota until {}", t.with_timezone(&chrono::Local).format("%a %-I:%M %p")),
@@ -699,6 +703,9 @@ mod tests {
         assert_eq!(u(AgentState::Limited, None).reason(), "Out of quota");
         assert!(u(AgentState::Limited, Some(1_792_886_400_000)).reason().starts_with("Out of quota until "));
         assert_eq!(u(AgentState::SignedOut, None).reason(), "Needs sign-in");
+        let mut credits = u(AgentState::Limited, Some(1_792_886_400_000));
+        credits.title = crate::agents::failure::ROUTE_CREDITS_TITLE.to_string();
+        assert_eq!(credits.reason(), "Route out of credits", "a route's balance is not a plan's quota");
     }
 
     fn store() -> Store {

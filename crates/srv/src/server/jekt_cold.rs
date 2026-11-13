@@ -147,6 +147,38 @@ pub(super) async fn hold_if_cold(
     req: &InjectionRequest,
     replay: &mut replay::Reservation,
 ) -> Option<serde_json::Value> {
+    let held = hold_decision(state, auth_via, req).await?;
+    replay.delivered();
+    let reason = if held.hold_reason == REASON_QUOTA { HoldReason::Quota } else { HoldReason::Idle };
+    Some(held_answer(&req.target_agent, &held.request_id, reason))
+}
+
+/// The `AppState` the relay subscriber's cold hold reads, set once it exists ([`install`]).
+static RELAY_STATE: std::sync::OnceLock<AppState> = std::sync::OnceLock::new();
+
+/// Give the relay subscriber, which has no `AppState` of its own, the cold hold ([`hold_relayed`]).
+pub(crate) fn install(state: &AppState) {
+    let _ = RELAY_STATE.set(state.clone());
+}
+
+/// A message that came by the cloud relay, to an agent here: kept, as a local or LAN one is, when it
+/// is routine, its sender is a proven install of this account and its session has gone cold
+/// (#2263). `true` when it is kept, so the caller does not inject it. Nothing is held before
+/// [`install`] has run.
+pub(crate) async fn hold_relayed(req: &InjectionRequest) -> bool {
+    match RELAY_STATE.get() {
+        Some(state) => hold_decision(state, super::ReactiveAuthVia::LanKey, req).await.is_some(),
+        None => false,
+    }
+}
+
+/// The cold hold's decision for `req`: the row it was kept as, or `None` to deliver it, with the
+/// reason logged either way.
+async fn hold_decision(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+) -> Option<crate::backend::storage::jekt_held::HeldJekt> {
     // The messages the hold takes (`outside_the_hold`): a full-key host-tier caller, or a peer on
     // another machine that proved who it is, with an id and a named sender that is not cron. Not a
     // message an agent sends itself (its own loops and reminders). Every other one is let through
@@ -224,11 +256,15 @@ pub(super) async fn hold_if_cold(
         }
         Err(_) => return None,
     };
-    replay.delivered();
     crate::backend::agent_resolve::record_uid_fallback("jekt.held");
     let reason = if held.hold_reason == REASON_QUOTA { HoldReason::Quota } else { HoldReason::Idle };
-    tracing::info!(target = %req.target_agent, reason = reason.as_str(), "reactive inject: holding a routine message until the agent is next active");
-    Some(held_answer(&req.target_agent, &held.request_id, reason))
+    tracing::info!(
+        target = %req.target_agent,
+        tier = req.delivery_tier.as_deref().unwrap_or(""),
+        reason = reason.as_str(),
+        "reactive inject: holding a routine message until the agent is next active"
+    );
+    Some(held)
 }
 
 /// The answer to a routine message held because the target's session is cold (`Idle`), or because

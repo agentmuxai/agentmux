@@ -23,6 +23,7 @@
 //!
 //! Cost controls:
 //!   - only agents whose controller is running (`STATUS_RUNNING`) and that have no usable title;
+//!   - no agent on a model server of its own or on a model route ([`crate::ambient::cli::recovery_skips`]);
 //!   - only agents whose `output` is in a shape the digest can read
 //!     (`digest::reads_output_format`); another provider's file holds no
 //!     conversation it can find;
@@ -32,6 +33,8 @@
 //!     activity never shows what the work is (the model abstains) stops costing;
 //!   - no conversation in the digest means no call at all (`digest` returns
 //!     `None` for activity with no user or assistant text);
+//!   - a call that fails (the CLI could not run, exited badly or timed out) is tried again only
+//!     after a wait that doubles with each failure in a row ([`backoff_ticks`]), up to half an hour;
 //!   - one call in flight per block, waiting in the background class's queue
 //!     (`ambient::limits`) across all blocks;
 //!   - per-block bookkeeping is pruned each tick against the registration list.
@@ -43,6 +46,7 @@ use std::time::Duration;
 use tokio::time::interval;
 
 use crate::ambient::digest;
+use crate::ambient::tasks::Recovery;
 use crate::ambient::title::{store_title, Replace, META_TITLE};
 use crate::ambient::validate::is_usable_title;
 use crate::backend::blockcontroller::core::broadcast_block_update;
@@ -72,16 +76,48 @@ pub(crate) struct Attempts {
     pub count: u32,
     /// The `output` size at the last completed attempt.
     pub last_size: Option<i64>,
+    /// Calls that failed in a row, since one last completed.
+    pub failures: u32,
+    /// The first tick a block whose call failed may be tried again.
+    pub retry_at_tick: u64,
 }
 
-/// Why a block is not attempted this tick, or `None` to attempt it. Pure, so the
+impl Attempts {
+    /// A call failed at `tick`: wait longer than after the last failure before the next try.
+    fn failed(&mut self, tick: u64) {
+        self.failures += 1;
+        self.retry_at_tick = tick + backoff_ticks(self.failures);
+    }
+
+    /// A call completed with the output at `size`; returns the attempts used. The failure streak ends.
+    fn completed(&mut self, size: i64) -> u32 {
+        self.count += 1;
+        self.last_size = Some(size);
+        self.failures = 0;
+        self.retry_at_tick = 0;
+        self.count
+    }
+}
+
+/// How many ticks to wait after `failures` failed calls in a row: three (a minute), doubling, at most 90 (half an hour).
+pub(crate) fn backoff_ticks(failures: u32) -> u64 {
+    if failures == 0 {
+        return 0;
+    }
+    (3u64 << (failures - 1).min(5)).min(90)
+}
+
+/// Why a block is not attempted at `tick`, or `None` to attempt it. Pure, so the
 /// cost rules are testable without a model, a store or a clock.
-pub(crate) fn skip_reason(has_title: bool, attempts: Attempts, output_size: i64) -> Option<&'static str> {
+pub(crate) fn skip_reason(has_title: bool, attempts: Attempts, output_size: i64, tick: u64) -> Option<&'static str> {
     if has_title {
         return Some("has a title");
     }
     if attempts.count >= MAX_ATTEMPTS {
         return Some("attempts exhausted");
+    }
+    if tick < attempts.retry_at_tick {
+        return Some("backing off after a failed call");
     }
     if attempts.last_size == Some(output_size) {
         return Some("no new output");
@@ -125,7 +161,9 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                 attempts.lock().unwrap().remove(&block_id);
                 continue;
             }
-            if !digest::reads_output_format(&obj::meta_get_string(&block.meta, "agentOutputFormat", "")) {
+            // None for an agent on a model server of its own (no ambient call is made) or on a model route: nothing to try, nothing to count as failed.
+            let readable = digest::reads_output_format(&obj::meta_get_string(&block.meta, "agentOutputFormat", ""));
+            if !readable || crate::ambient::cli::recovery_skips(&block.meta) {
                 continue;
             }
             // The agent's own zone when it has content (the copy the pane reads),
@@ -136,7 +174,7 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                 continue;
             };
             let state = attempts.lock().unwrap().get(&block_id).copied().unwrap_or_default();
-            if skip_reason(false, state, output_size).is_some() {
+            if skip_reason(false, state, output_size, tick).is_some() {
                 continue;
             }
             if !in_flight.lock().unwrap().insert(block_id.clone()) {
@@ -155,18 +193,14 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                         .await;
                 in_flight.lock().unwrap().remove(&block_id);
 
-                // `None`: nothing ran (no conversation in the digest, no CLI path,
-                // superseded). Not an attempt; a later tick may try again.
-                let Some(generated) = result else {
-                    return;
+                // `NotRun`: nothing ran (no conversation in the digest, no CLI path, superseded): not an
+                // attempt, and a later tick may try again. `Failed`: the block waits before its next try.
+                let generated = match result {
+                    Recovery::NotRun => return,
+                    Recovery::Failed => return attempts.lock().unwrap().entry(block_id.clone()).or_default().failed(tick),
+                    Recovery::Done(generated) => generated,
                 };
-                let attempt = {
-                    let mut map = attempts.lock().unwrap();
-                    let entry = map.entry(block_id.clone()).or_default();
-                    entry.count += 1;
-                    entry.last_size = Some(output_size);
-                    entry.count
-                };
+                let attempt = attempts.lock().unwrap().entry(block_id.clone()).or_default().completed(output_size);
 
                 let Some(title) = generated.text else {
                     tracing::info!(
@@ -200,24 +234,41 @@ mod tests {
     use super::*;
 
     fn tried(count: u32, last_size: i64) -> Attempts {
-        Attempts { count, last_size: Some(last_size) }
+        Attempts { count, last_size: Some(last_size), ..Attempts::default() }
     }
 
     #[test]
     fn an_agent_with_a_title_costs_nothing() {
-        assert_eq!(skip_reason(true, Attempts::default(), 100), Some("has a title"));
+        assert_eq!(skip_reason(true, Attempts::default(), 100, 1), Some("has a title"));
     }
 
     #[test]
     fn an_untitled_agent_is_tried_once_per_growth_of_its_output() {
-        assert_eq!(skip_reason(false, Attempts::default(), 100), None, "first try");
-        assert_eq!(skip_reason(false, tried(1, 100), 100), Some("no new output"));
-        assert_eq!(skip_reason(false, tried(1, 100), 250), None, "new output, try again");
+        assert_eq!(skip_reason(false, Attempts::default(), 100, 1), None, "first try");
+        assert_eq!(skip_reason(false, tried(1, 100), 100, 1), Some("no new output"));
+        assert_eq!(skip_reason(false, tried(1, 100), 250, 1), None, "new output, try again");
     }
 
     #[test]
     fn attempts_are_bounded_while_the_title_stays_empty() {
-        assert_eq!(skip_reason(false, tried(MAX_ATTEMPTS - 1, 1), 2), None);
-        assert_eq!(skip_reason(false, tried(MAX_ATTEMPTS, 1), 2), Some("attempts exhausted"));
+        assert_eq!(skip_reason(false, tried(MAX_ATTEMPTS - 1, 1), 2, 1), None);
+        assert_eq!(skip_reason(false, tried(MAX_ATTEMPTS, 1), 2, 1), Some("attempts exhausted"));
+    }
+
+    #[test]
+    fn a_failed_call_waits_longer_each_time_up_to_half_an_hour() {
+        let waits: Vec<u64> = (0..9).map(backoff_ticks).collect();
+        assert_eq!(waits, vec![0, 3, 6, 12, 24, 48, 90, 90, 90]);
+        assert_eq!(backoff_ticks(u32::MAX), 90, "a long streak does not overflow");
+    }
+
+    #[test]
+    fn a_block_whose_call_failed_is_not_tried_again_until_its_wait_is_over() {
+        let failed = Attempts { failures: 1, retry_at_tick: 10 + backoff_ticks(1), ..Attempts::default() };
+        assert_eq!(skip_reason(false, failed, 100, 11), Some("backing off after a failed call"));
+        assert_eq!(skip_reason(false, failed, 100, 12), Some("backing off after a failed call"));
+        assert_eq!(skip_reason(false, failed, 100, 13), None, "three ticks (a minute) later");
+        // New output does not shorten the wait: it was the CLI that failed, not the conversation.
+        assert_eq!(skip_reason(false, failed, 9_999, 11), Some("backing off after a failed call"));
     }
 }

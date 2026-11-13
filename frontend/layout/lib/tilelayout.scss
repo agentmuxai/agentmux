@@ -2,6 +2,32 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// A tile's four edges during a pane drag's live reflow (liveReflow.ts `reflowEdges`). Registered as lengths
+// so that a transition on them glides: an unregistered custom property only flips half way through.
+@property --reflow-l {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
+@property --reflow-t {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
+@property --reflow-r {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
+@property --reflow-b {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+
 .tile-layout {
     position: relative;
     height: 100%;
@@ -18,6 +44,7 @@
 
     .overlay-container,
     .display-container,
+    .ghost-container,
     .placeholder-container {
         position: absolute;
         display: flex;
@@ -31,6 +58,44 @@
 
     .display-container {
         z-index: var(--z-layout-display);
+    }
+
+    // The frames of panes that just left (settlingPass.ts), under the panes: before them in the document, at
+    // their level. Each fades where its pane stood while the neighbours' clips open over it.
+    .ghost-container {
+        z-index: var(--z-layout-display);
+        pointer-events: none;
+    }
+
+    .tile-ghost {
+        position: absolute;
+        top: 0;
+        left: 0;
+        box-sizing: border-box;
+        // The gap around a pane, as `.tile-leaf` takes it below.
+        $half: calc(var(--gap-size-px) / 2);
+        padding: round(down, $half, 1px) round(up, $half, 1px) round(up, $half, 1px) round(down, $half, 1px);
+        opacity: 0;
+        // The shared fade-in played backwards: `ease-in` reversed slows at the end, as the glide's ease-out does.
+        animation: am-fade-in var(--duration-base) ease-in reverse both;
+    }
+
+    // A pane's frame as block.scss draws it: its background, its border, and the line under its header.
+    .tile-ghost-frame {
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        border: 2px solid var(--border-color);
+        border-radius: var(--radius-md);
+        background-color: var(--block-bg-color);
+
+        &::before {
+            content: "";
+            display: block;
+            height: calc(var(--header-height) * var(--zoomfactor));
+            border-bottom: 1px solid var(--border-color);
+        }
     }
 
     .placeholder-container {
@@ -99,6 +164,44 @@
 
         &.dragging {
             filter: blur(8px);
+        }
+
+        // The dragged pane's own place at the start of its drag, behind the pane in hand: a release there
+        // tears the pane off, and the place says so, in the error red with nothing of the pane showing
+        // through. It is over, for the rest of the drag, the first time the layout shows a drop or closes
+        // over the place (`tearOffOffered`, futureLayout.ts); from then on the place is the blurred pane
+        // above, as before. The words scale with the place: `cq` units of the leaf, which is a size
+        // container only while this is shown (its size is the tile's either way).
+        &.tear-off-offered {
+            filter: none;
+
+            .tile-leaf {
+                container-type: size;
+            }
+
+            .tile-leaf::after {
+                content: "TEAR OFF";
+                position: absolute;
+                inset: 0;
+                z-index: var(--z-drag-overlay);
+                display: grid;
+                place-items: center;
+                overflow: hidden;
+                background: var(--error-color);
+                color: var(--button-color);
+                font-weight: 800;
+                font-size: clamp(12px, min(14cqw, 50cqh), 160px);
+                line-height: 1;
+                letter-spacing: 0.06em;
+                white-space: nowrap;
+                pointer-events: none;
+            }
+
+            // Inside the gap a split pane keeps around itself, as the pane's own frame is (below).
+            &:not(:only-child) .tile-leaf::after {
+                $half: calc(var(--gap-size-px) / 2);
+                inset: round(down, $half, 1px) round(up, $half, 1px) round(up, $half, 1px) round(down, $half, 1px);
+            }
         }
 
         // A minimized pane is its whole block squeezed to a header-sized chip,
@@ -217,6 +320,12 @@
         display: none;
     }
 
+    // A pane that came or was restored (settlingPass.ts): it fades in at its rect, over the length of its
+    // neighbours' glide (the shorter one under reduced motion, set on the tile).
+    .tile-node.tile-entering {
+        animation: am-fade-in var(--duration-base) ease-out both;
+    }
+
     &.animate {
         // `.placeholder-sizer` only changes transform during drag-move
         // (width/height are set once per zone change and snap instantly
@@ -300,6 +409,13 @@
             transition-timing-function: ease-in;
             transition-duration: var(--duration-base);
         }
+    }
+
+    // The live reflow (liveReflow.ts): the panes themselves glide to where the drop leaves them, so they are the
+    // outline and the gap is the signal. The landing zone keeps its edge and fill, and the rest of the layout is
+    // not dimmed: it is what the user is reading.
+    .placeholder-container.live-reflow .placeholder {
+        box-shadow: none;
     }
 
     // NOTE — no reduced treatment here by design. The drag-rearrange glide

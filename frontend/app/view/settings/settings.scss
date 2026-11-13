@@ -115,10 +115,12 @@
 
     .setting-text {
         width: 320px;
+        max-width: 100%;
     }
 }
 
 .default-shell-status {
+    overflow-wrap: anywhere;
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
 
@@ -152,7 +154,8 @@
 }
 
 .setting-kv-key {
-    flex: 0 0 160px;
+    flex: 0 1 160px;
+    min-width: 0;
     font-family: var(--font-mono);
 }
 
@@ -178,10 +181,18 @@
 
 // ── Widget colors ───────────────────────────────────────────────────────────
 
+// One row at a wide pane: chip, the 17 swatches (the "no colour" one and the 16 of the palette), Reset. It wraps
+// by the Settings pane's own width (the `settings` container below), never the window's: the swatches take a line
+// of their own, and then fewer columns, so nothing runs past the pane's edge.
 .setting-widget-color {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2) 10px;
+
+    .palette-swatches.palette-swatches {
+        --palette-cols: 17;
+    }
 }
 
 // A pane-tab pill in the widget's color, as panes draw it.
@@ -332,6 +343,33 @@
     }
 }
 
+// Widget colors: the swatches under the chip (Reset beside it) once the pane is under the width the whole row needs;
+// 17 swatches in a line need about 440 px, 9 per line about 260 px, and below that 6.
+@container settings (max-width: 639px) {
+    .setting-widget-color {
+        > .ui-button {
+            order: 2;
+        }
+
+        .palette-swatches.palette-swatches {
+            order: 3;
+            flex: 1 0 100%;
+        }
+    }
+}
+
+@container settings (max-width: 459px) {
+    .setting-widget-color .palette-swatches.palette-swatches {
+        --palette-cols: 9;
+    }
+}
+
+@container settings (max-width: 259px) {
+    .setting-widget-color .palette-swatches.palette-swatches {
+        --palette-cols: 6;
+    }
+}
+
 // Paired devices (sections/devices-section.tsx): one row per device, Revoke
 // at the end.
 .setting-devices-description,
@@ -365,6 +403,52 @@
     overflow-wrap: anywhere;
 }
 
+// A narrow Settings pane: each device is a card instead of a row of five columns, which left its name a letter wide
+// and Revoke past the edge. The name has the first line, Paired and Last seen follow as "label: value" lines (from the
+// cells' data-label), then the Can send switch beside Revoke.
+@container settings (max-width: 479px) {
+    .setting-devices {
+        display: block;
+
+        thead {
+            display: none;
+        }
+
+        tbody {
+            display: block;
+        }
+
+        tr {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: var(--space-0-5) var(--space-2);
+            padding: var(--space-2) 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            display: block;
+            padding: 0;
+        }
+
+        td:nth-child(-n + 3) {
+            grid-column: 1 / -1;
+        }
+
+        td:nth-child(n + 2):nth-child(-n + 4)::before {
+            content: attr(data-label) ": ";
+            color: var(--secondary-text-color);
+        }
+
+        td:nth-child(4) {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+        }
+    }
+}
+
 // "Pair again" where a device without a key would have its Can send switch.
 .setting-devices-muted {
     color: var(--secondary-text-color);
@@ -394,6 +478,7 @@
 
 .setting-hidden-agents-add {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
     margin-top: var(--space-2);
@@ -708,6 +793,7 @@
 
     .animations-number {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-3);
     }
@@ -719,6 +805,7 @@
 
     .animations-actions {
         display: flex;
+        flex-wrap: wrap;
         gap: var(--space-2);
         padding-top: var(--space-2);
     }
@@ -734,6 +821,7 @@
 
     .animations-preview-samples {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-4);
     }

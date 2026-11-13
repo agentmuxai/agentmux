@@ -77,12 +77,7 @@ pub(super) struct RekeyStats {
 }
 
 pub(super) fn rekey_registry(conn: &Connection, registry: &Registry) -> Result<RekeyStats, String> {
-    let has_legacy: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_agent_instances')",
-            [],
-            |row| row.get(0),
-        )
+    let has_legacy = crate::migrations::table_exists(conn, "db_agent_instances")
         .map_err(|e| format!("probe db_agent_instances: {e}"))?;
     if !has_legacy {
         return Ok(RekeyStats::default());

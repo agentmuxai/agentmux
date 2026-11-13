@@ -23,11 +23,11 @@ store.follow
           <tr>
             <td class="setting-devices-name">
               "Pixel 9"
-            <td>
+            <td data-label="Paired">
               "2 h ago"
-            <td>
+            <td data-label="Last seen">
               "10 min ago"
-            <td>
+            <td data-label="Can send">
               <span data-stand="Switch" data-checked="true" data-disabled="false" data-aria-label="Pixel 9 can send messages">
             <td>
               <span data-stand="Button" data-tone="danger" data-disabled="false">
@@ -35,11 +35,11 @@ store.follow
           <tr>
             <td class="setting-devices-name">
               "Tablet"
-            <td>
+            <td data-label="Paired">
               "just now"
-            <td>
+            <td data-label="Last seen">
               "never"
-            <td>
+            <td data-label="Can send">
               <span data-stand="Switch" data-checked="false" data-disabled="false" data-aria-label="Tablet can send messages">
             <td>
               <span data-stand="Button" data-tone="danger" data-disabled="false">
@@ -47,11 +47,11 @@ store.follow
           <tr>
             <td class="setting-devices-name">
               "Old phone"
-            <td>
+            <td data-label="Paired">
               "5 min ago"
-            <td>
+            <td data-label="Last seen">
               "just now"
-            <td>
+            <td data-label="Can send">
               <span class="setting-devices-muted" data-tip="This device paired before devices had keys. Pair it again to let it send.">
                 "Pair again"
             <td>

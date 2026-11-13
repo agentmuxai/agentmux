@@ -1,16 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! One-shot backfill of pre-existing agent CONVERSATIONS into the GLOBAL
-//! transcript store, so the 9 (and any) agents created before cross-channel
-//! transcripts shipped load their history when opened from a fresh channel.
+//! Put an agent's CONVERSATION back into the GLOBAL transcript store from the
+//! copies that live in the channels it ran in (`restore_damaged`, after a
+//! repair of the shared store).
 //!
-//! The merged feature (#1399) mirrors *new* agent output into the global
-//! `agent:<defId>:current` zone, but pre-existing conversations were never
-//! mirrored — they live only in the channel they ran in. This scans every
-//! channel/dev `objects.db` for blocks belonging to each agent definition,
-//! reads the richest `output` from that channel's `filestore.db`, and seeds the
-//! global zone with it.
+//! Cross-channel transcripts mirror agent output into the global
+//! `agent:<defId>:current` zone, but the channel the agent ran in keeps its own
+//! copy. This scans every channel/dev `objects.db` for blocks belonging to each
+//! agent definition, reads the richest `output` from that channel's
+//! `filestore.db`, and seeds the global zone with it.
 //!
 //! **Source = the channel block's `output`, NOT the provider `.jsonl`.** The
 //! block `output` is the exact stdout stream-json the renderer already parses
@@ -23,11 +22,10 @@
 //! The seeded snapshot overlay uses `sourceBlockId: ""`, which the frontend
 //! treats as "matches any block" — so opening the agent (a fresh local block
 //! with no local `output`) takes the v2 fast-path and the
-//! `blockfile:read_range` global fallback (#1399) serves the backfilled zone.
+//! `blockfile:read_range` global fallback (#1399) serves the restored zone.
 //!
-//! Marker-gated (`.transcripts_backfilled`, version-stamped) like the
-//! definition backfill (`registry::def_migrate`); read-only on every scanned
-//! SQLite (the global store is the only thing written).
+//! Read-only on every scanned SQLite (the global store is the only thing
+//! written).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -38,81 +36,6 @@ use crate::backend::agent_session::{
     agent_current_zone, is_valid_definition_id, OUTPUT_FILE, SNAPSHOT_FILE, TSIDX_FILE,
 };
 use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
-
-const MARKER: &str = ".transcripts_backfilled";
-
-/// Bump to re-run the backfill once for everyone (e.g. when the source-selection
-/// logic improves).
-const BACKFILL_VERSION: u32 = 1;
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct BackfillStats {
-    pub agents_seen: usize,
-    pub data_dirs_scanned: usize,
-    pub seeded: usize,
-    pub skipped_no_source: usize,
-    pub skipped_global_richer: usize,
-}
-
-/// Seed the global transcript zone for each agent in `def_ids` from its richest
-/// channel/dev block `output`. Marker-gated under `transcripts_dir`. Best-effort
-/// — any per-DB failure is skipped, never fatal.
-pub fn backfill_transcripts_once(
-    home: &Path,
-    transcripts_dir: &Path,
-    def_ids: &[String],
-    global: &FileStore,
-) -> BackfillStats {
-    let mut stats = BackfillStats::default();
-    let marker = transcripts_dir.join(MARKER);
-    if marker_version(&marker) >= BACKFILL_VERSION {
-        return stats;
-    }
-
-    let want: HashSet<&str> = def_ids
-        .iter()
-        .map(|s| s.as_str())
-        .filter(|s| is_valid_definition_id(s))
-        .collect();
-    if want.is_empty() {
-        let _ = write_marker(&marker);
-        return stats;
-    }
-
-    let (best, scanned) = richest_outputs(home, &want);
-    stats.data_dirs_scanned = scanned;
-
-    for def_id in def_ids {
-        if !is_valid_definition_id(def_id) {
-            continue;
-        }
-        stats.agents_seen += 1;
-        let Some(bytes) = best.get(def_id) else {
-            stats.skipped_no_source += 1;
-            continue;
-        };
-        let zone = agent_current_zone(def_id);
-        // Don't clobber a global zone that already has equal/more content (the
-        // live mirror, or a richer prior backfill, may already own it).
-        let cur = global
-            .stat(&zone, OUTPUT_FILE)
-            .ok()
-            .flatten()
-            .map(|f| f.size)
-            .unwrap_or(0);
-        if (bytes.len() as i64) <= cur {
-            stats.skipped_global_richer += 1;
-            continue;
-        }
-        match seed_global_zone(global, &zone, bytes) {
-            Ok(()) => stats.seeded += 1,
-            Err(e) => tracing::warn!(zone = %zone, error = %e, "transcript backfill: seed failed"),
-        }
-    }
-
-    let _ = write_marker(&marker);
-    stats
-}
 
 /// The richest `output` found for each wanted agent definition across every channel and dev data
 /// dir under `home`, and how many data dirs were scanned. Read-only on every scanned store.
@@ -205,6 +128,8 @@ fn seed_global_zone(global: &FileStore, zone: &str, bytes: &[u8]) -> Result<(), 
     global
         .replace_file(zone, OUTPUT_FILE, bytes, &[TSIDX_FILE, "output.idx"])
         .map_err(|e| format!("replace_file: {e}"))?;
+    // The bytes are new, so a count of the images in the old ones does not carry over.
+    crate::backend::transcript::images::forget(zone);
     let hwm = count_nonblank_lines(bytes);
     let overlay = serde_json::json!({
         "schemaVersion": 2,
@@ -362,20 +287,6 @@ fn dir_subdirs(p: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn marker_version(marker: &Path) -> u32 {
-    std::fs::read_to_string(marker)
-        .ok()
-        .and_then(|s| s.trim().parse::<u32>().ok())
-        .unwrap_or(0)
-}
-
-fn write_marker(marker: &Path) -> std::io::Result<()> {
-    if let Some(parent) = marker.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    std::fs::write(marker, BACKFILL_VERSION.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -423,77 +334,38 @@ mod tests {
     }
 
     #[test]
-    fn backfill_seeds_global_zone_from_richest_channel_block() {
+    fn a_restore_takes_the_richest_copy_and_matches_a_block_with_the_legacy_agent_id_key() {
+        // Two channels hold the agent; the richer (bigger) output wins. A third agent's only block
+        // stamps the legacy `agent:id` meta key that older builds wrote instead of `agentId`; it
+        // must still be recovered (#1403).
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
         let tdir = home.join("shared").join("agents").join("transcripts");
         std::fs::create_dir_all(&tdir).unwrap();
-        let def_id = "11111111-2222-3333-4444-555555555555";
-
-        // Two channels for the same agent; the richer (bigger) output wins.
+        let (rich, legacy) = ("11111111-2222-3333-4444-555555555555", "deadbeef-0000-1111-2222-333344445555");
         let small = b"{\"type\":\"system\"}\n";
         let big = b"{\"type\":\"system\"}\n{\"type\":\"assistant\"}\n{\"type\":\"result\"}\n";
-        seed_channel(home, "verify-a", def_id, "blk-small", small);
-        seed_channel(home, "verify-b", def_id, "blk-big", big);
+        seed_channel(home, "verify-a", rich, "blk-small", small);
+        seed_channel(home, "verify-b", rich, "blk-big", big);
+        seed_channel_keyed(home, "legacy-ch", "agent:id", legacy, "blk-legacy", small);
 
         let global = Arc::new(FileStore::open(&tdir.join("filestore.db")).unwrap());
-        let stats = backfill_transcripts_once(home, &tdir, &[def_id.to_string()], &global);
+        let zones: Vec<String> = [rich, legacy].iter().map(|id| agent_current_zone(id)).collect();
+        for zone in &zones {
+            global.make_file(zone, OUT, FileMeta::default(), FileOpts::default()).unwrap();
+        }
+        let stats = restore_damaged(home, &global, &zones);
 
-        assert_eq!(stats.seeded, 1, "should seed the agent zone");
-        let zone = agent_current_zone(def_id);
-        let out = global.read_file(&zone, OUT).unwrap().unwrap();
-        assert_eq!(out, big, "global zone seeded with the RICHEST channel output");
+        assert_eq!(stats.restored, 2, "both zones are put back");
+        let rich_zone = agent_current_zone(rich);
+        assert_eq!(global.read_file(&rich_zone, OUT).unwrap().unwrap(), big, "the RICHEST channel output");
+        assert_eq!(global.read_file(&agent_current_zone(legacy), OUT).unwrap().unwrap(), small, "the legacy-keyed block is found");
         // Snapshot overlay: v2, hwm = non-blank line count, sourceBlockId empty.
-        let snap = global.read_file(&zone, SNAPSHOT_FILE).unwrap().unwrap();
+        let snap = global.read_file(&rich_zone, SNAPSHOT_FILE).unwrap().unwrap();
         let o: serde_json::Value = serde_json::from_slice(&snap).unwrap();
         assert_eq!(o["schemaVersion"], 2);
         assert_eq!(o["highWaterMark"], 3);
         assert_eq!(o["sourceBlockId"], "");
-
-        // Idempotent: second run is a no-op (marker written).
-        let stats2 = backfill_transcripts_once(home, &tdir, &[def_id.to_string()], &global);
-        assert_eq!(stats2.seeded, 0);
-        assert_eq!(stats2.data_dirs_scanned, 0, "marker short-circuits the re-run");
-    }
-
-    #[test]
-    fn backfill_matches_legacy_agent_id_key() {
-        // Blocks from older builds stamp the legacy `agent:id` meta key instead
-        // of `agentId`; the backfill must still recover them. (reagent P1 #1403.)
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path();
-        let tdir = home.join("shared").join("agents").join("transcripts");
-        std::fs::create_dir_all(&tdir).unwrap();
-        let def_id = "deadbeef-0000-1111-2222-333344445555";
-        seed_channel_keyed(home, "legacy-ch", "agent:id", def_id, "blk-legacy", b"{\"type\":\"system\"}\n{\"type\":\"result\"}\n");
-
-        let global = Arc::new(FileStore::open(&tdir.join("filestore.db")).unwrap());
-        let stats = backfill_transcripts_once(home, &tdir, &[def_id.to_string()], &global);
-        assert_eq!(stats.seeded, 1, "legacy agent:id block must be recovered");
-        let out = global.read_file(&agent_current_zone(def_id), OUT).unwrap().unwrap();
-        assert!(out.starts_with(b"{\"type\":\"system\"}"));
-    }
-
-    #[test]
-    fn backfill_does_not_clobber_richer_global_zone() {
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path();
-        let tdir = home.join("shared").join("agents").join("transcripts");
-        std::fs::create_dir_all(&tdir).unwrap();
-        let def_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-        seed_channel(home, "verify-a", def_id, "blk1", b"{\"type\":\"system\"}\n");
-
-        // Global already holds MORE than the channel source → must not clobber.
-        let global = Arc::new(FileStore::open(&tdir.join("filestore.db")).unwrap());
-        let zone = agent_current_zone(def_id);
-        global.make_file(&zone, OUT, FileMeta::default(), FileOpts::default()).unwrap();
-        global.write_file(&zone, OUT, b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n{\"d\":4}\n").unwrap();
-
-        let stats = backfill_transcripts_once(home, &tdir, &[def_id.to_string()], &global);
-        assert_eq!(stats.seeded, 0);
-        assert_eq!(stats.skipped_global_richer, 1);
-        let out = global.read_file(&zone, OUT).unwrap().unwrap();
-        assert!(out.starts_with(b"{\"a\":1}"), "richer global content preserved");
     }
 
     #[test]

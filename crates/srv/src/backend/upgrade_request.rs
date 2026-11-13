@@ -348,6 +348,7 @@ mod tests {
             can_download,
             download: None,
             install_first: None,
+            rev: 0,
         }
     }
 
@@ -380,6 +381,7 @@ mod tests {
             folder: None,
             installer: None,
             waiting_for: 0,
+            waiting_on: Vec::new(),
             stopping: Vec::new(),
         });
         let Err(Outcome::Unavailable { message, .. }) = installable(&busy, None) else { panic!("expected unavailable") };

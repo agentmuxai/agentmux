@@ -230,6 +230,7 @@ function appendLeadingMark(row: HTMLElement, item: NativeContextMenuItem, reserv
             const icon = document.createElement("i");
             icon.className = iconClass;
             icon.setAttribute("aria-hidden", "true");
+            if (item.iconColor) icon.style.setProperty("--menu-icon-color", item.iconColor);
             row.appendChild(icon);
         } else if (reserveIconSlot && !item.swatchColor) {
             const spacer = document.createElement("span");

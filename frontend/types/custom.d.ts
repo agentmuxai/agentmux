@@ -135,10 +135,9 @@ declare global {
         floatingAlwaysOnTop: boolean;
     };
 
-    /** Host-mediated approvals and memory adoption (the approval windows and panels). */
+    /** Host-mediated approvals (the approval windows) and the Vault's file steps. */
     type ApprovalHostApi = {
         decideCredential(approvalId: string, approve: boolean): Promise<void>;
-        decideMemoryAdoption(approvalId: string, approve: boolean): Promise<void>;
         /** Answer an SSH approval: consent, or ssh's own prompt (`text` for a secret one). */
         decideSsh(approvalId: string, approve: boolean, text: string, checkbox: boolean): Promise<void>;
         /** Answer a browser pane's banner: a hand-off (`done`) or an approval
@@ -184,12 +183,24 @@ declare global {
          *  and Cancel. Relayed by the host, which srv trusts and agents can't
          *  impersonate; answers srv's update status after the action. */
         appUpdate?(action: "download" | "restart" | "cancel", now?: boolean): Promise<unknown>;
-        /** A Microsoft Store install: ask the Store to install the update; `fallback` means open the Store page instead. */
-        storeUpdate?(version?: string): Promise<{ outcome: "installed" | "canceled" | "none" | "fallback"; message: string }>;
+        /** A Microsoft Store install: ask the Store to download the update (nothing is installed or asked of the person);
+         *  `fallback` means open the Store page instead; `downloaded` means it is here and `storeUpdateRestart` installs it.
+         *  While it runs the host sends `store-update-progress` events (`AppApi.listen`). */
+        storeUpdate?(): Promise<{ outcome: "downloaded" | "installed" | "canceled" | "none" | "fallback"; message: string }>;
+        /** A Microsoft Store install with a downloaded update: install it now. The host raises this window, arranges AgentMux
+         *  to be opened again, then asks the Store (silently when the Store allows it, else through the Store's own window,
+         *  while this call stays open and the host sends `store-update-progress` events with phase `asking`). Normally the
+         *  call never returns: Windows closes AgentMux for the swap. Only a click in this app's own window reaches it.
+         *  `ok` false says why nothing was closed; `canceled` means the person said no in the Store's window. */
+        storeUpdateRestart?(): Promise<{ ok: boolean; canceled?: boolean; message: string }>;
+        /** Who a Store restart interrupts: the agents in the middle of a turn (by name) and how many agents there are. */
+        storeUpdateWorking?(): Promise<{ working: string[]; agents: number }>;
+        /** Bring this window to the front, so the Store's own prompt (owned by it) comes forward with it. */
+        storeUpdateRaise?(): Promise<boolean>;
         /** A Microsoft Store install: whether the Store itself lists an update (nothing is installed); `version` is the Store package's version when it does (empty if unreadable); `no_answer` means it never answered, `unknown` says why it couldn't be asked. */
         storeUpdateCheck?(): Promise<{ state: "available" | "none" | "no_answer" | "unknown"; message: string; version?: string }>;
         /** What the Store's last install left: the app came back `updated`, or `stayed` on the version the Store closed it on. */
-        storeUpdateCameBack?(): Promise<{ state: "none" | "updated" | "stayed"; from: string; target: string }>;
+        storeUpdateCameBack?(): Promise<{ state: "none" | "updated" | "stayed"; from: string; target: string; reopen_failed?: boolean }>;
         /** Forget the key a widget publisher is pinned to (Settings → Widgets),
          *  relayed by the host like an approval: forgetting lets another key pin
          *  that publisher. SPEC_WIDGET_SHARING_2026_10_10.md §2.3. */
@@ -216,10 +227,6 @@ declare global {
         vaultImport?(args: { pick_id?: string; passphrase?: string; mapping?: unknown; choose_key_file?: boolean; clear_key_file?: boolean }): Promise<unknown>;
         /** Delete the file picked for an import, after the person pressed Delete the file. */
         vaultImportDelete?(args: { pick_id: string }): Promise<unknown>;
-        /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
-        requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
-        /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */
-        requestMemoryRelease(args: Record<string, unknown>): Promise<void>;
     };
 
     /** A rectangle in CSS pixels. */
@@ -541,6 +548,9 @@ declare global {
          *  where a new window goes when that spot is on no monitor now. */
         openRestoredWindow: (w: { workspaceid: string; x?: number; y?: number; width?: number; height?: number }) => Promise<string>;
         closeWindow: (label?: string) => Promise<void>;
+        /** Tell the host this window's page got its `window-close-requested` (an OS close it
+         *  held back). A page that doesn't say so is taken for hung, and the window closes. */
+        closeRequestSeen: (seq: number) => Promise<void>;
         minimizeWindow: () => void;
         maximizeWindow: () => void;
         toggleDevtools: () => void;
@@ -717,7 +727,7 @@ declare global {
             isLastTab?: boolean;
             /** A pane or pane-tab drag: the hook only reports Escape (`tabdrag:escape-pressed`). */
             escapeOnly?: boolean;
-            /** With `escapeOnly`: the hook also moves the live-follow picture while the cursor is outside every window. */
+            /** With `escapeOnly`: the hook also moves the live-follow picture with the cursor, wherever it goes. */
             paneFollow?: boolean;
         }) => Promise<void>;
         /** Belt-and-suspenders hook teardown at dragend — the hook
@@ -736,11 +746,25 @@ declare global {
             /** Cursor to the window's top-left. */
             offsetX: number;
             offsetY: number;
-            /** The viewport y below which the picture shows; none: outside every AgentMux window (a pane). */
+            /** The viewport y below which a window tab's picture shows; none: a pane, shown everywhere from its first move. */
             tearLineY?: number;
         }) => Promise<void>;
         /** Drop the picture now. Idempotent. */
         liveFollowEnd: () => Promise<void>;
+        /** Give the picture another size (DIP). For a landing rect (`landingKey`) whose own picture the host keeps, it
+         *  shows that one (`adopt` keeps the one just taken); otherwise the first picture is resized. A no-op with no picture. */
+        liveFollowResize: (args: { windowWidth: number; windowHeight: number; landingKey?: string; adopt?: boolean }) => Promise<void>;
+        /** Take a pane's picture again where it stands in its window now (`rect`, CSS px of a viewport `viewportWidth`
+         *  wide), at the size it is shown at for the landing rect `landingKey` (DIP), with a flat `wash` drawn over
+         *  it taken back out. `staged` says one was taken and waits for `liveFollowResize` with `adopt`. */
+        liveFollowCapture: (args: {
+            landingKey: string;
+            windowWidth: number;
+            windowHeight: number;
+            rect: { left: number; top: number; width: number; height: number };
+            viewportWidth: number;
+            wash?: { r: number; g: number; b: number; a: number };
+        }) => Promise<{ staged: boolean }>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;
@@ -768,6 +792,8 @@ declare global {
         swatchColor?: string;
         /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
         icon?: string;
+        /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
+        iconColor?: string;
     };
 
     type ContextMenuItem = {
@@ -784,6 +810,8 @@ declare global {
         swatchColor?: string;
         /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
         icon?: string;
+        /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
+        iconColor?: string;
     };
 
     type KeyPressDecl = {
@@ -1104,8 +1132,10 @@ declare global {
         cefVersion?: string;
         channel?: string;
         platform?: string;
-        /** Windows only in practice: "views" when browser panes are CEF Views overlays (they hide whole under a menu). */
+        /** Windows only in practice: "views" when browser panes are CEF Views overlays. */
         paneBackend?: "views" | "hwnd";
+        /** Windows and Linux: a Views pane under a menu is cut around it and stays live, where it used to hide whole. */
+        paneClip?: boolean;
         arch?: string;
     }
 
@@ -1317,6 +1347,19 @@ declare global {
         // Bootstrap flags (set before app init)
         __AGENTMUX_IPC_PORT__?: number;
         __AGENTMUX_IPC_TOKEN__?: string;
+        /**
+         * The host's process-message lane for a command, put on an app
+         * window's main frame by the host's renderer (crates/cef/src/ipc_query.rs).
+         * Used through `invokeFastCommand` (app/platform/ipc-query.ts).
+         */
+        agentmuxQuery?: (query: {
+            request: string;
+            persistent?: boolean;
+            onSuccess: (response: string) => void;
+            onFailure: (code: number, message: string) => void;
+        }) => number;
+        /** A lab's probe: every host command roundtrip, when a script has put an array here (perf/index.ts). */
+        __agentmuxIpcProbe?: Array<{ command: string; durationMs: number; at: number }>;
         __WAVE_SERVER_WS_ENDPOINT__?: string;
         __WAVE_SERVER_WEB_ENDPOINT__?: string;
         __startupPerfStart?: number;
