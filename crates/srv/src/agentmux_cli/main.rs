@@ -171,6 +171,13 @@ fn exe_dir() -> Result<PathBuf, String> {
     exe.parent().map(Path::to_path_buf).ok_or_else(|| "cannot find this command's own folder".to_string())
 }
 
+/// `existing` with `dir` in front of it (once), so the helpers installed beside the server are found first.
+fn path_with_dir(dir: Option<&Path>, existing: Option<std::ffi::OsString>) -> std::ffi::OsString {
+    let existing = existing.unwrap_or_default();
+    let rest = std::env::split_paths(&existing).filter(|p| Some(p.as_path()) != dir);
+    std::env::join_paths(dir.map(Path::to_path_buf).into_iter().chain(rest)).unwrap_or(existing)
+}
+
 fn find_srv_in(bin_dir: &Path, flag: Option<&Path>) -> Result<PathBuf, String> {
     let path = flag.map(Path::to_path_buf).unwrap_or_else(|| bin_dir.join(if cfg!(windows) { "agentmux-srv.exe" } else { "agentmux-srv" }));
     if path.is_file() { Ok(path) } else { Err(format!("the server program is not at {} (--srv-bin names another)", path.display())) }
@@ -245,6 +252,8 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
         .arg(&web)
         .args(["--web-port", &record.web_port.to_string(), "--ws-port", &record.ws_port.to_string()])
         .envs(paths.to_env_vars())
+        // The agents the server starts find their helpers (`agentmux-mcp`, `agentmux-bashwrap`) by name on the PATH.
+        .env("PATH", path_with_dir(srv.parent(), std::env::var_os("PATH")))
         .stdin(Stdio::null());
     become_server(cmd)
 }
@@ -654,6 +663,16 @@ mod tests {
             assert_eq!(cmd_client(paths, "open", &[]), 1);
             assert_eq!(cmd_client(paths, "logout", &[]), 1);
         });
+    }
+
+    #[test]
+    fn the_servers_own_folder_leads_the_path_once() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let existing = |dirs: &[&str]| Some(std::ffi::OsString::from(dirs.join(sep)));
+        let got = path_with_dir(Some(Path::new("/i/bin")), existing(&["/usr/bin", "/i/bin", "/bin"]));
+        assert_eq!(got.to_string_lossy(), ["/i/bin", "/usr/bin", "/bin"].join(sep));
+        assert_eq!(path_with_dir(Some(Path::new("/i/bin")), None).to_string_lossy(), "/i/bin");
+        assert_eq!(path_with_dir(None, existing(&["/usr/bin"])).to_string_lossy(), "/usr/bin");
     }
 
     #[test]
