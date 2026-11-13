@@ -316,7 +316,7 @@ async fn list(state: &AppState, data: &Value) -> Result<Value, String> {
         let default_board = boards.iter().find(|b| b.is_default).map(|b| b.slug.clone());
         Ok(json!({
             "tasks": tasks_json, "agents": agents, "agent_colors": agent_colors, "stamp": stamp, "now": now,
-            "boards": boards, "board": scope.as_ref().map(|b| b.slug.clone()).unwrap_or_else(|| "all".into()),
+            "boards": boards.iter().map(crate::server::work_boards::board_json).collect::<Vec<_>>(), "board": scope.as_ref().map(|b| b.slug.clone()).unwrap_or_else(|| "all".into()),
             "default_board": default_board,
         }))
     })

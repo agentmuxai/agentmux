@@ -51,7 +51,7 @@ pub(crate) struct BoardsRequest {
     pub agents: Option<Vec<String>>,
 }
 
-fn board_json(b: &Board) -> Value {
+pub(crate) fn board_json(b: &Board) -> Value {
     json!({
         "id": b.id, "slug": b.slug, "name": b.name, "tier": b.tier, "readable": b.readable,
         "agents": b.agents, "default": b.is_default, "archived": b.archived,
