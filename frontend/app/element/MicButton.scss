@@ -18,7 +18,8 @@
             border-radius: 50%;
             background: var(--error-color);
             opacity: calc(var(--mic-level, 0) * 0.45);
-            transform: scale(calc(0.6 + var(--mic-level, 0) * 0.7));
+            // At its loudest a little past the ring: larger, it ran over the composer's edge to the pane's.
+            transform: scale(calc(0.6 + var(--mic-level, 0) * 0.5));
             transition:
                 opacity var(--duration-fast) linear,
                 transform var(--duration-fast) linear;
