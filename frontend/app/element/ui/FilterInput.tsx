@@ -3,6 +3,7 @@
 
 import clsx from "clsx";
 import { Show, type JSX } from "solid-js";
+import { CloseButton } from "./CloseButton";
 
 export interface FilterInputProps {
     value: string;
@@ -62,15 +63,14 @@ export function FilterInput(props: FilterInputProps): JSX.Element {
                 }}
             />
             <Show when={props.value}>
-                <button
-                    type="button"
+                <CloseButton
+                    size="sm"
                     class="ui-filter-clear"
+                    label="Clear filter"
+                    tooltip={false}
                     onClick={() => clear()}
-                    aria-label="Clear filter"
                     data-testid={props.testId ? `${props.testId}-clear` : undefined}
-                >
-                    <i class="fa-solid fa-xmark" aria-hidden="true" />
-                </button>
+                />
             </Show>
         </span>
     );

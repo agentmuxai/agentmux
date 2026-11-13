@@ -25,7 +25,7 @@
 
 import { createMemo, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { getSettingsKeyAtom } from "@/app/store/global";
-import { IconButton } from "@/app/element/ui";
+import { CloseButton } from "@/app/element/ui";
 import type { SignalPair } from "../../../agent-model/state";
 import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -303,7 +303,7 @@ export function AgentAuthPanel(props: AgentAuthPanelProps): JSX.Element {
                 {(notice) => (
                     <div class="agent-auth-notice" role="alert">
                         <span class="agent-auth-notice-text">{notice()}</span>
-                        <IconButton icon="xmark" label="Dismiss" density="compact" onClick={() => props.onDismissAuthNotice?.()} />
+                        <CloseButton size="sm" label="Dismiss" onClick={() => props.onDismissAuthNotice?.()} />
                     </div>
                 )}
             </Show>

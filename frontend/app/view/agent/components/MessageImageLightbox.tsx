@@ -10,7 +10,7 @@
 
 import { Modal } from "@/app/element/modal";
 import { tip } from "@/app/element/tip";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, CloseButton, IconButton } from "@/app/element/ui";
 import { formatBytes } from "@/util/format-bytes";
 import { Show, type JSX } from "solid-js";
 import { createMessageLightbox, type MessageImageLightboxProps, type MessageLightboxState } from "./message-image-lightbox-state";
@@ -63,7 +63,7 @@ function Actions(props: { s: MessageLightboxState; onClose: () => void }): JSX.E
             <Button title="Open this image in the editor (E)" onClick={s.openEditor}>
                 Open in editor
             </Button>
-            <IconButton icon="xmark" label="Close preview" tooltip={false} title="Close (Esc)" onClick={props.onClose} />
+            <CloseButton label="Close preview" tooltip={false} title="Close (Esc)" onClick={props.onClose} />
         </span>
     );
 }

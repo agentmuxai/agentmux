@@ -569,40 +569,12 @@
     cursor: text;
 }
 
+// The tab's close is the kit's CloseButton (size "tab"): it shows on hover, attention and closing, below,
+// and always while it has keyboard focus (the kit shows it on :focus-visible).
 .pane-tab-close {
-    // reset.scss sets `appearance: auto` on every native <button> (kept
-    // there so unstyled form controls still get native OS chrome by
-    // default); every custom-styled button in the app opts back out
-    // individually (_shell-node.scss, _control-bar.scss, swarm-view.scss,
-    // …) — this one didn't, so Chromium was drawing native button chrome
-    // (a fixed-size, semi-transparent box) UNDER this element's own
-    // transparent background/border reset, regardless of pane width or
-    // tab count. Same fix as .pane-tab-strip-add below.
-    appearance: none;
-    // outline: none too — `appearance: none` only removes native widget
-    // chrome (background/border/padding treatment); the browser's default
-    // focus-visible ring is a separate UA style that survives it. An
-    // outline paints outside the box model, so it wouldn't show as its own
-    // node in DevTools' element tree even though it's visually there.
-    outline: none;
-    flex: 0 0 16px;
-    width: 16px;
-    height: 16px;
-    @include mixins.flex-center(inline-flex);
-    @include mixins.button-reset;
-    border-radius: var(--radius-sm);
-    color: inherit;
-    cursor: default;
-    font-size: var(--text-md);
-    line-height: 1;
+    --ui-close-fg: inherit;
     opacity: 0;
-    transition:
-        opacity var(--duration-decorative-instant) var(--ease-standard),
-        background var(--duration-decorative-instant) var(--ease-standard);
-
-    &:hover {
-        background: var(--tint-4);
-    }
+    transition: opacity var(--duration-decorative-instant) var(--ease-standard);
 }
 
 // The progress line along the top of a pill: what its agent is doing

@@ -288,27 +288,19 @@ $gap: 6px;
             left: 3px;
         }
 
-        &__remove.ui-button {
+        &__remove.ui-close {
             position: absolute;
             top: -6px;
             right: -6px;
             width: 18px;
             height: 18px;
-            min-height: 0;
-            @include mixins.flex-center;
-            padding: 0;
             border: 1px solid var(--border-color);
             border-radius: 50%;
             background: var(--main-bg-color);
             color: var(--secondary-text-color);
             font-size: var(--text-2xs);
-            cursor: pointer;
             opacity: 0;
             transition: opacity var(--duration-decorative-instant) linear;
-
-            &:hover {
-                color: var(--main-text-color);
-            }
         }
 
         &:hover .agent-attachment-tile__remove,

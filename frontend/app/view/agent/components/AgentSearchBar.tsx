@@ -22,7 +22,7 @@
  */
 
 import { createEffect, createSignal, on, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
-import { IconButton, TextInput } from "@/app/element/ui";
+import { CloseButton, IconButton, TextInput } from "@/app/element/ui";
 
 /** The announced count changes at most this often. */
 export const LIVE_COUNT_MS = 400;
@@ -137,7 +137,7 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
                         onClick={() => props.onDimChange!(!props.dim!())}
                     />
                 </Show>
-                <IconButton icon="xmark" label="Close search (Esc)" density="compact" onClick={() => props.onClose()} />
+                <CloseButton size="sm" label="Close search (Esc)" onClick={() => props.onClose()} />
             </div>
         </Show>
     );

@@ -8,6 +8,8 @@ import clsx from "clsx";
 import { Show, type JSX } from "solid-js";
 
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
+import { CloseButton } from "@/app/element/ui/CloseButton";
+import { tip } from "./tip";
 import { Input } from "./input";
 import type { SearchState } from "./search-state";
 
@@ -55,7 +57,7 @@ export function SearchBar(props: { s: SearchState }): JSX.Element {
             <div class="right-buttons">
                 <DeclIconButton decl={s.prevDecl} />
                 <DeclIconButton decl={s.nextDecl} />
-                <DeclIconButton decl={s.closeDecl} />
+                <CloseButton size="sm" label="Close (Esc)" tooltip={false} {...tip("Close (Esc)")} onClick={() => s.close()} />
             </div>
         </div>
     );

@@ -113,6 +113,13 @@
 //                   upward, keyboard-driven), so the count only goes down as each is converted. A hard zero
 //                   everywhere: MENUS_ALLOWLIST names the three window-chrome menus left, each with why.
 //
+//  17. closeControls  a close, dismiss or remove control built outside the kit's `CloseButton`
+//                   (element/ui/CloseButton.tsx), per file in .tsx outside element/ui/: an `icon="xmark"` or
+//                   `icon="close"`, a `fa-xmark` / `fa-close` class, `makeIconClass("xmark")`, or a `✕`, `✖` or
+//                   `&times;` glyph. Every close in the app highlights red on hover from the one shared control, with
+//                   an accessible name and a keyboard focus ring; a hand-made one has its own hover, or none. A hard
+//                   zero everywhere: CLOSE_CONTROLS_ALLOWLIST names the ✕ that is a status mark, not a control.
+//
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
 // one used to live in scripts/ui-primitives-baseline.json, and since every
@@ -157,6 +164,13 @@ export function countMenus(source) {
     return (stripScriptComments(source).match(/role="menu"|<(?:FlyoutMenu|PopoverMenu|MenuButton)\b|\bshowContextMenu\(/g) ?? []).length;
 }
 
+/** A ✕ drawn as a close, dismiss or remove control: an icon name, a Font Awesome class or a glyph. */
+export function countCloseControls(source) {
+    return (
+        stripScriptComments(source).match(/\bicon="(?:xmark|close)"|\bfa-(?:xmark|close)\b|makeIconClass\("(?:xmark|close)"|[✕✖]|&times;/g) ?? []
+    ).length;
+}
+
 export function countButtons(source) {
     return (stripScriptComments(source).match(/<button\b/g) ?? []).length;
 }
@@ -180,8 +194,8 @@ export const BUTTON_ALLOWLIST = {
         reason: "the window-chrome menu trigger: the hand-drawn AgentMux mark (a 5x5 grid of rects) that must stay pixel-exact, inside the drag region",
     },
     "frontend/app/element/PaneTabStrip.tsx": {
-        max: 2,
-        reason: "the tab strip's own add (+) and close (x) controls: drawn glyph, hover-revealed, sized to the tab",
+        max: 1,
+        reason: "the tab strip's own add (+) control: drawn glyph, sized to the tab (its close is the kit's CloseButton)",
     },
     "frontend/app/statusbar/StatusBar.tsx": {
         max: 1,
@@ -251,10 +265,6 @@ export const FONT_SIZES_ALLOWLIST = {
 
 /** A native `title=` on a control (button, a, input, select, textarea, summary) that has no kit component to take it. */
 export const CONTROL_TITLES_ALLOWLIST = {
-    "frontend/app/element/PaneTabStrip.tsx": {
-        max: 1,
-        reason: "the tab close control's title carries its state (Closing, Close with unsaved changes) and sits on a control already on the button allowlist",
-    },
     "frontend/app/statusbar/InstancePanel.tsx": {
         max: 1,
         reason: "the opacity range slider: a bare input with a title and an aria-label; a Tooltip wrapper would break its row",
@@ -369,8 +379,23 @@ export const MENUS_ALLOWLIST = {
     },
 };
 
+/**
+ * The only ✕ left in a .tsx outside the kit, and why it is not a close control: a mark that shows a state, which
+ * nobody can click.
+ */
+export const CLOSE_CONTROLS_ALLOWLIST = {
+    "frontend/app/statusbar/UpdateStatus.tsx": {
+        max: 1,
+        reason: "the ✕ that marks a failed update in the status bar: a state glyph, not a control",
+    },
+    "frontend/app/view/settings/sections/recording-section.tsx": {
+        max: 1,
+        reason: "the icon that marks a recorder binary as not found: a state mark in a status line, not a control",
+    },
+};
+
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, rawFieldProblems: {}, tsColours: TS_COLOURS_ALLOWLIST, menus: MENUS_ALLOWLIST, tags: {} };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, rawFieldProblems: {}, tsColours: TS_COLOURS_ALLOWLIST, menus: MENUS_ALLOWLIST, closeControls: CLOSE_CONTROLS_ALLOWLIST, tags: {} };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
@@ -946,6 +971,7 @@ export function collect(files) {
     const disabledTips = {};
     const rawFieldProblemCounts = {};
     const menus = {};
+    const closeControls = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -967,6 +993,7 @@ export function collect(files) {
             countInto(disabledTips, path, tipsOnDisabledElements(source).length);
             countInto(rawFieldProblemCounts, path, rawFieldProblems(source).length);
             countInto(menus, path, countMenus(source));
+            countInto(closeControls, path, countCloseControls(source));
         }
         if (isStyle) {
             for (const selector of solidFills(source)) fills.add(`${path} :: ${selector}`);
@@ -1011,6 +1038,7 @@ export function collect(files) {
         disabledTips: sortObject(disabledTips),
         rawFieldProblems: sortObject(rawFieldProblemCounts),
         menus: sortObject(menus),
+        closeControls: sortObject(closeControls),
     };
 }
 
@@ -1024,7 +1052,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles", "menus"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles", "menus", "closeControls"];
 
 /**
  * `baseline` with each renamed file's counts moved to its new path, so a file moved or renamed since the base is
@@ -1185,7 +1213,7 @@ if (isMain(import.meta.url)) {
             `${total(current.colours)} colour literals in styles, ${total(current.tsColours)} in scripts, ` +
             `${total(current.tags)} hand-drawn tags, ` +
             `${total(current.nativeTitles)} native title= labels, ${total(current.textFields)} hand-written text fields, ` +
-            `${total(current.menus)} menus outside the kit's Menu.`
+            `${total(current.menus)} menus outside the kit's Menu, ${total(current.closeControls)} close controls outside CloseButton.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);

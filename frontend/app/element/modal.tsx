@@ -84,7 +84,7 @@ import { ModalTitleIdContext } from "./modal-parts";
 import { acquireRegionLock, releaseRegionLock } from "./modal-region-lock";
 import { push, remove, isReachable, type StackEntry } from "./modal-stack";
 
-import { IconButton } from "./ui";
+import { CloseButton } from "./ui";
 import "./modal.scss";
 
 export { ModalHeader, ModalBody, ModalFooter } from "./modal-parts";
@@ -424,9 +424,7 @@ export const Modal: Component<ModalProps> = (props) => {
                                 tabIndex={-1}
                             >
                                 <Show when={props.showCloseButton}>
-                                    <IconButton
-                                        icon="xmark"
-                                        label="Close"
+                                    <CloseButton
                                         tooltip={false}
                                         class="modal-panel-close-btn"
                                         data-modal-dismiss

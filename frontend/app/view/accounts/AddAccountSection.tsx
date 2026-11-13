@@ -6,7 +6,7 @@
 // over the pane. It asks how to connect (a sign-in or a key), then the sign-in or the form runs in
 // it, and it collapses when the account is saved or the person cancels.
 
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, CloseButton } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { AccountForm } from "@/app/view/identity/identity-account-form";
@@ -63,7 +63,7 @@ export function AddAccountSection(props: {
                     <ProviderLogo provider={tile.id} size={20} />
                 </span>
                 <span class="accounts-chooser-title">Connect {tile.displayName}</span>
-                <IconButton icon="xmark" label="Close" tooltip={false} onClick={() => props.onClose()} />
+                <CloseButton tooltip={false} onClick={() => props.onClose()} />
             </div>
             <Show when={tile.id === "agentmux"}>
                 <AgentMuxConnectBody muxbus={props.muxbus} />

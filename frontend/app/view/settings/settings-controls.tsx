@@ -3,7 +3,7 @@
 
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 
-import { Button, Field, IconButton, NumberInput, Switch, TextInput, useField } from "@/app/element/ui";
+import { Button, CloseButton, Field, IconButton, NumberInput, Switch, TextInput, useField } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
@@ -266,7 +266,7 @@ export function KeyValueEditor(p: { value: Record<string, string>; onChange: (v:
                             value={p.value[k] ?? ""}
                             onBlur={(e) => updateEntry(k, e.currentTarget.value)}
                         />
-                        <IconButton icon="xmark" label={`Remove ${k}`} tooltip={false} onClick={() => removeEntry(k)} />
+                        <CloseButton label={`Remove ${k}`} tooltip={false} onClick={() => removeEntry(k)} />
                     </div>
                 )}
             </For>
