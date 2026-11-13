@@ -15,11 +15,12 @@
 #
 #   1. A resource trace every 5 seconds, written to a file as well as the log (CI_TRACE_FILE), which the workflow
 #      uploads when the step fails or is cancelled.
-#   2. A watchdog on that trace. The stall is a machine that has run out of memory and swap and spends its time
-#      paging: the runner's agent starves with everything else and can neither stream the log nor end the step. Three
-#      samples in a row with almost no memory and almost no swap left kill the biggest process (the rustc that is
-#      growing), which is what the kernel's OOM killer would do after a long time paging. The step then fails with the
-#      cause printed, the runner stays able to upload the trace, and the step can retry.
+#   2. A watchdog on that trace. The stall is a machine that has run out of memory and spends its time paging: the
+#      runner's agent starves with everything else and can neither stream the log nor end the step. Three samples in
+#      a row with almost no memory left (under 300 MB available, or under 512 MB with swap nearly full too) kill the
+#      biggest process (the rustc that is growing), which is what the kernel's OOM killer would do after a long time
+#      paging. The step then fails with the cause printed, the runner stays able to upload the trace, and the step can
+#      retry. Each trace line also carries the kernel's memory pressure (psi_full10).
 #   3. A time limit per attempt (CI_ATTEMPT1_SECONDS, CI_ATTEMPT2_SECONDS) set near twice the normal run, and one
 #      automatic retry of a STALLED attempt (timed out, killed by the watchdog or by a signal). The retry reuses what
 #      the first attempt compiled. A failing test or a compile error is not retried.
@@ -35,10 +36,20 @@ BUILD_LOG="${CI_BUILD_LOG:-${RUNNER_TEMP:-/tmp}/nextest-build.log}"
 FIRED="$TRACE.watchdog"
 CRATES="-p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats"
 
-# Whether memory and swap are both nearly gone: below 512 MB available and 1 GB of swap free. Arguments in MB.
+# Whether the machine is out of memory: below 512 MB available and 1 GB of swap free, or below 300 MB available
+# whatever the swap. The second rule is for the stall that left no log (2026-11-12 and 11-13, nine times: a job ran to
+# its 50-minute limit and the runner never answered the cancel). Healthy runs reach 437 to 483 MB available while
+# rustc holds ~14.9 GB of the runner's 16 GB, and use only 3 to 4 GB of the 16 GB of swap, so a few hundred MB more
+# does not exhaust the swap: the machine pages the code and cache it runs on, and crawls, with swap to spare and
+# the kernel's OOM killer never called. Arguments in MB.
 pressure_high() {
     local mem_avail=$1 swap_free=$2
-    [ "$mem_avail" -lt 512 ] && [ "$swap_free" -lt 1024 ]
+    [ "$mem_avail" -lt 300 ] || { [ "$mem_avail" -lt 512 ] && [ "$swap_free" -lt 1024 ]; }
+}
+
+# The kernel's memory pressure: the share of the last 10 s in which every task was stalled on memory ("full avg10").
+memory_psi() {
+    awk '/^full/ {split($2, a, "="); print a[2]; found = 1} END {if (!found) print "na"}' /proc/pressure/memory 2>/dev/null || echo na
 }
 
 # Whether an attempt's exit status means it stalled rather than failed: timed out (124), killed (137), terminated
@@ -56,7 +67,7 @@ meminfo_mb() {
 sample() {
     local mem swap
     read -r mem swap < <(meminfo_mb)
-    echo "[resources] $(date -u +%H:%M:%S) mem_avail=${mem}MB swap_free=${swap}MB $(free -m | awk 'NR==2{printf "mem_used=%dMB ", $3} NR==3{printf "swap_used=%dMB", $3}') disk_root_avail=$(df -m --output=avail / | tail -1 | tr -d ' ')MB top=$(ps -eo rss=,comm= --sort=-rss | head -1 | awk '{printf "%s:%dMB", $2, $1/1024}')"
+    echo "[resources] $(date -u +%H:%M:%S) mem_avail=${mem}MB swap_free=${swap}MB $(free -m | awk 'NR==2{printf "mem_used=%dMB ", $3} NR==3{printf "swap_used=%dMB", $3}') disk_root_avail=$(df -m --output=avail / | tail -1 | tr -d ' ')MB top=$(ps -eo rss=,comm= --sort=-rss | head -1 | awk '{printf "%s:%dMB", $2, $1/1024}') psi_full10=$(memory_psi)"
 }
 
 # Kill the process that holds the most memory, leaving the runner's own processes alone, and say what it was.
@@ -64,7 +75,7 @@ kill_biggest() {
     local pid rss comm
     read -r pid rss comm < <(ps -eo pid=,rss=,comm= --sort=-rss | awk '$3 !~ /^(Runner|dotnet|systemd|sshd|ps|awk)/ {print; exit}')
     [ -n "${pid:-}" ] || return 0
-    echo "[watchdog] memory and swap are nearly gone; killing pid $pid ($comm, $((rss / 1024)) MB). Biggest processes:"
+    echo "[watchdog] memory is nearly gone; killing pid $pid ($comm, $((rss / 1024)) MB). Biggest processes:"
     ps -eo pid=,rss=,etimes=,args= --sort=-rss | head -8 | cut -c1-200
     : > "$FIRED"
     kill -KILL "$pid" 2>/dev/null || true
