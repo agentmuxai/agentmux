@@ -102,10 +102,18 @@ impl FileStore {
     /// restarts: a terminal flood grew it to 4.3 GB. A pass made by the writer
     /// itself, with no write in progress, leaves nothing behind, and its next
     /// write starts the log over (cut back to `journal_size_limit`).
+    ///
+    /// Returns whether the whole log was copied back, which is what lets the
+    /// next write start it over. It is not when another connection's checkpoint
+    /// holds the checkpoint lock (the background checkpointer, mid-pass: the
+    /// pass then does nothing at all) or a reader still needs the log's older
+    /// pages; the caller should try again soon.
     #[track_caller]
-    pub fn checkpoint_between_writes(&self) -> Result<(), StoreError> {
-        self.lock_conn().query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))?;
-        Ok(())
+    pub fn checkpoint_between_writes(&self) -> Result<bool, StoreError> {
+        // (busy, frames in the log, frames copied back); the last two are -1 when busy.
+        let (busy, log, copied): (i64, i64, i64) =
+            self.lock_conn().query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(busy == 0 && log == copied)
     }
 
     /// Delete the parts of a circular `name` that lie wholly below its window.

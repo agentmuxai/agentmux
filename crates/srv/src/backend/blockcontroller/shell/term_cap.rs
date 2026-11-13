@@ -25,6 +25,8 @@ const MIB: i64 = 1 << 20;
 /// from one 4 KB read to 256 KB, and the smaller they are the more log each
 /// byte of output costs.
 const WAL_RELIEF_EVERY: i64 = 8 * MIB;
+/// Log written before the writer tries again after a pass that could not finish.
+const RELIEF_RETRY_AFTER: i64 = MIB;
 /// The block file the cap applies to.
 pub const TERM_FILE: &str = "term";
 
@@ -46,6 +48,26 @@ fn relief_due(pending: &AtomicI64, start: i64, len: usize) -> bool {
     }
     pending.store(0, Ordering::Relaxed);
     true
+}
+
+/// After `WAL_RELIEF_EVERY` of log (`pending`), copy the log back into the
+/// database so the next write starts it over. When that pass could not finish
+/// (the background checkpointer was mid-pass and holds the checkpoint lock, or a
+/// reader is still on the log) the log is no shorter, and waiting another
+/// `WAL_RELIEF_EVERY` would let it grow by that much per miss: on a loaded disk
+/// the background pass can be what is running most of the time. So the count is
+/// put back to `RELIEF_RETRY_AFTER` short of due, and the next appends try again.
+fn relieve_log(fs: &FileStore, pending: &AtomicI64, start: i64, len: usize) {
+    if !relief_due(pending, start, len) {
+        return;
+    }
+    match fs.checkpoint_between_writes() {
+        Ok(true) => {}
+        Ok(false) => {
+            pending.fetch_add(WAL_RELIEF_EVERY - RELIEF_RETRY_AFTER, Ordering::Relaxed);
+        }
+        Err(e) => tracing::debug!(error = %e, "term cap: checkpoint between writes failed"),
+    }
 }
 
 /// The cap in bytes; 0 means no limit.
@@ -127,11 +149,7 @@ pub(super) fn ends_at_boundary(data: &[u8]) -> bool {
 fn after_append_capped(fs: &FileStore, block_id: &str, start: i64, data: &[u8], cap: i64) -> bool {
     let len = data.len();
     // Under a flood the log would only grow: empty it every few megabytes.
-    if relief_due(&LOG_SINCE_RELIEF, start, len) {
-        if let Err(e) = fs.checkpoint_between_writes() {
-            tracing::debug!(error = %e, "term cap: checkpoint between writes failed");
-        }
-    }
+    relieve_log(fs, &LOG_SINCE_RELIEF, start, len);
     let mut trim = false;
     let current = match fs.stat(block_id, TERM_FILE) {
         Ok(Some(f)) => f,

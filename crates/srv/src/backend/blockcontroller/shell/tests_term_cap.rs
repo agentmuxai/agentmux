@@ -137,12 +137,51 @@ fn flood_file_backed(chunks: usize, chunk: usize, cap: i64) -> (u64, u64, u64) {
 #[test]
 fn a_flood_leaves_the_database_at_the_cap_and_the_log_short() {
     // 200 MB at a 16 MB cap. Before the writer checkpointed between writes the
-    // log held every byte written: a flood that never pauses is never found
-    // fully copied back, so the log never restarted.
+    // log held every byte written (200 MB here, 4.3 GB in the field): a flood
+    // that never pauses is never found fully copied back, so the log never
+    // restarted. What the writer guarantees is that the log is a small part of
+    // what was written, not a figure: how large it gets between two restarts
+    // depends on how long the background checkpointer's pass holds the checkpoint
+    // lock, which depends on the disk's speed (a nightly CI run reached 78 MB where
+    // this asserted 64; on charlie one pass in 25 found the lock held). A miss is retried (see the test below), so half of the
+    // flood is well above what a slow disk makes it and well below a log that
+    // was never restarted.
     let (peak_wal, end_wal, db) = flood_file_backed(800, 256 * 1024, 16 * MB);
-    assert!(peak_wal < 64, "the log reached {peak_wal} MB");
-    assert!(end_wal < 64, "the log ended at {end_wal} MB");
+    assert!(peak_wal < 100, "the log reached {peak_wal} MB of a 200 MB flood");
+    assert!(end_wal < 100, "the log ended at {end_wal} MB of a 200 MB flood");
     assert!(db < 40, "the database ended at {db} MB for a 16 MB cap");
+}
+
+#[test]
+fn a_relief_pass_that_could_not_finish_is_tried_again_soon() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("filestore.db");
+    let fs = FileStore::open(&db).unwrap();
+    fs.make_file("b", TERM_FILE, FileMeta::new(), opts_for(16 * MB)).unwrap();
+    let data = vec![b'y'; 256 * 1024];
+    let pending = AtomicI64::new(0);
+    let write = |n: usize| {
+        for _ in 0..n {
+            let at = fs.append_data_at("b", TERM_FILE, &data).unwrap();
+            relieve_log(&fs, &pending, at, data.len());
+        }
+    };
+    // A reader on the log, as a pane reading its history in the middle of a flood:
+    // the pages it needs stay in the log, so a pass can't copy the log back whole.
+    let reader = rusqlite::Connection::open(&db).unwrap();
+    reader.execute_batch("BEGIN; SELECT count(*) FROM db_wave_file;").unwrap();
+    write(40); // 10 MB of log: the window is crossed (more than once), and every pass fell short
+    let waiting = pending.load(Ordering::Relaxed);
+    assert!(waiting >= WAL_RELIEF_EVERY - RELIEF_RETRY_AFTER && waiting < WAL_RELIEF_EVERY, "a miss waits {waiting} bytes of log for the next try, not a whole window");
+    // The reader is done: the next try finishes, and the count starts over.
+    reader.execute_batch("COMMIT").unwrap();
+    for _ in 0..20 {
+        write(8);
+        if pending.load(Ordering::Relaxed) < 2 * MB {
+            return;
+        }
+    }
+    panic!("the log was never copied back after the reader finished: {} bytes counted", pending.load(Ordering::Relaxed));
 }
 
 /// A measurement, not a check. `MEASURE_MB` written (400 by default) in batches
