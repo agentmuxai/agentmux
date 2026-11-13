@@ -380,16 +380,27 @@ function drawOnChange(c: ChartState) {
     // theme, whose colors the canvas resolved when it was built), or when it
     // has none yet; otherwise only a new size, or new data. A getter that reads a
     // signal runs this again on every sample even when its value is the same (the
-    // focus view's `timeAxis` reads its core list), so a run with the same
-    // values is skipped: a rebuild replaces uPlot's `.u-over`, and a press that
-    // straddled it lost its click (Kanban #615).
+    // focus view's `timeAxis` reads its core list; the simple view builds a new
+    // `series` array each time), so a run with the same values is skipped, the
+    // series compared by content: a rebuild replaces uPlot's `.u-over`, and a
+    // press that straddled it lost its click (Kanban #615).
     let drawn: unknown[] | undefined;
     createEffect(
-        on([() => props.series, bare, () => props.timeAxis, () => props.yLabels, zoom, appliedWindowTheme], (deps) => {
-            const before = drawn;
-            drawn = deps;
-            if (before?.some((d, i) => d !== deps[i])) build(c);
-        })
+        on(
+            [
+                () => JSON.stringify(props.series),
+                bare,
+                () => props.timeAxis,
+                () => props.yLabels,
+                zoom,
+                appliedWindowTheme,
+            ],
+            (deps) => {
+                const before = drawn;
+                drawn = deps;
+                if (before?.some((d, i) => d !== deps[i])) build(c);
+            }
+        )
     );
     createEffect(
         on(c.size, (s) => {

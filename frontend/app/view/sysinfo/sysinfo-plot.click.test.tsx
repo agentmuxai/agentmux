@@ -130,4 +130,31 @@ describe("a sysinfo chart over time", () => {
             expect(after.every((el, i) => el === before[i])).toBe(true);
         });
     }
+
+    // The simple view builds a new series array, and a new meta object, for each sample.
+    it("keeps its plot element when a sample arrives in the simple view", async () => {
+        const [data, setData] = createSignal(rows(3, false));
+        const meta = () =>
+            ({ name: "CPU", label: "%", color: "#a3e635", decimalPlaces: 0, maxy: 100 }) as TimeSeriesMeta;
+        const [yvalMeta, setMeta] = createSignal(meta());
+        const { container } = render(() => (
+            <SingleLinePlot
+                plotData={data()}
+                yval="cpu"
+                yvalMeta={yvalMeta()}
+                blockId="b"
+                defaultColor="#a3e635"
+                targetLen={300}
+                intervalSecs={1}
+            />
+        ));
+        await vi.waitFor(() => expect(container.querySelector(".u-over")).not.toBeNull());
+        const before = container.querySelector(".u-over");
+        for (let n = 4; n < 9; n++) {
+            setMeta(meta());
+            setData(rows(n, false));
+            await new Promise((r) => setTimeout(r, 20));
+        }
+        expect(container.querySelector(".u-over")).toBe(before);
+    });
 });
