@@ -12,6 +12,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { openLink } from "@/app/store/global";
 import type { AccountProvider } from "@/app/view/identity/identity-model";
 import { PROVIDER_LABELS, refreshAccountCache } from "@/app/view/identity/identity-model";
+import type { AccountOAuthClientInfo } from "@/types/rpc/AccountOAuthClientInfo";
 import { muxbusDelivery, muxbusOffersSignIn } from "@/store/muxbus-delivery";
 import { githubNeedsCloudSignIn, isNeedsCloudSignInError } from "./github-cloud-gate";
 import { isBlockedError, setOAuthNote } from "./oauth-account-state";
@@ -138,6 +139,11 @@ function createFlowSession(props: OAuthConnectPanelProps) {
     };
 }
 
+/** Nothing to connect with: AgentMux's own client is the one asked for and this build has none, or the provider hides its client and there is none. */
+function connectUnavailable(info: OAuthServiceInfo, client: AccountOAuthClientInfo | null, builtinOnly: boolean): boolean {
+    return builtinOnly ? client != null && !client.builtinAvailable : clientUnavailable(info, client);
+}
+
 /** The OAuth connect's state: everything the panel's markup reads, and what it does. */
 export function createOAuthConnect(props: OAuthConnectPanelProps, info: OAuthServiceInfo) {
     const client = createOAuthClientState(info, props.clientIdHint, props.useBuiltinClient === true);
@@ -195,10 +201,7 @@ export function createOAuthConnect(props: OAuthConnectPanelProps, info: OAuthSer
             muxbusDelivery(),
         );
 
-    const unavailable = () =>
-        props.useBuiltinClient
-            ? client.state.info() != null && !client.state.info()!.builtinAvailable
-            : clientUnavailable(info, client.state.info());
+    const unavailable = () => connectUnavailable(info, client.state.info(), props.useBuiltinClient === true);
 
     // A Reconnect starts by itself once it knows it has a client to use, and, for GitHub, a Cloud sign-in.
     let autoStarted = false;
