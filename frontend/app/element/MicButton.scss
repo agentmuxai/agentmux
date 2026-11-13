@@ -42,6 +42,13 @@
     &.mic-active .ui-button--chrome.ui-button--toggle[aria-pressed="true"] {
         color: var(--error-text-color);
         position: relative;
+
+        // The pointer rests on the mic right after the click that turned it on. The toggle's hover fill is
+        // a rectangle, and it would sit over the round level disc, inside the ring.
+        &:hover {
+            background: none;
+        }
+
         &::after {
             content: "";
             position: absolute;
