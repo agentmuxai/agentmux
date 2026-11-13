@@ -300,6 +300,16 @@ function registerSplitCommands(): void {
 
 /** The "Window" commands. */
 function registerWindowCommands(): void {
+    // Only a browser signed in to a headless srv has a session of its own to end.
+    commandRegistry.register({
+        id: "window:sign-out-this-browser",
+        label: "Sign Out of This Browser",
+        category: "Window",
+        icon: "right-from-bracket",
+        keywords: "log out logout session headless sign out",
+        when: () => typeof getApi().signOutThisBrowser === "function",
+        execute: () => fireAndForget(async () => getApi().signOutThisBrowser?.()),
+    });
     commandRegistry.register({
         id: "window:new",
         label: "New Window",

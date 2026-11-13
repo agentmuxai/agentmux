@@ -15,6 +15,10 @@ const HOST: &str = "127.0.0.1:7777";
 const KEY: &str = "test-secret-key";
 const COOKIE: &str = "amx-s-test-instance";
 
+/// The store is the running server's, shared by every test of this file; a logout ends every session in it.
+/// A test that signs a browser in and then relies on it holds this for its whole length.
+static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// The shape every test shares (a process-wide one-time setting, like the running server's).
 fn ensure_shape() -> &'static Shape {
     let _ = SHAPE.set(Shape::new(7777, "test-instance", Some("http://127.0.0.1:8080")));
@@ -201,6 +205,7 @@ async fn a_refusal_waits_a_fixed_quarter_second_whatever_was_wrong() {
 
 #[tokio::test]
 async fn a_browser_signs_in_with_a_code_the_person_confirms_and_only_then_reaches_the_api() {
+    let _only = ONE_AT_A_TIME.lock().await;
     ensure_shape();
     let router = build_router(test_state());
     let probe = |hs: Vec<(&str, String)>| {
@@ -285,6 +290,62 @@ async fn a_discarded_sign_in_gives_the_browser_nothing_and_the_person_a_line() {
     // Nobody else's code is answerable.
     let other = open.ask(&router, "/auth/confirm", r#"{"code":"someone else's","accept":true}"#).await;
     assert_eq!(field(&other, "found"), "false");
+}
+
+// ---- Signing out one browser ----
+
+/// A browser signed in the whole way, through the router: (its cookie pair, its token).
+async fn signed_in_browser(router: &Router) -> (String, String) {
+    let mut open = Open::connect(router).await;
+    let code = field(&open.ask(router, "/auth/code", "{}").await, "code");
+    let handle = field(&call(router, from_page("/auth/enter", &format!(r#"{{"code":"{code}"}}"#))).await.2, "handle");
+    open.ask(router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#)).await;
+    let (status, hs, body) = call(router, from_page("/auth/wait", &format!(r#"{{"handle":"{handle}"}}"#))).await;
+    assert_eq!(status, 200, "{body}");
+    let cookie = hs.get(header::SET_COOKIE).unwrap().to_str().unwrap().split(';').next().unwrap().to_string();
+    (cookie, field(&body, "token"))
+}
+
+fn from_browser(method: Method, path: &str, cookie: &str, token: &str, extra: &[(&str, &str)]) -> Request<Body> {
+    let mut hs = vec![("host", HOST), ("cookie", cookie), (TOKEN_HEADER, token)];
+    hs.extend(extra.iter().copied());
+    request(method, path, &hs, "")
+}
+
+#[tokio::test]
+async fn a_browser_signs_itself_out_and_no_other_browser_with_it() {
+    let _only = ONE_AT_A_TIME.lock().await;
+    ensure_shape();
+    let router = build_router(test_state());
+    let (cookie_a, token_a) = signed_in_browser(&router).await;
+    let (cookie_b, token_b) = signed_in_browser(&router).await;
+    let probe = |cookie: &str, token: &str| from_browser(Method::GET, "/agentmux/work/boards", cookie, token, &[]);
+    assert_ne!(call(&router, probe(&cookie_a, &token_a)).await.0, 401);
+
+    // Not by the cookie alone, not by the token alone, not from another site, not by GET.
+    let signout = |extra: &[(&str, &str)], cookie: &str, token: &str| from_browser(Method::POST, "/auth/signout", cookie, token, extra);
+    for (name, req) in [
+        ("no fetch metadata", signout(&[], &cookie_a, &token_a)),
+        ("cross-site", signout(&[("sec-fetch-site", "cross-site")], &cookie_a, &token_a)),
+        ("another browser's token", signout(&[("sec-fetch-site", "same-origin")], &cookie_a, &token_b)),
+        ("a bad cookie", signout(&[("sec-fetch-site", "same-origin")], "amx-s-test-instance=nope", &token_a)),
+    ] {
+        assert_eq!(call(&router, req).await.0, 403, "{name}");
+    }
+    let cookie_only = request(Method::POST, "/auth/signout", &[("host", HOST), ("cookie", &cookie_a), ("sec-fetch-site", "same-origin")], "");
+    assert_eq!(call(&router, cookie_only).await.0, 403, "cookie alone");
+    assert_ne!(call(&router, probe(&cookie_a, &token_a)).await.0, 401, "nothing of that ended it");
+
+    // From the page: only this browser's session ends, and the cookie is told to go.
+    let (status, hs, body) = call(&router, signout(&[("sec-fetch-site", "same-origin")], &cookie_a, &token_a)).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(field(&body, "signedOut"), "true");
+    let set = hs.get(header::SET_COOKIE).unwrap().to_str().unwrap();
+    assert!(set.starts_with("amx-s-test-instance=;") && set.contains("Max-Age=0"), "{set}");
+    assert_eq!(call(&router, probe(&cookie_a, &token_a)).await.0, 401, "this browser is out");
+    assert_ne!(call(&router, probe(&cookie_b, &token_b)).await.0, 401, "the other browser stays");
+    // A second sign-out of the same session is refused like any request without one.
+    assert_eq!(call(&router, signout(&[("sec-fetch-site", "same-origin")], &cookie_a, &token_a)).await.0, 403);
 }
 
 // ---- The proof of the key ----
@@ -433,16 +494,18 @@ fn the_policy_is_closed_by_default_and_names_only_the_websocket_origins() {
     let csp = content_security_policy(shape);
     for directive in [
         "default-src 'none'",
-        "script-src 'self';",
+        "script-src 'self' 'wasm-unsafe-eval';",
         "object-src 'none'",
-        "base-uri 'none'",
+        "base-uri 'self';",
         "form-action 'self'",
         "frame-ancestors 'none'",
         "connect-src 'self' ws://127.0.0.1:7777 ws://127.0.0.1:8080;",
     ] {
         assert!(csp.contains(directive), "{directive} in {csp}");
     }
-    assert!(!csp.contains("script-src 'self' 'unsafe-inline'") && !csp.contains("'unsafe-eval'"), "{csp}");
+    // WebAssembly may compile (the code highlighter's engine) and nothing else of the kind is allowed.
+    assert!(!csp.contains("script-src 'self' 'unsafe-inline'") && !csp.contains("'unsafe-eval'") && !csp.contains("'unsafe-hashes'"), "{csp}");
+    assert_eq!(csp.matches("wasm-unsafe-eval").count(), 1, "{csp}");
     assert_eq!(csp.matches("'unsafe-inline'").count(), 1, "styles only");
 }
 
