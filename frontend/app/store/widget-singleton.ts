@@ -18,6 +18,7 @@ import { IDENTITY_META_KEY, parseIdentity } from "@/app/util/browser-identity";
  * the fallback: such an entry keeps doing what it did (a test keeps this list equal to the flags).
  */
 export const BUILTIN_SINGLETON_VIEWS: ReadonlySet<string> = new Set([
+    "atlas",
     "audit",
     "connectors",
     "drone",

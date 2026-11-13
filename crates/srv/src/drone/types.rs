@@ -23,6 +23,11 @@ pub enum BlockKind {
     Task,
     Notify,
     AppQuery,
+    /// Shapes a list or object with a restricted expression language.
+    Transform,
+    /// Runs one body block once per item of a list.
+    #[serde(rename = "foreach")]
+    ForEach,
 }
 
 impl BlockKind {
@@ -37,6 +42,8 @@ impl BlockKind {
             "task" => Some(Self::Task),
             "notify" => Some(Self::Notify),
             "app_query" => Some(Self::AppQuery),
+            "transform" => Some(Self::Transform),
+            "foreach" => Some(Self::ForEach),
             _ => None,
         }
     }

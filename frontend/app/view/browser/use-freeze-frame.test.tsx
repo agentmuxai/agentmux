@@ -11,6 +11,7 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
+import { beginDrag, endDrag } from "@/app/drag/drag-session";
 import type { BrowserViewModel } from "./browser-model";
 import type { PaneRect } from "./use-pane-rect-sync";
 
@@ -96,6 +97,7 @@ beforeEach(() => {
     };
 });
 afterEach(() => {
+    endDrag("cancel");
     cleanup();
     vi.useRealTimers();
     delete (navigator as unknown as Record<string, unknown>).userAgent;
@@ -408,6 +410,36 @@ describe("the overlay's clip", () => {
         clip({ rects: [rect(100, 100)], wait: vi.fn() });
         await vi.advanceTimersByTimeAsync(10_000);
         expect(fz.freezeSnapshot()).not.toBeNull();
+    });
+
+    it("holds no frame and asks for no wait for an in-app drag's hole: the drag's own picture covers the page", async () => {
+        mount();
+        const wait = vi.fn();
+        for (const kind of ["tile", "pane-tab", "window-tab", "doc-tab"] as const) {
+            beginDrag(kind);
+            clip({ rects: [rect(100, 100)], wait });
+            await flush();
+            endDrag("drop");
+        }
+        expect(wait).not.toHaveBeenCalled();
+        expect(env.screenshot).not.toHaveBeenCalled();
+        expect(fz.freezeSnapshot()).toBeNull();
+        // The drag over, a menu on the pane is waited for as before.
+        clip({ rects: [rect(100, 100)], wait });
+        expect(wait).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops a frame it held when an in-app drag's hole lands on the pane", async () => {
+        mount();
+        prewarm();
+        await flush();
+        expect(fz.freezeSnapshot()).not.toBeNull();
+        beginDrag("tile");
+        clip({ rects: [rect(100, 100)], wait: vi.fn() });
+        expect(fz.freezeSnapshot()).toBeNull();
+        // The 4 seconds of the prewarm are over with it: nothing comes back.
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(fz.freezeSnapshot()).toBeNull();
     });
 
     it("starts no capture when the host gave nothing to wait with", async () => {
