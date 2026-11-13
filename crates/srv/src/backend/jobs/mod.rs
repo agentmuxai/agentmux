@@ -588,6 +588,17 @@ impl RunLedger {
         self.turn_finished(run_id, infra_status, Some(drone_cost(block_states)), error);
     }
 
+    /// A Drone run was cancelled: its row closes `interrupted` with the reason,
+    /// unless whoever stopped it (a timeout, `cancel_other`) closed it already.
+    pub fn drone_stopped(
+        &self,
+        run_id: &str,
+        block_states: &std::collections::HashMap<String, crate::drone::types::BlockState>,
+        reason: &str,
+    ) {
+        self.turn_finished(run_id, infra::INTERRUPTED, Some(drone_cost(block_states)), reason);
+    }
+
     /// After a restart: close what this channel left open (§3.2). Cron runs
     /// still `scheduled` or `running`, and Drone runs still `running`, were
     /// interrupted, in the ledger and in `db_drone_runs`; so were the runs

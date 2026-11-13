@@ -1,14 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! A run's handle and its event stream. The scheduler that runs the graph is
-//! `scheduler.rs`.
+//! A run's handle, its event stream and the way to stop it. The scheduler that
+//! runs the graph is `scheduler.rs`.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use serde_json::Value;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::drone::types::{BlockState, DroneGraph};
 
@@ -36,6 +37,60 @@ pub enum RunEvent {
         output: Value,
     },
     RunFailed { run_id: String, error: String },
+    /// The run was stopped on purpose (`cancel_run`): a person, an agent, the
+    /// job's timeout or the job's next run. `reason` says which, in plain words.
+    RunCancelled { run_id: String, reason: String },
+}
+
+/// How a run is stopped: a flag the scheduler looks at before each block and
+/// that ends the block in flight, with the reason it was set for.
+#[derive(Clone, Default)]
+pub struct Cancel {
+    token: CancellationToken,
+    reason: Arc<Mutex<Option<String>>>,
+}
+
+impl Cancel {
+    /// Stop the run, for `reason`. The first reason stays. `false` when the run
+    /// was stopped already.
+    pub fn cancel(&self, reason: &str) -> bool {
+        let mut slot = self.reason.lock().unwrap_or_else(|e| e.into_inner());
+        if self.token.is_cancelled() {
+            return false;
+        }
+        *slot = Some(reason.to_string());
+        self.token.cancel();
+        true
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.token.is_cancelled()
+    }
+
+    pub(super) async fn cancelled(&self) {
+        self.token.cancelled().await;
+    }
+
+    pub fn reason(&self) -> String {
+        self.reason.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(|| "stopped".to_string())
+    }
+}
+
+/// The runs going now, by id.
+static LIVE: LazyLock<Mutex<HashMap<String, Cancel>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Stop the run `run_id` for `reason` (a Drone run, not a ledger row). The block
+/// in flight ends, an Agent block's process with it, and the run ends
+/// `cancelled`. `false` when no such run is going.
+pub fn cancel_run(run_id: &str, reason: &str) -> bool {
+    let cancel = LIVE.lock().unwrap_or_else(|e| e.into_inner()).get(run_id).cloned();
+    cancel.is_some_and(|c| c.cancel(reason))
+}
+
+/// How the scheduler ended a run that did not finish.
+pub(super) enum RunEnd {
+    Failed(String),
+    Cancelled(String),
 }
 
 pub struct RunHandle {
@@ -61,6 +116,8 @@ pub async fn run_drone(
     let final_states: Arc<tokio::sync::Mutex<HashMap<String, BlockState>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
+    let cancel = Cancel::default();
+    LIVE.lock().unwrap_or_else(|e| e.into_inner()).insert(run_id.clone(), cancel.clone());
     let states_for_task = final_states.clone();
     let drone_id_for_evt = drone_id.clone();
     let run_id_for_task = run_id.clone();
@@ -70,20 +127,14 @@ pub async fn run_drone(
             run_id: run_id_for_task.clone(),
             drone_id: drone_id_for_evt,
         });
-        match super::scheduler::execute(&run_id_for_task, (&graph, trigger, run_cap_usd, &drone_id), &tx_for_task, &states_for_task).await {
-            Ok(output) => {
-                let _ = tx_for_task.send(RunEvent::RunDone {
-                    run_id: run_id_for_task,
-                    output,
-                });
-            }
-            Err(e) => {
-                let _ = tx_for_task.send(RunEvent::RunFailed {
-                    run_id: run_id_for_task,
-                    error: e,
-                });
-            }
-        }
+        let limits = super::scheduler::Limits { run_cap_usd, cancel };
+        let ended = super::scheduler::execute(&run_id_for_task, (&graph, trigger, limits, &drone_id), &tx_for_task, &states_for_task).await;
+        LIVE.lock().unwrap_or_else(|e| e.into_inner()).remove(&run_id_for_task);
+        let _ = tx_for_task.send(match ended {
+            Ok(output) => RunEvent::RunDone { run_id: run_id_for_task, output },
+            Err(RunEnd::Failed(error)) => RunEvent::RunFailed { run_id: run_id_for_task, error },
+            Err(RunEnd::Cancelled(reason)) => RunEvent::RunCancelled { run_id: run_id_for_task, reason },
+        });
     });
 
     Ok(RunHandle {

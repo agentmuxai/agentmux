@@ -337,7 +337,7 @@ export class DroneViewModel {
         }
         this.activeRunUnsub = onMuxEvent(`dronerun:${runId}`, (data) => {
             this.dispatchWireEvent(data);
-            if (data.kind === "run_done" || data.kind === "run_failed") {
+            if (data.kind === "run_done" || data.kind === "run_failed" || data.kind === "run_cancelled") {
                 // Backend writes the row update BEFORE publishing
                 // the terminal event (codex P2 on #843), so a
                 // refresh here lands the final state.
@@ -395,6 +395,14 @@ export class DroneViewModel {
                     error: ev.error ?? "run failed",
                 });
                 break;
+            case "run_cancelled":
+                // The inspector has no separate cancelled state yet: it shows the
+                // run as ended, with the reason in the error line.
+                this.dispatchIfAlive({
+                    type: "RunFailed",
+                    error: `Stopped: ${ev.reason ?? "cancelled"}`,
+                });
+                break;
         }
     }
 
@@ -409,7 +417,7 @@ export class DroneViewModel {
         // a partial-but-correct mid-flight backlog.
         if (Object.keys(this.blockResultsAtom()).length > 0) return;
         const row = this.runsAtom().find((r) => r.id === runId);
-        if (!row || (row.status !== "done" && row.status !== "failed")) return;
+        if (!row || (row.status !== "done" && row.status !== "failed" && row.status !== "cancelled")) return;
         const blocks = Object.entries(row.block_states ?? {}).map(
             ([blockId, st]) => ({
                 blockId,
@@ -425,7 +433,7 @@ export class DroneViewModel {
                 droneId,
                 status: row.status === "done" ? "done" : "failed",
                 output: row.output,
-                error: row.error,
+                error: row.status === "cancelled" ? `Stopped: ${row.error}` : row.error,
                 blocks,
             },
             "system",

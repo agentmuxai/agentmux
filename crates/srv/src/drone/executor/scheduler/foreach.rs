@@ -63,6 +63,7 @@ impl<'a> Scheduler<'a> {
             self.scope.local_bits = (false, false);
             match outcome {
                 Ok(output) => results.push(output),
+                Err(e) if self.cancelled => return Err(e),
                 Err(e) => match cfg.on_item_error {
                     OnItemError::Stop => return Err(format!("for-each {id}: item {index}: {e}")),
                     OnItemError::Continue => errors.push(json!({ "index": index, "error": e })),

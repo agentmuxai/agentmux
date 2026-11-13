@@ -169,6 +169,8 @@ pub enum RunStatus {
     Running,
     Done,
     Failed,
+    /// Stopped on purpose: by a person, an agent, the job's timeout or its next run.
+    Cancelled,
 }
 
 impl RunStatus {
@@ -177,6 +179,7 @@ impl RunStatus {
             Self::Running => "running",
             Self::Done => "done",
             Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
         }
     }
 }
