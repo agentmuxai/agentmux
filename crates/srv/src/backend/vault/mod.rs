@@ -797,6 +797,8 @@ pub fn activity(store: &Store, limit: i64) -> Result<Vec<VaultActivity>, String>
 }
 
 #[cfg(test)]
+mod card_scan_tests;
+#[cfg(test)]
 mod history_tests;
 #[cfg(test)]
 mod tests;

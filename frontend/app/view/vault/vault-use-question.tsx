@@ -10,6 +10,7 @@ import { createEffect, createSignal, onCleanup, Show, type Accessor, type Compon
 import { tip } from "@/app/element/tip";
 import { Button, Field, Select, TextInput, type SelectOption } from "@/app/element/ui";
 import type { UseRequest } from "@/types/rpc/UseRequest";
+import { CardTyped } from "./vault-use-card";
 import { answerUse, holdUse, vaultUses, type UseDecision } from "./vault-store";
 // The question's styles, loaded with it: a card in an agent's pane is drawn
 // whether or not a Vault pane was opened.
@@ -301,6 +302,23 @@ export type UseAnswerState = ReturnType<typeof createUseAnswer>;
 function TypedValue(props: { use: UseRequest; answer: UseAnswerState; focus: boolean }): JSX.Element {
     const u = props.use;
     const a = props.answer;
+    // A card is typed whole, in the person's own form: number, expiry, code, name and ZIP.
+    if (u.kind === "card") {
+        return (
+            <CardTyped
+                label={clip(u.entry_label, CLIP.label)}
+                why={`You're asked because ${clip(u.reason, CLIP.reason)}.`}
+                busy={a.busy()}
+                focus={props.focus}
+                save={a.save()}
+                onSave={a.setSave}
+                onText={a.setTyped}
+                onSubmit={() => {
+                    if (a.typed()) void a.decide("once");
+                }}
+            />
+        );
+    }
     return (
         <form
             onSubmit={(e) => {
