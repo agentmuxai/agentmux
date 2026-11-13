@@ -240,7 +240,7 @@ jobs:
     # §5 Phase 4; ~4.5 of the ~6.5 nextest minutes were compiling).
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: ${{ matrix.os == 'ubuntu-latest' && '0' || 'line-tables-only' }}
     # Both legs block, per SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md R2.
     # Ubuntu used to be `continue-on-error` — it spent ~6 min on every PR and
     # could not fail one, while Windows (14-15 min, the slowest leg) was the
