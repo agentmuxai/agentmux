@@ -50,6 +50,8 @@ const h = vi.hoisted(() => ({
     releaseTileDrag: null as unknown as Mock<(...a: unknown[]) => void>,
     toPng: null as unknown as Mock<(...a: unknown[]) => Promise<string>>,
     gating: new Set<string>(),
+    /** The node ids whose pane is a browser pane. */
+    browsers: new Set<string>(),
     resizing: false,
     markBehind: null as unknown as Mock<(...a: unknown[]) => void>,
 }));
@@ -76,6 +78,10 @@ vi.mock("@/app/drag/window-drag-events", () => ({
 vi.mock("@/app/drag/wayland-drag-image", () => ({ hideDragImageOnNativeWayland: () => false }));
 vi.mock("html-to-image", () => ({ toPng: (...a: unknown[]) => h.toPng(...a) }));
 vi.mock("./layoutModel", () => ({ LayoutModel: class {} }));
+vi.mock("./liveReflow", async (original) => ({
+    ...(await original<typeof import("./liveReflow")>()),
+    movesWithReflow: (leaf: { id: string }) => !h.browsers.has(leaf.id),
+}));
 vi.mock("./layoutModelHooks", () => ({
     useTileLayout: () => h.model,
     useNodeModel: (_m: unknown, node: { id: string }) => h.nodeModels.get(node.id),
@@ -106,6 +112,7 @@ vi.mock("./tile-drag", () => ({
 import { tileItemType } from "@/app/drag/drag-types";
 import { createTileLayout, type TileLayoutPlatform } from "./TileLayout.core";
 import { DRAG_PREVIEW_HOVER_MS } from "./drag-preview-size";
+import { beginPageCut, resetPageCutGateForTests } from "@/app/drag/page-cut-gate";
 import { beginPaneCapture, resetPaneCaptureGateForTests } from "@/app/drag/pane-capture-gate";
 import { REFLOW_CLIP, REFLOW_TRANSFORM, type ReflowEntry } from "./liveReflow";
 import type { SettlingPass } from "./settlingPass";
@@ -216,6 +223,8 @@ function mountWithTile(platform: MockPlatform) {
 
 beforeEach(() => {
     resetPaneCaptureGateForTests();
+    resetPageCutGateForTests();
+    h.browsers.clear();
     h.model = makeModel();
     h.nodeModels = new Map([["n1", makeNodeModel()]]);
     h.draggable = [];
@@ -680,6 +689,28 @@ describe("createTileLayout: a tile", () => {
             h.model.set.setTearOffOffered(false);
             expect(el.classList.contains("tear-off-offered")).toBe(false);
             expect(el.classList.contains("dragging")).toBe(true);
+            cfg.onDrop();
+        });
+
+        it("marks a dragged browser pane's place only once its page is cut away: the page is drawn above the sign until then", () => {
+            h.browsers.add(NODE.id);
+            const { cfg, el } = start();
+            h.model.set.setTearOffOffered(true);
+            const cut = beginPageCut();
+            cfg.onDragStart();
+            expect(el.classList.contains("tear-off-offered")).toBe(false);
+            cut();
+            expect(el.classList.contains("tear-off-offered")).toBe(true);
+            cfg.onDrop();
+        });
+
+        it("does not hold another pane's sign for a browser page elsewhere in the tab", () => {
+            const { cfg, el } = start();
+            h.model.set.setTearOffOffered(true);
+            const cut = beginPageCut();
+            cfg.onDragStart();
+            expect(el.classList.contains("tear-off-offered")).toBe(true);
+            cut();
             cfg.onDrop();
         });
 

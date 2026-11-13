@@ -658,6 +658,7 @@ partial list.
 | [`SPEC_ANIMATIONS_SETTINGS_PAGE_2026_11_01`](SPEC_ANIMATIONS_SETTINGS_PAGE_2026_11_01.md) | SPEC: an Animations page in Settings, with four presets that fill editable numbers |
 | [`SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09`](SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md) | Spec: Armory Naming Consolidation — Bundle vs Memory |
 | [`SPEC_ASK_USER_QUESTION_2026_06_15`](SPEC_ASK_USER_QUESTION_2026_06_15.md) | SPEC: AskUserQuestion — interactive agent questions in the agent pane |
+| [`SPEC_ATLAS_AGENT_MAP_2026_11_13`](SPEC_ATLAS_AGENT_MAP_2026_11_13.md) | Spec: Atlas, a map of every agent across machines and tiers |
 | [`SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02`](SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) | Spec: an orthogonal "attached task" status axis, sibling to `TurnPhase` |
 | [`SPEC_ATTENTION_TOAST_WITH_LINK_TO_AGENT_2026_11_02`](SPEC_ATTENTION_TOAST_WITH_LINK_TO_AGENT_2026_11_02.md) | Spec: when something waits on you, you can see what, where, and one click takes you to it |
 | [`SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03`](SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03.md) | Spec: the Audit as a live log of every agent action |

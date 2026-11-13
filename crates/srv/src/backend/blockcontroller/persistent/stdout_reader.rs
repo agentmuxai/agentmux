@@ -69,8 +69,8 @@ struct StdoutReader {
     cli_native: crate::backend::cli_native::reader::CliNativeReader,
     /// What this turn has done, for the loop guard (`agents::loop_guard`).
     loop_guard: crate::agents::loop_guard::LoopGuard,
-    /// The guard ended this turn: the interrupt's result frame is our stop, not a failure.
-    ended_by_guard: bool,
+    /// The guard ended this turn, and why: the interrupt's result frame is our stop, not a failure.
+    ended_by_guard: Option<String>,
 }
 
 /// What one parsed stdout line decided for the loop.
@@ -80,6 +80,9 @@ struct FrameOutcome {
     skip: bool,
     hold_back_for_resume_retry: bool,
     release_parked_notices: bool,
+    /// Why we ended this result frame's turn (the loop guard, the spend cap): the frame is shown with that
+    /// text, not the CLI's generic error.
+    ended_because: Option<String>,
 }
 
 /// What a frame says about its turn, before the turn-end work.
@@ -182,7 +185,7 @@ impl StdoutReader {
             login_failed_in_band: false,
             cli_native,
             loop_guard: Default::default(),
-            ended_by_guard: false,
+            ended_by_guard: None,
         };
         (stdout, reader)
     }
@@ -269,6 +272,7 @@ impl StdoutReader {
             if outcome.skip {
                 return;
             }
+            if let Some(why) = outcome.ended_because.take() { line = loop_stop::plain_end_frame(&line, &why); }
         }
 
         if outcome.hold_back_for_resume_retry {
@@ -329,7 +333,7 @@ impl StdoutReader {
         }
         let release_parked_notices = self.observe_frame(parsed);
         let FrameVerdict { is_result_frame, inband_error, early_failure } = self.frame_verdict(parsed);
-        let ended_by_guard = self.watch_for_loops(parsed, is_result_frame);
+        let ended_because = self.watch_for_loops(parsed, is_result_frame).or_else(|| (is_result_frame && loop_stop::take_cap_end(&self.block_id_read)).then(|| loop_stop::CAP_ENDED.to_string()));
         // Claude's turn-ending marker. Persistent mode never exits
         // between turns, so this is the only place `turn_active`
         // can go back to false without waiting for process exit —
@@ -346,8 +350,7 @@ impl StdoutReader {
             && self.inner_read.lock().unwrap().shutdown_generation == Some(self.my_generation_read);
         let is_error_result = is_result_frame
             && !closing_this_generation
-            && !ended_by_guard
-            && !loop_stop::take_cap_end(&self.block_id_read)
+            && ended_because.is_none()
             && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true);
         // reagentx P0 on PR #2371: the real CLI's stream-json
         // protocol embeds `session_id_field` on EVERY event,
@@ -386,23 +389,23 @@ impl StdoutReader {
             inband_error,
             flushed_failure_this_tick,
         );
-        FrameOutcome { skip: false, hold_back_for_resume_retry, release_parked_notices }
+        FrameOutcome { skip: false, hold_back_for_resume_retry, release_parked_notices, ended_because: ended_because.filter(|_| parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true)) }
     }
 
     /// Feeds the frame to the loop guard and ends the turn when it says the agent is stuck. `true` for the
-    /// result frame of a turn the guard ended.
-    fn watch_for_loops(&mut self, parsed: &serde_json::Value, is_result_frame: bool) -> bool {
+    /// result frame of a turn the guard ended: what it was stuck doing.
+    fn watch_for_loops(&mut self, parsed: &serde_json::Value, is_result_frame: bool) -> Option<String> {
         if is_result_frame {
             self.loop_guard.new_turn();
-            return std::mem::take(&mut self.ended_by_guard);
+            return self.ended_by_guard.take();
         }
-        if self.ended_by_guard {
-            return false;
+        if self.ended_by_guard.is_some() {
+            return None;
         }
         if let Some(stuck) = self.loop_guard.observe(parsed) {
             self.ended_by_guard = loop_stop::end_the_turn(&self.inner_read, self.my_generation_read, &self.block_id_read, self.mstore_read.as_ref(), &stuck);
         }
-        false
+        None
     }
 
     /// The answers to our own control requests, and the question the agent is blocked on.

@@ -156,7 +156,7 @@ impl Registry {
             op: spec.op.to_string(),
             summary: spec.summary(&facts),
             facts,
-            reason: crate::sagas::pending_shutdown::clean_reason(reason),
+            reason: crate::backend::shutdown_events::clean_reason(reason),
             status: Status::Asked,
             decided_by: None,
             deny_reason: String::new(),
@@ -203,7 +203,7 @@ impl Registry {
             }
             r.status = Status::Denied;
             r.decided_by = Some(approver_slug.to_string());
-            r.deny_reason = crate::sagas::pending_shutdown::clean_reason(reason);
+            r.deny_reason = crate::backend::shutdown_events::clean_reason(reason);
             r.decided_ms = Some(now_ms);
             r.ended_ms = Some(now_ms);
             Ok(())

@@ -13,6 +13,9 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use super::state::{Reducer, RunState};
+use super::value::Tv;
+
 /// Only env vars starting with this prefix are exposed to drone
 /// templates via `{{env.NAME}}`. See `ExecutionScope::lookup` for
 /// the security rationale.
@@ -29,8 +32,19 @@ const DRONE_ENV_PREFIX: &str = "AGENTMUX_DR_";
 #[derive(Debug, Default)]
 pub struct ExecutionScope {
     pub outputs: HashMap<String, Value>,
+    /// What `{{var.name}}` reads: a mirror of [`state`](Self::state)'s values.
     pub vars: HashMap<String, Value>,
     pub trigger: Value,
+    /// The run's named values with their reducers and taint bits. Write through
+    /// [`write_var`](Self::write_var), which keeps `vars` in step.
+    pub state: RunState,
+    /// Each block's output bits `(tainted, derived)`, set by the scheduler and
+    /// by the blocks that compute one. A block with none is clean.
+    pub bits: HashMap<String, (bool, bool)>,
+    /// `{{item}}` and `{{index}}` while a for-each runs its body, and the bits
+    /// of the item.
+    pub locals: HashMap<String, Value>,
+    pub local_bits: (bool, bool),
     pub drone_id: String,
 }
 
@@ -42,6 +56,57 @@ impl ExecutionScope {
     /// A scope for a run started by `trigger`.
     pub fn with_trigger(trigger: Value) -> Self {
         Self { trigger, ..Self::default() }
+    }
+
+    /// The value a template stands for: the raw value (a list, an object, a
+    /// number) when the template is one `{{...}}` token, else the text with every
+    /// token filled in.
+    pub fn value_of(&self, template: &str) -> Value {
+        let t = template.trim();
+        let one = t.strip_prefix("{{").and_then(|r| r.strip_suffix("}}")).filter(|inner| !inner.contains("{{") && !inner.contains("}}"));
+        if let Some(v) = one.and_then(|inner| self.lookup(inner.trim())) {
+            return v;
+        }
+        Value::String(self.resolve(template))
+    }
+
+    /// Declare how writes to `name` combine (`replace` when never declared).
+    pub fn declare_var(&mut self, name: &str, reducer: Reducer) -> Result<(), String> {
+        self.state.declare(name, reducer).map_err(|e| e.to_string())
+    }
+
+    /// Write a variable under its reducer, keeping the value `{{var.name}}` reads
+    /// in step with the state. An error leaves both as they were.
+    pub fn write_var(&mut self, name: &str, value: Tv) -> Result<(), String> {
+        self.state.write(name, value).map_err(|e| e.to_string())?;
+        if let Some(now) = self.state.get(name) {
+            self.vars.insert(name.to_string(), now.v.clone());
+        }
+        Ok(())
+    }
+
+    /// The bits `(tainted, derived)` of a text made by filling in `template`:
+    /// tainted when any value it reads is, derived when none is tainted and one
+    /// is derived. The trigger is outside text when something started the run.
+    pub fn bits_of(&self, template: &str) -> (bool, bool) {
+        let (mut tainted, mut derived) = (false, false);
+        let mut rest = template;
+        while let Some(open) = rest.find("{{") {
+            let Some(len) = find_close(&rest[open + 2..]) else { break };
+            let path = rest[open + 2..open + 2 + len].trim();
+            rest = &rest[open + 2 + len + 2..];
+            let mut parts = path.split('.');
+            let (t, d) = match parts.next().unwrap_or("") {
+                "trigger" => (!self.trigger.is_null(), false),
+                "env" => (false, false),
+                "item" | "index" if self.locals.contains_key(path.split('.').next().unwrap_or("")) => self.local_bits,
+                "var" | "vars" => parts.next().and_then(|name| self.state.get(name)).map(|tv| (tv.tainted, tv.derived)).unwrap_or((false, false)),
+                node => self.bits.get(node).copied().unwrap_or((false, false)),
+            };
+            tainted |= t;
+            derived |= d;
+        }
+        (tainted, !tainted && derived)
     }
 
     /// A scope for a run of the drone `drone_id`, started by `trigger`.
@@ -113,6 +178,9 @@ impl ExecutionScope {
             let name = rest.first()?;
             let v = self.vars.get(*name)?;
             return Some(walk(v.clone(), &rest[1..]));
+        } else if (head == "item" || head == "index") && self.locals.contains_key(head) {
+            // `{{item.path}}` and `{{index}}` inside a for-each body.
+            return Some(walk(self.locals.get(head)?.clone(), &rest));
         } else if head == "trigger" {
             // `{{trigger.path}}`: the run input. Missing keys resolve to
             // nothing, so the token stays visible like any unknown one.

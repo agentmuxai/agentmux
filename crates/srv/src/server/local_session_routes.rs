@@ -16,9 +16,9 @@ use std::time::{Duration, Instant};
 use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderMap, HeaderValue};
-use agentmux_common::AUTH_KEY_HEADER;
 use serde::Deserialize;
 
+use super::local_proof::{self, Admitted, Channels};
 use super::local_session::{CodeState, Collected, RouteClass, SessionId, SessionStore, LOGGED_FAILURES};
 use super::*;
 
@@ -57,19 +57,35 @@ impl Shape {
     fn host_ok(&self, host: &str) -> bool {
         self.origins.iter().any(|o| o.strip_prefix("http://") == Some(host))
     }
+
+    /// The address srv is bound to, as `host:port`: what its proof to `open` covers.
+    fn bound(&self) -> &str {
+        self.origins[0].strip_prefix("http://").unwrap_or(&self.origins[0])
+    }
+
+    /// The other origin it accepts, or empty.
+    fn declared(&self) -> &str {
+        self.origins.get(1).map_or("", String::as_str)
+    }
 }
 
 static SHAPE: OnceLock<Shape> = OnceLock::new();
 static STORE: OnceLock<SessionStore> = OnceLock::new();
+static CHANNELS: OnceLock<Channels> = OnceLock::new();
 
 fn store() -> &'static SessionStore {
     STORE.get_or_init(SessionStore::default)
+}
+
+fn channels() -> &'static Channels {
+    CHANNELS.get_or_init(Channels::default)
 }
 
 /// Turn the sign-in on, once the web listener has its port. Only for a headless srv that serves a UI.
 pub(crate) fn enable(port: u16, instance_id: &str) {
     if crate::headless::local_sign_in() {
         let _ = SHAPE.set(Shape::new(port, instance_id, crate::headless::public_origin()));
+        crate::headless::publish_port(port);
     }
 }
 
@@ -80,6 +96,7 @@ pub(crate) fn enabled() -> bool {
 /// The `/auth/*` routes.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
+        .route("/auth/hello", post(handle_hello))
         .route("/auth/code", post(handle_code))
         .route("/auth/pending", post(handle_pending))
         .route("/auth/confirm", post(handle_confirm))
@@ -100,7 +117,7 @@ enum Reason {
     Host,
     Origin,
     FetchSite,
-    Key,
+    Proof,
 }
 
 impl Reason {
@@ -110,7 +127,7 @@ impl Reason {
             Reason::Host => "host",
             Reason::Origin => "origin",
             Reason::FetchSite => "fetch-site",
-            Reason::Key => "key",
+            Reason::Proof => "proof",
         }
     }
 }
@@ -176,14 +193,40 @@ fn no_store(mut r: Response) -> Response {
     r
 }
 
-/// `open` and the other commands: the shape of a non-browser caller, and the key.
-async fn client_gate(state: &AppState, headers: &HeaderMap, route: &'static str) -> Result<(), Response> {
+/// `open` and the other commands: the shape of a non-browser caller, and a request that proves the
+/// caller holds the key on a channel it began with [`handle_hello`]. The key itself is never sent,
+/// and is not accepted on these routes.
+async fn channel_gate(headers: &HeaderMap, route: &'static str, body: &[u8]) -> Result<Admitted, Response> {
     let Some(shape) = SHAPE.get() else { return Err(refusal()) };
     if let Err(reason) = check_shape(shape, headers, Kind::Client) {
         return Err(refuse(route, reason).await);
     }
-    let key_ok = hval(headers, AUTH_KEY_HEADER).is_some_and(|k| secret_eq(k.as_bytes(), state.auth_key.as_bytes()));
-    if key_ok { Ok(()) } else { Err(refuse(route, Reason::Key).await) }
+    let seq = hval(headers, local_proof::SEQ_HEADER).and_then(|s| s.parse::<u64>().ok());
+    let admitted = match (hval(headers, local_proof::CHANNEL_HEADER), seq, hval(headers, local_proof::PROOF_HEADER)) {
+        (Some(channel), Some(seq), Some(proof)) => channels().admit(channel, seq, "POST", route, body, proof, Instant::now()),
+        _ => None,
+    };
+    match admitted {
+        Some(a) => Ok(a),
+        None => Err(refuse(route, Reason::Proof).await),
+    }
+}
+
+/// A 200 answer that carries the proof of the channel for the request it answers.
+fn proved(admitted: &Admitted, value: serde_json::Value) -> Response {
+    let body = serde_json::to_vec(&value).unwrap_or_default();
+    let proof = local_proof::response_proof(&admitted.key, admitted.seq, 200, &body);
+    let mut r = (StatusCode::OK, body).into_response();
+    r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    if let Ok(v) = HeaderValue::from_str(&proof) {
+        r.headers_mut().insert(local_proof::PROOF_HEADER, v);
+    }
+    no_store(r)
+}
+
+#[derive(Deserialize)]
+struct HelloBody {
+    nonce: String,
 }
 
 #[derive(Deserialize)]
@@ -202,49 +245,68 @@ struct HandleBody {
     handle: String,
 }
 
-// ---- The commands' routes (the key) ----
+// ---- The commands' routes (a proof of the key) ----
 
-/// `POST /auth/code`: the key for a new one-time code.
-async fn handle_code(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(r) = client_gate(&state, &headers, "/auth/code").await {
-        return r;
+/// `POST /auth/hello {nonce}`: srv proves to `open` that it holds the key and which address it is
+/// bound to, before `open` sends anything else. It asks for no secret, so anyone may call it; what it
+/// returns proves only what srv holds, and is made for this caller's nonce alone.
+async fn handle_hello(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    let Some(shape) = SHAPE.get() else { return refusal() };
+    if let Err(reason) = check_shape(shape, &headers, Kind::Client) {
+        return refuse("/auth/hello", reason).await;
     }
-    no_store(Json(json!({ "code": store().mint_code(Instant::now()) })).into_response())
+    let Ok(HelloBody { nonce }) = serde_json::from_slice(&body) else { return refuse("/auth/hello", Reason::Code).await };
+    let Some(hello) = channels().hello(state.auth_key.as_bytes(), &nonce, shape.bound(), shape.declared(), Instant::now()) else {
+        return refuse("/auth/hello", Reason::Code).await;
+    };
+    no_store(Json(json!({ "channel": hello.channel, "nonce": hello.nonce, "declared": shape.declared(), "proof": hello.proof })).into_response())
+}
+
+/// `POST /auth/code`: a new one-time code.
+async fn handle_code(headers: HeaderMap, body: Bytes) -> Response {
+    let admitted = match channel_gate(&headers, "/auth/code", &body).await {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    proved(&admitted, json!({ "code": store().mint_code(Instant::now()) }))
 }
 
 /// `POST /auth/pending {code}`: what became of the code `open` minted.
-async fn handle_pending(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    if let Err(r) = client_gate(&state, &headers, "/auth/pending").await {
-        return r;
-    }
+async fn handle_pending(headers: HeaderMap, body: Bytes) -> Response {
+    let admitted = match channel_gate(&headers, "/auth/pending", &body).await {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
     let Ok(CodeBody { code }) = serde_json::from_slice(&body) else { return refuse("/auth/pending", Reason::Code).await };
     let state = match store().code_state(&code, Instant::now()) {
         CodeState::Unused => json!({ "state": "unused" }),
         CodeState::Entered { phrase } => json!({ "state": "entered", "phrase": phrase }),
         CodeState::Gone => json!({ "state": "gone" }),
     };
-    no_store(Json(state).into_response())
+    proved(&admitted, state)
 }
 
 /// `POST /auth/confirm {code, accept}`: the person's answer for the session that code made.
-async fn handle_confirm(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    if let Err(r) = client_gate(&state, &headers, "/auth/confirm").await {
-        return r;
-    }
+async fn handle_confirm(headers: HeaderMap, body: Bytes) -> Response {
+    let admitted = match channel_gate(&headers, "/auth/confirm", &body).await {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
     let Ok(ConfirmBody { code, accept }) = serde_json::from_slice(&body) else { return refuse("/auth/confirm", Reason::Code).await };
     let found = store().decide(&code, accept, Instant::now());
     tracing::info!(accepted = accept && found, found, "local sign-in answered");
-    no_store(Json(json!({ "found": found })).into_response())
+    proved(&admitted, json!({ "found": found }))
 }
 
 /// `POST /auth/logout`: end every browser session.
-async fn handle_logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(r) = client_gate(&state, &headers, "/auth/logout").await {
-        return r;
-    }
+async fn handle_logout(headers: HeaderMap, body: Bytes) -> Response {
+    let admitted = match channel_gate(&headers, "/auth/logout", &body).await {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
     let revoked = store().revoke_all();
     tracing::info!(revoked, "local sign-in sessions revoked");
-    no_store(Json(json!({ "revoked": revoked })).into_response())
+    proved(&admitted, json!({ "revoked": revoked }))
 }
 
 // ---- The browser's routes (the code) ----

@@ -81,7 +81,7 @@ struct Scheduler<'a> {
     held: Vec<&'a FlowEdge>,
     /// How many times each guard has sent the run round its loop.
     rounds: HashMap<&'a str, u32>,
-    loop_started: HashMap<&'a str, Instant>,
+    loop_started: HashMap<String, Instant>,
     spent: f64,
     spent_by: HashMap<&'a str, f64>,
     history: HashMap<&'a str, VecDeque<Value>>,
@@ -152,7 +152,7 @@ impl<'a> Scheduler<'a> {
     }
 
     async fn run(&mut self) -> Result<(), String> {
-        let mut roots: Vec<&str> = self.node_of.keys().copied().filter(|id| self.incoming.get(id).is_none_or(|v| v.is_empty())).collect();
+        let mut roots: Vec<&str> = self.node_of.keys().copied().filter(|id| !self.plan.owned.contains(*id) && self.incoming.get(id).is_none_or(|v| v.is_empty())).collect();
         roots.sort_unstable();
         for id in roots {
             self.enqueue(id, false);
@@ -219,9 +219,39 @@ impl<'a> Scheduler<'a> {
         if let Some(stopped) = over_run_cap(self.spent, self.run_cap_usd) {
             return Err(stopped);
         }
+        // A loop's time runs from the first block of its cycle, not from the
+        // first time its guard sends the run round.
+        let guards: Vec<String> = self.plan.cycle_of.iter().filter(|(g, group)| self.plan.guards.contains_key(*g) && group.contains(id)).map(|(g, _)| g.clone()).collect();
+        for guard in guards {
+            self.loop_started.entry(guard).or_insert_with(Instant::now);
+        }
         let output = self.run_block(node).await?;
         self.finished.insert(id);
         self.route(node, &output)
+    }
+
+    /// Hand a block to the code for its kind. A for-each runs its body block
+    /// through [`run_block`](Self::run_block), so it is handled here, not in
+    /// `blocks`.
+    async fn dispatch(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
+        if kind == BlockKind::ForEach {
+            return self.run_foreach(node).await;
+        }
+        let scope = &mut self.scope;
+        match kind {
+            BlockKind::Variables => blocks::variables::run(node, scope).await,
+            BlockKind::Api => blocks::api::run(node, scope).await,
+            BlockKind::Condition => blocks::condition::run(node, scope).await,
+            BlockKind::Response => blocks::response::run(node, scope).await,
+            BlockKind::Agent => blocks::agent::run(node, scope).await,
+            BlockKind::Message => blocks::message::run(node, scope).await,
+            BlockKind::Task => blocks::task::run(node, scope).await,
+            BlockKind::Notify => blocks::notify::run(node, scope).await,
+            BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
+            BlockKind::Spawn => blocks::spawn::run(node, scope).await,
+            BlockKind::Transform => blocks::transform::run(node, scope).await,
+            BlockKind::ForEach => unreachable!("handled above"),
+        }
     }
 
     /// Run one block with its events and its recorded state.
@@ -239,19 +269,7 @@ impl<'a> Scheduler<'a> {
             completed_at: done.then(now_ms),
         };
         mark_state(self.states, id, state("running", None, None, false)).await;
-        let scope = &mut self.scope;
-        let result = match kind {
-            BlockKind::Variables => blocks::variables::run(node, scope).await,
-            BlockKind::Api => blocks::api::run(node, scope).await,
-            BlockKind::Condition => blocks::condition::run(node, scope).await,
-            BlockKind::Response => blocks::response::run(node, scope).await,
-            BlockKind::Agent => blocks::agent::run(node, scope).await,
-            BlockKind::Message => blocks::message::run(node, scope).await,
-            BlockKind::Task => blocks::task::run(node, scope).await,
-            BlockKind::Notify => blocks::notify::run(node, scope).await,
-            BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
-            BlockKind::Spawn => blocks::spawn::run(node, scope).await,
-        };
+        let result = self.dispatch(node, kind).await;
         match result {
             Ok(mut output) => {
                 self.keep_history(id, &mut output);
@@ -259,6 +277,7 @@ impl<'a> Scheduler<'a> {
                 self.spent += cost;
                 *self.spent_by.entry(id).or_default() += cost;
                 self.scope.outputs.insert(id.to_string(), output.clone());
+                self.mark_bits(node, kind);
                 let _ = self.tx.send(RunEvent::BlockDone { run_id: self.run_id.to_string(), block_id: id.to_string(), output: output.clone() });
                 mark_state(self.states, id, state("done", Some(output.clone()), None, true)).await;
                 if matches!(kind, BlockKind::Response) {
@@ -274,6 +293,25 @@ impl<'a> Scheduler<'a> {
                 Err(format!("block {id} failed: {e}"))
             }
         }
+    }
+
+    /// What a block's output is made of, for the taint bits: an Agent's answer, an
+    /// API response and a message reply are outside text; a Condition's result is
+    /// a boolean made from what it read (derived when that was tainted); a
+    /// Response is its template filled in. A Variables block sets its own.
+    fn mark_bits(&mut self, node: &FlowNode, kind: BlockKind) {
+        let read = |key: &str| node.data.get(key).and_then(Value::as_str).map(|t| self.scope.bits_of(t)).unwrap_or((false, false));
+        let bits = match kind {
+            BlockKind::Agent | BlockKind::Api | BlockKind::Message | BlockKind::AppQuery => (true, false),
+            BlockKind::Condition => {
+                let (tainted, derived) = read("expr");
+                (false, tainted || derived)
+            }
+            BlockKind::Response => read("template"),
+            BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach => return,
+            BlockKind::Task | BlockKind::Notify | BlockKind::Spawn => (false, false),
+        };
+        self.scope.bits.insert(node.id.clone(), bits);
     }
 
     /// A block that runs again carries its earlier outputs, newest last, as
@@ -304,7 +342,6 @@ impl<'a> Scheduler<'a> {
         if let Some(guard) = self.plan.guards.get(id).cloned() {
             let goes_round = edges.iter().zip(&carry).any(|(e, c)| *c && guard.loop_edges.contains(&e.id));
             if goes_round {
-                self.loop_started.entry(id).or_insert_with(Instant::now);
                 if let Some(why) = self.loop_cap(id, &guard) {
                     match guard.on_cap {
                         OnCap::EndRun => return Err(why),
@@ -324,14 +361,16 @@ impl<'a> Scheduler<'a> {
                 }
             }
         }
-        for (edge, carries) in edges.into_iter().zip(carry) {
-            if self.plan.back_edges.contains(&edge.id) {
-                if carries {
-                    self.go_round(edge);
-                }
-            } else {
-                self.leave(edge, carries);
+        // Back-edges first: going round clears the decisions inside the loop, so
+        // an edge decided before it would be erased.
+        let (back, forward): (Vec<_>, Vec<_>) = edges.into_iter().zip(carry).partition(|(e, _)| self.plan.back_edges.contains(&e.id));
+        for (edge, carries) in back {
+            if carries {
+                self.go_round(edge);
             }
+        }
+        for (edge, carries) in forward {
+            self.leave(edge, carries);
         }
         Ok(())
     }
@@ -380,6 +419,8 @@ impl<'a> Scheduler<'a> {
         self.enqueue(head, true);
     }
 }
+
+mod foreach;
 
 #[cfg(test)]
 #[path = "scheduler_tests.rs"]
