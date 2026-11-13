@@ -102,6 +102,7 @@ export function VaultHistoryDialog(props: { entryId: string; label: string; onCl
                     </div>
                 </Show>
                 <Show when={rows().length > 0} fallback={<div class="warden-section-stub">{history.loading ? "Loading…" : "Nothing here yet."}</div>}>
+                    <div class="vault-dialog-scope">
                     <table class="warden-manager-table vault-history-table">
                         <thead>
                             <tr>
@@ -118,6 +119,7 @@ export function VaultHistoryDialog(props: { entryId: string; label: string; onCl
                             <For each={rows()}>{(r) => <HistoryRow row={r} showHost={showHost()} />}</For>
                         </tbody>
                     </table>
+                    </div>
                 </Show>
                 <Show when={chain()}>
                     {(c) => (

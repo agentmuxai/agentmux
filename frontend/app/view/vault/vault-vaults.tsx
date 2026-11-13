@@ -47,7 +47,7 @@ export function VaultField(props: { value: string; onChange: (id: string) => voi
 }
 
 /** Narrows the lists to one Vault, or all of them. Shown once there is more than one. */
-export function VaultPicker(props: { value: string; onChange: (id: string) => void; onManage: () => void }): JSX.Element {
+export function VaultPicker(props: { value: string; onChange: (id: string) => void; onManage: () => void; extra?: JSX.Element }): JSX.Element {
     const options = createMemo<SegmentedOption<string>[]>(() => [
         { value: ALL_VAULTS, label: "All Vaults" },
         ...vaultList().map((v) => ({ value: v.id, label: `${v.name} (${v.entries})` })),
@@ -57,6 +57,7 @@ export function VaultPicker(props: { value: string; onChange: (id: string) => vo
             <Show when={vaultList().length > 1}>
                 <SegmentedControl class="vault-picker-choices" density="compact" ariaLabel="Vault" options={options()} value={props.value} onChange={props.onChange} />
             </Show>
+            {props.extra}
             <Button density="compact" icon="gear" onClick={props.onManage}>
                 Vaults
             </Button>

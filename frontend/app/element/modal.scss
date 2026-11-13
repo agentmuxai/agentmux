@@ -192,6 +192,9 @@
     font-weight: var(--font-weight-bold);
     line-height: var(--leading-tight);
     color: var(--main-text-color);
+    // A title that names something with no spaces in it (an environment variable, a path) breaks
+    // instead of running past the panel's edge.
+    overflow-wrap: anywhere;
 }
 
 .modal-panel-description {
@@ -199,6 +202,7 @@
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
     line-height: var(--leading-normal);
+    overflow-wrap: anywhere;
 }
 
 .modal-panel-body {

@@ -41,12 +41,19 @@
 
 .vault-request {
     display: flex;
+    // In a narrow pane the buttons go below the text, whole, rather than being squeezed beside it.
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-1) var(--space-2);
+
+    > .ui-button {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
 }
 
 .vault-request-text {
-    flex: 1 1 auto;
+    flex: 1 1 16em;
     min-width: 0;
     overflow-wrap: anywhere;
 }
@@ -93,6 +100,20 @@
     }
 }
 
+// A button that names a site or an agent ("Always on shop.example.com") wraps in a narrow pane, whole,
+// instead of running past the edge or being cut: the person reads where an answer applies.
+.vault-use-item-actions .ui-button,
+.vault-requests-deny-all .ui-button {
+    max-width: 100%;
+    white-space: normal;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.vault-clipped {
+    overflow-wrap: anywhere;
+}
+
 // The request a parked agent's row or the status bar sent the person to.
 .vault-use-item.is-focused,
 .vault-request.is-focused {
@@ -123,6 +144,13 @@
 
 .vault-id {
     margin-left: var(--space-2);
+    // An id or a label with no spaces (an environment variable's name) breaks rather than widening the list.
+    overflow-wrap: anywhere;
+}
+
+.vault-table td,
+.vault-table th {
+    overflow-wrap: anywhere;
 }
 
 .vault-actions {
@@ -130,39 +158,68 @@
     text-align: right;
 }
 
-// In a narrow pane the six columns (about 530px) cannot all show, so a row stacks instead: the
-// label across the top, then kind, details, value and date wrapping together, the row's buttons last.
+// In a narrow pane the columns of a list cannot all show, so a row stacks instead: the first cell across
+// the top, then the rest wrapping together, the row's buttons last. Every list in the pane uses it:
+// the entries (about 530px of columns), Kept by AgentMux, and Activity (about 640px, `vault-table--wide`).
+@mixin stacked-rows {
+    display: block;
+
+    thead {
+        display: none;
+    }
+
+    tbody {
+        display: block;
+    }
+
+    tr {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-1) var(--space-3);
+        padding: var(--space-2) var(--space-2);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    td {
+        padding: 0;
+        border-bottom: 0;
+        min-width: 0;
+    }
+
+    td:first-child,
+    td.vault-actions {
+        flex: 1 1 100%;
+    }
+
+    // An entry's name on the Activity tab is a button: a long one wraps inside it.
+    td:not(.vault-actions) .ui-button {
+        max-width: 100%;
+        white-space: normal;
+        text-align: left;
+    }
+}
+
 @container vault (max-width: 600px) {
     .vault-table {
-        display: block;
+        @include stacked-rows;
+    }
+}
 
-        thead {
-            display: none;
-        }
+@container vault (max-width: 700px) {
+    .vault-table--wide {
+        @include stacked-rows;
+    }
+}
 
-        tbody {
-            display: block;
-        }
+// A dialog is drawn outside the pane's own box, so its lists measure the dialog (`vault-dialog-scope`).
+.vault-dialog-scope {
+    container: vault-dialog / inline-size;
+}
 
-        tr {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: baseline;
-            gap: var(--space-1) var(--space-3);
-            padding: var(--space-2) var(--space-2);
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        td {
-            padding: 0;
-            border-bottom: 0;
-            min-width: 0;
-        }
-
-        td:first-child,
-        td.vault-actions {
-            flex: 1 1 100%;
-        }
+@container vault-dialog (max-width: 640px) {
+    .vault-history-table {
+        @include stacked-rows;
     }
 }
 
@@ -177,8 +234,10 @@
     align-items: center;
     gap: var(--space-2);
 
+    // The input gives way to its button in a narrow dialog rather than pushing it past the edge.
     > :first-child {
         flex: 1 1 auto;
+        min-width: 0;
     }
 }
 
@@ -315,6 +374,8 @@
     align-items: center;
     gap: var(--space-1);
     padding: 0 var(--space-1);
+    max-width: 100%;
+    overflow-wrap: anywhere;
     border: 1px solid var(--border-color);
 }
 
@@ -344,8 +405,10 @@
 
 .vault-version {
     display: flex;
+    // A narrow dialog wraps the line (the value, who and when, Restore) rather than running past the edge.
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-1) var(--space-3);
 
     > :last-child {
         margin-left: auto;
@@ -372,10 +435,15 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    // A long entry name (an environment variable's, a URL) breaks rather than widening the list; a word
+    // that fits on a line of its own is not broken ("unencrypted").
+    overflow-wrap: break-word;
 }
 
 .vault-check-entry {
     padding-left: 1.5em;
+    // An entry's own name (a key, a URL) may break anywhere, so the row shrinks to the dialog.
+    overflow-wrap: anywhere;
 }
 
 .vault-strength {
@@ -404,6 +472,7 @@
 // The Vault picker: narrows the lists to one Vault, and opens the Vaults dialog.
 .vault-picker {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
     // The bottom space keeps a wrapped second line off the section tabs.
@@ -419,7 +488,20 @@
 .vault-picker-choices {
     flex: 1 1 auto;
     min-width: 0;
-    overflow-x: auto;
+
+    // A long Vault's name wraps inside its choice rather than making the row scroll sideways.
+    .ui-segmented-option {
+        max-width: 100%;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        text-align: left;
+    }
+}
+
+// Import, Export and the note, here instead of in a header too narrow for them (vault-narrow-actions.tsx).
+.vault-narrow-actions {
+    display: flex;
+    gap: var(--space-1);
 }
 
 .vault-in-vault {

@@ -5,10 +5,12 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const seen = vi.hoisted(() => ({ model: null as null | { setWidth: (px: number) => void } }));
 vi.mock("./vault-view", () => ({
-    VaultView: (props: { model: { blockId: string; shown: () => boolean } }) => (
-        <div data-testid="vault-view" data-block={props.model.blockId} data-shown={String(props.model.shown())} />
-    ),
+    VaultView: (props: { model: { blockId: string; shown: () => boolean; setWidth: (px: number) => void } }) => {
+        seen.model = props.model;
+        return <div data-testid="vault-view" data-block={props.model.blockId} data-shown={String(props.model.shown())} />;
+    },
 }));
 
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
@@ -53,5 +55,34 @@ describe("the Vault pane", () => {
             "Export the Vault",
             "What the Vault may ask you",
         ]);
+    });
+
+    it("moves its header buttons into the pane, and shortens its title, as the pane narrows", () => {
+        const instance = createRoot(() => create(host()));
+        const Component = instance.component;
+        render(() => <Component ctx={host()} />);
+        const titles = () => instance.headerActions?.().map((a) => (a as { title?: string }).title);
+        const setWidth = seen.model!.setWidth;
+
+        // Until the view has measured the pane, and in a wide one: the header as before.
+        expect(titles()).toHaveLength(3);
+        setWidth(900);
+        expect(titles()).toHaveLength(3);
+        expect(instance.liveTitle?.().text).toBe("Vault · Personal data");
+
+        // Too narrow for the title and the three buttons: the buttons are in the pane (vault-narrow-actions.tsx).
+        setWidth(420);
+        expect(titles()).toEqual([]);
+        expect(instance.liveTitle?.().text).toBe("Vault · Personal data");
+
+        // Too narrow for "Vault · " as well: the section's short name.
+        setWidth(300);
+        expect(instance.liveTitle?.().text).toBe("Personal");
+        setBlockMeta({ view: "vault", "vault:section": "kept" });
+        expect(instance.liveTitle?.().text).toBe("Kept");
+
+        setWidth(900);
+        expect(titles()).toHaveLength(3);
+        expect(instance.liveTitle?.().text).toBe("Vault · Kept by AgentMux");
     });
 });

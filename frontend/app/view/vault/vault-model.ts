@@ -3,9 +3,18 @@
 
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { createMemo, createSignal, type Accessor } from "solid-js";
+import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { readZoom } from "@/app/store/zoom-factor";
 import { sectionOf } from "@/app/store/pane-sections";
 import { SECTION_LABELS, VAULT_SECTIONS, type VaultPaneSection } from "./vault-kinds";
+
+/**
+ * Below this many pixels of pane width (at chrome zoom 1) the header cannot hold the title and the
+ * Import, Export and note buttons without scrolling sideways, so the buttons move into the pane.
+ */
+export const NARROW_PX = 500;
+/** Below this the title is the section's short name alone: "Vault · Kept by AgentMux" no longer fits beside the tab's and the pane's own controls. */
+export const TIGHT_PX = 340;
 
 /** The Vault's state behind its native pane tab (vault.tsx). */
 export class VaultViewModel {
@@ -29,6 +38,12 @@ export class VaultViewModel {
     /** The export or import dialog, opened from the header. */
     transfer: Accessor<"export" | "import" | null>;
     openTransfer: (which: "export" | "import" | null) => void;
+    /** The pane's width as the view last saw it, for the header's fit (the header is drawn at the chrome zoom, the pane is not). */
+    setWidth: (px: number) => void;
+    /** The header has no room for its own buttons: they sit in the pane instead. */
+    narrow: Accessor<boolean>;
+    /** The header has no room for "Vault · " before the section's name. */
+    tight: Accessor<boolean>;
 
     constructor(ctx: PaneTabHostContext) {
         this.blockId = ctx.blockId;
@@ -54,5 +69,10 @@ export class VaultViewModel {
         const [transfer, setTransfer] = createSignal<"export" | "import" | null>(null);
         this.transfer = transfer;
         this.openTransfer = setTransfer;
+        // Unknown until the view has been laid out: the full header, as before.
+        const [width, setWidth] = createSignal(Infinity);
+        this.setWidth = setWidth;
+        this.narrow = createMemo(() => width() < NARROW_PX * chromeZoomAtom());
+        this.tight = createMemo(() => width() < TIGHT_PX * chromeZoomAtom());
     }
 }
