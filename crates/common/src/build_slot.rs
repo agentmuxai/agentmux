@@ -674,25 +674,8 @@ mod tests {
     }
 
     fn spawn_slot(bash: &Path, script: &Path, root: &Path, limit: Option<&str>, args: &[&str]) -> std::process::Child {
-        let mut cmd = std::process::Command::new(bash);
-        cmd.arg(script)
-            .args(args)
-            .env("AGENTMUX_BUILD_SLOT_DIR", root)
-            .env_remove("BUILD_SLOT_HELD")
-            .env_remove("BUILD_SLOT_MAX")
-            .env("BUILD_SLOT_POLL", "1")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        if let Some(n) = limit {
-            cmd.env("BUILD_SLOT_MAX", n);
-        }
-        #[cfg(windows)]
-        {
-            use crate::win32::NoWindow;
-            cmd.no_window();
-        }
-        cmd.spawn().unwrap()
+        let env: Vec<(&str, &str)> = limit.map(|n| ("BUILD_SLOT_MAX", n)).into_iter().collect();
+        spawn_slot_env(bash, script, root, &env, args)
     }
 
     /// One run at a time by default; with a limit of two, two hold a slot at once and a third waits,
