@@ -78,6 +78,7 @@ import { Portal } from "solid-js/web";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 
 import { nudgeDismissControl } from "./modal-dismiss-nudge";
+import { fadeOutBackdrop } from "./modal-exit-fade";
 import { createBackdropDismiss, createModalCaret } from "./modal-caret";
 import { firstFocusable, lastFocusable } from "./modal-focus-trap";
 import { ModalTitleIdContext } from "./modal-parts";
@@ -322,7 +323,7 @@ export const Modal: Component<ModalProps> = (props) => {
     };
 
     const closeModal = (): void => {
-        remove(id);
+        fadeOutBackdrop(rootRef, mountNode); remove(id); // the dim fades, not one frame: modal-exit-fade.ts
         stackEntry = null;
 
         // Release the per-region lock. If this was the last modal in

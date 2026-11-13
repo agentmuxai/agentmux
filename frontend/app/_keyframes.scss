@@ -20,6 +20,12 @@
     to   { opacity: 1; }
 }
 
+// Fade out to transparent; `forwards` keeps it there.
+@keyframes am-fade-out {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}
+
 // One full turn, starting at `--spin-from` (default 0deg).
 @keyframes am-spin {
     from { transform: rotate(var(--spin-from, 0deg)); }
