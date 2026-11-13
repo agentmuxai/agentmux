@@ -543,6 +543,16 @@ mod tests {
     }
 
     #[test]
+    fn a_repository_flag_with_its_value_glued_on_does_not_hide_the_command() {
+        for lead in [&["-Ro/r"][..], &["-R=o/r"], &["--repo=o/r"], &["-R", "o/r"]] {
+            let mut a: Vec<&str> = lead.to_vec();
+            a.extend(["pr", "create", "--title", "x"]);
+            let a: Vec<String> = a.iter().map(|s| s.to_string()).collect();
+            assert!(sends_text(&a), "{lead:?}");
+        }
+    }
+
+    #[test]
     fn a_short_flag_with_its_value_glued_on_is_scanned_too() {
         let aws = format!("{}{}", "AKIA", "ABCDEFGHIJKLMNOP");
         for a in [
