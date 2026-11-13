@@ -118,8 +118,92 @@ fn a_drone_template_installs_lists_and_waits_for_approval_like_a_job_one() {
     assert_eq!((info.state, info.error), (JobTemplateState::NeedsApproval, None));
     assert_eq!(info.drone.map(|d| d.nodes), Some(2), "the prompt carries the graph's summary");
     svc.approve("acme.echo", &info.hash, "").unwrap();
-    // Approved, it still makes no brief-based job.
-    let mut def = json!({ "template": { "id": "acme.echo" }, "action": { "kind": "message" } });
-    let err = crate::backend::jobs::from_template::apply_with(&mut def, None, &svc).unwrap_err();
-    assert!(err.contains("Drone template"), "{err}");
+}
+
+fn param_graph() -> Value {
+    json!({
+        "nodes": [node("tell", json!({ "kind": "message", "to": "{{param.who}}", "body": "Look at {{param.repo}} and {{ask.response}}" }))],
+        "edges": []
+    })
+}
+
+fn param_manifest() -> Value {
+    manifest(json!({
+        "params": { "type": "object", "properties": { "repo": { "type": "string" }, "who": { "type": "string", "default": "loap" } }, "required": ["repo"] }
+    }))
+}
+
+#[test]
+fn a_graph_may_use_only_the_parameters_the_template_declares() {
+    assert!(parse(&param_manifest(), Some(&param_graph()), None).is_ok());
+    let err = parse(&manifest(json!({})), Some(&param_graph()), None).unwrap_err();
+    assert!(err.contains("{{param.who}}") && err.contains("isn't one of its parameters"), "{err}");
+    let typo = json!({ "nodes": [node("a", json!({ "kind": "message", "to": "x", "body": "{{param.repo" }))], "edges": [] });
+    assert!(parse(&param_manifest(), Some(&typo), None).unwrap_err().contains("node \"a\""));
+}
+
+#[test]
+fn rendering_fills_the_parameters_once_and_leaves_the_drones_own_references() {
+    let pkg = parse(&param_manifest(), Some(&param_graph()), None).unwrap();
+    let given = json!({ "repo": "acme/site" }).as_object().cloned().unwrap();
+    let g = graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given).unwrap();
+    assert_eq!(g.nodes[0].data["to"], "loap", "a default fills in");
+    assert_eq!(g.nodes[0].data["body"], "Look at acme/site and {{ask.response}}");
+    // A value that opens a reference would be read by the drone at run time.
+    let hostile = json!({ "repo": "{{trigger.job.name}}" }).as_object().cloned().unwrap();
+    assert!(graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &hostile).unwrap_err().contains("can't contain"));
+    assert!(graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &Default::default()).unwrap_err().contains("required"));
+}
+
+#[test]
+fn values_that_form_a_reference_with_the_text_next_to_them_are_refused() {
+    let m = manifest(json!({
+        "params": { "type": "object", "properties": { "a": { "type": "string" }, "b": { "type": "string" } }, "required": ["a", "b"] }
+    }));
+    let render = |body: &str, a: &str, b: &str| {
+        let g = json!({ "nodes": [node("n", json!({ "kind": "message", "to": "x", "body": body }))], "edges": [] });
+        let pkg = parse(&m, Some(&g), None).unwrap();
+        let given = json!({ "a": a, "b": b }).as_object().cloned().unwrap();
+        graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given)
+    };
+    // Each value is clean alone; joined, they read as {{trigger.job.name}}.
+    let err = render("{{param.a}}{{param.b}}", "{", "{trigger.job.name}}").unwrap_err();
+    assert!(err.contains("forms {{"), "{err}");
+    // A value that ends or starts with a brace next to a brace of the template.
+    assert!(render("{{{param.a}}", "{trigger.job.name}}", "b").is_err(), "template brace + value brace");
+    assert!(render("{{param.a}}{{param.b}}", "x{", "{y").is_err(), "value, value");
+    // Braces that stay single, and the template's own references, are fine.
+    let ok = render("{{param.a}} {x} {{ask.response}} {{param.b}}", "{a}", "{b}").unwrap();
+    assert_eq!(ok.nodes[0].data["body"], "{a} {x} {{ask.response}} {b}");
+}
+
+#[test]
+fn a_drone_template_declares_no_secrets_yet() {
+    let m = manifest(json!({
+        "params": { "type": "object", "properties": { "t": { "type": "string", "format": "credential" } } },
+        "secrets": [{ "name": "TOKEN", "param": "t" }]
+    }));
+    assert!(parse(&m, Some(&graph()), None).unwrap_err().contains("secrets"));
+}
+
+#[test]
+fn a_job_from_a_drone_template_names_the_drone_it_runs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("src").join("acme.echo");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("template.json"), serde_json::to_vec(&param_manifest()).unwrap()).unwrap();
+    std::fs::write(dir.join("graph.json"), serde_json::to_vec(&param_graph()).unwrap()).unwrap();
+    let svc = JobTemplates::new(tmp.path().join("job-templates"), &tmp.path().join("data"), &[]);
+    svc.install(&dir, false).unwrap();
+    let hash = svc.get("acme.echo").unwrap().0.hash;
+    svc.approve("acme.echo", &hash, "").unwrap();
+
+    let make = |action: Value| json!({ "jobVersion": 1, "template": { "id": "acme.echo" }, "params": { "repo": "a/b" }, "action": action, "owner": "uid-a" });
+    let apply = |mut def: Value| crate::backend::jobs::from_template::apply_with(&mut def, None, &svc).map(|()| def);
+    let err = apply(make(json!({ "kind": "message", "to": "x" }))).unwrap_err();
+    assert!(err.contains("make its drone first"), "{err}");
+    let def = apply(make(json!({ "kind": "drone", "drone_id": "d-1" }))).unwrap();
+    assert_eq!(def["action"], json!({ "kind": "drone", "drone_id": "d-1" }), "no brief is written into a drone action");
+    assert_eq!(def["trigger"]["kind"], "cron", "the template's trigger default is filled in");
+    assert_eq!(def["template"]["hash"], hash.as_str());
 }
