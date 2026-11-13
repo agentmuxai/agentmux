@@ -374,7 +374,7 @@ async fn spawn_beside_leader(
     let block_id = state
         .reactive_handler
         .block_for_uid(leader_uid)
-        .ok_or_else(|| "the job's leader isn't running: start it, or the worker has no pane to open beside".to_string())?;
+        .ok_or_else(|| "the leader isn't running: start it, or the worker has no pane to open beside".to_string())?;
     let leader = leader_at(state, block_id).map_err(|e| e.message)?;
     let req = SpawnAgentRequest {
         auth: agentmux_common::api_types::UiAutomationAuth { agent_id: leader.def.name.clone(), ts_secs: 0, sig: String::new() },
