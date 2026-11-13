@@ -102,10 +102,16 @@ pub(crate) fn find_active_record_by_slug_and_definition(
     (!of_definition.is_empty()).then(|| preferred(of_definition))
 }
 
-/// Whether every record names one non-empty definition: they are one agent, recorded more than once.
+/// Whether every record names one non-empty definition that is a user agent: they are one agent, recorded more than
+/// once. A user agent's own record is keyed by its agent id, which is its definition id, so that is the mark of one. A
+/// template's launches share the template's id but are each their own agent, keyed by their own launch ids, and no
+/// record is keyed by the template: they are a collision, and the lookup refuses them (as the migration that re-keys the
+/// registry treats them, `m0026_registry_agent_id_rekey.rs`).
 fn same_definition(records: &[NamedAgentRecord]) -> bool {
     let first = &records[0].data.definition_id;
-    !first.is_empty() && records.iter().all(|r| &r.data.definition_id == first)
+    !first.is_empty()
+        && records.iter().all(|r| &r.data.definition_id == first)
+        && records.iter().any(|r| &r.data.instance_id == first)
 }
 
 /// The record to go by among several for one agent: the one whose instance holds a live lease, else the one launched
@@ -264,13 +270,15 @@ mod tests {
             );
         });
     }
-    /// Two records of one definition (an agent recorded twice across the move to definition-id keys). `launched` is
-    /// each record's `last_launched_at_ms`.
+    /// Two records of one definition (an agent recorded twice across the move to definition-id keys): its old launch
+    /// record, `a-launch`, and the record keyed by the agent id, `def-manpo`. `launched` is each record's
+    /// `last_launched_at_ms`.
     fn with_pair<T>(launched: [i64; 2], f: impl FnOnce(&Registry) -> T) -> T {
         with_registry(&[], || {
             let registry = Registry::open(crate::registry::resolve_shared_registry_dir().unwrap()).unwrap();
             for (i, at) in launched.into_iter().enumerate() {
-                let mut r = record(&format!("i{i}"), "Manpo");
+                let id = if i == 0 { "a-launch" } else { "def-manpo" };
+                let mut r = record(id, "Manpo");
                 r.data.definition_id = "def-manpo".to_string();
                 r.data.last_launched_at_ms = at;
                 registry.upsert(&r).unwrap();
@@ -285,15 +293,15 @@ mod tests {
     fn two_records_of_one_definition_are_one_agent_and_the_one_launched_last_answers() {
         with_pair([100, 200], |_| {
             let found = find_active_record_by_slug("manpo").expect("one agent, not a collision");
-            assert_eq!(found.data.instance_id, "i1");
+            assert_eq!(found.data.instance_id, "def-manpo");
             let scoped = find_active_record_by_slug_and_definition("manpo", "def-manpo").unwrap();
-            assert_eq!(scoped.data.instance_id, "i1", "the definition-scoped lookup picks the same record");
+            assert_eq!(scoped.data.instance_id, "def-manpo", "the definition-scoped lookup picks the same record");
         });
         with_pair([200, 100], |_| {
-            assert_eq!(find_active_record_by_slug("manpo").unwrap().data.instance_id, "i0");
+            assert_eq!(find_active_record_by_slug("manpo").unwrap().data.instance_id, "a-launch");
         });
         with_pair([100, 100], |_| {
-            assert_eq!(find_active_record_by_slug("manpo").unwrap().data.instance_id, "i0", "a tie is decided the same way every time");
+            assert_eq!(find_active_record_by_slug("manpo").unwrap().data.instance_id, "a-launch", "a tie is decided the same way every time");
         });
     }
 
@@ -315,8 +323,24 @@ mod tests {
         with_pair([100, 200], |registry| {
             let leases = crate::registry::LeaseStore::open(registry.root()).unwrap();
             let boot: std::sync::Arc<str> = std::sync::Arc::from("boot-live");
-            let _held = leases.claim("i0", &boot, "block-1", None).unwrap();
-            assert_eq!(find_active_record_by_slug("manpo").unwrap().data.instance_id, "i0", "the live one, though the other was launched later");
+            let _held = leases.claim("a-launch", &boot, "block-1", None).unwrap();
+            assert_eq!(find_active_record_by_slug("manpo").unwrap().data.instance_id, "a-launch", "the live one, though the other was launched later");
+        });
+    }
+
+    // On a channel that has not upgraded, two launches of one template share the template's id as their definition and
+    // each is its own agent, keyed by its launch id; no record is keyed by the template. Collapsing them would answer
+    // for one agent with the other's memory or history (#46578).
+    #[test]
+    fn two_launches_of_one_template_are_still_a_collision() {
+        with_registry(&[("launch-1", "Manpo"), ("launch-2", "MANPO")], || {
+            let records = crate::registry::Registry::open(crate::registry::resolve_shared_registry_dir().unwrap()).unwrap();
+            for id in ["launch-1", "launch-2"] {
+                let mut r = record(id, if id == "launch-1" { "Manpo" } else { "MANPO" });
+                r.data.definition_id = "template-9".to_string();
+                records.upsert(&r).unwrap();
+            }
+            assert!(find_active_record_by_slug("manpo").is_none(), "two template launches are two agents: refused");
         });
     }
 
