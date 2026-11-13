@@ -221,14 +221,54 @@ const edgeDirection = (e: PointerEvent): number =>
     isFloaterBandControl(e.target)
         ? FLOATER_EDGE_NONE
         : floaterEdgeDirection(e.clientX, e.clientY, window.innerWidth, window.innerHeight);
-// Show the resize cursor for a direction (0 clears it) on <html>. The band
-// is invisible, so the cursor is the only sign it is there, and a cursor
-// set on <body> loses to any child that sets its own (a header button).
-// floating-pane-workspace.scss applies it to every element.
-const showEdgeCursor = (d: number): void => {
+// The resize cursor. The band is invisible, so the cursor is the only sign it is there.
+//
+// Hovering the band sets it on the one element under the pointer (inline, `!important`, so the
+// element's own `cursor`, a header button's or a text field's, does not hide it). Restyling
+// the whole document for a hover (`html[data-floater-edge] *`) cost about 45 ms on a six-pane
+// layout at every crossing of the band; one element costs nothing (#47376, the same pattern
+// as the text-drag guard, #45977).
+//
+// Only a resize in progress needs the cursor everywhere, since the pointer leaves the band and
+// the window: that sets it on <html>, and floating-pane-workspace.scss applies it to every
+// element. It goes on at the first move of the drag, so a press with no move restyles nothing.
+interface HoverCursor {
+    el: HTMLElement | SVGElement;
+    value: string;
+    priority: string;
+}
+let hoverCursor: HoverCursor | null = null;
+const clearHoverCursor = (): void => {
+    if (!hoverCursor) return;
+    const { el, value, priority } = hoverCursor;
+    hoverCursor = null;
+    if (value) el.style.setProperty("cursor", value, priority);
+    else el.style.removeProperty("cursor");
+};
+const showHoverCursor = (d: number, target: EventTarget | null): void => {
+    const el = target instanceof HTMLElement || target instanceof SVGElement ? target : null;
+    if (!d || !el) {
+        clearHoverCursor();
+        return;
+    }
+    if (hoverCursor?.el !== el) {
+        clearHoverCursor();
+        hoverCursor = {
+            el,
+            value: el.style.getPropertyValue("cursor"),
+            priority: el.style.getPropertyPriority("cursor"),
+        };
+    }
+    el.style.setProperty("cursor", FLOATER_RESIZE_CURSORS[d], "important");
+};
+const showDragCursor = (d: number): void => {
     const root = document.documentElement;
-    if (d) root.dataset.floaterEdge = FLOATER_RESIZE_CURSORS[d];
-    else delete root.dataset.floaterEdge;
+    if (!d) delete root.dataset.floaterEdge;
+    else if (root.dataset.floaterEdge !== FLOATER_RESIZE_CURSORS[d]) root.dataset.floaterEdge = FLOATER_RESIZE_CURSORS[d];
+};
+const clearEdgeCursor = (): void => {
+    clearHoverCursor();
+    showDragCursor(0);
 };
 
 // Coalesce moves the same way the header MOVE does: one IPC in
@@ -266,8 +306,9 @@ function installEdgeResize(label: string): void {
         e.preventDefault();
         e.stopImmediatePropagation();
         dir = d;
-        // The cursor stays this one for the whole drag, wherever the pointer goes.
-        showEdgeCursor(d);
+        // The cursor stays this one for the whole drag, wherever the pointer goes: on the element
+        // under the pointer now, and on the whole document from the first move.
+        showHoverCursor(d, e.target);
         startX = e.screenX;
         startY = e.screenY;
         const target = e.target as Element;
@@ -290,9 +331,10 @@ function installEdgeResize(label: string): void {
     const onPointerMove = (e: PointerEvent): void => {
         if (!resizing) {
             // Hover feedback only.
-            showEdgeCursor(edgeDirection(e));
+            showHoverCursor(edgeDirection(e), e.target);
             return;
         }
+        showDragCursor(dir);
         // screenX/Y are CSS px. Windows: rect is physical px → scale by DPR.
         // macOS / Linux: rect is DIP (1 CSS px == 1 DIP) → scale 1:1.
         // posScale() encodes this: DPR on Windows, 1 elsewhere (mirrors drag).
@@ -319,7 +361,7 @@ function installEdgeResize(label: string): void {
         if (!resizing) return;
         resizing = false;
         try { (e.target as Element).releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-        showEdgeCursor(0);
+        clearEdgeCursor();
     };
 
     // Capture phase + registered before the header listener so the
@@ -331,7 +373,7 @@ function installEdgeResize(label: string): void {
         document.removeEventListener("pointerdown", onPointerDown, true);
         document.removeEventListener("pointermove", onPointerMove, true);
         document.removeEventListener("pointerup", onPointerUp, true);
-        showEdgeCursor(0);
+        clearEdgeCursor();
     });
 }
 
