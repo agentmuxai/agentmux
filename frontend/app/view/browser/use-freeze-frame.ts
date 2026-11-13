@@ -3,6 +3,7 @@
 
 import { createSignal, onCleanup, onMount, type Accessor, type JSX, type Setter } from "solid-js";
 import { getApi } from "@/util/app-api";
+import { ELEMENT_DRAG_KINDS, isAnyUnderway } from "@/app/drag/drag-session";
 import { hidesPaneUnderOverlay, watchPaneClip } from "@/app/platform/pane-backend";
 import type { BrowserViewModel } from "./browser-model";
 import type { PaneRect } from "./use-pane-rect-sync";
@@ -28,6 +29,14 @@ export interface FreezeFrame {
 // Everywhere else the host cuts a hole in the pane and the pane stays live, so
 // freezing would be harmful: it forces a compositor frame, visible as a jerk,
 // and defers the clip IPC.
+//
+// Not for an in-app drag either. The page is hidden for the whole drag behind
+// the drag catcher's own picture of it, which is painted before the hole is
+// asked for (browser-view.tsx). A frame held here as well was a second picture
+// in the same placeholder: it follows the placeholder's size, so once the live
+// reflow moved the pane's tile it was drawn scaled down over the first. And
+// waiting for it kept the live page on screen, over the pane's place, for up
+// to FREEZE_WAIT_CAP_MS of the drag (pane-overlay.ts).
 
 // Offsets from the placeholder's edges, not a fixed size: the frame then
 // follows the placeholder while a splitter is dragged, stretched in step with
@@ -157,6 +166,13 @@ function overlayHitsPane(pr: PaneRect, dpr: number, rects: { x: number; y: numbe
 
 function handleOverlayClip(f: FreezeState, e: Event): void {
     if (!freezeGatesOpen(f)) return;
+    if (isAnyUnderway(ELEMENT_DRAG_KINDS)) {
+        // The drag catcher's picture is the one picture: drop a frame held from before, and ask for no wait.
+        cancelFreezeClear(f);
+        f.token++;
+        f.setSnapshot(null);
+        return;
+    }
     const detail = (e as CustomEvent).detail as
         | {
               rects?: { x: number; y: number; w: number; h: number }[];

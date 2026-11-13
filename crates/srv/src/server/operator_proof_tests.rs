@@ -108,6 +108,31 @@ async fn registering_as_an_agent_drops_the_proof() {
 }
 
 #[tokio::test]
+async fn a_browser_the_person_signed_in_is_their_window_and_a_bare_connection_is_not() {
+    let session = crate::server::local_session::SessionId::of_cookie("a-cookie");
+
+    let (browser, mut rx) = engine();
+    assert!(vouch_for_signed_in_browser(&browser, Some(&session)));
+    assert_eq!(call(&browser, &mut rx, PROBE).await.unwrap(), json!(true));
+
+    // No confirmed session (the key alone, an agent's way in): no proof.
+    let (keyed, mut keyed_rx) = engine();
+    assert!(!vouch_for_signed_in_browser(&keyed, None));
+    assert!(call(&keyed, &mut keyed_rx, PROBE).await.is_err());
+}
+
+#[tokio::test]
+async fn a_signed_in_browser_that_registers_as_an_agent_loses_the_proof() {
+    let session = crate::server::local_session::SessionId::of_cookie("a-cookie");
+    let (engine, mut rx) = engine();
+    assert!(vouch_for_signed_in_browser(&engine, Some(&session)));
+    as_agent(&engine, "AgentX");
+    assert_eq!(call(&engine, &mut rx, PROBE).await.unwrap_err(), "FORBIDDEN: probe");
+    // And a connection already registered as an agent is never vouched for.
+    assert!(!vouch_for_signed_in_browser(&engine, Some(&session)));
+}
+
+#[tokio::test]
 async fn a_connection_registered_as_an_agent_gets_no_challenge_and_no_proof() {
     let (engine, mut rx) = engine();
     let nonce = challenge(&engine, &mut rx).await;

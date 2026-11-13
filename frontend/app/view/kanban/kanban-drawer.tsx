@@ -45,6 +45,7 @@ const EVENT_WORDS: Record<string, string> = {
     reopened: "took the acceptance back",
     sent_back: "sent it back",
     released: "handed it back",
+    handed_back: "handed it back: not its area",
     expired: "lost its lease",
     cancelled: "cancelled it",
     retried: "tried it again",

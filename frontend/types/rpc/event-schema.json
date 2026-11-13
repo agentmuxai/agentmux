@@ -711,6 +711,15 @@
     }
   },
   {
+    "event": "message-flow",
+    "payloadTs": {
+      "imports": [
+        "MessageFlowEvent"
+      ],
+      "name": "MessageFlowEvent"
+    }
+  },
+  {
     "event": "muxbus:status",
     "payloadTs": {
       "imports": [
@@ -968,6 +977,15 @@
         "TimeSeriesData"
       ],
       "name": "TimeSeriesData"
+    }
+  },
+  {
+    "event": "task-flow",
+    "payloadTs": {
+      "imports": [
+        "TaskFlowEvent"
+      ],
+      "name": "TaskFlowEvent"
     }
   },
   {

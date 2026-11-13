@@ -20,9 +20,13 @@
  * drag ends (pane-size-hold.ts). A browser pane's page is a native window that neither a transform nor a clip
  * moves; for the length of a drag it is cut away behind a picture of itself and held where it was
  * (browser-view.tsx, use-pane-rect-sync.ts), so its tile is plain DOM and moves with the rest, once every
- * page's cut has landed (page-cut-gate.ts). That is Windows, where the host cuts a page to a region; elsewhere
- * a browser pane that is not the dragged one stays where it is (`movesWithDrag`). On unless the
- * `layout:livereflow` setting is false.
+ * page's cut has landed (page-cut-gate.ts). That holds on every platform: a host that cannot cut a page to a
+ * region hides it whole for the drag, and what is drawn in its tile is the same one picture
+ * (use-freeze-frame.ts). On unless the `layout:livereflow` setting is false.
+ *
+ * A single pane tab dragged over a pane's body is placed the same way (pillPlacement.ts): the panes take the
+ * rects its drop leaves them. The tab's new pane is in no tile yet, so its landing rect is the landing zone
+ * alone; a pane's only tab moves the pane itself, whose tile goes to the landing rect as a dragged pane's does.
  * docs/specs/SPEC_LIVE_REFLOW_PANE_DRAG_2026_11_06.md §4, §5, §6;
  * docs/reports/REPORT_LIVE_REFLOW_REAL_SIZES_2026_11_10.md.
  *
@@ -40,8 +44,8 @@ import { notifyPaneReflow } from "@/app/platform/pane-anim";
 import { holdPaneSizes } from "@/app/platform/pane-size-hold";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { getObjectValue, makeORef } from "@/app/store/mos";
-import { isWindows } from "@/util/platformutil";
 import type { LayoutModel } from "./layoutModel";
+import { pillReflowIn } from "./pillDragState";
 import type { SettlingPass } from "./settlingPass";
 import type { LayoutNode } from "./types";
 
@@ -116,21 +120,11 @@ function isBrowserBlock(blockId: string | undefined): boolean {
 
 /**
  * Whether a glide outside a drag (settlingPass.ts) can move `leaf`'s tile: every pane but a browser pane, whose
- * page is live then, a native window that stays where the layout put it. A drag's reflow moves them all.
+ * page is live then, a native window that stays where the layout put it. A drag's reflow moves them all:
+ * the page is cut away or hidden for the drag, behind one picture of itself.
  */
 export function movesWithReflow(leaf: LayoutNode): boolean {
     return !isBrowserBlock(shownBlockId(leaf));
-}
-
-/**
- * Whether a drag's reflow can move `leaf`'s tile while another pane is the dragged one. Every pane on Windows,
- * where the host cuts a browser page away behind its picture for the drag. Elsewhere the host has no such cut
- * (it hides a whole page or shows it, pane-overlay.ts): a page whose tile moved was drawn at its old size in
- * the tile's new place, over its own picture (the Linux look check of #7081). So there a browser pane stays
- * where it is while another pane is dragged, as it did before browser panes joined the reflow.
- */
-function movesWithDrag(leaf: LayoutNode): boolean {
-    return isWindows() || movesWithReflow(leaf);
 }
 
 /** Whether panes glide at all: unless the `layout:livereflow` setting is false. Reactive. */
@@ -289,15 +283,19 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
     const targets = createMemo((): Targets | undefined => {
         if (!liveReflowEnabled()) return undefined;
         const tearOff = model.tearOffLayout();
-        if (!model.activeDrag() && !tearOff) return settlingTargets(model.settlingPass());
+        const dragging = model.activeDrag() || pillReflowIn(model);
+        if (!dragging && !tearOff) return settlingTargets(model.settlingPass());
         const leafs = model.leafs();
         if (leafs.length > REFLOW_MAX_PANES) return undefined;
         // A tear-off shown after the release has no page to wait for: the drag's cuts are over.
-        const waiting = paneCaptureInFlight() || (model.activeDrag() && pageCutsPending());
+        const waiting = paneCaptureInFlight() || (dragging && pageCutsPending());
         const future = waiting ? undefined : (model.futureLayout() ?? tearOff);
         const current = model.additionalProps();
         const futureRectOfBlock = new Map<string, Dimensions>();
         for (const id of future?.leafIds ?? []) {
+            // Not the moved pane's: it is found by its id (below), and a tab pill's stand-in carries the block
+            // of a tab that is still in its own pane, which must not take that pane to the landing rect.
+            if (id === future!.movedId) continue;
             const blockId = future!.leafBlockIds[id];
             if (blockId && future!.rects[id]) futureRectOfBlock.set(blockId, future!.rects[id]);
         }
@@ -307,8 +305,8 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
             if (!from) continue;
             // The dragged pane keeps its node id through the preview: its future rect is the landing rect.
             const moved = !!future && leaf.id === future.movedId;
-            const follows = leaf.data?.blockId && movesWithDrag(leaf);
-            const to = moved ? future!.rects[leaf.id] : follows ? futureRectOfBlock.get(leaf.data!.blockId!) : undefined;
+            const blockId = leaf.data?.blockId;
+            const to = moved ? future!.rects[leaf.id] : blockId ? futureRectOfBlock.get(blockId) : undefined;
             const { width, height } = wholePx(to ?? from);
             const leaving = moved && !!future!.leaves;
             byId.set(leaf.id, { rect: shownPx(to ?? from), size: { width, height }, moved: moved && !!to, leaving });
@@ -359,7 +357,8 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
     return {
         reflowFor: (nodeId) => entries().get(nodeId),
         liveReflowActive: () => !!targets()?.showing,
-        liveReflowExpected: () => liveReflowEnabled() && model.activeDrag() && model.leafs().length <= REFLOW_MAX_PANES,
+        liveReflowExpected: () =>
+            liveReflowEnabled() && (model.activeDrag() || pillReflowIn(model)) && model.leafs().length <= REFLOW_MAX_PANES,
         landingSettled,
     };
 }

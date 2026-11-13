@@ -6,6 +6,8 @@
  * pointer's zone and gives the header glow where the pill would join and the placement ghost where
  * it would become a pane of its own. The adapter and the zone maths are mocked, as in
  * PaneTabStrip.dropTarget.test.tsx, so the wiring between zone, feedback and drop is what is tested.
+ * A tab of this layout is handed to the layout at its first placing sample (pillPlacement.ts, mocked too);
+ * the ghost tested here is what a tab from another window tab still gets.
  * docs/specs/SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.1.
  */
 
@@ -17,6 +19,18 @@ const payloadCalls: unknown[] = [];
 const zone: { current: any } = { current: { kind: "none" } };
 const ghostCalls: unknown[][] = [];
 const clearCalls: number[] = [];
+/** The layout's side (pillPlacement.ts): whether it takes the tab, has the drag now, and lets this pane read the pointer. */
+const layout = {
+    takes: false,
+    placing: false,
+    reads: true,
+    /** Whether the layout places the tab where it was released; when not, it gives the drag back. */
+    drops: true,
+    begun: [] as unknown[][],
+    registered: [] as unknown[][],
+    followed: [] as unknown[][],
+    dropped: [] as unknown[][],
+};
 
 vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
     draggable: () => () => {},
@@ -34,6 +48,25 @@ vi.mock("@/layout/lib/paneBodyDrop", () => ({
     clearPillGhost: () => clearCalls.push(1),
 }));
 
+vi.mock("@/layout/lib/pillPlacement", () => ({
+    beginPillPlacement: (...args: unknown[]) => {
+        layout.begun.push(args);
+        return layout.takes;
+    },
+    panePillZone: () => (layout.reads ? zone.current : { kind: "none" }),
+    followPill: (...args: unknown[]) => void layout.followed.push(args),
+    dropPill: (...args: unknown[]) => {
+        layout.dropped.push(args);
+        if (!layout.drops) layout.placing = false;
+        return layout.drops;
+    },
+    registerPillPane: (...args: unknown[]) => {
+        layout.registered.push(args);
+        return () => {};
+    },
+}));
+vi.mock("@/layout/lib/pillDragState", () => ({ pillPlacingIn: () => layout.placing }));
+
 import { PaneTabStrip } from "./PaneTabStrip";
 import { paneTabItemType } from "@/app/drag/drag-types";
 import { endDrag } from "@/app/drag/drag-session";
@@ -47,6 +80,7 @@ beforeEach(() => {
     payloadCalls.length = 0;
     ghostCalls.length = 0;
     clearCalls.length = 0;
+    Object.assign(layout, { takes: false, placing: false, reads: true, drops: true, begun: [], registered: [], followed: [], dropped: [] });
     zone.current = { kind: "none" };
     vi.useFakeTimers();
 });
@@ -106,6 +140,100 @@ describe("PaneTabStrip bodyDrop", () => {
         dropTargetCalls.length = 0;
         const one = renderPane({ tabs: [TABS[0]] });
         expect(one.config.canDrop(own)).toBe(false);
+    });
+
+    it("gives the layout what it needs to read a pointer over this pane", () => {
+        const { header, place } = renderPane();
+        expect(layout.registered).toHaveLength(1);
+        const [, nodeId, pane] = layout.registered[0] as [unknown, string, { headerEl: HTMLElement; place: (id: string, zone: unknown) => unknown }];
+        expect(nodeId).toBe("pane-self");
+        expect(pane.headerEl).toBe(header);
+        pane.place("dragged", { kind: "place", direction: 2, side: "left" });
+        expect(place).toHaveBeenCalledWith("dragged", { kind: "place", direction: 2, side: "left" });
+    });
+
+    it("hands a tab of this layout over the body's edge to the layout: no ghost of its own, and the overlay is the layout's", () => {
+        const { config, showOverlay } = renderPane();
+        layout.takes = true;
+        zone.current = { kind: "place", direction: 2, side: "left" };
+
+        config.onDragEnter(pill());
+        expect(layout.begun).toHaveLength(1);
+        expect(layout.begun[0].slice(1)).toEqual(["dragged", { x: 40, y: 300 }]);
+        expect(ghostCalls).toHaveLength(0);
+        expect(showOverlay._set).not.toHaveBeenCalled();
+
+        // The pointer is on the layout's catcher now, which is how it left this pane.
+        layout.placing = true;
+        config.onDragLeave();
+        expect(clearCalls).toHaveLength(0);
+        expect(showOverlay._set).not.toHaveBeenCalled();
+    });
+
+    it("passes its samples to the layout while the layout has the drag and the catcher has had no event yet", () => {
+        const { config, header } = renderPane();
+        layout.takes = true;
+        zone.current = { kind: "place", direction: 2, side: "left" };
+        config.onDragEnter(pill());
+        layout.placing = true;
+
+        zone.current = { kind: "join" };
+        later();
+        config.onDrag(pill());
+
+        expect(layout.followed).toHaveLength(1);
+        expect(layout.followed[0].slice(1)).toEqual([{ x: 40, y: 300 }]);
+        // The layout still has the drag: this pane shows nothing of its own.
+        expect(header.classList.contains("pane-header--foreign-hover")).toBe(false);
+    });
+
+    it("a quick release that comes to this pane while the layout has the drag is the layout's drop", () => {
+        const { config, place, onReceiveForeignTab } = renderPane();
+        layout.takes = true;
+        zone.current = { kind: "place", direction: 2, side: "left" };
+        config.onDragEnter(pill());
+        layout.placing = true;
+
+        config.onDrop(pill());
+        vi.runAllTimers();
+
+        expect(layout.dropped).toHaveLength(1);
+        expect(layout.dropped[0].slice(1)).toEqual([{ x: 40, y: 300 }]);
+        // The layout commits it: not placed a second time from here, and not joined.
+        expect(place).not.toHaveBeenCalled();
+        expect(onReceiveForeignTab).not.toHaveBeenCalled();
+    });
+
+    it("and is this pane's when the layout places nothing there: released over the middle, the tab joins", () => {
+        const { config, place, onReceiveForeignTab } = renderPane();
+        layout.takes = true;
+        zone.current = { kind: "place", direction: 2, side: "left" };
+        config.onDragEnter(pill());
+        layout.placing = true;
+        layout.drops = false;
+
+        zone.current = { kind: "join" };
+        config.onDrop(pill());
+        vi.runAllTimers();
+
+        expect(layout.dropped).toHaveLength(1);
+        expect(place).not.toHaveBeenCalled();
+        expect(onReceiveForeignTab).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not read the pointer while it is not the pane that stands there: no glow, no ghost, no drop", () => {
+        const { config, header, place, onReceiveForeignTab } = renderPane();
+        layout.reads = false;
+        zone.current = { kind: "join" };
+
+        config.onDragEnter(pill());
+        expect(header.classList.contains("pane-header--foreign-hover")).toBe(false);
+        expect(layout.begun).toHaveLength(0);
+
+        config.onDrop(pill());
+        vi.runAllTimers();
+        expect(place).not.toHaveBeenCalled();
+        expect(onReceiveForeignTab).not.toHaveBeenCalled();
     });
 
     it("a pill over the body's edge shows the ghost, brings the overlay on screen, and does not glow the header", () => {
@@ -168,6 +296,31 @@ describe("PaneTabStrip bodyDrop", () => {
         vi.runAllTimers();
 
         expect(place).toHaveBeenCalledWith("dragged", { kind: "place", direction: 2, side: "left" });
+        expect(onReceiveForeignTab).not.toHaveBeenCalled();
+    });
+
+    it("takes a release the layout's catcher passes on as its own drop: the tab joins", () => {
+        const { place, onReceiveForeignTab } = renderPane();
+        const [, , pane] = layout.registered[0] as [unknown, string, { release: (drop: unknown) => void }];
+        zone.current = { kind: "join" };
+
+        pane.release(pill());
+        vi.runAllTimers();
+
+        expect(payloadCalls).toEqual([null]);
+        expect(onReceiveForeignTab).toHaveBeenCalledWith("dragged");
+        expect(place).not.toHaveBeenCalled();
+    });
+
+    it("and refuses it under its own rule: this pane's only tab cannot be dropped on it", () => {
+        const { onReceiveForeignTab } = renderPane({ tabs: [TABS[0]] });
+        const [, , pane] = layout.registered[0] as [unknown, string, { release: (drop: unknown) => void }];
+        zone.current = { kind: "join" };
+
+        pane.release(pill({ blockId: "a", sourceNodeId: "pane-self" }));
+        vi.runAllTimers();
+
+        expect(payloadCalls).toEqual([]);
         expect(onReceiveForeignTab).not.toHaveBeenCalled();
     });
 

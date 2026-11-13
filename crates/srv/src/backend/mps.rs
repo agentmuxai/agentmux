@@ -63,6 +63,12 @@ pub const EVENT_USER_INPUT: &str = "userinput";
 /// promote pending `PendingMessage` entries into the conversation
 /// document. Payload: `{ block_id, message_id }`.
 pub const EVENT_AGENT_MESSAGE_ACCEPTED: &str = "agent-message-accepted";
+/// One message between two agents was handled by this srv: ids and times only, never its text
+/// (`message_flow`). Not scoped: any window may subscribe. Payload: `MessageFlowEvent`.
+pub const EVENT_MESSAGE_FLOW: &str = "message-flow";
+/// A task was filed, reassigned, started or handed back (`task_flow`): names, ids and times only, never its text.
+/// Not scoped. Payload: `TaskFlowEvent`.
+pub const EVENT_TASK_FLOW: &str = "task-flow";
 /// Image attachment processing (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md
 /// §6.5). Scoped `block:<id>` of the pane that started the batch. Payloads are
 /// `AttachmentProgressEvent` / `AttachmentReadyEvent` / `AttachmentFailedEvent`

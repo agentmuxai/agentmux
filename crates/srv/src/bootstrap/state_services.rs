@@ -170,6 +170,14 @@ fn spawn_spend_services(state: &AppState) {
 }
 
 /// Starts the services that run beside the server and need the app state.
+/// The panes that watch messages are told as they happen: the Audit when a row is written, the Atlas map when
+/// a message goes between two agents.
+fn install_message_brokers(state: &AppState) {
+    backend::audit_live::install_broker(Arc::clone(&state.broker));
+    backend::message_flow::install(Arc::clone(&state.broker));
+    backend::task_flow::install(Arc::clone(&state.broker));
+}
+
 pub fn spawn_state_services(state: &AppState) {
     // Keeps the host's copy of which panes agents own current (for its popup
     // decisions; docs/specs/SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
@@ -243,8 +251,7 @@ pub fn spawn_state_services(state: &AppState) {
     backend::supervisor::settings::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::framer::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::damage::install_broker(Arc::clone(&state.broker));
-    // The open Audit panes are told when a row is written.
-    backend::audit_live::install_broker(Arc::clone(&state.broker));
+    install_message_brokers(state);
     crate::identity::accounts_changed::install_broker(Arc::clone(&state.broker));
     // The open workspace saves itself as it changes (SPEC_WORKSPACES_2026_10_23.md §4.1).
     crate::server::service::user_workspace::spawn_saver(Arc::clone(&state.mstore));
@@ -425,6 +432,7 @@ pub async fn shut_down(
 ) {
     // This host's other LAN channels stop listing this one as a sibling.
     lan_discovery.withdraw_instance_record();
+    crate::headless::withdraw_port_file();
 
     // Shutdown cleanup: close every agent through the one teardown
     // (SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md, `Policy::app_exit()`),

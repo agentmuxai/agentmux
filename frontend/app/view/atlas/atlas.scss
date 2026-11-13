@@ -1,0 +1,338 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Atlas pane (atlas-view.tsx). The colours follow the Swarm: working in the error colour, waiting in the accent,
+// idle in the success colour, a limit or a sign-in in the warning colour, stopped muted.
+
+@use "../../mixins.scss";
+
+.atlas {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    color: var(--main-text-color);
+}
+
+.atlas-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+
+    .swarm-filter-bar {
+        flex: 1 1 140px;
+        min-width: 0;
+    }
+}
+
+.atlas-viewport {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    cursor: grab;
+    touch-action: none;
+
+    &:active {
+        cursor: grabbing;
+    }
+}
+
+.atlas-world {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
+}
+
+.atlas-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+}
+
+.atlas-region {
+    position: absolute;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--panel-bg-color);
+
+    &--stale {
+        opacity: 0.6;
+    }
+}
+
+.atlas-region__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2) 0;
+    font-size: var(--text-sm);
+}
+
+.atlas-region__title {
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.atlas-region__badge {
+    flex: none;
+    color: var(--secondary-text-color);
+    font-size: var(--text-2xs);
+}
+
+.atlas-edges {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.atlas-edge {
+    fill: none;
+    stroke: var(--secondary-text-color);
+    stroke-opacity: 0.55;
+    stroke-width: 1.5;
+
+    &--spawned {
+        stroke-dasharray: 4 3;
+    }
+}
+
+.atlas-node {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--border-color);
+    border-left-width: 3px;
+    border-radius: var(--radius-sm);
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+
+    &--selected {
+        border-color: var(--accent-color);
+    }
+
+    &--stale {
+        opacity: 0.6;
+    }
+
+    &--working {
+        border-left-color: var(--error-text-color);
+    }
+
+    &--waiting {
+        border-left-color: var(--accent-color);
+    }
+
+    &--idle {
+        border-left-color: var(--success-text-color);
+    }
+
+    &--error,
+    &--limited,
+    &--signed_out {
+        border-left-color: var(--warning-text-color);
+    }
+
+    &--stopped {
+        border-left-color: var(--secondary-text-color);
+        opacity: 0.7;
+    }
+
+    // In the By seat layout a node carries its machine as a tint along its top.
+    $tints: var(--accent-color), var(--success-color), var(--warning-color), var(--error-color), var(--info-color), var(--secondary-text-color);
+    @for $i from 1 through 6 {
+        &[data-tint="#{$i - 1}"] {
+            box-shadow: inset 0 2px 0 color-mix(in srgb, #{nth($tints, $i)} 80%, transparent);
+        }
+    }
+}
+
+.atlas-node__top {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.atlas-node__name {
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.atlas-node__sub {
+    overflow: hidden;
+    color: var(--secondary-text-color);
+    font-size: var(--text-2xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.atlas-node__dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-full);
+    background: var(--secondary-text-color);
+}
+
+.atlas-node--working > .atlas-node__top > .atlas-node__dot,
+.atlas-node__dot.atlas-node--working {
+    background: var(--error-text-color);
+}
+
+.atlas-node--waiting > .atlas-node__top > .atlas-node__dot,
+.atlas-node__dot.atlas-node--waiting {
+    background: var(--accent-color);
+}
+
+.atlas-node--idle > .atlas-node__top > .atlas-node__dot,
+.atlas-node__dot.atlas-node--idle {
+    background: var(--success-text-color);
+}
+
+.atlas-node--error > .atlas-node__top > .atlas-node__dot,
+.atlas-node--limited > .atlas-node__top > .atlas-node__dot,
+.atlas-node--signed_out > .atlas-node__top > .atlas-node__dot,
+.atlas-node__dot.atlas-node--error,
+.atlas-node__dot.atlas-node--limited,
+.atlas-node__dot.atlas-node--signed_out {
+    background: var(--warning-text-color);
+}
+
+.atlas-fold {
+    position: absolute;
+    z-index: var(--z-map-fold);
+}
+
+.atlas-fold__list {
+    position: absolute;
+    left: 0;
+    top: 100%;
+    z-index: var(--z-map-fold-list);
+    min-width: 200px;
+    max-height: 240px;
+    margin: var(--space-1) 0 0;
+    padding: var(--space-1);
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--main-bg-color);
+
+    li {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        padding: 2px var(--space-1);
+        font-size: var(--text-xs);
+    }
+}
+
+.atlas-fold__name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.atlas-stopped-count {
+    position: absolute;
+    left: var(--space-2);
+    bottom: var(--space-2);
+    color: var(--secondary-text-color);
+    font-size: var(--text-2xs);
+}
+
+// The card is a sheet over the map's right edge, and the whole pane's width in a narrow pane.
+.atlas-card {
+    position: absolute;
+    right: var(--space-2);
+    top: var(--space-2);
+    bottom: var(--space-2);
+    box-sizing: border-box;
+    width: min(280px, calc(100% - var(--space-2) * 2));
+    padding: var(--space-2);
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--main-bg-color);
+    cursor: default;
+    z-index: var(--z-map-card);
+}
+
+.atlas-card__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+
+.atlas-card__name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.atlas-card__rows {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-1) var(--space-2);
+    margin: 0;
+    font-size: var(--text-xs);
+
+    dt {
+        color: var(--secondary-text-color);
+    }
+
+    dd {
+        min-width: 0;
+        margin: 0;
+        overflow-wrap: anywhere;
+    }
+}
+
+.atlas-card__actions {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+}

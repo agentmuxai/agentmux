@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
 use super::choice_facts::{add_option_owners, describe_scope};
+use super::click_delivery;
 use super::combobox;
 pub(super) use super::hidden_choices::hidden_choices;
 use super::dates;
@@ -141,6 +142,7 @@ pub(super) async fn page_now(cdp: &mut CdpSession, before: &str) -> Option<Value
 /// Scroll into view and report where to click, in viewport coordinates, or why a click can't land
 /// (`scripts/click_point.js`).
 const CLICK_POINT: &str = include_str!("scripts/click_point.js");
+
 
 /// Focus and select the current contents, so inserted text replaces them.
 pub(super) const PREPARE_FILL: &str = r#"function () {
@@ -586,6 +588,7 @@ pub(super) async fn click_element(
     frame: Option<&FrameRef>,
     object_id: &str,
 ) -> Result<(), String> {
+    let watching = click_delivery::begin(cdp, object_id).await?;
     let p = match call_on(cdp, object_id, CLICK_POINT, vec![]).await {
         Ok(p) => p,
         Err(e) => return Err(explain_unclickable(cdp, object_id, e).await),
@@ -600,7 +603,8 @@ pub(super) async fn click_element(
         x += ox;
         y += oy;
     }
-    click_at(root, x, y).await
+    click_at(root, x, y).await?;
+    click_delivery::check(cdp, object_id, watching).await
 }
 
 /// An element that can't be clicked, as the agent should read it: "not

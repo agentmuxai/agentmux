@@ -6,6 +6,8 @@
 //! (`sync_agent_reactive`) and the batch pull (`sync_agents_batched`).
 
 use super::*;
+use crate::backend::message_flow::{self, MessageFlowOutcome, MessageFlowVia, Seen};
+use crate::backend::reactive::InjectionRequest;
 
 #[path = "delivery_steps.rs"]
 mod steps;
@@ -190,12 +192,15 @@ pub(super) async fn claim_and_deliver(
         // a failed turn, or given back to the relay to come again. Or a routine message to a session gone
         // cold, which waits for its next activity as a local or LAN one does (#2263).
         if crate::server::jekt_hold::hold_wan_for_unavailable(mstore, handler, &req) || crate::server::jekt_cold::hold_relayed(&req).await {
+            note_flow(&req, MessageFlowOutcome::Held);
             delivered_count += 1;
             steps::record_delivered(&checked);
             continue;
         }
         let charged = req.files_delivery.is_some().then(|| req.clone());
+        let flow_req = (req.source_agent.clone(), req.target_agent.clone(), req.request_id.clone());
         let delivery = handler.inject_message(req);
+        note_flow_of(&flow_req, if delivery.success { MessageFlowOutcome::Delivered } else { MessageFlowOutcome::Refused });
         if let Some(charged) = &charged {
             crate::server::jekt_files::settle(charged, delivery.success);
         }
@@ -225,6 +230,18 @@ pub(super) async fn claim_and_deliver(
 
     delivery_status::fetched(agent_id, delivered_count, &body.expired);
     AgentSyncOutcome::Ok
+}
+
+/// Tells the Atlas map a message that came through the cloud relay was handled here (`backend::message_flow`).
+fn note_flow(req: &InjectionRequest, outcome: MessageFlowOutcome) {
+    note_flow_of(&(req.source_agent.clone(), req.target_agent.clone(), req.request_id.clone()), outcome);
+}
+
+/// [`note_flow`] for a request already handed on: its sender, its receiver and its id.
+fn note_flow_of((from, to, msg_id): &(Option<String>, String, Option<String>), outcome: MessageFlowOutcome) {
+    let (Some(from), Some(msg_id)) = (from, msg_id) else { return };
+    let here = crate::backend::reactive::registry::local_host_label();
+    message_flow::note(&Seen { msg_id, from, from_host: None, to, to_host: Some(&here), via: MessageFlowVia::Wan, outcome });
 }
 
 /// Give a claimed injection back to pending, so it's delivered on a later

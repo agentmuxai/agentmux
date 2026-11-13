@@ -199,7 +199,6 @@
 143 crates/srv/src/backend/storage/filestore/offset_ops.rs::FileStore::write_at
 119 crates/srv/src/backend/storage/migrations.rs::run_filestore_migrations
 131 crates/srv/src/backend/subagent_watcher/mod.rs::SubagentWatcher::build_watch
-286 crates/srv/src/backend/subagent_watcher/scan.rs::SubagentWatcher::reconcile_stale_subagents_impl
 139 crates/srv/src/backend/supervisor/watcher.rs::Supervisor::evaluate
 103 crates/srv/src/backend/swarm_remote.rs::lan_hosts
 167 crates/srv/src/backend/sysinfo.rs::log_memory_attribution
@@ -220,7 +219,6 @@
 102 crates/srv/src/bootstrap/stores.rs::prepare_in_process
 113 crates/srv/src/bootstrap/watchers.rs::start_parent_watcher
 154 crates/srv/src/broker/state.rs::update
-142 crates/srv/src/drone/executor/engine.rs::execute
 134 crates/srv/src/identity/oauth_client.rs::start_code_flow
 125 crates/srv/src/identity/resolver/oauth_probe.rs::probe_oauth_status
 111 crates/srv/src/messaging/discord/gateway.rs::handle_dispatch

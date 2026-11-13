@@ -53,6 +53,7 @@ import type { LanFirewall } from "@/types/rpc/LanFirewall";
 import type { LanInstanceList } from "@/types/rpc/LanInstanceList";
 import type { LspMessageEvent } from "@/types/rpc/LspMessageEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
+import type { MessageFlowEvent } from "@/types/rpc/MessageFlowEvent";
 import type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
 import type { MuxObjBatch } from "@/types/rpc/MuxObjBatch";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
@@ -90,6 +91,7 @@ import type { SubagentCompletedEvent } from "@/types/rpc/SubagentCompletedEvent"
 import type { SubagentNamedEvent } from "@/types/rpc/SubagentNamedEvent";
 import type { SubagentSpawnedEvent } from "@/types/rpc/SubagentSpawnedEvent";
 import type { SubagentUpdatedEvent } from "@/types/rpc/SubagentUpdatedEvent";
+import type { TaskFlowEvent } from "@/types/rpc/TaskFlowEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 import type { ToolChunk } from "@/types/rpc/ToolChunk";
 import type { UpgradeRequestsEvent } from "@/types/rpc/UpgradeRequestsEvent";
@@ -179,6 +181,7 @@ export type MuxEventPayloads = {
   "mcp:observed": BlockRefEvent;
   "media:file_changed": PathChangedEvent;
   "memories:changed": null;
+  "message-flow": MessageFlowEvent;
   "muxbus:status": MuxBusDeliveryStatus;
   "namedagents:changed": null;
   notification: OsNotification;
@@ -209,6 +212,7 @@ export type MuxEventPayloads = {
   "subagent:spawned": SubagentSpawnedEvent;
   "subagent:updated": SubagentUpdatedEvent;
   sysinfo: TimeSeriesData;
+  "task-flow": TaskFlowEvent;
   tool_chunk: ToolChunk;
   userattention: UserAttentionEvent;
   vault: VaultEvent;
@@ -307,6 +311,7 @@ export const TYPED_MUX_EVENTS = [
   "mcp:observed",
   "media:file_changed",
   "memories:changed",
+  "message-flow",
   "muxbus:status",
   "namedagents:changed",
   "notification",
@@ -337,6 +342,7 @@ export const TYPED_MUX_EVENTS = [
   "subagent:spawned",
   "subagent:updated",
   "sysinfo",
+  "task-flow",
   "tool_chunk",
   "userattention",
   "vault",

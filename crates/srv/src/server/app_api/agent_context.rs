@@ -286,6 +286,16 @@ pub(crate) fn compact_message(focus: Option<&str>) -> String {
     if focus.is_empty() { "/compact".to_string() } else { format!("/compact {focus}") }
 }
 
+/// srv's own compaction of a route agent whose context is far over its budget: the compaction `Agents compact` schedules,
+/// without a focus (the harness's summarizer decides what to keep). `Err(why)` when it can't be sent now.
+pub(crate) fn compact_for_backstop(state: &AppState, block_id: &str) -> Result<(), &'static str> {
+    let (provider, container) = provider_of(state, block_id).ok_or("the pane can't be read")?;
+    let message = compact_request(&provider, container, None)?;
+    context_reading::schedule_compact(block_id, agentmux_common::time::now_ms_u64())?;
+    tokio::runtime::Handle::current().spawn(compact_when_turn_ends(state.clone(), block_id.to_string(), message));
+    Ok(())
+}
+
 /// Wait for `block_id`'s turn to end, then send `message` as AgentMux's own turn.
 async fn compact_when_turn_ends(state: AppState, block_id: String, message: String) {
     let deadline = tokio::time::Instant::now() + TURN_END_WAIT;

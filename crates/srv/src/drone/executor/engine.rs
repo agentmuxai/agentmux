@@ -1,20 +1,16 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! DAG executor — topological sort + per-layer runner.
-//!
-//! Phase 1 is sequential per layer (one block at a time). Phase 2
-//! parallelizes independent branches with `tokio::spawn`.
+//! A run's handle and its event stream. The scheduler that runs the graph is
+//! `scheduler.rs`.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use super::blocks;
-use crate::drone::data_flow::ExecutionScope;
-use crate::drone::types::{BlockKind, BlockState, FlowEdge, FlowNode, DroneGraph};
+use crate::drone::types::{BlockState, DroneGraph};
 
 /// Streaming events emitted to the frontend during a run.
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
@@ -74,7 +70,7 @@ pub async fn run_drone(
             run_id: run_id_for_task.clone(),
             drone_id: drone_id_for_evt,
         });
-        match execute(&run_id_for_task, (&graph, trigger, run_cap_usd, &drone_id), &tx_for_task, &states_for_task).await {
+        match super::scheduler::execute(&run_id_for_task, (&graph, trigger, run_cap_usd, &drone_id), &tx_for_task, &states_for_task).await {
             Ok(output) => {
                 let _ = tx_for_task.send(RunEvent::RunDone {
                     run_id: run_id_for_task,
@@ -97,158 +93,7 @@ pub async fn run_drone(
     })
 }
 
-/// Why the run must not start another block: its Agent blocks have spent its
-/// cap (`caps::reached`: a run that spent nothing has not reached any cap).
-fn over_run_cap(scope: &ExecutionScope, cap: Option<f64>) -> Option<String> {
-    let cap = cap?;
-    let spent: f64 = scope.outputs.values().filter_map(|o| o.get("cost_usd").and_then(Value::as_f64)).sum();
-    crate::backend::jobs::caps::reached(spent, cap).then(|| format!("stopped: the run spent ${spent:.2}, its cap of ${cap:.2}"))
-}
-
-async fn execute(
-    run_id: &str,
-    (graph, trigger, run_cap_usd, drone_id): (&DroneGraph, Value, Option<f64>, &str),
-    tx: &mpsc::UnboundedSender<RunEvent>,
-    final_states: &Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>,
-) -> Result<Value, String> {
-    if graph.nodes.is_empty() {
-        return Err("drone has no blocks".to_string());
-    }
-
-    let layers = topological_layers(graph)?;
-    let mut scope = ExecutionScope::for_drone(drone_id, trigger);
-    let mut response_output: Option<Value> = None;
-    let nodes_by_id: HashMap<String, &FlowNode> =
-        graph.nodes.iter().map(|n| (n.id.clone(), n)).collect();
-    // Blocks whose execution is pruned by a Condition's non-matching
-    // branch (or transitively, because all their incoming edges came
-    // from skipped/pruned sources). They consume no events and run no
-    // block runner — important so the false-branch's API/agent calls
-    // do not fire side effects when the condition is true.
-    let mut skipped: HashSet<String> = HashSet::new();
-
-    for layer in layers {
-        for block_id in layer {
-            let node = nodes_by_id
-                .get(&block_id)
-                .ok_or_else(|| format!("internal: missing node {block_id}"))?;
-            let kind = block_kind_of(node)?;
-
-            if should_skip(&block_id, graph, &nodes_by_id, &scope, &skipped) {
-                skipped.insert(block_id.clone());
-                mark_state(
-                    final_states,
-                    &block_id,
-                    BlockState {
-                        status: "skipped".to_string(),
-                        output: None,
-                        error: None,
-                        started_at: None,
-                        completed_at: Some(now_ms()),
-                    },
-                )
-                .await;
-                continue;
-            }
-
-            if let Some(stopped) = over_run_cap(&scope, run_cap_usd) {
-                return Err(stopped);
-            }
-            let _ = tx.send(RunEvent::BlockStarted {
-                run_id: run_id.to_string(),
-                block_id: block_id.clone(),
-            });
-            // Captured once at BlockStarted so the running / done / error
-            // transitions all carry the same start timestamp — otherwise
-            // the run-history record loses per-block duration (reagent P2).
-            let started_at = now_ms();
-            mark_state(
-                final_states,
-                &block_id,
-                BlockState {
-                    status: "running".to_string(),
-                    output: None,
-                    error: None,
-                    started_at: Some(started_at),
-                    completed_at: None,
-                },
-            )
-            .await;
-
-            let result = match kind {
-                BlockKind::Variables => blocks::variables::run(node, &mut scope).await,
-                BlockKind::Api => blocks::api::run(node, &scope).await,
-                BlockKind::Condition => blocks::condition::run(node, &scope).await,
-                BlockKind::Response => blocks::response::run(node, &scope).await,
-                BlockKind::Agent => blocks::agent::run(node, &scope).await,
-                BlockKind::Message => blocks::message::run(node, &scope).await,
-                BlockKind::Task => blocks::task::run(node, &scope).await,
-                BlockKind::Notify => blocks::notify::run(node, &scope).await,
-                BlockKind::AppQuery => blocks::app_query::run(node, &scope).await,
-            };
-
-            match result {
-                Ok(output) => {
-                    scope.outputs.insert(block_id.clone(), output.clone());
-                    let _ = tx.send(RunEvent::BlockDone {
-                        run_id: run_id.to_string(),
-                        block_id: block_id.clone(),
-                        output: output.clone(),
-                    });
-                    mark_state(
-                        final_states,
-                        &block_id,
-                        BlockState {
-                            status: "done".to_string(),
-                            output: Some(output.clone()),
-                            error: None,
-                            started_at: Some(started_at),
-                            completed_at: Some(now_ms()),
-                        },
-                    )
-                    .await;
-                    if matches!(kind, BlockKind::Response) {
-                        // Response emits `{ "value": <resolved-template> }`;
-                        // unwrap to the bare value so the run's final
-                        // output is the user-facing string (or whatever
-                        // the template resolved to), not the wrapper
-                        // JSON. (codex P3 on PR #755.)
-                        response_output = Some(
-                            output
-                                .get("value")
-                                .cloned()
-                                .unwrap_or(output),
-                        );
-                    }
-                }
-                Err(e) => {
-                    let _ = tx.send(RunEvent::BlockError {
-                        run_id: run_id.to_string(),
-                        block_id: block_id.clone(),
-                        error: e.clone(),
-                    });
-                    mark_state(
-                        final_states,
-                        &block_id,
-                        BlockState {
-                            status: "error".to_string(),
-                            output: None,
-                            error: Some(e.clone()),
-                            started_at: Some(started_at),
-                            completed_at: Some(now_ms()),
-                        },
-                    )
-                    .await;
-                    return Err(format!("block {block_id} failed: {e}"));
-                }
-            }
-        }
-    }
-
-    Ok(response_output.unwrap_or(Value::Null))
-}
-
-async fn mark_state(
+pub(super) async fn mark_state(
     states: &Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>,
     id: &str,
     state: BlockState,
@@ -257,153 +102,9 @@ async fn mark_state(
     g.insert(id.to_string(), state);
 }
 
-use agentmux_common::time::now_ms;
-
-/// Returns the layered topological order of the graph. Each layer is
-/// the set of blocks whose dependencies are already satisfied —
-/// independent branches run together.
-pub fn topological_layers(graph: &DroneGraph) -> Result<Vec<Vec<String>>, String> {
-    let mut indegree: HashMap<String, usize> = HashMap::new();
-    let mut outedges: HashMap<String, Vec<String>> = HashMap::new();
-    let known: HashSet<String> = graph.nodes.iter().map(|n| n.id.clone()).collect();
-    for n in &graph.nodes {
-        indegree.entry(n.id.clone()).or_insert(0);
-        outedges.entry(n.id.clone()).or_insert_with(Vec::new);
-    }
-    for e in &graph.edges {
-        if !known.contains(&e.source) || !known.contains(&e.target) {
-            return Err(format!(
-                "edge references unknown node ({} → {})",
-                e.source, e.target
-            ));
-        }
-        *indegree.entry(e.target.clone()).or_insert(0) += 1;
-        outedges
-            .entry(e.source.clone())
-            .or_insert_with(Vec::new)
-            .push(e.target.clone());
-    }
-
-    let mut layers: Vec<Vec<String>> = Vec::new();
-    let mut frontier: VecDeque<String> = indegree
-        .iter()
-        .filter_map(|(id, deg)| if *deg == 0 { Some(id.clone()) } else { None })
-        .collect();
-
-    while !frontier.is_empty() {
-        let mut layer: Vec<String> = Vec::new();
-        let next_frontier: Vec<String> = frontier.drain(..).collect();
-        for id in &next_frontier {
-            layer.push(id.clone());
-        }
-        // Stable order by id within a layer (for deterministic tests).
-        layer.sort();
-        for id in &layer {
-            if let Some(targets) = outedges.get(id).cloned() {
-                for t in targets {
-                    if let Some(d) = indegree.get_mut(&t) {
-                        if *d > 0 {
-                            *d -= 1;
-                            if *d == 0 {
-                                frontier.push_back(t);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        layers.push(layer);
-    }
-
-    let scheduled: usize = layers.iter().map(|l| l.len()).sum();
-    if scheduled != graph.nodes.len() {
-        return Err("drone contains a cycle".to_string());
-    }
-    Ok(layers)
-}
-
-fn block_kind_of(node: &FlowNode) -> Result<BlockKind, String> {
-    let kind = node
-        .data
-        .get("kind")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("node {} has no `kind` field", node.id))?;
-    BlockKind::parse(kind).ok_or_else(|| format!("unknown block kind: {kind}"))
-}
-
-/// Decide whether `node_id` should be pruned given the per-run state.
-///
-/// A block runs iff at least one of its incoming edges is "active":
-///   * The edge's source is NOT in `skipped`, AND
-///   * If the source is a Condition block, the edge's `source_handle`
-///     ("true" / "false") matches the boolean stored in the Condition's
-///     `result` output.
-///
-/// Blocks with no incoming edges are root nodes and never skip.
-/// Topological ordering guarantees every source has already been
-/// processed (run or skipped) by the time we evaluate a target here.
-fn should_skip(
-    node_id: &str,
-    graph: &DroneGraph,
-    nodes_by_id: &HashMap<String, &FlowNode>,
-    scope: &ExecutionScope,
-    skipped: &HashSet<String>,
-) -> bool {
-    let mut had_incoming = false;
-    let mut had_active = false;
-    for edge in &graph.edges {
-        if edge.target != node_id {
-            continue;
-        }
-        had_incoming = true;
-        if edge_is_active(edge, nodes_by_id, scope, skipped) {
-            had_active = true;
-            break;
-        }
-    }
-    had_incoming && !had_active
-}
-
-/// True iff the given edge carries control + data flow under the
-/// current scope. See `should_skip` for the full ruleset.
-fn edge_is_active(
-    edge: &FlowEdge,
-    nodes_by_id: &HashMap<String, &FlowNode>,
-    scope: &ExecutionScope,
-    skipped: &HashSet<String>,
-) -> bool {
-    if skipped.contains(&edge.source) {
-        return false;
-    }
-    let src_node = match nodes_by_id.get(&edge.source) {
-        Some(n) => n,
-        None => return true,
-    };
-    let is_condition = src_node
-        .data
-        .get("kind")
-        .and_then(|v| v.as_str())
-        == Some("condition");
-    if !is_condition {
-        return true;
-    }
-    let cond_result = scope
-        .outputs
-        .get(&edge.source)
-        .and_then(|v| v.get("result"))
-        .and_then(|v| v.as_bool());
-    match (edge.source_handle.as_deref(), cond_result) {
-        (Some("true"), Some(r)) => r,
-        (Some("false"), Some(r)) => !r,
-        // Unhandled / pre-spec edges off a Condition — be permissive
-        // (Phase 2 will tighten this once the canvas always sets a
-        // source_handle on condition edges).
-        _ => true,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::scheduler::over_run_cap;
     use super::*;
     use crate::drone::types::{FlowEdge, FlowNode, NodePosition};
     use serde_json::json;
@@ -427,53 +128,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn topo_orders_diamond() {
-        // a → b, a → c, b → d, c → d
-        let g = DroneGraph {
-            nodes: vec![n("a", "variables"), n("b", "api"), n("c", "api"), n("d", "response")],
-            edges: vec![
-                e("e1", "a", "b"),
-                e("e2", "a", "c"),
-                e("e3", "b", "d"),
-                e("e4", "c", "d"),
-            ],
-        };
-        let layers = topological_layers(&g).unwrap();
-        assert_eq!(layers.len(), 3);
-        assert_eq!(layers[0], vec!["a"]);
-        assert_eq!(layers[1], vec!["b", "c"]);
-        assert_eq!(layers[2], vec!["d"]);
-    }
-
-    #[test]
-    fn topo_rejects_cycle() {
-        let g = DroneGraph {
-            nodes: vec![n("a", "variables"), n("b", "api")],
-            edges: vec![e("e1", "a", "b"), e("e2", "b", "a")],
-        };
-        assert!(topological_layers(&g).is_err());
-    }
-
-    #[test]
-    fn topo_rejects_unknown_node_in_edge() {
-        let g = DroneGraph {
-            nodes: vec![n("a", "variables")],
-            edges: vec![e("e1", "a", "ghost")],
-        };
-        assert!(topological_layers(&g).is_err());
-    }
-
-    #[test]
-    fn topo_single_node_one_layer() {
-        let g = DroneGraph {
-            nodes: vec![n("a", "response")],
-            edges: vec![],
-        };
-        let layers = topological_layers(&g).unwrap();
-        assert_eq!(layers, vec![vec!["a".to_string()]]);
-    }
-
     // ────────────────────────────────────────────────────────────────
     // Condition branch pruning (codex P2 on PR #755)
     // ────────────────────────────────────────────────────────────────
@@ -486,139 +140,6 @@ mod tests {
             source_handle: handle.map(|s| s.to_string()),
             target_handle: None,
         }
-    }
-
-    fn nodes_map<'a>(g: &'a DroneGraph) -> HashMap<String, &'a FlowNode> {
-        g.nodes.iter().map(|n| (n.id.clone(), n)).collect()
-    }
-
-    fn scope_with_cond(cond_id: &str, result: bool) -> ExecutionScope {
-        let mut scope = ExecutionScope::new();
-        scope
-            .outputs
-            .insert(cond_id.to_string(), json!({ "result": result }));
-        scope
-    }
-
-    #[test]
-    fn skip_root_node_runs() {
-        // No incoming edges — always runs regardless of state.
-        let g = DroneGraph {
-            nodes: vec![n("a", "variables")],
-            edges: vec![],
-        };
-        let nodes = nodes_map(&g);
-        assert!(!should_skip(
-            "a",
-            &g,
-            &nodes,
-            &ExecutionScope::new(),
-            &HashSet::new()
-        ));
-    }
-
-    #[test]
-    fn skip_unconditional_chain_runs() {
-        // a → b (a is plain Variables, not a condition).
-        let g = DroneGraph {
-            nodes: vec![n("a", "variables"), n("b", "api")],
-            edges: vec![e("e1", "a", "b")],
-        };
-        let nodes = nodes_map(&g);
-        assert!(!should_skip(
-            "b",
-            &g,
-            &nodes,
-            &ExecutionScope::new(),
-            &HashSet::new()
-        ));
-    }
-
-    #[test]
-    fn skip_condition_false_branch_when_result_true() {
-        // c (condition, true) → t via "true" handle (active)
-        //                    → f via "false" handle (inactive)
-        let g = DroneGraph {
-            nodes: vec![n("c", "condition"), n("t", "api"), n("f", "api")],
-            edges: vec![
-                eh("e1", "c", "t", Some("true")),
-                eh("e2", "c", "f", Some("false")),
-            ],
-        };
-        let nodes = nodes_map(&g);
-        let scope = scope_with_cond("c", true);
-        let skipped = HashSet::new();
-        assert!(!should_skip("t", &g, &nodes, &scope, &skipped));
-        assert!(should_skip("f", &g, &nodes, &scope, &skipped));
-    }
-
-    #[test]
-    fn skip_condition_true_branch_when_result_false() {
-        let g = DroneGraph {
-            nodes: vec![n("c", "condition"), n("t", "api"), n("f", "api")],
-            edges: vec![
-                eh("e1", "c", "t", Some("true")),
-                eh("e2", "c", "f", Some("false")),
-            ],
-        };
-        let nodes = nodes_map(&g);
-        let scope = scope_with_cond("c", false);
-        let skipped = HashSet::new();
-        assert!(should_skip("t", &g, &nodes, &scope, &skipped));
-        assert!(!should_skip("f", &g, &nodes, &scope, &skipped));
-    }
-
-    #[test]
-    fn skip_transitive_through_skipped_source() {
-        // c (condition, true) → f via "false" (skipped) → x
-        // x's only incoming is from skipped `f`, so x must also skip
-        // — guards against false-branch side effects past depth 1.
-        let g = DroneGraph {
-            nodes: vec![n("c", "condition"), n("f", "api"), n("x", "agent")],
-            edges: vec![
-                eh("e1", "c", "f", Some("false")),
-                e("e2", "f", "x"),
-            ],
-        };
-        let nodes = nodes_map(&g);
-        let scope = scope_with_cond("c", true);
-        let mut skipped = HashSet::new();
-        skipped.insert("f".to_string());
-        assert!(should_skip("x", &g, &nodes, &scope, &skipped));
-    }
-
-    #[test]
-    fn join_runs_if_any_incoming_active() {
-        // a (active) → d, b (skipped) → d
-        // d has one active source — Phase 1 any-active semantics.
-        let g = DroneGraph {
-            nodes: vec![n("a", "variables"), n("b", "api"), n("d", "response")],
-            edges: vec![e("e1", "a", "d"), e("e2", "b", "d")],
-        };
-        let nodes = nodes_map(&g);
-        let mut skipped = HashSet::new();
-        skipped.insert("b".to_string());
-        assert!(!should_skip(
-            "d",
-            &g,
-            &nodes,
-            &ExecutionScope::new(),
-            &skipped
-        ));
-    }
-
-    #[test]
-    fn condition_edge_without_handle_is_permissive() {
-        // Pre-spec edges off a Condition block lack a source_handle.
-        // Don't accidentally prune them — Phase 2 will require the
-        // handle once the canvas always sets it.
-        let g = DroneGraph {
-            nodes: vec![n("c", "condition"), n("x", "api")],
-            edges: vec![eh("e1", "c", "x", None)],
-        };
-        let nodes = nodes_map(&g);
-        let scope = scope_with_cond("c", false);
-        assert!(!should_skip("x", &g, &nodes, &scope, &HashSet::new()));
     }
 
     #[tokio::test]
@@ -694,14 +215,11 @@ mod tests {
     /// have spent it; a run with no cap, with room, or that spent nothing goes on.
     #[tokio::test]
     async fn a_run_is_held_to_its_cap_between_blocks() {
-        let mut scope = ExecutionScope::new();
-        scope.outputs.insert("a1".into(), json!({ "cost_usd": 1.25 }));
-        scope.outputs.insert("a2".into(), json!({ "cost_usd": 1.75 }));
-        scope.outputs.insert("v1".into(), json!({ "vars": { "cost_usd": 99 } }));
-        assert_eq!(over_run_cap(&scope, None), None);
-        assert_eq!(over_run_cap(&scope, Some(5.0)), None);
-        assert_eq!(over_run_cap(&scope, Some(3.0)), Some("stopped: the run spent $3.00, its cap of $3.00".to_string()));
-        assert_eq!(over_run_cap(&ExecutionScope::new(), Some(0.0)), None, "a run that spent nothing has not reached a cap of 0");
+        assert_eq!(over_run_cap(0.0, None), None);
+        assert_eq!(over_run_cap(3.0, None), None);
+        assert_eq!(over_run_cap(3.0, Some(5.0)), None);
+        assert_eq!(over_run_cap(3.0, Some(3.0)), Some("stopped: the run spent $3.00, its cap of $3.00".to_string()));
+        assert_eq!(over_run_cap(0.0, Some(0.0)), None, "a run that spent nothing has not reached a cap of 0");
 
         // The cap is passed through: a run with room, or none, finishes.
         let mut resp = n("r1", "response");

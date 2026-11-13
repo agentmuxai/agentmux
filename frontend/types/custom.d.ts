@@ -504,6 +504,9 @@ declare global {
         /** A browser host signed in by `agentmux-srv open`: this tab's session token, sent as
          *  `X-AM-Session` and as the WebSocket's second protocol. Absent where the host holds the key. */
         getSessionToken?(): string | undefined;
+        /** A browser host signed in by `agentmux-srv open`: end this browser's session (not the others')
+         *  and go to the page that says how to sign in again. Absent where the host holds the key. */
+        signOutThisBrowser?(): Promise<void>;
         /** Reload this window's page, keeping what the host needs to reconnect it. */
         reloadWindow(): void;
         getIsDev(): boolean;
