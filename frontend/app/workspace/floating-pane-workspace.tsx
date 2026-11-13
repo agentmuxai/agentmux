@@ -357,6 +357,13 @@ function installEdgeResize(label: string): void {
         sendRect({ x, y, width: w, height: h });
     };
 
+    // An element under a resting pointer that is replaced (a live chart rebuilds its overlay every second)
+    // takes the inline cursor with it. The browser sends `pointerover` to the new one at the same spot, with
+    // no move, so the cursor is set again there; until a drag starts, when the document's rule holds it.
+    const onPointerOver = (e: PointerEvent): void => {
+        if (!resizing) showHoverCursor(edgeDirection(e), e.target);
+    };
+
     const onPointerUp = (e: PointerEvent): void => {
         if (!resizing) return;
         resizing = false;
@@ -368,10 +375,12 @@ function installEdgeResize(label: string): void {
     // edge wins (stopImmediatePropagation halts the header handler).
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("pointermove", onPointerMove, true);
+    document.addEventListener("pointerover", onPointerOver, true);
     document.addEventListener("pointerup", onPointerUp, true);
     onCleanup(() => {
         document.removeEventListener("pointerdown", onPointerDown, true);
         document.removeEventListener("pointermove", onPointerMove, true);
+        document.removeEventListener("pointerover", onPointerOver, true);
         document.removeEventListener("pointerup", onPointerUp, true);
         clearEdgeCursor();
     });

@@ -320,6 +320,22 @@ describe("FloatingPaneWorkspace: edge resize", () => {
         expect(h.api.windows.setRect).toHaveBeenCalledTimes(1);
     });
 
+    it("sets the cursor again on an element that takes the place under a resting pointer (a live chart's rebuilt overlay)", () => {
+        const { body } = mount();
+        move(body, 0, 0, 2, 400);
+        expect(body.style.getPropertyValue("cursor")).toBe(FLOATER_RESIZE_CURSORS[1]);
+        // The element is replaced at the same spot: the browser sends pointerover to the new one, no move.
+        const replacement = document.createElement("div");
+        body.appendChild(replacement);
+        replacement.dispatchEvent(mouse("pointerover", { clientX: 2, clientY: 400 }));
+        expect(replacement.style.getPropertyValue("cursor")).toBe(FLOATER_RESIZE_CURSORS[1]);
+        expect(replacement.style.getPropertyPriority("cursor")).toBe("important");
+        expect(body.style.getPropertyValue("cursor")).toBe("");
+        // A pointerover away from the band clears it.
+        replacement.dispatchEvent(mouse("pointerover", { clientX: 500, clientY: 400 }));
+        expect(replacement.style.getPropertyValue("cursor")).toBe("");
+    });
+
     it("puts back an element's own inline cursor when the pointer leaves the band", () => {
         const { body } = mount();
         body.style.cursor = "text";
