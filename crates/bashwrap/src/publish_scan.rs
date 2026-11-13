@@ -45,6 +45,8 @@ const ZERO: &str = "0000000000000000000000000000000000000000";
 pub struct RefUpdate {
     pub local_ref: String,
     pub local_sha: String,
+    /// The ref on the remote that the push updates (the hook's third field).
+    pub remote_ref: String,
     pub remote_sha: String,
 }
 
@@ -52,6 +54,11 @@ pub struct RefUpdate {
 #[derive(Debug, Default, Serialize, PartialEq, Eq)]
 pub struct Part {
     pub r#ref: String,
+    /// The ref the push updates on the remote, and whether the remote has none yet: a new branch or tag becomes public with
+    /// the push, so its name is judged too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_ref: Option<String>,
+    pub new_ref: bool,
     pub count: u64,
     pub remote_named: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -104,9 +111,12 @@ pub fn parse_updates(input: &str) -> Vec<RefUpdate> {
         .filter_map(|line| {
             let f: Vec<&str> = line.split_whitespace().collect();
             match f.as_slice() {
-                [local_ref, local_sha, _remote_ref, remote_sha] if !local_sha.chars().all(|c| c == '0') => {
-                    Some(RefUpdate { local_ref: local_ref.to_string(), local_sha: local_sha.to_string(), remote_sha: remote_sha.to_string() })
-                }
+                [local_ref, local_sha, remote_ref, remote_sha] if !local_sha.chars().all(|c| c == '0') => Some(RefUpdate {
+                    local_ref: local_ref.to_string(),
+                    local_sha: local_sha.to_string(),
+                    remote_ref: remote_ref.to_string(),
+                    remote_sha: remote_sha.to_string(),
+                }),
                 _ => None,
             }
         })
@@ -157,7 +167,14 @@ pub fn collect(updates: &[RefUpdate], remote: &str, git: Git) -> Result<Vec<Part
             git(&refs)
         };
         let count: u64 = run(with(&["rev-list", "--count"]))?.trim().parse().map_err(|_| "couldn't count the commits in this push".to_string())?;
-        let mut part = Part { r#ref: u.local_ref.clone(), count, remote_named: named, ..Part::default() };
+        let mut part = Part {
+            r#ref: u.local_ref.clone(),
+            remote_ref: Some(u.remote_ref.clone()).filter(|r| !r.is_empty()),
+            new_ref: u.remote_sha.is_empty() || u.remote_sha == ZERO,
+            count,
+            remote_named: named,
+            ..Part::default()
+        };
         if count <= MAX_PUSH_COMMITS {
             if u.local_ref.starts_with("refs/tags/") && git(&["cat-file", "-t", &u.local_sha])?.trim() == "tag" {
                 part.tag_message = Some(tag_body(&git(&["cat-file", "tag", &u.local_sha])?));
@@ -399,7 +416,7 @@ mod tests {
         let sha = "a".repeat(40);
         let input = format!("refs/heads/x {sha} refs/heads/x {ZERO}\n(delete) {ZERO} refs/heads/y {sha}\n\nbroken line\n");
         let got = parse_updates(&input);
-        assert_eq!(got, vec![RefUpdate { local_ref: "refs/heads/x".into(), local_sha: sha, remote_sha: ZERO.into() }]);
+        assert_eq!(got, vec![RefUpdate { local_ref: "refs/heads/x".into(), local_sha: sha, remote_ref: "refs/heads/x".into(), remote_sha: ZERO.into() }]);
     }
 
     #[test]
@@ -449,7 +466,7 @@ mod tests {
     }
 
     fn update(local_ref: &str, remote_sha: &str) -> RefUpdate {
-        RefUpdate { local_ref: local_ref.into(), local_sha: "b".repeat(40), remote_sha: remote_sha.into() }
+        RefUpdate { local_ref: local_ref.into(), local_sha: "b".repeat(40), remote_ref: local_ref.into(), remote_sha: remote_sha.into() }
     }
 
     #[test]
@@ -517,6 +534,21 @@ mod tests {
             assert!(matches!(read_answer(status, &json!({ "error": "why" })), Answer::Unavailable(w) if w == "why"), "{status}");
         }
         assert!(matches!(read_answer(413, &Value::Null), Answer::Unavailable(w) if w.contains("split it")));
+    }
+
+    #[test]
+    fn a_part_names_the_remote_ref_and_whether_the_push_creates_it() {
+        let git = fake("1");
+        let created = collect(&[update("refs/heads/new-branch", ZERO)], "origin", &|a| git.run(a)).unwrap();
+        assert_eq!((created[0].remote_ref.as_deref(), created[0].new_ref), (Some("refs/heads/new-branch"), true));
+        let moved = collect(&[update("refs/heads/old-branch", &"c".repeat(40))], "origin", &|a| git.run(a)).unwrap();
+        assert_eq!((moved[0].remote_ref.as_deref(), moved[0].new_ref), (Some("refs/heads/old-branch"), false));
+        // A push to a differently named remote ref sends the remote's name, not the local one.
+        let renamed = RefUpdate { local_ref: "refs/heads/local".into(), local_sha: "b".repeat(40), remote_ref: "refs/tags/v1".into(), remote_sha: ZERO.into() };
+        let parts = collect(&[renamed], "origin", &|a| git.run(a)).unwrap();
+        assert_eq!((parts[0].r#ref.as_str(), parts[0].remote_ref.as_deref(), parts[0].new_ref), ("refs/heads/local", Some("refs/tags/v1"), true));
+        let body = serde_json::to_value(&parts[0]).unwrap();
+        assert_eq!((body["remote_ref"].as_str(), body["new_ref"].as_bool()), (Some("refs/tags/v1"), Some(true)));
     }
 
     #[test]
