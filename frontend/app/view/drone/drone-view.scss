@@ -25,6 +25,9 @@
     flex-shrink: 0;
     position: relative;
     flex-wrap: wrap;
+    // The bar answers to its own width (in its zoomed pixels, so the pane's zoom counts), not the window's:
+    // a thin pane gives the node types a row of their own instead of squeezing them past the right edge.
+    container-type: inline-size;
 }
 
 .drone-bar-name {
@@ -88,6 +91,45 @@
     gap: 6px;
     flex-shrink: 0;
     margin-left: auto;
+}
+
+// Narrow: name and buttons share the first row, the node types take the full row under them.
+@container (max-width: 640px) {
+    .drone-bar-name {
+        order: 1;
+        flex: 1 1 120px;
+        min-width: 0;
+        width: auto;
+    }
+    .drone-bar-actions {
+        order: 2;
+    }
+    .drone-bar-types {
+        order: 3;
+        flex: 1 1 100%;
+    }
+}
+
+// Thin: the name and the buttons each get a row, and the buttons may wrap too.
+@container (max-width: 400px) {
+    .drone-bar-name {
+        flex-basis: 100%;
+    }
+    .drone-bar-actions {
+        flex: 1 1 100%;
+        flex-wrap: wrap;
+        margin-left: 0;
+    }
+}
+
+// Very thin: the node types are their emoji alone (the tooltip and the label for assistive tech stay).
+@container (max-width: 340px) {
+    .drone-chip-label {
+        display: none;
+    }
+    .ui-button.drone-chip {
+        padding: 4px 8px 4px 8px;
+    }
 }
 
 // The Drone buttons are element/ui Buttons: primary accent, small ones at
