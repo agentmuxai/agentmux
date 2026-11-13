@@ -232,6 +232,19 @@ pub(super) const OBJECT_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_agent_
         CREATE INDEX IF NOT EXISTS idx_drone_runs_status
             ON db_drone_runs(status);
 
+        -- A saved graph per drone, beside the definitions (m0049). No FK to
+        -- db_drone_definitions: a version of a drone in another store is still
+        -- saved (the same reason m0038 drops the runs' FK).
+        CREATE TABLE IF NOT EXISTS db_drone_versions (
+            drone_id TEXT NOT NULL,
+            version  INTEGER NOT NULL,
+            graph    TEXT NOT NULL,
+            hash     TEXT NOT NULL,
+            saved_at INTEGER NOT NULL,
+            saved_by TEXT NOT NULL,
+            PRIMARY KEY (drone_id, version)
+        );
+
         -- v10: Standalone skill and MCP server primitives (composable model).
         CREATE TABLE IF NOT EXISTS db_skills (
             id          TEXT PRIMARY KEY,
