@@ -12,6 +12,9 @@ use crate::backend::reactive::InjectionRequest;
 #[path = "delivery_steps.rs"]
 mod steps;
 
+#[path = "reagent_age.rs"]
+mod reagent_age;
+
 /// One agent's answer to a pending pull, single or batched.
 #[derive(Deserialize)]
 pub(super) struct PendingResp {
@@ -175,6 +178,9 @@ pub(super) async fn claim_and_deliver(
         }
 
         let checked = steps::verify(inj, agent_id, token, http, mstore).await;
+        if steps::is_repeat(inj, agent_id, &checked) {
+            continue;
+        }
         let mut req = steps::request(inj, &target, &checked, mstore);
         if steps::attach_files(base, http, &agent_token, agent_id, inj, &mut req, &delivered_at).await.is_err() {
             continue;
@@ -191,39 +197,50 @@ pub(super) async fn claim_and_deliver(
             steps::record_delivered(&checked);
             continue;
         }
-        let charged = req.files_delivery.is_some().then(|| req.clone());
-        let flow_req = (req.source_agent.clone(), req.target_agent.clone(), req.request_id.clone());
-        let delivery = handler.inject_message(req);
-        note_flow_of(&flow_req, if delivery.success { MessageFlowOutcome::Delivered } else { MessageFlowOutcome::Refused });
-        if let Some(charged) = &charged {
-            crate::server::jekt_files::settle(charged, delivery.success);
-        }
-        tracing::debug!(
-            injection_id = %inj.id,
-            agent_id = %agent_id,
-            success = delivery.success,
-            "cloud_subscriber: delivered injection"
-        );
-
         // W3-S §2.5: only now, after it landed, is this signature "seen" —
         // a release-and-redeliver after a failed delivery must not read as
         // a replay.
-        if delivery.success {
+        if inject_or_release(base, http, &agent_token, agent_id, inj, &delivered_at, handler, req).await {
             delivered_count += 1;
             steps::record_delivered(&checked);
-        }
-
-        if !delivery.success {
-            // We hold the claim but local delivery failed (e.g. agent not
-            // ready) — release it back to pending so it's retried, instead
-            // of silently dropping it now that claiming already marked it
-            // "delivered".
-            release(base, http, &agent_token, agent_id, &inj.id, &delivered_at).await;
         }
     }
 
     delivery_status::fetched(agent_id, delivered_count, &body.expired);
     AgentSyncOutcome::Ok
+}
+
+/// Inject the request locally, settle its files, and tell the Atlas map. A delivery that failed (e.g. the agent
+/// is not ready) is released back to pending so it is retried, instead of silently dropped now that claiming
+/// already marked it "delivered". Whether it landed.
+#[allow(clippy::too_many_arguments)]
+async fn inject_or_release(
+    base: &str,
+    http: &reqwest::Client,
+    agent_token: &str,
+    agent_id: &str,
+    inj: &PendingInj,
+    delivered_at: &str,
+    handler: &'static crate::backend::reactive::handler::ReactiveHandler,
+    req: InjectionRequest,
+) -> bool {
+    let charged = req.files_delivery.is_some().then(|| req.clone());
+    let flow_req = (req.source_agent.clone(), req.target_agent.clone(), req.request_id.clone());
+    let delivery = handler.inject_message(req);
+    note_flow_of(&flow_req, if delivery.success { MessageFlowOutcome::Delivered } else { MessageFlowOutcome::Refused });
+    if let Some(charged) = &charged {
+        crate::server::jekt_files::settle(charged, delivery.success);
+    }
+    tracing::debug!(
+        injection_id = %inj.id,
+        agent_id = %agent_id,
+        success = delivery.success,
+        "cloud_subscriber: delivered injection"
+    );
+    if !delivery.success {
+        release(base, http, agent_token, agent_id, &inj.id, delivered_at).await;
+    }
+    delivery.success
 }
 
 /// Tells the Atlas map a message that came through the cloud relay was handled here (`backend::message_flow`).
