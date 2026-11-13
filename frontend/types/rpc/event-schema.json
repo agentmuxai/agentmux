@@ -980,6 +980,15 @@
     }
   },
   {
+    "event": "task-flow",
+    "payloadTs": {
+      "imports": [
+        "TaskFlowEvent"
+      ],
+      "name": "TaskFlowEvent"
+    }
+  },
+  {
     "event": "tool_chunk",
     "payloadTs": {
       "imports": [

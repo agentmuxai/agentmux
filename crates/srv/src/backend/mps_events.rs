@@ -94,6 +94,8 @@ events! {
     AgentMessageAccepted: super::mps::EVENT_AGENT_MESSAGE_ACCEPTED => crate::backend::blockcontroller::MessageAcceptedEvent,
     /// A message between two agents was handled by this srv (`message_flow`): ids and times, never its text.
     MessageFlow: super::mps::EVENT_MESSAGE_FLOW => crate::backend::message_flow::MessageFlowEvent,
+    /// A task was filed, reassigned, started or handed back (`task_flow`): names and numbers, never its text.
+    TaskFlow: super::mps::EVENT_TASK_FLOW => crate::backend::task_flow::TaskFlowEvent,
     /// A stale `--resume` is being retried, or the retry resolved.
     AgentResumeRetry: super::mps::EVENT_AGENT_RESUME_RETRY => ResumeRetryEvent,
     /// A Claude CLI request is being retried, or no longer is.

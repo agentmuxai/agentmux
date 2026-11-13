@@ -143,11 +143,15 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
         reason: crate::server::remote_ops::op::clip_reason(reason),
     };
     let nonce = envelope.nonce.clone();
+    let target = envelope.params.get("target_agent").and_then(Value::as_str).unwrap_or_default().to_string();
     let Some(signed) = envelope.sign_with(&key, super::max_params_of(op)) else {
         return RemoteOpResult::failed("the request could not be signed (too long, or a malformed field)");
     };
     let mut result = post(state, &peer, &signed).await;
     explain_not_found(&mut result, &peer);
+    if op == "tasks.enqueue" {
+        crate::server::task_flow_notes::note_remote_filed(slug, &peer.hostname, &target, &result.result);
+    }
     let ok = matches!(result.status, crate::server::remote_ops::op::OpStatus::Done | crate::server::remote_ops::op::OpStatus::Queued | crate::server::remote_ops::op::OpStatus::PendingVeto);
     let note = result.refused_reason.clone().or_else(|| result.result.get("error").and_then(Value::as_str).map(str::to_string));
     state.reactive_handler.log_fleet_action_audit(

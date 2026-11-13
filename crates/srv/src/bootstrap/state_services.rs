@@ -175,6 +175,7 @@ fn spawn_spend_services(state: &AppState) {
 fn install_message_brokers(state: &AppState) {
     backend::audit_live::install_broker(Arc::clone(&state.broker));
     backend::message_flow::install(Arc::clone(&state.broker));
+    backend::task_flow::install(Arc::clone(&state.broker));
 }
 
 pub fn spawn_state_services(state: &AppState) {

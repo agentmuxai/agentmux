@@ -91,6 +91,7 @@ import type { SubagentCompletedEvent } from "@/types/rpc/SubagentCompletedEvent"
 import type { SubagentNamedEvent } from "@/types/rpc/SubagentNamedEvent";
 import type { SubagentSpawnedEvent } from "@/types/rpc/SubagentSpawnedEvent";
 import type { SubagentUpdatedEvent } from "@/types/rpc/SubagentUpdatedEvent";
+import type { TaskFlowEvent } from "@/types/rpc/TaskFlowEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 import type { ToolChunk } from "@/types/rpc/ToolChunk";
 import type { UpgradeRequestsEvent } from "@/types/rpc/UpgradeRequestsEvent";
@@ -211,6 +212,7 @@ export type MuxEventPayloads = {
   "subagent:spawned": SubagentSpawnedEvent;
   "subagent:updated": SubagentUpdatedEvent;
   sysinfo: TimeSeriesData;
+  "task-flow": TaskFlowEvent;
   tool_chunk: ToolChunk;
   userattention: UserAttentionEvent;
   vault: VaultEvent;
@@ -340,6 +342,7 @@ export const TYPED_MUX_EVENTS = [
   "subagent:spawned",
   "subagent:updated",
   "sysinfo",
+  "task-flow",
   "tool_chunk",
   "userattention",
   "vault",
