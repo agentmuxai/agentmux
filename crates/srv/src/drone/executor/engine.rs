@@ -183,6 +183,7 @@ async fn execute(
                 BlockKind::Agent => blocks::agent::run(node, &scope).await,
                 BlockKind::Message => blocks::message::run(node, &scope).await,
                 BlockKind::Task => blocks::task::run(node, &scope).await,
+                BlockKind::Notify => blocks::notify::run(node, &scope).await,
             };
 
             match result {

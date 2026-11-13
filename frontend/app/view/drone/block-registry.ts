@@ -90,6 +90,19 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],
     },
+    notify: {
+        kind: "notify",
+        emoji: "🔔",
+        label: "Notify",
+        description: "Tell the operator, as a notification. The title is fixed; every {{...}} value in the text is put in as quoted data.",
+        color: "#ec4899", // colour: fixed (the block's identity colour)
+        defaultData: {
+            title: "",
+            body: "",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     api: {
         kind: "api",
         emoji: "🌐",
@@ -140,6 +153,7 @@ export const BLOCK_KINDS: BlockKind[] = [
     "agent",
     "message",
     "task",
+    "notify",
     "api",
     "condition",
     "response",

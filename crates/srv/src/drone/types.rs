@@ -21,6 +21,7 @@ pub enum BlockKind {
     Variables,
     Message,
     Task,
+    Notify,
 }
 
 impl BlockKind {
@@ -33,6 +34,7 @@ impl BlockKind {
             "variables" => Some(Self::Variables),
             "message" => Some(Self::Message),
             "task" => Some(Self::Task),
+            "notify" => Some(Self::Notify),
             _ => None,
         }
     }
