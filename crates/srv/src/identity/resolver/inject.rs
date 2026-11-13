@@ -107,10 +107,11 @@ pub async fn inject_identity_env_async(
     broker: Option<Arc<Broker>>,
     block_id: String,
     env_vars: HashMap<String, String>,
+    own_claude_endpoint: bool,
 ) -> Result<HashMap<String, String>, SpawnGateError> {
     match tokio::task::spawn_blocking(move || {
         let mut env = env_vars;
-        inject_identity_env_with_broker(mstore, id_store, identity_store, broker, &block_id, &mut env)
+        inject_identity_env_for_spawn(mstore, id_store, identity_store, broker, &block_id, &mut env, own_claude_endpoint)
             .map(|()| env)
     })
     .await
@@ -497,6 +498,25 @@ pub fn inject_identity_env_with_broker(
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
 ) -> Result<(), SpawnGateError> {
+    inject_identity_env_for_spawn(mstore, id_store, identity_store, broker, block_id, env_vars, false)
+}
+
+/// [`inject_identity_env_with_broker`] for a spawn that may bring its own Claude endpoint.
+/// `own_claude_endpoint` is true for a Claude Code agent whose environment names a model server of its
+/// own (`spawn_env::endpoint`): the person's Claude account is discarded for that agent and its own
+/// authentication (a Vault key opened to it, or a placeholder) is put in after this step, so the
+/// account is neither injected nor required: an unlinked agent, or one whose account no longer
+/// resolves, is not refused for it. Every other check stays: the instance lookup, other providers'
+/// bindings, and the deleted-agent check at the gate's exit.
+pub fn inject_identity_env_for_spawn(
+    mstore: Arc<Store>,
+    id_store: Arc<Store>,
+    identity_store: Arc<Store>,
+    broker: Option<Arc<Broker>>,
+    block_id: &str,
+    env_vars: &mut HashMap<String, String>,
+    own_claude_endpoint: bool,
+) -> Result<(), SpawnGateError> {
     // Step 1: instance lookup — per-channel, always reads from mstore.
     let instance = match mstore.instance_get_active_for_block(block_id) {
         Ok(Some(i)) => i,
@@ -536,11 +556,16 @@ pub fn inject_identity_env_with_broker(
         injected_oauth: std::collections::HashSet::new(),
     };
     for binding in &bindings {
+        // The Claude account is discarded for an agent on its own endpoint: not injected, not required.
+        if own_claude_endpoint && resolve_provider_alias(&binding.provider) == "claude" {
+            continue;
+        }
         injector.inject(binding, env_vars)?;
     }
 
     // Step 5: the definition-provider gate (spec §2.2 edge case).
-    if !on_route { steps::gate_unbound_provider(def_provider, &injector.injected_oauth, &bindings, &identity_store, &instance, &parent_template_id)?; }
+    let brings_own_login = on_route || (own_claude_endpoint && def_provider.as_deref() == Some("claude"));
+     if !brings_own_login { steps::gate_unbound_provider(def_provider, &injector.injected_oauth, &bindings, &identity_store, &instance, &parent_template_id)?; }
 
     // #3577, re-checked at the gate's own exit.
     steps::recheck_agent_not_deleted(&mstore, &instance)
@@ -551,6 +576,8 @@ mod steps;
 
 #[cfg(test)]
 mod tests {
+    #[path = "../../inject_own_endpoint_tests.rs"]
+    mod own_endpoint;
     use super::*;
     use super::super::oauth_probe::oauth_status;
     use crate::backend::storage::store::{

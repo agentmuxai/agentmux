@@ -142,6 +142,8 @@ pub(crate) async fn inject_identity(
     base_env_vars: HashMap<String, String>,
 ) -> Result<HashMap<String, String>, crate::identity::resolver::SpawnGateError> {
     let (own, mstore_after) = (base_env_vars.clone(), mstore.clone());
+    // The account's login is discarded for this agent below, so the identity step neither injects nor requires it.
+    let own_claude_endpoint = is_claude(block_meta) && requested(&own).is_some();
     let mut env_vars = crate::identity::token_warmup::inject_after_warmup(
         mstore,
         id_store,
@@ -149,6 +151,7 @@ pub(crate) async fn inject_identity(
         broker,
         block_id.to_string(),
         base_env_vars,
+        own_claude_endpoint,
     )
     .await?;
     guard(&mut env_vars, &own, block_meta, block_id, mstore_after.clone(), identity_store.clone()).await;

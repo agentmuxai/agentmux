@@ -228,8 +228,12 @@ pub async fn inject_after_warmup(
     broker: Option<Arc<Broker>>,
     block_id: String,
     env_vars: HashMap<String, String>,
+    own_claude_endpoint: bool,
 ) -> Result<HashMap<String, String>, SpawnGateError> {
-    let dir = {
+    // An agent on a model server of its own discards the account's login, so there is no dir to wait for.
+    let dir = if own_claude_endpoint {
+        None
+    } else {
         let (m, i, s, b) = (mstore.clone(), id_store.clone(), identity_store.clone(), block_id.clone());
         tokio::task::spawn_blocking(move || crate::identity::resolver::resolve_bound_oauth_config_dir(&m, &i, &s, &b))
             .await
@@ -241,7 +245,7 @@ pub async fn inject_after_warmup(
         global().enter(&key_of(&dir), &block_id, false, move || token_is_stale(&probe)).await;
     }
     let result = crate::identity::resolver::inject_identity_env_async(
-        mstore, id_store, identity_store, broker, block_id.clone(), env_vars,
+        mstore, id_store, identity_store, broker, block_id.clone(), env_vars, own_claude_endpoint,
     )
     .await;
     if result.is_err() {
