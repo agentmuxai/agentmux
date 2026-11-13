@@ -31,6 +31,10 @@ pub(crate) const PENDING_LIFE: Duration = Duration::from_secs(60);
 pub(crate) const SESSION_IDLE_LIFE: Duration = Duration::from_secs(12 * 60 * 60);
 /// Most codes and most pending sessions held at once; the oldest goes first.
 const MAX_HELD: usize = 64;
+/// Most refusals remembered at once (they are counted over a minute).
+pub(crate) const MAX_FAILURES: usize = 1000;
+/// This many refusals in a minute are logged one by one; after them, one line says the rest are only counted.
+pub(crate) const LOGGED_FAILURES: usize = 5;
 
 type Digest32 = [u8; 32];
 
@@ -109,10 +113,31 @@ struct Inner {
     failures: VecDeque<Instant>,
 }
 
-#[derive(Default)]
 pub(crate) struct SessionStore {
     inner: Mutex<Inner>,
+    /// Counts the logouts, so a socket upgraded with a session hears that it ended.
+    revoked: tokio::sync::watch::Sender<u64>,
 }
+
+impl Default for SessionStore {
+    fn default() -> Self {
+        SessionStore { inner: Mutex::new(Inner::default()), revoked: tokio::sync::watch::channel(0).0 }
+    }
+}
+
+/// Which session a request came from (the digest of its cookie), carried on the request so a
+/// WebSocket upgraded with it can be closed when the session ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SessionId(Digest32);
+
+impl SessionId {
+    pub(crate) fn of_cookie(cookie: &str) -> SessionId {
+        SessionId(digest(cookie))
+    }
+}
+
+/// How often a socket re-checks that its session is still live (a logout is heard at once).
+const LIVE_RECHECK: Duration = Duration::from_secs(10);
 
 /// What a code entry made.
 pub(crate) struct Entered {
@@ -269,7 +294,28 @@ impl SessionStore {
         inner.pending.clear();
         let n = inner.sessions.len();
         inner.sessions.clear();
+        drop(inner);
+        self.revoked.send_modify(|logouts| *logouts += 1);
         n
+    }
+
+    /// Is this session still live? A socket that asks is in use, so it slides the idle limit.
+    pub(crate) fn is_live(&self, id: SessionId, now: Instant) -> bool {
+        let mut inner = self.lock();
+        prune(&mut inner, now);
+        inner.sessions.get_mut(&id.0).map(|s| s.last_seen = now).is_some()
+    }
+
+    /// Completes when the session has ended: at a logout, and at the first re-check after it
+    /// expired. A WebSocket is authenticated once, when it is upgraded, so it waits on this.
+    pub(crate) async fn ended(&self, id: SessionId) {
+        let mut logouts = self.revoked.subscribe();
+        while self.is_live(id, Instant::now()) {
+            tokio::select! {
+                _ = logouts.changed() => {}
+                _ = tokio::time::sleep(LIVE_RECHECK) => {}
+            }
+        }
     }
 
     pub(crate) fn session_count(&self, now: Instant) -> usize {
@@ -278,11 +324,15 @@ impl SessionStore {
         inner.sessions.len()
     }
 
-    /// Count a refused sign-in; how many in the last minute, this one included.
+    /// Count a refused sign-in; how many in the last minute (at most [`MAX_FAILURES`]), this one
+    /// included. The list is capped, so a flood of refusals holds no more memory than a trickle.
     pub(crate) fn note_failure(&self, now: Instant) -> usize {
         let mut inner = self.lock();
         let minute = Duration::from_secs(60);
         while inner.failures.front().is_some_and(|t| now.duration_since(*t) > minute) {
+            inner.failures.pop_front();
+        }
+        if inner.failures.len() >= MAX_FAILURES {
             inner.failures.pop_front();
         }
         inner.failures.push_back(now);

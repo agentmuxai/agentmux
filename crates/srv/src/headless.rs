@@ -195,7 +195,7 @@ fn web_options(frontend_dir: Option<PathBuf>, origins: &[String], public_origin:
 /// The one origin a loopback sign-in accepts besides srv's own: `http://127.0.0.1:<port>`, the
 /// other end of a tunnel. Never a real host name, `localhost`, another address or `https`: a
 /// browser on a non-loopback origin needs a design of its own (SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI §3).
-fn normalize_public_origin(origin: &str) -> Result<String, String> {
+pub(crate) fn normalize_public_origin(origin: &str) -> Result<String, String> {
     let normalized = normalize_origin(origin)?;
     let url = url::Url::parse(&normalized).map_err(|e| e.to_string())?;
     let loopback = url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port().is_some();

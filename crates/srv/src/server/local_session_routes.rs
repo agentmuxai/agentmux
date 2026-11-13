@@ -19,7 +19,7 @@ use axum::http::{HeaderMap, HeaderValue};
 use agentmux_common::AUTH_KEY_HEADER;
 use serde::Deserialize;
 
-use super::local_session::{CodeState, Collected, RouteClass, SessionStore};
+use super::local_session::{CodeState, Collected, RouteClass, SessionId, SessionStore, LOGGED_FAILURES};
 use super::*;
 
 /// The cookie's name is this, then the instance id.
@@ -153,7 +153,11 @@ fn check_shape(shape: &Shape, headers: &HeaderMap, kind: Kind) -> Result<(), Rea
 async fn refuse(route: &'static str, reason: Reason) -> Response {
     static DELAYED: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(MAX_DELAYED);
     let recent = store().note_failure(Instant::now());
-    tracing::warn!(route, reason = reason.name(), failures_last_minute = recent, "local sign-in refused");
+    match recent {
+        n if n <= LOGGED_FAILURES => tracing::warn!(route, reason = reason.name(), failures_last_minute = n, "local sign-in refused"),
+        n if n == LOGGED_FAILURES + 1 => tracing::warn!(failures_last_minute = n, "local sign-in refused again and again: more this minute are counted, not logged"),
+        _ => {}
+    }
     if let Ok(_slot) = DELAYED.try_acquire() {
         tokio::time::sleep(FAILURE_DELAY).await;
     }
@@ -331,19 +335,26 @@ fn session_token<'a>(headers: &'a HeaderMap, path: &str) -> Option<&'a str> {
 
 /// Does this request come from a live browser session? `Host` and `Origin` exact, and the cookie
 /// and token (or the cookie alone where listed, with `Sec-Fetch-Site: same-origin`).
-pub(crate) fn admit_session(req: &Request<Body>) -> bool {
-    let Some(shape) = SHAPE.get() else { return false };
+pub(crate) fn admit_session(req: &Request<Body>) -> Option<SessionId> {
+    let shape = SHAPE.get()?;
     let headers = req.headers();
-    if check_shape(shape, headers, Kind::Any).is_err() {
-        return false;
-    }
+    check_shape(shape, headers, Kind::Any).ok()?;
     let class = route_class(req.method(), req.uri().path());
     if class == RouteClass::CookieOnly && hval(headers, "sec-fetch-site") != Some("same-origin") {
-        return false;
+        return None;
     }
-    let cookie = cookie_value(headers, &shape.cookie_name);
+    let cookie = cookie_value(headers, &shape.cookie_name)?;
     let token = session_token(headers, req.uri().path());
-    store().admit(cookie, token, class, Instant::now())
+    store().admit(Some(cookie), token, class, Instant::now()).then(|| SessionId::of_cookie(cookie))
+}
+
+/// Completes when the browser session behind a WebSocket ends; never for a connection that came
+/// with the key.
+pub(crate) async fn session_ended(session: Option<SessionId>) {
+    match session {
+        Some(id) => store().ended(id).await,
+        None => std::future::pending().await,
+    }
 }
 
 // ---- The served UI ----

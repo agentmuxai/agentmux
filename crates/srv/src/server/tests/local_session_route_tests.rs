@@ -301,7 +301,7 @@ fn a_cookie_only_get_needs_same_origin_fetch_metadata() {
     };
     // Not a listed route, so it needs the token as well: nothing here is admitted.
     for site in [None, Some("same-origin"), Some("none")] {
-        assert!(!admit_session(&req(site)));
+        assert!(admit_session(&req(site)).is_none());
     }
 }
 

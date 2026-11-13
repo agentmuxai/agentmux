@@ -46,12 +46,16 @@ struct Target {
 }
 
 fn prepare(wavedata: Option<&std::path::Path>, port: u16, key_file: Option<std::path::PathBuf>, origin: Option<String>) -> Result<Target, String> {
+    // Before anything is read: a line that carries a live code is never opened at any other page.
+    let origin = match origin {
+        Some(o) => crate::headless::normalize_public_origin(&o).map_err(|e| format!("--origin {o:?}: {e}"))?,
+        None => format!("http://127.0.0.1:{port}"),
+    };
     let path = match key_file {
         Some(p) => p,
         None => crate::headless::key_file_path(wavedata)?,
     };
     let key = crate::headless::read_key_file(&path).map_err(|e| format!("{e} (is the server started here, with this data folder?)"))?;
-    let origin = origin.unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
     Ok(Target { port, key, origin })
 }
 
@@ -235,6 +239,7 @@ impl Terminal for Stdio {
     }
 
     fn open_browser(&mut self, url: &str) -> bool {
+        use agentmux_common::win32::NoWindow;
         use std::process::{Command, Stdio};
         let mut cmd = if cfg!(target_os = "macos") {
             let mut c = Command::new("open");
@@ -249,7 +254,9 @@ impl Terminal for Stdio {
             c.arg(url);
             c
         };
-        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok()
+        // The browser needs nothing of this instance's identity or key.
+        crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+        cmd.no_window().stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok()
     }
 }
 

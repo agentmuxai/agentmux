@@ -202,3 +202,55 @@ fn secrets_are_256_random_bits_and_never_repeat() {
     assert!(a.bytes().all(|b| b.is_ascii_hexdigit()));
     assert_ne!(a, random_secret());
 }
+
+#[tokio::test]
+async fn a_socket_upgraded_with_a_session_hears_the_logout() {
+    let store = std::sync::Arc::new(SessionStore::default());
+    let now = Instant::now();
+    let grant = signed_in(&store, now);
+    let id = SessionId::of_cookie(&grant.cookie);
+    assert!(store.is_live(id, now));
+    let waiting = tokio::spawn({
+        let store = store.clone();
+        async move { store.ended(id).await }
+    });
+    tokio::task::yield_now().await;
+    assert!(!waiting.is_finished(), "a live session keeps its socket");
+    store.revoke_all();
+    tokio::time::timeout(Duration::from_secs(2), waiting).await.expect("the socket is told at once").unwrap();
+    assert!(!store.is_live(id, now));
+}
+
+#[tokio::test]
+async fn a_session_that_ended_before_the_wait_began_ends_it_at_once() {
+    let store = SessionStore::default();
+    let grant = signed_in(&store, Instant::now());
+    let id = SessionId::of_cookie(&grant.cookie);
+    store.revoke_all();
+    tokio::time::timeout(Duration::from_secs(2), store.ended(id)).await.expect("nothing left to wait for");
+}
+
+#[test]
+fn an_open_socket_counts_as_use_and_an_idle_one_expires() {
+    let store = SessionStore::default();
+    let now = Instant::now();
+    let grant = signed_in(&store, now);
+    let id = SessionId::of_cookie(&grant.cookie);
+    let hour = |n: u64| secs(n * 3600);
+    assert!(store.is_live(id, now + hour(11)));
+    assert!(store.is_live(id, now + hour(22)), "the check at hour 11 slid the limit");
+    assert!(!store.is_live(id, now + hour(35)));
+    assert!(!store.is_live(SessionId::of_cookie("another cookie"), now), "a cookie that was never granted");
+}
+
+#[test]
+fn a_flood_of_refusals_holds_no_more_than_the_cap() {
+    let store = SessionStore::default();
+    let now = Instant::now();
+    let mut last = 0;
+    for _ in 0..(MAX_FAILURES * 5) {
+        last = store.note_failure(now);
+    }
+    assert_eq!(last, MAX_FAILURES);
+    assert_eq!(store.note_failure(now + secs(61)), 1, "a minute later they have all aged out");
+}

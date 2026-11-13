@@ -170,3 +170,21 @@ async fn a_code_nobody_enters_ends_the_wait_after_a_minute() {
     assert!(t.asked.is_empty());
     assert!(t.said.last().unwrap().contains("No browser entered"));
 }
+
+/// The typed origin is the one `--public-origin` accepts, or nothing: a line carrying a live code is
+/// never opened at another page. It is judged before the key file is read.
+#[test]
+fn the_origin_is_held_to_the_rule_of_the_servers_public_origin() {
+    let missing = std::path::PathBuf::from("no/such/key-file");
+    for bad in ["https://127.0.0.1:8080", "http://localhost:8080", "http://evil.test", "http://127.0.0.1", "http://192.0.2.1:80", "http://127.0.0.1:8080/x"] {
+        let err = prepare(None, 7380, Some(missing.clone()), Some(bad.to_string())).err().expect(bad);
+        assert!(err.contains("--origin"), "{bad}: {err}");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let key = dir.path().join("k");
+    std::fs::write(&key, "secret\n").unwrap();
+    let t = prepare(None, 7380, Some(key.clone()), Some("http://127.1:8080/".into())).unwrap();
+    assert_eq!(t.origin, "http://127.0.0.1:8080");
+    let t = prepare(None, 7380, Some(key), None).unwrap();
+    assert_eq!(t.origin, "http://127.0.0.1:7380");
+}

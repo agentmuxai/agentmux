@@ -92,11 +92,14 @@ pub(super) async fn auth_middleware(
     // A headless srv that serves its own UI also admits a browser the person signed in
     // (`local_session_routes`): the session stands in for the key, on that browser's requests only.
     if auth_key.is_none() && super::local_session_routes::enabled() {
-        return if super::local_session_routes::admit_session(&req) {
-            req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
-            next.run(req).await
-        } else {
-            unauthorized()
+        return match super::local_session_routes::admit_session(&req) {
+            Some(session) => {
+                req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
+                // The WebSocket handler closes its socket when this session ends.
+                req.extensions_mut().insert(session);
+                next.run(req).await
+            }
+            None => unauthorized(),
         };
     }
 
