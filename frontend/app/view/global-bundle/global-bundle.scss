@@ -201,6 +201,15 @@ code.global-bundle-file-label {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+
+    // An option wider than the strip can't wrap onto another line: it is cut.
+    .ui-segmented-option {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
 }
 
 .global-memory-token-strip-bar {
