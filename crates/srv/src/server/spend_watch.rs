@@ -250,7 +250,7 @@ fn stop(state: &AppState, grant: &Grant, hit: &Hit, now: i64) {
         set_meta(state, &block_id, WARNING_META_KEY, Value::Null);
         // The turn in flight ends now rather than retrying against the refusal.
         if let Some(ctrl) = blockcontroller::get_controller(&block_id) {
-            if let Err(e) = ctrl.send_input(BlockInputUnion::signal("SIGINT"), None) {
+            if let Err(e) = ctrl.interrupt_turn() {
                 tracing::warn!(block_id, error = %e, "spend cap: the turn was not interrupted");
             }
         }
