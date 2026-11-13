@@ -19,7 +19,7 @@ use agentmux_common::time::now_ms;
 use serde_json::value::RawValue;
 use zeroize::Zeroizing;
 
-use super::scrub::{Scrubber, MIN_LINE};
+use super::scrub::{self, Scrubber, MIN_LINE};
 use super::{card, insert, kinds, new_id_besides, record_line, seal, validate, versions, Line, NewEntry, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
@@ -29,9 +29,8 @@ use crate::backend::storage::vault_versions::CaptureWrite;
 pub const MOST: usize = 8;
 /// A shorter value is refused: the output couldn't be cleaned of it reliably.
 pub const MIN_LEN: usize = 8;
-/// The shortest value of a card's other parts (a security code, a month, a ZIP) a `parts` capture takes: they are
-/// short by nature, and the output is cleaned of them on their own (`scrub.rs`).
-pub const MIN_PART: usize = 2;
+/// A card's other parts (a security code, an expiry, a ZIP) are short by nature: they are taken at any length and then
+/// checked against what the scrubber can clean (`scrub::cleanable`), so none is stored that would still show in the output.
 /// The most output held for a capture; past it the capture fails and the
 /// output kept for the person is cut here.
 pub const MAX_HELD: usize = 1024 * 1024;
@@ -373,21 +372,35 @@ pub fn extract_min(from: &Source, stdout: &str, min: usize) -> Result<Found, Str
 }
 
 impl Rule {
-    /// The shortest main value the rule takes: a card's number, like any value, is cleaned out of the output as text; a
-    /// security code, an expiry or a ZIP captured into a card that exists is short by nature (`MIN_PART`).
-    fn min_len(&self) -> usize {
+    /// Whether the rule's main value is one of a card's short parts (a security code, an expiry or a ZIP captured into a
+    /// card that exists), not the number or another kind's value.
+    fn short_part(&self) -> Option<&'static str> {
         match &self.into {
-            Target::Existing { kind, part, .. } if kind == card::KIND && *part != "number" => MIN_PART,
-            _ => MIN_LEN,
+            Target::Existing { kind, part, .. } if kind == card::KIND && *part != "number" => Some(part),
+            _ => None,
         }
     }
 }
 
+/// A card's part the output could not be cleaned of is refused, naming the part and never the value.
+fn cleanable(part: &str, f: &Found) -> Result<(), String> {
+    if scrub::cleanable(&f.value) {
+        return Ok(());
+    }
+    let hint = if part.starts_with("exp_") { ": give the expiry as one text, exp (like 03/30)" } else { "" };
+    Err(format!("the card's {part} is too short to clean out of the output (under {} characters, and not a 3-digit code){hint}", scrub::MIN_LEN))
+}
+
 /// A rule's values in `stdout`: its main one, and a card's other parts, which may be short.
 fn extract_rule(r: &Rule, stdout: &str) -> Result<Found, String> {
-    let mut found = extract_min(&r.from, stdout, r.min_len())?;
+    let short = r.short_part();
+    let mut found = extract_min(&r.from, stdout, if short.is_some() { 1 } else { MIN_LEN })?;
+    if let Some(part) = short {
+        cleanable(part, &found)?;
+    }
     for (part, from) in &r.also {
-        let f = extract_min(from, stdout, MIN_PART).map_err(|e| format!("the card's {part}: {e}"))?;
+        let f = extract_min(from, stdout, 1).map_err(|e| format!("the card's {part}: {e}"))?;
+        cleanable(part, &f)?;
         found.also.push((part, f));
     }
     Ok(found)
@@ -497,13 +510,16 @@ impl Capture {
                             }
                         }
                     }
-                    let mut fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+                    // Only a card's plain fields follow its parts; any other kind's are left exactly as they are.
+                    let is_card = row.kind == card::KIND;
+                    let mut fields: BTreeMap<String, String> = if is_card { serde_json::from_str(&row.fields).map_err(|_| format!("{label}'s details can't be read, so nothing was changed"))? } else { BTreeMap::new() };
                     card::settle(&row.kind, &mut fields, &mut parts)?;
+                    let fields_text = if is_card { serde_json::to_string(&fields).map_err(|e| e.to_string())? } else { row.fields.clone() };
                     // The whole entry as it was, whichever part this replaces: the person was
                     // told the old value is kept for 7 days.
                     let kept = Some(versions::of(&row, &self.agent, CAPTURED));
                     let was = row.sealed.clone();
-                    let changed = VaultRow { sealed: seal::seal(&key, &row.id, &parts)?, fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?, updated_at: now, ..row };
+                    let changed = VaultRow { sealed: seal::seal(&key, &row.id, &parts)?, fields: fields_text, updated_at: now, ..row };
                     writes.push(CaptureWrite::Replace { row: changed, was, kept });
                     made.push((id.clone(), label.clone()));
                 }

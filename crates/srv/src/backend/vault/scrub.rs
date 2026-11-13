@@ -29,6 +29,12 @@ pub struct Scrubber {
     standalone: Vec<(String, String)>,
 }
 
+/// Whether the scrubber can clean `value` out of an output: as text (`MIN_LEN` characters or more), or, for a card's
+/// three-digit security code, where it stands alone. Anything shorter would be stored and still show in the output.
+pub fn cleanable(value: &str) -> bool {
+    value.chars().count() >= MIN_LEN || is_code(value)
+}
+
 /// A card's three-digit security code: too short to scrub as text, since `123` is in `4123` and in a timestamp.
 fn is_code(value: &str) -> bool {
     value.len() == 3 && value.bytes().all(|b| b.is_ascii_digit())
