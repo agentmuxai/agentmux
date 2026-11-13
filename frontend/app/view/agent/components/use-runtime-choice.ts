@@ -12,7 +12,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCapability, watchCapability } from "@/app/store/toolchain-capabilities";
 import type { AgentDefinition } from "@/app/store/rpc-api";
-import { settingsAtom } from "@/app/store/global";
+import { getSettingsKeyAtom } from "@/app/store/global";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { defaultsToContainer, shouldPreselectContainer, type ContainerImageState } from "../defaults/container-default";
 import { loadLastRuntime, storeLastRuntime } from "../defaults/runtime-choice";
@@ -74,7 +74,7 @@ export function useRuntimeChoice(
     // What the person chose last time, read once as the panel opens.
     const lastRuntime = loadLastRuntime();
     // Where a new agent runs when nobody chose: the setting, as srv's own spawns read it.
-    const defaultContainer = () => defaultsToContainer(((settingsAtom() ?? {}) as Record<string, unknown>)["agents:defaultruntime"]);
+    const defaultContainer = () => defaultsToContainer(getSettingsKeyAtom("agents:defaultruntime" as never)());
     // Default the runtime once the probes land, never to a mode that can't
     // run, until the user chooses.
     createEffect(() => {
