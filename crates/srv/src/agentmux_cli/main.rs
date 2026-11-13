@@ -174,7 +174,8 @@ fn exe_dir() -> Result<PathBuf, String> {
 /// `existing` with `dir` in front of it (once), so the helpers installed beside the server are found first.
 fn path_with_dir(dir: Option<&Path>, existing: Option<std::ffi::OsString>) -> std::ffi::OsString {
     let existing = existing.unwrap_or_default();
-    let rest = std::env::split_paths(&existing).filter(|p| Some(p.as_path()) != dir);
+    // An empty entry would mean the current folder: it is dropped.
+    let rest = std::env::split_paths(&existing).filter(|p| !p.as_os_str().is_empty() && Some(p.as_path()) != dir);
     std::env::join_paths(dir.map(Path::to_path_buf).into_iter().chain(rest)).unwrap_or(existing)
 }
 
