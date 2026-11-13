@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use super::{
-    builtin_client_of, byo_from_req, oauth_status_wire, panel_start_options, AccountOAuthClientClearResult, AccountOAuthClientInfo,
+    builtin_client_of, byo_from_req, oauth_status_wire, panel_start_options, reads_saved_client, AccountOAuthClientClearResult, AccountOAuthClientInfo,
     AccountOAuthStartResult, OAuthClientReq, OAuthSessionReq, OAuthStartReq,
 };
 use crate::backend::rpc_types::AccountOAuthCancelResult;
@@ -33,7 +33,7 @@ pub(super) async fn start_oauth(
         Ok(t) => t,
         Err(e) => return Ok(start_failed(e)),
     };
-    let saved = if byo.is_some() { None } else { saved_client(&req.provider).await };
+    let saved = if reads_saved_client(&req, &byo) { saved_client(&req.provider).await } else { None };
     let cloud_signed_in = cloud_signed_in(&mstore, &req.provider).await;
     let opts = panel_start_options(&req, target, byo, saved, cloud_signed_in);
     match crate::identity::oauth_client::start(&req.provider, opts, mstore, identity_store) {

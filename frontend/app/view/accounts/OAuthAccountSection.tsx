@@ -113,6 +113,7 @@ function SignInDetails(props: { account: Account }): JSX.Element {
                     accountId={a().id}
                     scopes={reconnectScopes(a())}
                     clientIdHint={a().context.oauth_client?.client_id}
+                    useBuiltinClient={isBrokeredGithub(a())}
                     autoStart
                     onConnected={() => setReconnecting(false)}
                     onCancel={() => setReconnecting(false)}

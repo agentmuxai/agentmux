@@ -665,6 +665,7 @@ export const GeneratedApi = {
       scopes?: string[];
       accountId?: string;
       replaceGithubUser?: boolean;
+      useBuiltinClient?: boolean;
     },
     opts?: RpcOpts
   ): Promise<AccountOAuthStartResult> {

@@ -26,7 +26,7 @@
         {
             "command": "account.oauth.start",
             "method": "AccountOAuthStartCommand",
-            "dataType": "{ provider: string; name?: string; clientId?: string; clientSecret?: string; clientMode?: \"byo\" | \"workspace\"; saveClient?: boolean; scopes?: string[]; accountId?: string; replaceGithubUser?: boolean }"
+            "dataType": "{ provider: string; name?: string; clientId?: string; clientSecret?: string; clientMode?: \"byo\" | \"workspace\"; saveClient?: boolean; scopes?: string[]; accountId?: string; replaceGithubUser?: boolean; useBuiltinClient?: boolean }"
         },
         {
             "command": "clearcontainercaches",
