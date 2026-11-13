@@ -15,8 +15,9 @@
  * outside every AgentMux window, where the drop tears the pane off and the floating window opens where the
  * picture was last seen, over the body of another window tab the drag has gone on to, whose layout shows
  * nothing of the pane, and over its own layout while that shows the tear-off (the pointer rested over the
- * pane's own place and the others closed over it), when the pane is in no place on screen. No translucent ghost ever stands in for it. The picture stays on the monitor its window
- * is on: it stops whole at that monitor's edge, as a window does, while the cursor goes on (the host's `home`).
+ * pane's own place and the others closed over it), when the pane is in no place on screen. No translucent
+ * ghost ever stands in for it. The picture stays on the monitor its window is on: it stops whole at that
+ * monitor's edge, as a window does, while the cursor goes on (the host's `home`).
  *
  * It is never resized. (It took the landing rect's shape for a while, smaller than it, and then a second
  * picture of the pane laid out for that rect; the operator, 2026-11-13: "lets get rid of the minimized teared
