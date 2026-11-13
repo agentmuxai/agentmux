@@ -297,7 +297,7 @@
                 --merge-light: 42%;
             }
             .pane-merge-glyph rect {
-                transition: fill 120ms ease;
+                transition: fill var(--duration-quick) var(--ease-out);
             }
             .block-frame-merge:not([aria-disabled="true"]):hover .pane-merge-glyph rect {
                 &:nth-child(1) {
