@@ -265,9 +265,8 @@ fn spawn_run_drain(
                     output: output.clone(),
                     error: error.clone(),
                 };
-                if let Some((ledger, ledger_id)) = &ledger_run {
-                    ledger.drone_finished(ledger_id, last_status == RunStatus::Done, &row.block_states, &row.error);
-                }
+                // The Drone run is saved before the job's row closes: whoever
+                // sees the job's row ended then finds the run's output.
                 match mstore_for_drain.drone_run_update(&row) {
                     Ok(0) => tracing::warn!(
                         run_id = %run_id_for_drain,
@@ -279,6 +278,9 @@ fn spawn_run_drain(
                         error = %e,
                         "drone_run_update failed"
                     ),
+                }
+                if let Some((ledger, ledger_id)) = &ledger_run {
+                    ledger.drone_finished(ledger_id, last_status == RunStatus::Done, &row.block_states, &row.error);
                 }
             }
             broker_for_drain.publish_event_for::<crate::backend::mps_events::DroneRun>(&run_id_for_drain, &ev, vec![], 0);
