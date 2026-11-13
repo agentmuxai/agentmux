@@ -98,6 +98,20 @@ pub(crate) async fn refresh_if_stale(client: &reqwest::Client, local_url: &str, 
     }
 }
 
+/// Whether the keys are still on their way: a fetch was tried a moment ago and nothing is held yet. The first
+/// signed call of a process made by hand lands in this window (the fetch runs beside startup), and its answer
+/// should say to try again, not that the agent needs a respawn (#47532).
+pub(crate) fn fetch_in_progress() -> bool {
+    let held = CACHE.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+    let since = LAST_ATTEMPT.lock().unwrap_or_else(|e| e.into_inner()).map(|t| t.elapsed());
+    fetch_pending(held, since)
+}
+
+/// `fetch_in_progress` on its inputs: whether a copy is held, and how long ago the last fetch was started.
+fn fetch_pending(held: bool, since_last_attempt: Option<Duration>) -> bool {
+    !held && since_last_attempt.is_some_and(|d| d < FETCH_TIMEOUT + Duration::from_secs(2))
+}
+
 /// Whether a cached copy needs no re-fetch at `now` (unix seconds).
 fn still_good(c: &Cached, now: i64) -> bool {
     c.fetched_at.elapsed() < REFRESH_AFTER && c.keys.jekt_key_expires_at.is_none_or(|expires| now < expires)
@@ -163,6 +177,15 @@ mod tests {
         assert!(!super::is_container_hint(None));
         assert!(!super::is_container_hint(Some("0")));
         assert!(!super::is_container_hint(Some("")));
+    }
+
+    #[test]
+    fn keys_are_on_their_way_only_for_a_moment_after_a_fetch_started_with_nothing_held() {
+        use std::time::Duration;
+        assert!(super::fetch_pending(false, Some(Duration::from_millis(500))));
+        assert!(!super::fetch_pending(true, Some(Duration::from_millis(500))), "a held copy is not on its way");
+        assert!(!super::fetch_pending(false, None), "no fetch was tried: this srv serves none");
+        assert!(!super::fetch_pending(false, Some(Duration::from_secs(30))), "an old attempt that left nothing failed");
     }
 
     use super::*;

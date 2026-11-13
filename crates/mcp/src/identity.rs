@@ -400,6 +400,13 @@ pub(crate) fn sign_ui_automation_auth() -> Result<agentmux_common::api_types::Ui
         if crate::self_keys::in_container() {
             return Ok(agentmux_common::api_types::UiAutomationAuth { agent_id, ts_secs, sig: String::new() });
         }
+        if crate::self_keys::fetch_in_progress() {
+            anyhow::bail!(
+                "this agent's signing key is still being fetched from AgentMux (the agent has only just started): \
+                 try again in a few seconds; if the same answer comes back, the agent needs to be respawned to \
+                 get a signing key"
+            );
+        }
         anyhow::bail!(
             "AGENTMUX_JEKT_KEY is not set (or not valid base64) and srv served no key — this agent \
              needs to be respawned to get a signing key before it can use UI automation \
