@@ -31,6 +31,8 @@ export function CardTyped(props: {
     label: string;
     why: string;
     busy: boolean;
+    /** The answer was sent: what was typed is cleared from the boxes, whether or not the question leaves at once. */
+    answered: boolean;
     focus: boolean;
     save: boolean;
     onSave: (on: boolean) => void;
@@ -46,6 +48,10 @@ export function CardTyped(props: {
     const digits = () => cardDigits(number());
     const brand = () => (number() ? cardBrand(number()) : "");
     const length = () => cardCvcLength(brand());
+    createEffect(() => {
+        if (!props.answered) return;
+        for (const set of [setNumber, setMonth, setYear, setCvc, setName, setZip]) set("");
+    });
     createEffect(() => {
         props.onText(cardAnswerText({ number: number(), month: month(), year: year(), cvc: cvc(), name: name(), zip: zip() }));
     });

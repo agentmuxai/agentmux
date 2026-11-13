@@ -311,6 +311,8 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(sent).toMatchObject({ id: "use-1", decision: "once", save: true });
         expect(JSON.parse(sent.value)).toEqual({ number: "4242 4242 4242 4242", exp: "", cvc: "123", name: "Alex Doe", zip: "94107" });
         await waitFor(() => expect(close).toHaveBeenCalled());
+        // The question stays in the list here (nothing removed it), yet the boxes no longer hold what was typed.
+        expect([number.value, (within(dialog).getByLabelText(/Security code/) as HTMLInputElement).value, (within(dialog).getByLabelText("Name on card") as HTMLInputElement).value, (within(dialog).getByLabelText("Billing ZIP") as HTMLInputElement).value]).toEqual(["", "", "", ""]);
         expect(document.body.innerHTML).not.toContain("4242 4242");
     });
 
