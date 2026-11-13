@@ -7,6 +7,8 @@
 // it, and it collapses when the account is saved or the person cancels.
 
 import { Button, IconButton } from "@/app/element/ui";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { AccountForm } from "@/app/view/identity/identity-account-form";
 import type { AccountKind, IdentityViewModel } from "@/app/view/identity/identity-model";
 import { ProviderLogo } from "@/element/ProviderLogo";
@@ -14,7 +16,7 @@ import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "
 import { modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
 import { AgentMuxConnectBody, type MuxBusController } from "./AgentMuxConnectPanel";
 import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
-import { GITHUB_GH_AGENT_NOTE, githubStatusLine } from "./github-account-copy";
+import { githubStatusLine } from "./github-account-copy";
 
 export function AddAccountSection(props: {
     tile: ServiceTile;
@@ -28,6 +30,13 @@ export function AddAccountSection(props: {
     // preset to the provider and kind.
     const [mode, setMode] = createSignal<AuthMode | null>(null);
     const claudeSignIn = () => tile.id === "anthropic" && mode() === "oauth";
+    // Whether this computer has gh-agent, which srv knows and the frontend can't: it is GitHub's status then.
+    const [ghAgentHere, setGhAgentHere] = createSignal(false);
+    if (tile.id === "github") {
+        void RpcApi.GithubConnectionCommand(TabRpcClient, {})
+            .then((c) => setGhAgentHere(c.ghAgentOnThisComputer === true))
+            .catch(() => {});
+    }
 
     let openedForm = false;
     const pick = (picked: AuthMode) => {
@@ -61,8 +70,7 @@ export function AddAccountSection(props: {
             </Show>
             <Show when={tile.id === "github"}>
                 <div class="accounts-add-status">
-                    <p>{githubStatusLine(model.accountsByProvider().get("github") ?? [])}</p>
-                    <p class="accounts-add-status-note">{GITHUB_GH_AGENT_NOTE}</p>
+                    <p>{githubStatusLine(model.accountsByProvider().get("github") ?? [], ghAgentHere())}</p>
                 </div>
             </Show>
             <Show when={tile.id !== "agentmux" && mode() === null}>
