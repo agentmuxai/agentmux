@@ -37,8 +37,9 @@ import { debounce } from "throttle-debounce";
 import { describeRejection } from "@/util/describe-rejection";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
+import { pageCutsPending } from "@/app/drag/page-cut-gate";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
-import { REFLOW_CLIP, REFLOW_EDGES, REFLOW_TRANSFORM, reflowEdges, shownPx } from "./liveReflow";
+import { movesWithReflow, REFLOW_CLIP, REFLOW_EDGES, REFLOW_TRANSFORM, reflowEdges, shownPx } from "./liveReflow";
 import "./tilelayout.scss";
 import { LayoutNode, ResizeHandleProps, TileLayoutContents } from "./types";
 import { clearPlacement } from "./placementPreview";
@@ -628,6 +629,8 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
     // reparented into the magnify overlay, outside the tile nodes.
     const magnifyActive = () => !!props.layoutModel.magnifiedNodeIdAtom();
     const [isDragging, setIsDragging] = createSignal(false);
+    // This pane is a browser pane and a page is still on screen at the drag's start (page-cut-gate.ts).
+    const ownPageUncut = () => pageCutsPending() && !movesWithReflow(props.node);
 
     // Clear isDragging when activeDrag goes false without onDrop having
     // fired — see `TileLayoutPlatform.clearDraggingWhenInactive`.
@@ -680,7 +683,8 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
                 // Not while the pane's picture is still being taken: the picture would show the blur.
                 dragging: isDragging() && !paneCaptureInFlight(),
                 // The pane's own place until the layout first shows a drop or the tear-off: a release tears it off.
-                "tear-off-offered": isDragging() && !paneCaptureInFlight() && props.layoutModel.tearOffOffered(),
+                // A browser pane's sign waits for its page to be cut away: the page is drawn above it until then.
+                "tear-off-offered": isDragging() && !paneCaptureInFlight() && !ownPageUncut() && props.layoutModel.tearOffOffered(),
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
                 // On its way to its chip: its content stays drawn under the closing clip until the glide ends.
