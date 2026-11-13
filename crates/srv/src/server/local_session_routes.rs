@@ -5,8 +5,8 @@
 //! the `/auth/*` routes, the check that admits a browser's session in [`auth_middleware`], and the
 //! headers of the served UI. The sessions themselves are in [`super::local_session`].
 //!
-//! Every answer to a failed `/auth/code` or `/auth/enter` is the same 403 `not accepted`, after the
-//! same short wait, whatever was wrong; the reason goes to the log only, never the secret.
+//! Every answer to a failed sign-in route is the same 403 `not accepted`, after the same short wait,
+//! whatever was wrong; the reason goes to the log only, never the secret.
 //! The routes are registered here, not in `routes.rs`: they authenticate themselves (a container
 //! token never reaches them: its listener refuses a path with no audience).
 
@@ -105,6 +105,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/auth/enter.js", get(handle_script))
         .route("/auth/enter.css", get(handle_style))
         .route("/auth/wait", post(handle_wait))
+        .route("/auth/signout", post(handle_signout))
         .layer(DefaultBodyLimit::max(1024))
 }
 
@@ -118,6 +119,7 @@ enum Reason {
     Origin,
     FetchSite,
     Proof,
+    Session,
 }
 
 impl Reason {
@@ -128,6 +130,7 @@ impl Reason {
             Reason::Origin => "origin",
             Reason::FetchSite => "fetch-site",
             Reason::Proof => "proof",
+            Reason::Session => "session",
         }
     }
 }
@@ -370,6 +373,24 @@ async fn handle_wait(headers: HeaderMap, body: Bytes) -> Response {
     }
 }
 
+/// `POST /auth/signout`: end this browser's session, and no other. It takes the session pair like any
+/// route of the UI, from a same-origin fetch of the page; srv also tells the browser to drop the cookie.
+async fn handle_signout(req: Request<Body>) -> Response {
+    let Some(shape) = SHAPE.get() else { return refusal() };
+    if let Err(reason) = check_shape(shape, req.headers(), Kind::Browser) {
+        return refuse("/auth/signout", reason).await;
+    }
+    let Some(session) = admit_session(&req) else { return refuse("/auth/signout", Reason::Session).await };
+    let ended = store().revoke(session, Instant::now());
+    tracing::info!(ended, "local sign-in session signed out");
+    let mut r = no_store(Json(json!({ "signedOut": ended })).into_response());
+    let cleared = format!("{}=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/", shape.cookie_name);
+    if let Ok(v) = HeaderValue::from_str(&cleared) {
+        r.headers_mut().insert(header::SET_COOKIE, v);
+    }
+    r
+}
+
 // ---- A browser's session on any other route ----
 
 /// How a route takes a session. Every route needs the cookie and the token, except the GETs named
@@ -423,11 +444,15 @@ pub(crate) async fn session_ended(session: Option<SessionId>) {
 
 /// The policy of the served UI and the sign-in page. `'unsafe-inline'` for styles only: the
 /// terminal and layout set inline styles.
+/// `'wasm-unsafe-eval'` lets the code highlighter's WebAssembly engine (Oniguruma, in shiki) compile and
+/// nothing else: scripts still come from this origin only, and `eval` of text stays refused. `base-uri
+/// 'self'` lets a library resolve a relative address against a base on this origin (the drag-preview
+/// picture does, for the fonts) and no other.
 fn content_security_policy(shape: &Shape) -> String {
     let ws: Vec<String> = shape.origins.iter().map(|o| o.replacen("http://", "ws://", 1)).collect();
     format!(
-        "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; \
-         font-src 'self' data:; connect-src 'self' {}; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; \
+        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; \
+         font-src 'self' data:; connect-src 'self' {}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; \
          form-action 'self'; frame-ancestors 'none'",
         ws.join(" ")
     )
