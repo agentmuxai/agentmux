@@ -21,6 +21,11 @@ what: string,
  */
 origin: string, 
 /**
+ * The page's own origin, when the field is in another site's frame (a payment provider's hosted field): the question
+ * is then about that frame on that page, and "Always" is for the pair. Empty for a field of the page itself.
+ */
+page: string, 
+/**
  * The field, as a person reads it.
  */
 field: string, 

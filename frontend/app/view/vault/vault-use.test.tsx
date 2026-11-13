@@ -20,6 +20,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     entry_label: "Alex",
     what: "Social Security number",
     origin: "https://www.irs.gov",
+    page: "",
     field: "Social Security Number",
     offer_always: true,
     reason: "the first time this entry is used on this site",
@@ -434,6 +435,18 @@ describe("srv's deadline in the prompt", () => {
 
             fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
             await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once", choice: "card-old" }]));
+        });
+
+        it("names the payment frame and the page it is on, and the Always is for that pair", async () => {
+            uses = [cardUse({ entry_id: "card-a", entry_label: "Probe Visa", what: "Visa •••• 4242, expires 03/27", origin: "https://js.stripe.com", page: "https://shop.example" })];
+            await refreshVault();
+            render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+            const dialog = await screen.findByRole("group");
+            expect(dialog.textContent).toContain("in a frame from js.stripe.com");
+            expect(dialog.textContent).toContain("on shop.example");
+            expect(within(dialog).getByRole("button", { name: "Always on shop.example (js.stripe.com fields)" })).toBeEnabled();
+            fireEvent.click(within(dialog).getByRole("button", { name: "Always on shop.example (js.stripe.com fields)" }));
+            await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always", choice: "card-a" }]));
         });
 
         it("sends no card with a no, and no picker for a use that is not a whole card", async () => {

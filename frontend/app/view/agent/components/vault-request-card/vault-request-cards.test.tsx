@@ -43,6 +43,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     entry_label: "GitHub token",
     what: "value",
     origin: "",
+    page: "",
     field: "GH_TOKEN (value)",
     offer_always: true,
     reason: "it is the first time Builder runs a command with this entry",
