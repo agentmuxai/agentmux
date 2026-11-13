@@ -1,5 +1,87 @@
 # AgentMux Version History
 
+## 0.60.26 — 2026-11-12
+
+- A Claude Code agent pointed at its own model server launches without a linked Claude account
+- A job can run a Drone as its action, handing it what fired the job as trigger fields; rundrone takes an optional input
+- A model route that is out of credits (HTTP 402) now shows every agent on it as limited, holds their messages and tells each lead once
+- A background title-recovery call that fails is retried after a growing wait (up to half an hour) instead of every 20 seconds, its failure reason is logged, and an agent on a model server of its own is no longer tried
+- After an app upgrade or restart, a container agent that was up comes back instead of staying wanted-running and stopped
+- The restart popover names the agents it waits for, never says 'waiting for 0 agents', and says 'Restarting now' when the wait ends
+- A message to a peer that answers polls but not the message is held and sent again, and a peer's check of a message from another machine no longer waits for a stuck cloud login
+- Every Settings search result, row label and description, and the group headings of Keyboard, Sounds, Notifications, Recording, Devices, Widgets, Advanced and Agents read from the dictionary, so they can be translated (#21624)
+- The background title recovery leaves an agent on a model route alone, as it does one on a model server of its own
+- Vault cards: an agent can fill a whole card into a payment form after one question (number, expiry, security code, name, ZIP), including month and year lists; in a narrow Vault pane each entry row stacks, so its value and buttons stay in view
+- An agent signed out by an expired login now signs itself back in once the login is good again, instead of staying 'Not authenticated' until a person types to it
+- A 402 out-of-credits failure that lands after a model switch made during the turn is now attributed to the route the agent was running, not the one it switched to
+- A standalone agent that hit an out-of-credits error and then worked again is told to its lead again if it runs out a second time
+- The DeepSeek Harness loop guard keeps its count when the agent rejects a steering prompt while an earlier prompt still runs, instead of forgetting it and cancelling the same turn twice
+- Settings: the Browser page's keep-awake and profile text and the Terminal page's dropdown options now follow the chosen language
+- The builds use the CEF 156 r2 runtimes: overlay panes can be clipped to a set of rectangles, and Chrome's browser autofill is no longer attached to pages
+- A fresh start of an ACP agent no longer kills a message that was accepted at the same moment: the message either keeps its turn or waits for the next launch
+- An agent with one pane relaunched on a new model route and another still on the old one: an out-of-credits error on the old route no longer marks the relaunched pane
+- The person gets one notification when a model route runs out of credits, naming the route and what to do, and it comes down when the route works again
+- A container agent's publish check is switched on only where the host's gh-agent can judge a push, and a push from a container whose AgentMux is older than the check says so instead of passing silently
+- A pane dragged out of the window already shows the tear-off in its window: the other panes close over its slot, and open again if the pointer comes back or the drag is cancelled
+- Drone engine interfaces: tainted values, run state and reducers, checkpoints, the Transform node and graph versions, with their acceptance tests (no behaviour change yet)
+- A browser pane stays live under a menu or tooltip on Linux, and on Windows with overlay panes: the covered part is cut out, where the whole pane used to hide behind a still picture (AGENTMUX_PANE_CLIP=off for the old way)
+- Panes glide into place when a pane opens, splits, is minimized or restored, or two are swapped; a new or restored pane fades in
+- The token count's red dot says what is failing in plain words, and Reset counter asks inside the popover instead of in a window modal
+- A fast instance-panel poll (closed windows, window slots) is logged at debug, so a panel left open no longer floods the host log
+- Clicking a widget whose pane is already open flashes that pane on every click, even while the last flash is still showing
+- Browser panes on Windows are overlay panes by default, so a page stays inside its pane border while the window is resized (AGENTMUX_PANE_BACKEND=hwnd goes back to child-window panes); on Linux a pane under a menu keeps its cut-out through a window resize
+- Update in the Store now shows the Store's download percentage and size, then says the update is downloaded; Restart now asks in the row (naming the agents in the middle of a turn), raises the window for the Store's own prompt or installs silently, and arranges for AgentMux to open again on the new version (before, the row stayed on Asking the Microsoft Store and the app was not reopened after the update).
+- A pane no longer blanks to a spinner and loses its scroll position while part of it loads: the view stays in place, and the loading mark appears over it only after half a second
+- Dragging panes with a browser pane in the tab: the browser pane moves with the others while a drop is previewed, and a dragged browser pane keeps its header and address bar in hand
+- On macOS, Quit in the app menu and Cmd+Q ask before stopping agents that are working, as the tray's Quit does
+- Connectors: the GitHub choices say what they are (AgentMux's GitHub App, muxagent, or a personal access token), the duplicate API key kind is gone for GitHub, and a GitHub account's details say who agents act as
+- A pane dragged over a smaller landing place is shown whole at a smaller size, instead of cut off at the edge (Windows)
+- A dragged pane stops at the edge of the monitor its window is on, instead of jumping whole onto a second monitor (Windows)
+- Dropping a pane no longer plays a shrinking landing-zone animation, which could appear on a different pane than the one it landed in
+- Dragging a pane across other panes no longer flickers: the shown drop is kept while the pointer crosses between panes, and the layout is not dimmed for a moment between drops
+- Update in the Store no longer sends a version the host ignores, and a second Restart now request can no longer clear the guard of the first
+- A browser pane woken while an earlier wake's page was still loading no longer stays on the restoring card
+- A pane dragged over its own layout is shown in hand as it will land: laid out for the landing site, not squashed to its shape (Windows)
+- The "keeps running without a pane" toast has a Shutdown button next to Open, with its status and result in the toast
+- Tearing a pane off no longer changes the size of the window it leaves
+- A dragged pane's own place says TEAR OFF, in red, until the layout first shows a drop or closes over it
+- A browser build of the frontend (npm run build:web) with a browser host that reaches srv on the page's own origin
+- The pane + menu shows each widget's icon in the widget's own colour (Settings > Appearance > Widget colors), and the empty-tab menu does too
+- Settings works in a thin pane: the widget colors' swatches wrap under the chip, paired devices are cards, and nothing needs sideways scrolling down to 200 px
+- Once a pane drag has rearranged the layout, the pane's own place is a drop zone like any other: released there, the pane goes back where it was
+- The History and Tower panes fit a thin pane: History's agent list stacks as cards, Tower's view tabs become icons, its headline wraps and its memory rows keep their names, with no sideways scrolling down to 200 px
+- A model route out of credits now reads as that, not as a plan quota: the Swarm chip and row, the Agents list line and the spend chip say the route has no credits left, and the pane card offers Retry instead of an account switch
+- Merging a pane's tabs into a neighbour whose tab strip is full no longer flies tabs past the pane: the flying copies are cut off at the strip's visible edge
+- Zooming a pane shows the amount centred on that pane, not on the window
+- The Memory pane's Global tab in a narrow pane wraps an entry's name to a second line instead of cutting it
+- The Files pane fits a narrow pane: toolbar buttons that have no room move into a More menu, the list drops columns instead of scrolling sideways, and Places stays collapsed until the pane is wide enough for it
+- CI: a frontend-only PR no longer waits on the Rust test legs, and a stalled Ubuntu test step is ended, explained and retried once
+- App logs can filter by a minimum level and a text match before the last lines are taken, and reads this machine's own logs too
+- The desktop follows a cloud discovery document only to AgentMux's own cloud hosts
+- container agents: on a machine with gh-agent, GitHub access is narrowed to one repository and one use (git writes contents, gh does not), gh pr merge is done by AgentMux, and raw API writes that change refs, tags, releases or files say to use git
+- CI: the Codex review gate no longer cancels its own run when two Codex events arrive together, which left a failed evaluate check on the PR
+- The browser host can be imported as @/web-host, so a host module built on it can wrap it
+- The Vault works in a narrow pane: its header buttons move into the pane, every list (entries, Kept by AgentMux, Activity, a History dialog) stacks its rows, and long names, ids and dialog titles wrap instead of scrolling the pane sideways
+- A route-credits note is not posted for an episode that already ended
+- On macOS and Linux a browser pane stays where it is while another pane is dragged, as before; on Windows it moves with the others
+- fix(linux): a dev build or app started by an agent no longer waits behind the AppArmor sandbox dialog: it stops within seconds with exit code 78 and a message naming AGENTMUX_UNSAFE_NOSANDBOX=1
+- Browser: a call that needs the person's answer (a click that sends or submits, a handoff) returns "waiting for the person" after a few seconds so the agent can end its turn and the person can ask it questions; AgentMux carries out what they approve and tells the agent how it went (request_status, cancel_request)
+- Memory pane Global tab no longer scrolls sideways in a zoomed pane (#47511)
+- Swarm row chip for a stopped agent is cut with an ellipsis in a narrow pane, not past the row's edge (#47518)
+- task dev now ends the Vite it started when its launcher ends (normal quit, failed start, signal), on Linux, macOS and Windows; scripts/dev-vite.sh records the Vite's PID and port, and a Vite it did not start is never touched
+- A registry lookup that finds one record no longer opens the lease store (#46577)
+- Vault cards: when an agent names no card and there is no default, or the person has more than one, the approval has a card picker; the person picks which card is filled
+- A container agent of goose, Grok, Muse, Antigravity, Aider or Kimi installs its CLI in the container from a pinned, hash-checked download or a hash-locked uv install, as the npm ones do
+- Browser: Save to Vault and saved sign-ins reach the pane again; the host's calls to srv now use a working address
+- LEGAL.md: AgentMux Corp's California registration, with its Secretary of State entity number
+- A container agent's log no longer says a macOS account 'will not be authenticated' when its Keychain login is staged at start
+- Connecting through AgentMux's GitHub App now uses AgentMux's App even when a GitHub client of your own is saved
+- The pane header's two stacked minimize buttons are gone: Minimize is one button again and merges a pane's tabs into its neighbour (Shift+click for the header chip); a lone pane has no Maximize button, a pane minimized to its header glides there, and the pane grip lights up only under the pointer
+- Connectors Accounts fits a narrow pane: section headers wrap with the filter on its own row, and provider captions wrap instead of being cut off
+- Minimizing a pane deals its tabs out round robin to the open panes instead of putting them all in one; the window header's right-click menu no longer offers Open widgets.json, and its Pin Widgets list shows each widget's icon in its own colour
+- Drone: a job-run row closes only after its Drone run is saved (a Linux test race), and the Transform taint acceptance test uses a valid chain
+- An agent stopped on purpose (the idle lifecycle, Agents stop, a shut down) shows stopped in Agents list, not error, even when the forced kill exits non-zero.
+
 ## 0.60.25 — 2026-11-11
 
 - The merge queue runs vitest on the combined tree, so a JavaScript test broken only by two PRs together stops the second one instead of main
