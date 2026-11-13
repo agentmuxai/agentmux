@@ -37,21 +37,29 @@ pub(crate) fn place_within(cursor: (i32, i32), offset: (i32, i32), size: (i32, i
     (x, y)
 }
 
-/// Whether the picture is shown for a cursor at `cursor_y`. A window tab's shows below the tear line (the
-/// strip's bottom edge plus the tear threshold, the same rule `decideTabRelease` uses) and not over another
-/// AgentMux window, where a release merges the tab. A pane has no tear line: its picture is the dragged pane
-/// itself, shown from the drag's first move wherever the cursor is, over the layout making room for it as much
-/// as over the desktop, so no translucent ghost ever stands in for it (the live reflow spec's "what the user sees").
+/// Whether the picture is shown for a cursor at `cursor` (screen pixels). A window tab's shows below the tear
+/// line (the strip's bottom edge plus the tear threshold, the same rule `decideTabRelease` uses) and not over
+/// another AgentMux window, where a release merges the tab. A pane has no tear line: its picture is the
+/// dragged pane itself, at the pane's own size, and it shows wherever the cursor is except over `quiet`, the
+/// body of the layout the drag began in (left, top, right, bottom). There the layout already shows the pane
+/// where it would land, so the hand holds nothing and the cursor alone says a drag is on (the operator,
+/// 2026-11-13: "it does not need to show at all while a user is hovering over the main window tab body ...
+/// when going off window or into another tab, thats when we want to see its original shape").
 #[cfg(any(target_os = "windows", test))]
-pub(crate) fn picture_wanted(cursor_y: i32, tear_line_y: Option<i32>, over_other_window: bool) -> bool {
+pub(crate) fn picture_wanted(
+    cursor: (i32, i32),
+    tear_line_y: Option<i32>,
+    over_other_window: bool,
+    quiet: Option<(i32, i32, i32, i32)>,
+) -> bool {
     match tear_line_y {
-        Some(line) => cursor_y > line && !over_other_window,
-        None => true,
+        Some(line) => cursor.1 > line && !over_other_window,
+        None => !quiet.is_some_and(|(l, t, r, b)| cursor.0 >= l && cursor.0 < r && cursor.1 >= t && cursor.1 < b),
     }
 }
 
 #[cfg(target_os = "windows")]
-pub use win::{begin, capture, end, landing, on_cursor, on_escape, on_session_end, picture_shown, resize};
+pub use win::{begin, capture, end, landing, on_cursor, on_escape, on_session_end, picture_held, picture_shown, quiet, resize};
 
 #[cfg(not(target_os = "windows"))]
 pub fn begin(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -69,17 +77,23 @@ pub fn resize(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn quiet(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    Ok(serde_json::Value::Null)
+}
+
+#[cfg(not(target_os = "windows"))]
 pub async fn capture(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "staged": false }))
 }
 
-/// The picture's commands by name: `live_follow_begin`, `live_follow_resize`, `live_follow_capture`, and
-/// `live_follow_end` for any other.
+/// The picture's commands by name: `live_follow_begin`, `live_follow_resize`, `live_follow_capture`,
+/// `live_follow_quiet`, and `live_follow_end` for any other.
 pub async fn route(cmd: &str, state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     match cmd {
         "live_follow_begin" => begin_blocking(state, args).await,
         "live_follow_resize" => resize_blocking(args).await,
         "live_follow_capture" => capture(state, args).await,
+        "live_follow_quiet" => quiet(args),
         _ => end(),
     }
 }
@@ -117,7 +131,9 @@ mod win {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use windows_sys::Win32::Foundation::{GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
+    use windows_sys::Win32::Foundation::{
+        GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
+    };
     use windows_sys::Win32::Graphics::Gdi::{
         ClientToScreen, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
         BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
@@ -125,7 +141,8 @@ mod win {
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetMessageW, PostMessageW,
+        PostQuitMessage,
         RegisterClassExW, SetTimer, SetWindowPos, TranslateMessage, UpdateLayeredWindow, HWND_TOP, MSG, SWP_ASYNCWINDOWPOS,
         SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, ULW_ALPHA, WM_APP,
         WM_ERASEBKGND, WM_DESTROY, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
@@ -175,6 +192,12 @@ mod win {
         /// out of the monitor agentmux is running on, so it behaves like a typical edge of the screen").
         /// A window tab has none: it is torn off onto whichever monitor it is carried to.
         home: Option<(i32, i32, i32, i32)>,
+        /// The body of the layout a pane's drag began in, screen pixels (left, top, right, bottom): the picture
+        /// is not shown over it (`picture_wanted`). None for a window tab, and for a pane whose page gave none.
+        quiet: Option<(i32, i32, i32, i32)>,
+        /// Whether `quiet` holds now: the page turns it off while the window shows another window tab, whose
+        /// layout shows nothing of the pane (`quiet`).
+        quiet_on: bool,
         /// Where the hook last saw the cursor, screen pixels: a new size is placed around it (`resize`).
         cursor: Option<(i32, i32)>,
         shown: bool,
@@ -192,6 +215,9 @@ mod win {
     static FOLLOWER: Mutex<Option<Follower>> = Mutex::new(None);
     /// Whether the picture is on screen, readable without the lock the hook thread holds on every move.
     static PICTURE_SHOWN: AtomicBool = AtomicBool::new(false);
+    /// Whether a pane's picture is held out of sight over its own layout at times (`quiet`): the drag then
+    /// shows no picture there at all, not the shell's either (`picture_held`).
+    static PICTURE_HELD: AtomicBool = AtomicBool::new(false);
     /// The picture `resize` composed, for the window's thread to paint (`WM_FOLLOW_RESIZE`); a newer one
     /// replaces an unpainted one, and the end of the picture clears it.
     static PENDING_REPAINT: Mutex<Option<Repaint>> = Mutex::new(None);
@@ -247,11 +273,13 @@ mod win {
             .map_err(|e| format!("picture is not base64: {}", e))?;
         let source = unsafe { crate::commands::window::resolve_window_hwnd_strict(state, label) }
             .ok_or_else(|| format!("no window for {}", label))?;
-        let (scale, client_top) = unsafe {
+        let (scale, client_left, client_top, client_width) = unsafe {
             let dpi = GetDpiForWindow(source);
             let mut origin = POINT { x: 0, y: 0 };
             ClientToScreen(source, &mut origin);
-            (if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 }, origin.y)
+            let mut client = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            GetClientRect(source, &mut client);
+            (if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 }, origin.x, origin.y, client.right - client.left)
         };
         let px = |dip: f64| (dip * scale).round() as i32;
         let size = (
@@ -261,6 +289,7 @@ mod win {
         let offset = (px(num(args, "offsetX")?), px(num(args, "offsetY")?));
         let tear_line_y = args.get("tearLineY").and_then(|v| v.as_f64()).map(|line| client_top + px(line));
         let home = if tear_line_y.is_none() { crate::app::window_work_area_physical(source as isize) } else { None };
+        let quiet = if tear_line_y.is_none() { quiet_area(args, (client_left, client_top), client_width)? } else { None };
         let bgra = Arc::new(decode_bgra(&jpeg, size.0 as u32, size.1 as u32)?);
 
         end_now();
@@ -276,6 +305,8 @@ mod win {
             source_size: size,
             tear_line_y,
             home,
+            quiet,
+            quiet_on: true,
             cursor: None,
             shown: false,
             last: (0, 0),
@@ -283,9 +314,10 @@ mod win {
             shows: None,
             pictures: LandedPictures::default(),
         });
+        PICTURE_HELD.store(quiet.is_some(), Ordering::Release);
         tracing::info!(
             target: "dnd:tearoff",
-            label = %label, width = size.0, height = size.1, tear_line_y = ?tear_line_y,
+            label = %label, width = size.0, height = size.1, tear_line_y = ?tear_line_y, quiet = ?quiet,
             "[live-follow] picture ready; it shows with the cursor's next move"
         );
         // The drag ended while the picture was being made: nothing will move it, so it goes.
@@ -304,6 +336,7 @@ mod win {
     fn end_now() {
         let taken = FOLLOWER.lock().ok().and_then(|mut g| g.take());
         PICTURE_SHOWN.store(false, Ordering::Release);
+        PICTURE_HELD.store(false, Ordering::Release);
         if let Ok(mut pending) = PENDING_REPAINT.lock() {
             *pending = None;
         }
@@ -368,9 +401,49 @@ mod win {
     pub fn on_cursor(x: i32, y: i32, over_other_window: bool) {
         let Ok(mut guard) = FOLLOWER.try_lock() else { return };
         let Some(f) = guard.as_mut() else { return };
+        track(f, x, y, over_other_window);
+    }
+
+    /// The body of the layout a pane's drag began in, as the page gave it (`quiet`: `left`, `top`, `width`,
+    /// `height` in CSS px of a viewport `viewportWidth` wide), in screen pixels (left, top, right, bottom). The
+    /// page's px are scaled by the window's client width, as a picture of the window is (`capture`), so a
+    /// zoomed page is read right. None when the page gave none.
+    fn quiet_area(
+        args: &serde_json::Value,
+        client_origin: (i32, i32),
+        client_width: i32,
+    ) -> Result<Option<(i32, i32, i32, i32)>, String> {
+        let Some(area) = args.get("quiet").filter(|q| !q.is_null()) else { return Ok(None) };
+        let viewport_width = num(area, "viewportWidth")?;
+        if !(viewport_width > 0.0) || client_width <= 0 {
+            return Ok(None);
+        }
+        let ratio = client_width as f64 / viewport_width;
+        let px = |css: f64| (css * ratio).round() as i32;
+        let (left, top) = (client_origin.0 + px(num(area, "left")?), client_origin.1 + px(num(area, "top")?));
+        Ok(Some((left, top, left + px(num(area, "width")?), top + px(num(area, "height")?))))
+    }
+
+    /// Turn the quiet area on or off (`on`): off while the window shows another window tab than the one the
+    /// drag began in, where nothing on screen shows the pane; on again when it is back. The picture is shown or
+    /// hidden for the cursor where it is, without waiting for its next move. A no-op with no picture.
+    pub fn quiet(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let on = args.get("on").and_then(|v| v.as_bool()).ok_or_else(|| "missing on".to_string())?;
+        let mut guard = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?;
+        let Some(f) = guard.as_mut() else { return Ok(serde_json::Value::Null) };
+        f.quiet_on = on;
+        if let Some((x, y)) = f.cursor {
+            track(f, x, y, false);
+        }
+        Ok(serde_json::Value::Null)
+    }
+
+    /// Show, move or hide the picture for a cursor at (x, y).
+    fn track(f: &mut Follower, x: i32, y: i32, over_other_window: bool) {
         f.cursor = Some((x, y));
         let hwnd = f.hwnd as HWND;
-        if !super::picture_wanted(y, f.tear_line_y, over_other_window) {
+        let quiet = if f.quiet_on { f.quiet } else { None };
+        if !super::picture_wanted((x, y), f.tear_line_y, over_other_window, quiet) {
             if f.shown {
                 f.shown = false;
                 PICTURE_SHOWN.store(false, Ordering::Release);
@@ -504,6 +577,12 @@ mod win {
     /// would answer no and bring the shell's picture back for a frame.
     pub fn picture_shown() -> bool {
         PICTURE_SHOWN.load(Ordering::Acquire)
+    }
+
+    /// Whether a pane's picture exists that is held out of sight over its own layout: the shell's picture must
+    /// not stand in for it there. Read from the drag's own thread on every cursor move, so a flag, as above.
+    pub fn picture_held() -> bool {
+        PICTURE_HELD.load(Ordering::Acquire)
     }
 
     /// Where the real window should open: the picture's last place, if the picture is on screen. Handed out
@@ -774,21 +853,39 @@ mod tests {
 
     #[test]
     fn a_window_tabs_picture_shows_only_below_the_tear_line() {
-        assert!(picture_wanted(301, Some(300), false));
-        assert!(!picture_wanted(300, Some(300), false));
-        assert!(!picture_wanted(120, Some(300), false));
+        assert!(picture_wanted((0, 301), Some(300), false, None));
+        assert!(!picture_wanted((0, 300), Some(300), false, None));
+        assert!(!picture_wanted((0, 120), Some(300), false, None));
     }
 
     #[test]
     fn a_window_tabs_picture_stays_hidden_over_another_window() {
-        assert!(!picture_wanted(900, Some(300), true));
+        assert!(!picture_wanted((0, 900), Some(300), true, None));
     }
 
     #[test]
-    fn a_panes_picture_shows_everywhere_from_the_first_move() {
-        assert!(picture_wanted(0, None, false));
-        assert!(picture_wanted(-5_000, None, false));
-        // Over its own window, where the layout makes room, and over another AgentMux window too.
-        assert!(picture_wanted(0, None, true));
+    fn a_panes_picture_with_no_quiet_area_shows_everywhere_from_the_first_move() {
+        assert!(picture_wanted((0, 0), None, false, None));
+        assert!(picture_wanted((0, -5_000), None, false, None));
+        // Over another AgentMux window too.
+        assert!(picture_wanted((0, 0), None, true, None));
+    }
+
+    #[test]
+    fn a_panes_picture_is_not_shown_over_the_body_of_its_own_layout() {
+        // The layout's body on screen: 100..1300 across, 133..933 down.
+        let body = Some((100, 133, 1300, 933));
+        // Over the body, to its last pixel: the layout shows the pane where it would land.
+        assert!(!picture_wanted((700, 500), None, false, body));
+        assert!(!picture_wanted((100, 133), None, false, body));
+        assert!(!picture_wanted((1299, 932), None, false, body));
+        // Over the window's tab bar above it, and outside the window on every side: the pane, as it is.
+        assert!(picture_wanted((700, 120), None, false, body));
+        assert!(picture_wanted((1300, 500), None, false, body));
+        assert!(picture_wanted((99, 500), None, false, body));
+        assert!(picture_wanted((700, 933), None, false, body));
+        assert!(picture_wanted((-400, 500), None, false, body));
+        // A window tab has a tear line and no quiet area: the body is where its picture shows.
+        assert!(picture_wanted((700, 500), Some(133), false, body));
     }
 }

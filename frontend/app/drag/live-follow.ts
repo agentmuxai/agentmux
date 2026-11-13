@@ -14,7 +14,7 @@
 import { Logger } from "@/util/logger";
 import { isWindows } from "@/util/platformutil";
 
-type Api = Pick<AppApi, "liveFollowBegin" | "liveFollowEnd" | "liveFollowResize" | "liveFollowCapture">;
+type Api = Pick<AppApi, "liveFollowBegin" | "liveFollowEnd" | "liveFollowResize" | "liveFollowCapture" | "liveFollowQuiet">;
 
 export interface LiveFollowSpec {
     sourceWindowLabel: string;
@@ -26,8 +26,13 @@ export interface LiveFollowSpec {
     /** Cursor to the window's top-left, DIP. */
     offsetX: number;
     offsetY: number;
-    /** The viewport y below which a window tab's picture shows, DIP; none for a pane, shown everywhere from its first move. */
+    /** The viewport y below which a window tab's picture shows, DIP; none for a pane. */
     tearLineY?: number;
+    /**
+     * A pane: the body of the layout its drag began in, in the viewport's CSS px, and the viewport's width. The
+     * picture is not shown while the cursor is over it. None: shown everywhere from its first move.
+     */
+    quiet?: { left: number; top: number; width: number; height: number; viewportWidth: number };
 }
 
 /** Hand the host the picture and where it goes. A failure only means no picture: the tear-off is unchanged. */
@@ -38,6 +43,17 @@ export async function beginLiveFollow(api: Api, spec: LiveFollowSpec): Promise<v
     } catch (e) {
         Logger.warn("dnd", "live follow begin failed", { error: String(e) });
     }
+}
+
+/**
+ * Turn a pane picture's quiet area on or off. Calls go out in order, so the last one asked is the one that
+ * holds. A failure only leaves the area as it was.
+ */
+let quiets: Promise<unknown> = Promise.resolve();
+export function quietLiveFollow(api: Pick<Api, "liveFollowQuiet">, on: boolean): Promise<void> {
+    if (!isWindows()) return Promise.resolve();
+    quiets = quiets.then(() => api.liveFollowQuiet({ on })).catch((e) => Logger.debug("dnd", "live follow quiet failed", { error: String(e) }));
+    return quiets as Promise<void>;
 }
 
 /** The real window is up (or the tear-off failed): drop the picture now. */

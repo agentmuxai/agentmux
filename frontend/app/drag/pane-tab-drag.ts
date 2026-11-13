@@ -8,6 +8,8 @@
  * docs/specs/SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md §5.1.
  */
 
+import { homeLayoutOf } from "@/layout/lib/homeLayout";
+import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { beginDrag, isUnderway, markReleased, session } from "./drag-session";
 import { watchEscapeDuringDrag } from "./escape-watch";
 
@@ -16,8 +18,11 @@ import { watchEscapeDuringDrag } from "./escape-watch";
 export function startPaneTabDrag(blockId: string, paneKey?: string, tabId?: string, blockIds?: readonly string[]): void {
     const several = !!blockIds && blockIds.length > 1;
     beginDrag("pane-tab", { blockId, nodeId: paneKey, tabId, ...(several ? { blockIds } : {}) });
-    // Only a single tab with a window tab can tear off, so only that one is followed (pane-live-follow.ts).
-    watchEscapeDuringDrag(!several && paneKey && tabId ? { blockId } : undefined);
+    // Only a single tab with a window tab can tear off, so only that one is followed (pane-live-follow.ts), and
+    // its picture is carried outside its own layout's body only, as a dragged pane's is.
+    const model = !several && paneKey && tabId ? getLayoutModelForTabById(tabId) : undefined;
+    const home = model && homeLayoutOf(model, () => isUnderway("pane-tab"));
+    watchEscapeDuringDrag(!several && paneKey && tabId ? { blockId, ...(home ? { home } : {}) } : undefined);
 }
 
 export function releasePaneTabDrag(): void {

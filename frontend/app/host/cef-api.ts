@@ -601,6 +601,9 @@ function crossWindowDragApi() {
             await invokeCommand("live_follow_resize", args);
         },
         liveFollowCapture: (args) => invokeCommand<{ staged: boolean }>("live_follow_capture", args),
+        liveFollowQuiet: async (args) => {
+            await invokeCommand("live_follow_quiet", args);
+        },
     } satisfies Partial<AppApi>;
 }
 
