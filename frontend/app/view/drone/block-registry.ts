@@ -150,6 +150,34 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
             { id: "false", label: "false", type: "any" },
         ],
     },
+    transform: {
+        kind: "transform",
+        emoji: "🧮",
+        label: "Transform",
+        description: "Shape a list or object with a chain of operations (map, filter, pick, sort, group, count, sum...). No code runs.",
+        color: "#14b8a6", // colour: fixed (the block's identity colour)
+        defaultData: {
+            input: "",
+            ops: [],
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    foreach: {
+        kind: "foreach",
+        emoji: "🔁",
+        label: "For each",
+        description: "Run one block once per item of a list. Reads {{item}} and {{index}}; results come out as a list.",
+        color: "#6366f1", // colour: fixed (the block's identity colour)
+        defaultData: {
+            items: "",
+            body: "",
+            max_items: 100,
+            on_item_error: "stop",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     response: {
         kind: "response",
         emoji: "🏁",

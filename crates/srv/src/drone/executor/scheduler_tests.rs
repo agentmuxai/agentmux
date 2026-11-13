@@ -60,7 +60,11 @@ impl Outcome {
 }
 
 async fn run(graph: DroneGraph) -> Outcome {
-    let mut handle = run_drone("d".to_string(), graph, Value::Null, None).await.unwrap();
+    run_with(graph, Value::Null).await
+}
+
+async fn run_with(graph: DroneGraph, trigger: Value) -> Outcome {
+    let mut handle = run_drone("d".to_string(), graph, trigger, None).await.unwrap();
     let mut done = Vec::new();
     let mut result = Err("no end".to_string());
     while let Some(ev) = handle.events.recv().await {
@@ -176,7 +180,173 @@ fn a_loops_cost_and_time_limits_end_it_with_their_reason() {
     let why = s.loop_cap("guard", &guard).unwrap();
     assert!(why.contains("the loop at guard spent $1.10, its cap of $1.00"), "{why}");
     s.spent_by.clear();
-    s.loop_started.insert("guard", Instant::now() - std::time::Duration::from_secs(6 * 60));
+    s.loop_started.insert("guard".to_string(), Instant::now() - std::time::Duration::from_secs(6 * 60));
     let why = s.loop_cap("guard", &guard).unwrap();
     assert!(why.contains("ran 6.0 minutes, its cap of 5 minutes"), "{why}");
+}
+
+#[tokio::test]
+async fn a_loops_clock_starts_with_the_first_block_of_its_cycle() {
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let states: States = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let graph = counting_loop("never", json!({ "max_minutes": 5 }), "unreached");
+    let plan = schedule::analyze(&graph).unwrap();
+    let mut s = Scheduler::new("r", &graph, plan, ExecutionScope::new(), None, &tx, &states);
+    s.enqueue("start", false);
+    s.step("start", false).await.unwrap();
+    assert!(s.loop_started.is_empty(), "the start block is not in the cycle");
+    s.step("step", false).await.unwrap();
+    assert!(s.loop_started.contains_key("guard"), "the first pass counts toward the loop's time, before the guard has gone round");
+}
+
+#[tokio::test]
+async fn a_block_with_a_forward_edge_and_a_back_edge_keeps_its_forward_edge() {
+    // b leads on to c inside the cycle and also back to the guard a; c leads back too.
+    let g = DroneGraph {
+        nodes: vec![
+            vars("start", "n", "x"),
+            node("a", json!({ "kind": "condition", "expr": "{{var.n}} == xxxx" })),
+            vars("b", "n", "{{var.n}}x"),
+            vars("c", "m", "y"),
+            response("done", "{{var.n}}"),
+        ],
+        edges: vec![
+            edge("e1", "start", "a", None),
+            edge("e2", "a", "b", Some("false")),
+            edge("e3", "a", "done", Some("true")),
+            edge("e4", "b", "c", None),
+            edge("e5", "b", "a", None),
+            edge("e6", "c", "a", None),
+        ],
+    };
+    // Two ways back into one guard is not a loop with a clear count, so only
+    // the edge's own fate is asserted: c is not skipped by the trip back.
+    let out = run(g).await;
+    assert!(out.times("c") >= 1, "c ran: its edge from b was not erased by the trip back");
+}
+
+#[tokio::test]
+async fn a_loop_collects_into_a_list_and_adds_up_a_number_with_reducers() {
+    let mut g = counting_loop("xxxx", json!({}), "{{var.log}} total={{var.total}}");
+    g.nodes[1] = node(
+        "step",
+        json!({ "kind": "variables", "entries": [
+            { "name": "n", "value": "{{var.n}}x" },
+            { "name": "log", "value": "{{var.n}}", "reducer": "append" },
+            { "name": "total", "value": 10, "reducer": "add" },
+        ]}),
+    );
+    let out = run(g).await;
+    assert_eq!(out.result, Ok(json!(r#"["xx","xxx","xxxx"] total=30"#)));
+}
+
+#[tokio::test]
+async fn the_run_marks_what_came_from_outside_as_tainted_for_the_state() {
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let states: States = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let graph = DroneGraph {
+        nodes: vec![
+            vars("a", "x", "{{trigger.title}}"),
+            node("c", json!({ "kind": "condition", "expr": "{{var.x}} == hi" })),
+            response("r", "{{c.result}} {{var.x}}"),
+        ],
+        edges: vec![edge("e1", "a", "c", None), edge("e2", "c", "r", None)],
+    };
+    let plan = schedule::analyze(&graph).unwrap();
+    let scope = ExecutionScope::with_trigger(json!({ "title": "hi" }));
+    let mut s = Scheduler::new("r", &graph, plan, scope, None, &tx, &states);
+    s.run().await.unwrap();
+    assert!(s.scope.state.get("x").unwrap().tainted);
+    assert_eq!(s.scope.bits["c"], (false, true), "a boolean made from tainted text is derived, not tainted");
+    assert_eq!(s.scope.bits["r"], (true, false), "a response reading the tainted variable is tainted");
+}
+
+
+fn each(extra: Value, items: Value) -> (DroneGraph, Value) {
+    let mut data = json!({ "kind": "foreach", "items": "{{trigger.list}}", "body": "work" });
+    data.as_object_mut().unwrap().extend(extra.as_object().cloned().unwrap_or_default());
+    let g = DroneGraph {
+        nodes: vec![
+            vars("start", "init", "begin"),
+            node("each", data),
+            // The body adds the item to a list; the response reads the list.
+            node("work", json!({ "kind": "variables", "entries": [{ "name": "seen", "value": "{{item.name}}#{{index}}", "reducer": "append" }] })),
+            response("done", "{{each.count}} {{var.seen}}"),
+        ],
+        edges: vec![edge("e1", "start", "each", None), edge("e2", "each", "done", None)],
+    };
+    (g, json!({ "list": items }))
+}
+
+
+#[tokio::test]
+async fn runs_the_body_once_per_item_with_item_and_index() {
+    let (g, trigger) = each(json!({}), json!([{ "name": "a" }, { "name": "b" }, { "name": "c" }]));
+    let out = run_with(g, trigger).await;
+    assert_eq!(out.result, Ok(json!(r#"3 ["a#0","b#1","c#2"]"#)));
+    assert_eq!(out.times("work"), 3);
+    let each = &out.done.iter().find(|(b, _)| b == "each").unwrap().1;
+    assert_eq!(each["results"].as_array().unwrap().len(), 3);
+    assert_eq!(each["capped"], false);
+}
+
+#[tokio::test]
+async fn an_empty_list_runs_nothing_and_the_run_goes_on() {
+    let (g, trigger) = each(json!({}), json!([]));
+    let out = run_with(g, trigger).await;
+    assert_eq!(out.times("work"), 0);
+    assert_eq!(out.times("done"), 1);
+}
+
+#[tokio::test]
+async fn more_items_than_max_items_stop_the_run_naming_both_numbers() {
+    let items: Vec<Value> = (0..150).map(|i| json!({ "name": format!("n{i}") })).collect();
+    let (g, trigger) = each(json!({}), json!(items));
+    let out = run_with(g, trigger).await;
+    let why = out.result.clone().unwrap_err();
+    assert!(why.contains("stopped after 100 of 150 items"), "{why}");
+    assert_eq!(out.times("work"), 100, "the first hundred ran, no more");
+}
+
+#[tokio::test]
+async fn exit_loop_goes_on_after_max_items_with_capped_set() {
+    let items: Vec<Value> = (0..5).map(|i| json!({ "name": format!("n{i}") })).collect();
+    let (g, trigger) = each(json!({ "max_items": 2, "on_cap": "exit_loop" }), json!(items));
+    let out = run_with(g, trigger).await;
+    assert_eq!(out.times("work"), 2);
+    let each = &out.done.iter().find(|(b, _)| b == "each").unwrap().1;
+    assert_eq!((each["capped"].clone(), each["count"].clone()), (json!(true), json!(2)));
+    assert!(each["capped_reason"].as_str().unwrap().contains("2 of 5"));
+    assert_eq!(out.times("done"), 1);
+}
+
+#[tokio::test]
+async fn a_failed_item_stops_the_run_or_is_recorded_as_chosen() {
+    // `add` of text onto a number fails on the second item.
+    let body = json!({ "kind": "variables", "entries": [{ "name": "n", "value": "{{item}}", "reducer": "add" }] });
+    let build = |extra: Value| {
+        let mut data = json!({ "kind": "foreach", "items": "{{trigger.list}}", "body": "work" });
+        data.as_object_mut().unwrap().extend(extra.as_object().cloned().unwrap());
+        DroneGraph {
+            nodes: vec![vars("start", "x", "1"), node("each", data), node("work", body.clone()), response("done", "ok")],
+            edges: vec![edge("e1", "start", "each", None), edge("e2", "each", "done", None)],
+        }
+    };
+    let trigger = json!({ "list": [1, "two", 3] });
+    let out = run_with(build(json!({})), trigger.clone()).await;
+    assert!(out.result.clone().unwrap_err().contains("item 1"), "{:?}", out.result);
+    let kept = run_with(build(json!({ "on_item_error": "continue" })), trigger).await;
+    assert_eq!(kept.result, Ok(json!("ok")));
+    let each = &kept.done.iter().find(|(b, _)| b == "each").unwrap().1;
+    assert_eq!(each["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(each["errors"][0]["index"], 1);
+    assert_eq!(each["count"], 3, "the failed item is counted");
+}
+
+#[tokio::test]
+async fn items_that_are_not_a_list_fail_the_block_and_say_what_they_were() {
+    let (g, trigger) = each(json!({}), json!("nope"));
+    let out = run_with(g, trigger).await;
+    let why = out.result.unwrap_err();
+    assert!(why.contains("items must be a list") && why.contains("text"), "{why}");
 }
