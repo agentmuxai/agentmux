@@ -12,6 +12,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { openLink } from "@/app/store/global";
 import type { AccountProvider } from "@/app/view/identity/identity-model";
 import { PROVIDER_LABELS, refreshAccountCache } from "@/app/view/identity/identity-model";
+import type { AccountOAuthClientInfo } from "@/types/rpc/AccountOAuthClientInfo";
 import { muxbusDelivery, muxbusOffersSignIn } from "@/store/muxbus-delivery";
 import { githubNeedsCloudSignIn, isNeedsCloudSignInError } from "./github-cloud-gate";
 import { isBlockedError, setOAuthNote } from "./oauth-account-state";
@@ -40,6 +41,8 @@ export interface OAuthConnectPanelProps {
     autoStart?: boolean;
     /** Prefills the client id if the user has to enter the client again. */
     clientIdHint?: string;
+    /** Connect with AgentMux's own client, whatever client the person saved (the GitHub App choice). */
+    useBuiltinClient?: boolean;
     /** Called once the backend reports success (account already created or updated). */
     onConnected: (result: OAuthConnectResult) => void;
     /** Shows a Cancel button beside Connect. */
@@ -136,9 +139,14 @@ function createFlowSession(props: OAuthConnectPanelProps) {
     };
 }
 
+/** Nothing to connect with: AgentMux's own client is the one asked for and this build has none, or the provider hides its client and there is none. */
+function connectUnavailable(info: OAuthServiceInfo, client: AccountOAuthClientInfo | null, builtinOnly: boolean): boolean {
+    return builtinOnly ? client != null && !client.builtinAvailable : clientUnavailable(info, client);
+}
+
 /** The OAuth connect's state: everything the panel's markup reads, and what it does. */
 export function createOAuthConnect(props: OAuthConnectPanelProps, info: OAuthServiceInfo) {
-    const client = createOAuthClientState(info, props.clientIdHint);
+    const client = createOAuthClientState(info, props.clientIdHint, props.useBuiltinClient === true);
     const flow = createFlowSession(props);
     const { sessionId, setSessionId, status, setStatus, setBusy, localError, setLocalError, stopPolling, applyStatus } = flow;
 
@@ -187,11 +195,13 @@ export function createOAuthConnect(props: OAuthConnectPanelProps, info: OAuthSer
     const needsCloud = () =>
         githubNeedsCloudSignIn(
             props.provider,
-            client.state.loaded() && !client.state.showFields() && client.state.info()?.saved !== true,
+            client.state.loaded() &&
+                !client.state.showFields() &&
+                (props.useBuiltinClient === true || client.state.info()?.saved !== true),
             muxbusDelivery(),
         );
 
-    const unavailable = () => clientUnavailable(info, client.state.info());
+    const unavailable = () => connectUnavailable(info, client.state.info(), props.useBuiltinClient === true);
 
     // A Reconnect starts by itself once it knows it has a client to use, and, for GitHub, a Cloud sign-in.
     let autoStarted = false;

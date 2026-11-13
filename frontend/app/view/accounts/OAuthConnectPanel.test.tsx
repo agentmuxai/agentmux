@@ -305,3 +305,58 @@ describe("Connect GitHub without an AgentMux Cloud sign-in", () => {
         expect(await screen.findByRole("button", { name: "Connect GitHub" })).toBeTruthy();
     });
 });
+
+
+describe("Connect GitHub with AgentMux's own App (the App choice)", () => {
+    const GITHUB_URL = "https://github.com/login/oauth/authorize?x";
+    const OWN_SAVED = { saved: true, clientId: "Iv1.mine", hasSecret: false, mode: "byo", builtinAvailable: true };
+    const delivery = (state: string) => acceptMuxbusDelivery({ state, since_ms: 1 });
+
+    it("asks srv for AgentMux's own client and shows no saved client, although the person saved one", async () => {
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue(OWN_SAVED);
+        rpc.AccountOAuthStartCommand.mockResolvedValue({ sessionId: "s1", status: { status: "url-available", authUrl: GITHUB_URL } });
+        delivery("connected");
+        render(() => <OAuthConnectPanel provider="github" name={() => "work"} useBuiltinClient onConnected={() => {}} />);
+        fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
+        await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1));
+        expect(rpc.AccountOAuthStartCommand.mock.calls[0][1]).toEqual({
+            provider: "github",
+            name: "work",
+            accountId: undefined,
+            scopes: undefined,
+            useBuiltinClient: true,
+        });
+        expect(screen.queryByText("Using your saved client")).toBeNull();
+        expect(screen.queryByText("Iv1.mine")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Forget this client" })).toBeNull();
+        expect(screen.queryByPlaceholderText(/Iv1\./)).toBeNull();
+    });
+
+    it("still says to sign in to AgentMux Cloud when the person's own client is saved", async () => {
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue(OWN_SAVED);
+        delivery("signed_out");
+        render(() => <OAuthConnectPanel provider="github" name={() => "work"} useBuiltinClient onConnected={() => {}} />);
+        expect(await screen.findByText("Sign in to AgentMux Cloud to connect GitHub")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+        expect(rpc.AccountOAuthStartCommand).not.toHaveBeenCalled();
+    });
+
+    it("says the App isn't available in a build without one, and starts nothing", async () => {
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue({ ...OWN_SAVED, builtinAvailable: false });
+        delivery("connected");
+        render(() => <OAuthConnectPanel provider="github" name={() => "work"} useBuiltinClient onConnected={() => {}} />);
+        expect(await screen.findByText(/GitHub isn't available in this version of AgentMux yet/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+        expect(rpc.AccountOAuthStartCommand).not.toHaveBeenCalled();
+    });
+
+    it("a panel without the flag still uses the saved client, shown as before (a reconnect of an own-client account)", async () => {
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue(OWN_SAVED);
+        delivery("connected");
+        render(() => <OAuthConnectPanel provider="github" name={() => "work"} onConnected={() => {}} />);
+        expect(await screen.findByText("Using your saved client")).toBeTruthy();
+        fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
+        await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1));
+        expect(rpc.AccountOAuthStartCommand.mock.calls[0][1]).not.toHaveProperty("useBuiltinClient");
+    });
+});
