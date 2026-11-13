@@ -14,6 +14,34 @@ use crate::backend::storage::store::Store;
 
 use super::types::{DroneDefinition, DroneRun};
 
+/// The definition upsert, shared by [`DroneStore::drone_upsert`] and the
+/// versioned save in `versions.rs`, so both write the same row.
+pub(crate) fn upsert_definition(conn: &rusqlite::Connection, wf: &DroneDefinition) -> Result<(), StoreError> {
+    let graph = serde_json::to_string(&wf.graph).unwrap_or_else(|_| "{}".to_string());
+    let viewport = serde_json::to_string(&wf.viewport).unwrap_or_else(|_| "{}".to_string());
+    conn.execute(
+        "INSERT INTO db_drone_definitions
+            (id, name, description, graph, viewport, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            description = excluded.description,
+            graph = excluded.graph,
+            viewport = excluded.viewport,
+            updated_at = excluded.updated_at",
+        params![
+            wf.id,
+            wf.name,
+            wf.description,
+            graph,
+            viewport,
+            wf.created_at,
+            wf.updated_at,
+        ],
+    )?;
+    Ok(())
+}
+
 pub trait DroneStore {
     fn drone_list(&self) -> Result<Vec<DroneDefinition>, StoreError>;
     fn drone_get(&self, id: &str) -> Result<Option<DroneDefinition>, StoreError>;
@@ -99,29 +127,7 @@ impl DroneStore for Store {
 
     fn drone_upsert(&self, wf: &DroneDefinition) -> Result<(), StoreError> {
         let conn = self.conn().lock().unwrap();
-        let graph = serde_json::to_string(&wf.graph).unwrap_or_else(|_| "{}".to_string());
-        let viewport = serde_json::to_string(&wf.viewport).unwrap_or_else(|_| "{}".to_string());
-        conn.execute(
-            "INSERT INTO db_drone_definitions
-                (id, name, description, graph, viewport, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                description = excluded.description,
-                graph = excluded.graph,
-                viewport = excluded.viewport,
-                updated_at = excluded.updated_at",
-            params![
-                wf.id,
-                wf.name,
-                wf.description,
-                graph,
-                viewport,
-                wf.created_at,
-                wf.updated_at,
-            ],
-        )?;
-        Ok(())
+        upsert_definition(&conn, wf)
     }
 
     fn drone_delete(&self, id: &str) -> Result<bool, StoreError> {
