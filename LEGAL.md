@@ -2,12 +2,13 @@
 
 ## Corporate Entity
 
-AgentMux is developed and maintained by **AgentMux Corp**, a corporation incorporated in the State of Delaware.
+AgentMux is developed and maintained by **AgentMux Corp**, a corporation incorporated in the State of Delaware and registered to do business in California as an out-of-state (foreign) stock corporation.
 
 | | |
 |---|---|
 | **Legal name** | AgentMux Corp |
 | **Jurisdiction** | Delaware, United States |
+| **Registered in** | California, as an out-of-state (foreign) stock corporation; California Secretary of State entity number B20260493432 (file date November 7, 2026) |
 
 ## Contact
 
