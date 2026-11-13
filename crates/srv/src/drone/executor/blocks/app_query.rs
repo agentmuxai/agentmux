@@ -26,7 +26,7 @@
 //!               "last_seen_ms", "last_answered_ms"?, "answered" }] }`. `answered` is true when the peer
 //!               answered this machine's own poll (asked every 30 s) in the last two minutes: it is up and
 //!               reachable from here. It is not a signature check.
-//!   * `jobs`:   `{ "found": bool, "count": N, "runs": [{ "id", "job_id", "job", "state", "outcome", "trigger",
+//!   * `jobs`:   (scheduled, Drone and cloud jobs alike, as the run ledger holds them) `{ "found": bool, "count": N, "runs": [{ "id", "job_id", "job", "state", "outcome", "trigger",
 //!               "summary", "started_ms", "ended_ms"?, "cost_usd"? }] }`; `found` is false for a `job` that
 //!               matches none.
 
@@ -259,27 +259,28 @@ fn run_row(r: &crate::backend::storage::job_runs::JobRun) -> Value {
     row
 }
 
-/// `jobs`: the named job's newest runs, or the newest run of every job, newest first, cut to the limit.
+/// `jobs`: the named job's newest runs, or the newest run of every job, newest first, cut to the limit. A job is
+/// whatever the run ledger has runs of (scheduled, Drone and cloud jobs alike), and a scheduled job with no run yet.
 pub(crate) fn jobs_answer(jobs: &crate::backend::storage::store::Store, ledger: &crate::backend::storage::store::Store, f: &JobsFilter) -> Result<Value, String> {
-    let all = jobs.cron_list().map_err(|e| format!("app query: couldn't read the jobs: {e}"))?;
     let read = |e: crate::backend::storage::StoreError| format!("app query: couldn't read the runs: {e}");
     if f.job.is_empty() {
-        let mut runs = Vec::new();
-        for job in &all {
-            runs.extend(ledger.job_run_last(&job.id).map_err(read)?);
-        }
-        runs.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms));
-        let rows: Vec<Value> = runs.iter().take(f.limit).map(run_row).collect();
+        let rows: Vec<Value> = ledger.job_runs_latest_per_job(f.limit as i64).map_err(read)?.iter().map(run_row).collect();
         return Ok(json!({ "found": true, "count": rows.len(), "runs": rows }));
     }
-    let mut named = all.iter().filter(|j| j.id == f.job || j.name == f.job);
-    let (Some(job), None) = (named.next(), named.next()) else {
-        let more_than_one = all.iter().filter(|j| j.id == f.job || j.name == f.job).count() > 1;
-        return Ok(if more_than_one { json!({ "found": false, "ambiguous": true, "count": 0, "runs": [] }) } else { json!({ "found": false, "count": 0, "runs": [] }) });
-    };
-    let runs = ledger.job_runs_for_job(&job.id, f.limit as i64, None).map_err(read)?;
-    let rows: Vec<Value> = runs.iter().map(run_row).collect();
-    Ok(json!({ "found": true, "count": rows.len(), "runs": rows }))
+    let mut ids = ledger.job_ids_named(&f.job).map_err(read)?;
+    for job in jobs.cron_list().map_err(|e| format!("app query: couldn't read the jobs: {e}"))? {
+        if (job.id == f.job || job.name == f.job) && !ids.contains(&job.id) {
+            ids.push(job.id);
+        }
+    }
+    match ids.as_slice() {
+        [] => Ok(json!({ "found": false, "count": 0, "runs": [] })),
+        [id] => {
+            let rows: Vec<Value> = ledger.job_runs_for_job(id, f.limit as i64, None).map_err(read)?.iter().map(run_row).collect();
+            Ok(json!({ "found": true, "count": rows.len(), "runs": rows }))
+        }
+        _ => Ok(json!({ "found": false, "ambiguous": true, "count": 0, "runs": [] })),
+    }
 }
 
 #[cfg(test)]
@@ -394,6 +395,23 @@ mod tests {
         let ids: Vec<&str> = a["runs"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!((a["found"].clone(), a["count"].clone(), ids), (json!(true), json!(2), vec!["r2", "r3"]));
         assert_eq!(jobs_answer(&state.mstore, &state.mstore, &JobsFilter { job: String::new(), limit: 1 }).unwrap()["count"], 1);
+    }
+
+    #[tokio::test]
+    async fn jobs_of_other_sources_count_too_and_a_scheduled_job_with_no_run_is_found() {
+        use crate::backend::storage::job_runs::JobRun;
+        let state = ledger_with(&[("j1", "Nightly"), ("j9", "Idle")], &[("r1", "j1", 100)]);
+        state.mstore.job_run_insert(&JobRun::new("d1", "drone-1", "drone", "Report drone", "manual", "finished", 500)).unwrap();
+        state.mstore.job_run_insert(&JobRun::new("c1", "tpl.cloud", "cloud", "Cloud check", "event", "finished", 400)).unwrap();
+        let all = jobs_answer(&state.mstore, &state.mstore, &JobsFilter { job: String::new(), limit: 20 }).unwrap();
+        let ids: Vec<&str> = all["runs"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["d1", "c1", "r1"], "the Drone and cloud jobs' newest runs are in, newest first");
+        for who in ["Report drone", "drone-1", "Cloud check", "tpl.cloud"] {
+            let a = jobs_answer(&state.mstore, &state.mstore, &JobsFilter { job: who.to_string(), limit: 20 }).unwrap();
+            assert_eq!((a["found"].clone(), a["count"].clone()), (json!(true), json!(1)), "{who}");
+        }
+        let idle = jobs_answer(&state.mstore, &state.mstore, &JobsFilter { job: "Idle".to_string(), limit: 20 }).unwrap();
+        assert_eq!((idle["found"].clone(), idle["count"].clone()), (json!(true), json!(0)), "a scheduled job that hasn't run yet exists");
     }
 
     #[tokio::test]
