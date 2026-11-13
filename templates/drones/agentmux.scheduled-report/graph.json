@@ -1,0 +1,23 @@
+{
+  "nodes": [
+    {
+      "id": "report",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "kind": "agent",
+        "task": "{{param.question}}\n\nAnswer with the report only: a short summary first, then the details as a list. Say plainly when there is nothing to report.",
+        "max_turns": 20
+      }
+    },
+    {
+      "id": "tell",
+      "position": { "x": 280, "y": 0 },
+      "data": {
+        "kind": "message",
+        "to": "{{param.owner}}",
+        "body": "Scheduled report:\n{{report.response}}"
+      }
+    }
+  ],
+  "edges": [{ "id": "report-tell", "source": "report", "target": "tell" }]
+}
