@@ -172,6 +172,11 @@ pub fn diff(prev: &Checkpoint, next: &Checkpoint) -> Result<CheckpointDiff, Chec
         // graph, so a pair that does is not one step of one run.
         return Err(CheckpointError::DoesNotFollow("the graph ref changed inside the run".to_string()));
     }
+    if next.step >= MAX_STEPS {
+        // The incremental store must honour the ceiling `encode` enforces;
+        // otherwise a run could be resumed from a step no reader would accept.
+        return Err(CheckpointError::TooManySteps { step: next.step, max: MAX_STEPS });
+    }
     let mut d = CheckpointDiff {
         schema_version: next.schema_version,
         run_id: next.run_id.clone(),
@@ -203,6 +208,14 @@ pub fn diff(prev: &Checkpoint, next: &Checkpoint) -> Result<CheckpointDiff, Chec
     if prev.resume_on != next.resume_on {
         d.resume_on = Some(next.resume_on.clone());
     }
+    // A diff that cannot rebuild `next` would let a restored run differ from
+    // the one that was saved, with no error anywhere. The format cannot express
+    // a loop counter that vanished, a reducer declaration that was dropped, or
+    // a removed variable whose declaration stays, so refuse those shapes
+    // (rather than store a lossy diff) when the round trip does not match.
+    if apply(prev, &d)? != *next {
+        return Err(CheckpointError::DoesNotFollow("the diff cannot rebuild this checkpoint".to_string()));
+    }
     Ok(d)
 }
 
@@ -225,6 +238,11 @@ pub fn apply(prev: &Checkpoint, d: &CheckpointDiff) -> Result<Checkpoint, Checkp
             "diff goes from step {} to step {}",
             d.from_step, d.to_step
         )));
+    }
+    if d.to_step >= MAX_STEPS {
+        // A restored checkpoint at or past the ceiling could never be encoded
+        // again, so the diff that would build it is refused here too.
+        return Err(CheckpointError::TooManySteps { step: d.to_step, max: MAX_STEPS });
     }
     let mut out = prev.clone();
     out.schema_version = d.schema_version;
@@ -411,5 +429,56 @@ mod tests {
         let restored = apply(&prev, &d).unwrap();
         assert_eq!(restored.state.reducers.get(&name), None);
         assert_eq!(restored, next);
+    }
+
+    #[test]
+    fn a_pair_a_diff_cannot_rebuild_is_refused() {
+        // A loop counter that disappeared: the format carries changed counters only.
+        let mut prev = sample(1);
+        prev.loop_counters = BTreeMap::from([("guard".to_string(), 2)]);
+        let mut next = prev.clone();
+        next.step = 2;
+        next.loop_counters.clear();
+        assert!(matches!(diff(&prev, &next), Err(CheckpointError::DoesNotFollow(_))));
+
+        // A reducer declaration dropped while its variable stays.
+        let mut prev = sample(1);
+        prev.state.vars.insert("n".into(), Tv::clean(json!(1)));
+        prev.state.reducers.insert("n".into(), Reducer::Add);
+        let mut next = prev.clone();
+        next.step = 2;
+        next.state.reducers.remove("n");
+        assert!(matches!(diff(&prev, &next), Err(CheckpointError::DoesNotFollow(_))));
+
+        // A removed variable whose declaration stays.
+        let mut prev = sample(1);
+        prev.state.vars.insert("n".into(), Tv::clean(json!(1)));
+        prev.state.reducers.insert("n".into(), Reducer::Add);
+        let mut next = prev.clone();
+        next.step = 2;
+        next.state.vars.remove("n");
+        assert!(matches!(diff(&prev, &next), Err(CheckpointError::DoesNotFollow(_))));
+    }
+
+    #[test]
+    fn a_checkpoint_past_the_step_ceiling_is_refused_by_diff_and_apply() {
+        let prev = sample(MAX_STEPS - 1);
+        let mut next = prev.clone();
+        next.step = MAX_STEPS;
+        assert_eq!(
+            diff(&prev, &next).unwrap_err(),
+            CheckpointError::TooManySteps { step: MAX_STEPS, max: MAX_STEPS }
+        );
+        let d = CheckpointDiff {
+            schema_version: SCHEMA_VERSION,
+            run_id: prev.run_id.clone(),
+            from_step: prev.step,
+            to_step: MAX_STEPS,
+            ..CheckpointDiff::default()
+        };
+        assert_eq!(
+            apply(&prev, &d).unwrap_err(),
+            CheckpointError::TooManySteps { step: MAX_STEPS, max: MAX_STEPS }
+        );
     }
 }
