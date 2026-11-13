@@ -297,19 +297,52 @@ describe("FloatingPaneWorkspace: edge resize", () => {
         expect(h.api.windows.getRect).toHaveBeenCalledWith(LABEL);
     });
 
-    it("shows the edge's cursor on hover, and clears it when the press ends", async () => {
+    it("shows the edge's cursor on the element under the pointer on hover, and on the document only while resizing", async () => {
         const { body } = mount();
+        const root = document.documentElement;
         move(body, 0, 0, 2, 400);
-        expect(document.documentElement.dataset.floaterEdge).toBe(FLOATER_RESIZE_CURSORS[1]);
+        expect(body.style.getPropertyValue("cursor")).toBe(FLOATER_RESIZE_CURSORS[1]);
+        expect(body.style.getPropertyPriority("cursor")).toBe("important");
+        expect(root.dataset.floaterEdge).toBeUndefined();
         move(body, 0, 0, 500, 400);
-        expect(document.documentElement.dataset.floaterEdge).toBeUndefined();
+        expect(body.style.getPropertyValue("cursor")).toBe("");
         down(body, 2, 400);
         await flush();
-        expect(document.documentElement.dataset.floaterEdge).toBe(FLOATER_RESIZE_CURSORS[1]);
-        body.dispatchEvent(mouse("pointerup", {}));
-        expect(document.documentElement.dataset.floaterEdge).toBeUndefined();
+        // A press with no move restyles nothing but the element under it.
+        expect(body.style.getPropertyValue("cursor")).toBe(FLOATER_RESIZE_CURSORS[1]);
+        expect(root.dataset.floaterEdge).toBeUndefined();
         move(body, 900, 500);
-        expect(h.api.windows.setRect).not.toHaveBeenCalled();
+        expect(root.dataset.floaterEdge).toBe(FLOATER_RESIZE_CURSORS[1]);
+        body.dispatchEvent(mouse("pointerup", {}));
+        expect(root.dataset.floaterEdge).toBeUndefined();
+        expect(body.style.getPropertyValue("cursor")).toBe("");
+        move(body, 900, 500);
+        expect(h.api.windows.setRect).toHaveBeenCalledTimes(1);
+    });
+
+    it("sets the cursor again on an element that takes the place under a resting pointer (a live chart's rebuilt overlay)", () => {
+        const { body } = mount();
+        move(body, 0, 0, 2, 400);
+        expect(body.style.getPropertyValue("cursor")).toBe(FLOATER_RESIZE_CURSORS[1]);
+        // The element is replaced at the same spot: the browser sends pointerover to the new one, no move.
+        const replacement = document.createElement("div");
+        body.appendChild(replacement);
+        replacement.dispatchEvent(mouse("pointerover", { clientX: 2, clientY: 400 }));
+        expect(replacement.style.getPropertyValue("cursor")).toBe(FLOATER_RESIZE_CURSORS[1]);
+        expect(replacement.style.getPropertyPriority("cursor")).toBe("important");
+        expect(body.style.getPropertyValue("cursor")).toBe("");
+        // A pointerover away from the band clears it.
+        replacement.dispatchEvent(mouse("pointerover", { clientX: 500, clientY: 400 }));
+        expect(replacement.style.getPropertyValue("cursor")).toBe("");
+    });
+
+    it("puts back an element's own inline cursor when the pointer leaves the band", () => {
+        const { body } = mount();
+        body.style.cursor = "text";
+        move(body, 0, 0, 2, 400);
+        expect(body.style.getPropertyValue("cursor")).toBe(FLOATER_RESIZE_CURSORS[1]);
+        move(body, 0, 0, 500, 400);
+        expect(body.style.getPropertyValue("cursor")).toBe("text");
     });
 
     it("gives up when the host returns an empty rect", async () => {
