@@ -28,7 +28,7 @@ import { EASE_OUT } from "@/app/motion/tokens";
 import { gatingNodeIds } from "@/app/store/tab-reveal";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
-import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { onWindowDrag } from "@/app/drag/window-drag-events";
 import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
@@ -65,6 +65,7 @@ import {
     Placeholder,
 } from "./tilelayout-shared";
 import { PillCatcher } from "./PillCatcher";
+import { TearOffPlace } from "./TearOffPlace";
 import { tileItemType } from "@/app/drag/drag-types";
 
 export interface TileLayoutProps {
@@ -669,14 +670,15 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
     };
 
     const { skipsLayout, tileStyle, entering } = useTileStyle(props, nodeModel);
+    // The pane's own place until the layout first shows a drop or the tear-off: a release tears it off.
+    const tearOffOffered = () => isDragging() && !paneCaptureInFlight() && props.layoutModel.tearOffOffered();
 
     return (
         <div
             class={clsx("tile-node", {
                 // Not while the pane's picture is still being taken: the picture would show the blur.
                 dragging: isDragging() && !paneCaptureInFlight(),
-                // The pane's own place until the layout first shows a drop or the tear-off: a release tears it off.
-                "tear-off-offered": isDragging() && !paneCaptureInFlight() && props.layoutModel.tearOffOffered(),
+                "tear-off-offered": tearOffOffered(),
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
                 // On its way to its chip: its content stays drawn under the closing clip until the glide ends.
@@ -695,6 +697,9 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
             onPointerOver={(event) => event.stopPropagation()}
         >
             {leafContent()}
+            <Show when={tearOffOffered()}>
+                <TearOffPlace />
+            </Show>
             {previewElement()}
         </div>
     );
