@@ -60,6 +60,12 @@ pub(crate) struct PushScanRequest {
 #[serde(deny_unknown_fields)]
 struct Part {
     r#ref: String,
+    /// The ref the push updates on the remote and whether the remote has none yet, for gh-agent's check of a name that
+    /// becomes public with the push. Both are optional: material that omits them is judged as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote_ref: Option<String>,
+    #[serde(default)]
+    new_ref: bool,
     count: u64,
     remote_named: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -109,6 +115,9 @@ pub(crate) fn validate(req: &PushScanRequest) -> Result<String, String> {
     for (i, p) in req.parts.iter().enumerate() {
         if !is_ref(&p.r#ref) {
             return Err(format!("part {i}: the ref is not a ref name"));
+        }
+        if p.remote_ref.as_deref().is_some_and(|r| !is_ref(r)) {
+            return Err(format!("part {i}: the remote ref is not a ref name"));
         }
         if p.count > 10_000_000 {
             return Err(format!("part {i}: count is out of range"));
@@ -228,7 +237,7 @@ mod tests {
     use super::*;
 
     fn part() -> Part {
-        Part { r#ref: "refs/heads/x".into(), count: 1, remote_named: true, tag_message: None, messages: String::new(), name_status: String::new(), patch: String::new(), changesets: vec![] }
+        Part { r#ref: "refs/heads/x".into(), remote_ref: None, new_ref: false, count: 1, remote_named: true, tag_message: None, messages: String::new(), name_status: String::new(), patch: String::new(), changesets: vec![] }
     }
 
     fn request(repo: &str, parts: Vec<Part>) -> PushScanRequest {
@@ -282,6 +291,25 @@ mod tests {
         let parts = vec![big(MAX_FIELD_BYTES), big(MAX_FIELD_BYTES), big(10)];
         let why = validate(&request("a/b", parts)).unwrap_err();
         assert!(why.contains("split it into smaller pushes"), "{why}");
+    }
+
+    #[test]
+    fn the_remote_ref_and_whether_it_is_new_are_checked_and_passed_on() {
+        let json = r#"{"repo":"a/b","allow_new_docs":false,"parts":[{"ref":"refs/heads/x","remote_ref":"refs/heads/new","new_ref":true,"count":1,"remote_named":true}]}"#;
+        let req: PushScanRequest = serde_json::from_str(json).unwrap();
+        assert!(validate(&req).is_ok());
+        let again: serde_json::Value = serde_json::from_slice(&serde_json::to_vec(&req).unwrap()).unwrap();
+        assert_eq!(again["parts"][0]["remote_ref"], "refs/heads/new");
+        assert_eq!(again["parts"][0]["new_ref"], true);
+        // Material without them is read as before, and a remote ref that is not a ref name is refused.
+        let old = r#"{"repo":"a/b","allow_new_docs":false,"parts":[{"ref":"refs/heads/x","count":1,"remote_named":true}]}"#;
+        let old: PushScanRequest = serde_json::from_str(old).unwrap();
+        assert!(validate(&old).is_ok());
+        let mut bad = req;
+        bad.parts[0].remote_ref = Some("refs/heads/\u{1}x".into());
+        assert!(validate(&bad).is_err());
+        bad.parts[0].remote_ref = Some(String::new());
+        assert!(validate(&bad).is_err());
     }
 
     #[test]
