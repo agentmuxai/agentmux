@@ -4,6 +4,8 @@
 // The Atlas pane (atlas-view.tsx). The colours follow the Swarm: working in the error colour, waiting in the accent,
 // idle in the success colour, a limit or a sign-in in the warning colour, stopped muted.
 
+@use "../../mixins.scss";
+
 .atlas {
     display: flex;
     flex-direction: column;
@@ -135,8 +137,7 @@
     }
 
     &:focus-visible {
-        outline: 2px solid var(--accent-color);
-        outline-offset: 1px;
+        @include mixins.focus-ring;
     }
 
     &--selected {
@@ -171,9 +172,10 @@
     }
 
     // In the By seat layout a node carries its machine as a tint along its top.
-    @for $i from 0 through 5 {
-        &[data-tint="#{$i}"] {
-            box-shadow: inset 0 2px 0 hsl($i * 60, 55%, 55%);
+    $tints: var(--accent-color), var(--success-color), var(--warning-color), var(--error-color), var(--info-color), var(--secondary-text-color);
+    @for $i from 1 through 6 {
+        &[data-tint="#{$i - 1}"] {
+            box-shadow: inset 0 2px 0 color-mix(in srgb, #{nth($tints, $i)} 80%, transparent);
         }
     }
 }
@@ -236,29 +238,14 @@
 
 .atlas-fold {
     position: absolute;
-    z-index: 2;
-}
-
-.atlas-fold__chip {
-    padding: 0 var(--space-2);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-full);
-    background: transparent;
-    color: var(--secondary-text-color);
-    font: inherit;
-    font-size: var(--text-2xs);
-    cursor: pointer;
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
+    z-index: var(--z-map-fold);
 }
 
 .atlas-fold__list {
     position: absolute;
     left: 0;
     top: 100%;
-    z-index: 3;
+    z-index: var(--z-map-fold-list);
     min-width: 200px;
     max-height: 240px;
     margin: var(--space-1) 0 0;
@@ -308,7 +295,7 @@
     border-radius: var(--radius-md);
     background: var(--main-bg-color);
     cursor: default;
-    z-index: 4;
+    z-index: var(--z-map-card);
 }
 
 .atlas-card__head {

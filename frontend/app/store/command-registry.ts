@@ -246,7 +246,6 @@ function registerOpenViewCommands(): void {
         label: "Open Atlas",
         category: "Open",
         icon: "map",
-        iconColor: "#f59e0b",
         execute: (opts) => openPane({ meta: { view: "atlas" } }, opts?.forceNew),
     });
     commandRegistry.register({

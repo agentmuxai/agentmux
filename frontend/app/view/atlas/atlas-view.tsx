@@ -8,6 +8,7 @@
  */
 
 import { seatBadgeText, seatTooltipLine } from "@/app/agent-model/seat-format";
+import { tip } from "@/app/element/tip";
 import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { openAgentInActiveTab, startAgent } from "@/app/store/agent-runtime-live";
@@ -60,8 +61,9 @@ function Node(props: {
 }): JSX.Element {
     const a = () => props.agent;
     return (
-        <button
-            type="button"
+        <div
+            role="button"
+            tabindex="0"
             class={`atlas-node atlas-node--${a().state}`}
             classList={{ "atlas-node--selected": props.selected, "atlas-node--stale": a().stale }}
             data-tint={props.tint ?? undefined}
@@ -69,8 +71,13 @@ function Node(props: {
             style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${NODE_W}px`, height: `${NODE_H}px` }}
             aria-pressed={props.selected}
             aria-label={`${a().name}, ${STATE_LABELS[a().state]}`}
-            title={a().line ?? STATE_LABELS[a().state]}
+            {...tip(a().line ?? STATE_LABELS[a().state])}
             onClick={() => props.onSelect(a().key)}
+            onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                props.onSelect(a().key);
+            }}
         >
             <span class="atlas-node__top">
                 <span class="atlas-node__dot" />
@@ -79,7 +86,7 @@ function Node(props: {
             <span class="atlas-node__sub">
                 {a().seat ? seatBadgeText(a().seat!) : STATE_LABELS[a().state]}
             </span>
-        </button>
+        </div>
     );
 }
 
@@ -92,15 +99,14 @@ function FoldedChip(props: {
 }): JSX.Element {
     return (
         <div class="atlas-fold" style={{ left: `${props.x}px`, top: `${props.y}px` }}>
-            <button
-                type="button"
-                class="atlas-fold__chip"
+            <Button
+                density="compact"
                 aria-expanded={props.open}
                 style={{ height: `${FOLD_CHIP.h}px` }}
                 onClick={props.onToggle}
             >
                 {props.region.folded.length} stopped {props.open ? "▾" : "▸"}
-            </button>
+            </Button>
             <Show when={props.open}>
                 <ul class="atlas-fold__list">
                     <For each={props.region.folded}>
