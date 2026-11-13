@@ -6,7 +6,7 @@
 import type { Accessor, JSX } from "solid-js";
 import { Show } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
-import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
+import { Button, CloseButton, SegmentedControl } from "@/app/element/ui";
 import { redactSecrets } from "@/app/errors/redact";
 import { keyLabel } from "@/app/keybindings";
 import type { EditorMode, EditorViewModel } from "./editor-model";
@@ -75,10 +75,9 @@ export function EditorLspBanner(props: {
                             <span class="editor-lsp-banner-text">
                                 {hint?.serverName ?? state.language} not installed.
                             </span>
-                            <IconButton
-                                icon="xmark"
+                            <CloseButton
+                                size="sm"
                                 label="Dismiss banner for this session"
-                                density="compact"
                                 onClick={() => props.onDismiss(state.language)}
                             />
                         </div>

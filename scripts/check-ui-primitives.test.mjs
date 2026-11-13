@@ -18,6 +18,8 @@ import {
     followRenames,
     countButtons,
     countMenus,
+    countCloseControls,
+    CLOSE_CONTROLS_ALLOWLIST,
     deadFallbacks,
     declarations,
     handFocusRings,
@@ -671,6 +673,32 @@ describe("rule 15: hand-written text fields", () => {
         const now = collect(files);
         expect(now.rawFieldProblems).toEqual({ "frontend/app/view/x/x.tsx": 1 });
         expect(hardZeroViolations(now)).toContain("rawFieldProblems: frontend/app/view/x/x.tsx has 1, allowed 0");
+    });
+});
+
+describe("closeControls (rule 17)", () => {
+    it("counts a ✕ drawn by hand: an xmark icon, a Font Awesome class, a glyph; not the kit control, a comment or a ×", () => {
+        const source = [
+            '<IconButton icon="xmark" label="Dismiss" />',
+            '<i class="fa-solid fa-xmark" />',
+            '<button>✕</button>',
+            '<CloseButton label="Dismiss" onClick={x} />',
+            '// icon="xmark" in a comment',
+            '/* fa-xmark too */',
+            '<span>{w}×{h}</span>',
+        ].join("\n");
+        expect(countCloseControls(source)).toBe(3);
+    });
+
+    it("is a hard zero except for the status ✕s named, each with a reason", () => {
+        expect(Object.keys(CLOSE_CONTROLS_ALLOWLIST).sort()).toEqual([
+            "frontend/app/statusbar/UpdateStatus.tsx",
+            "frontend/app/view/settings/sections/recording-section.tsx",
+        ]);
+        for (const entry of Object.values(CLOSE_CONTROLS_ALLOWLIST)) expect(entry.reason.length).toBeGreaterThan(30);
+        expect(hardZeroViolations({ closeControls: { "frontend/app/view/x/x.tsx": 1 } }, { closeControls: {} })).toEqual([
+            "closeControls: frontend/app/view/x/x.tsx has 1, allowed 0",
+        ]);
     });
 });
 

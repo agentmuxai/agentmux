@@ -17,6 +17,8 @@
 
 import clsx from "clsx";
 import { Button } from "@/app/element/ui/Button";
+import { CloseButton } from "@/app/element/ui/CloseButton";
+import { tip } from "@/app/element/tip";
 import { For, Show, type JSX } from "solid-js";
 import { makeIconClass } from "@/util/util";
 import "./PaneRow.scss";
@@ -32,7 +34,7 @@ type PaneRowAccent =
     | "neutral";
 
 export interface PaneRowAction {
-    /** Single-glyph button label (e.g. "■" stop, "×" dismiss, "⌫" close).
+    /** Single-glyph button label (e.g. "■" stop, "⌫" close).
      *  Ignored when `icon` is set. */
     glyph?: string;
     /** FontAwesome icon key (e.g. "vault") — takes precedence over `glyph`
@@ -52,7 +54,9 @@ export interface PaneRowAction {
      *  `failure-accessory.test.ts` does — keep typechecking without a
      *  synthetic event; the real render call site always passes one. */
     onClick: (e?: MouseEvent) => void;
-    /** Tints the glyph on hover with the error colour (destructive actions). */
+    /** A dismiss: the kit's CloseButton (a ✕ that turns red on hover), named by `title`. */
+    close?: boolean;
+    /** Draws the button in the danger tone (destructive actions). */
     danger?: boolean;
     /** Emphasise as the primary action (filled accent). */
     primary?: boolean;
@@ -109,6 +113,21 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
                 </Show>
                 <For each={props.actions ?? []}>
                     {(action) => (
+                        <Show
+                            when={!action.close}
+                            fallback={
+                                <CloseButton
+                                    size="sm"
+                                    class="pane-row-action"
+                                    label={action.title}
+                                    tooltip={false}
+                                    {...tip(action.title)}
+                                    disabled={action.disabled}
+                                    // stopPropagation so an action never also fires onActivate.
+                                    onClick={(e) => { e.stopPropagation(); action.onClick(e); }}
+                                />
+                            }
+                        >
                         <Button
                             density="compact"
                             tone={action.danger || action.primary ? "danger" : "neutral"}
@@ -129,6 +148,7 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
                                 <span class="pane-row-action-text">{action.label}</span>
                             </Show>
                         </Button>
+                        </Show>
                     )}
                 </For>
             </div>

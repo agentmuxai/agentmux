@@ -9,7 +9,7 @@
 
 import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, CloseButton } from "@/app/element/ui";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import { formatWhen } from "./vault-format";
 import { openVault } from "./open-vault";
@@ -89,7 +89,7 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
                                             {(g) => (
                                                 <span class="vault-grant" data-origin={g}>
                                                     {grantText(g)}
-                                                    <IconButton icon="xmark" label={`Stop ${grantText(g)} for ${e.label}`} density="compact" onClick={() => void revoke(e.id, g)} />
+                                                    <CloseButton size="sm" label={`Stop ${grantText(g)} for ${e.label}`} onClick={() => void revoke(e.id, g)} />
                                                 </span>
                                             )}
                                         </For>

@@ -9,7 +9,7 @@
 
 import { seatBadgeText, seatTooltipLine } from "@/app/agent-model/seat-format";
 import { tip } from "@/app/element/tip";
-import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
+import { Button, CloseButton, IconButton, SegmentedControl } from "@/app/element/ui";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { openAgentInActiveTab, startAgent } from "@/app/store/agent-runtime-live";
 import { revealBlock } from "@/app/util/reveal-block";
@@ -143,7 +143,7 @@ function Card(props: { agent: AtlasAgent; machineTitle: string; onClose: () => v
             <header class="atlas-card__head">
                 <span class={`atlas-node__dot atlas-node--${a().state}`} />
                 <strong class="atlas-card__name">{a().name}</strong>
-                <IconButton icon="xmark" label="Close" density="compact" onClick={props.onClose} />
+                <CloseButton size="sm" onClick={props.onClose} />
             </header>
             <dl class="atlas-card__rows">
                 <dt>State</dt>

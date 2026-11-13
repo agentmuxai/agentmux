@@ -6,7 +6,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 
-import { Button, Pill } from "@/app/element/ui";
+import { Button, CloseButton, Pill } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { openLink } from "@/app/store/global";
 import { revealBlock } from "@/app/util/reveal-block";
@@ -211,9 +211,7 @@ export function HistoryActions(part: { props: JobHistoryProps; h: JobHistoryStat
                     </Button>
                 )}
             </Show>
-            <Button density="compact" tone="quiet" icon="xmark" onClick={() => props.onClose()}>
-                Close
-            </Button>
+            <CloseButton size="sm" text="Close" onClick={() => props.onClose()} />
         </div>
     );
 }

@@ -6,7 +6,7 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 
-import { Button, IconButton, TextInput } from "@/app/element/ui";
+import { Button, CloseButton, TextInput } from "@/app/element/ui";
 
 import { parseAfter } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
@@ -61,8 +61,7 @@ export function KanbanAfterSection(props: {
                                     </Button>
                                     <span class="warden-manager-dim">{STATE_WORDS[a.state] ?? a.state}</span>
                                     <Show when={open()}>
-                                        <IconButton
-                                            icon="xmark"
+                                        <CloseButton
                                             label={`Don't wait for #${a.num}`}
                                             disabled={busy()}
                                             onClick={() =>

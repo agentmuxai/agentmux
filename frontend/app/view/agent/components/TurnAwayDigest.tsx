@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Show, createEffect, createSignal, type Accessor, type JSX } from "solid-js";
-import { IconButton } from "@/app/element/ui";
+import { CloseButton } from "@/app/element/ui";
 import { markTurnsSeen, unseenTurnsFor } from "@/app/store/turn-awareness";
 import { awaySummary } from "../turn-trigger-text";
 
@@ -37,7 +37,7 @@ export function TurnAwayDigest(props: {
             {(text) => (
                 <div class="agent-away-digest" role="status">
                     <span class="agent-away-digest-text">{text()}</span>
-                    <IconButton icon="xmark" label="Dismiss" class="agent-away-digest-dismiss" onClick={() => setLine(null)} />
+                    <CloseButton label="Dismiss" class="agent-away-digest-dismiss" onClick={() => setLine(null)} />
                 </div>
             )}
         </Show>
