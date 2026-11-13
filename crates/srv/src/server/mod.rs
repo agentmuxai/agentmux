@@ -27,6 +27,9 @@ mod identity_auth_spawn;
 pub(crate) mod held_input;
 pub(crate) mod identity_handlers;
 pub mod install_handlers;
+mod install_task;
+#[cfg(all(test, unix))]
+mod install_task_tests;
 mod lsp_handlers;
 mod system_install_handlers;
 mod uninstall_handlers;
