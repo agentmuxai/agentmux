@@ -369,8 +369,9 @@ impl WshRpcEngine {
         self.lock_inner().rpc_context.clone().unwrap_or_default()
     }
 
-    /// Record that the CEF host vouched for this connection as the AgentMux
-    /// window's (`server::operator_proof`). Refused, returning false, once the
+    /// Record that the CEF host (or, on a headless srv, a confirmed local
+    /// browser session) vouched for this connection as the person's window
+    /// (`server::operator_proof`). Refused, returning false, once the
     /// connection has registered as an agent. [`Self::set_rpc_context`]
     /// replaces the whole context, so registering afterwards drops the proof.
     pub fn mark_operator_proven(&self) -> bool {
