@@ -3,7 +3,7 @@
 
 // The pane's grip (PaneGrip.tsx): a 24px target (WCAG 2.5.8) left of the pane
 // controls; dim at rest, full only while the pointer is over the grip itself or it has keyboard focus,
-// grab cursor. The header's other controls do not light it.
+// the plain arrow cursor. The header's other controls do not light it.
 
 @use "../mixins.scss";
 .pane-grip {
@@ -13,7 +13,7 @@
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
     opacity: 0.35;
-    cursor: grab;
+    cursor: default;
     transition: opacity var(--duration-decorative-quick) var(--ease-standard);
 
     &:hover {
@@ -25,19 +25,10 @@
         @include mixins.focus-ring;
     }
 
-    &:active {
-        cursor: grabbing;
-    }
 
     // First of the pinned end controls (blockframe.tsx): the room the header's gap left between it and the
     // window controls when it sat in the scrolling range.
     .block-frame-end-icons > & {
         margin-right: var(--space-2);
-    }
-
-    // Magnified or ephemeral: the pane can't move, so no grab cursor.
-    &--no-drag,
-    &--no-drag:active {
-        cursor: default;
     }
 }
