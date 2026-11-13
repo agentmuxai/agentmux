@@ -87,6 +87,7 @@ const blocksOf = (m: LayoutModel) => m.leafs().map((n) => n.data?.blockId);
 /** Near the left edge of pane b, and in its middle. */
 const LEFT_OF_B = { x: 640, y: 200 };
 const MIDDLE_OF_B = { x: 900, y: 200 };
+const RIGHT_OF_B = { x: 1160, y: 200 };
 /** Longer than the pending action's throttle holds a clearing back. */
 const CLEARED_MS = 100;
 
@@ -146,6 +147,40 @@ describe("a tab that leaves other tabs behind", () => {
         expect(pillPlacingIn(m)).toBe(false);
         expect(m.futureLayout()).toBeUndefined();
         expect(m.showOverlay()).toBe(false);
+    });
+
+    it("a quick drag lands on the side under the pointer, not the side it came in by", () => {
+        vi.useFakeTimers();
+        const now = vi.spyOn(performance, "now");
+        const m = layout(true);
+        // In by b's left edge, where the first drop is shown at once, and straight on to its right edge.
+        now.mockReturnValue(1000);
+        beginPillPlacement(m, "a2", LEFT_OF_B);
+        expect(pillDragIn(m)!.armed).toMatchObject({ targetId: "b" });
+        const cameInBy = pillDragIn(m)!.armed!.direction;
+        // Released there 60 ms later, the pointer still travelling: no sample had shown the right side yet.
+        now.mockReturnValue(1060);
+        expect(dropPill(m, RIGHT_OF_B)).toBe(true);
+        expect(pillDragIn(m)!.armed!.direction).not.toBe(cameInBy);
+        vi.advanceTimersByTime(CLEARED_MS);
+        now.mockRestore();
+        // b's right half is the new pane; b keeps its left half.
+        const landed = m.leafs().find((n) => n.data?.blockId === "a2")!;
+        expect(m.getNodeRectById(landed.id)!.left).toBeGreaterThan(m.getNodeRectById("b")!.left);
+        expect(m.getNodeRectById(landed.id)!.top).toBe(m.getNodeRectById("b")!.top);
+        expect(pillPlacingIn(m)).toBe(false);
+        expect(m.futureLayout()).toBeUndefined();
+    });
+
+    it("released where the tab would join a pane, nothing is placed and the release is the pane's", () => {
+        vi.useFakeTimers();
+        const m = layout(true);
+        beginPillPlacement(m, "a2", LEFT_OF_B);
+        expect(dropPill(m, MIDDLE_OF_B)).toBe(false);
+        expect(pillPlacingIn(m)).toBe(false);
+        expect(h.payloadCleared).toBe(0);
+        vi.advanceTimersByTime(CLEARED_MS);
+        expect(blocksOf(m).sort()).toEqual(["a", "b", "c"]);
     });
 
     it("is placed through the hovered pane's own strip when it has one, which marks the landing", () => {

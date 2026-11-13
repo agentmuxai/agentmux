@@ -29,7 +29,7 @@ import { effectiveStack } from "./layoutStack";
 import { reflowSettleMs } from "./liveReflow";
 import { pillStandIn, pillZone, placePill, type PillZone } from "./paneBodyDrop";
 import { currentPillDrag, pillDragIn, pillReflowIn, setPillDrag, type PillDrag } from "./pillDragState";
-import { clearPlacement, previewPlacement, resetDropIntent, sideOfDirection } from "./placementPreview";
+import { clearPlacement, previewPlacement, resetDropIntent, settleDropIntent, sideOfDirection } from "./placementPreview";
 
 type PlaceZone = Extract<PillZone, { kind: "place" }>;
 
@@ -179,14 +179,24 @@ export function endPillPlacement(model: LayoutModel): void {
 }
 
 /**
- * The tab was released over the layout: commit the drop that is shown, or the one under the pointer when
- * none was shown yet. On the next task, as a pane's own drop target does it: the move unmounts the dragged
- * pill, the live drag source. The shown drop stays until then, and goes in the same batch as the tree
- * changes, so the panes are already where the commit puts them.
+ * The tab was released at `client` while the layout has its drag, whichever element the release came to: the
+ * catcher, or the pane that had the drag when the layout took it (a quick release comes before the browser has
+ * sent the catcher an event). The release is the drag's last sample and the end of its travel: a drop that was
+ * still waiting for the pointer to stop is the one meant, so a quick drag lands on the side under the pointer
+ * and not on the one it came in by. Otherwise the drop that is shown is committed, or the one under the
+ * pointer when none was shown yet. False when nothing is placed there (the middle of a body, a header, outside
+ * the layout): the placing is over and the release is the pane's to read.
+ *
+ * The commit runs on the next task, as a pane's own drop target does it: the move unmounts the dragged pill,
+ * the live drag source. The shown drop stays until then, and goes in the same batch as the tree changes, so
+ * the panes are already where the commit puts them.
  */
-export function dropPill(model: LayoutModel, client: { x: number; y: number }): void {
+export function dropPill(model: LayoutModel, client: { x: number; y: number }): boolean {
     const pill = pillDragIn(model);
-    if (!pill || pill.dropped) return;
+    if (!pill || pill.dropped) return false;
+    followPill(model, client);
+    if (pillDragIn(model) !== pill) return false;
+    settleDropIntent(model, pill.draggedId);
     // Handled in the window: the cross-window monitor must not also tear the tab off (pane-tab-tearoff.ts).
     setCurrentDragPayload(null);
     const under = pill.armed ? undefined : zoneAt(pill, client);
@@ -197,7 +207,7 @@ export function dropPill(model: LayoutModel, client: { x: number; y: number }): 
           : undefined;
     if (!drop) {
         endPillPlacement(model);
-        return;
+        return false;
     }
     pill.dropped = true;
     setTimeout(() => {
@@ -210,6 +220,7 @@ export function dropPill(model: LayoutModel, client: { x: number; y: number }): 
             model.showOverlay._set(false);
         });
     }, 0);
+    return true;
 }
 
 // The drag ended somewhere else (cancelled, or released outside the layout): nothing stays shown.

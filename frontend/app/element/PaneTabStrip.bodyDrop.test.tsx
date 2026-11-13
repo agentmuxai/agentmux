@@ -20,7 +20,17 @@ const zone: { current: any } = { current: { kind: "none" } };
 const ghostCalls: unknown[][] = [];
 const clearCalls: number[] = [];
 /** The layout's side (pillPlacement.ts): whether it takes the tab, has the drag now, and lets this pane read the pointer. */
-const layout = { takes: false, placing: false, reads: true, begun: [] as unknown[][], registered: [] as unknown[][] };
+const layout = {
+    takes: false,
+    placing: false,
+    reads: true,
+    /** Whether the layout places the tab where it was released; when not, it gives the drag back. */
+    drops: true,
+    begun: [] as unknown[][],
+    registered: [] as unknown[][],
+    followed: [] as unknown[][],
+    dropped: [] as unknown[][],
+};
 
 vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
     draggable: () => () => {},
@@ -44,6 +54,12 @@ vi.mock("@/layout/lib/pillPlacement", () => ({
         return layout.takes;
     },
     paneReadsPill: () => layout.reads,
+    followPill: (...args: unknown[]) => void layout.followed.push(args),
+    dropPill: (...args: unknown[]) => {
+        layout.dropped.push(args);
+        if (!layout.drops) layout.placing = false;
+        return layout.drops;
+    },
     registerPillPane: (...args: unknown[]) => {
         layout.registered.push(args);
         return () => {};
@@ -64,7 +80,7 @@ beforeEach(() => {
     payloadCalls.length = 0;
     ghostCalls.length = 0;
     clearCalls.length = 0;
-    Object.assign(layout, { takes: false, placing: false, reads: true, begun: [], registered: [] });
+    Object.assign(layout, { takes: false, placing: false, reads: true, drops: true, begun: [], registered: [], followed: [], dropped: [] });
     zone.current = { kind: "none" };
     vi.useFakeTimers();
 });
@@ -152,6 +168,57 @@ describe("PaneTabStrip bodyDrop", () => {
         config.onDragLeave();
         expect(clearCalls).toHaveLength(0);
         expect(showOverlay._set).not.toHaveBeenCalled();
+    });
+
+    it("passes its samples to the layout while the layout has the drag and the catcher has had no event yet", () => {
+        const { config, header } = renderPane();
+        layout.takes = true;
+        zone.current = { kind: "place", direction: 2, side: "left" };
+        config.onDragEnter(pill());
+        layout.placing = true;
+
+        zone.current = { kind: "join" };
+        later();
+        config.onDrag(pill());
+
+        expect(layout.followed).toHaveLength(1);
+        expect(layout.followed[0].slice(1)).toEqual([{ x: 40, y: 300 }]);
+        // The layout still has the drag: this pane shows nothing of its own.
+        expect(header.classList.contains("pane-header--foreign-hover")).toBe(false);
+    });
+
+    it("a quick release that comes to this pane while the layout has the drag is the layout's drop", () => {
+        const { config, place, onReceiveForeignTab } = renderPane();
+        layout.takes = true;
+        zone.current = { kind: "place", direction: 2, side: "left" };
+        config.onDragEnter(pill());
+        layout.placing = true;
+
+        config.onDrop(pill());
+        vi.runAllTimers();
+
+        expect(layout.dropped).toHaveLength(1);
+        expect(layout.dropped[0].slice(1)).toEqual([{ x: 40, y: 300 }]);
+        // The layout commits it: not placed a second time from here, and not joined.
+        expect(place).not.toHaveBeenCalled();
+        expect(onReceiveForeignTab).not.toHaveBeenCalled();
+    });
+
+    it("and is this pane's when the layout places nothing there: released over the middle, the tab joins", () => {
+        const { config, place, onReceiveForeignTab } = renderPane();
+        layout.takes = true;
+        zone.current = { kind: "place", direction: 2, side: "left" };
+        config.onDragEnter(pill());
+        layout.placing = true;
+        layout.drops = false;
+
+        zone.current = { kind: "join" };
+        config.onDrop(pill());
+        vi.runAllTimers();
+
+        expect(layout.dropped).toHaveLength(1);
+        expect(place).not.toHaveBeenCalled();
+        expect(onReceiveForeignTab).toHaveBeenCalledTimes(1);
     });
 
     it("does not read the pointer while it is not the pane that stands there: no glow, no ghost, no drop", () => {

@@ -13,7 +13,7 @@ import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { paneTabItemType } from "@/app/drag/drag-types";
 import { clearPillGhost, pillZone, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
 import { pillPlacingIn } from "@/layout/lib/pillDragState";
-import { beginPillPlacement, paneReadsPill, registerPillPane } from "@/layout/lib/pillPlacement";
+import { beginPillPlacement, dropPill, followPill, paneReadsPill, registerPillPane } from "@/layout/lib/pillPlacement";
 import type { DropDirection } from "@/layout/lib/types";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { edgeFlashArea } from "./drop-blink-clock";
@@ -161,6 +161,12 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
         if (!force && now - lastFollow < 30) return;
         lastFollow = now;
         const input = zoneInput(args);
+        // The layout has the drag, and this pane still gets its events until the browser has sent the layout's
+        // catcher one: they are the layout's samples. The pane reads again once the layout gives the drag back.
+        if (pillPlacingIn(input.model)) {
+            followPill(input.model, input.pointer);
+            if (pillPlacingIn(input.model)) return;
+        }
         zone = paneReadsPill(input.model, paneKey, input.pointer) ? pillZone(input) : { kind: "none" };
         // The header glows where the pill would join, and nowhere else.
         if (zone.kind === "join") {
@@ -188,13 +194,22 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
         // The layout's own while it places the pill: leaving this pane is how the pointer got to its catcher.
         if (!pillPlacingIn(body.model)) body.model.showOverlay._set(false);
     };
+    /**
+     * The release came to this pane while the layout has the drag (a quick drag: the layout's catcher has had no
+     * event yet). The layout takes it; false when it places nothing there and the release is this pane's.
+     */
+    const dropInLayout = (args: PillArgs): boolean => {
+        if (!singlePill(args) || !pillPlacingIn(body!.model)) return false;
+        const { clientX, clientY } = args.location.current.input;
+        return dropPill(body!.model, { x: clientX, y: clientY });
+    };
     /** Where the pointer was released, not where the throttled drag last looked. */
     const zoneAtDrop = (args: PillArgs): PillZone => {
         if (!singlePill(args)) return zone;
         const input = zoneInput(args);
         return paneReadsPill(input.model, paneKey, input.pointer) ? pillZone(input) : { kind: "none" };
     };
-    return { singlePill, follow, end, zoneAtDrop };
+    return { singlePill, follow, end, zoneAtDrop, dropInLayout };
 }
 
 type Placement = ReturnType<typeof createPillPlacement>;
@@ -228,8 +243,9 @@ function canDropForeign<T>(props: ForeignTabDropProps<T>, paneKey: string, data:
 function dropForeign<T>(props: ForeignTabDropProps<T>, paneKey: string, placement: Placement, endHover: () => void, args: any): void {
     const { source } = args;
     endHover();
-    const dropZone = placement.zoneAtDrop(args);
+    const dropZone = placement.dropInLayout(args) ? undefined : placement.zoneAtDrop(args);
     placement.end();
+    if (!dropZone) return;
     const blockId = source.data.blockId as string | undefined;
     const body = props.bodyDrop;
     if (body && blockId && !multiIdsOf(source.data)) {

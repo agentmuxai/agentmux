@@ -306,6 +306,18 @@ function showWaiting(model: LayoutModel, held: Steadying, draggedId: string): vo
     showPlacement(model, shown, armed.direction);
 }
 
+/**
+ * The pointer was released: the travel is over, as it is when the dwell runs out with no new sample, so the
+ * candidate that was waiting for the pointer to stop is the drop. Nothing changes when none was waiting (the
+ * shown drop is the one under the pointer, or within the margin that keeps it).
+ */
+export function settleDropIntent(model: LayoutModel, draggedId: string): void {
+    const held = steadying.get(model);
+    if (!held) return;
+    clearTimeout(held.timer);
+    showWaiting(model, held, draggedId);
+}
+
 /** The side of the hovered pane a direction puts the new pane on; undefined for the centre and for none. */
 export type PlacementSide = "left" | "right" | "up" | "down";
 
