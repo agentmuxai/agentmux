@@ -74,7 +74,7 @@ pub async fn run_drone(
             run_id: run_id_for_task.clone(),
             drone_id: drone_id_for_evt,
         });
-        match execute(&run_id_for_task, (&graph, trigger, run_cap_usd), &tx_for_task, &states_for_task).await {
+        match execute(&run_id_for_task, (&graph, trigger, run_cap_usd, &drone_id), &tx_for_task, &states_for_task).await {
             Ok(output) => {
                 let _ = tx_for_task.send(RunEvent::RunDone {
                     run_id: run_id_for_task,
@@ -107,7 +107,7 @@ fn over_run_cap(scope: &ExecutionScope, cap: Option<f64>) -> Option<String> {
 
 async fn execute(
     run_id: &str,
-    (graph, trigger, run_cap_usd): (&DroneGraph, Value, Option<f64>),
+    (graph, trigger, run_cap_usd, drone_id): (&DroneGraph, Value, Option<f64>, &str),
     tx: &mpsc::UnboundedSender<RunEvent>,
     final_states: &Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>,
 ) -> Result<Value, String> {
@@ -116,7 +116,7 @@ async fn execute(
     }
 
     let layers = topological_layers(graph)?;
-    let mut scope = ExecutionScope::with_trigger(trigger);
+    let mut scope = ExecutionScope::for_drone(drone_id, trigger);
     let mut response_output: Option<Value> = None;
     let nodes_by_id: HashMap<String, &FlowNode> =
         graph.nodes.iter().map(|n| (n.id.clone(), n)).collect();
