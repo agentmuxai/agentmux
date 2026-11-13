@@ -46,7 +46,7 @@ export const TokenUsageIndicator = (): JSX.Element => {
                 type="button"
                 ref={indicatorRef}
                 class="token-usage-indicator"
-                classList={{ "token-usage-indicator--idle": isZero() }}
+                classList={{ "token-usage-indicator--idle": isZero(), "token-usage-indicator--failing": failing() > 0 }}
                 onClick={handleToggle}
                 onKeyDown={handleKeyDown}
                 aria-label={failing() > 0 ? "Token usage, AgentMux internal calls failing, click for what is failing" : "Token usage, click for breakdown"}
