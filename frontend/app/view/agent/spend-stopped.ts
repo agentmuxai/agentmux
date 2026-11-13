@@ -6,7 +6,8 @@
  * (`crates/srv/src/server/spend_watch.rs`, docs/specs/SPEC_ROUTE_AGENT_BRAKES_2026_11_10.md section 3):
  *
  * - `agent:spend_today`: the figure the chips show, `{day, spent, cap}`.
- * - `agent:spend_warning`: from 80% of the cap, a line above the composer.
+ * - `agent:spend_warning`: from 80% of the cap, a line above the composer; or, with `context`, the context staying far
+ *   over its compaction budget.
  * - `agent:spend_stopped`: the cap is used and the gateway refuses the agent's requests; the card offers Raise, Reset
  *   today and Dismiss.
  */
@@ -36,6 +37,8 @@ export interface SpendCard {
     route: string;
     /** "OpenRouter (DeepSeek V4.1 Flash)". */
     place: string;
+    /** Set on a warning that is about the context, not the spend: its size in tokens, compaction having failed to bring it down. */
+    context?: number;
 }
 
 export interface SpendToday {
@@ -53,7 +56,8 @@ function readCard(raw: unknown): SpendCard | null {
     const cap = num(r.cap);
     const spent = num(r.spent);
     if (cap == null || spent == null) return null;
-    return { at: num(r.at) ?? 0, scope: r.scope === "route" ? "route" : "agent", cap, spent, route: str(r.route), place: str(r.place) };
+    const context = num(r.context) ?? undefined;
+    return { at: num(r.at) ?? 0, scope: r.scope === "route" ? "route" : "agent", cap, spent, route: str(r.route), place: str(r.place), ...(context != null ? { context } : {}) };
 }
 
 /** Whether a card was written on an earlier UTC day than `now`'s: the gateway's day has turned since, so it no longer holds. */
@@ -154,6 +158,7 @@ export function spendStoppedHint(card: SpendCard): string {
 
 /** The 80% line. */
 export function spendWarningText(card: SpendCard): string {
+    if (card.context != null) return `Context is ${Math.round(card.context / 1000)}K; compaction did not run.`;
     return `${usd(card.spent)} of ${usd(card.cap)} used today: the agent stops at its cap.`;
 }
 

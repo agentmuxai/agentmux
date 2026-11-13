@@ -15,6 +15,7 @@ import {
     spendChipTitle,
     spendChipTone,
     spendStoppedText,
+    spendWarningText,
 } from "./spend-stopped";
 
 const NOW = 1_700_000_000_000;
@@ -67,6 +68,20 @@ describe("readSpendWarning", () => {
         expect(readSpendWarning({ [SPEND_WARNING_META_KEY]: warning }, tomorrow)).toBeNull();
         const newWarning = { ...warning, at: tomorrow };
         expect(readSpendWarning({ [SPEND_WARNING_META_KEY]: newWarning, [SPEND_STOPPED_META_KEY]: { ...stopped, at: NOW } }, tomorrow)?.at).toBe(tomorrow);
+    });
+});
+
+describe("the context warning", () => {
+    it("says the context is large and compaction did not run, not that the cap is near", () => {
+        const card = readSpendWarning({ [SPEND_WARNING_META_KEY]: { ...stopped, spent: 3, context: 480_000 } });
+        expect(card?.context).toBe(480_000);
+        expect(spendWarningText(card!)).toBe("Context is 480K; compaction did not run.");
+    });
+
+    it("leaves the 80% line as it was when there is no context", () => {
+        const card = readSpendWarning({ [SPEND_WARNING_META_KEY]: { ...stopped, spent: 16.5 } });
+        expect(card?.context).toBeUndefined();
+        expect(spendWarningText(card!)).toBe("$16.50 of $20 used today: the agent stops at its cap.");
     });
 });
 
