@@ -799,3 +799,24 @@ describe("it follows its props", () => {
         expect(approve()).toBeDisabled();
     });
 });
+
+
+describe("a Drone template's facts", () => {
+    const drone = (summary: { nodes: number; agents: number; writes_outside: string[] }, manifest: Partial<JobTemplateManifest> = {}) =>
+        job({ kind: "drone", action: null, outputs: [], ...manifest }, { drone: summary });
+
+    it("shows the graph's size, the agents it starts and the calls it makes outside AgentMux", () => {
+        show(drone({ nodes: 5, agents: 2, writes_outside: ["post: POST https://example.com/hook"] }));
+        expect(fact("Does").textContent).toBe("runs a drone of 5 nodes, 2 of them start an agent");
+        const outside = pills(fact("Calls outside"));
+        expect(outside.map((p) => p.textContent)).toEqual(["post: POST https://example.com/hook"]);
+        expect(tone(outside[0])).toBe("warn");
+    });
+
+    it("says none when it makes no call outside, and never describes a brief", () => {
+        show(drone({ nodes: 1, agents: 0, writes_outside: [] }));
+        expect(fact("Does").textContent).toBe("runs a drone of 1 node");
+        expect(fact("Calls outside").textContent).toBe("none");
+        expect(document.body.textContent).not.toContain("template's brief");
+    });
+});

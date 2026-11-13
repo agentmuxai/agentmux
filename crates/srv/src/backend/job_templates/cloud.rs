@@ -96,7 +96,7 @@ fn text_ok(s: &str) -> bool {
 
 /// Check the cloud fields: present and well-formed on a cloud template, absent on a job template.
 pub fn validate(m: &JobTemplateManifest) -> Result<(), String> {
-    if m.kind == JobTemplateKind::Job {
+    if m.kind != JobTemplateKind::Cloud {
         return if declares_cloud_fields(m) {
             Err("owner, reporter, expect, maxDurationMinutes, runNow and aggregate belong to a cloud template".to_string())
         } else {
