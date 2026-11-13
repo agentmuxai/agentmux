@@ -231,10 +231,13 @@ pub(crate) fn was_cancelled(id: &str) -> bool {
 
 /// The text the agent is woken with: what became of `question`, and what to do next.
 ///
-/// Whatever the page or the host wrote (the button's words, the address, an error) is quoted: the note carries
+/// Whatever the page or the host wrote (the button's words, the address, an error) is masked and quoted: the note carries
 /// AgentMux's own marker, so a page must not be able to put words of its own in it.
 pub(crate) fn outcome_text(id: &str, kind: &str, question: &str, state: &State) -> String {
-    use crate::backend::reactive::sanitize::quote_in_system_note as quoted;
+    use crate::backend::reactive::sanitize::quote_in_system_note;
+    // Card numbers, ID numbers and credential-shaped tokens are masked as Browser's own answers are: this note
+    // reaches the agent's transcript without passing through them.
+    let quoted = |text: &str| quote_in_system_note(&agentmux_common::pii_mask::mask_short_text(text));
     let head = format!("Your Browser request {id} ({})", quoted(question));
     match (kind, state) {
         ("handoff", State::Done(_)) => format!("{head}: the person clicked Done. Take a new snapshot: don't assume what they changed."),
@@ -458,6 +461,18 @@ mod tests {
             assert_eq!(t.matches("[AgentMux]").count(), 0, "no marker of the page's making: {t}");
             assert!(!t.contains("[JEKT:"), "{t}");
         }
+    }
+
+    #[test]
+    fn a_card_number_or_token_on_the_page_does_not_reach_the_transcript() {
+        let card = "4111 1111 1111 1111";
+        let token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+        let question = format!("Click \"Pay {card}\" on https://a.test/?k={token}");
+        for state in [State::Done(format!("The page is now https://a.test/{token}.")), State::Failed(format!("{card} changed")), State::Void(token.to_string())] {
+            let t = outcome_text("r-4", "approval", &question, &state);
+            assert!(!t.contains(card) && !t.contains("ghp_abcdef"), "{t}");
+        }
+        assert!(outcome_text("r-4", "approval", &question, &State::Declined).contains("[card number hidden]"));
     }
 
     #[test]
