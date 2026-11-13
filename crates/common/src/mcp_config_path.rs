@@ -273,10 +273,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(target, link).unwrap();
         #[cfg(windows)]
-        {
-            let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(link).arg(target).output().unwrap();
-            assert!(made.status.success(), "mklink /J: {}", String::from_utf8_lossy(&made.stdout));
-        }
+        junction::create(target, link).unwrap();
     }
 
     /// #47418: `<dir>/link/..` is the link's target's parent, not `<dir>`. Resolved by its text,
