@@ -58,6 +58,7 @@ pub mod events;
 mod jsonl;
 mod parse;
 mod query;
+mod reconcile_steps;
 mod scan;
 mod types;
 
