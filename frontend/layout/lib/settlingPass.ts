@@ -62,6 +62,11 @@ export interface SettlingPass {
     ghosts: PaneGhost[];
     /** The panes that came or were restored, by node id: each fades in at its own rect, with the glide. */
     enters: string[];
+    /**
+     * The panes of `enters` whose fade began in a pass this one replaced: each goes on fading from where it is,
+     * with no wait at its start, where one that has not been seen yet waits (`gliding`).
+     */
+    fading?: string[];
     /** The panes this change minimized, by node id: each glides to its chip with its content still drawn, hidden at the end. */
     minimizing?: string[];
     /** False while the tiles stand at `from` (the frame the pass opens on, and any late ones after it), true from then. */
@@ -268,11 +273,21 @@ export function planSettlingPass(
     // A pane still fading in from the open pass goes on fading.
     const still = (open?.enters ?? []).filter((id) => nextProps[id] && !change.minimized.has(id));
     const enters = [...new Set([...still, ...change.came.map((leaf) => leaf.id), ...change.restored])];
+    // Its fade has begun when the open pass was gliding, or named it as fading itself: it is on screen, and
+    // goes on from there. Restarting it at 0 would take a pane that is showing out and bring it back.
+    const fading = open ? still.filter((id) => open.gliding || open.fading?.includes(id)) : [];
     // A pane still on its way to its chip from the open pass goes on, unless it was restored since.
     const minimizing = [
         ...new Set([...(open?.minimizing ?? []).filter((id) => nextProps[id] && !change.restored.has(id)), ...change.minimized]),
     ];
-    return { moves, ghosts, enters, ...(minimizing.length > 0 && { minimizing }), gliding: false };
+    return {
+        moves,
+        ghosts,
+        enters,
+        ...(fading.length > 0 && { fading }),
+        ...(minimizing.length > 0 && { minimizing }),
+        gliding: false,
+    };
 }
 
 /** A frame whose callbacks run this long after the frame's own time is late: the main thread was busy. */
