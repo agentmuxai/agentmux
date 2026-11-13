@@ -94,7 +94,7 @@ struct Scheduler<'a> {
 
 pub(super) async fn execute(
     run_id: &str,
-    (graph, trigger, run_cap_usd): (&DroneGraph, Value, Option<f64>),
+    (graph, trigger, run_cap_usd, drone_id): (&DroneGraph, Value, Option<f64>, &str),
     tx: &mpsc::UnboundedSender<RunEvent>,
     states: &States,
 ) -> Result<Value, String> {
@@ -104,7 +104,7 @@ pub(super) async fn execute(
     let plan = schedule::analyze(graph).map_err(|issues| {
         issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; ")
     })?;
-    let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::with_trigger(trigger), run_cap_usd, tx, states);
+    let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::for_drone(drone_id, trigger), run_cap_usd, tx, states);
     s.run().await?;
     Ok(s.response.unwrap_or(Value::Null))
 }
@@ -249,6 +249,7 @@ impl<'a> Scheduler<'a> {
             BlockKind::Message => blocks::message::run(node, scope).await,
             BlockKind::Task => blocks::task::run(node, scope).await,
             BlockKind::Notify => blocks::notify::run(node, scope).await,
+            BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
         };
         match result {
             Ok(mut output) => {

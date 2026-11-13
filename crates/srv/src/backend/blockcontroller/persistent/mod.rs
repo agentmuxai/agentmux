@@ -1433,16 +1433,14 @@ impl Controller for PersistentSubprocessController {
         self.get_status_snapshot()
     }
 
+    fn interrupt_turn(&self) -> Result<(), String> {
+        stdout_reader::loop_stop::interrupt_for_cap(self)
+    }
+
     fn send_input(&self, input: BlockInputUnion, _seq: Option<u64>) -> Result<(), String> {
-        // Persistent controllers have no PTY and don't take raw keystrokes —
-        // user messages go through send_message(). But the agent-pane Stop
-        // button / Esc delivers an *interrupt* as a signal via
-        // `ControllerInputCommand({signame:"SIGINT"})` (see useAgentCommands
-        // `stopAgent`). Without handling it here, stopping a persistent (e.g.
-        // Claude stream-json) agent failed with "does not accept raw input".
-        // Route the interrupt to the same kill path `stop()` uses, mirroring
-        // SubprocessController. The session_id is retained, so the next message
-        // resumes the conversation.
+        // No PTY, no raw keystrokes: user messages go through send_message(). The Stop button / Esc sends
+        // `ControllerInputCommand({signame:"SIGINT"})` (useAgentCommands `stopAgent`); route it to the kill path
+        // `stop()` uses, as SubprocessController does. The session_id is retained, so the next message resumes.
         if let Some(sig) = input.sig_name.as_deref() {
             if sig == "SIGINT" || sig == "SIGTERM" {
                 tracing::info!(

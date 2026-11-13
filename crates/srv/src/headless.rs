@@ -47,6 +47,8 @@ static WEB: OnceLock<WebOptions> = OnceLock::new();
 #[derive(Debug, Default)]
 struct WebOptions {
     frontend_dir: Option<PathBuf>,
+    /// `--public-origin`, normalized: `http://127.0.0.1:<port>`.
+    public_origin: Option<String>,
     /// Normalized by [`normalize_origin`].
     allowed_origins: Vec<String>,
 }
@@ -100,7 +102,7 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     // aren't valid UTF-8 arrive intact (Codex P2 on #3893).
     let cli = <CliArgs as clap::Parser>::try_parse_from(std::env::args_os()).map_err(|e| e.to_string())?;
     // Checked before anything is written, so a typo leaves no lock or key behind.
-    let web = web_options(cli.frontend_dir.clone(), &cli.allowed_origins)?;
+    let web = web_options(cli.frontend_dir.clone(), &cli.allowed_origins, cli.public_origin.as_deref())?;
 
     let paths = match agentmux_common::DataPaths::from_env() {
         Some(p) => p,
@@ -169,7 +171,7 @@ fn effective_data_dir(wavedata: Option<&Path>, resolved: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-fn web_options(frontend_dir: Option<PathBuf>, origins: &[String]) -> Result<WebOptions, String> {
+fn web_options(frontend_dir: Option<PathBuf>, origins: &[String], public_origin: Option<&str>) -> Result<WebOptions, String> {
     if let Some(dir) = &frontend_dir {
         if !dir.join("index.html").is_file() {
             return Err(format!("--frontend-dir {}: no index.html there", dir.display()));
@@ -179,7 +181,35 @@ fn web_options(frontend_dir: Option<PathBuf>, origins: &[String]) -> Result<WebO
         .iter()
         .map(|o| normalize_origin(o).map_err(|e| format!("--allowed-origin {o:?}: {e}")))
         .collect::<Result<_, _>>()?;
-    Ok(WebOptions { frontend_dir, allowed_origins })
+    let public_origin = public_origin
+        .map(|o| {
+            if frontend_dir.is_none() {
+                return Err("--public-origin needs --frontend-dir".to_string());
+            }
+            normalize_public_origin(o).map_err(|e| format!("--public-origin {o:?}: {e}"))
+        })
+        .transpose()?;
+    Ok(WebOptions { frontend_dir, public_origin, allowed_origins })
+}
+
+/// The one origin a loopback sign-in accepts besides srv's own: `http://127.0.0.1:<port>`, the
+/// other end of a tunnel. Never a real host name, `localhost`, another address or `https`: a
+/// browser on a non-loopback origin needs a design of its own (SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI §3).
+pub(crate) fn normalize_public_origin(origin: &str) -> Result<String, String> {
+    let normalized = normalize_origin(origin)?;
+    let url = url::Url::parse(&normalized).map_err(|e| e.to_string())?;
+    let loopback = url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port().is_some();
+    if loopback { Ok(normalized) } else { Err("must be http://127.0.0.1:<port>".into()) }
+}
+
+/// Does this headless srv serve its own UI, so a browser signs in to it? (`--frontend-dir`.)
+pub fn local_sign_in() -> bool {
+    active() && frontend_dir().is_some()
+}
+
+/// `--public-origin`, when given.
+pub fn public_origin() -> Option<&'static str> {
+    WEB.get().and_then(|w| w.public_origin.as_deref())
 }
 
 /// The directory `--frontend-dir` named, when headless and given.
@@ -221,8 +251,24 @@ fn normalize_origin(origin: &str) -> Result<String, String> {
     Ok(url.origin().ascii_serialization())
 }
 
+/// Where this user's headless srv keeps its generated key: `<data dir>/srv-auth-key`, with the
+/// data dir resolved the way `prepare_env` does.
+pub fn key_file_path(wavedata: Option<&Path>) -> Result<PathBuf, String> {
+    if let Some(file) = std::env::var_os("AGENTMUX_AUTH_KEY_FILE").filter(|f| !f.is_empty()) {
+        return Ok(PathBuf::from(file));
+    }
+    let paths = match agentmux_common::DataPaths::from_env() {
+        Some(p) => p,
+        None => {
+            let mode = agentmux_common::RuntimeMode::from_env().unwrap_or(agentmux_common::RuntimeMode::Installed);
+            agentmux_common::DataPaths::resolve(env!("CARGO_PKG_VERSION"), &mode)?
+        }
+    };
+    Ok(effective_data_dir(wavedata, &paths.data_dir).join(AUTH_KEY_FILE_NAME))
+}
+
 /// Read a key from a file the operator provided; surrounding whitespace is ignored.
-fn read_key_file(path: &Path) -> Result<String, String> {
+pub(crate) fn read_key_file(path: &Path) -> Result<String, String> {
     let key = std::fs::read_to_string(path)
         .map_err(|e| format!("--auth-key-file {}: {e}", path.display()))?
         .trim()
@@ -402,13 +448,38 @@ mod tests {
     #[test]
     fn frontend_dir_needs_an_index_and_origins_must_parse() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(web_options(Some(dir.path().to_path_buf()), &[]).is_err());
+        assert!(web_options(Some(dir.path().to_path_buf()), &[], None).is_err());
         std::fs::write(dir.path().join("index.html"), "<!doctype html>").unwrap();
-        let w = web_options(Some(dir.path().to_path_buf()), &["https://App.example.com/".into()]).unwrap();
+        let w = web_options(Some(dir.path().to_path_buf()), &["https://App.example.com/".into()], None).unwrap();
         assert_eq!(w.allowed_origins, vec!["https://app.example.com".to_string()]);
-        assert!(web_options(None, &["https://app.example.com/ui".into()]).is_err());
+        assert!(web_options(None, &["https://app.example.com/ui".into()], None).is_err());
         let c = cli(&["srv", "--headless", "--allowed-origin", "https://a.test", "--allowed-origin=https://b.test"]);
         assert_eq!(c.allowed_origins, vec!["https://a.test", "https://b.test"]);
+    }
+
+    /// The declared origin only moves the port: loopback address, http, a port. Nothing else starts.
+    #[test]
+    fn the_public_origin_is_loopback_http_with_a_port() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("index.html"), "<!doctype html>").unwrap();
+        let web = |o: &str| web_options(Some(dir.path().to_path_buf()), &[], Some(o));
+        assert_eq!(web("http://127.0.0.1:8080").unwrap().public_origin.as_deref(), Some("http://127.0.0.1:8080"));
+        assert_eq!(web("http://127.1:8080/").unwrap().public_origin.as_deref(), Some("http://127.0.0.1:8080"));
+        for bad in [
+            "http://localhost:8080",
+            "http://127.0.0.1",
+            "https://127.0.0.1:8080",
+            "http://[::1]:8080",
+            "http://203.0.113.7:8080",
+            "http://app.example.com:8080",
+            "https://app.example.com",
+            "http://127.0.0.1:8080/ui",
+            "*",
+        ] {
+            assert!(web(bad).is_err(), "{bad} should be refused");
+        }
+        assert!(web_options(None, &[], Some("http://127.0.0.1:8080")).is_err(), "it names a UI to sign in to");
+        assert_eq!(cli(&["srv", "--headless", "--public-origin", "http://127.0.0.1:8080"]).public_origin.as_deref(), Some("http://127.0.0.1:8080"));
     }
 
     /// A srv that isn't headless never set WEB: no extra origins, no frontend.
@@ -416,6 +487,8 @@ mod tests {
     fn a_non_headless_srv_adds_nothing() {
         assert!(!is_extra_allowed_origin("https://app.example.com"));
         assert!(frontend_dir().is_none());
+        assert!(!local_sign_in());
+        assert!(public_origin().is_none());
     }
 
     #[test]

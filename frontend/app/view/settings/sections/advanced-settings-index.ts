@@ -39,6 +39,14 @@ export const ADVANCED_SETTINGS = {
         groupKey: "settings.advanced.group.agentPanes",
         keywords: ["compaction", "context", "tokens", "autoCompactWindow", "agent:compactat"],
     }),
+    routeSpendCap: settingEntry({
+        id: "advanced.route_spend_cap",
+        labelKey: "settings.advanced.routeSpendCap.label",
+        descriptionKey: "settings.advanced.routeSpendCap.description",
+        section: "advanced",
+        groupKey: "settings.advanced.group.agentPanes",
+        keywords: ["spend", "cap", "budget", "dollars", "openrouter", "model route", "stopped", "model:spend_cap_usd"],
+    }),
     previewSkidNotches: settingEntry({
         id: "advanced.preview_skid_notches",
         labelKey: "settings.advanced.previewSkidNotches.label",

@@ -70,7 +70,7 @@ pub async fn run_drone(
             run_id: run_id_for_task.clone(),
             drone_id: drone_id_for_evt,
         });
-        match super::scheduler::execute(&run_id_for_task, (&graph, trigger, run_cap_usd), &tx_for_task, &states_for_task).await {
+        match super::scheduler::execute(&run_id_for_task, (&graph, trigger, run_cap_usd, &drone_id), &tx_for_task, &states_for_task).await {
             Ok(output) => {
                 let _ = tx_for_task.send(RunEvent::RunDone {
                     run_id: run_id_for_task,

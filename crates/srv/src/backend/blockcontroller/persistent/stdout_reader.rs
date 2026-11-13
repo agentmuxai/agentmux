@@ -11,7 +11,7 @@ use super::*;
 // What the reader does when the loop guard says the agent is stuck. Declared here, not in `mod.rs`, which is
 // at its size ratchet.
 #[path = "loop_stop.rs"]
-mod loop_stop;
+pub(super) mod loop_stop;
 
 /// What the stdout reader task captures from `spawn_process`.
 pub(super) struct StdoutReaderCtx {
@@ -347,6 +347,7 @@ impl StdoutReader {
         let is_error_result = is_result_frame
             && !closing_this_generation
             && !ended_by_guard
+            && !loop_stop::take_cap_end(&self.block_id_read)
             && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true);
         // reagentx P0 on PR #2371: the real CLI's stream-json
         // protocol embeds `session_id_field` on EVERY event,

@@ -106,7 +106,8 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
       <span>
         "1"
         "peer"
-    <ul data-peers="[\"one\"]" data-self="narko">
+    <div class="host-popover-peers" data-testid="lan-peers-scroll">
+      <ul data-peers="[\"one\"]" data-self="narko">
     <div data-pair-device="" data-lan="true">
     <div class="status-bar-popover-divider">
     <div class="status-bar-popover-row">
@@ -177,7 +178,8 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
         "2"
         "peer"
         "s"
-    <ul data-peers="[\"one\",\"two\"]" data-self="narko">
+    <div class="host-popover-peers" data-testid="lan-peers-scroll">
+      <ul data-peers="[\"one\",\"two\"]" data-self="narko">
     <div data-pair-device="" data-lan="true">
     <div class="status-bar-popover-divider">
     <div class="status-bar-popover-row">

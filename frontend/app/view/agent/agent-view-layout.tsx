@@ -10,7 +10,7 @@
 
 import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
-import { isStopping } from "@/app/store/agent-pane-state/types";
+import { isStopping, isWorking, type AgentPaneState } from "@/app/store/agent-pane-state/types";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -238,7 +238,7 @@ function AgentViewTranscript({ v }: { v: AgentViewParts }): JSX.Element {
 function compactThenSwitchFor(
     blockId: string,
     commands: { sendWithState: (text: string) => Promise<void> },
-    paneModel: { state: { lastCompactionBoundaryAt: number | null } }
+    paneModel: { state: AgentPaneState }
 ): (route: string, modelId: string) => Promise<void> {
     let compacting = false;
     return async (route, modelId) => {
@@ -248,6 +248,7 @@ function compactThenSwitchFor(
             await compactThenSwitch({
                 compact: () => commands.sendWithState("/compact"),
                 boundaryAt: () => paneModel.state.lastCompactionBoundaryAt,
+                turnBusy: () => isWorking(paneModel.state),
                 switchTo: async () => {
                     const { failed } = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: blockId, route, model: modelId, restart: true });
                     // Saved, but a pane that could not restart still runs the old model: the card stays and says so.

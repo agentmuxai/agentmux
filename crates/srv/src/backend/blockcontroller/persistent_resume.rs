@@ -325,222 +325,164 @@ fn capture_resolution_effects(
     effects
 }
 
-/// The pure state transition. See the module doc comment for why this
-/// shape exists and what it replaces.
-pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Vec<ResumeEffect>) {
-    match (state, event) {
-        // A fresh spawn always starts (or restarts) tracking from
-        // scratch — normally the previous generation, if any, has
-        // already resolved (its own ProcessExited already ran) before a
-        // new spawn_process call happens on this same controller, but
-        // `resolve_superseded_generation` closes the gap for the rare
-        // out-of-order case (see its own doc comment).
-        (prior, ResumeEvent::SpawnedWithResume { generation, attempted_sid, retry }) => {
-            let effects = resolve_superseded_generation(prior);
-            (
-                ResumeState::AwaitingOutcome {
-                    generation,
-                    attempted_sid,
-                    retry,
-                    held_error_line: None,
-                    stop_requested: false,
-                },
-                effects,
-            )
-        }
-        (prior, ResumeEvent::SpawnedFresh { generation }) => {
-            let effects = resolve_superseded_generation(prior);
-            (ResumeState::NotTracking { current_generation: generation }, effects)
-        }
+type Transition = (ResumeState, Vec<ResumeEffect>);
 
-        // A session capture resolves tracking ONLY when it's unambiguous
-        // — see `SessionCaptured`'s own doc comment for why a same-sid
-        // echo alone isn't proof (the CLI echoes the attempted sid
-        // regardless of eventual success or failure). A different sid
-        // (the CLI gave up and started fresh) or a genuinely successful
-        // terminal result (the whole turn completed) both prove real
-        // progress; anything else (the ambiguous early echo, a
-        // non-terminal frame) is left untouched so `ResumeUnreachable`
-        // still gets a real chance to promote the retry if this turns
-        // out to be the doomed case after all.
-        (
-            ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested },
-            ResumeEvent::SessionCaptured { generation: g, sid, is_confirmed_success },
-        ) if generation == g => {
+/// The pure state transition: one function per event, each deciding what that
+/// event does in every state. See the module doc comment for why this shape
+/// exists and what it replaces. An event whose generation (or sid) doesn't match
+/// what is tracked is a safe no-op unless its handler says otherwise.
+pub(super) fn update(state: ResumeState, event: ResumeEvent) -> Transition {
+    match event {
+        ResumeEvent::SpawnedWithResume { generation, attempted_sid, retry } => on_spawned_with_resume(state, generation, attempted_sid, retry),
+        ResumeEvent::SpawnedFresh { generation } => on_spawned_fresh(state, generation),
+        ResumeEvent::SessionCaptured { generation, sid, is_confirmed_success } => on_session_captured(state, generation, sid, is_confirmed_success),
+        ResumeEvent::MessageAppendedToRetryBatch { generation, entry } => on_message_appended(state, generation, entry),
+        ResumeEvent::ResumeUnreachable { generation, sid } => on_resume_unreachable(state, generation, sid),
+        ResumeEvent::ErrorResultLine { generation, line } => on_error_result_line(state, generation, line),
+        ResumeEvent::StopRequested { generation } => on_stop_requested(state, generation),
+        ResumeEvent::ProcessExited { generation } => on_process_exited(state, generation),
+    }
+}
+
+/// A fresh spawn always starts (or restarts) tracking from scratch. Normally the
+/// previous generation has already resolved (its own `ProcessExited` ran) before
+/// a new `spawn_process`, but `resolve_superseded_generation` closes the gap for
+/// the rare out-of-order case.
+fn on_spawned_with_resume(prior: ResumeState, generation: u64, attempted_sid: String, retry: RetryPayload) -> Transition {
+    let effects = resolve_superseded_generation(prior);
+    (ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line: None, stop_requested: false }, effects)
+}
+
+fn on_spawned_fresh(prior: ResumeState, generation: u64) -> Transition {
+    let effects = resolve_superseded_generation(prior);
+    (ResumeState::NotTracking { current_generation: generation }, effects)
+}
+
+/// A capture resolves tracking ONLY when it is unambiguous (see
+/// `ResumeEvent::SessionCaptured`): a different sid (the CLI gave up and started
+/// fresh) or a genuinely successful terminal result (the whole turn completed).
+/// Anything else (the ambiguous early echo, a non-terminal frame) is left
+/// untouched so `ResumeUnreachable` still gets a chance to promote the retry if
+/// this turns out to be the doomed case.
+///
+/// That holds in `ConfirmedRetry` too. `resume_poisoned` (`persistent/mod.rs`) is
+/// one permanent field that is not scoped to a generation, so a lagging stderr
+/// reader from an older generation can overwrite it while this one is still
+/// `ConfirmedRetry`, which switches off `try_capture_session_id`'s poison guard.
+/// A routine same-sid echo then reaches here, and resolving on it would wipe the
+/// confirmed retry without firing it, losing every message the doomed process had
+/// accepted (#2368).
+fn on_session_captured(state: ResumeState, g: u64, sid: String, is_confirmed_success: bool) -> Transition {
+    match state {
+        ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested } if generation == g => {
             if sid != attempted_sid || is_confirmed_success {
                 (
                     ResumeState::NotTracking { current_generation: generation },
                     capture_resolution_effects(attempted_sid, held_error_line, sid, is_confirmed_success),
                 )
             } else {
-                (
-                    ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested },
-                    vec![],
-                )
+                (ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested }, vec![])
             }
         }
-        // reagentx P1 (round 9 on this PR, also flagged inline by codex):
-        // this arm used to resolve UNCONDITIONALLY, reasoning that a
-        // confirmed retry means the sid is already known dead so the
-        // first-echo ambiguity couldn't apply. That reasoning breaks
-        // because `resume_poisoned` (persistent/mod.rs) is a single,
-        // non-generation-scoped, PERMANENT field — a lagging stderr-
-        // reader task from an OLDER, already-superseded generation can
-        // overwrite it to a different sid while THIS generation is
-        // still `ConfirmedRetry`, silently disabling
-        // `try_capture_session_id`'s poison guard for this generation's
-        // own attempted sid. A routine same-sid echo (the CLI sends the
-        // attempted sid on every frame, ambiguous or not) can then reach
-        // this arm and used to wipe out the confirmed retry payload
-        // without ever firing it — silently losing every message the
-        // doomed process had already accepted, reproducing the exact
-        // #2368 bug class this PR exists to fix. Same unambiguity check
-        // as the `AwaitingOutcome` arm above: only a different sid or a
-        // confirmed terminal success resolves tracking here too.
-        (
-            ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested },
-            ResumeEvent::SessionCaptured { generation: g, sid, is_confirmed_success },
-        ) if generation == g => {
+        ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested } if generation == g => {
             if sid != attempted_sid || is_confirmed_success {
                 (
                     ResumeState::NotTracking { current_generation: generation },
                     capture_resolution_effects(attempted_sid, held_error_line, sid, is_confirmed_success),
                 )
             } else {
-                (
-                    ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested },
-                    vec![],
-                )
+                (ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested }, vec![])
             }
         }
+        other => (other, vec![]),
+    }
+}
 
-        // The drain can keep appending messages to the retry batch while
-        // still merely pending, or even after already confirmed (up
-        // until the doomed process actually exits and the batch is
-        // redelivered).
-        (
-            ResumeState::AwaitingOutcome { generation, attempted_sid, mut retry, held_error_line, stop_requested },
-            ResumeEvent::MessageAppendedToRetryBatch { generation: g, entry },
-        ) if generation == g => {
+/// The drain can keep appending messages to the retry batch while it is merely
+/// pending, or even once confirmed (until the doomed process exits and the batch
+/// is redelivered).
+fn on_message_appended(state: ResumeState, g: u64, entry: QueuedRetryEntry) -> Transition {
+    match state {
+        ResumeState::AwaitingOutcome { generation, attempted_sid, mut retry, held_error_line, stop_requested } if generation == g => {
             retry.append_in_seq_order(entry);
-            (
-                ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested },
-                vec![],
-            )
+            (ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested }, vec![])
         }
-        (
-            ResumeState::ConfirmedRetry { generation, attempted_sid, mut retry, held_error_line, stop_requested },
-            ResumeEvent::MessageAppendedToRetryBatch { generation: g, entry },
-        ) if generation == g => {
+        ResumeState::ConfirmedRetry { generation, attempted_sid, mut retry, held_error_line, stop_requested } if generation == g => {
             retry.append_in_seq_order(entry);
             (ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested }, vec![])
         }
+        other => (other, vec![]),
+    }
+}
 
-        // Promotion: only when the poisoned sid is the EXACT one this
-        // generation attempted — an unrelated/mismatched sid leaves the
-        // state untouched (falls through to the catch-all below).
-        (
-            ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested },
-            ResumeEvent::ResumeUnreachable { generation: g, sid },
-        ) if generation == g && attempted_sid == sid => {
+/// Promotion: only when the poisoned sid is the EXACT one this generation
+/// attempted. A different sid leaves the state untouched.
+fn on_resume_unreachable(state: ResumeState, g: u64, sid: String) -> Transition {
+    match state {
+        ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested } if generation == g && attempted_sid == sid => {
             (ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested }, vec![])
         }
+        other => (other, vec![]),
+    }
+}
 
-        // A terminal error-result line arriving while a resume outcome
-        // is still undecided (or already confirmed, but the process
-        // hasn't exited yet) is held back — its fate is resolved only
-        // once ProcessExited arrives. This is the crux of the whole
-        // module: unlike checking two separate mutex fields, ONE state
-        // enum makes "is this line still a retry candidate" a single,
-        // unambiguous question regardless of which order stderr's
-        // confirmation and stdout's error line happen to arrive in.
-        //
-        // reagentx P2 (round 4 on this PR): `held_error_line` holds
-        // exactly one line — a genuinely doomed resume produces at most
-        // one `is_error:true` before the retry decision resolves, but
-        // persistent mode can accept another user message and get a
-        // SECOND error before this generation's resume outcome is ever
-        // settled. A second line arriving is unambiguous proof the FIRST
-        // is a separate, already-settled turn's error — flush it
-        // immediately instead of silently overwriting it.
-        (
-            ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested },
-            ResumeEvent::ErrorResultLine { generation: g, line },
-        ) if generation == g => {
+/// A terminal error-result line arriving while a resume outcome is undecided (or
+/// confirmed, but the process hasn't exited) is held back; its fate is decided
+/// when `ProcessExited` arrives. That is the crux of the module: ONE state enum
+/// makes "is this line still a retry candidate" a single question, whichever
+/// order stderr's confirmation and stdout's error line arrive in.
+///
+/// `held_error_line` holds exactly one line. A doomed resume produces at most one
+/// `is_error:true` before the retry decision, but persistent mode can accept
+/// another user message and get a SECOND error before the outcome settles. A
+/// second line is proof the first is a separate, already-settled turn's error, so
+/// the first is persisted at once instead of being overwritten.
+///
+/// A line whose generation does NOT match (a lagging reader's line arriving after
+/// a respawn moved on) must still persist: the catch-all would lose it with no
+/// effect and nothing to hold it, which a caller can't tell from a correct
+/// hold-back.
+fn on_error_result_line(state: ResumeState, g: u64, line: String) -> Transition {
+    match state {
+        ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested } if generation == g => {
             let effects = held_error_line.map(|old| vec![ResumeEffect::PersistImmediately(old)]).unwrap_or_default();
-            (
-                ResumeState::AwaitingOutcome {
-                    generation,
-                    attempted_sid,
-                    retry,
-                    held_error_line: Some(line),
-                    stop_requested,
-                },
-                effects,
-            )
+            (ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line: Some(line), stop_requested }, effects)
         }
-        (
-            ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested },
-            ResumeEvent::ErrorResultLine { generation: g, line },
-        ) if generation == g => {
+        ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested } if generation == g => {
             let effects = held_error_line.map(|old| vec![ResumeEffect::PersistImmediately(old)]).unwrap_or_default();
-            (
-                ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line: Some(line), stop_requested },
-                effects,
-            )
+            (ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line: Some(line), stop_requested }, effects)
         }
-        (ResumeState::NotTracking { current_generation }, ResumeEvent::ErrorResultLine { line, .. }) => {
-            (ResumeState::NotTracking { current_generation }, vec![ResumeEffect::PersistImmediately(line)])
-        }
-        // reagentx P2 on PR #2373: an ErrorResultLine whose generation
-        // does NOT match what's currently tracked (a stale/lagging
-        // reader's line arriving after a respawn already moved on to a
-        // new generation) must still persist — falling through to the
-        // generic catch-all below would silently lose it (no effect, no
-        // state to hold it in), which a caller checking "were there any
-        // effects" can't distinguish from a genuine, correctly-tracked
-        // hold-back. Explicit arms here (rather than relying on the
-        // catch-all) keep that distinction unambiguous.
-        (state @ (ResumeState::AwaitingOutcome { .. } | ResumeState::ConfirmedRetry { .. }), ResumeEvent::ErrorResultLine { line, .. }) => {
-            (state, vec![ResumeEffect::PersistImmediately(line)])
-        }
+        other => (other, vec![ResumeEffect::PersistImmediately(line)]),
+    }
+}
 
-        // An explicit Stop must win over a retry even if one gets
-        // confirmed later (or was already confirmed) — recorded now,
-        // consulted when ProcessExited actually resolves the state.
-        (
-            ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, .. },
-            ResumeEvent::StopRequested { generation: g },
-        ) if generation == g => (
-            ResumeState::AwaitingOutcome {
-                generation,
-                attempted_sid,
-                retry,
-                held_error_line,
-                stop_requested: true,
-            },
-            vec![],
-        ),
-        (
-            ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, .. },
-            ResumeEvent::StopRequested { generation: g },
-        ) if generation == g => {
-            (
-                ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested: true },
-                vec![],
-            )
+/// An explicit Stop must win over a retry even if one is confirmed later (or
+/// already was): recorded now, consulted when `ProcessExited` resolves the state.
+fn on_stop_requested(state: ResumeState, g: u64) -> Transition {
+    match state {
+        ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, .. } if generation == g => {
+            (ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested: true }, vec![])
         }
+        ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, .. } if generation == g => {
+            (ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested: true }, vec![])
+        }
+        other => (other, vec![]),
+    }
+}
 
-        // Resolution. This is the only place a retry actually fires or a
-        // held-back line's fate is finally decided.
-        (
-            ResumeState::AwaitingOutcome { generation, held_error_line, .. },
-            ResumeEvent::ProcessExited { generation: g },
-        ) if generation == g => {
-            // Never confirmed (auth failure, rate limit, network blip,
-            // or the process simply exited before stderr ever reported
-            // anything) — genuinely done, not retrying. A held-back line
-            // is a real error the user must still see.
+/// Resolution: the only place a retry actually fires or a held-back line's fate
+/// is finally decided.
+///
+/// `NotTracking` is gated on `current_generation == g`: a STALE `ProcessExited`
+/// for a superseded generation (one a fresh spawn moved past before this exit
+/// arrived) would otherwise `PublishDone` (turn_active:false) over a new, running
+/// generation. A mismatched generation is a safe no-op, as for every other state.
+fn on_process_exited(state: ResumeState, g: u64) -> Transition {
+    match state {
+        // Never confirmed (auth failure, rate limit, network blip, or the process
+        // exited before stderr reported anything): done, not retrying. A held-back
+        // line is a real error the user must still see.
+        ResumeState::AwaitingOutcome { generation, held_error_line, .. } if generation == g => {
             let mut effects = Vec::new();
             if let Some(line) = held_error_line {
                 effects.push(ResumeEffect::FlushErrorLine(line));
@@ -548,15 +490,11 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             effects.push(ResumeEffect::PublishDone);
             (ResumeState::NotTracking { current_generation: generation }, effects)
         }
-        (
-            ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested },
-            ResumeEvent::ProcessExited { generation: g },
-        ) if generation == g => {
+        ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested } if generation == g => {
             let effects = if stop_requested {
-                // The user's explicit Stop wins over a confirmed retry —
-                // treat this exactly like "genuinely done, not
-                // retrying" instead of silently reviving the agent with
-                // the same prompt right after being asked to stop.
+                // The user's explicit Stop wins over a confirmed retry: treat it as
+                // done, not retrying, instead of reviving the agent with the same
+                // prompt right after being asked to stop.
                 let mut effects = Vec::new();
                 if let Some(line) = held_error_line {
                     effects.push(ResumeEffect::FlushErrorLine(line));
@@ -564,61 +502,25 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
                 effects.push(ResumeEffect::PublishDone);
                 effects
             } else {
-                // Whether the held line should actually be dropped
-                // depends on whether this retry ITSELF successfully
-                // launches — this pure function has no way to know that
-                // (it's determined later, asynchronously, by the
-                // caller's own spawn attempt), so it's bundled into the
-                // effect rather than pre-decided here.
-                //
-                // reagentx + Codex (PR #2693 review): the outcome is NO
-                // LONGER decidable here. This module used to assume the
-                // retry unconditionally clears `session_id` and starts
-                // blank — true before #2693, which added a recovery
-                // lookup (`retry_after_resume_failure` now tries to find
-                // a real on-disk session before giving up). Pre-emitting
-                // `Fresh` here was provably wrong whenever recovery
-                // succeeds: the frontend treats a `Fresh` node as a
-                // permanent scroll-anchor that a later `Resumed` outcome
-                // can never clear (`session-outcome.ts`), so the pane
-                // would show a truncated scrollback even when the model
-                // genuinely has full prior context. The caller now
-                // decides and emits the outcome itself, once recovery is
-                // actually known — immediately if it falls back to blank
-                // (see `PersistentSubprocessController::retry_after_resume_failure`),
-                // or via this same module's existing, already-correct
-                // `SessionCaptured` handling above once the recovery
-                // attempt (now itself resume-tracked, not fire-and-forget)
-                // resolves. `attempted_sid` is threaded through
-                // `FireRetry` so the caller has it either way. See
-                // `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`.
+                // The held line and the session outcome depend on whether the retry
+                // itself launches, which only the caller's spawn attempt knows: both
+                // are left to it (`retry_after_resume_failure`). Emitting `Fresh`
+                // here would be wrong whenever recovery finds a real on-disk
+                // session, and the frontend never clears one (#2693).
                 vec![ResumeEffect::FireRetry { retry, held_error_line, attempted_sid }]
             };
             (ResumeState::NotTracking { current_generation: generation }, effects)
         }
-        // reagentx P1 (round 5 on PR #2373): gated on `current_generation
-        // == g` — without this, a STALE `ProcessExited` for an
-        // already-superseded generation (one a fresh spawn moved past
-        // via `SpawnedFresh`/`SpawnedWithResume` before this exact exit
-        // event ever arrived) would match unconditionally and incorrectly
-        // `PublishDone` (turn_active:false) over a brand-new, actively
-        // running generation. A mismatched generation instead falls
-        // through to the catch-all below — a safe no-op, same treatment
-        // every OTHER state gives a stale event.
-        (
-            ResumeState::NotTracking { current_generation },
-            ResumeEvent::ProcessExited { generation: g },
-        ) if current_generation == g => {
+        ResumeState::NotTracking { current_generation } if current_generation == g => {
             (ResumeState::NotTracking { current_generation }, vec![ResumeEffect::PublishDone])
         }
-
-        // Any other (state, event) pairing is either a mismatched sid
-        // (an unrelated tentative retry left untouched by a poison for a
-        // different sid) or a stale event whose generation no longer
-        // matches what's currently tracked — both are safe no-ops.
-        (state, _) => (state, vec![]),
+        other => (other, vec![]),
     }
 }
+
+#[cfg(test)]
+#[path = "persistent_resume_transitions_tests.rs"]
+mod transition_tests;
 
 #[cfg(test)]
 mod tests {
