@@ -34,6 +34,10 @@ pub struct CaptureReq {
     pub block_id: String,
     #[serde(rename = "ref")]
     pub ref_: String,
+    /// A card's part: the element's whole text or value, as one short line, not a secret picked out of the text
+    /// around it (a card number shows as "4242 4242 4242 4242", an expiry as "03/30").
+    #[serde(default)]
+    pub whole: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -94,7 +98,7 @@ async fn capture(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: 
         return Err(format!("{} has no text to save", req.ref_));
     };
     let field = read.get("field").and_then(Value::as_bool).unwrap_or(false);
-    let value = pick(text, field, &req.ref_)?;
+    let value = if req.whole { whole(text, &req.ref_)? } else { pick(text, field, &req.ref_)? };
     Ok(Captured { value, origin: located.origin, page: located.page })
 }
 
@@ -144,6 +148,18 @@ fn pick(text: &str, field: bool, ref_: &str) -> Result<String, String> {
     }
 }
 
+/// The longest a card's part is: a name on a card is the longest.
+const MAX_PART: usize = 120;
+
+/// What a card's part element shows, whole: one line, not empty, not a page's worth of text.
+fn whole(text: &str, ref_: &str) -> Result<String, String> {
+    check(text, ref_)?;
+    if text.chars().count() > MAX_PART || text.contains('\n') {
+        return Err(format!("{ref_} holds more than one card part: name the element that holds only this one (its own line in a scoped snapshot)"));
+    }
+    Ok(text.to_string())
+}
+
 /// A value worth saving: not empty, and not a page's worth of text.
 fn check(value: &str, ref_: &str) -> Result<(), String> {
     if value.is_empty() {
@@ -170,6 +186,17 @@ mod tests {
         assert!(none.contains("not one secret"), "{none}");
         let two = pick(&format!("{secret} and {secret}"), false, "e5").unwrap_err();
         assert!(two.contains("holds 2 secrets") && !two.contains(secret), "{two}");
+    }
+
+    #[test]
+    fn a_card_part_is_the_elements_whole_text_on_one_short_line() {
+        assert_eq!(whole("4242 4242 4242 4242", "e1").unwrap(), "4242 4242 4242 4242");
+        assert_eq!(whole("Alex Doe", "e2").unwrap(), "Alex Doe");
+        assert!(pick("4242 4242 4242 4242", false, "e1").is_err(), "picked as a secret, a spaced number would not be taken");
+        let two = whole("03/30\n123", "e3").unwrap_err();
+        assert!(two.contains("more than one card part") && !two.contains("123"), "{two}");
+        assert!(whole(&"x".repeat(121), "e4").is_err());
+        assert!(whole("", "e5").unwrap_err().contains("nothing to save"));
     }
 
     #[test]

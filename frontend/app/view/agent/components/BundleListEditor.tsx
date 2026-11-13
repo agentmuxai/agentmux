@@ -11,7 +11,7 @@
  */
 
 import { createMemo, For, Show, type JSX } from "solid-js";
-import { IconButton, Select } from "@/app/element/ui";
+import { CloseButton, IconButton, Select } from "@/app/element/ui";
 import type { Bundle } from "@/app/store/rpc-api";
 import "./BundleListEditor.scss";
 
@@ -59,8 +59,7 @@ export function BundleListEditor(props: BundleListEditorProps): JSX.Element {
                             disabled={props.disabled || index() === props.value.length - 1}
                             onClick={() => move(index(), 1)}
                         />
-                        <IconButton
-                            icon="xmark"
+                        <CloseButton
                             label="Remove"
                             disabled={props.disabled}
                             onClick={() => remove(index())}

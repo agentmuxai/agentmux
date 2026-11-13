@@ -18,8 +18,8 @@ rpc AgentInputHistorySearch agent=a1 query="me" limit=200
       <span class="ui-filter warden-history-filter">
         <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
         <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Search what was typed" aria-label="Search what was typed">
-        <button type="button" class="ui-filter-clear" aria-label="Clear filter">
-          <i class="fa-solid fa-xmark" aria-hidden="true">
+        <button type="button" class="ui-close ui-close--sm ui-filter-clear" aria-label="Clear filter">
+          <i aria-hidden="true" class="fa-solid fa-xmark">
       <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
         <i aria-hidden="true" class="fa-solid fa-rotate">
         "Refresh"

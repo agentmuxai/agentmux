@@ -3,26 +3,8 @@
 //! The sender-side check that refuses a reply saying nothing (`backend::ack_policy`).
 
 use super::AppState;
+use crate::backend::ack_policy::{canon, remember_arrival};
 use crate::backend::reactive::types::InjectionRequest;
-use crate::backend::storage::store::Store;
-
-/// The agent a name, display binding, former slug or UID stands for, as one string, so a reply is
-/// matched to the message it answers whichever way each side addressed the other.
-fn canon(store: &Store, name: &str) -> String {
-    crate::backend::agent_resolve::resolve_agent_id(store, name).unwrap_or_else(|_| name.to_string())
-}
-
-/// Remember a message arriving here (from another host, by the cloud relay, or with files), for the
-/// next reply's check. It is never refused: only the sender's own srv does that.
-pub(crate) fn remember_arrival(store: &Store, req: &InjectionRequest) {
-    let Some(source) = req.source_agent.as_deref().filter(|s| !s.is_empty() && *s != "cron") else { return };
-    crate::backend::ack_policy::record(
-        &canon(store, source),
-        &canon(store, &req.target_agent),
-        req.request_id.as_deref(),
-        req.reply.as_deref() == Some("none"),
-    );
-}
 
 /// Refuse an agent's reply to a message that asked for none, or a bare acknowledgement to an agent
 /// that wrote to it a moment ago (`backend::ack_policy`); otherwise remember the message, for the
@@ -56,4 +38,38 @@ pub(super) fn refuse_empty_reply(state: &AppState, auth_via: super::auth::Reacti
     }
     remember_arrival(&state.mstore, req);
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::storage::store::Store;
+
+    fn arrival(source: Option<&str>, request_id: &str, reply: Option<&str>) -> InjectionRequest {
+        InjectionRequest {
+            target_agent: "jack-target".into(),
+            source_agent: source.map(str::to_string),
+            request_id: Some(request_id.into()),
+            reply: reply.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_arrival_that_asked_for_no_reply_is_remembered_for_the_next_check() {
+        let store = Store::open_in_memory().unwrap();
+        remember_arrival(&store, &arrival(Some("jack-sender"), "jack-msg-none", Some("none")));
+        remember_arrival(&store, &arrival(Some("jack-sender"), "jack-msg-reply", None));
+        assert!(crate::backend::ack_policy::asked_for_no_reply("jack-msg-none"));
+        assert!(!crate::backend::ack_policy::asked_for_no_reply("jack-msg-reply"));
+    }
+
+    #[test]
+    fn an_arrival_with_no_source_or_from_cron_is_not_remembered() {
+        let store = Store::open_in_memory().unwrap();
+        for source in [None, Some(""), Some("cron")] {
+            remember_arrival(&store, &arrival(source, "jack-msg-unsourced", Some("none")));
+        }
+        assert!(!crate::backend::ack_policy::asked_for_no_reply("jack-msg-unsourced"));
+    }
 }

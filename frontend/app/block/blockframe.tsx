@@ -10,7 +10,7 @@ import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { connBarShows } from "@/app/store/conn-status-rules";
-import { openMenuAt } from "@/app/element/ui";
+import { CloseButton, openMenuAt } from "@/app/element/ui";
 import { devModeOn } from "@/app/store/dev-mode";
 import { atoms, getConnStatusAtom, getSettingsKeyAtom, MOS, useBlockAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -421,13 +421,6 @@ function EndIcons(props: {
         return (floatingLabel() && tabId ? floaterPaneBlockId(tabId) : undefined) ?? props.blockId();
     };
 
-    const closeDecl: IconButtonDecl = {
-        elemtype: "iconbutton",
-        icon: "xmark",
-        title: "Close",
-        click: props.nodeModel.onClose,
-    };
-
     const closing = () => props.nodeModel.isClosing?.() ?? false;
 
     return (
@@ -479,7 +472,7 @@ function EndIcons(props: {
                     }}
                 />
             </Show>
-            <DeclIconButton decl={closeDecl} className="block-frame-default-close" />
+            <CloseButton size="header" class="block-frame-default-close" tooltip={false} {...tip("Close")} onClick={props.nodeModel.onClose} />
         </Show>
     );
 }

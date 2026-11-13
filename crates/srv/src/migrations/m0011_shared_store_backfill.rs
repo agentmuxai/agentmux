@@ -3,7 +3,7 @@
 
 use crate::backend::storage::store::Store;
 use crate::backend::storage::muxbus::MuxBusCredentials;
-use crate::drone::storage::DroneStore;
+use crate::backend::storage::drone_store::DroneStore;
 use crate::registry;
 use super::{Migration, MigrationContext, MigrationError, MigrationScope};
 

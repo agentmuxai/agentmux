@@ -13,7 +13,7 @@ import type { DroneViewModel } from "./drone-model";
 import type { BlockKind, FlowEdge, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
-import { Button, IconButton, TextArea, TextInput } from "@/app/element/ui";
+import { Button, CloseButton, TextArea, TextInput } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
 import { isModKey } from "@/util/platformutil";
 import { tip } from "@/app/element/tip";
@@ -606,10 +606,9 @@ const CanvasNode = (p: { s: CanvasState; n: FlowNode }): JSX.Element => {
             <header class="drone-node-header">
                 <span class="drone-node-emoji">{meta.emoji}</span>
                 <span class="drone-node-label">{meta.label}</span>
-                <IconButton
-                    icon="xmark"
+                <CloseButton
+                    size="sm"
                     label="Remove block"
-                    density="compact"
                     class="drone-node-close"
                     onClick={(e) => {
                         e.stopPropagation();
@@ -1077,10 +1076,9 @@ const VariablesEditor = (p: {
                             onContextMenu={showTextInputContextMenu}
                             placeholder="value"
                         />
-                        <IconButton
-                            icon="xmark"
+                        <CloseButton
+                            size="sm"
                             label="Remove variable"
-                            density="compact"
                             class="drone-btn drone-btn--small nodrag"
                             onClick={() => p.onChange(p.entries.filter((_, idx) => idx !== i()))}
                         />

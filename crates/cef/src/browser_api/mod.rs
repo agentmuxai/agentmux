@@ -45,6 +45,7 @@ pub mod hibernation;
 pub mod hidden_choices;
 pub mod key_typing;
 pub mod last_input;
+pub mod nav_settle;
 pub mod page_state;
 pub mod page_url;
 pub mod press;

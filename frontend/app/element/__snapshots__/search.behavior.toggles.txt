@@ -13,7 +13,7 @@ requestAnimationFrame
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0
 DeclIconButton Case Sensitive click
 DeclIconButton Regular Expression click
@@ -32,7 +32,7 @@ regex=true caseSensitive=true wholeWord=false
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0
 DeclIconButton Whole Word click
 DeclIconButton Case Sensitive click
@@ -51,5 +51,5 @@ regex=true caseSensitive=false wholeWord=true
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0

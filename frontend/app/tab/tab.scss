@@ -134,29 +134,12 @@
         }
     }
 
-    .wave-button {
-        flex-shrink: 0;
-        width: 20px;
-        height: 20px;
-        min-height: 0; // the line Button's 26px minimum would outgrow the tab
-        @include mixins.flex-center;
-        cursor: default;
-        z-index: var(--z-tab-name);
-        padding: 0;
-        /* Tab close button must NOT pick up the general `.tab *`
-           transition rule — a transition on the close button causes
-           a visible flicker every time the active tab changes. */
-        transition: none !important; /* stylelint-disable-line declaration-no-important */
-    }
-
+    // The close is the kit's CloseButton (size "tab"). A transition on it flickers every time the active tab
+    // changes, so it has none (this rule outranks the general `.tab *` one).
     .close {
         visibility: hidden;
-
-        // The close X is Font Awesome's `xmark`, the same shape as every other close.
-        i {
-            font-size: var(--text-base);
-            line-height: 1;
-        }
+        z-index: var(--z-tab-name);
+        transition: none;
     }
 
     // Custom tab color — the pane-tab pill tones for the picked hue (tab.tsx
@@ -201,9 +184,6 @@ body:not(.nohover) .tab.dragging {
     }
     .close {
         visibility: visible;
-        &:hover {
-            color: var(--main-text-color);
-        }
     }
 }
 
@@ -290,10 +270,10 @@ body:not(.nohover) .tab.tab-colored.active.dragging {
     border-radius: 0;
     font-size: var(--text-xs);
     font-weight: 400;
+}
 
-    &.tab-context-btn-close {
-        --ui-fg-hover: var(--error-text-color);
-        --ui-line-hover: var(--error-color);
-    }
+// The "Close menu" control is the kit's CloseButton; it shares the row with Rename.
+.ui-close.tab-context-btn-close {
+    flex: 1;
 }
 

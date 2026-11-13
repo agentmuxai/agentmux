@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, CloseButton } from "@/app/element/ui";
 import { For, Show, type JSX } from "solid-js";
 import type { HeldInput, OfflineNotice } from "./offline-input";
 
@@ -56,7 +56,7 @@ export function HeldInputPanel(props: {
                                 </Button>
                             )}
                         </Show>
-                        <IconButton density="compact" icon="xmark" label="Dismiss" onClick={() => props.onDismissNotice(n.id)} />
+                        <CloseButton size="sm" label="Dismiss" onClick={() => props.onDismissNotice(n.id)} />
                     </div>
                 )}
             </For>

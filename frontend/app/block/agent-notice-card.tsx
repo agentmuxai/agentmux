@@ -18,7 +18,7 @@
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 
 import { tip } from "@/app/element/tip";
-import { Button } from "@/app/element/ui";
+import { Button, CloseButton } from "@/app/element/ui";
 import type { PaneRequestProps } from "@/app/store/pane-requests";
 import type { NoticeView } from "@/types/rpc/NoticeView";
 import "./agent-notice-card.scss";
@@ -124,7 +124,7 @@ export function AgentNoticeLine(props: { notice: NoticeView } & PaneRequestProps
                     {n.quote}
                 </Show>
             </p>
-            <Button variant="chrome" icon="xmark" aria-label="Dismiss" onClick={() => props.close()} />
+            <CloseButton size="sm" label="Dismiss" tooltip={false} onClick={() => props.close()} />
         </section>
     );
 }

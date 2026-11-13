@@ -1,18 +1,17 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Store extension methods for `db_drone_definitions` +
-//! `db_drone_runs`. Lives in the drone module because the table
-//! schema is local to this feature; if Drone ever ships separately
-//! we can pull these methods out into a mstore module without changing
-//! call sites.
+//! Store extension methods for `db_drone_definitions` + `db_drone_runs`.
+//! They sit with the storage layer because the job store, the job templates
+//! and the migrations all read these rows; `crate::drone::storage` still
+//! names this module.
 
 use rusqlite::params;
 
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::store::Store;
 
-use super::types::{DroneDefinition, DroneRun};
+use super::drone_types::{DroneDefinition, DroneRun};
 
 /// The definition upsert, shared by [`DroneStore::drone_upsert`] and the
 /// versioned save in `versions.rs`, so both write the same row.

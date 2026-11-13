@@ -15,7 +15,7 @@
  *
  * Persistent (survives until dismissed, the agent restarts or the pane unmounts; deliberately
  * NOT persisted across app restarts — a restart is exactly what clears the
- * condition) and dismissable via the × action. Rendered through the shared
+ * condition) and dismissable via the ✕ action. Rendered through the shared
  * PaneRow pin primitive so it matches the other agent-pane status rows
  * (failure-recovery, runtime pin).
  */
@@ -75,7 +75,7 @@ export const AgentCredentialsRevokedChip = (
                     meta={state().providers.join(", ") || undefined}
                     actions={[
                         {
-                            glyph: "×",
+                            close: true,
                             title: "Dismiss",
                             onClick: () => setRevoked(null),
                         },

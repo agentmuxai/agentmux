@@ -701,7 +701,7 @@ describe("useAgentFailure — Copy error", () => {
             for (let i = 0; i < 6; i++) await Promise.resolve();
             expect(button(ui, "Copied")).toBeDefined();
 
-            const dismiss = ui.row()?.actions.find((a) => a.glyph === "×");
+            const dismiss = ui.row()?.actions.find((a) => a.close);
             dismiss!.onClick!(undefined as unknown as MouseEvent);
             fire("agentfailure", transient());
             expect(button(ui, "Copied")).toBeUndefined();
@@ -891,7 +891,7 @@ describe("useAgentFailure follows the live state (SPEC_AGENT_PANE_FAILURE_ROW_FO
     };
     const observed = (model: { dispatchPane: { mock: { calls: unknown[][] } } }) =>
         model.dispatchPane.mock.calls.filter((c) => (c[0] as { type: string }).type === "FailureObserved");
-    const labels = (ui: UseAgentFailureResult) => (ui.row()?.actions ?? []).map((a) => a.label ?? a.glyph);
+    const labels = (ui: UseAgentFailureResult) => (ui.row()?.actions ?? []).map((a) => (a.close ? "close" : a.label ?? a.glyph));
 
     it("raises nothing at mount for a sign-in failure srv says is over", async () => {
         hub.persistedFailure = authFailure();
@@ -996,7 +996,7 @@ describe("useAgentFailure follows the live state (SPEC_AGENT_PANE_FAILURE_ROW_FO
             await Promise.resolve();
             expect(ui.verdict()).toBe("lapsed");
             expect(ui.row()!.accent).toBe("idle");
-            expect(labels(ui)).toEqual(["Retry", "×"]);
+            expect(labels(ui)).toEqual(["Retry", "close"]);
             vi.advanceTimersByTime(5);
             successfulTurnEnded();
             expect(ui.row()).toBeNull();

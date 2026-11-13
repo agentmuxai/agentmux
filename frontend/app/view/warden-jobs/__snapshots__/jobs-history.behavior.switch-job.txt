@@ -36,9 +36,10 @@ dryRun j1
         <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-vial">
           "Dry run"
-        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <button type="button" class="ui-close ui-close--sm ui-close--text">
           <i aria-hidden="true" class="fa-solid fa-xmark">
-          "Close"
+          <span class="ui-close__text">
+            "Close"
     <div data-stand="JobDryRun" data-vault="[{\"id\":\"v-1\",\"name\":\"Repo token\"}]">
       "Weekly report"
       "|"
@@ -124,9 +125,10 @@ loadRuns j2 before=- limit=50
         <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-vial">
           "Dry run"
-        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <button type="button" class="ui-close ui-close--sm ui-close--text">
           <i aria-hidden="true" class="fa-solid fa-xmark">
-          "Close"
+          <span class="ui-close__text">
+            "Close"
     <div class="warden-section-stub">
       "No runs yet."
 loadRuns j3 before=- limit=50
@@ -164,8 +166,9 @@ loadRuns j3 before=- limit=50
         <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-vial">
           "Dry run"
-        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <button type="button" class="ui-close ui-close--sm ui-close--text">
           <i aria-hidden="true" class="fa-solid fa-xmark">
-          "Close"
+          <span class="ui-close__text">
+            "Close"
     <div class="warden-section-stub">
       "No runs yet."
