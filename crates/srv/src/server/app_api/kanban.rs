@@ -269,8 +269,11 @@ async fn list(state: &AppState, data: &Value) -> Result<Value, String> {
             Some(k) if k.eq_ignore_ascii_case("all") => None,
             k => Some(work.work_board_resolve(k, now).map_err(|e| e.to_string())?),
         };
+        // The limit is for one board; every board's answer is as long as the boards need, so a busy board
+        // does not push another's open tasks out of the counts.
+        let limit = if scope.is_some() { LIST_LIMIT } else { LIST_LIMIT * boards.len().clamp(1, 8) };
         let mut tasks = work
-            .work_board_list_in(scope.as_ref().map(|b| b.id.as_str()), now - FINISHED_WINDOW_MS, LIST_LIMIT, now)
+            .work_board_list_in(scope.as_ref().map(|b| b.id.as_str()), now - FINISHED_WINDOW_MS, limit, now)
             .map_err(|e| e.to_string())?;
         for t in &mut tasks {
             fill_media_paths(t);

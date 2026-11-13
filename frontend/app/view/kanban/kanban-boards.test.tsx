@@ -12,6 +12,7 @@ import {
     refOf,
     resolveBoard,
     secondsLeft,
+    taskForOpenRequestAnywhere,
     tasksOnLiveBoards,
     tierOf,
     viewOfBoard,
@@ -125,5 +126,18 @@ describe("the picker and the panel", () => {
         expect(secondsLeft(null, 1)).toBe(0);
         expect(tierOf("local").label).toBe("This machine only");
         expect(tierOf("lan").icon).toBe("network-wired");
+    });
+});
+
+describe("a request to open a task", () => {
+    it("finds it on any board, by id, by ref, or by number on the default board", () => {
+        const r = raw();
+        expect(taskForOpenRequestAnywhere(r, "c")?.id).toBe("c");
+        expect(taskForOpenRequestAnywhere(r, "work#3")?.id).toBe("c");
+        // A bare number is the default board's, even when another board has a task with that number.
+        expect(taskForOpenRequestAnywhere(r, "1")?.id).toBe("a");
+        expect(taskForOpenRequestAnywhere(r, "#1")?.id).toBe("a");
+        expect(taskForOpenRequestAnywhere(r, "99")).toBeUndefined();
+        expect(taskForOpenRequestAnywhere(null, "1")).toBeUndefined();
     });
 });

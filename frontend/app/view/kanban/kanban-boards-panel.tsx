@@ -7,9 +7,10 @@
 // `kanban.act`. Rename keeps the slug, so refs keep working. Delete is only for an archived board, and a
 // board with tasks waits out a visible countdown with a veto.
 
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, Show, type JSX } from "solid-js";
 
 import { Button, IconButton, MenuTrigger, Pill, TextInput, type MenuEntry } from "@/app/element/ui";
+import { tip } from "@/app/element/tip";
 import { useTick } from "@/app/hook/useTick";
 
 import { secondsLeft, tierOf } from "./kanban-boards";
@@ -39,6 +40,8 @@ function agentsWords(seen: readonly string[]): string {
 function BoardRow(props: { s: KanbanSectionState; b: KanbanBoardInfo; now: number }): JSX.Element {
     const { s, b } = props;
     const [name, setName] = createSignal(b.name);
+    // A rename from elsewhere (an agent's board_edit) shows here too.
+    createEffect(on(() => props.b.name, setName, { defer: true }));
     const act = (action: Parameters<typeof s.model.act>[0]["action"], more: object = {}) =>
         s.model.act({ action, board: b.slug, ...more });
     const rename = () => {
@@ -59,20 +62,20 @@ function BoardRow(props: { s: KanbanSectionState; b: KanbanBoardInfo; now: numbe
                     onBlur={rename}
                     onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
                 />
-                <code class="kanban-boards__slug" title="What a ref says: slug#number">{b.slug}#</code>
+                <code class="kanban-boards__slug" {...tip("What a ref says: slug#number")}>{b.slug}#</code>
                 <Show when={b.default}>
                     <Pill tone="accent">default</Pill>
                 </Show>
                 <Show when={b.archived}>
                     <Pill>archived</Pill>
                 </Show>
-                <span class="kanban-boards__count" title={tierOf(b.tier).label}>
+                <span class="kanban-boards__count" {...tip(tierOf(b.tier).label)}>
                     {b.open} open · {b.total} in all
                 </span>
             </div>
             <div class="kanban-boards__actions">
                 <MenuTrigger items={agentEntries(choices(), b.agents, (agents) => void act("board_edit", { agents }))} aria-label={`Agents that see ${b.name}`}>
-                    <Button density="compact" tone="quiet" icon="user-group" title="Which agents see this board">
+                    <Button density="compact" tone="quiet" icon="user-group" {...tip("Which agents see this board")}>
                         {agentsWords(b.agents)}
                     </Button>
                 </MenuTrigger>
@@ -91,7 +94,7 @@ function BoardRow(props: { s: KanbanSectionState; b: KanbanBoardInfo; now: numbe
                         density="compact"
                         tone="danger"
                         icon="trash"
-                        title={b.total > 0 ? `Deletes the board and its ${b.total} task(s), after a ${left() || 15} second countdown you can stop` : "Deletes the board"}
+                        {...tip(b.total > 0 ? `Deletes the board and its ${b.total} task(s), after a 15 second countdown you can stop` : "Deletes the board")}
                         onClick={() => void act("board_delete")}
                     >
                         Delete
@@ -133,7 +136,7 @@ function NewBoard(props: { s: KanbanSectionState }): JSX.Element {
                 onInput={(e) => setName(e.currentTarget.value)}
                 autofocus={s.managing() === "new"}
             />
-            <span class="kanban-boards__share" title="Sharing a board with your other machines comes with sync">
+            <span class="kanban-boards__share" {...tip("Sharing a board with your other machines comes with sync")}>
                 {tierOf("local").label}
             </span>
             <Button type="submit" density="compact" tone="accent" icon="plus" busy={busy()} disabled={!name().trim()}>

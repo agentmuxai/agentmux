@@ -27,6 +27,20 @@ export function resolveBoard(boards: readonly KanbanBoardInfo[], wanted: string 
     return defaultSlug;
 }
 
+/**
+ * The task a request to open one names, on any board: its id, its ref (`work#12`), or a bare number, which is
+ * the default board's (`#12`, the link agentmux://task/12).
+ */
+export function taskForOpenRequestAnywhere(raw: KanbanBoard | null, request: string): KanbanTask | undefined {
+    if (!raw) return undefined;
+    const def = defaultSlugOf(raw);
+    const wanted = request.trim();
+    return (
+        raw.tasks.find((t) => t.id === wanted || t.card.task_ref === wanted) ??
+        raw.tasks.find((t) => boardSlugOf(t, def) === def && String(t.card.num) === wanted.replace(/^#/, ""))
+    );
+}
+
 /** What the pane shows of `raw`: the selected board's tasks, with the same boards and agents. */
 export function viewOfBoard(raw: KanbanBoard | null, selected: string | null | undefined): KanbanBoard | null {
     if (!raw) return null;

@@ -25,8 +25,8 @@ import {
     untrackedAgents,
     type ColumnId,
 } from "./kanban-columns";
-import { defaultSlugOf, infoOf, needsByBoard, resolveBoard, tasksOnLiveBoards } from "./kanban-boards";
-import { KanbanModel, taskForOpenRequest } from "./kanban-model";
+import { boardSlugOf, defaultSlugOf, infoOf, needsByBoard, resolveBoard, taskForOpenRequestAnywhere, tasksOnLiveBoards } from "./kanban-boards";
+import { KanbanModel } from "./kanban-model";
 import type { KanbanSectionProps } from "./kanban-props";
 import { reportsTo, seatOf, taskReportsTo, useSeatIndex } from "./kanban-seats";
 import type { KanbanTask } from "./kanban-types";
@@ -153,9 +153,12 @@ export function createKanbanSection(props: SectionProps) {
     // Opened from elsewhere: show the task once the board has it, then clear the request.
     createEffect(() => {
         const request = props.openRequest;
-        // A task's id, or its number as the operator sees it ("12": a link, agentmux://task/12).
-        const task = request ? taskForOpenRequest(model.board()?.tasks ?? [], request) : undefined;
+        // A task's id, its ref (work#12), or its number as the operator sees it ("12": a link, agentmux://task/12),
+        // on any board: the pane then shows that task's board.
+        const everything = model.everything();
+        const task = request ? taskForOpenRequestAnywhere(everything, request) : undefined;
         if (!task) return;
+        select(boardSlugOf(task, defaultSlugOf(everything)));
         setOpenId(task.id);
         props.onOpenHandled?.();
     });
