@@ -221,6 +221,7 @@ pub mod always_available;
 pub mod sensitive_ops;
 /// The requests for those operations and what became of them.
 pub mod sensitive_requests;
+pub mod shutdown_events;
 /// Replies that say nothing are not sent (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).
 pub mod ack_policy;
 /// Quota mode, a fleet setting (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md section 5).

@@ -82,6 +82,8 @@ pub mod tear_off_tab;
 // `compensate_unresolved` will rely on.
 #[cfg(test)]
 mod integration_tests;
+#[cfg(test)]
+mod shutdown_events_tests;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
