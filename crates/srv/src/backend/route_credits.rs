@@ -125,10 +125,14 @@ pub(crate) fn on_failure(mstore: &Arc<Store>, bus: &Arc<EventBus>, block_id: &st
 /// A response on `route` worked: its episode ends, and the failure goes off every pane that shows it.
 /// BLOCKING (store reads and writes), but only once per episode; any other call is a map lookup.
 pub(crate) fn cleared(mstore: &Arc<Store>, bus: &Arc<EventBus>, broker: &Arc<Broker>, route: &str) {
-    if EPISODES.lock().remove(route).is_none() {
-        return;
+    {
+        // The note comes down under the lock that ended the episode, so [`post_while_open`] can't post it between the two.
+        let mut episodes = EPISODES.lock();
+        if episodes.remove(route).is_none() {
+            return;
+        }
+        take_down_note(broker, route);
     }
-    take_down_note(broker, route);
     for (block_id, _) in panes_on(mstore, route) {
         if shows_credits(mstore, &block_id) {
             crate::backend::blockcontroller::core::persist_last_failure(&block_id, None, &Some(mstore.clone()), &Some(bus.clone()));
@@ -149,7 +153,8 @@ pub(crate) fn turn_succeeded(mstore: &Store, broker: Option<&Arc<Broker>>, block
         return;
     }
     let key = format!("agent:{def_id}");
-    if EPISODES.lock().remove(&key).is_some() {
+    let mut episodes = EPISODES.lock();
+    if episodes.remove(&key).is_some() {
         if let Some(broker) = broker {
             take_down_note(broker, &key);
         }
@@ -254,9 +259,24 @@ fn note_key(episode_key: &str) -> String {
 /// Tell the person once per episode (the notification router's account surface, as for a login that expired).
 fn tell_person(broker: &Arc<Broker>, opened: &Opened) {
     match crate::backend::notify::router::get(broker) {
-        Some(router) => router.account_unavailable(&note_key(&opened.key), person_note(opened)),
+        Some(router) => {
+            post_while_open(&opened.key, || router.account_unavailable(&note_key(&opened.key), person_note(opened)));
+        }
         None => tracing::info!("route credits: no notification router yet (no window connected)"),
     }
+}
+
+/// Runs `post` only while the episode `key` is still open, and says whether it did. A success can end the episode
+/// between [`on_failure`] opening it and the note being posted; the note it took down was not there yet, so posting
+/// now would leave one for a route that works, and nothing would take it down. The check and the post are under the
+/// episodes lock, as [`cleared`]'s removal and take-down are.
+fn post_while_open(key: &str, post: impl FnOnce()) -> bool {
+    let episodes = EPISODES.lock();
+    if !episodes.contains_key(key) {
+        return false;
+    }
+    post();
+    true
 }
 
 /// The episode ended: its note comes down.

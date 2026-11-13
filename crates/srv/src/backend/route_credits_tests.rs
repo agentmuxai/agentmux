@@ -269,3 +269,39 @@ fn the_person_is_told_the_route_and_what_to_do_and_no_agent_by_name() {
     assert_ne!(note_key("openrouter"), note_key("agent:a"));
     assert!(!note_key("openrouter").contains("openrouter"), "hashed, like an account's key");
 }
+
+/// A success can land after the episode opens and before the person's note is posted (the leads are told in
+/// between). The note it could not take down is then not posted at all, and an episode that is still open posts it
+/// (#47508).
+#[tokio::test]
+async fn a_success_before_the_note_is_posted_leaves_no_note_for_a_route_that_works() {
+    let state = crate::server::tests::test_state();
+    let tab = tab(&state).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let def = format!("a-{id}");
+    agent(&state, &def, "Alpha");
+    let block = pane(&state, &tab, &def).await;
+    let failure = classify(Some(1), None, NO_CREDITS, None);
+    let now = agentmux_common::time::now_ms_u64();
+    let mut posts = 0;
+
+    // An agent on no route: its own next turn works between the failure and the note.
+    let opened = on_failure(&state.mstore, &state.event_bus, &block, &failure, now).expect("opens");
+    turn_succeeded(&state.mstore, Some(&state.broker), &block);
+    assert!(!post_while_open(&opened.key, || posts += 1));
+    assert_eq!(posts, 0, "the episode ended first: nothing is posted");
+
+    // A route: the gateway answers between the failure and the note.
+    let route = format!("route-{id}");
+    launched_on(&state, &block, &route);
+    let opened = on_failure(&state.mstore, &state.event_bus, &block, &failure, now + 1).expect("opens the route's episode");
+    cleared(&state.mstore, &state.event_bus, &state.broker, &route);
+    assert!(!post_while_open(&opened.key, || posts += 1));
+    assert_eq!(posts, 0);
+
+    // An episode still open posts, and the next success ends it.
+    let opened = on_failure(&state.mstore, &state.event_bus, &block, &failure, now + 2).expect("news again");
+    assert!(post_while_open(&opened.key, || posts += 1));
+    assert_eq!(posts, 1);
+    cleared(&state.mstore, &state.event_bus, &state.broker, &route);
+}
