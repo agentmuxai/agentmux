@@ -565,7 +565,7 @@ pub fn inject_identity_env_for_spawn(
 
     // Step 5: the definition-provider gate (spec §2.2 edge case).
     let brings_own_login = on_route || (own_claude_endpoint && def_provider.as_deref() == Some("claude"));
-    if !brings_own_login { steps::gate_unbound_provider(def_provider, &injector.injected_oauth, &bindings, &identity_store, &instance, &parent_template_id)?; }
+     if !brings_own_login { steps::gate_unbound_provider(def_provider, &injector.injected_oauth, &bindings, &identity_store, &instance, &parent_template_id)?; }
 
     // #3577, re-checked at the gate's own exit.
     steps::recheck_agent_not_deleted(&mstore, &instance)
