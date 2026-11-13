@@ -7,7 +7,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 
-import { IconButton } from "@/app/element/ui";
+import { CloseButton } from "@/app/element/ui";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import { COMMAND_GRANT, commandGrantLabel, isSiteGrant, SIGNIN_GRANT, signinGrantLabel } from "./vault-grant-labels";
 import { siteOf } from "./vault-use-question";
@@ -22,7 +22,7 @@ function GrantList(props: { grants: string[]; label: string; lead: string; name:
                     {(grant) => (
                         <span class="vault-grant" data-origin={grant}>
                             {props.name(grant)}
-                            <IconButton icon="xmark" label={props.stop(grant)} density="compact" onClick={() => props.revoke(grant)} />
+                            <CloseButton size="sm" label={props.stop(grant)} onClick={() => props.revoke(grant)} />
                         </span>
                     )}
                 </For>

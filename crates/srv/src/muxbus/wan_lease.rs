@@ -265,12 +265,12 @@ fn claim_outcome(resp: Option<(u16, serde_json::Value)>) -> Outcome {
 /// The key this install wants `agent_id`'s file keys sealed to, when it
 /// holds a WAN key for the agent (spec §7). Never mints one: the spawn path
 /// decides an agent's key, importing an older one.
-fn seal_offer(agent_id: &str) -> Option<crate::server::jekt_seal::SealOffer> {
+fn seal_offer(agent_id: &str) -> Option<crate::backend::jekt_seal::SealOffer> {
     let wan = crate::backend::storage::wan_identity::global()?;
     let key = wan.agent_key_load(agent_id).ok().flatten()?;
     let instance = wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()).ok()?;
     let seed: [u8; 32] = agentmux_common::jekt_sign::decode_key(&key.private_key)?.try_into().ok()?;
-    crate::server::jekt_seal::offer(&instance.instance_id, agent_id, &key.public_key_bytes()?, &seed)
+    crate::backend::jekt_seal::offer(&instance.instance_id, agent_id, &key.public_key_bytes()?, &seed)
 }
 
 /// POST `path` for `agent_id`; `(status, json body)` or `None` on transport error.
@@ -490,7 +490,7 @@ pub(crate) struct HeldBy {
     pub features: Vec<String>,
     /// The key it wants the agent's file keys sealed to; `None` from an
     /// install that predates sealing (spec §7).
-    pub seal: Option<crate::server::jekt_seal::SealOffer>,
+    pub seal: Option<crate::backend::jekt_seal::SealOffer>,
 }
 
 /// How long an answer is reused. Shorter than the lease TTL (60 s), so a

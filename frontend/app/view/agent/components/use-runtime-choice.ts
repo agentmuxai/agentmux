@@ -12,8 +12,9 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCapability, watchCapability } from "@/app/store/toolchain-capabilities";
 import type { AgentDefinition } from "@/app/store/rpc-api";
+import { getSettingsKeyAtom } from "@/app/store/global";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
-import { shouldPreselectContainer, type ContainerImageState } from "../defaults/container-default";
+import { defaultsToContainer, shouldPreselectContainer, type ContainerImageState } from "../defaults/container-default";
 import { loadLastRuntime, storeLastRuntime } from "../defaults/runtime-choice";
 import type { CreateDraft } from "./AgentCreateForm";
 import { isContainerAgentMode, isContainerAgentType } from "@/util/runtime-kind";
@@ -72,6 +73,8 @@ export function useRuntimeChoice(
 
     // What the person chose last time, read once as the panel opens.
     const lastRuntime = loadLastRuntime();
+    // Where a new agent runs when nobody chose: the setting, as srv's own spawns read it.
+    const defaultContainer = () => defaultsToContainer(getSettingsKeyAtom("agents:defaultruntime" as never)());
     // Default the runtime once the probes land, never to a mode that can't
     // run, until the user chooses.
     createEffect(() => {
@@ -83,6 +86,7 @@ export function useRuntimeChoice(
                 dockerAvailable: dockerUp(),
                 image: imageAccess(),
                 lastChoice: lastRuntime,
+                defaultContainer: defaultContainer(),
             })
                 ? "container"
                 : "host",
@@ -97,9 +101,11 @@ export function useRuntimeChoice(
 
     // A container is preferred (last choice, or the template's) but Docker or the image check has not answered:
     // the host steps would flash up and then be skipped, so they wait.
-    const prefersContainer = isContainerAgentMode(lastRuntime) || (lastRuntime !== "host" && isContainerAgentType(template.agent_type));
+    const prefersContainer = () =>
+        isContainerAgentMode(lastRuntime) ||
+        (lastRuntime !== "host" && (isContainerAgentType(template.agent_type) || (lastRuntime == null && defaultContainer())));
     const deciding = () => {
-        if (draft.runtimeTouched || !prefersContainer || !containerSupported()) return false;
+        if (draft.runtimeTouched || !prefersContainer() || !containerSupported()) return false;
         if (dockerAnswer() === undefined) return true;
         return dockerUp() && imageAccess() === undefined;
     };

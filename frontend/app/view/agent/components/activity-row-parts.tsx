@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { IconButton } from "@/app/element/ui/Button";
+import { CloseButton } from "@/app/element/ui/CloseButton";
 import { For, Show, type Accessor, type JSX } from "solid-js";
 import { Tooltip } from "@/app/element/tooltip";
 import { subagentDisplayLabel, type ActiveSubagent, type SubagentEvent } from "../../swarm/swarm-model";
@@ -73,11 +74,10 @@ export const ActivitySummary = ({ s, a, props }: PartProps): JSX.Element => {
                 />
             </Show>
             <Show when={!a().canStop && a().status === "error"}>
-                <IconButton
-                    icon="xmark"
+                <CloseButton
+                    size="sm"
                     label="Dismiss"
                     tooltip={false}
-                    density="compact"
                     class="agent-activity-dismiss"
                     onClick={(e) => { e.stopPropagation(); props.onDismiss(); }}
                 />

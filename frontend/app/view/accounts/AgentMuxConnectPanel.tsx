@@ -26,7 +26,7 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 import { CopyableErrorMessage } from "@/app/errors/CopyableErrorMessage";
 import { createMuxBusCloudConfig } from "./muxbus-cloud-config";
 import { muxbusNeedsSignInAgain } from "./muxbus-session";
-import { IconButton } from "@/app/element/ui";
+import { CloseButton } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import { Rich } from "@/app/i18n/rich";
 import { acceptMuxbusDelivery, type MuxBusDeliveryStatus } from "@/store/muxbus-delivery";
@@ -236,7 +236,7 @@ export function AgentMuxConnectPanel(props: {
                         <ProviderLogo provider="agentmux" size={20} />
                     </span>
                     <span class="accounts-chooser-title">{t("agentmuxConnect.title")}</span>
-                    <IconButton icon="xmark" label={t("agentmuxConnect.close")} tooltip={false} onClick={() => props.onClose()} />
+                    <CloseButton label={t("agentmuxConnect.close")} tooltip={false} onClick={() => props.onClose()} />
                 </div>
                 <AgentMuxConnectBody muxbus={props.muxbus} />
             </div>

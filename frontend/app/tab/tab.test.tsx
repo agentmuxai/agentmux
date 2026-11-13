@@ -80,7 +80,7 @@ function renderTab(
 describe("Tab close button", () => {
     it("fires onClose and never onSelect when the close button of a background tab is clicked", async () => {
         const { container, onSelect, onClose } = renderTab();
-        const closeButton = container.querySelector<HTMLButtonElement>("[title='Close Tab']");
+        const closeButton = container.querySelector<HTMLButtonElement>("button[aria-label='Close tab']");
         expect(closeButton).not.toBeNull();
 
         await userEvent.click(closeButton!);
@@ -107,7 +107,7 @@ describe("Tab context panel", () => {
     it("draws Rename and Close menu with Font Awesome icons, not emoji", async () => {
         const { container } = renderTab();
         fireEvent.contextMenu(container.querySelector(".tab")!);
-        const buttons = [...document.querySelectorAll<HTMLButtonElement>(".tab-context-btn")];
+        const buttons = [...document.querySelectorAll<HTMLButtonElement>(".tab-context-btn, .tab-context-btn-close")];
         expect(buttons.map((b) => b.textContent?.trim())).toEqual(["Rename", "Close menu"]);
         expect(buttons[0].querySelector("i.fa-pen")).not.toBeNull();
         expect(buttons[1].querySelector("i.fa-xmark")).not.toBeNull();

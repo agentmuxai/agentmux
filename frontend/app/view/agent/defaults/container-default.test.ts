@@ -9,6 +9,7 @@ import { getCliCatalogEntry } from "./cli-catalog";
 import {
     containerImageForChoice,
     containerImageNote,
+    defaultsToContainer,
     developerImageNote,
     DEVELOPER_CONTAINER_IMAGE,
     imageBlocksContainer,
@@ -128,5 +129,37 @@ describe("the developer image choice", () => {
         expect(developerImageNote("denied")).toMatch(/refuses access/);
         for (const ok of ["public", "local", "unknown", undefined] as const) expect(developerImageNote(ok)).toBeNull();
         expect(containerImageNote("not_found")).toMatch(/Native agents/);
+    });
+});
+
+
+describe("the setting agents:defaultruntime", () => {
+    it("leaves a new agent in a container unless it says native or host", () => {
+        expect(defaultsToContainer(undefined)).toBe(true);
+        expect(defaultsToContainer("container")).toBe(true);
+        expect(defaultsToContainer("something else")).toBe(true);
+        expect(defaultsToContainer(" Native ")).toBe(false);
+        expect(defaultsToContainer("host")).toBe(false);
+        expect(defaultsToContainer(true)).toBe(true);
+    });
+
+    it("makes the form default to a container for a host template when nobody chose", () => {
+        const hostTemplate = { ...ok, templateType: "host", defaultContainer: true };
+        expect(shouldPreselectContainer(hostTemplate)).toBe(true);
+        expect(shouldPreselectContainer({ ...hostTemplate, templateType: undefined })).toBe(true);
+    });
+
+    it("never overrides what the person chose, and still needs a container that can run", () => {
+        const hostTemplate = { ...ok, templateType: "host", defaultContainer: true };
+        expect(shouldPreselectContainer({ ...hostTemplate, lastChoice: "host" })).toBe(false);
+        expect(shouldPreselectContainer({ ...hostTemplate, dockerAvailable: false })).toBe(false);
+        expect(shouldPreselectContainer({ ...hostTemplate, containerSupported: false })).toBe(false);
+        expect(shouldPreselectContainer({ ...hostTemplate, image: "denied" })).toBe(false);
+        expect(shouldPreselectContainer({ ...hostTemplate, image: undefined })).toBe(false);
+    });
+
+    it("leaves a host template on the host when the setting says native or is not given", () => {
+        expect(shouldPreselectContainer({ ...ok, templateType: "host", defaultContainer: false })).toBe(false);
+        expect(shouldPreselectContainer({ ...ok, templateType: "host" })).toBe(false);
     });
 });

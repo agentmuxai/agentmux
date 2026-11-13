@@ -41,9 +41,9 @@ const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, nu
     };
 };
 
-/** Find the first action whose label (or glyph, for the bare Dismiss) matches. */
+/** Find the first action whose label matches, or the bare Dismiss (the kit's close control) for "close". */
 const action = (row: ReturnType<typeof failureToRow>, label: string) =>
-    row.actions.find((a) => a.label === label || a.glyph === label);
+    row.actions.find((a) => (label === "close" ? a.close : a.label === label || a.glyph === label));
 
 describe("isTransient", () => {
     it("is true only for throttling classes safe to auto-retry", () => {
@@ -64,8 +64,9 @@ describe("failureToRow", () => {
         const on = mkActions();
         const row = failureToRow(mkFailure(), mkView(), on);
         expect(row.accent).toBe("error");
-        const dismiss = action(row, "×");
-        expect(dismiss?.danger).toBe(true);
+        const dismiss = action(row, "close");
+        expect(dismiss?.close).toBe(true);
+        expect(dismiss?.title).toBe("Dismiss");
         dismiss?.onClick();
         expect(on._calls.dismiss).toBe(1);
     });
@@ -228,7 +229,7 @@ describe("failureToRow", () => {
         );
         expect(action(row, "Retry")).toBeUndefined();
         expect(action(row, "Details")).toBeDefined();
-        expect(action(row, "×")).toBeDefined();
+        expect(action(row, "close")).toBeDefined();
     });
 
     // SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6: the agent runs in
@@ -258,7 +259,7 @@ describe("failureToRow", () => {
         const row = failureToRow(mkFailure({ code: "live_elsewhere", retryable: false }), mkView(), mkActions());
         expect(action(row, "Take over")).toBeUndefined();
         expect(action(row, "Retry")).toBeUndefined();
-        expect(action(row, "×")).toBeDefined();
+        expect(action(row, "close")).toBeDefined();
     });
 
     // The agent is open in another pane of this AgentMux: Retry is refused identically, so the row
@@ -414,7 +415,7 @@ describe("failureToRow: verdict", () => {
         );
         expect(row.accent).toBe("idle");
         expect(row.title).toBe("Rate limited · 12 min ago");
-        expect(row.actions.map((a) => a.label ?? a.glyph)).toEqual(["Retry", "×"]);
+        expect(row.actions.map((a) => (a.close ? "close" : a.label ?? a.glyph))).toEqual(["Retry", "close"]);
         row.actions[0].onClick?.();
         expect(on._calls.retry).toBe(1);
     });

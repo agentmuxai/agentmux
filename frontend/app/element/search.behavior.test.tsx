@@ -69,6 +69,19 @@ vi.mock("@/app/element/ui/DeclIconButton", () => ({
         />
     ),
 }));
+vi.mock("@/app/element/ui/CloseButton", () => ({
+    CloseButton: (p: { label?: string; onClick?: (e: MouseEvent) => void }) => (
+        <button
+            data-stand="DeclIconButton"
+            data-elemtype="closebutton"
+            title={p.label}
+            onClick={(e) => {
+                log(`CloseButton ${p.label} click`);
+                p.onClick?.(e);
+            }}
+        />
+    ),
+}));
 vi.mock("./search.scss", () => ({}));
 
 import { Search, useSearch } from "./search";

@@ -7,6 +7,7 @@
 // scripts/check-ui-primitives.mjs counts what still doesn't.
 
 export { Button, IconButton, type ButtonProps, type ButtonVariant, type IconButtonProps } from "./Button";
+export { CloseButton, type CloseButtonProps, type CloseButtonSize } from "./CloseButton";
 export { Card, type CardProps } from "./Card";
 export { CardGrid, columnsFor, rowEnd, type CardGridProps } from "./CardGrid";
 export { Field, useField, type FieldProps } from "./Field";
