@@ -172,6 +172,7 @@ export type ProviderLoginOutcome =
     | "opened" // tier 1: browser/pane opened with a captured URL (caller polls for completion itself)
     | "inapp-success" // tier 1 + awaitTier1Completion: in-app login completed (child done, credential landed) and the account was persisted/linked here
     | "inapp-timeout" // tier 1 + awaitTier1Completion: URL captured, but no completion within the window (or cancelled) — no automatic tier 3 fallback; the user already has the URL in hand
+    | "inapp-ended" // tier 1 + awaitTier1Completion: the login child exited without a credential (a code it did not accept, or it was closed), well before the window ran out
     | "terminal-success" // tier 3: terminal login completed and was detected
     | "terminal-cli-signed-in" // tier 3, cli-managed provider: the CLI's own check passed; there is no account to save
     | "terminal-timeout" // tier 3: terminal opened, but no login within 5 min (or cancelled)
@@ -346,7 +347,7 @@ async function pollForInAppLoginCompletion(
     authEnv: Record<string, string>,
     isCancelled: () => boolean,
     opts: { pollMs?: number; timeoutMs?: number } = {},
-): Promise<{ completed: boolean; superseded: boolean }> {
+): Promise<{ completed: boolean; superseded: boolean; ended?: boolean }> {
     const pollMs = opts.pollMs ?? 2_000;
     const timeoutMs = opts.timeoutMs ?? INAPP_COMPLETION_TIMEOUT_MS;
     const deadline = performance.now() + timeoutMs;
@@ -412,7 +413,8 @@ async function pollForInAppLoginCompletion(
         }
         if (!childActive) {
             if (authed && (credentialChanged || !initialAuthed)) return { completed: true, superseded: false };
-            if (exitGraceChecksLeft-- <= 0) return { completed: false, superseded: false };
+            // The child is gone and no credential landed: it ended, it did not time out.
+            if (exitGraceChecksLeft-- <= 0) return { completed: false, superseded: false, ended: true };
         }
     }
     return { completed: false, superseded: false };
@@ -483,7 +485,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
                 deadlineMs: Date.now() + INAPP_COMPLETION_TIMEOUT_MS,
             });
             const isCancelled = p.isCancelled ?? (() => false);
-            const { completed, superseded } = await pollForInAppLoginCompletion(
+            const { completed, superseded, ended } = await pollForInAppLoginCompletion(
                 p.cliPath,
                 p.provider.authCheckCommand,
                 authEnvForTiers,
@@ -501,7 +503,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
             if (!superseded) {
                 await loginBackend().cancel().catch(() => {});
             }
-            if (!completed) return "inapp-timeout";
+            if (!completed) return ended ? "inapp-ended" : "inapp-timeout";
             // Same persist + one-retry + loud-error contract as tiers 2/3
             // below (reagent P2 / REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_
             // WORKING_2026_07_27.md): the credential is genuinely on disk, so

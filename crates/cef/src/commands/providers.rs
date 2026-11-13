@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::commands::cli_login::CliLoginStdin;
 use crate::state::AppState;
 
 /// Helper to extract the version-specific config dir from AppState.
@@ -83,6 +84,26 @@ fn save_config(config_dir: &str, config: &ProviderConfig) -> Result<(), String> 
 
 // ---- Command handlers ----
 
+/// Puts a PTY login's writer back after a code was written to it, so the CLI's
+/// input side stays open until the child exits. Only while that login is still
+/// running and nothing newer holds the slot: a stale writer left behind would
+/// make the next `set_provider_auth` write to a dead PTY instead of falling
+/// through to the config-file path. The login's reaper clears `active` before
+/// it clears the slot, so this can't refill the slot after the reap.
+fn restore_pty_writer(
+    slot: &parking_lot::Mutex<Option<CliLoginStdin>>,
+    active: &std::sync::atomic::AtomicBool,
+    stdin: CliLoginStdin,
+) {
+    if !matches!(stdin, CliLoginStdin::Pty(_)) {
+        return;
+    }
+    let mut slot = slot.lock();
+    if slot.is_none() && active.load(std::sync::atomic::Ordering::SeqCst) {
+        *slot = Some(stdin);
+    }
+}
+
 /// Store an auth token for a provider.
 pub async fn set_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let provider = args
@@ -107,7 +128,12 @@ pub async fn set_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) 
             tracing::warn!(error = %e, "set_provider_auth: failed to write to CLI stdin");
             return Err(format!("Failed to deliver auth code to CLI: {e}"));
         }
-        // Don't put stdin back — it's single-use (one code per login flow).
+        // A pipe is single-use: one code per login, and closing it is how the
+        // CLI learns there is no more input. A PTY writer must outlive the
+        // write: dropping it closes ConPTY's input side, which the CLI reads
+        // as a hangup, so it exits (129) before it can exchange a valid code.
+        // Put it back; the login's reaper drops it when the child exits.
+        restore_pty_writer(&state.cli_login_stdin, &state.cli_login_active, child_stdin);
         return Ok(serde_json::Value::Null);
     }
 
@@ -211,4 +237,75 @@ fn normalize_path_for_platform(path: &str) -> String {
     }
     #[cfg(not(windows))]
     path.to_string()
+}
+
+#[cfg(test)]
+mod login_writer_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// A PTY writer that records its bytes and whether it was dropped.
+    struct Probe {
+        written: Arc<parking_lot::Mutex<Vec<u8>>>,
+        dropped: Arc<AtomicBool>,
+    }
+
+    impl std::io::Write for Probe {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.written.lock().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn probe() -> (CliLoginStdin, Arc<parking_lot::Mutex<Vec<u8>>>, Arc<AtomicBool>) {
+        let written = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let w = Probe { written: written.clone(), dropped: dropped.clone() };
+        (CliLoginStdin::Pty(Box::new(w)), written, dropped)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_delivered_code_does_not_hang_up_the_login_child() {
+        let (mut stdin, written, dropped) = probe();
+        stdin.write_line("the-code").await.unwrap();
+        let slot = parking_lot::Mutex::new(None);
+        let active = AtomicBool::new(true);
+
+        restore_pty_writer(&slot, &active, stdin);
+
+        assert_eq!(written.lock().as_slice(), b"the-code\n");
+        assert!(!dropped.load(Ordering::SeqCst), "the writer must outlive the code delivery");
+        assert!(slot.lock().is_some(), "the writer is back in the slot for the reaper");
+        *slot.lock() = None;
+        assert!(dropped.load(Ordering::SeqCst), "the reaper's clear drops it");
+    }
+
+    #[test]
+    fn a_writer_of_a_finished_login_is_not_kept() {
+        let (stdin, _written, dropped) = probe();
+        let slot = parking_lot::Mutex::new(None);
+        restore_pty_writer(&slot, &AtomicBool::new(false), stdin);
+        assert!(slot.lock().is_none());
+        assert!(dropped.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_newer_logins_writer_is_not_replaced() {
+        let (newer, _w, newer_dropped) = probe();
+        let slot = parking_lot::Mutex::new(Some(newer));
+        let (old, _w2, old_dropped) = probe();
+        restore_pty_writer(&slot, &AtomicBool::new(true), old);
+        assert!(old_dropped.load(Ordering::SeqCst));
+        assert!(!newer_dropped.load(Ordering::SeqCst));
+        assert!(slot.lock().is_some());
+    }
 }
