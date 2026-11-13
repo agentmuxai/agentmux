@@ -13,6 +13,33 @@
     &.mic-active .ui-button--chrome.ui-button--toggle[aria-pressed="true"] {
         color: var(--error-text-color);
         position: relative;
+        // Its own stacking context, so the halo sits behind the icon and not behind the pane.
+        isolation: isolate;
+
+        // What the microphone hears (`--mic-level`, 0 to 1, MicButton.tsx): a red disc behind the icon
+        // that grows and darkens with the sound. With nothing heard it is not there, so a mic that is on
+        // and silent (a muted or wrong device) does not look like one that hears the person. The ring
+        // below only says the mic is on.
+        &::before {
+            content: "";
+            position: absolute;
+            inset: -3px;
+            z-index: -1;
+            border-radius: 50%;
+            background: var(--error-color);
+            opacity: calc(var(--mic-level, 0) * 0.45);
+            transform: scale(calc(0.6 + var(--mic-level, 0) * 0.7));
+            transition:
+                opacity var(--duration-fast) linear,
+                transform var(--duration-fast) linear;
+            pointer-events: none;
+
+            // Reduced treatment (status): the disc darkens in place, with no growth and no glide.
+            @include mixins.when-motion-reduced(status) {
+                transform: none;
+                transition: none;
+            }
+        }
 
         &::after {
             content: "";
