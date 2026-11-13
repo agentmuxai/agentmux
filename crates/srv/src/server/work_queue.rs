@@ -721,8 +721,10 @@ pub(super) async fn handle_work_release(
                 .flatten()
                 .map(|i| i.state)
                 .unwrap_or_default();
-            let kind = if req.handback { crate::backend::storage::work_queue::HANDED_BACK_EVENT } else { "released" };
-            super::work_tasks::record(&state, &id, &req.agent_id, "agent", kind, "claimed", &resulting, &req.result);
+            // A hand-back's history line was written with the hand-back itself.
+            if !req.handback {
+                super::work_tasks::record(&state, &id, &req.agent_id, "agent", "released", "claimed", &resulting, &req.result);
+            }
             super::agent_status_handlers::task_ended(&state, &req.agent_id, holder_uid(caller.as_deref()), &id);
             (StatusCode::OK, Json(json!({ "ok": true, "state": resulting })))
         }
