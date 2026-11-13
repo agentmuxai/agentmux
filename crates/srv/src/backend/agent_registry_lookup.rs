@@ -110,8 +110,13 @@ fn same_definition(records: &[NamedAgentRecord]) -> bool {
 
 /// The record to go by among several for one agent: the one whose instance holds a live lease, else the one launched
 /// last, else the newest made, else the lowest instance id (so the answer is the same on every call). `records` is not
-/// empty.
-fn preferred(records: Vec<NamedAgentRecord>) -> NamedAgentRecord {
+/// empty. One record is the answer as it stands: the lease store is opened (its folder made, its lock taken) only to
+/// choose between several, so the lookups that only read, history and memory among them, write nothing in the
+/// normal case.
+fn preferred(mut records: Vec<NamedAgentRecord>) -> NamedAgentRecord {
+    if records.len() == 1 {
+        return records.remove(0);
+    }
     let leases = crate::registry::resolve_shared_registry_dir().and_then(|dir| crate::registry::LeaseStore::open(&dir).ok());
     // Read once per record: each read takes the instance's lease lock.
     let live = |r: &NamedAgentRecord| {
@@ -289,6 +294,19 @@ mod tests {
         });
         with_pair([100, 100], |_| {
             assert_eq!(find_active_record_by_slug("manpo").unwrap().data.instance_id, "i0", "a tie is decided the same way every time");
+        });
+    }
+
+    // A lookup that finds one record only reads: opening the lease store makes its folder and takes a lock file in the
+    // registry shared by every instance, on every history and memory lookup (#46577).
+    #[test]
+    fn one_matching_record_is_returned_without_opening_the_lease_store() {
+        with_registry(&[("i1", "AgentY")], || {
+            let leases = crate::registry::resolve_shared_registry_dir().unwrap().join("leases");
+            assert!(!leases.exists(), "nothing has opened the lease store yet");
+            assert_eq!(find_active_record_by_slug("agenty").unwrap().data.instance_id, "i1");
+            assert_eq!(find_active_record_by_slug_and_definition("agenty", "def-i1").unwrap().data.instance_id, "i1");
+            assert!(!leases.exists(), "a single match leaves no lease folder or lock file behind");
         });
     }
 
