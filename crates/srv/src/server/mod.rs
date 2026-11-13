@@ -114,6 +114,8 @@ mod work_claims_handlers;
 mod work_facts_handlers;
 mod message_flow_handler;
 mod message_stats_handler;
+mod task_flow_handler;
+mod task_flow_notes;
 pub(crate) mod memory_launch_cost;
 pub(crate) mod native_memory_diff;
 mod native_memory_adopt_handlers;

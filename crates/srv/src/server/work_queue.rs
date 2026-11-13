@@ -711,6 +711,7 @@ pub(super) async fn handle_work_release(
         Ok(Some(matched)) => {
             count_holder_match(Some(matched));
             publish_changed(&state);
+            super::task_flow_notes::note(&state, &id, crate::backend::task_flow::TaskFlowKind::HandedBack, &req.agent_id, "");
             // Read back rather than infer: the store owns the
             // attempts-vs-max_attempts decision, and duplicating that rule
             // here is exactly how the two drift.
