@@ -289,12 +289,12 @@ export const Modal: Component<ModalProps> = (props) => {
         if (props.open && !mounted()) {
             openModal();
         } else if (!props.open && mounted()) {
-            closeModal();
+            fadeOutBackdrop(rootRef, mountNode); closeModal(); // the dim fades, not one frame: modal-exit-fade.ts
         }
     });
 
     onCleanup(() => {
-        if (mounted()) closeModal(false);
+        if (mounted()) closeModal();
     });
 
     const openModal = (): void => {
@@ -322,9 +322,7 @@ export const Modal: Component<ModalProps> = (props) => {
         caret.opened(resolved.scope, resolved.region);
     };
 
-    const closeModal = (fade = true): void => {
-        // The backdrop fades out instead of vanishing in one frame (modal-exit-fade.ts).
-        if (fade) fadeOutBackdrop(rootRef, mountNode);
+    const closeModal = (): void => {
         remove(id);
         stackEntry = null;
 
