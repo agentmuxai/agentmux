@@ -12,6 +12,8 @@ import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { paneTabItemType } from "@/app/drag/drag-types";
 import { clearPillGhost, pillZone, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
+import { pillPlacingIn } from "@/layout/lib/pillDragState";
+import { beginPillPlacement, paneReadsPill, registerPillPane } from "@/layout/lib/pillPlacement";
 import type { DropDirection } from "@/layout/lib/types";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { edgeFlashArea } from "./drop-blink-clock";
@@ -132,7 +134,9 @@ type HoverControl = { hovering: () => boolean; begin: (source: PillArgs["source"
 
 /**
  * A single pill over this pane, with `bodyDrop`: what the pointer is over decides the feedback (the
- * header glow, or the placement ghost), read again as it moves.
+ * header glow, or the placement ghost), read again as it moves. A tab of this layout over a placing zone is
+ * handed to the layout, which shows the drop by reflowing the panes and reads the pointer itself from then on
+ * (pillPlacement.ts); the ghost here is left for a tab from another window tab.
  */
 function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey: string; headerEl: HTMLElement; hover: HoverControl }) {
     const { body, paneKey, headerEl, hover } = opts;
@@ -157,7 +161,7 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
         if (!force && now - lastFollow < 30) return;
         lastFollow = now;
         const input = zoneInput(args);
-        zone = pillZone(input);
+        zone = paneReadsPill(input.model, paneKey, input.pointer) ? pillZone(input) : { kind: "none" };
         // The header glows where the pill would join, and nowhere else.
         if (zone.kind === "join") {
             if (!hover.hovering()) hover.begin(args.source);
@@ -165,6 +169,7 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
             hover.end();
         }
         if (zone.kind === "place") {
+            if (beginPillPlacement(input.model, input.blockId, input.pointer)) return;
             body!.model.showOverlay._set(true);
             if (zone.direction !== ghost) {
                 ghost = zone.direction;
@@ -180,14 +185,26 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
         if (!body) return;
         if (ghost !== undefined) clearPillGhost(body.model);
         ghost = undefined;
-        body.model.showOverlay._set(false);
+        // The layout's own while it places the pill: leaving this pane is how the pointer got to its catcher.
+        if (!pillPlacingIn(body.model)) body.model.showOverlay._set(false);
     };
     /** Where the pointer was released, not where the throttled drag last looked. */
-    const zoneAtDrop = (args: PillArgs): PillZone => (singlePill(args) ? pillZone(zoneInput(args)) : zone);
+    const zoneAtDrop = (args: PillArgs): PillZone => {
+        if (!singlePill(args)) return zone;
+        const input = zoneInput(args);
+        return paneReadsPill(input.model, paneKey, input.pointer) ? pillZone(input) : { kind: "none" };
+    };
     return { singlePill, follow, end, zoneAtDrop };
 }
 
 type Placement = ReturnType<typeof createPillPlacement>;
+
+/** Place the pill beside a pane and mark where it landed, for the bounce. */
+const placeAndMark = (body: PaneTabBodyDrop) => (blockId: string, zone: Extract<PillZone, { kind: "place" }>): string | false => {
+    const landedIn = body.place(blockId, zone);
+    if (landedIn !== false) markLanded(blockId, landedIn);
+    return landedIn;
+};
 
 /** Whether this pane takes the dragged tab(s). */
 function canDropForeign<T>(props: ForeignTabDropProps<T>, paneKey: string, data: Record<string | symbol, unknown>): boolean {
@@ -221,10 +238,7 @@ function dropForeign<T>(props: ForeignTabDropProps<T>, paneKey: string, placemen
         if (dropZone.kind === "place") {
             setCurrentDragPayload(null);
             // Next task, like a join: the move unmounts the dragged pill.
-            setTimeout(() => {
-                const landedIn = body.place(blockId, dropZone);
-                if (landedIn !== false) markLanded(blockId, landedIn);
-            }, 0);
+            setTimeout(() => placeAndMark(body)(blockId, dropZone), 0);
             return;
         }
     }
@@ -308,6 +322,8 @@ export function useForeignTabDrop<T>(props: ForeignTabDropProps<T>, stripEl: () 
             hover: { hovering, begin: beginForeignHover, end: endForeignHover },
         });
         onCleanup(placement.end);
+        const body = props.bodyDrop;
+        if (body) onCleanup(registerPillPane(body.model, paneKey, { headerEl: highlightEl, hasBody: body.hasBody, place: placeAndMark(body) }));
         const { singlePill, follow } = placement;
         const cleanup = dropTargetForElements({
             element: el,

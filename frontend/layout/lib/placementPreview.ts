@@ -23,11 +23,13 @@ import { DEFAULT_TRACKER, DropIntentTracker } from "./dropIntentTracker";
 import { dragState } from "./tilelayout-drag-state";
 import { clampCrossTabDirection } from "./crossTabDrag";
 import type { LayoutModel } from "./layoutModel";
+import { pillDragIn } from "./pillDragState";
 import { leaveOwnPane, pointerOutsideWindow } from "./tearOffPreview";
 import {
     DropDirection,
     LayoutTreeActionType,
     type LayoutNode,
+    type LayoutTreeAction,
     type LayoutTreeComputeMoveNodeAction,
     type LayoutTreeSetPendingAction,
     type LayoutTreeStayAction,
@@ -49,12 +51,20 @@ export interface PlacementInput {
      * split the hovered pane in half (`clampCrossTabDirection`).
      */
     foreignNode?: LayoutNode;
+    /**
+     * The dragged thing is a tab pill of this layout being placed as a pane (pillPlacement.ts). It is steadied
+     * as a pane of the tree is, and it lands beside the hovered pane, never across the whole row (`Outer*` is
+     * clamped). With `foreignNode` (its stand-in) the tab leaves a pane that keeps other tabs, and the drop is
+     * shown as the split the release makes; without, the tab is its pane's only one and the pane itself moves.
+     */
+    pill?: boolean;
 }
 
 /** The direction under the pointer, or undefined where there is none (outside the pane, on a diagonal). */
 export function placementDirection(model: LayoutModel, input: PlacementInput): DropDirection | undefined {
+    const besideOnly = !!input.foreignNode || !!input.pill;
     const raw =
-        (input.foreignNode
+        (besideOnly
             ? undefined
             : chipOverChipDirection(
                   model.treeState.rootNode,
@@ -63,7 +73,27 @@ export function placementDirection(model: LayoutModel, input: PlacementInput): D
                   input.rect,
                   input.offset
               )) ?? determineDropDirection(input.rect, input.offset);
-    return input.foreignNode ? clampCrossTabDirection(raw) : raw;
+    return besideOnly ? clampCrossTabDirection(raw) : raw;
+}
+
+/**
+ * The drop of a tab pill that leaves a pane with other tabs: the hovered pane is split in half and the new
+ * pane takes the half on the pointer's side, which is what the release does (`splitOutStackMember`,
+ * layoutStack.ts). Shown as that split and not as a move: a move puts the new pane beside the hovered one at
+ * a size of its own, which is another layout than the one the release makes.
+ */
+function pillSplit(input: PlacementInput, direction: DropDirection | undefined): LayoutTreeAction {
+    const side = sideOfDirection(direction);
+    if (!side) return { type: LayoutTreeActionType.ClearPendingAction };
+    const horizontal = side === "left" || side === "right";
+    const split = {
+        type: horizontal ? LayoutTreeActionType.SplitHorizontal : LayoutTreeActionType.SplitVertical,
+        targetNodeId: input.targetId,
+        newNode: input.foreignNode,
+        position: side === "left" || side === "up" ? "before" : "after",
+        sizeFraction: 0.5,
+    } as LayoutTreeAction;
+    return { type: LayoutTreeActionType.SetPendingAction, action: split } as LayoutTreeSetPendingAction;
 }
 
 /**
@@ -92,8 +122,14 @@ export function showPlacement(
     leaveOwnPane(model);
     // A drop is shown again: the zones the pointer left a moment ago clear nothing (`leavePlacement`).
     cancelLeave(model);
-    model.treeReducer(compute);
+    model.treeReducer(input.pill && input.foreignNode ? pillSplit(input, direction) : compute);
     return compute;
+}
+
+/** The drop now shown for the tab pill being placed, which its release commits. */
+function notePillDrop(model: LayoutModel, input: PlacementInput, armed: { targetId: string; direction: DropDirection | undefined }): void {
+    const pill = input.pill ? pillDragIn(model) : undefined;
+    if (pill) pill.armed = armed.direction === undefined ? undefined : { targetId: armed.targetId, direction: armed.direction };
 }
 
 /**
@@ -240,7 +276,7 @@ export function previewPlacement(
     input: PlacementInput
 ): { direction: DropDirection | undefined; compute: LayoutTreeComputeMoveNodeAction; targetId: string } {
     const raw = { targetId: input.targetId, direction: placementDirection(model, input) };
-    const held = steadyingOf(model, !!input.foreignNode);
+    const held = steadyingOf(model, !!input.foreignNode && !input.pill);
     clearTimeout(held.timer);
     const shape = layoutShape(model);
     if (held.shape !== undefined && held.shape !== shape) {
@@ -256,15 +292,18 @@ export function previewPlacement(
         held.timer = setTimeout(() => showWaiting(model, held, input.draggedId), Math.max(0, flushAt - now));
     }
     const shown = held.inputs.get(armed.targetId) ?? input;
+    notePillDrop(model, shown, armed);
     return { direction: armed.direction, compute: showPlacement(model, shown, armed.direction), targetId: armed.targetId };
 }
 
 /** The dwell ran out with no new sample: show the candidate that was waiting. */
 function showWaiting(model: LayoutModel, held: Steadying, draggedId: string): void {
-    if (dragState.nodeId !== draggedId) return;
+    if (dragState.nodeId !== draggedId && pillDragIn(model)?.draggedId !== draggedId) return;
     const armed = held.tracker.armWaiting();
     const shown = armed && held.inputs.get(armed.targetId);
-    if (armed && shown) showPlacement(model, shown, armed.direction);
+    if (!armed || !shown) return;
+    notePillDrop(model, shown, armed);
+    showPlacement(model, shown, armed.direction);
 }
 
 /** The side of the hovered pane a direction puts the new pane on; undefined for the centre and for none. */

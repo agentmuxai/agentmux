@@ -111,6 +111,14 @@
         z-index: var(--z-layout-overlay);
     }
 
+    // The layout's drop target for a tab pill being placed as a pane (PillCatcher.tsx): over the whole layout,
+    // above the panes the reflow moves under the pointer. It takes the pointer only while a placement is on.
+    .pill-catcher {
+        position: absolute;
+        inset: 0;
+        z-index: var(--z-layout-overlay);
+    }
+
     .overlay-node {
         display: flex;
         flex: 0 1 auto;
