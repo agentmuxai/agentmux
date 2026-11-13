@@ -103,6 +103,22 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],
     },
+    app_query: {
+        kind: "app_query",
+        emoji: "🔎",
+        label: "App query",
+        description: "Read AgentMux's own state: MuxBus, one agent, or Kanban tasks. Read-only.",
+        color: "#14b8a6", // colour: fixed (the block's identity colour)
+        defaultData: {
+            query: "muxbus",
+            agent: "",
+            holder: "",
+            state: "",
+            pr: "",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     api: {
         kind: "api",
         emoji: "🌐",
@@ -154,6 +170,7 @@ export const BLOCK_KINDS: BlockKind[] = [
     "message",
     "task",
     "notify",
+    "app_query",
     "api",
     "condition",
     "response",
