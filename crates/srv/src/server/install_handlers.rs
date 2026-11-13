@@ -22,13 +22,10 @@
 //!  - No verify / doctor / post-install steps yet — those land in
 //!    Phase β.
 
-#[cfg(windows)]
-use agentmux_common::win32::NoWindow;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::mps::Broker;
@@ -184,11 +181,11 @@ impl InstallSessionRegistry {
 
     /// Try to claim a provider; returns false if another session is
     /// already installing this provider.
-    fn try_claim_provider(&self, provider_id: &str) -> bool {
+    pub(crate) fn try_claim_provider(&self, provider_id: &str) -> bool {
         self.active_providers.lock().insert(provider_id.to_string())
     }
 
-    fn release_provider(&self, provider_id: &str) {
+    pub(crate) fn release_provider(&self, provider_id: &str) {
         self.active_providers.lock().remove(provider_id);
     }
 
@@ -202,7 +199,7 @@ impl InstallSessionRegistry {
         self.active_system_tools.lock().remove(tool_id);
     }
 
-    fn cancel(&self, session_id: &str) -> bool {
+    pub(crate) fn cancel(&self, session_id: &str) -> bool {
         if let Some(tx) = self.sessions.lock().remove(session_id) {
             let _ = tx.send(());
             true
@@ -254,7 +251,7 @@ pub(crate) fn installable_provider(
 
 /// The pinned CLI version an install of `provider_id` uses: the backend
 /// provider registry's pin (the source of truth), else the caller's.
-fn effective_pin(provider_id: &str, requested: &str) -> String {
+pub(super) fn effective_pin(provider_id: &str, requested: &str) -> String {
     crate::backend::providers::get_provider(provider_id)
         .map(|p| p.pinned_version.to_string())
         .filter(|v| !v.is_empty())
@@ -265,7 +262,7 @@ fn effective_pin(provider_id: &str, requested: &str) -> String {
 /// (`backend::cli_install`), which is also what `resolvecli` and the launch
 /// path look in first. Honors portable / installed mode + the
 /// `AGENTMUX_HOME_OVERRIDE` test override via `DataPaths::from_env()`.
-fn provider_install_dir(provider_id: &str, pinned_version: &str) -> Option<std::path::PathBuf> {
+pub(super) fn provider_install_dir(provider_id: &str, pinned_version: &str) -> Option<std::path::PathBuf> {
     let paths = agentmux_common::DataPaths::from_env()?;
     Some(crate::backend::cli_install::install_dir(
         &paths,
@@ -371,7 +368,7 @@ fn manifest_version(manifest: &std::path::Path) -> Option<String> {
     parsed.get("version")?.as_str().map(|s| s.to_string())
 }
 
-fn installed_bin_in(dir: &std::path::Path, cli_command: &str) -> Option<std::path::PathBuf> {
+pub(super) fn installed_bin_in(dir: &std::path::Path, cli_command: &str) -> Option<std::path::PathBuf> {
     for managed in [
         crate::backend::cli_download::download_bin(dir, cli_command),
         crate::backend::cli_uv::venv_bin(dir, cli_command),
@@ -452,7 +449,7 @@ pub(crate) fn install_start(
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
     registry.insert(session_id.clone(), cancel_tx);
 
-    spawn_install_task(
+    super::install_task::spawn_install_task(
         broker.clone(),
         registry.clone(),
         session_id.clone(),
@@ -534,400 +531,9 @@ pub(crate) fn install_cancel(registry: &Arc<InstallSessionRegistry>, req: Instal
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn spawn_install_task(
-    broker: Arc<Broker>,
-    registry: Arc<InstallSessionRegistry>,
-    session_id: String,
-    provider_id: String,
-    cli_command: String,
-    npm_package: String,
-    pinned_version: String,
-    mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
-) {
-    tokio::spawn(async move {
-        use std::process::Stdio;
-        use tokio::io::{AsyncBufReadExt, BufReader};
-        use tokio::process::Command;
-
-        let scope = format!("install:{}", session_id);
-        // The last lines npm printed, for the log when an install fails: the
-        // dialog shows the whole output, but nothing else kept it, so a failed
-        // install left no trace of why (only `install.start` was logged).
-        let tail: Arc<Mutex<std::collections::VecDeque<String>>> = Arc::default();
-        let log_done = |ok: bool, error: Option<&str>| {
-            if ok {
-                tracing::info!(session_id = %session_id, provider_id = %provider_id, "install.done");
-            } else {
-                let tail = tail.lock().iter().cloned().collect::<Vec<_>>().join(" | ");
-                tracing::warn!(
-                    session_id = %session_id,
-                    provider_id = %provider_id,
-                    error = error.unwrap_or(""),
-                    npm_tail = %tail,
-                    "install.failed"
-                );
-            }
-        };
-        let emit_line = |broker: &Broker, line: String, stream: InstallStream| {
-            broker.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::line(&session_id, line, stream), vec![scope.clone()], 1024);
-        };
-        // Legacy emit path — the `error` field is a free-text string.
-        // New code paths should use `emit_done_typed` below to emit
-        // the wire-format `AgentMuxError` object so the frontend can
-        // render a friendly `<ErrorBanner />`.
-        let emit_done = |broker: &Broker, ok: bool, error: Option<String>| {
-            log_done(ok, error.as_deref());
-            broker.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::done(&session_id, ok, json!(error)), vec![scope.clone()], 1024);
-        };
-        let emit_done_typed = |broker: &Broker, err: agentmux_common::AgentMuxError| {
-            log_done(false, Some(&err.to_string()));
-            broker.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::done(&session_id, false, err.to_wire()), vec![scope.clone()], 1024);
-        };
-
-        // One pin decides both the dir and the package version, so an
-        // install can never put version X in a dir named for version Y.
-        let pinned_version = effective_pin(&provider_id, &pinned_version);
-        let provider_dir = match provider_install_dir(&provider_id, &pinned_version) {
-            Some(p) => p,
-            None => {
-                emit_done(&broker, false, Some("cannot determine home directory".into()));
-                registry.drop_session(&session_id);
-                registry.release_provider(&provider_id);
-                return;
-            }
-        };
-
-        // The shared dir is written by every AgentMux instance on this
-        // machine: serialize on its install lock (held until this task ends).
-        // Waiting for another instance's install must stay cancellable, so
-        // poll the lock and race `install.cancel` instead of blocking in it
-        // (Codex P2 on #3927: a blocking wait ignored cancel, kept the
-        // provider claimed, and could later report success for a cancelled
-        // session).
-        let shared_dir = agentmux_common::DataPaths::from_env().and_then(|p| {
-            crate::backend::cli_install::shared_cli_dir(&p, &provider_id, &pinned_version)
-        });
-        let _install_guard = loop {
-            let lock_provider = provider_id.clone();
-            let lock_pin = pinned_version.clone();
-            let res = tokio::task::spawn_blocking(move || {
-                let paths = agentmux_common::DataPaths::from_env()
-                    .ok_or_else(|| std::io::Error::other("DataPaths::from_env() failed"))?;
-                crate::backend::cli_install::try_lock_install(&paths, &lock_provider, &lock_pin)
-            })
-            .await;
-            match res {
-                Ok(Ok(Some(g))) => break g,
-                Ok(Ok(None)) => {
-                    tokio::select! {
-                        _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => continue,
-                        _ = &mut cancel_rx => {
-                            tracing::info!(session_id = %session_id, "install.cancel: cancelled while waiting for another instance's install");
-                            emit_done(&broker, false, Some("cancelled".into()));
-                            registry.drop_session(&session_id);
-                            registry.release_provider(&provider_id);
-                            return;
-                        }
-                    }
-                }
-                Ok(Err(e)) => {
-                    emit_done(
-                        &broker,
-                        false,
-                        Some(format!("cannot take the CLI install lock: {e}")),
-                    );
-                    registry.drop_session(&session_id);
-                    registry.release_provider(&provider_id);
-                    return;
-                }
-                Err(e) => {
-                    emit_done(
-                        &broker,
-                        false,
-                        Some(format!("install lock task panicked: {e}")),
-                    );
-                    registry.drop_session(&session_id);
-                    registry.release_provider(&provider_id);
-                    return;
-                }
-            }
-        };
-        // Reuse only a FINISHED install (completion marker, not just a shim
-        // npm may have written early); clear a failed or interrupted one.
-        if let Some(dir) = shared_dir.as_deref() {
-            if crate::backend::cli_install::is_complete(dir)
-                && installed_bin_in(dir, &cli_command).is_some()
-            {
-                emit_line(
-                    &broker,
-                    "already installed by another AgentMux instance".to_string(),
-                    InstallStream::Stdout,
-                );
-                emit_done(&broker, true, None);
-                registry.drop_session(&session_id);
-                registry.release_provider(&provider_id);
-                return;
-            }
-            if let Err(e) = crate::backend::cli_install::clear_unless_valid(dir, &cli_command) {
-                emit_done(
-                    &broker,
-                    false,
-                    Some(format!(
-                        "cannot clear an incomplete install at {}: {e}",
-                        dir.display()
-                    )),
-                );
-                registry.drop_session(&session_id);
-                registry.release_provider(&provider_id);
-                return;
-            }
-        }
-        // A release download or a uv venv, not an npm package (`backend::cli_download`, `backend::cli_uv`).
-        if crate::backend::cli_download::is_managed_install(&provider_id) {
-            let res = run_download_install(&provider_id, &cli_command, &broker, (&session_id, &scope), &mut cancel_rx).await;
-            emit_done(&broker, res.is_ok(), res.err());
-            registry.drop_session(&session_id);
-            registry.release_provider(&provider_id);
-            return;
-        }
-        // Makes the folder too, with the public registry and an empty npm config (cli_install.rs).
-        let isolation = match crate::backend::cli_install::npm_isolation_args(&provider_dir) {
-            Ok(isolation) => isolation,
-            Err(e) => {
-                // Disk-full, permission-denied and path-not-found go to the typed catalog so the
-                // frontend shows a friendly message, not the raw OS error; other kinds stay Legacy.
-                let err = agentmux_common::AgentMuxError::from_io_with_path(
-                    provider_dir.display().to_string(),
-                    e,
-                );
-                emit_done_typed(&broker, err);
-                registry.drop_session(&session_id);
-                registry.release_provider(&provider_id);
-                return;
-            }
-        };
-        let provider_dir_str = provider_dir.to_string_lossy().to_string();
-
-        // The pinned package plus any companions (pi-acp's `pi`): one npm run,
-        // one dir, one completion marker.
-        let pkg_args: Vec<String> = match crate::backend::providers::get_provider(&provider_id) {
-            Some(p) if p.npm_package == npm_package => p.npm_install_specs(&pinned_version),
-            _ if pinned_version.is_empty() => vec![npm_package.clone()],
-            _ => vec![format!("{}@{}", npm_package, pinned_version)],
-        };
-
-        // `--progress=false` is unconditional: npm only renders the
-        // progress bar when both stdout and stderr are TTYs, and this
-        // task pipes both, so leaving progress at the default would
-        // produce no visible spinner anyway. `--loglevel=verbose` is
-        // also unconditional: the user's only signal of progress
-        // during long installs is the per-package fetch/extract
-        // chatter, so we always pay for the noise to gain the signal.
-        let mut npm_args: Vec<String> = std::iter::once("install".to_string())
-            .chain(pkg_args)
-            .chain([
-                "--prefix".to_string(),
-                provider_dir_str.clone(),
-                "--no-audit".to_string(),
-                "--no-fund".to_string(),
-                "--progress=false".to_string(),
-                "--loglevel=verbose".to_string(),
-                // A user's legacy-peer-deps would skip a package's peers.
-                "--legacy-peer-deps=false".to_string(),
-            ])
-            .collect();
-        npm_args.extend(isolation);
-
-        emit_line(
-            &broker,
-            format!("$ npm {}", npm_args.join(" ")),
-            InstallStream::Stdout,
-        );
-
-        let mut cmd = Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
-        // `npm install` runs arbitrary postinstall scripts — the textbook case for
-        // not handing a process this instance's identity or API endpoint.
-        crate::backend::pane_env::sanitize_external_command(&mut cmd);
-        cmd.args(&npm_args);
-        cmd.stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        #[cfg(windows)]
-        {
-            cmd.no_window(); // CREATE_NO_WINDOW
-        }
-
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                emit_done(&broker, false, Some(format!("spawn npm: {e}")));
-                registry.drop_session(&session_id);
-                registry.release_provider(&provider_id);
-                return;
-            }
-        };
-
-        let stdout = child.stdout.take().expect("piped");
-        let stderr = child.stderr.take().expect("piped");
-
-        let broker_out = broker.clone();
-        let session_out = session_id.clone();
-        let scope_out = scope.clone();
-        let tail_out = tail.clone();
-        let stdout_task = tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                push_tail(&tail_out, &line);
-                broker_out.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::line(&session_out, line, InstallStream::Stdout), vec![scope_out.clone()], 1024);
-            }
-        });
-
-        let broker_err = broker.clone();
-        let session_err = session_id.clone();
-        let scope_err = scope.clone();
-        let tail_err = tail.clone();
-        let stderr_task = tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                push_tail(&tail_err, &line);
-                broker_err.publish_event::<crate::backend::mps_events::InstallChunk>(&InstallChunkEvent::line(&session_err, line, InstallStream::Stderr), vec![scope_err.clone()], 1024);
-            }
-        });
-
-        tokio::select! {
-            wait = child.wait() => {
-                let _ = stdout_task.await;
-                let _ = stderr_task.await;
-                match wait {
-                    Ok(s) if s.success() => {
-                        // npm exit 0 ≠ "binary is on disk". Verify the
-                        // expected bin shim exists so a package/bin
-                        // rename or provider-config mismatch surfaces
-                        // as an install failure rather than a phantom
-                        // launch with a non-existent cmd path.
-                        if installed_bin_in(&provider_dir, &cli_command).is_some() {
-                            // Still under the install lock: publish the shared
-                            // install to every reader only now that it's verified.
-                            let marked = match shared_dir.as_deref() {
-                                Some(dir) => crate::backend::cli_install::mark_complete(dir, &pinned_version),
-                                None => Ok(()),
-                            };
-                            match marked {
-                                Ok(()) => emit_done(&broker, true, None),
-                                Err(e) => emit_done(&broker, false, Some(format!("cannot mark the install complete: {e}"))),
-                            }
-                        } else {
-                            emit_done(
-                                &broker,
-                                false,
-                                Some(format!(
-                                    "npm install reported success but {} not found in {}/node_modules/.bin/",
-                                    cli_command,
-                                    provider_dir.display()
-                                )),
-                            );
-                        }
-                    }
-                    Ok(s) => emit_done(&broker, false, Some(format!("npm exited {:?}", s.code()))),
-                    Err(e) => emit_done(&broker, false, Some(format!("wait: {e}"))),
-                }
-            }
-            _ = &mut cancel_rx => {
-                tracing::info!(session_id = %session_id, "install.cancel: killing child");
-                let _ = child.kill().await;
-                let _ = stdout_task.await;
-                let _ = stderr_task.await;
-                // Wipe the partial install so a retry doesn't inherit
-                // a half-written package-lock.json. Best-effort —
-                // logging only on failure.
-                if let Err(e) = std::fs::remove_dir_all(&provider_dir) {
-                    // Best-effort cleanup; tag the log with the typed
-                    // code so grouped support requests can grep by
-                    // `amx_code` rather than free-text matching.
-                    let mux = agentmux_common::AgentMuxError::from_io_with_path(
-                        provider_dir.display().to_string(),
-                        e,
-                    );
-                    tracing::warn!(
-                        target: "amx::error",
-                        session_id = %session_id,
-                        amx_code = %mux.code(),
-                        provider_dir = %provider_dir.display(),
-                        error = %mux,
-                        "install.cancel: remove partial dir failed"
-                    );
-                }
-                emit_done(&broker, false, Some("cancelled".into()));
-            }
-        }
-
-        registry.drop_session(&session_id);
-        registry.release_provider(&provider_id);
-    });
-}
-
-/// An `install.start` for a provider that is a release download: fetch the
-/// pinned file, check its hash, unpack, publish. Output lines go to the
-/// session; `install.cancel` stops the transfer and removes the partial dir.
-async fn run_download_install(
-    provider_id: &str,
-    cli_command: &str,
-    broker: &Arc<Broker>,
-    (session_id, scope): (&str, &str),
-    cancel_rx: &mut tokio::sync::oneshot::Receiver<()>,
-) -> Result<(), String> {
-    let paths = agentmux_common::DataPaths::from_env().ok_or("cannot determine home directory")?;
-    let on_line = |_: &'static str, line: &str| {
-        broker.publish_event::<crate::backend::mps_events::InstallChunk>(
-            &InstallChunkEvent::line(session_id, line.to_string(), InstallStream::Stdout),
-            vec![scope.to_string()],
-            1024,
-        );
-    };
-    let stop = std::sync::atomic::AtomicBool::new(false);
-    let run = crate::backend::cli_download::install_managed_into(&paths, provider_id, cli_command, &on_line, &stop);
-    tokio::pin!(run);
-    let outcome = tokio::select! {
-        r = &mut run => r,
-        _ = &mut *cancel_rx => {
-            stop.store(true, std::sync::atomic::Ordering::Relaxed);
-            (&mut run).await
-        }
-    };
-    outcome.map(|_| ()).map_err(|e| e.to_string())
-}
-
-/// How many lines of npm output a failed install logs.
-const INSTALL_LOG_TAIL_LINES: usize = 20;
-
-fn push_tail(tail: &Mutex<std::collections::VecDeque<String>>, line: &str) {
-    let mut tail = tail.lock();
-    if tail.len() == INSTALL_LOG_TAIL_LINES {
-        tail.pop_front();
-    }
-    tail.push_back(line.to_string());
-}
-
 #[cfg(test)]
 mod tests {
     use super::{find_on_path, is_safe_cli_command, is_safe_provider_id};
-
-    #[test]
-    fn the_log_keeps_only_the_last_lines_of_npm_output() {
-        let tail = parking_lot::Mutex::new(std::collections::VecDeque::new());
-        for i in 0..(super::INSTALL_LOG_TAIL_LINES + 5) {
-            super::push_tail(&tail, &format!("line {i}"));
-        }
-        let tail = tail.lock();
-        assert_eq!(tail.len(), super::INSTALL_LOG_TAIL_LINES);
-        assert_eq!(tail.front().map(String::as_str), Some("line 5"));
-        assert_eq!(
-            tail.back().cloned(),
-            Some(format!("line {}", super::INSTALL_LOG_TAIL_LINES + 4))
-        );
-    }
 
     /// The lookup is in-process: a PATH holding only the tool (no `which`
     /// binary anywhere on it) still finds it. Codex P2 on #3891.
