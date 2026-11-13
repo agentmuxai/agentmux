@@ -10,6 +10,7 @@
 //!
 //! Spec: docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md section 3.2.
 
+use crate::backend::container::cli_release::{self, Source, Upload};
 use crate::backend::container::image::CONTAINER_CLI_DIR;
 use crate::backend::providers;
 
@@ -23,26 +24,55 @@ pub struct CliInstall {
     pub specs: Vec<String>,
     /// The pinned version, for the pane's "Installing Claude Code 2.1.321" row.
     pub version: String,
+    /// How it gets into the container: npm, or the pinned file or Python tool of the non-npm route
+    /// (`container::cli_release`).
+    pub source: Source,
 }
 
 impl CliInstall {
     /// The install for `provider_id`, if the container runs that provider's own
-    /// CLI by its usual name and the provider is installed from npm. `None`
-    /// for a custom command or a provider that is not an npm package.
+    /// CLI by its usual name and AgentMux can install it: from npm, or by the
+    /// pinned file or `uv` route of the six that are not on npm. `None` for a
+    /// custom command or a provider with neither.
     pub fn for_provider(provider_id: &str, container_command: &str) -> Option<Self> {
         let provider = providers::get_provider(provider_id)?;
-        if provider.npm_package.is_empty() || provider.pinned_version.is_empty() {
-            return None;
-        }
         if provider.cli_command != container_command {
             return None;
         }
+        if !provider.npm_package.is_empty() {
+            if provider.pinned_version.is_empty() {
+                return None;
+            }
+            return Some(Self {
+                provider_id: provider.id.to_string(),
+                command: provider.cli_command.to_string(),
+                specs: provider.npm_install_specs(provider.pinned_version),
+                version: provider.pinned_version.to_string(),
+                source: Source::Npm,
+            });
+        }
+        let (source, version) = cli_release::source_for(provider.id)?;
         Some(Self {
             provider_id: provider.id.to_string(),
             command: provider.cli_command.to_string(),
-            specs: provider.npm_install_specs(provider.pinned_version),
-            version: provider.pinned_version.to_string(),
+            // The marker is built from this: a new pin is a new marker, so the next start installs it.
+            specs: vec![format!("{}@{version}", provider.id)],
+            version: version.to_string(),
+            source,
         })
+    }
+
+    /// The time limits for this install.
+    pub fn limits(&self) -> InstallLimits {
+        self.source.limits()
+    }
+
+    /// Files the install script reads from `/tmp`, written before it runs.
+    pub fn uploads(&self) -> Vec<Upload> {
+        match self.source {
+            Source::Uv => cli_release::uv_uploads(&self.provider_id),
+            Source::Npm | Source::Download => Vec::new(),
+        }
     }
 
     /// File name inside [`CONTAINER_CLI_DIR`] that says this exact set of
@@ -80,6 +110,15 @@ impl CliInstall {
     /// argv for the install. Everything variable is a positional parameter,
     /// never spliced into the script text.
     pub fn install_argv(&self, limits: InstallLimits) -> Vec<String> {
+        let marker = self.marker();
+        let routed = match self.source {
+            Source::Npm => None,
+            Source::Download => cli_release::download_argv(CONTAINER_CLI_DIR, &marker, &self.command, &self.provider_id, limits),
+            Source::Uv => cli_release::uv_argv(CONTAINER_CLI_DIR, &marker, &self.command, &self.provider_id, limits),
+        };
+        if let Some(argv) = routed {
+            return argv;
+        }
         let mut argv = vec![
             "sh".into(),
             "-c".into(),
@@ -113,10 +152,11 @@ impl Default for InstallLimits {
     }
 }
 
-/// Regex (in `pkill -f` / `pgrep -f` form) matching the install's `npm`. The
-/// bracket keeps the reap script's own command line, which contains this text,
-/// from matching itself.
-const NPM_INSTALL_PATTERN: &str = "[n]pm install --prefix /home/agent/.agentmux/cli";
+/// Regex (in `pkill -f` / `pgrep -f` form) matching what an install runs: the install script itself, its `npm`, its
+/// `curl` and the staged `uv`. The brackets keep the reap script's own command line, which contains this text, from
+/// matching itself.
+const NPM_INSTALL_PATTERN: &str =
+    "[n]pm install --prefix /home/agent/.agentmux/cli|[a]gentmux-cli-install|[c]url -fsSL --proto|[.]staging/uv (venv|pip)";
 
 /// argv that kills any `npm install` into [`CONTAINER_CLI_DIR`] and waits for
 /// it to be gone. Prints `gone` and exits 0 only once none is left.
@@ -194,9 +234,14 @@ mv "$STAGE/node_modules" "$DIR/node_modules"
 "$DIR/node_modules/.bin/$BIN" --version >/dev/null
 : > "$DIR/$MARKER""#;
 
-/// The directory the turn wrapper appends to `PATH`.
+/// The directory an npm install puts its shims in.
 pub fn cli_bin_dir() -> String {
     format!("{CONTAINER_CLI_DIR}/node_modules/.bin")
+}
+
+/// What the turn wrapper appends to `PATH`: the npm shims, the downloaded files and the Python tools' venv.
+pub fn cli_path_dirs() -> String {
+    format!("{}:{CONTAINER_CLI_DIR}/bin:{CONTAINER_CLI_DIR}/venv/bin", cli_bin_dir())
 }
 
 /// Whether the check script's output means the CLI is already there.
