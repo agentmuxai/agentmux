@@ -34,12 +34,14 @@
 //!   - no conversation in the digest means no call at all (`digest` returns
 //!     `None` for activity with no user or assistant text);
 //!   - a call that fails (the CLI could not run, exited badly or timed out) is tried again only
-//!     after a wait that doubles with each failure in a row ([`backoff_ticks`]), up to half an hour;
+//!     after a wait that doubles with each failure in a row ([`backoff_ticks`]), up to half an hour,
+//!     counted from when the failed call ends;
 //!   - one call in flight per block, waiting in the background class's queue
 //!     (`ambient::limits`) across all blocks;
 //!   - per-block bookkeeping is pruned each tick against the registration list.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -83,7 +85,7 @@ pub(crate) struct Attempts {
 }
 
 impl Attempts {
-    /// A call failed at `tick`: wait longer than after the last failure before the next try.
+    /// A call failed, and the sweep is at `tick` as it ends: wait longer than after the last failure before the next try. The wait runs from the end of the call, not from the tick that started it, which a call that queued or ran long may be many ticks behind.
     fn failed(&mut self, tick: u64) {
         self.failures += 1;
         self.retry_at_tick = tick + backoff_ticks(self.failures);
@@ -105,6 +107,12 @@ pub(crate) fn backoff_ticks(failures: u32) -> u64 {
         return 0;
     }
     (3u64 << (failures - 1).min(5)).min(90)
+}
+
+/// A call for `block_id` failed: start its wait from the sweep's tick now (`clock`), not from the tick the call was dispatched at.
+fn record_failure(attempts: &Mutex<HashMap<String, Attempts>>, block_id: &str, clock: &AtomicU64) {
+    let now = clock.load(Ordering::Relaxed);
+    attempts.lock().unwrap().entry(block_id.to_string()).or_default().failed(now);
 }
 
 /// Why a block is not attempted at `tick`, or `None` to attempt it. Pure, so the
@@ -134,10 +142,13 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     // The gateway's generation only has to increase per (block, purpose).
     let mut tick: u64 = 0;
+    // The same count, readable by a call that ends later: its failure wait starts then.
+    let clock = Arc::new(AtomicU64::new(0));
 
     loop {
         ticker.tick().await;
         tick += 1;
+        clock.store(tick, Ordering::Relaxed);
 
         let agents = get_global_handler().list_agents();
         let registered: HashSet<String> = agents.iter().map(|a| a.block_id.clone()).collect();
@@ -186,6 +197,7 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
             let event_bus = event_bus.clone();
             let attempts = attempts.clone();
             let in_flight = in_flight.clone();
+            let clock = clock.clone();
 
             tokio::spawn(async move {
                 let result =
@@ -197,7 +209,7 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                 // attempt, and a later tick may try again. `Failed`: the block waits before its next try.
                 let generated = match result {
                     Recovery::NotRun => return,
-                    Recovery::Failed => return attempts.lock().unwrap().entry(block_id.clone()).or_default().failed(tick),
+                    Recovery::Failed => return record_failure(&attempts, &block_id, &clock),
                     Recovery::Done(generated) => generated,
                 };
                 let attempt = attempts.lock().unwrap().entry(block_id.clone()).or_default().completed(output_size);
@@ -270,5 +282,25 @@ mod tests {
         assert_eq!(skip_reason(false, failed, 100, 13), None, "three ticks (a minute) later");
         // New output does not shorten the wait: it was the CLI that failed, not the conversation.
         assert_eq!(skip_reason(false, failed, 9_999, 11), Some("backing off after a failed call"));
+    }
+
+    #[test]
+    fn the_wait_starts_when_the_failed_call_ends_not_when_it_was_dispatched() {
+        let attempts = Mutex::new(HashMap::new());
+        // Dispatched at tick 10; it queued and ran for four ticks, and fails at tick 14.
+        let clock = AtomicU64::new(10);
+        clock.store(14, Ordering::Relaxed);
+        record_failure(&attempts, "b", &clock);
+        let state = attempts.lock().unwrap().get("b").copied().unwrap();
+        assert_eq!(state.failures, 1);
+        assert_eq!(state.retry_at_tick, 14 + backoff_ticks(1));
+        // The next sweep after the failure is no retry; the full first wait still applies.
+        assert_eq!(skip_reason(false, state, 100, 15), Some("backing off after a failed call"));
+        assert_eq!(skip_reason(false, state, 100, 16), Some("backing off after a failed call"));
+        assert_eq!(skip_reason(false, state, 100, 17), None);
+        // A second failure in a row waits longer, again from its own end.
+        clock.store(30, Ordering::Relaxed);
+        record_failure(&attempts, "b", &clock);
+        assert_eq!(attempts.lock().unwrap().get("b").unwrap().retry_at_tick, 30 + backoff_ticks(2));
     }
 }
