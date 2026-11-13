@@ -1,0 +1,170 @@
+# Spec: Atlas, a map of every agent across machines and tiers
+
+Task #47547 (build: #47548, after this). Owner: Camper (panes, layout, Swarm). Written 2026-11-13 from origin/main
+32d862d3d. Status: draft for the operator. No code until it is approved.
+
+## 1. What the operator asked for
+
+In their words (2026-11-13): "we want to be able to see a graph of our systems. ... it is a map of all the agents across
+the tiers with data about what they are doing. essentially a geographic look at things (as opposed to the swarm's list
+based)". The name is decided: "atlas is good".
+
+Fixed by those words: a pane; a graph laid out in space; every agent, across the tiers; each agent shows what it is doing;
+the spatial counterpart of the Swarm's list. Everything else below is a recommendation to decide.
+
+## 2. What the app already has (the survey)
+
+Read from the code, with file paths in the notes at the end. The short version: **most of what a map needs is already in
+the frontend for the Swarm; two things are missing (message flow, PR/branch) and three are cheap to add.**
+
+| Need | Exists today | Where |
+|---|---|---|
+| Every local agent, state, status line, current tool, context size, spend today, last failure, seat | yes | `AgentTreeNode` (`swarm-model.ts`), block meta `agent:*` |
+| Agents on other machines (LAN, and this machine's other channels) | yes, thinner: name, status, line, provider, seat | `RemoteAgent` (`swarm-remote.ts`), srv `swarm_remote.rs` |
+| Machines | yes | `HostInfo`, `LanInstance` (hostname, os, version, channel, last seen) |
+| Seat, area, and who it reports to | yes | `AgentSeat` (`lead`, remote leads as `Name@host`), meta `agent:seat` |
+| Spawned workers and subagents | yes | `agent:worker_of`; `ActiveSubagent.parent_agent` |
+| Runtime (host or container) | in srv, not shown | `RuntimeKind` |
+| The relay's health | yes, status bar only | `ConnectivityStatus` |
+| An agent's repo, branch, goal, recent files | in srv, not read by the frontend | `work_facts` (`Agents conversations`) |
+| Account per remote agent | srv sends it, the frontend drops it | `agent_accounts` |
+| Messages between agents, task hand-overs | **no**: no list, no history | gap |
+| The review bot, CI, containers as systems | **no** | gap |
+| A "cloud" tier | typed in the frontend, srv never sends it | gap |
+| Graph layout or pan/zoom to reuse | pan and zoom yes (the Drone canvas); auto-layout no; no graph library in `package.json` | `drone-view.tsx` |
+
+Scale: about 70 agents on one machine, most stopped. The Swarm folds stopped agents into one "Stopped agents" section; every
+row is in the DOM (no virtualisation), which is fine at this size.
+
+## 3. Proposal in one paragraph
+
+Atlas is a pane, available from the "+" menu like any widget and to every user (its data is what the Swarm already
+shows; a user with no seats just gets machines and agents, no lines). It draws **machines as regions and agents as nodes
+inside them**, with **lines for "reports to"** (and dashed lines for "spawned"), so a leader on one machine and its
+workers on another read as one picture. A node shows state at a glance; hover or click gives the card. It is **read-only
+apart from the Swarm row's own actions** (focus or open the agent's pane, Start a stopped one). A second layout, **By
+seat**, redraws the same nodes as an org chart; the machine becomes a colour on the node. Messages in flight and task
+hand-overs are the first thing added after v1, because they need a new srv event.
+
+## 4. Layout sketches
+
+### 4.1 By machine (the default)
+
+```
+ Atlas                                   [By machine | By seat]   [fit] [+] [-]   filter: ____
+ ┌───────────────────────────────────────────────┐   ┌─────────────────────────┐
+ │ desk  (this computer)  0.60.26  stable       │   │ lab-1     Linux  0.60.26│
+ │                                               │   │                         │
+ │        (Lead-A)●────┐          (Lead-B)●────┐  │   │      (Eve)●           │
+ │          │          │             │         │  │   │        │                │
+ │       (Ann)◐    (Bo)●        (Cy)●     (Di)◐│   │  (Fay)●   (Gus)○  │
+ │          :                                    │   │                         │
+ │      (Ann-sub)·                            │   │  3 stopped ▸            │
+ │                                               │   └─────────────────────────┘
+ │   52 stopped ▸                                │   ┌─────────────────────────┐
+ └───────────────────────────────────────────────┘   │ lab-2   macOS  0.60.26│
+        (Lead-B ──────────── reports to ─────────────▶ (cross-machine lines     │
+                                                      │  cross the gap)         │
+                                                      └─────────────────────────┘
+  ● working   ◐ waiting / blocked   ○ idle   ✕ error or signed out   · subagent
+```
+
+- A region per machine (this computer first, then LAN peers, then this computer's other channels).
+- Inside a region, leaders are placed on top and the agents that report to them below; agents with no lead sit in a row at
+  the bottom. A solid line is "reports to"; a line that leaves a region is a cross-machine lead (`Lead@host`).
+- Stopped agents are not nodes: each region has a "N stopped ▸" chip that unfolds them into a compact list.
+
+### 4.2 By seat
+
+```
+                        (Operator)
+                 ┌─────────┴─────────┐
+              (Lead-A)            (Lead-B)
+        product leader       platform leader
+         ┌───┬───┐            ┌──────┬───────┬──────┐
+        Ann  Bo  Cy        Di     Eve    Fay    Gus ...
+         d    d   d          d      l1     l1     l2        d = desk, l1 = lab-1, l2 = lab-2
+```
+
+The same nodes as an org chart by lead. The machine is a small badge and a tint. This is the view for "who is doing
+what for whom"; By machine is the view for "what is each computer doing".
+
+### 4.3 A node and its card
+
+At rest: provider icon, name, a state dot, a seat badge, and a small ring when the context is nearly full. On hover or
+click, a card: status line (the Swarm's own line), the current tool, context size, spend today, the held Kanban task
+(local agents only), the last failure or sign-in state, the machine and runtime (host or container), and the Swarm's
+actions (focus or open, Start).
+
+## 5. Decisions for the operator
+
+Each has a recommendation; "yes" to all of them is a complete answer.
+
+1. **What are the tiers?** Both: machines and seats, as two layouts of the same data. *Recommend:* build **By machine
+   first** and By seat in the same PR if it stays small (it reuses the nodes and the lines); the toggle is saved in the
+   pane's meta. *Alternative:* By machine only for v1.
+2. **What does a node show?** State at rest; the card on hover or click (section 4.3). PR and branch are **not** in v1
+   (the frontend has no source; see 5.5). *Recommend:* as written.
+3. **What are the lines?** v1: **reports to** (solid) and **spawned** (dashed). **Messages in flight** (animated pulses)
+   and **task hand-overs** are v2: no message or hand-over history exists today, so v2 needs an srv event that says
+   "A sent B a message at T" (ids only, never text). *Recommend:* v1 as written; file the srv event now so v2 follows.
+4. **Do non-agent systems appear?** v1: **machines** (the regions) and **MuxBus** as one badge on the title bar, from
+   `ConnectivityStatus` (the status bar already has this). The review bot, CI and containers as their own nodes are v2:
+   they have no status in the frontend. *Recommend:* as written.
+5. **Where does the data come from?** The Swarm's own store (`AgentTreeNode` and `RemoteAgent`); no second data path.
+   Three small additions, all in the frontend: show the account that srv already sends for remote agents, read
+   `work_facts` for PR and branch on the card (after v1), and show runtime kind. Nothing new in srv for v1. *Recommend:*
+   as written.
+6. **What can you do from the map?** Read-only plus the Swarm row's own actions (focus or open the pane, Start a stopped
+   agent). **No message, stop or broadcast from the map in v1**: the Swarm has no single-agent stop or message either, and
+   the fleet toolbar acts on a selection, which a map could add later (lasso, then the same Broadcast and Bulk stop).
+   *Recommend:* as written.
+7. **Scale and stopped agents.** Stopped agents fold into a per-machine chip (matches the Swarm). Layout is computed
+   in the pane by our own small deterministic layout (regions in a row or grid, leaders above reports, no physics), so
+   it does not move on every refresh. No graph library is added: `package.json` has none, the Drone canvas shows
+   hand-rolled SVG with pan and zoom is enough, and 70-ish nodes need no virtualisation. *Recommend:* as written.
+
+## 6. Plan (the build, #47548)
+
+One PR, in this order, each behind the pane existing:
+
+1. The `atlas` view: registration, "+" menu entry, pane header, empty states (no agents, no peers).
+2. The data adapter: one function from the Swarm's tree and remote rows to `{regions, nodes, edges}` (pure, unit tested,
+   including remote leads written `Name@host` and agents whose lead is missing or unknown).
+3. The layout: deterministic, pure, tested (stable positions across refreshes, no overlap, 0, 1 and 70 agents).
+4. The SVG render and pan, zoom and fit (the Drone canvas's anchored wheel zoom pattern), keyboard focus on nodes.
+5. The card, the filter (the Swarm's `name:` and `work:` prefixes), and the layout toggle.
+6. Look checks on macOS and Linux (visual), light and dark, the narrow-pane rule (works down to 280 px: the card becomes a
+   sheet, the map scrolls and zooms).
+
+Out of v1, filed as follow-ups: the message-flow event and pulses; PR and branch on the card; review bot, CI and
+container nodes; lasso select to Broadcast or Bulk stop; the cloud tier (typed, never sent).
+
+## 7. Risks and notes
+
+- **"Steward" is not a stored seat role** (`ROLES` is leader, worker, specialist, platform_tester, analyst, super), so a
+  steward draws as a worker until a seat role is added. Not an Atlas problem; worth knowing when the By seat layout shows.
+- **Remote rows are thinner** than local ones and go stale after 60 s (hidden after 10 min): a stale node is drawn muted
+  with its age, the way the Swarm does.
+- **Motion:** nodes do not glide on refresh unless animations are on; the pane uses the existing motion tokens and the
+  reduced-motion setting.
+- **Container agents and every user:** the pane only reads what the Swarm already reads, so it works for container agents
+  and for users with no seats, no peers and one machine (one region, no lines).
+- **The survey came from a read-only pass over the code** (file references below); the first thing the build does is
+  re-read each of those so the adapter is written against the real types.
+
+## 8. Where each fact lives (for the build)
+
+- Local card data: `frontend/app/view/swarm/swarm-model.ts` (`AgentTreeNode`, `buildTree`), `swarm-agent-card.tsx`,
+  `swarm-display-status.ts`, `frontend/app/store/swarm-line.ts`, meta `agent:context`, `agent:seat`, `agent:spend_today`,
+  `agent:last_failure`.
+- Remote: `swarm-remote.ts` (`RemoteAgent`), `crates/srv/src/backend/swarm_remote.rs`, `frontend/types/rpc/LanInstance.ts`.
+- Seats and leads: `crates/srv/src/backend/agent_seat.rs`, `crates/srv/src/registry/def_schema.rs` (`AgentSeat`),
+  `frontend/types/rpc/SeatSummary.ts`, `swarm-seats.tsx`, `swarm-seat-groups.ts`.
+- Spawn: `frontend/app/agent-model/subagent-types.ts` (`ActiveSubagent`), `agent:worker_of`.
+- Machines and relay: `frontend/app/statusbar/host-popover-state.ts`, `lan-peer.ts`, `frontend/app/store/connectivity.ts`.
+- Work facts: `crates/srv/src/backend/work_facts/mod.rs`.
+- Pan and zoom: `frontend/app/view/drone/drone-view.tsx` (`zoomByCenter`, `fitView`), `drone-model.ts`.
+- Stopped-agent folding and order: `swarm-stopped-agents.tsx`, `swarm-agent-list.tsx`, `swarm-order.ts`.
+
+Agent: Camper@narko
