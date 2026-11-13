@@ -74,6 +74,36 @@ fn sides(n: usize, out: &[Vec<(usize, Option<&str>)>], roots: &[usize], conditio
     result
 }
 
+/// A variable's reducer cannot change once it has a value, so the blocks that
+/// write it must agree on one, and a block that names none must come after a
+/// block that does: otherwise it depends on which ran first whether the
+/// declaring block fails at run time.
+fn check_declarations(sorted: &[&FlowNode], by_name: &BTreeMap<String, Vec<(usize, Option<String>)>>, reach: &[Vec<bool>], issues: &mut Vec<Issue>) {
+    for (name, writes) in by_name {
+        let reducers: BTreeSet<&str> = writes.iter().filter_map(|(_, r)| r.as_deref()).collect();
+        if reducers.len() > 1 {
+            issues.push(Issue {
+                node: Some(sorted[writes[0].0].id.clone()),
+                message: format!("{name:?} is written with different reducers ({}): a variable has one", reducers.iter().copied().collect::<Vec<_>>().join(", ")),
+            });
+            continue;
+        }
+        let Some(reducer) = reducers.iter().next().copied().filter(|r| *r != "replace") else { continue };
+        let declarers: Vec<usize> = writes.iter().filter(|(_, r)| r.is_some()).map(|(i, _)| *i).collect();
+        for (idx, _) in writes.iter().filter(|(_, r)| r.is_none()) {
+            if !declarers.iter().any(|&d| reach[d][*idx] && !reach[*idx][d]) {
+                issues.push(Issue {
+                    node: Some(sorted[*idx].id.clone()),
+                    message: format!(
+                        "{} writes {name:?} without a reducer and may run before the block that gives it {reducer}: put the reducer on this write too, or run the declaring block first",
+                        sorted[*idx].id
+                    ),
+                });
+            }
+        }
+    }
+}
+
 pub(super) fn check(sorted: &[&FlowNode], edges: &[(usize, usize, &FlowEdge)], reach: &[Vec<bool>], plan: &Plan, issues: &mut Vec<Issue>) {
     let n = sorted.len();
     // A for-each body writes when its for-each does.
@@ -85,11 +115,13 @@ pub(super) fn check(sorted: &[&FlowNode], edges: &[(usize, usize, &FlowEdge)], r
     };
     let mut writers: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
     let mut declared: BTreeMap<String, String> = BTreeMap::new();
+    let mut by_name: BTreeMap<String, Vec<(usize, Option<String>)>> = BTreeMap::new();
     for (idx, node) in sorted.iter().enumerate() {
         for (name, reducer) in writes_of(node) {
-            if let Some(r) = reducer {
-                declared.insert(name.clone(), r);
+            if let Some(r) = &reducer {
+                declared.insert(name.clone(), r.clone());
             }
+            by_name.entry(name.clone()).or_default().push((owner_of(idx), reducer));
             writers.entry(name).or_default().insert(owner_of(idx));
         }
     }
@@ -104,6 +136,7 @@ pub(super) fn check(sorted: &[&FlowNode], edges: &[(usize, usize, &FlowEdge)], r
     let side = sides(n, &out, &roots, &conditions);
     let exclusive = |a: usize, b: usize| side.values().any(|s| matches!((s[a], s[b]), (Some(x), Some(y)) if x != y));
 
+    check_declarations(sorted, &by_name, reach, issues);
     for (name, who) in &writers {
         if declared.get(name).is_some_and(|r| r != "replace") {
             continue;
@@ -170,9 +203,23 @@ mod tests {
 
     #[test]
     fn the_same_two_branches_are_fine_when_the_variable_has_a_reducer() {
-        assert!(analyze(&fan_out(Some("append"), None)).is_ok(), "one declaration is the variable's reducer");
+        assert!(analyze(&fan_out(Some("append"), Some("append"))).is_ok());
         assert!(analyze(&fan_out(Some("add"), Some("add"))).is_ok());
         assert!(analyze(&fan_out(Some("replace"), None)).is_err(), "replace is no reducer");
+    }
+
+    #[test]
+    fn writers_must_agree_on_a_reducer_and_declare_it_first() {
+        let issues = analyze(&fan_out(Some("append"), None)).unwrap_err();
+        assert!(issues.iter().any(|i| i.message.contains("without a reducer")), "{issues:?}");
+        let issues = analyze(&fan_out(Some("append"), Some("add"))).unwrap_err();
+        assert!(issues.iter().any(|i| i.message.contains("different reducers")), "{issues:?}");
+        let row = |first: Option<&str>, second: Option<&str>| DroneGraph {
+            nodes: vec![writer("a", "x", first), writer("b", "x", second)],
+            edges: vec![edge("e1", "a", "b", None)],
+        };
+        assert!(analyze(&row(Some("append"), None)).is_ok(), "declared first");
+        assert!(analyze(&row(None, Some("append"))).is_err(), "the write before the declaration would make it fail");
     }
 
     #[test]

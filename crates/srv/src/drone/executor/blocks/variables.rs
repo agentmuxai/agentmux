@@ -29,7 +29,22 @@ fn reducer_of(entry: &Value, name: &str) -> Result<Option<Reducer>, String> {
     }
 }
 
+/// The block fails as a whole: when an entry fails, the entries before it and
+/// every declaration are put back as they were.
 pub async fn run(node: &FlowNode, scope: &mut ExecutionScope) -> Result<Value, String> {
+    let (state, vars) = (scope.state.clone(), scope.vars.clone());
+    let result = write_entries(node, scope);
+    if result.is_err() {
+        scope.state = state;
+        scope.vars = vars;
+    }
+    let (written, wrote) = result?;
+    let (tainted, derived) = join(&wrote.iter().collect::<Vec<_>>());
+    scope.bits.insert(node.id.clone(), (tainted, derived));
+    Ok(json!({ "vars": written }))
+}
+
+fn write_entries(node: &FlowNode, scope: &mut ExecutionScope) -> Result<(serde_json::Map<String, Value>, Vec<Tv>), String> {
     let entries = node.data.get("entries").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let mut written = serde_json::Map::new();
     let mut wrote: Vec<Tv> = Vec::new();
@@ -50,9 +65,7 @@ pub async fn run(node: &FlowNode, scope: &mut ExecutionScope) -> Result<Value, S
         written.insert(name.to_string(), tv.v.clone());
         wrote.push(tv);
     }
-    let (tainted, derived) = join(&wrote.iter().collect::<Vec<_>>());
-    scope.bits.insert(node.id.clone(), (tainted, derived));
-    Ok(json!({ "vars": written }))
+    Ok((written, wrote))
 }
 
 #[cfg(test)]
@@ -76,6 +89,25 @@ mod tests {
         let out = run(&node, &mut scope).await.unwrap();
         assert_eq!(scope.vars.get("greeting").unwrap(), &json!("hi"));
         assert_eq!(out["vars"]["greeting"], json!("hi"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_entry_puts_back_the_entries_before_it_and_the_declarations() {
+        let mut scope = ExecutionScope::new();
+        run(&vars("v0", json!([{ "name": "total", "value": 1, "reducer": "add" }])), &mut scope).await.unwrap();
+        let node = vars(
+            "v1",
+            json!([
+                { "name": "total", "value": 4, "reducer": "add" },
+                { "name": "log", "value": "x", "reducer": "append" },
+                { "name": "total", "value": "text" },
+            ]),
+        );
+        assert!(run(&node, &mut scope).await.is_err(), "adding text to a number fails");
+        assert_eq!(scope.vars.get("total"), Some(&json!(1)), "the first entry did not stay");
+        assert!(scope.vars.get("log").is_none());
+        assert_eq!(scope.state.reducer_of("log"), Reducer::Replace, "the declaration did not stay");
+        assert!(!scope.bits.contains_key("v1"));
     }
 
     #[tokio::test]

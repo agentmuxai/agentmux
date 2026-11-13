@@ -74,6 +74,9 @@ impl<'a> Scheduler<'a> {
                 return Err(why.clone());
             }
         }
+        // The body's spend counts as the for-each's own, so a loop that holds the
+        // for-each sees it against its cap (`loop_cap` sums the cycle's blocks).
+        *self.spent_by.entry(id).or_default() += self.spent - spent_before;
         let (body_tainted, body_derived) = self.scope.bits.get(body.id.as_str()).copied().unwrap_or((false, false));
         let any_tainted = tainted || body_tainted;
         self.scope.bits.insert(node.id.clone(), (any_tainted, !any_tainted && (derived || body_derived)));
