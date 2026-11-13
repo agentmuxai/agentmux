@@ -44,6 +44,30 @@ pub(crate) fn repeats_crash(last: Option<(i32, std::time::Instant)>, code: i32, 
     }
 }
 
+/// Whether a host exit is the one that says "the browser sandbox is blocked by system policy and nobody can answer
+/// the dialog" (`agentmux_common::process::HOST_EXIT_SANDBOX_UNAVAILABLE`, set by `agentmux-cef` for a start made
+/// from an agent's environment). The same stop would come again at every relaunch, so the supervisor ends with
+/// that code at once instead of spending its crash budget on it.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn is_sandbox_unavailable_exit(code: i32) -> bool {
+    code == agentmux_common::process::HOST_EXIT_SANDBOX_UNAVAILABLE
+}
+
+/// The log line for a host exit that ends the launcher without a relaunch: a clean exit, or the stop for a blocked
+/// sandbox (#610), which says why where the person or agent reading this log looks.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn final_host_exit_line(code: i32) -> String {
+    if is_sandbox_unavailable_exit(code) {
+        format!(
+            "CEF host stopped at start-up (code {code}): the browser sandbox is blocked by system policy and this start came \
+             from an agent's environment, so nobody can answer the dialog. Not relaunching. The host's stderr says why; \
+             AGENTMUX_UNSAFE_NOSANDBOX=1 is the explicit opt-out (docs/linux.md)."
+        )
+    } else {
+        format!("CEF host exited cleanly (code {code}) — shutting down")
+    }
+}
+
 /// `STATUS_CONTROL_C_EXIT`: the console interrupted the process (Ctrl+C or a
 /// close) — a shutdown, not a fault, whatever its NTSTATUS-looking value.
 const STATUS_CONTROL_C_EXIT: i32 = 0xC000_013A_u32 as i32;
@@ -58,6 +82,21 @@ fn is_fault_code(code: i32) -> bool {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn the_final_exit_line_says_which_stop_it_is() {
+        assert_eq!(final_host_exit_line(0), "CEF host exited cleanly (code 0) — shutting down");
+        let l = final_host_exit_line(agentmux_common::process::HOST_EXIT_SANDBOX_UNAVAILABLE);
+        assert!(l.contains("code 78") && l.contains("Not relaunching") && l.contains("AGENTMUX_UNSAFE_NOSANDBOX=1"), "{l}");
+    }
+
+    #[test]
+    fn only_the_sandbox_unavailable_code_ends_the_launcher_without_a_relaunch() {
+        assert!(is_sandbox_unavailable_exit(agentmux_common::process::HOST_EXIT_SANDBOX_UNAVAILABLE));
+        for ordinary in [0, 1, 2, -1, 101] {
+            assert!(!is_sandbox_unavailable_exit(ordinary), "{ordinary} keeps the crash-budget relaunch");
+        }
+    }
 
     #[test]
     fn a_manual_kill_after_a_long_run_is_not_a_repeat_crash() {

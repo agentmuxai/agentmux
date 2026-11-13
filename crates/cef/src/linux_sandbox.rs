@@ -183,6 +183,35 @@ fn parse_continue_only_kdialog(exit_code: Option<i32>) -> SandboxDialogChoice {
     }
 }
 
+/// Whether this start was made from an agent's environment, so nobody is at the session to answer the dialog.
+/// `agent_id` is `AGENTMUX_AGENT_ID`: AgentMux sets it in every agent's shell and a person's terminal never has it,
+/// so a `task dev` or an installed app that an agent starts carries it into the host. This is the signal and not
+/// "a dev build" (a person's own `task dev` should still get the dialog) or "no terminal" (an installed app started
+/// from a launcher has none either, and a person is there to click).
+pub fn nobody_to_answer(agent_id: Option<&str>) -> bool {
+    agent_id.is_some_and(|v| !v.trim().is_empty())
+}
+
+/// What an unattended start prints, on stderr and in the launcher's log, instead of showing the dialog: why it
+/// stops, the one explicit way to run on, and what that costs. `exe` is this host binary; `fixable` is whether
+/// the one-time profile fix could cover it (an AppImage or a .deb/.rpm install).
+pub fn unattended_message(exe: &str, fixable: bool) -> String {
+    let keep = if fixable {
+        "To keep the sandbox, install the one-time fix from a terminal of your own: start AgentMux there and choose \"Fix it now\" (docs/linux.md)."
+    } else {
+        "To keep the sandbox, run AgentMux from the AppImage or a .deb/.rpm install after the one-time fix (docs/linux.md); this copy is not covered by it."
+    };
+    format!(
+        "AgentMux: stopping. The browser sandbox is blocked by a system AppArmor policy (common on Ubuntu), and this start \
+         came from an agent's environment (AGENTMUX_AGENT_ID is set), so nobody can answer the dialog that would ask what to do.\n\
+         This copy is running from: {exe}\n\
+         To run anyway WITHOUT the sandbox, start it again with AGENTMUX_UNSAFE_NOSANDBOX=1. The browser engine then runs web \
+         pages with no operating-system sandbox, so a flaw in a page could act as you: use it for a check of your own pane layout \
+         or of pages you wrote, not for browsing sites you do not trust.\n\
+         {keep}"
+    )
+}
+
 const CONTINUE_WITHOUT_SANDBOX_LABEL: &str = "Continue without sandbox this time";
 const FIX_NOW_LABEL: &str = "Fix it now (one-time, needs your password)";
 const DIALOG_TITLE: &str = "AgentMux — sandbox blocked by system policy";
@@ -361,6 +390,30 @@ mod imp {
             .unwrap_or(SandboxDialogChoice::NoDialogToolAvailable)
     }
 
+    /// The start of an agent has nobody to click the dialog (an agent's `task dev` build for a look check, an
+    /// installed app under test): say why and how to go on, and stop with a code the launcher does not retry,
+    /// instead of waiting behind the dialog for hours (#610). A person's start returns and gets the dialog.
+    pub fn stop_if_nobody_can_answer() {
+        if !nobody_to_answer(std::env::var("AGENTMUX_AGENT_ID").ok().as_deref()) {
+            return;
+        }
+        let exe = std::env::current_exe().ok();
+        let fixable = exe.as_deref().is_some_and(exe_covered_by_profile);
+        let exe = exe.map_or_else(|| "agentmux-cef".to_string(), |e| e.to_string_lossy().into_owned());
+        eprintln!("{}", unattended_message(&exe, fixable));
+        std::process::exit(agentmux_common::process::HOST_EXIT_SANDBOX_UNAVAILABLE);
+    }
+
+    /// No `zenity` or `kdialog` to ask with: print the explanation and exit (never proceed unsandboxed unasked).
+    pub fn exit_no_dialog_tool() -> ! {
+        eprintln!(
+            "AgentMux: the sandbox is blocked by a system AppArmor policy (common on newer Ubuntu), and no dialog tool \
+             (zenity/kdialog) is available to ask how to proceed. Set AGENTMUX_UNSAFE_NOSANDBOX=1 to run without the \
+             sandbox, or see docs/linux.md for how to install the proper fix."
+        );
+        std::process::exit(1);
+    }
+
     /// Resolve the absolute path to the bundled helper script
     /// (`install-userns-apparmor-fix.sh`, copied to the AppDir root
     /// alongside `install-linux-desktop.sh` by `build-appimage-linux.sh` —
@@ -496,8 +549,8 @@ mod imp {
 
 #[cfg(target_os = "linux")]
 pub use imp::{
-    probe_userns_available, resolve_helper_script_path, run_internal_userns_probe_and_exit,
-    run_pkexec_fix, show_userns_blocked_dialog,
+    exit_no_dialog_tool, probe_userns_available, resolve_helper_script_path, run_internal_userns_probe_and_exit,
+    run_pkexec_fix, show_userns_blocked_dialog, stop_if_nobody_can_answer,
 };
 
 /// Set (by lib.rs, once) when the current session is running with the
@@ -603,6 +656,27 @@ mod tests {
     fn apparmor_profile_is_valid_utf8_and_nonempty() {
         let profile = build_apparmor_profile();
         assert!(!profile.is_empty());
+    }
+
+    #[test]
+    fn only_an_agent_environment_means_nobody_can_answer() {
+        assert!(nobody_to_answer(Some("opaz")));
+        assert!(!nobody_to_answer(None));
+        assert!(!nobody_to_answer(Some("")));
+        assert!(!nobody_to_answer(Some("  ")));
+    }
+
+    #[test]
+    fn unattended_message_names_the_way_on_the_cost_and_the_binary() {
+        for fixable in [false, true] {
+            let m = unattended_message("/work/dist/cef-dev/agentmux-cef", fixable);
+            assert!(m.contains("AGENTMUX_UNSAFE_NOSANDBOX=1"), "{m}");
+            assert!(m.contains("WITHOUT the sandbox"), "{m}");
+            assert!(m.contains("/work/dist/cef-dev/agentmux-cef"), "{m}");
+            assert!(m.contains("docs/linux.md"), "{m}");
+        }
+        assert!(unattended_message("x", true).contains("Fix it now"));
+        assert!(!unattended_message("x", false).contains("Fix it now"));
     }
 
     #[test]

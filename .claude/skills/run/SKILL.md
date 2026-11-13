@@ -249,6 +249,15 @@ If you kill a background `task dev` job yourself later (e.g. via
 `taskkill`), that's you, not the environment — don't mistake it for an
 external interrupt.
 
+## Linux: a `task dev` build the AppArmor sandbox policy blocks
+
+On Ubuntu with AppArmor's restriction on unprivileged user namespaces, a `task dev` build is not covered by AgentMux's one-time fix (it lives in `dist/cef-dev`, not in an AppImage or a `.deb`/`.rpm` path). Since #610 an agent's `task dev` does not wait behind the "sandbox blocked by system policy" dialog (a build once sat behind it for 1 h 44 min with the debug port never opening):
+
+- **What it looks like:** within seconds `task dev` ends with exit code `78`, the output says "AgentMux: stopping. The browser sandbox is blocked by a system AppArmor policy...", and the launcher log has "CEF host stopped at start-up (code 78)". No window, no debug port.
+- **What to do:** if the check can run without the sandbox, start it again with `AGENTMUX_UNSAFE_NOSANDBOX=1` in front (`AGENTMUX_UNSAFE_NOSANDBOX=1 AGENTMUX_CDP_PORT=9331 task dev TITLE=...`). That is your explicit choice and it costs the page sandbox: use it for your own pane layout or pages you wrote, never to browse sites you do not trust. Say in the report that the check ran unsandboxed.
+- **Do not wait for a dialog.** If a check you accepted has shown nothing for 15 minutes, look at the build output and tell the requester once (the dialog was never going to be answered).
+- Older builds, before #610, show the dialog instead: a `zenity` window with that title in `ps` is the sign.
+
 ## Gotchas
 
 - **`cmd //c` argument quoting on Windows paths.** Pass the *entire* command
