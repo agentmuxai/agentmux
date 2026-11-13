@@ -126,6 +126,7 @@ pub(crate) mod browser_dialog;
 pub(crate) mod browser_permission;
 pub(crate) mod browser_find;
 pub(crate) mod browser_handoffs;
+pub(crate) mod browser_waiting;
 pub(crate) mod browser_hibernation;
 pub(crate) mod browser_host_sync;
 pub(crate) mod browser_identity;

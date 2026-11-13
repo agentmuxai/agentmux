@@ -39,6 +39,8 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "eval", tool: "BrowserEval", rename: &[] },
     Act { action: "handoff", tool: "BrowserHandoff", rename: &[] },
     Act { action: "handoff_status", tool: "BrowserHandoffStatus", rename: &[] },
+    Act { action: "request_status", tool: "BrowserRequestStatus", rename: &[] },
+    Act { action: "cancel_request", tool: "BrowserCancelRequest", rename: &[] },
     Act { action: "retake", tool: "BrowserRetake", rename: &[] },
     Act { action: "take_control", tool: "BrowserTakeControl", rename: &[] },
     Act { action: "release", tool: "BrowserRelease", rename: &[] },
@@ -79,6 +81,8 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         "take_control" => return take_control(arguments, cx).await,
         "release" => return release(arguments, cx).await,
         "handoff_status" => return handoff_status(arguments, cx).await,
+        "request_status" => return super::browser_waiting::request(arguments, cx, false).await,
+        "cancel_request" => return super::browser_waiting::request(arguments, cx, true).await,
         _ => {}
     }
     // `wait`'s own conditions are the until_* parameters (pick renamed
@@ -105,6 +109,10 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             return Err(if dialogs.is_empty() { e } else { anyhow::anyhow!("{e}{dialogs}") });
         }
     };
+    // Waiting for the person: nothing has happened yet, so the follow-ups have nothing to wait for or read.
+    if out.starts_with(super::browser_waiting::WAITING_PREFIX) {
+        return Ok(out);
+    }
     // The action has run: a follow-up that fails is reported after its
     // result, never instead of it, so the agent doesn't repeat a click
     // that already submitted something.

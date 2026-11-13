@@ -13,6 +13,7 @@ mod agents_tool;
 mod app_tool;
 mod browser;
 mod browser_tool;
+mod browser_waiting;
 mod browser_zoom;
 mod cron;
 mod desktop;
@@ -149,6 +150,8 @@ const REPLACED: &[(&str, &str)] = &[
     ("BrowserForward", "Browser with action \"forward\""),
     ("BrowserReload", "Browser with action \"reload\""),
     ("BrowserZoom", "Browser with action \"zoom\""),
+    ("BrowserRequestStatus", "Browser with action \"request_status\""),
+    ("BrowserCancelRequest", "Browser with action \"cancel_request\""),
     ("BrowserEval", "Browser with action \"eval\""),
     ("BrowserDispatchKey", "Browser with action \"key\""),
     ("BrowserFocusElement", "Browser with action \"focus\""),

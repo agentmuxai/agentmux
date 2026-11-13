@@ -9,8 +9,8 @@
 use serde::{Deserialize, Serialize};
 pub use crate::agent_create_types::{ContainerAsk, CreateAgentRequest, RouteAsk, SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
 pub use crate::browser_control_types::{
-    UiBrowserHandoffStatusRequest, UiBrowserReleaseRequest, UiBrowserRetakeRequest, UiBrowserTakeControlRequest,
-    UiBrowserZoomRequest,
+    UiBrowserHandoffStatusRequest, UiBrowserReleaseRequest, UiBrowserRequestRequest, UiBrowserRetakeRequest,
+    UiBrowserTakeControlRequest, UiBrowserZoomRequest,
 };
 use std::collections::HashMap;
 
