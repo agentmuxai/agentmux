@@ -283,16 +283,17 @@ async fn a_tool_missing_what_it_needs_refuses_before_it_asks_srv() {
     }
 }
 
-/// What a call without `attempt` is told, given the claimed tasks srv lists: the refusal asks srv which tasks
-/// the agent holds (one GET), and sends nothing else.
+/// What a call without `attempt` is told, given the tasks srv lists: the refusal asks srv which tasks the agent
+/// holds (a GET for the claimed ones and one for the blocked ones), and sends nothing else.
 async fn missing_attempt_says(tool: &str, args: Value, listed: Value) -> String {
     let srv = stub_srv("200 OK", listed);
     let fx = Fixture::new(&srv);
     let err = call(tool, &args, &fx.cx()).await.expect_err("a call without an attempt refuses").to_string();
     let seen = srv.seen.lock().unwrap().clone();
-    assert_eq!(seen.len(), 1, "only the list of claimed tasks: {seen:?}");
-    assert!(seen[0].0.starts_with("/agentmux/work?"), "{seen:?}");
-    assert!(seen[0].0.contains("board=all"), "a task on any board: {seen:?}");
+    assert_eq!(seen.len(), 2, "only the lists of claimed and of blocked tasks: {seen:?}");
+    assert!(seen[0].0.starts_with("/agentmux/work?") && seen[0].0.contains("state=claimed"), "{seen:?}");
+    assert!(seen[1].0.starts_with("/agentmux/work?") && seen[1].0.contains("state=blocked"), "{seen:?}");
+    assert!(seen.iter().all(|s| s.0.contains("board=all")), "a task on any board: {seen:?}");
     err
 }
 
@@ -317,6 +318,16 @@ async fn a_call_without_an_attempt_for_a_task_it_does_not_hold_lists_what_it_hol
     let err = missing_attempt_says("WorkUpdate", json!({ "id": "7" }), listed).await;
     assert!(err.contains("You hold: #1 (attempt 1), #2 (attempt 3)"), "{err}");
     assert!(!err.contains("attempt=") , "it does not pick one for the agent: {err}");
+}
+
+#[tokio::test]
+async fn a_call_without_an_attempt_for_a_task_it_asked_about_is_told_the_attempt_it_holds() {
+    // After `Tasks ask` the task is blocked, still held, and update and submit still take it.
+    let listed = json!({ "items": [{ "ref": "#47380", "state": "blocked", "claimed_by": "tester", "attempts": 1 }] });
+    for tool in ["WorkUpdate", "WorkSubmit"] {
+        let err = missing_attempt_says(tool, json!({ "id": "47380", "result": "R" }), listed.clone()).await;
+        assert!(err.contains("You hold #47380 as attempt 1: pass id=47380 attempt=1"), "{tool}: {err}");
+    }
 }
 
 #[tokio::test]
