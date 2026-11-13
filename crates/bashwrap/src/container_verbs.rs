@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::github::{default_repo_source, owner_repo_of_path, repo_of_default};
+use crate::github::{default_repo_source, owner_repo_of_path, repo_of_default, repo_of_spec};
 use crate::mps_client::WpsClient;
 
 /// srv runs the merge on the host and may wait on GitHub and a merge queue.
@@ -82,6 +82,7 @@ pub fn parse_merge(args: &[String]) -> Result<Parsed, String> {
             }
             "-R" | "--repo" => m.repo = Some(repo_of_flag(it.next().map(String::as_str))?),
             _ if a.starts_with("--repo=") => m.repo = Some(repo_of_flag(Some(&a["--repo=".len()..]))?),
+            _ if a.starts_with("-R") && a.len() > 2 => m.repo = Some(repo_of_flag(Some(a[2..].trim_start_matches('=')))?),
             _ if a.starts_with('-') => return Err(unsupported(a)),
             _ => {
                 if positional.replace(a).is_some() {
@@ -109,10 +110,26 @@ pub fn parse_merge(args: &[String]) -> Result<Parsed, String> {
     Ok(Parsed::Merge(m))
 }
 
+/// The repository a `-R`/`--repo`/`GH_REPO` value names. The whole spec must be `OWNER/REPO` or `github.com/OWNER/REPO`:
+/// another host, or a longer path, names a repository this step cannot merge on, and is never cut down to its first two
+/// parts (that would merge on a different repository than the one named).
 fn repo_of_flag(value: Option<&str>) -> Result<(String, String), String> {
     let spec = value.ok_or_else(|| "-R needs OWNER/REPO".to_string())?;
-    let spec = spec.strip_prefix("github.com/").unwrap_or(spec);
-    owner_repo_of_path(spec).ok_or_else(|| format!("{spec} is not OWNER/REPO"))
+    repo_of_spec(spec).ok_or_else(|| format!("{spec} is not OWNER/REPO or github.com/OWNER/REPO"))
+}
+
+/// The repository a merge is on: the one the merge names, else a leading `-R`, else `GH_REPO`, else the working
+/// directory's. A `GH_REPO` that is not a plain repository is refused, not replaced by the working directory's.
+fn merge_repo(merge: &Merge, lead_repo: Option<(String, String)>) -> Result<(String, String), String> {
+    if let Some(found) = merge.repo.clone().or(lead_repo) {
+        return Ok(found);
+    }
+    if let Some(env) = std::env::var("GH_REPO").ok().filter(|r| !r.is_empty()) {
+        return repo_of_flag(Some(&env)).map_err(|why| format!("GH_REPO: {why}"));
+    }
+    default_repo_source(None)
+        .and_then(|s| repo_of_default(&s))
+        .ok_or_else(|| "no repository: pass -R OWNER/REPO, or run it in a clone of the repository".to_string())
 }
 
 /// The refusal for a raw `gh api` write a container's token cannot make, with the command that does the job; `None` for
@@ -240,9 +257,12 @@ pub fn run_github_container(gh_args: &[String]) -> i32 {
             return 1;
         }
     };
-    let Some((owner, repo)) = merge.repo.clone().or(lead_repo).or_else(|| std::env::var("GH_REPO").ok().and_then(|r| repo_of_flag(Some(&r)).ok())).or_else(|| default_repo_source(None).and_then(|s| repo_of_default(&s))) else {
-        eprintln!("agentmux: gh pr merge not run: no repository: pass -R OWNER/REPO, or run it in a clone of the repository");
-        return 1;
+    let (owner, repo) = match merge_repo(&merge, lead_repo) {
+        Ok(found) => found,
+        Err(why) => {
+            eprintln!("agentmux: gh pr merge not run: {why}");
+            return 1;
+        }
     };
     match ask_merge(&owner, &repo, &merge) {
         Ok(said) => {
@@ -383,6 +403,43 @@ mod tests {
         assert_eq!(rest(&["pr", "merge", "7"]), Some((None, tail.clone())));
         assert_eq!(rest(&["-R", "not-a-repo", "pr", "merge", "7"]), None);
         assert_eq!(rest(&["-R"]), None);
+    }
+
+    #[test]
+    fn a_repository_that_is_not_owner_repo_is_never_cut_down_to_its_first_two_parts() {
+        let repo = |v: &str| repo_of_flag(Some(v)).ok();
+        let octo = Some(("octo".to_string(), "hello".to_string()));
+        assert_eq!(repo("octo/hello"), octo);
+        assert_eq!(repo("github.com/octo/hello"), octo);
+        assert_eq!(repo("GitHub.com/octo/hello"), octo);
+        for bad in ["enterprise/team/project", "github.com/octo/hello/extra", "ghe.example.com/octo/hello", "octo", "octo/", "/hello", "octo/hello/", ""] {
+            assert_eq!(repo(bad), None, "{bad:?}");
+        }
+        // A merge that names such a repository is refused, whichever way it is written, rather than sent for another repository.
+        for flag in [&["-R", "enterprise/team/project"][..], &["--repo=enterprise/team/project"], &["-Renterprise/team/project"], &["-R=ghe.example.com/octo/hello"]] {
+            let mut a = vec!["pr", "merge", "7"];
+            a.extend(flag);
+            assert!(matches!(parse_merge(&args(&a)), Err(why) if why.contains("OWNER/REPO")), "{flag:?}");
+        }
+        let attached = parse_merge(&args(&["pr", "merge", "7", "-Rocto/hello"]));
+        assert!(matches!(attached, Ok(Parsed::Merge(m)) if m.repo == octo && m.number == 7));
+        // In front of the command it is left to gh.
+        assert_eq!(lead_repo_flag(&args(&["-R", "enterprise/team/project", "pr", "merge", "7"])), None);
+    }
+
+    #[test]
+    fn a_github_repo_that_is_not_owner_repo_is_refused_not_replaced_by_the_working_directory() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let merge = Merge { number: 7, ..Merge::default() };
+        std::env::set_var("GH_REPO", "enterprise/team/project");
+        let why = merge_repo(&merge, None).unwrap_err();
+        assert!(why.contains("GH_REPO") && why.contains("OWNER/REPO"), "{why}");
+        std::env::set_var("GH_REPO", "octo/hello");
+        assert_eq!(merge_repo(&merge, None), Ok(("octo".to_string(), "hello".to_string())));
+        // A repository the merge or a leading flag names wins over GH_REPO.
+        let lead = Some(("lead".to_string(), "repo".to_string()));
+        assert_eq!(merge_repo(&merge, lead.clone()), Ok(("lead".to_string(), "repo".to_string())));
+        std::env::remove_var("GH_REPO");
     }
 
     #[test]
