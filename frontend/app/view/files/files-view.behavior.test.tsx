@@ -157,11 +157,16 @@ class FakeResizeObserver {
     constructor(public cb: () => void) {
         h.state.roCallbacks.push(cb);
     }
-    observe() {
+    watchesList = false;
+    // The record is of the list's observer; the breadcrumb row's (the path kept at its end) is not in it.
+    observe(el: Element) {
+        if (el.classList.contains("files-breadcrumb")) return;
+        this.watchesList = true;
         life("ResizeObserver.observe(list)");
     }
+    unobserve() {}
     disconnect() {
-        life("ResizeObserver.disconnect()");
+        if (this.watchesList) life("ResizeObserver.disconnect()");
     }
 }
 

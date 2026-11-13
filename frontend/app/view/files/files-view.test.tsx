@@ -1517,6 +1517,36 @@ describe("the Files pane: a narrow pane (#47504)", () => {
         }
     });
 
+    it("keeps the path at its end when the path row gets narrower, so the folder you are in stays in view", async () => {
+        const watching = new Map<Element, () => void>();
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                constructor(private cb: () => void) {}
+                observe(el: Element) {
+                    watching.set(el, this.cb);
+                }
+                unobserve(el: Element) {
+                    watching.delete(el);
+                }
+                disconnect() {}
+            }
+        );
+        try {
+            const v = mount();
+            await waitFor(() => expect(v.names()).toHaveLength(4));
+            const crumbs = v.container.querySelector(".files-breadcrumb") as HTMLElement;
+            expect(watching.has(crumbs)).toBe(true);
+            // The row got narrower: its content is now 300 px wide and it was showing its start.
+            Object.defineProperty(crumbs, "scrollWidth", { configurable: true, get: () => 300 });
+            crumbs.scrollLeft = 0;
+            watching.get(crumbs)!();
+            expect(crumbs.scrollLeft).toBe(300);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
     it("leaves a toolbar and a header with room as they are", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));

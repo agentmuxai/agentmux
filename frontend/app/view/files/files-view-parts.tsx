@@ -86,7 +86,10 @@ export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
                 onToggleViewMode={pointer.toggleViewMode}
                 focusList={() => refs.list?.focus()}
                 pathInputRef={(el) => (refs.pathInput = el)}
-                crumbsRef={(el) => (refs.crumbs = el)}
+                crumbsRef={(el) => {
+                    refs.crumbs = el;
+                    refs.onCrumbs?.(el);
+                }}
                 filterRef={(el) => (refs.filterInput = el)}
                 filterButtonRef={(el) => (refs.filterButton = el)}
                 openMenu={fv.setMenu}

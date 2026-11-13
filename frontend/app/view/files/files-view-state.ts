@@ -23,6 +23,8 @@ interface FilesRefs {
     list?: HTMLDivElement;
     pathInput?: HTMLInputElement;
     crumbs?: HTMLElement;
+    /** Told each breadcrumb row as it is drawn: the first, and the one that comes back after the path editor. */
+    onCrumbs?: (el: HTMLElement) => void;
     filterInput?: HTMLInputElement;
     filterButton?: HTMLElement;
 }
