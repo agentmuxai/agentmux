@@ -220,3 +220,39 @@ async fn a_block_with_a_forward_edge_and_a_back_edge_keeps_its_forward_edge() {
     let out = run(g).await;
     assert!(out.times("c") >= 1, "c ran: its edge from b was not erased by the trip back");
 }
+
+#[tokio::test]
+async fn a_loop_collects_into_a_list_and_adds_up_a_number_with_reducers() {
+    let mut g = counting_loop("xxxx", json!({}), "{{var.log}} total={{var.total}}");
+    g.nodes[1] = node(
+        "step",
+        json!({ "kind": "variables", "entries": [
+            { "name": "n", "value": "{{var.n}}x" },
+            { "name": "log", "value": "{{var.n}}", "reducer": "append" },
+            { "name": "total", "value": 10, "reducer": "add" },
+        ]}),
+    );
+    let out = run(g).await;
+    assert_eq!(out.result, Ok(json!(r#"["xx","xxx","xxxx"] total=30"#)));
+}
+
+#[tokio::test]
+async fn the_run_marks_what_came_from_outside_as_tainted_for_the_state() {
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let states: States = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let graph = DroneGraph {
+        nodes: vec![
+            vars("a", "x", "{{trigger.title}}"),
+            node("c", json!({ "kind": "condition", "expr": "{{var.x}} == hi" })),
+            response("r", "{{c.result}} {{var.x}}"),
+        ],
+        edges: vec![edge("e1", "a", "c", None), edge("e2", "c", "r", None)],
+    };
+    let plan = schedule::analyze(&graph).unwrap();
+    let scope = ExecutionScope::with_trigger(json!({ "title": "hi" }));
+    let mut s = Scheduler::new("r", &graph, plan, scope, None, &tx, &states);
+    s.run().await.unwrap();
+    assert!(s.scope.state.get("x").unwrap().tainted);
+    assert_eq!(s.scope.bits["c"], (false, true), "a boolean made from tainted text is derived, not tainted");
+    assert_eq!(s.scope.bits["r"], (true, false), "a response reading the tainted variable is tainted");
+}

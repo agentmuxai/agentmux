@@ -263,6 +263,7 @@ impl<'a> Scheduler<'a> {
                 self.spent += cost;
                 *self.spent_by.entry(id).or_default() += cost;
                 self.scope.outputs.insert(id.to_string(), output.clone());
+                self.mark_bits(node, kind);
                 let _ = self.tx.send(RunEvent::BlockDone { run_id: self.run_id.to_string(), block_id: id.to_string(), output: output.clone() });
                 mark_state(self.states, id, state("done", Some(output.clone()), None, true)).await;
                 if matches!(kind, BlockKind::Response) {
@@ -278,6 +279,25 @@ impl<'a> Scheduler<'a> {
                 Err(format!("block {id} failed: {e}"))
             }
         }
+    }
+
+    /// What a block's output is made of, for the taint bits: an Agent's answer, an
+    /// API response and a message reply are outside text; a Condition's result is
+    /// a boolean made from what it read (derived when that was tainted); a
+    /// Response is its template filled in. A Variables block sets its own.
+    fn mark_bits(&mut self, node: &FlowNode, kind: BlockKind) {
+        let read = |key: &str| node.data.get(key).and_then(Value::as_str).map(|t| self.scope.bits_of(t)).unwrap_or((false, false));
+        let bits = match kind {
+            BlockKind::Agent | BlockKind::Api | BlockKind::Message => (true, false),
+            BlockKind::Condition => {
+                let (tainted, derived) = read("expr");
+                (false, tainted || derived)
+            }
+            BlockKind::Response => read("template"),
+            BlockKind::Variables => return,
+            BlockKind::Task | BlockKind::Notify => (false, false),
+        };
+        self.scope.bits.insert(node.id.clone(), bits);
     }
 
     /// A block that runs again carries its earlier outputs, newest last, as
