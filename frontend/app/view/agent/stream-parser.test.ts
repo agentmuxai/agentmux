@@ -533,6 +533,18 @@ describe("jekt marker detection", () => {
         expect(jekt.raw).toBe(message);
     });
 
+    test("reads the marker's SIG= and ignores one it does not know", () => {
+        const withSig = (sig: string | null) =>
+            jektBlock({ trust: "network-claimed" }).replace(" MSGID=", `${sig === null ? "" : ` SIG=${sig}`} MSGID=`);
+        const sigOf = (sig: string | null) =>
+            (parser.parseStreamEvent({ type: "user_message", message: withSig(sig) }) as import("../../agent-model/types").JektMessageNode).sig;
+        expect(sigOf("verified")).toBe("verified");
+        expect(sigOf("invalid")).toBe("invalid");
+        expect(sigOf("expired")).toBe("expired");
+        expect(sigOf(null)).toBeUndefined();
+        expect(sigOf("bogus")).toBeUndefined();
+    });
+
     test("strips divider/header/reply scaffolding from the displayed message", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock() });
         const jekt = node as import("../../agent-model/types").JektMessageNode;
