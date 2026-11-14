@@ -162,6 +162,45 @@ async fn a_container_agent_reads_with_the_session_it_was_minted_and_never_a_prof
     assert!(env.contains(&"AWS_ACCESS_KEY_ID") && env.contains(&"AWS_SECRET_ACCESS_KEY") && env.contains(&"AWS_SESSION_TOKEN"));
 }
 
+#[tokio::test]
+async fn the_cli_is_told_to_write_utf8_whoever_it_reads_as() {
+    // On Windows the CLI (Python) writes in the console's code page and fails on a character outside it, in any field of
+    // the secret. The child's environment is an allowlist, so the import sets UTF-8 itself, for a native and a container agent.
+    let minted = crate::identity::aws_broker::mint::parse_process_json(crate::identity::aws_broker::mint::tests::creds_json(60).as_bytes(), crate::identity::aws_broker::mint::tests::now()).unwrap();
+    for via in [Via::Host, Via::Session(&minted)] {
+        let fake = Fake::ok(plain_secret());
+        read_secret(&fake, &source("staging/db", None), via).await.unwrap();
+        let seen = fake.seen.lock().unwrap();
+        let env = &seen[0].2;
+        assert!(env.iter().any(|(k, v)| k == "PYTHONUTF8" && v == "1"), "{env:?}");
+        assert!(env.iter().any(|(k, v)| k == "PYTHONIOENCODING" && v == "utf-8"), "{env:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_secret_with_non_ascii_names_and_values_in_sibling_fields_imports_the_one_key() {
+    let s = store();
+    // What the CLI prints once it writes UTF-8: made-up names and notes outside the Windows console's code page.
+    let body = format!(r#"{{"clé.société":"naïve café 中文 🔑","заметка":"тест","db":{{"password":"{VALUE}"}}}}"#);
+    let secret = serde_json::to_string(&body).unwrap();
+    assert!(!secret.is_ascii());
+    let plan = plan(&s, &request(source("staging/unicode-names", Some("db.password"))));
+    let done = perform(&s, &Fake::ok(secret), &plan, Via::Host, "builder").await.unwrap();
+    assert_eq!(reveal(&s, &done.id, "value", "revealed").unwrap().as_str(), VALUE);
+    nothing_leaked(&s, &[&serde_json::to_string(&done).unwrap()]);
+}
+
+#[tokio::test]
+async fn a_python_encoding_failure_is_one_line_with_no_value_in_it() {
+    let s = store();
+    let plan = plan(&s, &request(source("staging/db", None)));
+    let stderr = "\n'charmap' codec can't encode characters in position 29-30: character maps to <undefined>\n".to_string();
+    let fake = Fake::answering(Ok(RunOutput { success: false, stdout: VALUE.as_bytes().to_vec(), stderr }));
+    let err = perform(&s, &fake, &plan, Via::Host, "builder").await.unwrap_err();
+    assert!(err.starts_with("AWS said: 'charmap' codec"), "{err}");
+    assert!(!err.contains(VALUE), "{err}");
+}
+
 #[test]
 fn a_key_picks_a_string_or_a_number_and_nothing_else() {
     let whole = Zeroizing::new(format!(r#"{{"db":{{"password":"{VALUE}","port":5432,"tags":["a"]}}}}"#));
