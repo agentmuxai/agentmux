@@ -9,14 +9,15 @@ name: build-server-package
 # command answers, and a server started from the package serves /health and the web UI. Linux legs build on the
 # oldest runner image so the programs run on older distributions.
 #
-# `legs` says which platforms: `release` is the two legs on the kinds of runner the desktop builds already use
-# (ubuntu-22.04 and macos-latest), which is all release-core.yml asks for, because `sign-release` and `publish` wait for
-# this workflow and a leg queued for a scarce runner (ubuntu-22.04-arm, macos-15-intel) would hold the release for as long
-# as GitHub keeps it queued (up to 24 hours) and nobody can cancel one leg of a run. `all` (the default, and what a pull
-# request that changes this file runs) adds those two, so a workflow_dispatch can still build them; a release does not
-# publish them, because the signed manifest is made once from the files the release has when `sign-release` runs and
-# `install.sh --server` accepts nothing the manifest does not list. A release without them says so in its summary, and
-# `install.sh --server` says that version has no server package for the platform.
+# `legs` says which platforms: `release` is the three legs on kinds of runner a release already waits for (ubuntu-22.04
+# and macos-latest, which the desktop builds use, and the hosted arm64 Linux kind, which container-image.yml uses), which
+# is all release-core.yml asks for, because `sign-release` and `publish` wait for this workflow and a leg queued for a
+# scarce runner (macos-15-intel) would hold the release for as long as GitHub keeps it queued (up to 24 hours) and nobody
+# can cancel one leg of a run. `all` (the default, and what a pull request that changes this file runs) adds that one, so
+# a workflow_dispatch can still build it; a release does not publish it, because the signed manifest is made once from
+# the files the release has when `sign-release` runs and `install.sh --server` accepts nothing the manifest does not list.
+# A release without it says so in its summary, and `install.sh --server` says that version has no server package for the
+# platform.
 
 on:
   workflow_call:
@@ -26,7 +27,7 @@ on:
         required: true
         type: string
       legs:
-        description: "release (the legs on runner kinds the desktop builds use) or all"
+        description: "release (the legs on runner kinds a release already waits for) or all"
         required: false
         type: string
         default: all
@@ -37,7 +38,7 @@ on:
         required: true
         default: main
       legs:
-        description: "release (the legs on runner kinds the desktop builds use) or all"
+        description: "release (the legs on runner kinds a release already waits for) or all"
         required: false
         default: all
   pull_request:
@@ -61,8 +62,8 @@ jobs:
           LEGS: ${{ inputs.legs }}
         run: |
           # timeout: the leg's limit in minutes, about three times what it takes cold (a release builds with no cache).
-          release='[{"os":"linux","arch":"x64","runner":"ubuntu-22.04","timeout":50},{"os":"macos","arch":"arm64","runner":"macos-latest","timeout":140}]'
-          late='[{"os":"linux","arch":"arm64","runner":"ubuntu-22.04-arm","timeout":50},{"os":"macos","arch":"x64","runner":"macos-15-intel","timeout":160}]'
+          release='[{"os":"linux","arch":"x64","runner":"ubuntu-22.04","timeout":50},{"os":"linux","arch":"arm64","runner":"ubuntu-22.04-arm","timeout":50},{"os":"macos","arch":"arm64","runner":"macos-latest","timeout":140}]'
+          late='[{"os":"macos","arch":"x64","runner":"macos-15-intel","timeout":160}]'
           if [ "$LEGS" = release ]; then
             legs="$release"
           else
@@ -95,7 +96,7 @@ jobs:
           bash scripts/ci-apt.sh update
           bash scripts/ci-apt.sh install -y pkg-config libdbus-1-dev libxcb1-dev
 
-      # release builds use their own cache
+      # release builds use no cache
       - uses: Swatinem/rust-cache@v2
         if: github.ref_type != 'tag'
         with:
