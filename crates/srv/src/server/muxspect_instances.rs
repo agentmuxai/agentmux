@@ -123,17 +123,34 @@ async fn forward(
     }
 }
 
+/// The body of `resp`, read chunk by chunk so that no more than `cap` bytes are ever held: `None`
+/// when it is larger (known from its Content-Length, or found out as it streams in).
+async fn read_capped(mut resp: reqwest::Response, cap: usize) -> Result<Option<Vec<u8>>, reqwest::Error> {
+    if resp.content_length().is_some_and(|len| len > cap as u64) {
+        return Ok(None);
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if body.len() + chunk.len() > cap {
+            return Ok(None);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(Some(body))
+}
+
 /// The other instance's answer, as it gave it: its status, its content type and its body.
 async fn relay(resp: reqwest::Response, channel: &str) -> Response {
     let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_type = resp.headers().get(header::CONTENT_TYPE).cloned();
     let version = resp.headers().get("x-agentmux-srv-version").cloned();
-    let Ok(body) = resp.bytes().await else {
-        return error_response(StatusCode::BAD_GATEWAY, format!("instance '{channel}' stopped answering part way"), &[]);
+    let body = match read_capped(resp, MAX_FORWARDED_BYTES).await {
+        Ok(Some(body)) => body,
+        Ok(None) => {
+            return error_response(StatusCode::BAD_GATEWAY, format!("instance '{channel}' answered with more than {MAX_FORWARDED_BYTES} bytes"), &[]);
+        }
+        Err(_) => return error_response(StatusCode::BAD_GATEWAY, format!("instance '{channel}' stopped answering part way"), &[]),
     };
-    if body.len() > MAX_FORWARDED_BYTES {
-        return error_response(StatusCode::BAD_GATEWAY, format!("instance '{channel}' answered with more than {MAX_FORWARDED_BYTES} bytes"), &[]);
-    }
     let mut out = (status, body).into_response();
     let headers = out.headers_mut();
     if let Some(v) = content_type {

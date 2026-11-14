@@ -146,7 +146,7 @@ never takes it, and neither do `find`, `conversations`, `conversation`,
 their own). stderr says which instance answered and its srv version
 (`[channel dev-posa-fix, srv v0.60.28]`).
 
-How it works: each running srv writes `~/.agentmux/shared/instances/<channel>.json`
+How it works: each running srv writes `~/.agentmux/shared/instances/<channel>-<hash>.json`
 at start, rewrites it every 20 seconds and removes it at a clean exit. The
 file holds the loopback URL and auth key a forward needs (readable by its
 owner only; `instances` never prints the key). A record is listed only

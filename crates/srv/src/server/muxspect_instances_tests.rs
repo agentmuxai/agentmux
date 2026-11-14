@@ -126,3 +126,25 @@ fn the_listing_has_every_instance_and_no_key() {
     assert_eq!(body["instances"][0]["self"], true);
     assert!(body["own_channel"].is_string());
 }
+
+#[tokio::test]
+async fn an_answer_over_the_cap_is_refused_whether_or_not_it_says_its_length() {
+    let big = vec![b'x'; 2048];
+    let sized = big.clone();
+    let app = Router::new()
+        .route("/sized", get(move || { let b = sized.clone(); async move { b } }))
+        .route("/stream", get(move || {
+            let b = big.clone();
+            async move {
+                let chunks = b.chunks(512).map(|c| Ok::<_, std::io::Error>(axum::body::Bytes::copy_from_slice(c))).collect::<Vec<_>>();
+                axum::body::Body::from_stream(futures_util::stream::iter(chunks))
+            }
+        }));
+    let port = serve(app).await;
+    for path in ["/sized", "/stream"] {
+        let resp = reqwest::get(format!("http://127.0.0.1:{port}{path}")).await.unwrap();
+        assert!(read_capped(resp, 1024).await.unwrap().is_none(), "{path}");
+        let resp = reqwest::get(format!("http://127.0.0.1:{port}{path}")).await.unwrap();
+        assert_eq!(read_capped(resp, 4096).await.unwrap().map(|b| b.len()), Some(2048), "{path}");
+    }
+}

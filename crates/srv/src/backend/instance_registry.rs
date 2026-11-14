@@ -5,7 +5,7 @@
 //! name another (`muxspect instances`, `muxspect --channel <name> ...`;
 //! `docs/specs/SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md` §2, Phase 2a).
 //!
-//! One `<channel>.json` per running srv under `registry::resolve_shared_instances_dir()`,
+//! One `<channel>-<hash>.json` per running srv under `registry::resolve_shared_instances_dir()`,
 //! written when srv starts, rewritten every [`HEARTBEAT_INTERVAL`] and removed when it exits. The
 //! agent registry cannot answer this: it has one file per agent, so a channel with no agent
 //! registered has no file at all. A record carries the instance's `auth_key` (the way the agent
