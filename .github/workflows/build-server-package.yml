@@ -85,7 +85,7 @@ jobs:
         run: |
           set -eu
           tarball=$(ls dist-server/agentmux-server-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz)
-          test "$(ls dist-server/*.tar.gz | wc -l)" = 1
+          test "$(ls dist-server/*.tar.gz | wc -l | tr -d ' ')" = 1
           mkdir unpacked
           tar -xzf "$tarball" -C unpacked
           top=$(ls unpacked)
