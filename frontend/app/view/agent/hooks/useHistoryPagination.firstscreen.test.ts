@@ -31,7 +31,6 @@ vi.mock("../virtualization/scroll-memo", () => ({
 
 import { setLastInputForTests } from "@/app/store/last-input";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { sleep } from "@/util/util";
 import { createTranscriptSettleLatch, TranscriptCursor } from "../transcript-cursor";
 import { beginAgentOpen, finishAgentOpen, openTraceEnv, resetAgentOpenTracesForTests } from "../open-trace";
 import { hiddenFill } from "./hidden-fill";
@@ -82,11 +81,26 @@ const mount = (over: Record<string, unknown> = {}) => {
     return { paneEvents, docEvents, settled, hook: () => hook };
 };
 
+// The fill's waits (the 250 ms look-again, the idle tick, the quiet period) run on fake timers: the test moves the
+// clock, so how loaded the machine is changes how long a test takes, never whether it passes.
+const sleep = (ms: number) => vi.advanceTimersByTimeAsync(ms);
+/** Moves the fake clock in small steps until `check` holds; `budgetMs` is fake time, not a wall-clock timeout. */
+const until = async (check: () => void, budgetMs = 6_000) => {
+    for (let spent = 0; ; spent += 50) {
+        try {
+            return check();
+        } catch (err) {
+            if (spent >= budgetMs) throw err;
+        }
+        await sleep(50);
+    }
+};
 const flush = async () => {
     for (let i = 0; i < 5; i++) await sleep(0);
 };
 
 beforeEach(async () => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
     openTail.mockReset();
     scrolledUp.value = false;
@@ -100,6 +114,7 @@ beforeEach(async () => {
 afterEach(() => {
     dispose?.();
     dispose = null;
+    vi.useRealTimers();
 });
 
 describe("first screen", () => {
@@ -351,7 +366,7 @@ describe("the restore budget counts bytes", () => {
         mount({ restoreBytes: () => 1_000_000 });
         await flush();
         release();
-        await vi.waitFor(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalled(), { timeout: 4000 });
+        await until(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalled());
         expect(vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls[0][1].tail_bytes).toBe(1_000_000 - bytes);
     });
 
@@ -361,7 +376,7 @@ describe("the restore budget counts bytes", () => {
         mount({ restoreBytes: () => 1_000_000 });
         await flush();
         release();
-        await vi.waitFor(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalled(), { timeout: 4000 });
+        await until(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalled());
         expect(vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls[0][1].tail_bytes).toBe(1_000_000 - 40_000);
     });
 
@@ -372,7 +387,7 @@ describe("the restore budget counts bytes", () => {
         mount({ restoreBytes: () => 1_000_000 });
         await flush();
         release();
-        await vi.waitFor(() => expect(vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 4000 });
+        await until(() => expect(vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls.length).toBeGreaterThanOrEqual(2));
         const [first, second] = vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls.map((c) => c[1].tail_bytes as number);
         expect(first - second).toBe(2 * (encoded(cjkLine) + 1));
     });
@@ -457,7 +472,7 @@ describe("the rest of the restore window", () => {
         expect(RpcApi.BlockfileReadRangeCommand).not.toHaveBeenCalled(); // the user is busy
 
         release();
-        await vi.waitFor(() => expect(hook().historyOffset()).toBe(FLOOR_END - RESTORE_WINDOW_LINES), { timeout: 4000 });
+        await until(() => expect(hook().historyOffset()).toBe(FLOOR_END - RESTORE_WINDOW_LINES));
 
         const calls = vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls;
         expect(calls[0][1]).toMatchObject({ offset: FLOOR_END - 3 - OLDER_PAGE_LINES, limit: OLDER_PAGE_LINES, expect_gen: "g1" });
@@ -476,7 +491,7 @@ describe("the rest of the restore window", () => {
         const { hook } = mount({ restoreBytes: () => 1_000_000 });
         await flush();
         release();
-        await vi.waitFor(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalled(), { timeout: 4000 });
+        await until(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalled());
         const tailBytes = vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls[0][1].tail_bytes as number;
         expect(tailBytes).toBeGreaterThan(900_000);
         expect(tailBytes).toBeLessThan(1_000_000);
@@ -490,7 +505,7 @@ describe("the rest of the restore window", () => {
         const { hook } = mount({ restoreBytes: () => 1_000_000 });
         await flush();
         release();
-        await vi.waitFor(() => expect(hook().historyOffset()).toBe(19_960), { timeout: 4000 });
+        await until(() => expect(hook().historyOffset()).toBe(19_960));
         await sleep(300);
         expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledTimes(1);
     });
@@ -501,7 +516,7 @@ describe("the rest of the restore window", () => {
         const { docEvents, hook } = mount();
         await flush();
         release();
-        await vi.waitFor(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalled(), { timeout: 4000 });
+        await until(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalled());
         await sleep(300);
         expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledTimes(1);
         expect(docEvents).toHaveLength(1);
@@ -518,7 +533,7 @@ describe("the rest of the restore window", () => {
         await sleep(600);
         expect(RpcApi.BlockfileReadRangeCommand).not.toHaveBeenCalled();
         fillPaused.value = false;
-        await vi.waitFor(() => expect(hook().historyOffset()).toBeLessThan(FLOOR_END - 3), { timeout: 4000 });
+        await until(() => expect(hook().historyOffset()).toBeLessThan(FLOOR_END - 3));
     });
 
     it("does not read for a hidden pane's page that waited behind another pane's, when the pane was shown and scrolled meanwhile", async () => {
@@ -536,7 +551,7 @@ describe("the rest of the restore window", () => {
         await sleep(600);
         expect(RpcApi.BlockfileReadRangeCommand).not.toHaveBeenCalled();
         fillPaused.value = false;
-        await vi.waitFor(() => expect(hook().historyOffset()).toBeLessThan(FLOOR_END - 3), { timeout: 4000 });
+        await until(() => expect(hook().historyOffset()).toBeLessThan(FLOOR_END - 3));
     });
 
     it("stops when the pane closes", async () => {
@@ -571,7 +586,7 @@ describe("the rest of the restore window", () => {
         await flush();
         release();
         // The fill's first page is now in flight, and held open.
-        await vi.waitFor(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledTimes(1), { timeout: 4000 });
+        await until(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledTimes(1));
 
         const scroll = hook().loadOlder();
         await sleep(50);
@@ -579,7 +594,7 @@ describe("the rest of the restore window", () => {
         expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledTimes(1);
 
         releaseRead.shift()!(); // the fill's page lands
-        await vi.waitFor(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledTimes(2), { timeout: 4000 });
+        await until(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledTimes(2));
         // The scroll-up reads below where the fill's page ended, not where it began.
         const [first, second] = vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls.map((c) => c[1].offset as number);
         expect(second).toBeLessThan(first);
@@ -616,12 +631,12 @@ describe("every page of the fill starts at a turn start", () => {
         const { hook } = mount();
         await flush();
         release();
-        await vi.waitFor(() => expect(hook().historyOffset()).toBeLessThan(18_300), { timeout: 4000 });
+        await until(() => expect(hook().historyOffset()).toBeLessThan(18_300));
         const reqs = requests();
         expect(reqs[0]).toMatchObject({ offset: 18_000, limit: 2_000 });
         // The 200 lines before that turn start were not loaded: the document now begins there.
         // The next page ends exactly where the document begins.
-        await vi.waitFor(() => expect(requests().length).toBeGreaterThanOrEqual(2), { timeout: 4000 });
+        await until(() => expect(requests().length).toBeGreaterThanOrEqual(2));
         expect(requests()[1].offset + requests()[1].limit).toBe(18_200);
         expect(requests()[1]).toMatchObject({ offset: 16_200, limit: 2_000 });
     });
@@ -633,7 +648,7 @@ describe("every page of the fill starts at a turn start", () => {
         await flush();
         release();
         const floor = END - RESTORE_WINDOW_LINES;
-        await vi.waitFor(() => expect(hook().historyOffset()).toBe(floor), { timeout: 6000 });
+        await until(() => expect(hook().historyOffset()).toBe(floor));
         const pages = docEvents.slice(1); // after the first screen
         expect(pages.length).toBeGreaterThan(2);
         // The last page ends the fill at the window's floor, which the usual open also leaves where it falls.
@@ -643,12 +658,14 @@ describe("every page of the fill starts at a turn start", () => {
     it("a page with no turn start reads further back until it has one", async () => {
         openTail.mockResolvedValue(tailOf(3, END));
         serve(5_000); // the first turn start below 20_000 is at 15_000
-        const { hook } = mount();
+        const { docEvents, hook } = mount();
         await flush();
         release();
-        await vi.waitFor(() => expect(hook().historyOffset()).toBe(15_000), { timeout: 4000 });
+        await until(() => expect(hook().historyOffset()).toBe(END - RESTORE_WINDOW_LINES));
         // [18_000, 20_000), then [16_000, 18_000), then [14_000, 16_000), which holds 15_000.
         expect(requests().slice(0, 3).map((r) => r.offset)).toEqual([18_000, 16_000, 14_000]);
+        // The pages with no turn start were not dispatched alone: the first one that is begins on the turn at 15_000.
+        expect(docEvents[1].nodes[0].type).toBe("user_message");
     });
 
     it("stops reading back at the window's floor and takes the page as it is", async () => {
@@ -658,7 +675,7 @@ describe("every page of the fill starts at a turn start", () => {
         await flush();
         release();
         const floor = END - RESTORE_WINDOW_LINES;
-        await vi.waitFor(() => expect(hook().historyOffset()).toBe(floor), { timeout: 6000 });
+        await until(() => expect(hook().historyOffset()).toBe(floor));
         await sleep(300);
         // Nothing was read below the floor.
         expect(Math.min(...requests().map((r) => r.offset))).toBeGreaterThanOrEqual(floor);
@@ -670,7 +687,7 @@ describe("every page of the fill starts at a turn start", () => {
         const { hook } = mount({ restoreBytes: () => 1_000_000 });
         await flush();
         release();
-        await vi.waitFor(() => expect(hook().historyOffset()).toBe(19_960), { timeout: 4000 });
+        await until(() => expect(hook().historyOffset()).toBe(19_960));
         await sleep(300);
         expect(requests()).toHaveLength(1);
     });
@@ -687,7 +704,7 @@ describe("appends during the open leave no gap and no duplicate", () => {
     it("resumes the live stream at the slice's end line", async () => {
         // The first screen ends at line 100 (it shows lines [97, 100)).
         openTail.mockImplementation(async () => {
-            await sleep(30); // events arrive while the read is in flight
+            await new Promise((resolve) => setTimeout(resolve, 30)); // events arrive while the read is in flight
             return tailOf(3, 100);
         });
         const delivered: string[] = [];
