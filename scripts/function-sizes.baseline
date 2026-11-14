@@ -412,7 +412,6 @@
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 111 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 131 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::SuperviseActions
-104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 128 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
 290 frontend/app/view/term/term.tsx::TerminalView

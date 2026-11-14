@@ -176,173 +176,108 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        wire format: channel-local, so a cross-channel-reopened agent starts at "private".
 ///        `db_conversation_trust_grants` mirrors `db_lan_peer_pubkey_pins`' shape (own module,
 ///        get/set methods, case-insensitive agent_id lookups)
-///   v27 — db_bundles.is_system: an AgentMux-controlled, highest-priority
-///        Global Bundle tier (INTEGER, default 0). A system row is always
-///        also is_global=1 (enforced in code, not a CHECK constraint —
-///        see `bundle_upsert_system`). Writable only through the
-///        dedicated `upsertsystemmemory`/`deletesystemmemory` RPCs and
-///        `Store::bundle_upsert_system`/`_delete_system` — the
-///        generic `bundle_upsert`/`_delete`/`_reorder` all refuse
-///        to touch an is_system=1 row. Injected first in
-///        `format_global_bundle_block`'s output, wrapped in explicit
-///        override wording, ahead of every ordinary Global Bundle
-///        section. See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
-///   v28 — db_agent_activity_summaries: one-shot, on-demand Haiku-generated
-///        activity summary per `definition_id`, used as the AgentPicker's
-///        "My Agents" conversation-preview fallback when a row has no
-///        structured `output.state.json` snapshot to preview (legacy rows
-///        predating snapshot persistence — see `has_snapshot` in
-///        `listrecentsessions`, `agent_handlers/session.rs`). Generated
-///        from the instance's raw `"output"` filestore file (present even
-///        when the newer structured snapshot isn't) via the same shared
-///        Ambient Model Call gateway `dispatch_name`/`term:ambient_summary`
-///        already use (`invoke_haiku`,
-///        `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`).
-///        Generated lazily (first picker load that needs it, not on every
-///        turn) and cached forever once non-empty — mirrors
-///        `SubAgent.display_name`'s cache-once posture, not
-///        `term:ambient_summary`'s per-turn refresh. Renumbered from an
-///        earlier v27 — merged alongside the Global Bundle system-tier PR
-///        (#2782), which independently claimed v27 for an unrelated
-///        column (same collision class as this file's own v20→v22 and
-///        v24→v25 history, see those entries above). See
-///        docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §5a.
-///   v29 — db_agents.session_id / status / started_at / ended_at: the
-///        agent's LATEST launch state, the four `db_agent_instances`
-///        columns the consolidated row never got (Phase 3a deliberately
-///        left them "on the block", but the recent-sessions picker, the
-///        pane close/reopen continuity write-back and the status-filtered
-///        instance list all kept reading them from the legacy table — the
-///        reason it could not be dropped). One row per agent ⇒ one launch
-///        state per agent; a continuation moves it to the new block/session.
-///        Backfilled from the legacy rows by
-///        `m0025_agents_launch_state_backfill` (latest instance per
-///        projection key), kept current by the instance dual-write, and
-///        the read flip in `SPEC_AGENT_ARCHITECTURE_2026_05_27.md` Phase
-///        3b retires the legacy reads on top of it. No unique index on
-///        `db_agents(slug)` is added: template-launch projections copy
-///        their template's slug, so uniqueness stays a definition-level
-///        rule enforced by the slug collision scan in `agent_def_insert`.
-///   v30 — `db_agent_content` / `db_agent_skills` / `db_agent_history` /
-///        `db_agent_identity_links` / `db_agent_skills_ref` /
-///        `db_agent_mcp_ref`: `agent_id`'s foreign key now targets
-///        `db_agents(id)` instead of `db_agent_definitions(id)`. Every
-///        existing row already satisfies the new target (its `agent_id` is
-///        a definition id, and every definition has a `db_agents` mirror
-///        at the same id) — what changes is that a `db_agents` row with NO
-///        definition counterpart (a template launch) can now hold these
-///        directly too, closing the gap `listrecentsessions`' template
-///        fallback (Phase 3b, #3080) exists for. SQLite has no in-place FK
-///        redefinition, so an existing store needs its six tables rebuilt;
-///        `m0028_agent_child_tables_repoint_fk` does that (rename,
-///        recreate, copy, drop, `PRAGMA foreign_key_check` before commit).
-///        A fresh install gets the new FK directly from the CREATE TABLE
-///        statements below — nothing to rebuild there. Phase 3c
-///        (`SPEC_AGENT_ARCHITECTURE_2026_05_27.md`).
-///   v31 — No DDL change. Every `agent_def_*` write now lands on
-///        `db_agents` only — `db_agent_definitions` is no longer kept in
-///        sync (Phase 3d, #3092). Bumped anyway (codex P1 on #3092):
-///        `check_schema_compat` is a downgrade guard as much as a schema
-///        guard, and this release changes what a NEWER binary's writes
-///        mean to an OLDER one just as much as a column would. Without the
-///        bump, rolling back to the immediately preceding binary after
-///        this version has run would silently accept a store where new
-///        agents exist only in `db_agents` — that binary's `agent_def_get`/
-///        `update`/`delete` still target `db_agent_definitions` and would
-///        404 on them, or replay stale legacy values back into `db_agents`
-///        on edit. Stamping 31 makes that downgrade refuse to open instead.
-///   v32 — `db_agent_definitions` and `db_agent_instances` are dropped.
-///        Nothing has read or written either table since v31 (agent-concept
-///        consolidation's definition and instance flips, #3080/#3092); this
-///        is the final phase (Phase 3e,
-///        `SPEC_AGENT_ARCHITECTURE_2026_05_27.md`) closing out the tracking
-///        spec. `db_agent_instances`' `CREATE TABLE`/indexes and
-///        `db_agent_definitions`' `CREATE TABLE` are gone from this function
-///        — leaving either would silently recreate the tables (empty) on
-///        the very next `Store::open()` after the drop migration runs,
-///        since migrations execute before this function does on every
-///        boot. `db_agent_definitions`' own `ALTER TABLE ADD COLUMN`
-///        entries, by contrast, are KEPT — gated on the table still
-///        existing (see that block's own comment below) — because several
-///        pending migrations (m0007, m0025, m0026, m0028) call
-///        `Store::open()` internally, running this function, before m0029
-///        (numbered last) ever drops the table in the SAME upgrade pass; a
-///        store old enough to be missing one of those columns would fail
-///        those migrations' own reads with "no such column" otherwise
-///        (Codex P1 on #3096). An existing store's tables are actually
-///        removed by `m0029_drop_legacy_agent_tables`; a fresh install
-///        never has them to begin with, so the gate is a no-op for it.
-///        `adopt_legacy_table_names`'s
-///        `db_forge_agents` → `db_agent_definitions` rename entry is left
-///        in place deliberately: an install old enough to still carry
-///        `db_forge_agents` reaches it during an EARLIER migration's own
-///        `Store::open()` call (every migration in this chain lays down
-///        schema that way), so the rename still fires before
-///        `m0029` runs later in the same upgrade pass and correctly drops
-///        what the rename just produced — no special-casing needed, and no
-///        data is stranded under the old name.
-///   v33 — `db_agent_project_instructions`: what each agent was last observed
-///        to read as project instructions from its working directory, keyed
-///        `(agent_id, path)`. Phase 3 of
-///        `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`.
-///
-///        Records a content hash and an observation time, never the content:
-///        this is a tracking table, not a mirror. The distinction from
-///        `db_agent_native_memory` above is deliberate — that one stores
-///        content because it is a durable copy of files AgentMux may have to
-///        serve when the originals are unreachable, whereas these files
-///        belong to the repository, are always readable from it, and are
-///        never written by AgentMux. Storing their content would create a
-///        second copy of somebody else's file with no one to keep it honest.
-///
-///        Purely additive: nothing reads it at launch, and an agent with no
-///        row simply has no prior observation to compare against.
-///   v34 — `db_agent_skills_ref` / `db_agent_mcp_ref` / `db_bundle_skills_ref`
-///        / `db_bundle_mcp_ref` drop their `skill_id`/`mcp_id` FK to this
-///        store's LOCAL `db_skills`/`db_mcp_servers`. Phase 2 of
-///        `SPEC_DURABLE_BINDINGS_2026_09_10.md` §5.4 (Codex P1, PR #3182):
-///        once catalog writes redirect to `identity_store`, this channel's
-///        local catalog copies stop gaining new rows, so binding a
-///        post-redirect skill/server would otherwise hit a hard `FOREIGN KEY
-///        constraint failed` (`PRAGMA foreign_keys=ON` in production, see
-///        `Store::configure_and_migrate`). The `agent_id → db_agents` FK on
-///        the agent-level pair is kept verbatim — only the catalog-pointing
-///        FK is dropped. Same shape `db_bundle_skills_ref`/`db_bundle_mcp_ref`
-///        already used for `db_bundles` (see those tables' own doc comment
-///        below): existence moves to the application layer
-///        (`managed_bind_agent`/`managed_bind_bundle`'s new `catalog: &Store`
-///        check). SQLite has no `ALTER TABLE ... DROP CONSTRAINT`, so an
-///        existing store's four tables are rebuilt by
-///        `m0032_drop_catalog_fk_from_ref_tables`; a fresh install gets the
-///        trimmed FK directly from the CREATE TABLE statements below.
-///   v35 — db_bundle_versions: append-only version history for Global
-///        Memory entry content (`name` + `instructions`), one row per
-///        write through the new agent-facing Global Memory API
-///        (`docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md`
-///        Phase 0) — mirrors `db_agent_native_memory_versions`'s shape
-///        exactly, keyed by a single `bundle_id` instead of that table's
-///        composite `(agent_id, filename)`, since a Bundle's identity is
-///        already a single id. Global Memory (`db_bundles`) previously had
-///        no audit trail at all — only `updated_at`, no way to see what
-///        changed, when, or by which agent, unlike native memory which has
-///        had this since v24. Opened specifically because Global Memory is
-///        about to gain a write path an agent (not just a human at the
-///        Armory UI) can reach. `written_by` is a TRUSTED identity column
-///        (an agent's real `AGENTMUX_AGENT_ID`, or `"armory-ui"`),
-///        deliberately separate from the caller-describable `source`/
-///        `source_detail` pair — an agent could otherwise claim
-///        `source: "human"` with nothing to contradict it (codex P2, PR
-///        #3237, caught before this table ever shipped).
-///   v36 — db_agent_wan_keys: per-agent Ed25519 keypair for general
-///        agent-to-agent WAN-tier jekt signing (issue #2586's second half).
-///        Mirrors v20's shape; a SEPARATE keypair from db_agent_lan_keys by
-///        design, not a reuse — LAN public keys are permanently TOFU-pinned
-///        by peers (v21), which is why they cannot rotate
-///        (SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md §4), whereas WAN
-///        keys are served from muxbus's authoritative ownership registry and
-///        are meant to. One key cannot have both lifecycles. `key_version`
-///        is reserved for the publish-sync and rotation phases (that spec's
-///        §3.2/§3.6) and is not yet read by anything.
+///   v27 — db_bundles.is_system: an AgentMux-controlled, highest-priority Global Bundle tier
+///        (INTEGER, default 0). A system row is always also is_global=1 (enforced in code, not a
+///        CHECK; see `bundle_upsert_system`). Writable only through the
+///        `upsertsystemmemory`/`deletesystemmemory` RPCs and
+///        `Store::bundle_upsert_system`/`_delete_system`; the generic
+///        `bundle_upsert`/`_delete`/`_reorder` refuse an is_system=1 row. Injected first in
+///        `format_global_bundle_block`'s output, wrapped in explicit override wording, ahead of
+///        every ordinary Global Bundle section
+///        (docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md)
+///   v28 — db_agent_activity_summaries: one-shot, on-demand Haiku-generated activity summary per
+///        `definition_id`, the AgentPicker's "My Agents" conversation-preview fallback for legacy
+///        rows with no structured `output.state.json` snapshot (see `has_snapshot` in
+///        `listrecentsessions`, `agent_handlers/session.rs`). Generated from the instance's raw
+///        `"output"` filestore file through the shared Ambient Model Call gateway (`invoke_haiku`,
+///        docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md), lazily (first picker load
+///        that needs it) and cached forever once non-empty, like `SubAgent.display_name`, not
+///        `term:ambient_summary`'s per-turn refresh. Renumbered from v27 after colliding with the
+///        system-tier PR (#2782)
+///        (docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §5a)
+///   v29 — db_agents.session_id / status / started_at / ended_at: the agent's LATEST launch state,
+///        the four `db_agent_instances` columns the consolidated row never got (Phase 3a left them
+///        "on the block", but the recent-sessions picker, the pane close/reopen write-back and the
+///        status-filtered instance list kept reading the legacy table, which is why it could not be
+///        dropped). One row per agent means one launch state per agent; a continuation moves it to
+///        the new block/session. Backfilled by `m0025_agents_launch_state_backfill` (latest
+///        instance per projection key) and kept current by the instance dual-write; the Phase 3b
+///        read flip (SPEC_AGENT_ARCHITECTURE_2026_05_27.md) retires the legacy reads on top of it.
+///        No unique index on `db_agents(slug)`: template-launch projections copy their template's
+///        slug, so uniqueness stays a definition-level rule enforced by the slug collision scan in
+///        `agent_def_insert`
+///   v30 — `db_agent_content` / `db_agent_skills` / `db_agent_history` / `db_agent_identity_links`
+///        / `db_agent_skills_ref` / `db_agent_mcp_ref`: `agent_id`'s foreign key now targets
+///        `db_agents(id)`, not `db_agent_definitions(id)`. Existing rows already satisfy it (each
+///        `agent_id` is a definition id with a `db_agents` mirror at the same id); what changes is
+///        that a `db_agents` row with no definition counterpart (a template launch) can now hold
+///        these directly, closing the gap `listrecentsessions`' template fallback (Phase 3b, #3080)
+///        exists for. SQLite can't redefine an FK in place, so
+///        `m0028_agent_child_tables_repoint_fk` rebuilds the six tables (rename, recreate, copy,
+///        drop, `PRAGMA foreign_key_check` before commit); a fresh install gets the new FK from the
+///        CREATE TABLE statements below (Phase 3c, SPEC_AGENT_ARCHITECTURE_2026_05_27.md)
+///   v31 — No DDL change. Every `agent_def_*` write now lands on `db_agents` only (Phase 3d,
+///        #3092); `db_agent_definitions` is no longer kept in sync. Bumped anyway:
+///        `check_schema_compat` is a downgrade guard as much as a schema guard, and this release
+///        changes what a NEWER binary's writes mean to an OLDER one. Without the bump, rolling back
+///        one binary would silently accept a store where new agents exist only in `db_agents`, and
+///        that binary's `agent_def_get`/`update`/`delete` (still on `db_agent_definitions`) would
+///        404 or replay stale legacy values into `db_agents` on edit. Stamping 31 makes that
+///        downgrade refuse to open
+///   v32 — `db_agent_definitions` and `db_agent_instances` are dropped (Phase 3e,
+///        SPEC_AGENT_ARCHITECTURE_2026_05_27.md, closing out the tracking spec): nothing has read
+///        or written either since v31 (the definition and instance flips, #3080/#3092). Their
+///        `CREATE TABLE`s and indexes are gone from this function, because migrations run before it
+///        on every boot and leaving them would recreate empty tables after the drop.
+///        `db_agent_definitions`' `ALTER TABLE ADD COLUMN` entries are KEPT, gated on the table
+///        still existing (see that block's comment below): several pending migrations (m0007,
+///        m0025, m0026, m0028) call `Store::open()`, running this function, before m0029 drops the
+///        table in the same upgrade pass, and an old store missing one of those columns would fail
+///        their reads with "no such column" (#3096). An existing store's tables are removed by
+///        `m0029_drop_legacy_agent_tables`; a fresh install never has them.
+///        `adopt_legacy_table_names`' `db_forge_agents` → `db_agent_definitions` rename stays on
+///        purpose: an install old enough to carry `db_forge_agents` reaches it in an EARLIER
+///        migration's `Store::open()`, so the rename still fires before m0029 drops what it
+///        produced, and no data is stranded under the old name
+///   v33 — `db_agent_project_instructions`: what each agent was last observed to read as project
+///        instructions from its working directory, keyed `(agent_id, path)` (Phase 3 of
+///        SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md). Records a content hash and an
+///        observation time, never the content: a tracking table, not a mirror. Unlike
+///        `db_agent_native_memory`, which keeps content because it is a durable copy of files
+///        AgentMux may have to serve when the originals are unreachable, these files belong to the
+///        repository, are always readable from it and are never written by AgentMux; storing them
+///        would make a second copy of somebody else's file with no one to keep it honest. Purely
+///        additive: nothing reads it at launch, and an agent with no row has no prior observation
+///        to compare against
+///   v34 — `db_agent_skills_ref` / `db_agent_mcp_ref` / `db_bundle_skills_ref` /
+///        `db_bundle_mcp_ref` drop their `skill_id` / `mcp_id` FK to this store's LOCAL `db_skills`
+///        / `db_mcp_servers` (Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md §5.4, #3182). Once
+///        catalog writes redirect to `identity_store`, the local catalog copies stop gaining rows,
+///        so binding a post-redirect skill/server would hit `FOREIGN KEY constraint failed`
+///        (`PRAGMA foreign_keys=ON` in production, see `Store::configure_and_migrate`). The
+///        `agent_id → db_agents` FK on the agent-level pair stays; existence moves to the
+///        application layer (`managed_bind_agent` / `managed_bind_bundle`'s `catalog: &Store`
+///        check), as `db_bundle_skills_ref` / `db_bundle_mcp_ref` already did for `db_bundles` (see
+///        their CREATE TABLE doc below). SQLite can't drop a constraint in place, so
+///        `m0032_drop_catalog_fk_from_ref_tables` rebuilds an existing store's four tables; a fresh
+///        install gets the trimmed FK from the CREATE TABLE statements below
+///   v35 — db_bundle_versions: append-only version history for Global Memory entry content (`name`
+///        + `instructions`), one row per write through the agent-facing Global Memory API
+///        (docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md Phase 0). Same shape as
+///        `db_agent_native_memory_versions`, keyed by a single `bundle_id` instead of `(agent_id,
+///        filename)`. Global Memory (`db_bundles`) had no audit trail, only `updated_at`, and is
+///        about to gain a write path an agent (not just a human in the Armory UI) can reach.
+///        `written_by` is a TRUSTED identity column (an agent's real `AGENTMUX_AGENT_ID`, or
+///        `"armory-ui"`), kept separate from the caller-describable `source` / `source_detail`
+///        pair, which would let an agent claim `source: "human"` with nothing to contradict it
+///        (#3237)
+///   v36 — db_agent_wan_keys: per-agent Ed25519 keypair for agent-to-agent WAN-tier jekt signing
+///        (#2586, second half). Mirrors v20's shape but is a SEPARATE keypair from
+///        `db_agent_lan_keys`: LAN public keys are permanently TOFU-pinned by peers (v21), so they
+///        cannot rotate (SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md §4), while WAN keys are
+///        served from muxbus's ownership registry and are meant to; one key cannot have both
+///        lifecycles. `key_version` is reserved for the publish-sync and rotation phases (that
+///        spec's §3.2/§3.6) and unread so far
 ///   v37 — db_agent_tokens: per-agent local identity token, keyed by the
 ///        agent's UID (`db_agents.id`) — identity M1 of
 ///        `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` (§6, §9.1).
@@ -593,122 +528,82 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// `user_version` stamped into the new, permanently-global
-/// `~/.agentmux/shared/identity-store.db` (distinct file from
-/// `store.db` — see [`run_identity_store_schema`]'s own doc comment for
-/// why). Independent counter from `SHARED_STORE_SCHEMA_VERSION`.
-///   v1 — initial: agent→account links, bundles, drone
-///        definitions, muxbus credentials, per-agent M2M credentials,
-///        native memory mirror, cron jobs. Everything
-///        `run_shared_store_schema` already held EXCEPT `db_accounts` —
-///        see docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md §3.1.
-///   v2 — db_accounts, as a FALLBACK MIRROR only (reagentx P0 review on
-///        PR #2632): the link resolves via this store now, but the
-///        account row it points to could still only exist in the
-///        per-channel-isolatable `id_store`, which is empty on a fresh
-///        channel — the reported bug wasn't actually fixed end to end
-///        without this. `id_store` remains the PRIMARY, authoritative,
-///        write path (so Armory's disposable-test-account isolation is
-///        unchanged); this copy is consulted only when `id_store` doesn't
-///        have the row. See `identity::resolver::inject`'s account
-///        resolution for the read-with-fallback + write-back-to-source-store
-///        logic this enables.
-///   v3 — db_agent_native_memory_versions, for schema parity with the v1
-///        native memory mirror this store already carries. Same as that
-///        table, this store's copy is not an actively-written duplicate
-///        (id_store/store.db remains the authoritative write path — see
-///        v2's note above) — added here only so a future always-global
-///        read path (mirroring what v2 did for db_accounts) is not blocked
-///        on a missing table. See
-///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
-///   v4 — db_bundles.is_system, for schema parity with OBJECT_SCHEMA_VERSION
-///        v27 / SHARED_STORE_SCHEMA_VERSION v9 (same column, same reasoning
-///        as v3 above — this store's `db_bundles` copy is not an actively-
-///        written duplicate either). Real ALTER TABLE ADD COLUMN added to
-///        `run_identity_store_schema` in the same change, so this counter
-///        MUST bump alongside it — an unbumped counter would leave an
-///        existing identity-store.db stamped at the old user_version
-///        forever, silently defeating check_schema_compat/stamp_version's
-///        forward-compat lock for this one store (reagent P1, PR #2782).
-///        See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
-/// v5: `db_work_queue` — the Muxqueue backlog
-///        (`docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md`).
-///        A NEW table, so no ALTER is involved, but the counter still bumps:
-///        an identity-store.db stamped v4 that a v5 binary opens must be
-///        recognized as older, not "already current" (same reagent P1 on
-///        PR #2782 reasoning recorded for v4 above).
-///
-///        Deliberately in THIS store, not the per-channel one. A queue whose
-///        rows are per-channel means "any agent IN THIS CHANNEL can pick it
-///        up", which is close to useless given every local/dev/portable build
-///        is its own channel — see the report's §6.2, and
-///        `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
-///        for what the per-channel/global seam has already cost once.
-/// v6: `db_skills`, `db_mcp_servers` — Phase 2 of
-///        `SPEC_DURABLE_BINDINGS_2026_09_10.md`. These become the
-///        AUTHORITATIVE catalogs as of this version; the per-channel copies
-///        in `run_object_schema` keep their declarations (never removed —
-///        see that spec's §5.1 and §8 item 3) and continue to exist only as
-///        the same best-effort degraded-mode fallback
-///        `bootstrap/stores.rs` already substitutes for every other
-///        identity-store table (`mstore` in
-///        place of `identity_store` when the identity store can't be
-///        resolved, created, or opened). Deliberately NOT declared with the
-///        ref tables (`db_agent_skills_ref`, `db_bundle_skills_ref`, and
-///        the MCP equivalents) — those stay channel-scoped until Phase 3/6
-///        promotes them; adding them here now, unpaired with a live writer,
-///        would be schema for a phase that hasn't shipped.
-/// v7: partial UNIQUE indexes on `db_skills(name, skill_type)` and
-///        `db_mcp_servers(name)`, each `WHERE is_global = 1` — global rows
-///        only; two different owners' private rows sharing a name is still
-///        fine. Closes a real race in
-///        `m0031_carry_skills_and_mcp_servers_to_identity_store`: two
-///        channels' migrations can run concurrently (multiple AgentMux
-///        instances is an explicitly supported scenario), both read "no
-///        matching global row yet" before either has inserted, and both
-///        proceed to insert under different ids — the promised first-wins
-///        cross-channel dedup silently fails without a DB-level constraint
-///        to arbitrate the race (Codex P1, PR #3181). The migration's
-///        insert now handles the resulting `UNIQUE constraint failed` by
-///        re-querying for whichever row actually won.
-///   v8 — `idx_ids_skills_global_name` replaces `idx_ids_skills_global_name_type`:
-///        narrows the skill global-uniqueness index from `(name, skill_type)`
-///        to `name` alone, matching the invariant `skill_upsert_unique_global`'s
-///        own dup-check has always enforced (`WHERE name = ?1 AND id <> ?2
-///        AND is_global = 1` — no `skill_type` filter). Codex P2, PR #3182,
-///        `SPEC_DURABLE_BINDINGS_2026_09_10.md` §5.4: the v7 index was
-///        narrower than the invariant it was meant to back, so a
-///        same-name-different-`skill_type` race between two channels could
-///        insert two rows the application itself considers duplicates. MCP
-///        servers don't have this mismatch — `idx_ids_mcp_servers_global_name`
-///        is already name-only — so this bump is skills-only.
-///        `m0033_narrow_skill_global_uniqueness_index` defensively collapses
-///        any existing same-name/different-type pair `m0031`'s own
-///        `(name, skill_type)`-keyed dedup may already have produced, to the
-///        earlier-`created_at` row, before the new index is created.
-///   v9 — db_bundle_versions, for schema parity with OBJECT_SCHEMA_VERSION
-///        v35 / SHARED_STORE_SCHEMA_VERSION v10 (same table, same reasoning
-///        as v3 above — this store's copy is not an actively-written
-///        duplicate either). See
-///        docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md.
-///   v10 — db_work_queue.target_agent_uid / claimed_by_uid, and
-///        db_cron_jobs.target_uid (parity with SHARED_STORE_SCHEMA_VERSION
-///        v11): the UID (`db_agents.id`) beside each slug column, dual-written
-///        and not yet read. Identity M1b of
-///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §9.1.
-///        `target_agent_uid` is resolved ONCE at enqueue (spec §5.4);
-///        `claimed_by_uid` is CARRIED from the claimer's own
-///        `AGENTMUX_AGENT_UID` (M1a, #3548), falling back to resolving its
-///        `agent_id` with the fallback counted (spec §9.2). Empty when
-///        unknown; never guessed.
+/// `user_version` stamped into the permanently-global `~/.agentmux/shared/identity-store.db` (a
+/// different file from `store.db`; see [`run_identity_store_schema`]). Independent counter from
+/// `SHARED_STORE_SCHEMA_VERSION`.
+///   v1 — initial: agent→account links, bundles, drone definitions, muxbus credentials, per-agent
+///        M2M credentials, native memory mirror, cron jobs: everything `run_shared_store_schema`
+///        held EXCEPT `db_accounts` (docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md §3.1)
+///   v2 — db_accounts, as a FALLBACK MIRROR only (#2632): a link resolves via this store, but the
+///        account row it points to could exist only in the per-channel-isolatable `id_store`, empty
+///        on a fresh channel, so the bug wasn't fixed end to end without it. `id_store` stays the
+///        PRIMARY, authoritative write path (Armory's disposable-test-account isolation is
+///        unchanged); this copy is consulted only when `id_store` lacks the row (see
+///        `identity::resolver::inject`'s account resolution: read-with-fallback plus write-back to
+///        the source store)
+///   v3 — db_agent_native_memory_versions, for parity with the v1 native memory mirror this store
+///        carries. Not an actively written duplicate either (`id_store` / `store.db` stay
+///        authoritative, see v2); it is here so a future always-global read path, like v2's for
+///        db_accounts, isn't blocked on a missing table
+///        (docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md)
+///   v4 — db_bundles.is_system, for parity with OBJECT_SCHEMA_VERSION v27 /
+///        SHARED_STORE_SCHEMA_VERSION v9 (same reasoning as v3: not an actively written duplicate).
+///        A real ALTER TABLE ADD COLUMN in `run_identity_store_schema`, so the counter MUST bump
+///        with it: an unbumped counter leaves an existing identity-store.db at the old
+///        `user_version` forever, defeating `check_schema_compat` / `stamp_version`'s
+///        forward-compat lock for this store (#2782;
+///        docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md)
+///   v5 — `db_work_queue`, the Muxqueue backlog
+///        (docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md). A new table, no ALTER,
+///        but the counter still bumps: an identity-store.db stamped v4 that a v5 binary opens must
+///        read as older, not "already current" (the #2782 reasoning of v4). Deliberately in THIS
+///        store, not the per-channel one: a queue with per-channel rows means "any agent IN THIS
+///        CHANNEL can pick it up", close to useless when every local/dev/portable build is its own
+///        channel (the report's §6.2;
+///        docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md for what the
+///        per-channel/global seam has already cost)
+///   v6 — `db_skills`, `db_mcp_servers` (Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md): the
+///        AUTHORITATIVE catalogs from this version. The per-channel copies in `run_object_schema`
+///        keep their declarations (never removed; that spec's §5.1 and §8 item 3) and remain only
+///        the best-effort degraded-mode fallback `bootstrap/stores.rs` substitutes (`mstore` for
+///        `identity_store`) when the identity store can't be resolved, created or opened. NOT
+///        declared here with the ref tables (`db_agent_skills_ref`, `db_bundle_skills_ref` and the
+///        MCP equivalents): those stay channel-scoped until Phase 3/6 promotes them, and adding
+///        them unpaired with a live writer would be schema for a phase that hasn't shipped
+///   v7 — partial UNIQUE indexes on `db_skills(name, skill_type)` and `db_mcp_servers(name)`, each
+///        `WHERE is_global = 1`: global rows only, so two owners' private rows may share a name.
+///        Closes a race in `m0031_carry_skills_and_mcp_servers_to_identity_store`: two channels'
+///        migrations can run concurrently (several AgentMux instances is a supported scenario),
+///        both read "no matching global row yet" and insert under different ids, and the first-wins
+///        cross-channel dedup fails without a DB-level constraint to arbitrate (#3181). The
+///        migration's insert now handles the resulting `UNIQUE constraint failed` by re-querying
+///        for the winning row
+///   v8 — `idx_ids_skills_global_name` replaces `idx_ids_skills_global_name_type`: the skill
+///        global-uniqueness index narrows from `(name, skill_type)` to `name`, matching the
+///        invariant `skill_upsert_unique_global`'s dup-check enforces (`WHERE name = ?1 AND id <>
+///        ?2 AND is_global = 1`, no `skill_type` filter). The v7 index was narrower than that
+///        invariant, so a same-name, different-`skill_type` race between two channels could insert
+///        two rows the application treats as duplicates (#3182, SPEC_DURABLE_BINDINGS_2026_09_10.md
+///        §5.4). MCP servers don't have the mismatch (`idx_ids_mcp_servers_global_name` is already
+///        name-only), so this bump is skills-only. `m0033_narrow_skill_global_uniqueness_index`
+///        collapses any same-name/different-type pair that `m0031`'s `(name, skill_type)` dedup may
+///        have produced, keeping the earlier-`created_at` row, before the new index is created
+///   v9 — db_bundle_versions, for parity with OBJECT_SCHEMA_VERSION v35 /
+///        SHARED_STORE_SCHEMA_VERSION v10 (same reasoning as v3;
+///        docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md)
+///   v10 — db_work_queue.target_agent_uid / claimed_by_uid and db_cron_jobs.target_uid (parity with
+///        SHARED_STORE_SCHEMA_VERSION v11): the UID (`db_agents.id`) beside each slug column,
+///        dual-written, not yet read (identity M1b,
+///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §9.1). `target_agent_uid` is
+///        resolved ONCE at enqueue (§5.4); `claimed_by_uid` is CARRIED from the claimer's own
+///        `AGENTMUX_AGENT_UID` (M1a, #3548), else resolved from its `agent_id` with the fallback
+///        counted (§9.2). Empty when unknown, never guessed
 ///   v11 — db_work_queue.created_by_uid, and db_cron_jobs.created_by_uid /
-///        db_bundle_versions.written_by_uid (parity with
-///        SHARED_STORE_SCHEMA_VERSION v12): the actor's UID beside each
-///        actor-name column, taken from the request's `Caller` (its
-///        `X-Agent-Token`), never from a body field. Empty for an
-///        Unattributed request; never guessed. Dual-written, not yet read.
-///        Identity M4c-1 of
-///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9.
+///        db_bundle_versions.written_by_uid (parity with SHARED_STORE_SCHEMA_VERSION v12): the
+///        actor's UID beside each actor-name column, from the request's `Caller` (its
+///        `X-Agent-Token`), never a body field. Empty for an Unattributed request, never guessed.
+///        Dual-written, not yet read (identity M4c-1,
+///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9)
 ///
 /// Added WITHOUT a bump: `db_mcp_server_reach` (OBJECT_SCHEMA_VERSION v44
 /// has the same table). The catalog's reach switches live with the catalog,
@@ -724,44 +619,31 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 /// `SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md` §2.1.
 pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 11;
 
-/// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
-/// schema — the permanently-global store introduced by
-/// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` to fix
-/// conversation-continuity-across-a-version-switch
-/// (`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md`).
+/// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db` schema: the
+/// permanently-global store from docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md, which
+/// fixes conversation continuity across a version switch
+/// (docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md).
 ///
-/// This is a **near-superset** of [`run_shared_store_schema`]'s tables
-/// (v2): every one of them, INCLUDING `db_accounts` as of v2 — but
-/// `db_accounts` here is a read-through FALLBACK MIRROR only, not the
-/// authoritative write path. Unlike agent→account links, bundles,
-/// drone definitions, muxbus credentials, and native memory,
-/// `db_accounts` has one genuine, intentional isolation need (Armory's
-/// disposable delete-account testing flow): a real per-account
-/// creation-time scope split (SPEC §3.2) hasn't shipped yet, so
-/// `id_store`/`resolve_shared_store_path()` stays the primary read/write
-/// path for accounts, preserving Armory's isolation exactly as before.
-/// This store's copy exists ONLY so a link resolved here (always global)
-/// doesn't dead-end on an account row that's stuck in a fresh, per-
-/// channel-isolated `id_store` — see `identity::resolver::inject`'s
-/// account resolution (falls back to this store's `identity_get` only
-/// when `id_store`'s own lookup misses) and
-/// `migrations::m0022_identity_store_links_backfill` (backfills this
-/// mirror the same way it backfills links). `db_agent_identity_links.account_id`
-/// still has NO foreign key here (same reasoning `run_shared_store_schema`
-/// already uses to drop its FK to `db_agent_definitions`: cross-database
-/// FK enforcement is impossible in SQLite, and this table's `db_accounts`
-/// is itself just a mirror, not guaranteed complete — application code
-/// enforces referential integrity, tolerating a miss, instead).
+/// A **near-superset** of [`run_shared_store_schema`]'s tables (v2), including `db_accounts`,
+/// but there it is a read-through FALLBACK MIRROR, not the authoritative write path. Accounts
+/// have one intentional isolation need (Armory's disposable delete-account testing flow) and
+/// the per-account creation-time scope split (SPEC §3.2) hasn't shipped, so `id_store` /
+/// `resolve_shared_store_path()` stays the primary read/write path for accounts. This copy
+/// exists only so a link resolved here (always global) doesn't dead-end on an account row stuck
+/// in a fresh, per-channel `id_store`: see `identity::resolver::inject`'s account resolution
+/// (falls back to this store's `identity_get` only when `id_store`'s lookup misses) and
+/// `migrations::m0022_identity_store_links_backfill`, which backfills the mirror as it does
+/// links. `db_agent_identity_links.account_id` has NO foreign key here, as
+/// `run_shared_store_schema` does for `db_agent_definitions`: cross-database FKs can't be
+/// enforced in SQLite and the mirror isn't guaranteed complete, so application code enforces
+/// integrity and tolerates a miss.
 ///
-/// A dedicated store (not a subset of the existing shared store reached
-/// via a new always-global path) is deliberate, not just a naming choice:
-/// it makes "can this table ever be reached from a per-channel-isolated
-/// codepath" a structural fact (a totally separate file/connection)
-/// rather than a convention someone could violate by calling
-/// `resolve_shared_store_path()` for a new call site later — the exact
-/// failure mode `docs/specs/CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17.md`
-/// items 2-4 already document as having bitten this codebase more than
-/// once.
+/// A dedicated store, not a subset of the shared store reached by a new always-global path, is
+/// deliberate: "can this table ever be reached from a per-channel-isolated codepath" becomes a
+/// structural fact (a separate file and connection) rather than a convention a later call site
+/// of `resolve_shared_store_path()` could violate, the failure mode
+/// docs/specs/CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17.md items 2-4 record as having
+/// bitten more than once.
 ///
 /// Idempotent — safe to call on every startup.
 pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
@@ -931,36 +813,24 @@ pub fn run_saga_log_migrations(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// `PRAGMA user_version` tripwire (AUDIT_SQLITE_SYSTEMS §8.5).
+/// `PRAGMA user_version` tripwire (AUDIT_SQLITE_SYSTEMS §8.5): compare the file's
+/// `user_version` to `current` and refuse to open a database written by a NEWER binary. This is
+/// the forward-compat safety lock of the channels design (`SPEC_DATA_CHANNELS_2026_05_24.md`
+/// §3.3): within a channel several released AgentMux versions share one data dir, and the lock
+/// keeps an older binary from writing into a schema a newer one laid down (as Chrome's
+/// profile-too-new check and Postgres's catalog version mismatch do).
 ///
-/// Compare the file's `user_version` to `current` and refuse to open
-/// the database if it was written by a NEWER binary.
+/// **Must be called BEFORE `run_*_schema` / `run_*_migrations`.** Those include mutating steps
+/// (legacy-table renames, seed inserts, `CREATE TABLE` for tables the older binary doesn't
+/// have), so checking afterwards would let a downgraded binary alter a newer database before
+/// the error fires, breaking the "reject without touching disk" invariant (#1029).
 ///
-/// This is the forward-compat **safety lock** from the channels design
-/// (`SPEC_DATA_CHANNELS_2026_05_24.md` §3.3). Within a channel,
-/// multiple released AgentMux versions share one data dir; the lock
-/// keeps an older binary from writing into a schema laid down by a
-/// newer binary. Same discipline as Chrome's profile-too-new check
-/// and Postgres's catalog version mismatch.
+/// Read-only: only a `PRAGMA user_version` query. [`stamp_version`] does the corresponding
+/// write AFTER migrations succeed.
 ///
-/// **Must be called BEFORE `run_*_schema` / `run_*_migrations`.** The
-/// `run_*` functions include mutating steps (legacy-table renames,
-/// seed inserts, `CREATE TABLE` for new tables the older binary
-/// doesn't have), so if we ran them first and only then checked the
-/// version, a downgraded binary could still alter a newer database
-/// before the error fires — breaking the "reject without touching
-/// disk" invariant the lock is meant to guarantee (codex P1 on PR
-/// #1029).
-///
-/// Read-only: only `PRAGMA user_version` query, no writes.
-/// [`stamp_version`] does the corresponding write AFTER migrations
-/// complete successfully.
-///
-/// Recovery for the user when this returns `SchemaTooNew`: upgrade
-/// AgentMux to a version ≥ `found`, or set
-/// `AGENTMUX_CHANNEL=<other>` to land in a different channel dir.
-/// The data on disk is preserved either way — this function never
-/// modifies the database on the rejected path.
+/// On `SchemaTooNew` the user upgrades AgentMux to a version ≥ `found`, or sets
+/// `AGENTMUX_CHANNEL=<other>` to land in a different channel dir; the data on disk is preserved
+/// either way, since this function never modifies the database on the rejected path.
 pub fn check_schema_compat(
     conn: &Connection,
     current: i64,

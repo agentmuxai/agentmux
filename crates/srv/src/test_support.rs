@@ -75,6 +75,24 @@ pub(crate) struct CoreParts {
     pub(crate) filestore: std::sync::Arc<crate::backend::storage::filestore::FileStore>,
     pub(crate) event_bus: std::sync::Arc<crate::backend::eventbus::EventBus>,
     pub(crate) broker: std::sync::Arc<crate::backend::mps::Broker>,
+    /// The reducer's state, empty: what `dispatch` runs commands against.
+    pub(crate) srv_state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+}
+
+#[cfg(test)]
+impl CoreParts {
+    /// Run a command through the reducer and persist what it emitted to the store, as a handler does:
+    /// how a core test makes a workspace, a tab or a pane the way the app does.
+    pub(crate) async fn dispatch_apply(&self, cmd: agentmux_common::ipc::Command) -> Vec<agentmux_common::ipc::Event> {
+        let events = {
+            let mut state = self.srv_state.lock().await;
+            crate::reducer::update(&mut state, cmd, &crate::reducer::Ctx::new(None))
+        };
+        for event in &events {
+            crate::persist_subscriber::apply_event_to_mstore(event, &self.mstore).unwrap();
+        }
+        events
+    }
 }
 
 #[cfg(test)]
@@ -93,7 +111,8 @@ pub(crate) fn core_parts() -> CoreParts {
     let broker = Arc::new(crate::backend::mps::Broker::new());
     // Bootstrap initial data
     crate::backend::wcore::ensure_initial_data(&mstore).unwrap();
-    CoreParts { mstore, filestore, event_bus, broker }
+    let srv_state = Arc::new(tokio::sync::Mutex::new(crate::state::State::default()));
+    CoreParts { mstore, filestore, event_bus, broker, srv_state }
 }
 
 /// The fake App Server test binary (`tests/fixtures/fake_app_server.rs`),

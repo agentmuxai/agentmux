@@ -1577,43 +1577,31 @@ export class SwarmViewModel {
         this.armCountdownTimer(rowKey);
     }
 
-    /** Arm/clear countdowns against current subagent/dispatch state — called
-     *  after loadSubagents()/loadDispatches() settle, same timing as
-     *  pruneRetiredRowKeys(). In scope: agentToolRows/workflowRows only,
-     *  per the spec's own "out of scope: shellRows/cronRows" note.
+    /**
+     * Arm/clear countdowns against current subagent/dispatch state, called after
+     * loadSubagents()/loadDispatches() settle (same timing as pruneRetiredRowKeys()). In scope:
+     * agentToolRows/workflowRows only (the spec's "out of scope: shellRows/cronRows").
      *
-     *  Critically, "agentToolRows" here means `buildDispatchBuckets()`'s
-     *  actual `agentToolRows` output (solo + orphaned-workflow-member
-     *  subagents) — NOT the raw, unfiltered `subagentsAtom()` list, which
-     *  also contains every NORMAL (non-orphaned) member of a still-tracked
-     *  Workflow dispatch. Those never get their own `SubagentRow` (SPEC §7
-     *  — a Workflow dispatch this large can't hold thousands of members'
-     *  rows, hence `WorkflowDispatchRow`'s aggregate-only display). Arming
-     *  a countdown per completed member of, say, a 1,030-member workflow
-     *  (a real scale documented elsewhere in this file) would reintroduce
-     *  exactly the per-member `setTimeout`/state-entry cost this design
-     *  otherwise avoids — AND permanently hide a member that later surfaces
-     *  through the `orphanedWorkflowMembers` fallback (a stale/failed
-     *  `ListDispatches` call): `retireRow` would already have marked its
-     *  `subagentRowKey` retired against its (unchanged, since it already
-     *  completed) `last_event_at`, so `filterRetired` suppresses it forever
-     *  the moment it needs that exact fallback to stay visible during the
-     *  lag (reagentx P1 on #2440, second pass). Reusing
-     *  `buildDispatchBuckets` directly — rather than re-deriving its
-     *  solo/orphaned logic here — keeps this arming scope byte-for-byte in
-     *  sync with what actually renders, including if that logic changes.
+     * "agentToolRows" means `buildDispatchBuckets()`'s actual `agentToolRows` output (solo +
+     * orphaned-workflow-member subagents), NOT the raw `subagentsAtom()` list, which also holds
+     * every NORMAL member of a still-tracked Workflow dispatch. Those never get their own
+     * `SubagentRow` (SPEC §7: a dispatch that large can't hold thousands of member rows, hence
+     * `WorkflowDispatchRow`'s aggregate-only display). Arming a countdown per completed member of,
+     * say, a 1,030-member workflow would bring back the per-member `setTimeout`/state-entry cost
+     * this design avoids, AND permanently hide a member that later surfaces through the
+     * `orphanedWorkflowMembers` fallback (a stale or failed `ListDispatches`): `retireRow` would
+     * already have retired its `subagentRowKey` against its unchanged `last_event_at`, so
+     * `filterRetired` would suppress it forever just when it needs the fallback to stay visible
+     * (#2440). Reusing `buildDispatchBuckets` rather than re-deriving its solo/orphaned logic keeps
+     * the arming scope in sync with what renders.
      *
-     *  A subagent's `status === "completed"` is exactly
-     *  `subagentDisplayStatus()`'s (swarm-view.tsx) `"idle"` case regardless
-     *  of parent status — `"active"`/`"abandoned"` never map to `"idle"` —
-     *  so checking it directly here arms the same set that function's
-     *  `"idle"` would, without duplicating its parent-status branching or
-     *  importing across the model/view boundary. A `"completed"` Workflow
-     *  dispatch is this bucket's equivalent terminal state. Neither bucket
-     *  has a distinct dispatch-level "failed" status to exclude beyond
-     *  what's already excluded by only matching `"completed"` — an
-     *  `"abandoned"` subagent (interrupted) is never `"completed"`, so it's
-     *  already outside `liveTerminal` without a separate check.
+     * A subagent's `status === "completed"` is exactly `subagentDisplayStatus()`'s (swarm-view.tsx)
+     * `"idle"` case regardless of parent status (`"active"` / `"abandoned"` never map to `"idle"`),
+     * so checking it directly arms the same set without duplicating that function's parent-status
+     * branching or importing across the model/view boundary. A `"completed"` Workflow dispatch is
+     * the bucket's equivalent terminal state. Neither bucket has a distinct dispatch-level "failed"
+     * status to exclude, and an `"abandoned"` (interrupted) subagent is never `"completed"`, so it
+     * is already outside `liveTerminal`.
      */
     private reconcileCountdowns(): void {
         const dispatches = this.dispatchesAtom();
@@ -1638,20 +1626,16 @@ export class SwarmViewModel {
         }
     }
 
-    /** Every row's toggle. `rowKey` must be a per-ROW-unique identity, NOT
-     *  necessarily the row's `dispatch_id` — a `WorkflowDispatchRow`'s own
-     *  `dispatch_id` is always 1:1 with its row, but an Agent Tool row's
-     *  `dispatch_id` is NOT: an orphaned workflow member (falling back into
-     *  the Agent Tool bucket while `ListDispatches` is stale/lagging) shares
-     *  its real `dispatch_id` with every sibling member still waiting on
-     *  the same lag. Callers rendering a single-subagent row must pass a
-     *  key derived from something per-row-unique instead (e.g.
-     *  `agent:${sub.agent_id}`) — see `getDispatchDetail`'s doc comment.
-     *  Tears down the cached DispatchDetail (and its WS subscriptions) on
-     *  collapse, so a row a user opened once and moved on from doesn't keep
-     *  a live subscription forever. Unified in
-     *  SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4 (was split
-     *  into toggleSubagentExpanded/toggleDispatchExpanded). */
+    /**
+     * Every row's toggle. `rowKey` must be a per-ROW-unique identity, not necessarily the row's
+     * `dispatch_id`: a `WorkflowDispatchRow`'s `dispatch_id` is 1:1 with its row, but an Agent Tool
+     * row's is not, because an orphaned workflow member (falling back into the Agent Tool bucket
+     * while `ListDispatches` lags) shares its real `dispatch_id` with every sibling still waiting
+     * on the same lag. A single-subagent row must pass a per-row-unique key (e.g.
+     * `agent:${sub.agent_id}`; see `getDispatchDetail`). Tears down the cached DispatchDetail (and
+     * its WS subscriptions) on collapse, so a row opened once doesn't keep a live subscription
+     * forever (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4).
+     */
     toggleDispatchExpanded(rowKey: string): void {
         const wasExpanded = this.isExpanded(rowKey);
         this.toggleExpanded(rowKey);
@@ -1662,24 +1646,20 @@ export class SwarmViewModel {
     }
 
     /**
-     * `rowKey`: cache identity for THIS row — must be unique per row (see
-     * `toggleDispatchExpanded`'s doc comment for why this can't just be
-     * `dispatchId` for an Agent Tool row). Two sibling rows sharing one
-     * `dispatchId` but caching under distinct `rowKey`s previously each
-     * subscribed to the SAME live `dispatch:activity` broadcast unfiltered,
-     * so each would render every OTHER sibling's events too — fixed by
-     * `dispatchId`: the real dispatch_id to subscribe to for live
-     * `dispatch:activity` events (may legitimately be shared across sibling
-     * rows — `createDispatchDetail` itself filters live events down to
-     * `backfillAgentId` when one is given, so this is safe even then).
+     * `rowKey`: cache identity for THIS row, unique per row (see `toggleDispatchExpanded` for why
+     * it can't be `dispatchId` for an Agent Tool row). Two sibling rows sharing a `dispatchId` but
+     * cached under distinct `rowKey`s used to subscribe to the same live `dispatch:activity`
+     * broadcast unfiltered, so each rendered every other sibling's events too.
      *
-     * `backfillAgentId`: pass the row's own single `ActiveSubagent.agent_id`
-     * whenever the caller is rendering exactly one subagent's row (an Agent
-     * Tool row, including an orphaned workflow member) — NOT just when
-     * `dispatchId` happens to start with `"solo:"`, which silently dropped
-     * an orphaned member's `GetHistory` backfill (reagent P1 on #2232).
-     * Omit it for a genuine `WorkflowDispatchRow`, which represents many
-     * members and has no one agent to backfill or filter to.
+     * `dispatchId`: the real dispatch_id to subscribe to for live `dispatch:activity` events; it
+     * may be shared across sibling rows, since `createDispatchDetail` filters live events to
+     * `backfillAgentId` when one is given.
+     *
+     * `backfillAgentId`: pass the row's own single `ActiveSubagent.agent_id` whenever the caller
+     * renders exactly one subagent's row (an Agent Tool row, including an orphaned workflow
+     * member), not just when `dispatchId` starts with `"solo:"`, which dropped an orphaned member's
+     * `GetHistory` backfill (#2232). Omit it for a genuine `WorkflowDispatchRow`, which represents
+     * many members and has no one agent to backfill or filter to.
      */
     getDispatchDetail(rowKey: string, dispatchId: string, backfillAgentId?: string): DispatchDetail {
         let detail = this.dispatchDetailCache.get(rowKey);
@@ -1704,14 +1684,12 @@ export class SwarmViewModel {
             new Map(blockIds.map((id) => [id, prev.get(id) ?? ("idle" as const)]))
         );
 
-        // Prune pushed progress for blocks that are gone, mirroring the
-        // backend watcher's own per-sweep `retain` (reagent P2 on PR #2952).
-        // `agent:progress` is push-only, so without this the Map keeps an
-        // entry for every block that ever reported — unbounded across a long
-        // session with many ephemeral panes. This is the right place rather
-        // than the `block_pruned` event: the block-list refresh is the general
-        // case, and it's where the statuses Map above is already rebuilt from
-        // the same authoritative list.
+        // Prune pushed progress for blocks that are gone, mirroring the backend watcher's per-sweep
+        // `retain` (#2952). `agent:progress` is push-only, so the Map would keep an entry for every
+        // block that ever reported, unbounded over a long session of ephemeral panes. The
+        // block-list refresh is the right place rather than the `block_pruned` event: it is the
+        // general case, and the statuses Map above is already rebuilt from the same authoritative
+        // list.
         const live = new Set(blockIds);
         this.setProgress((prev) => {
             if (![...prev.keys()].some((id) => !live.has(id))) return prev;
@@ -1752,23 +1730,19 @@ export class SwarmViewModel {
         const parentIds = subagents.map((s) => s.parent_block_id).filter(Boolean);
         const allBlockIds = [...new Set([...blockIds, ...parentIds])];
 
-        // Collected from the WorkflowDispatch rows actually produced below,
-        // not derived from the raw dispatch list, so stabilizeGroupIdentity's
-        // cache only ever retains keys for dispatches actually present this
-        // pass — same "harmless either way, but this is the precise set"
-        // rationale the pre-two-bucket design used for NameGroup keys.
+        // Collected from the WorkflowDispatch rows actually produced below, not derived from the
+        // raw dispatch list, so stabilizeGroupIdentity's cache retains keys only for dispatches
+        // present this pass (harmless either way, but this is the precise set).
         const liveGroupKeys = new Set<string>();
         const retired = this.retiredRowKeysAtom();
         const nodes = allBlockIds.flatMap((blockId) => {
             const blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
-            // isLoading distinguishes "this oref hasn't resolved yet" from
-            // "this oref resolved to nothing" — both read as block == null,
-            // but only the latter means the id is genuinely phantom.
-            // getMuxObjectLoadingAtom returns `null` while loading, `false`
-            // once GetObject has resolved either way — found, or a definitive
-            // "not found" (mos.ts's `startFetch`; any other fetch error leaves
-            // it `null`).
+            // isLoading distinguishes "this oref hasn't resolved yet" from "resolved to nothing":
+            // both read as block == null, but only the latter means the id is genuinely phantom.
+            // getMuxObjectLoadingAtom returns `null` while loading and `false` once GetObject has
+            // resolved either way, found or a definitive "not found" (mos.ts's `startFetch`; any
+            // other fetch error leaves it `null`).
             const isLoading = MOS.getMuxObjectLoadingAtom(`block:${blockId}`)() !== false;
             if (!hasRenderableBlock(block, isLoading)) return [];
             const agentName =
