@@ -9,8 +9,13 @@
  * without a bind (every agent, new agents).
  */
 
+// reactive-coverage: one-shot the installed application changes only when the person installs or removes it outside AgentMux, so its version is read when Memory opens and again whenever the skill list changes (an install, an edit, a delete)
+
 import { createResource, createSignal, onCleanup, For, Show, type Accessor, type JSX, type Setter } from "solid-js";
+import type { AppSkillHere } from "@/types/rpc/AppSkillHere";
 import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { Markdown } from "@/app/element/markdown";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
@@ -20,7 +25,7 @@ import { SkillImportPanel, SkillImportResult } from "./skill-import";
 import { SkillMatrix } from "./skill-matrix";
 import { AppFilterRow, SkillAppDetail } from "./skill-app";
 import { SkillBrowse } from "./skill-browse";
-import { appPlatform, appStatus, filterSkills, firstRoute, type AppFilter } from "./skill-app-model";
+import { appHereFact, appPlatform, appStatus, filterSkills, firstRoute, type AppFilter } from "./skill-app-model";
 import "./skill-import.scss";
 import "../agent/components/AgentPrimitiveModal.scss";
 import { Button, Card, CardGrid, Pill, Switch, TextArea, TextInput } from "@/app/element/ui";
@@ -94,6 +99,8 @@ interface ManagerState {
     setShowBrowse: Setter<boolean>;
     filter: Accessor<AppFilter>;
     setFilter: Setter<AppFilter>;
+    /** Where each installed App skill's application is on this computer, by skill id; empty until srv answers. */
+    appHere: Accessor<Record<string, AppSkillHere>>;
 }
 
 function createManagerState(): ManagerState {
@@ -106,7 +113,13 @@ function createManagerState(): ManagerState {
     const [showMatrix, setShowMatrix] = createSignal(false);
     const [showBrowse, setShowBrowse] = createSignal(false);
     const [filter, setFilter] = createSignal<AppFilter>("all");
-    return { model, importing, setImporting, showMatrix, setShowMatrix, showBrowse, setShowBrowse, filter, setFilter };
+    // Read again when the catalog changes (an install, an edit, a delete); a lookup that fails leaves the cards as they were.
+    const [here] = createResource(
+        () => model.revisionAtom(),
+        async () => Object.fromEntries((await RpcApi.AppSkillsHereCommand(TabRpcClient, {})).items.map((h) => [h.skill_id, h])),
+    );
+    const appHere = () => (here.error ? {} : (here() ?? {}));
+    return { model, importing, setImporting, showMatrix, setShowMatrix, showBrowse, setShowBrowse, filter, setFilter, appHere };
 }
 
 const inDetail = (m: ManagerState) =>
@@ -152,10 +165,13 @@ function reachFacts(skill: SkillCatalogItem): string[] {
 
 function SkillCard(p: { m: ManagerState; skill: SkillCatalogItem }): JSX.Element {
     const app = () => p.skill.app;
-    const status = () => (app() ? appStatus(app()!, appPlatform()) : null);
+    const here = () => p.m.appHere()[p.skill.id];
+    const status = () => (app() ? appStatus(app()!, appPlatform(), here()) : null);
+    const hereFact = () => (app() ? appHereFact(app()!, here(), false) : null);
     // An App skill's card leads with how well it is tested and its route; where it came from is in its detail.
     const facts = () => [
         ...(app() ? [<span>{status()!.label}</span>] : []),
+        ...(hereFact() ? [<span>{hereFact()}</span>] : []),
         ...(app() && firstRoute(app()!) ? [<span>route: {firstRoute(app()!)}</span>] : []),
         ...reachFacts(p.skill).map((fact) => <span>{fact}</span>),
         ...(p.skill.source && !app() ? [<span>Imported from {p.skill.source.location}</span>] : []),
@@ -283,7 +299,7 @@ function SkillReadOnly(p: { m: ManagerState; skill: Accessor<SkillCatalogItem> }
                     ? "Used by every agent"
                     : `Used by ${skill().bound_count} ${skill().bound_count === 1 ? "agent" : "agents"}`}
             </p>
-            <Show when={skill().app}>{(app) => <SkillAppDetail skillId={skill().id} app={app()} />}</Show>
+            <Show when={skill().app}>{(app) => <SkillAppDetail skillId={skill().id} app={app()} here={p.m.appHere()[skill().id]} />}</Show>
             <SkillReach model={model} skill={skill()} />
             <SkillBoundAgents model={model} skill={skill()} />
             <Show when={skill().source}>

@@ -98,6 +98,30 @@ fn the_pinned_key_is_a_real_key() {
 }
 
 #[test]
+fn an_installed_skill_is_looked_up_by_its_own_executables_for_this_platform_only() {
+    use crate::backend::app_version::Found;
+    let b = signed_with_script(1, "1.0.0");
+    let c = catalog();
+    c.skill_upsert_unique_global(&skill_row(&b)).unwrap();
+    install_checked(&c, "x", &b, 1).unwrap();
+    let installed = c.skill_app_map().unwrap();
+
+    let asked = std::cell::RefCell::new(Vec::new());
+    let here = installed_here(&installed, "windows", |names| {
+        asked.borrow_mut().push(names.to_vec());
+        Some(Found { version: Some("16.0.18227".into()) })
+    });
+    assert_eq!(here, vec![AppSkillHere { skill_id: "x".into(), found: true, version: Some("16.0.18227".into()) }]);
+    assert_eq!(*asked.borrow(), vec![vec!["WINWORD.EXE".to_string()]], "the skill's own executable names");
+
+    assert_eq!(installed_here(&installed, "windows", |_| Some(Found { version: None }))[0], AppSkillHere { skill_id: "x".into(), found: true, version: None });
+    assert_eq!(installed_here(&installed, "windows", |_| None)[0], AppSkillHere { skill_id: "x".into(), found: false, version: None });
+    let never = |_: &[String]| -> Option<Found> { panic!("a skill with no executable for this platform is not looked up") };
+    assert!(installed_here(&installed, "macos", never).is_empty());
+    assert!(installed_here(&BTreeMap::new(), "windows", never).is_empty());
+}
+
+#[test]
 fn browse_adds_the_version_of_the_app_found_here_by_the_executables_listed_for_this_platform() {
     use crate::backend::app_version::Found;
     let b = signed_with_script(1, "1.0.0");

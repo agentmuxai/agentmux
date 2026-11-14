@@ -15,6 +15,7 @@ const rpc = vi.hoisted(() => ({
     SkillCatalogAppFileCommand: vi.fn(),
     SkillCatalogAppScriptCommand: vi.fn(),
     SkillCatalogExportCommand: vi.fn(),
+    AppSkillsHereCommand: vi.fn(),
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -233,6 +234,52 @@ describe("Signature and script approval", () => {
     it("shows the signature line in the detail", async () => {
         const detail = await openDetail();
         expect(within(detail).getByText(/Signed by acme · AAAA-BBBB/)).toBeTruthy();
+    });
+
+    it("shows the app on this computer on the card and in the detail, and flags drift from the version the last pass was run on", async () => {
+        const answer = (here: Record<string, unknown>) => rpc.AppSkillsHereCommand.mockResolvedValue({ items: [{ skill_id: "k1", ...here }] });
+        const card = async () => (await screen.findByText("acme-word")).closest(".skill-card")?.textContent ?? "";
+
+        // A build of the tested version: still verified, with the version it found.
+        answer({ found: true, version: "16.0.18227.20162" });
+        render(() => <SkillManager />);
+        await vi.waitFor(async () => expect(await card()).toContain("installed 16.0.18227.20162"));
+        expect(await card()).toContain("verified 16.0");
+        expect(await card()).not.toContain("tested on 16.0, installed");
+        fireEvent.click(await screen.findByText("acme-word"));
+        let detail = await screen.findByRole("region", { name: "App skill" });
+        expect(detail.textContent).toContain("Word on this computer: version 16.0.18227.20162.");
+        expect(detail.textContent).not.toContain("check before trusting it");
+        cleanup();
+
+        // Another version: drift, said on the card and in the detail.
+        answer({ found: true, version: "17.1.2" });
+        render(() => <SkillManager />);
+        await vi.waitFor(async () => expect(await card()).toContain("tested on 16.0, installed 17.1.2"));
+        fireEvent.click(await screen.findByText("acme-word"));
+        detail = await screen.findByRole("region", { name: "App skill" });
+        expect(detail.textContent).toContain("Word on this computer: version 17.1.2. It was last tested on another version: check before trusting it.");
+        cleanup();
+
+        // Not found, found without a version: said, and the test status is left as it was.
+        answer({ found: false, version: null });
+        render(() => <SkillManager />);
+        await vi.waitFor(async () => expect(await card()).toContain("not found here"));
+        expect(await card()).toContain("verified 16.0");
+        cleanup();
+        answer({ found: true, version: null });
+        render(() => <SkillManager />);
+        await vi.waitFor(async () => expect(await card()).toContain("found here"));
+        expect(await card()).toContain("verified 16.0");
+    });
+
+    it("a lookup that fails leaves the card as it was", async () => {
+        rpc.AppSkillsHereCommand.mockRejectedValue(new Error("boom"));
+        render(() => <SkillManager />);
+        const text = (await screen.findByText("acme-word")).closest(".skill-card")?.textContent ?? "";
+        expect(text).toContain("verified 16.0");
+        expect(text).not.toContain("installed");
+        expect(text).not.toContain("not found here");
     });
 
     it("says it is from the AgentMux catalog, in the detail and in the script's review, only when it is exactly what the catalog listed", async () => {
