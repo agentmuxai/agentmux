@@ -9,6 +9,7 @@ import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-r
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { focusManager } from "@/app/store/focusManager";
+import { takePaneOpenTiming } from "@/app/store/pane-open-marks";
 import type { BrowserViewModel } from "./browser-model";
 import { afterDiscard } from "./hibernation";
 import { paneRectBatcher } from "./pane-rect-batcher";
@@ -294,7 +295,7 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
         ownerToken = token;
         nativePaneOwners.set(model.blockId, token);
         try {
-            diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel}`);
+            diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel}${takePaneOpenTiming(model.blockId)}`);
             await getApi().browserPanes.create(
                 model.blockId,
                 url || "about:blank",
