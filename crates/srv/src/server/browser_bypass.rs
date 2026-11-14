@@ -505,11 +505,11 @@ pub(crate) fn is_payment(what: &str) -> bool {
 /// Words that, in front of "Pay", make a name a command ("Confirm and Pay", "Click to Pay", "Place Pay")
 /// and not a brand's.
 /// Keep in step with `NOT_BRAND` in `click_label.js`.
-const NOT_BRAND: [&str; 41] = [
+const NOT_BRAND: [&str; 45] = [
     "pay", "buy", "confirm", "complete", "place", "make", "click", "tap", "press", "finish", "submit", "send", "and", "to",
     "with", "now", "then", "or", "the", "a", "your", "proceed", "continue", "review", "order", "checkout", "check", "out",
     "purchase", "subscribe", "donate", "go", "use", "sign", "agree", "accept", "transfer", "delete", "remove", "securely",
-    "express",
+    "express", "unsubscribe", "publish", "post", "up",
 ];
 
 /// A description that opens with one of these tells the person to pay.
@@ -552,9 +552,17 @@ pub(crate) fn click_is_payment(what: &str, description: &str, submits: bool) -> 
         .join(" ");
     if name.is_empty() || is_brand_pay(&name) {
         let first = description.split(|c: char| !c.is_ascii_alphanumeric()).find(|w| !w.is_empty()).unwrap_or("");
-        return COMMANDS.contains(&first.to_ascii_lowercase().as_str()) && is_payment(description);
+        return (COMMANDS.contains(&first.to_ascii_lowercase().as_str()) && is_payment(description))
+            || outside_of(what).as_deref().is_some_and(is_payment);
     }
-    is_payment(&name) || is_payment(description)
+    // What `what` says outside the name (a frame from a payment site) is judged as it always was.
+    is_payment(&name) || is_payment(description) || outside_of(what).as_deref().is_some_and(is_payment)
+}
+
+/// What `what` says around the quoted name: ` (in a frame from https://pay.example.com)`.
+fn outside_of(what: &str) -> Option<String> {
+    let (a, b) = (what.find('"')?, what.rfind('"')?);
+    (b > a).then(|| format!("{} {}", &what[..a], &what[b + 1..]))
 }
 
 /// The sites a grant on `pane` binds to: the origin of the page it shows
@@ -845,6 +853,12 @@ mod tests {
             ("Click \"Confirm and Pay\"", ""),
             ("Click \"Click to Pay\"", ""),
             ("Click \"Pay with Apple Pay\"", ""),
+            ("Click \"Kakao Pay\" (in a frame from https://pay.example.com)", ""),
+            ("Click \"Confirm\" (in a frame from https://checkout.example.com)", ""),
+            ("Click \"Unsubscribe Apple Pay\"", ""),
+            ("Click \"Post Kakao Pay\"", ""),
+            ("Click \"Publish Kakao Pay\"", ""),
+            ("Click \"Kakao Pay $20\"", ""),
             ("Click \"Pay-as-you-go: Pay now\"", ""),
             ("Click \"Pay-per-use - Pay $20\"", ""),
             ("Click \"Pay-as-you-go\"", "Pay now"),

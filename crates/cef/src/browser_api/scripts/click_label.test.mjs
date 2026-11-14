@@ -147,9 +147,16 @@ describe("clickLabel: a brand or plan with Pay in its name is not a payment (#47
         expect(asks("Pay-per-use plan")).toBe(false);
     });
 
-    it("a row whose accessible name or description carries the brand does not commit", () => {
+    it("a row whose accessible name is the brand does not commit; a description with a pay word does", () => {
         expect(asks("Kakao Pay", button, "Kakao Pay")).toBe(false);
-        expect(clickLabel(null, "", "Kakao Pay\nShow Kakao Pay to customers in Korea", button).committing).toBe(false);
+        expect(clickLabel(null, "", "Kakao Pay\nShow it to customers in Korea", button).committing).toBe(false);
+        expect(clickLabel(null, "", "Kakao Pay\nPay $20.00 now", button).committing).toBe(true);
+    });
+
+    it("a brand with a verb or more text after it still commits", () => {
+        for (const name of ["Kakao Pay $20", "Unsubscribe Apple Pay", "Post Kakao Pay", "Publish Kakao Pay", "Sign Up Apple Pay", "Kakao Pay now"]) {
+            expect(asks(name), name).toBe(true);
+        }
     });
 
     it("a command still commits", () => {

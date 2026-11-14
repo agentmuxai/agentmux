@@ -48,13 +48,18 @@ function clickLabel(ariaLabel, labelledBy, text, el, axName) {
   const LINK_WORDS = 6;
   const VERBS = "submit|send|pay|buy|purchase|order|checkout|check out|delete|remove|publish|post|confirm|sign up|sign|agree|accept|transfer|unsubscribe";
   const clean = (s) => String(s || "").replace(/\s+/g, " ").trim();
-  // A name a brand or plan puts "Pay" in: not a word that commits. A brand is one to three capitalised words
-  // in front of "Pay", none of which is a verb or a joiner (in any case: "Confirm And Pay", "CLICK TO PAY").
-  // Any doubt leaves the name as it is, and it asks. Keep in step with is_brand_pay in browser_bypass.rs.
-  const NOT_BRAND = new Set("pay buy confirm complete place make click tap press finish submit send and to with now then or the a your proceed continue review order checkout check out purchase subscribe donate go use sign agree accept transfer delete remove securely express".split(" "));
-  const BRAND_PAY = /(?:[A-Z][\w.&'-]*\s+){1,3}P(?:ay|AY)\b(?![\w-])/g;
-  const brandOnly = (m) => (m.split(/\s+/).slice(0, -1).some((w) => NOT_BRAND.has(w.toLowerCase())) ? m : " ");
-  const plain = (s) => String(s || "").replace(/\bpay-(?:as|per)-[\w-]+/gi, " ").replace(BRAND_PAY, brandOnly);
+  // A plan's name ("Pay-as-you-go", "Pay-per-use") is not a word that commits: it is taken out of a name or a
+  // description before they are judged. A brand ("Kakao Pay") is not one either, but only when it is the whole
+  // name: one to three capitalised words and a last "Pay", none of the words a verb or a joiner (in any case:
+  // "Confirm And Pay", "CLICK TO PAY"). Any doubt leaves the name as it is, and it asks. Keep in step with
+  // is_brand_pay in browser_bypass.rs, whose list holds every word of VERBS.
+  const NOT_BRAND = new Set("pay buy confirm complete place make click tap press finish submit send and to with now then or the a your proceed continue review order checkout check out purchase subscribe unsubscribe donate go use sign up agree accept transfer delete remove publish post securely express".split(" "));
+  const BRAND_PAY = /^(?:[A-Z][\w.&'-]*\s+){1,3}P(?:ay|AY)$/;
+  const planOnly = (s) => String(s || "").replace(/\bpay-(?:as|per)-[\w-]+/gi, " ");
+  const plain = (s) => {
+    const name = clean(planOnly(s)).replace(/[.!]+$/, "");
+    return BRAND_PAY.test(name) && !name.split(" ").slice(0, -1).some((w) => NOT_BRAND.has(w.toLowerCase())) ? "" : planOnly(s);
+  };
   const lines = String(text || "").split("\n").map(clean).filter(Boolean);
   const named = clean(ariaLabel) || clean(labelledBy);
   const fullName = named || lines[0] || "";
@@ -88,7 +93,7 @@ function clickLabel(ariaLabel, labelledBy, text, el, axName) {
     // word counts with its -s, -es, -d or -ed. A name is a command, and a tab
     // named "Orders" or "Posts" doesn't commit.
     const inName = found(plain(fullName), anywhere);
-    const inRest = inName ? "" : found(plain(rest), new RegExp("\\b((?:" + VERBS + ")(?:s|es|d|ed)?)\\b", "i"));
+    const inRest = inName ? "" : found(planOnly(rest), new RegExp("\\b((?:" + VERBS + ")(?:s|es|d|ed)?)\\b", "i"));
     if (inName || inRest) {
       committing = true;
       why = inName ? "its name says \"" + inName + "\"" : "its text says \"" + inRest + "\"";
