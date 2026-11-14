@@ -13,6 +13,8 @@
 //! can still both see room for one more for an instant; the limits are for
 //! the providers' rate limits and for tidiness, not safety.
 
+mod events;
+
 use std::sync::Arc;
 
 use agentmux_common::time::now_ms;

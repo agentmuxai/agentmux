@@ -51,10 +51,13 @@ pub const TRIGGER_SCHEDULE: &str = "schedule";
 pub const TRIGGER_CATCH_UP: &str = "catch_up";
 pub const TRIGGER_MANUAL: &str = "manual";
 pub const TRIGGER_RETRY: &str = "retry";
+pub const TRIGGER_EVENT: &str = "event";
 
 /// `triggered_by` for runs the scheduler starts, and for the operator.
 pub const BY_SCHEDULER: &str = "scheduler";
 pub const BY_OPERATOR: &str = "operator";
+/// `triggered_by` for an event's run is this, then `:` and the source (`event:app_event`).
+pub const BY_EVENT: &str = "event";
 
 /// A cron job's catch-up policy (§5.2): what an undelivered fire leaves.
 pub const CATCH_UP_SKIP: &str = "skip";
@@ -176,6 +179,9 @@ pub struct RunLedger {
     /// job id. A pending row doesn't occupy a place in the ledger, so until the
     /// delivery lands these count as running.
     pending_claims: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    /// What an event's run reads as `{{trigger.*}}`, held from the fire until the run starts: run id to input
+    /// (`admission/events.rs`). Never written to the ledger.
+    event_inputs: std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>,
     interrupt: std::sync::OnceLock<BlockHook>,
     worker_stop: std::sync::OnceLock<BlockHook>,
     /// How to ask another channel's instance to stop a run it follows (`remote.rs`).
@@ -215,6 +221,7 @@ impl RunLedger {
             jobs: std::sync::OnceLock::new(),
             admission: std::sync::Mutex::new(()),
             pending_claims: std::sync::Mutex::default(),
+            event_inputs: std::sync::Mutex::default(),
             interrupt: std::sync::OnceLock::new(),
             worker_stop: std::sync::OnceLock::new(),
             remote_stop: std::sync::OnceLock::new(),
