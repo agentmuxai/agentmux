@@ -20,6 +20,14 @@ pub fn alert_key(job_id: &str) -> String {
 /// The `[AgentMux]` note to the owning leader. The job's name is quoted: an
 /// agent named it.
 pub fn note_text(job_name: &str, refusal: Refusal) -> String {
+    if refusal == Refusal::Rate {
+        return format!(
+            "[AgentMux] Job \"{}\" skipped events: {}. It isn't paused. The limit is the trigger's max_per_hour, and \
+             a source that sends more than it is stuck or looping.",
+            quote_in_system_note(job_name),
+            refusal.words()
+        );
+    }
     format!(
         "[AgentMux] Job \"{}\" skipped a run: {}. It isn't paused and runs again tomorrow (the day ends at the \
          operator's local midnight). Only the operator raises a cap, in Settings → Jobs.",

@@ -227,3 +227,66 @@ async fn a_waiting_runs_input_outlives_the_event_ids_pruning() {
     assert_eq!(rig.ledger.event_input("held-run"), Some(json!({ "n": 1 })), "an input a delay may still need stays");
     assert_eq!(rig.ledger.event_input("ancient-run"), None, "one older than the longest delay plus the ids' week goes");
 }
+
+/// Finish the run `run_id` so the job's overlap policy lets the next event start.
+fn finish(rig: &Rig, run_id: &str) {
+    rig.ledger.drone_finished(run_id, true, &Default::default(), "");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn events_beyond_the_hourly_limit_are_one_collapsed_row_and_the_first_alerts_once() {
+    let rig = rig();
+    let job = event_job(&rig, "j-rate", |j| j.trigger_event = json!({ "source": "app_event", "filter": {}, "max_per_hour": 2 }));
+    let started = drone_runner(&rig);
+
+    for id in ["e1", "e2"] {
+        let run = rig.sched.fire_event(&job, event(id, json!({}))).await.run_id.expect("within the limit");
+        finish(&rig, &run);
+    }
+    assert!(rig.ledger.cap_alerts().is_empty());
+    for id in ["e3", "e4", "e5"] {
+        let over = rig.sched.fire_event(&job, event(id, json!({}))).await;
+        assert_eq!((over.run_id, over.outcome.is_none()), (None, true), "{id} is over the limit");
+    }
+    assert_eq!(started.lock().unwrap().len(), 2, "only two runs started");
+    let skips: Vec<_> = rig.runs("j-rate").into_iter().filter(|r| r.state == state::SKIPPED).map(|r| (r.reason, r.skip_count)).collect();
+    assert_eq!(skips, [(reason::RATE.to_string(), 3)], "the three are one row");
+    assert_eq!(rig.ledger.cap_alerts(), [("j-rate".to_string(), "rate".to_string())], "the first one alerted, once");
+
+    // A repeat of a refused event is still nothing, and refused events do not count: a flood does not extend itself.
+    let again = rig.sched.fire_event(&job, event("e3", json!({}))).await;
+    assert_eq!(again.run_id, None);
+    assert_eq!(rig.store.job_events_since("j-rate", 0).unwrap(), 2, "only the admitted events count");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_hourly_limit_frees_as_the_hour_passes_and_skipped_events_do_not_count() {
+    let rig = rig();
+    let job = event_job(&rig, "j-rate2", |j| j.trigger_event = json!({ "source": "app_event", "filter": {}, "max_per_hour": 2 }));
+    let started = drone_runner(&rig);
+
+    let first = rig.sched.fire_event(&job, event("e1", json!({}))).await.run_id.unwrap();
+    // Overlap skips this one: no run, so it is not one of the two.
+    assert_eq!(rig.sched.fire_event(&job, event("e2", json!({}))).await.run_id, None);
+    finish(&rig, &first);
+    let third = rig.sched.fire_event(&job, event("e3", json!({}))).await.run_id.expect("the skipped event did not use the limit");
+    finish(&rig, &third);
+    assert_eq!(rig.sched.fire_event(&job, event("e4", json!({}))).await.run_id, None, "now two have started this hour");
+    assert_eq!(started.lock().unwrap().len(), 2);
+
+    // The hour passes: the runs' events age out of the window.
+    rig.store.conn().lock().unwrap().execute("UPDATE db_job_trigger_events SET at_ms = at_ms - 3700000", []).unwrap();
+    assert!(rig.sched.fire_event(&job, event("e5", json!({}))).await.run_id.is_some(), "free again");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_job_without_a_limit_of_its_own_gets_thirty_an_hour() {
+    let rig = rig();
+    let job = event_job(&rig, "j-rate3", |_| {});
+    drone_runner(&rig);
+    for i in 0..30 {
+        let run = rig.sched.fire_event(&job, event(&format!("e{i}"), json!({}))).await.run_id.expect("within thirty");
+        finish(&rig, &run);
+    }
+    assert_eq!(rig.sched.fire_event(&job, event("e30", json!({}))).await.run_id, None, "the thirty-first is refused");
+}

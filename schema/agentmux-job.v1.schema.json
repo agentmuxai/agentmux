@@ -95,6 +95,13 @@
               "minimum": 0,
               "maximum": 10080,
               "description": "Minutes between the event and the run (at most a week). The run is a scheduled row due at event time plus the delay, so a restart does not lose it. 0 starts it at once."
+            },
+            "max_per_hour": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 30,
+              "description": "The most runs this trigger starts in any hour, so a stuck source or a loop of events cannot run away. The events beyond it are one collapsed skipped row (reason rate), and the first raises the usual alert."
             }
           },
           "required": ["kind", "source"],

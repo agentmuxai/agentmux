@@ -100,6 +100,8 @@ fn an_event_trigger_is_a_source_and_a_plain_filter_on_a_drone_job() {
     assert!(bad(json!({ "kind": "event", "source": "app_event", "filter": many })).contains("at most"));
     assert!(bad(json!({ "kind": "event", "source": "app_event", "delay": MAX_EVENT_DELAY_MINUTES + 1 })).contains("delay is at most"), "a delay is at most a week");
     assert!(bad(json!({ "kind": "event", "source": "app_event", "delay": -1 })).len() > 0, "and never negative");
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "max_per_hour": 0 })).contains("max_per_hour is 1 to"), "a limit of none is not a limit");
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "max_per_hour": MAX_EVENT_RATE_PER_HOUR + 1 })).contains("max_per_hour is 1 to"));
     // Only a drone is handed an event.
     let e = refused(with(example(), "/trigger", json!({ "kind": "event", "source": "app_event" })));
     assert!(e.contains("the action is a drone"), "{e}");
@@ -130,6 +132,14 @@ fn an_event_trigger_survives_the_stored_row() {
     delayed.apply_to(&mut row, &|to| (to.to_string(), String::new()));
     assert_eq!(row.trigger_event, json!({ "source": "app_event", "filter": {}, "delay": 30 }));
     assert_eq!(JobDefinition::from_job(&row).trigger, delayed.trigger);
+    // The hourly limit is stored when it is not the default, and read back as the default when absent.
+    let limited = JobDefinition::parse(&with(example_drone(), "/trigger", json!({ "kind": "event", "source": "app_event", "max_per_hour": 5 })), create()).unwrap();
+    limited.apply_to(&mut row, &|to| (to.to_string(), String::new()));
+    assert_eq!(row.trigger_event, json!({ "source": "app_event", "filter": {}, "max_per_hour": 5 }));
+    assert_eq!(JobDefinition::from_job(&row).trigger, limited.trigger);
+    row.trigger_event = json!({ "source": "app_event", "filter": {} });
+    let Trigger::Event(read) = JobDefinition::from_job(&row).trigger else { panic!("an event trigger") };
+    assert_eq!(read.max_per_hour, DEFAULT_EVENT_RATE_PER_HOUR);
     // Edited to a timer, the event is gone from the row.
     let mut timer = def.clone();
     timer.trigger = Trigger::Every { seconds: 3600 };
