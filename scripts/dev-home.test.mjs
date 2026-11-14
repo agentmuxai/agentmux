@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { banner, chooseHome, shellLines, USE_REAL_HOME } from "./dev-home.mjs";
-import { findInstancePort, pickHome, resolvePort } from "./dev-seed.mjs";
+import { argProblem, findInstancePort, pickHome, resolvePort, USAGE } from "./dev-seed.mjs";
 
 let tmp;
 beforeEach(() => {
@@ -120,6 +120,46 @@ describe("the window dev-seed drives", () => {
         expect(resolvePort(home, undefined, alive(1))).toBe(51234);
         expect(resolvePort(home, 51234, alive(1))).toBe(51234);
         expect(() => resolvePort(home, 9223, alive(1))).toThrow(/port 9223 is not the build running on .* \(that one is on 51234\)/);
+    });
+});
+
+describe("dev-seed's arguments", () => {
+    const seedScript = join(dirname(fileURLToPath(import.meta.url)), "dev-seed.mjs");
+    // Run in an empty folder with no home set: a run that went on to seed would fail on "no dev home".
+    const runSeed = (...args) =>
+        spawnSync(process.execPath, [seedScript, ...args], { cwd: tmp, encoding: "utf8", env: { PATH: process.env.PATH } });
+
+    it("reads -h and --help as a request for the usage, wherever they are", () => {
+        expect(argProblem(["--help"])).toBe("help");
+        expect(argProblem(["-h"])).toBe("help");
+        expect(argProblem(["--agents", "2", "--help"])).toBe("help");
+    });
+
+    it("accepts every option the usage lists, and none for a seed with no arguments", () => {
+        expect(argProblem([])).toBeNull();
+        expect(argProblem(["--port", "9223", "--home", "h", "--agents", "2", "--name", "n", "--script", "s.json", "--no-open"])).toBeNull();
+    });
+
+    it("names an argument it does not know", () => {
+        expect(argProblem(["--agent", "2"])).toBe("unknown option --agent");
+        expect(argProblem(["--no-open", "extra"])).toBe("unknown option extra");
+    });
+
+    it("prints the usage for --help and -h, exits 0, and seeds nothing", () => {
+        for (const flag of ["--help", "-h"]) {
+            const r = runSeed(flag);
+            expect(r.status).toBe(0);
+            expect(r.stdout).toContain(USAGE);
+            expect(r.stderr).toBe("");
+        }
+    });
+
+    it("prints the usage and exits 1 for an unknown option, and seeds nothing", () => {
+        const r = runSeed("--bogus");
+        expect(r.status).toBe(1);
+        expect(r.stderr).toContain("unknown option --bogus");
+        expect(r.stderr).toContain(USAGE);
+        expect(r.stderr).not.toMatch(/no dev home/);
     });
 });
 

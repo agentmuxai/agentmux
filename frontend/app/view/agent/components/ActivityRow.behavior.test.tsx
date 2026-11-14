@@ -45,6 +45,21 @@ vi.mock("@/app/element/tooltip", () => ({
         </div>
     ),
 }));
+vi.mock("@/app/element/ui/CloseButton", () => ({
+    CloseButton: (p: Record<string, any>) => (
+        <span
+            data-stand={`CloseButton:${p.label}`}
+            data-props={JSON.stringify({ size: p.size, class: p.class, tooltip: p.tooltip })}
+            data-cb="onClick"
+            onClick={(e) => {
+                log(`CloseButton:${p.label}.onClick`);
+                const stop = e.stopPropagation.bind(e);
+                e.stopPropagation = () => (log("stopPropagation"), stop());
+                p.onClick(e);
+            }}
+        />
+    ),
+}));
 vi.mock("@/app/element/ui/Button", () => ({
     IconButton: (p: Record<string, any>) => (
         <span
@@ -181,7 +196,7 @@ describe("ActivityRow, pinned", () => {
         look("done");
         setActivity(activity({ status: "error", canStop: false, endedAt: Date.now(), shell: shell("npm run dev", []) }));
         look("failed");
-        press("[data-stand='IconButton:Dismiss']");
+        press("[data-stand='CloseButton:Dismiss']");
         setActivity(activity({ status: "stopped", canStop: false, endedAt: Date.now(), kind: "tool" }));
         look("stopped");
         setActivity(undefined);

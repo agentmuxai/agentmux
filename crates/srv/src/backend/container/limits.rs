@@ -295,7 +295,7 @@ impl ContainerManager {
     /// Puts the limits on an existing container (one made before they existed, or whose setting changed), without
     /// recreating it. A failure is logged and the container is left as it is. `None`: there is no such container (it
     /// takes the limits when it is made); `Some(true)`: it has them now; `Some(false)`: Docker refused the update.
-    pub(crate) async fn limits_apply(&self, container_name: &str, agent: ContainerLimits) -> Option<bool> {
+    pub async fn limits_apply(&self, container_name: &str, agent: ContainerLimits) -> Option<bool> {
         let details = self.inner.docker.inspect_container(container_name, None).await.ok()?;
         let wanted = self.wanted_limits(agent, recommended_min_mb(&details)).await;
         let Some(update) = wanted.update_from(details.host_config.as_ref()) else { return Some(true) };

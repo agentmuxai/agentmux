@@ -827,6 +827,10 @@
             "send": "{}"
         },
         {
+            "command": "jobs.templates.make_drone",
+            "method": "JobsTemplatesMakeDroneCommand"
+        },
+        {
             "command": "jobs.templates.uninstall",
             "method": "JobsTemplatesUninstallCommand"
         },
@@ -1404,6 +1408,11 @@
         {
             "command": "app_skills.catalog.install",
             "method": "AppSkillsCatalogInstallCommand"
+        },
+        {
+            "command": "app_skills.here",
+            "method": "AppSkillsHereCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "skill.catalog.app_file",

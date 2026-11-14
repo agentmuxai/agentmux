@@ -12,8 +12,8 @@
 //! - Controllers dispatch I/O between the user and the process/service
 
 pub mod acp;
-mod acp_prelaunch;
-mod acp_mcp;
+pub mod acp_prelaunch;
+pub mod acp_mcp;
 pub mod agent_lock;
 pub mod app_server;
 pub mod app_server_controller;
@@ -22,16 +22,16 @@ pub mod core;
 pub mod durable_mode;
 pub mod durable_ssh;
 pub mod health;
-mod loop_stop;
+pub mod loop_stop;
 pub mod msp;
-mod msp_protocol;
-mod msp_session;
+pub mod msp_protocol;
+pub mod msp_session;
 pub mod persistent;
-mod persistent_resume;
+pub mod persistent_resume;
 pub mod pidregistry;
-mod prompt_record;
-mod resync_lock;
-mod resync_steps;
+pub mod prompt_record;
+pub mod resync_lock;
+pub mod resync_steps;
 pub mod process_tree;
 pub mod session_agent;
 pub mod session_recovery;
@@ -353,6 +353,12 @@ pub trait Controller: Send + Sync {
     /// Send input (terminal data, signal, or resize) to the controller.
     /// `seq` is the per-TermViewModel monotonic counter; `None` means fire-and-forget (no ordering).
     fn send_input(&self, input: BlockInputUnion, seq: Option<u64>) -> Result<(), String>;
+
+    /// End the turn in progress the way the harness itself is asked to, leaving its process and session up. The default is
+    /// the Stop button's: `send_input(SIGINT)`, which kills the process (the session resumes at the next message).
+    fn interrupt_turn(&self) -> Result<(), String> {
+        self.send_input(BlockInputUnion::signal("SIGINT"), None)
+    }
 
     /// Get the controller type (e.g., "shell", "cmd").
     fn controller_type(&self) -> &str;

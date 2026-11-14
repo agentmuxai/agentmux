@@ -599,6 +599,7 @@ fn create_one(
     let first = if req.hold == Some(true) { work_state::HELD } else { work_state::OPEN };
     let body = if after.is_empty() { String::new() } else { after_words(store, after) };
     record(state, &item.id, OPERATOR, OPERATOR, "created", "", first, &body);
+    crate::server::task_flow_notes::note(state, &item.id, crate::backend::task_flow::TaskFlowKind::Filed, OPERATOR, &item.target_agent);
     Ok((item.id, num))
 }
 

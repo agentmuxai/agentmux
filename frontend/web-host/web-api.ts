@@ -200,6 +200,27 @@ function identityAndEnvApi(platform: NodeJS.Platform) {
     return {
         // The proxy in front of srv adds the key; the page never holds it.
         getAuthKey: () => "",
+        // The tab's session, set by srv's sign-in page after the person confirmed it in the terminal.
+        // `sessionStorage` is per tab and per origin (port included); a hosted page has none.
+        getSessionToken: () => {
+            try {
+                return window.sessionStorage.getItem("amx-session") ?? undefined;
+            } catch {
+                return undefined;
+            }
+        },
+        signOutThisBrowser: async () => {
+            const token = window.sessionStorage.getItem("amx-session") ?? "";
+            // The cookie goes with the request; srv ends this session only and tells the browser to drop it.
+            const resp = await fetch("/auth/signout", { method: "POST", headers: { "X-AM-Session": token }, credentials: "same-origin" });
+            if (!resp.ok) throw new Error("this browser's sign-in was not ended: srv did not accept the request");
+            try {
+                window.sessionStorage.removeItem("amx-session");
+            } catch {
+                // The session is already ended on srv's side; the token is no use without it.
+            }
+            window.location.replace("/auth/enter");
+        },
         reloadWindow: () => window.location.reload(),
         getIsDev: () => false,
         getCursorPoint: () => lastPointer,

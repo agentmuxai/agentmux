@@ -12,6 +12,9 @@
 // this file must still compile on those platforms.
 
 mod app;
+mod dev_home_check;
+#[cfg(test)]
+mod tls_test_init;
 mod background_audit;
 mod start_hidden;
 mod browser_api;
@@ -201,6 +204,7 @@ mod launcher_parent_tests {
 /// `null_mut()` on all other platforms / sandbox-off builds.
 pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     agentmux_common::secret_env::stash_startup_secrets(); // first: no child inherits them
+    agentmux_common::tls_provider::install_ring_provider(); // reqwest 0.13 builds no client without it
     // Internal self-probe mode (Linux userns-sandbox detection) — must be
     // the very first check in this function, before anything else: a
     // probe-mode process does nothing but this one syscall and exits, so
@@ -222,6 +226,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // it behind an "Application Error" dialog. Must be the first statement —
     // set before anything can fault.
     suppress_os_crash_dialogs();
+    dev_home_check::refuse_hand_started_dev_host(launcher_is_genuine_parent());
 
     // Set the DLL search path so CEF's runtime LoadLibrary calls (chrome_elf,
     // libEGL, libGLESv2, d3dcompiler_47, …) resolve against the directory that

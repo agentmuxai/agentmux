@@ -40,12 +40,10 @@ export type { ActiveSubagent } from "@/app/agent-model/subagent-types";
 import type { ActiveSubagent } from "@/app/agent-model/subagent-types";
 
 /**
- * Mirrors the backend's `ShellSummary` (`shell_node.rs`) — one currently-
- * RUNNING background shell the agent kicked off via the Shell MCP tool.
- * Fetched via `shell.ListActive` (unfiltered, like `ActiveSubagent` above);
- * `buildTree()` groups by `block_id` client-side. Exited shells never
- * appear here — Phase 1's scope is "what's happening now," not history.
- * See SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20.
+ * Mirrors the backend's `ShellSummary` (`shell_node.rs`): one RUNNING background shell the agent
+ * started via the Shell MCP tool, from `shell.ListActive` (unfiltered, like `ActiveSubagent`);
+ * `buildTree()` groups by `block_id`. Exited shells never appear: Phase 1 shows what is happening
+ * now, not history (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20).
  */
 export interface ActiveShell {
     shell_id: string;
@@ -80,10 +78,9 @@ export interface ActiveCron {
 }
 
 /**
- * Mirrors the backend's `AgentDispatch` (one per Agent-tool-or-Workflow-tool
- * call). Only Workflow-kind dispatches get their own tree row
- * (`WorkflowDispatch`, below) — a Solo-kind dispatch's one member renders as
- * a plain `ActiveSubagent` row directly, no wrapper (SPEC §5/§7).
+ * Mirrors the backend's `AgentDispatch` (one per Agent-tool or Workflow-tool call). Only
+ * Workflow-kind dispatches get their own tree row (`WorkflowDispatch`); a Solo dispatch's one
+ * member renders as a plain `ActiveSubagent` row, no wrapper (SPEC §5/§7).
  */
 export interface AgentDispatch {
     dispatch_id: string;
@@ -93,25 +90,22 @@ export interface AgentDispatch {
     session_id: string;
     member_count: number;
     members_done: number;
-    /** `"abandoned"` (DispatchStatus::Abandoned, Rust) added
-     *  SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2 —
-     *  every member is Completed|Abandoned and at least one is Abandoned
-     *  (the parent block's turn ended before this dispatch finished). Both
-     *  `"completed"` and `"abandoned"` are terminal for UI purposes — see
-     *  `WorkflowDispatch.status`'s derivation below, which folds both into
-     *  `"retired"`. */
+    /**
+     * `"abandoned"` (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2): every
+     * member is Completed|Abandoned and at least one Abandoned (the parent block's turn ended
+     * first). Both `"completed"` and `"abandoned"` are terminal: `WorkflowDispatch.status` folds
+     * them into `"retired"`.
+     */
     status: "running" | "completed" | "abandoned";
     last_event_at: number;
-    /** For a Workflow-kind dispatch: a concise Haiku-generated name, resolved
-     *  EAGERLY (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A)
-     *  the first time its first member is observed live — not on-click like
-     *  `ActiveSubagent.display_name`. `null` until resolved.
+    /**
+     * A Workflow-kind dispatch's concise Haiku-generated name, resolved EAGERLY the first time its
+     * first member is observed live (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A),
+     * not on click like `ActiveSubagent.display_name`; `null` until resolved.
      *
-     *  For a Solo-kind dispatch: mirrors that one member's own
-     *  `display_name` directly (`subagent_watcher/query.rs`'s `solo_dispatch()`) —
-     *  there's no separate dispatch-level naming call for Solo, so this is
-     *  `null` until that member's `display_name` itself resolves, same
-     *  timing as `ActiveSubagent.display_name`, not always `null`. */
+     * A Solo-kind dispatch mirrors its one member's `display_name` (`subagent_watcher/query.rs`'s
+     * `solo_dispatch()`), so it is `null` until that resolves.
+     */
     dispatch_name: string | null;
 }
 
@@ -146,32 +140,28 @@ export function subagentToolDetail(name: string, input: unknown): string {
 }
 
 /**
- * One row for a Workflow-kind `AgentDispatch` — SPEC §7: never one row per
- * member, regardless of member count (a single workflow run can spawn
- * hundreds to low-thousands of members; see
- * docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md, which found
- * 1,030+ in one run). Deliberately does NOT carry the member list — a
- * dispatch this large can't hold its members' event histories in the tree
- * atom without reintroducing the same unbounded-volume problem this
- * redesign exists to fix. Expanding this row shows a live concatenated
- * activity feed instead (`createDispatchDetail`), not nested member rows.
+ * One row for a Workflow-kind `AgentDispatch` (SPEC §7): never one row per member, however many
+ * (one run spawned 1,030+; docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md). It does NOT
+ * carry the member list: a dispatch this large can't hold its members' event histories in the tree
+ * atom without reintroducing the unbounded volume that retro found. Expanding the row shows a live
+ * concatenated activity feed (`createDispatchDetail`), not nested member rows.
  */
 export interface WorkflowDispatch {
     kind: "workflowDispatch";
     dispatchId: string;
-    /** Prefers the backend's eagerly-resolved `AgentDispatch.dispatch_name`
-     *  (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A) —
-     *  falls back to a member's `slug`, then the raw `dispatchId`, only for
-     *  the brief window before the eager Haiku call resolves (or if it
-     *  never does — see that spec's naming-failure fallback notes). */
+    /**
+     * Prefers the backend's eagerly-resolved `AgentDispatch.dispatch_name`
+     * (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A); falls back to a member's
+     * `slug`, then the raw `dispatchId`, for the window before the eager Haiku call resolves (or if
+     * it never does).
+     */
     name: string;
     memberCount: number;
     membersDone: number;
-    /** "active" if any member is still active; "retired" once every member
-     *  has completed OR been abandoned. Derived from AgentDispatch.status
-     *  ("running" | "completed" | "abandoned") — both non-"running" values
-     *  fold into "retired" here, different vocabulary but same meaning as
-     *  the rest of this file's group rows. */
+    /**
+     * "active" if any member is still active; "retired" once every member has completed or been
+     * abandoned (both non-"running" `AgentDispatch.status` values fold into it).
+     */
     status: "active" | "retired";
     lastEventAt: number;
 }
@@ -187,40 +177,44 @@ export interface AgentTreeNode {
     line: SwarmLine;
     contextTokens: number | null;
     agentStatus: "running" | "idle";
-    /** One row per Agent-tool (solo) dispatch — always a flat list, never
-     *  grouped/collapsed by shared name (SPEC_SWARM_DISPATCH_NAMING_AND_
-     *  ROW_MODEL_2026_07_19 §2, superseding the `NameGroup` slug-fallback
-     *  approach from PR #2226: eager per-dispatch naming means there's no
-     *  more "many rows share one uninformative label" problem to collapse
-     *  away). Sorted by most recent activity. */
+    /**
+     * One row per Agent-tool (solo) dispatch: always a flat list, never grouped by shared name
+     * (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §2, superseding #2226's `NameGroup`:
+     * eager per-dispatch naming removed the "many rows share one label" problem). Sorted by most
+     * recent activity.
+     */
     agentToolRows: ActiveSubagent[];
-    /** One row per Workflow-tool dispatch, always its own row regardless of
-     *  member count (SPEC §7, unchanged from the pre-existing design).
-     *  Sorted by most recent activity. */
+    /**
+     * One row per Workflow-tool dispatch, always its own row (SPEC §7). Sorted by most recent
+     * activity.
+     */
     workflowRows: WorkflowDispatch[];
-    /** One row per currently-RUNNING background shell this agent started
-     *  (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1). Sorted
-     *  newest-first, same convention as the other two buckets. */
+    /**
+     * One row per currently-RUNNING background shell this agent started
+     * (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1), newest first.
+     */
     shellRows: ActiveShell[];
-    /** One row per cron job this agent created (SPEC_SWARM_LONG_RUNNING_
-     *  PROCESS_ROWS_2026_07_20 Phase 2), enabled or paused. Sorted
-     *  newest-first by `last_fired` (nulls — never fired — last). */
+    /**
+     * One row per cron job this agent created (same spec, Phase 2), enabled or paused; newest
+     * `last_fired` first, never-fired last.
+     */
     cronRows: ActiveCron[];
-    /** The agent's current todo checklist, in the agent's own order (NOT
-     *  sorted here — the order it wrote them in is the order it means).
-     *  Pushed by the backend's `agent:progress` sweep rather than read from
-     *  block meta, because the frontend only holds tool calls for panes that
-     *  are currently mounted and the Swarm's whole point is the ones that
-     *  aren't. */
+    /**
+     * The agent's current todo checklist in its own order (NOT sorted: the order it wrote is the
+     * order it means). Pushed by the backend's `agent:progress` sweep, not read from block meta,
+     * because the frontend holds tool calls only for mounted panes and the Swarm exists for the
+     * ones that aren't.
+     */
     todoRows: TodoItem[];
     /** How many rows `MAX_TODOS` dropped backend-side, so the tree can say
      *  "+N more" instead of showing a partial list as if it were whole. */
     todosTruncated: number;
-    /** True when the backend first saw this block mid-stream, so item-at-a-time
-     *  (`TaskCreate`) entries from before that point were never observed.
-     *  Deliberately NOT folded into `todosTruncated`: that is a cap we chose
-     *  and can count, this is history we could not see and cannot. Rendering
-     *  them the same way would claim a precision we do not have. */
+    /**
+     * True when the backend first saw this block mid-stream, so item-at-a-time (`TaskCreate`)
+     * entries from before were never observed. Not folded into `todosTruncated`: that is a cap we
+     * chose and can count, this is history we could not see, and rendering them alike would claim a
+     * precision we lack.
+     */
     todosPartial: boolean;
     /** The tool this agent is running right now, or null between tools.
      *  Complements `activitySummary`: that is a Haiku paraphrase of the last
@@ -236,9 +230,10 @@ export interface AgentTreeNode {
 /** One checklist entry, as published by the backend progress watcher. */
 export interface TodoItem {
     text: string;
-    /** `pending` | `in_progress` | `completed`, or whatever a provider wrote —
-     *  passed through verbatim rather than coerced, so an unrecognized status
-     *  renders as itself instead of silently becoming "pending". */
+    /**
+     * `pending` | `in_progress` | `completed`, or whatever a provider wrote: passed through
+     * verbatim so an unrecognized status renders as itself, not as "pending".
+     */
     status: string;
 }
 
@@ -251,11 +246,9 @@ export interface AgentProgress {
 }
 
 /**
- * Build one block's two fixed row buckets from its `AgentDispatch`es
- * (already block-filtered) and raw `SubAgent`s — always exactly these two
- * groupings, never data-driven collapsing by shared name (see
- * `AgentTreeNode.agentToolRows`'s doc comment for why that approach was
- * retired). Each bucket is independently sorted by recency.
+ * Builds one block's two fixed row buckets from its (block-filtered) `AgentDispatch`es and raw
+ * `SubAgent`s: always these two groupings, never data-driven collapsing by shared name (see
+ * `AgentTreeNode.agentToolRows`). Each is sorted by recency.
  */
 export function buildDispatchBuckets(
     dispatches: AgentDispatch[],
@@ -271,9 +264,8 @@ export function buildDispatchBuckets(
                 name: d.dispatch_name || namedMember?.slug || d.dispatch_id,
                 memberCount: d.member_count,
                 membersDone: d.members_done,
-                // Both "completed" and "abandoned" are terminal — an
-                // abandoned dispatch (dead parent, never finished) must not
-                // read as "active" just because it isn't "completed".
+                // Both "completed" and "abandoned" are terminal: an abandoned dispatch (dead
+                // parent, never finished) must not read as "active".
                 status: d.status === "running" ? ("active" as const) : ("retired" as const),
                 lastEventAt: d.last_event_at,
             };
@@ -282,22 +274,14 @@ export function buildDispatchBuckets(
 
     const solo = subagents.filter((s) => s.dispatch_id.startsWith("solo:"));
 
-    // Fallback for a failed/lagging `ListDispatches` call: `loadDispatches()`
-    // swallows RPC errors and leaves `dispatchesAtom` stale (see its call
-    // site), so `dispatches` here can lag or miss entries `subagents` (a
-    // separate fetch) already has. Without this, any workflow-kind subagent
-    // whose dispatch has no matching row in `workflowRows` would vanish from
-    // the tree entirely.
-    //
-    // Grouped into ONE synthesized placeholder `WorkflowDispatch` row per
-    // orphaned `dispatch_id`, appended to `workflowRows` — never spread
-    // individually into `agentToolRows`. Spreading them flat previously
-    // turned a lagging Workflow dispatch's member files into N separate
-    // Agent-Tool rows (up to member_count of them), breaking the "one row
-    // per Workflow-tool call" invariant `WorkflowDispatch`'s own doc comment
-    // establishes, and inflating the visible row count independent of the
-    // naming-collision issue (already fixed, see `subagentDisplayLabel`).
-    // See docs/specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.1.
+    // Fallback for a failed or lagging `ListDispatches`: `loadDispatches()` swallows RPC errors and
+    // leaves `dispatchesAtom` stale, so `dispatches` can miss entries that `subagents` (a separate
+    // fetch) already has, and a workflow-kind subagent with no `workflowRows` entry would vanish
+    // from the tree. Each orphaned `dispatch_id` becomes ONE placeholder `WorkflowDispatch` row
+    // appended to `workflowRows`, never spread into `agentToolRows`: that turned a lagging
+    // dispatch's members into N Agent-Tool rows (up to member_count), breaking the
+    // one-row-per-Workflow-call invariant
+    // (docs/specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.1).
     const workflowDispatchIds = new Set(workflowRows.map((w) => w.dispatchId));
     const orphanedWorkflowMembers = subagents.filter(
         (s) => !s.dispatch_id.startsWith("solo:") && !workflowDispatchIds.has(s.dispatch_id)
@@ -316,9 +300,8 @@ export function buildDispatchBuckets(
             kind: "workflowDispatch" as const,
             dispatchId,
             name: named?.display_name || named?.slug || dispatchId,
-            // Best-effort lower bound — the real member_count isn't known
-            // until ListDispatches catches up; this only reflects the
-            // members ListActive has surfaced so far for this dispatch.
+            // Best-effort lower bound: the real member_count is unknown until ListDispatches
+            // catches up; this counts only the members ListActive has surfaced.
             memberCount: members.length,
             membersDone: members.filter((m) => m.status !== "active").length,
             status: members.some((m) => m.status === "active") ? ("active" as const) : ("retired" as const),
@@ -335,11 +318,9 @@ export function buildDispatchBuckets(
 }
 
 /**
- * Build one block's Shell bucket rows (SPEC_SWARM_LONG_RUNNING_PROCESS_
- * ROWS_2026_07_20 Phase 1) — every currently-running shell whose
- * `block_id` matches, newest-first. Extracted as a pure function (matching
- * `buildDispatchBuckets` above) purely so it's directly unit-testable
- * without instantiating `SwarmViewModel`.
+ * Builds one block's Shell bucket rows (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1):
+ * every running shell with a matching `block_id`, newest first. A pure function, like
+ * `buildDispatchBuckets`, so it is unit-testable without `SwarmViewModel`.
  */
 export function buildShellRows(shells: ActiveShell[], blockId: string | null): ActiveShell[] {
     return shells
@@ -348,11 +329,9 @@ export function buildShellRows(shells: ActiveShell[], blockId: string | null): A
 }
 
 /**
- * Build one block's Cron bucket rows (SPEC_SWARM_LONG_RUNNING_PROCESS_
- * ROWS_2026_07_20 Phase 2) — every cron job whose `block_id` matches,
- * newest-last-fired-first; a job that has never fired sorts last (nulls
- * carry no recency signal). Extracted as a pure function for the same
- * reason as `buildShellRows` — directly unit-testable, no ViewModel needed.
+ * Builds one block's Cron bucket rows (same spec, Phase 2): every cron job with a matching
+ * `block_id`, newest last-fired first; a never-fired job sorts last (no recency signal). Pure, for
+ * the same reason as `buildShellRows`.
  */
 export function buildCronRows(crons: ActiveCron[], blockId: string | null): ActiveCron[] {
     return crons
@@ -360,41 +339,6 @@ export function buildCronRows(crons: ActiveCron[], blockId: string | null): Acti
         .sort((a, b) => (b.last_fired ?? -1) - (a.last_fired ?? -1));
 }
 
-/**
- * Whether a blockId in `buildTree()`'s row list should actually render a
- * row — false only when the id's MOS oref has been definitively resolved
- * to nothing. This is distinct from "the block exists but `agentName`
- * hasn't propagated to its meta yet" (the case `buildTree()`'s own
- * `"Agent"` fallback string is for, unchanged since 2026-06-22) — that's a
- * real, transient loading state on a real block, and from "the fetch for
- * this oref just hasn't resolved yet" (`isLoading`) — `MOS.
- * getMuxObjectAtom` seeds a freshly-tracked oref with `{ value: null,
- * loading: true }` (`mos.ts`'s `createMuxValueObject`) until its async
- * `GetObject` fetch resolves, so a genuinely real, just-spawned block's row
- * would otherwise read identically to a phantom one on the very first
- * `buildTree()` pass —
- * reagentx P1 on #2438, and very plausibly the explanation for the
- * separate "a live-spawned subagent wasn't observed in Swarm" symptom this
- * retro originally left as an open, unconfirmed question. While loading,
- * this returns `true` (render it, same as today's pre-existing behavior —
- * self-corrects once the fetch resolves) rather than guessing either way.
- *
- * A `null`/`undefined` block with `isLoading === false` means the fetch
- * completed and there is genuinely nothing there: most commonly a
- * subagent's `parent_block_id` (added to `buildTree()`'s row-id set as a
- * registration-ordering fallback — see that comment) that never resolved
- * to a fully-registered block, or a pruned block whose subagent record
- * outlived it (`prune_block` is triggered by BlockDeleted/TabDeleted/
- * WorkspaceDeleted; a block whose OWN registration never completed was
- * never "deleted," so nothing prunes it). Rendering a placeholder
- * `"Agent"` row for an id that structurally doesn't exist is worse than
- * not rendering it — indistinguishable from a real agent to the user, and
- * any dispatch grouped under it shows as an empty "No activity yet" row
- * beside it. Extracted as a pure predicate so it's directly unit-testable
- * without instantiating `SwarmViewModel` or mocking MOS, same rationale as
- * `buildShellRows`/`buildCronRows` above.
- * See RETRO_SWARM_PHANTOM_ROWS_AND_STALE_TRACKING_2026_08_06.md.
- */
 /**
  * The context size a Swarm row shows: the agent pane's own validated reading,
  * mirrored to `agent:context` (store/agent-pane-state/context-reading.ts). The
@@ -405,6 +349,24 @@ export function swarmContextTokens(meta: MetaType | null | undefined): number | 
     return contextReadingFromMeta(meta?.["agent:context"])?.tokens ?? null;
 }
 
+/**
+ * Whether a blockId in `buildTree()`'s row list should render a row: false only when its MOS oref
+ * has definitively resolved to nothing. While loading it returns `true` (render, as before;
+ * self-corrects when the fetch resolves) because `MOS.getMuxObjectAtom` seeds a fresh oref with `{
+ * value: null, loading: true }` (`mos.ts`'s `createMuxValueObject`), so a just-spawned real block
+ * would otherwise look like a phantom on the first `buildTree()` pass (#2438; plausibly the cause
+ * of "a live-spawned subagent wasn't observed in Swarm").
+ *
+ * A `null` block with `isLoading === false` means the fetch completed with nothing there: usually a
+ * subagent's `parent_block_id` (added to the row-id set as a registration-ordering fallback) that
+ * never resolved to a registered block, or a pruned block whose subagent record outlived it
+ * (`prune_block` runs on BlockDeleted/TabDeleted/WorkspaceDeleted; a block whose own registration
+ * never completed was never "deleted"). A placeholder `"Agent"` row for such an id is
+ * indistinguishable from a real agent and leaves any grouped dispatch as an empty "No activity yet"
+ * row. Distinct from a real block whose `agentName` hasn't reached its meta yet (`buildTree()`'s
+ * `"Agent"` fallback). Pure, so it is unit-testable without MOS
+ * (RETRO_SWARM_PHANTOM_ROWS_AND_STALE_TRACKING_2026_08_06.md).
+ */
 export function hasRenderableBlock<T>(block: T | null | undefined, isLoading: boolean): boolean {
     if (isLoading) return true;
     return block != null;
@@ -413,15 +375,10 @@ export function hasRenderableBlock<T>(block: T | null | undefined, isLoading: bo
 export type { FleetResultEntry } from "./swarm-fleet-targets";
 
 /**
- * Rows eligible for the bulk "Clear completed" action — every terminal-
- * status (not currently `"active"`) row across every `AgentTreeNode`, as a
- * flat list of `(rowKey, lastEventAt)` pairs ready to hand to `retireRow`.
- * Extracted as a pure function for direct unit-testability, mirroring
- * `buildShellRows`/`buildCronRows` above. A row already retired doesn't
- * need separate exclusion here — `buildTree()` already filters retired
- * rows out of the `AgentTreeNode`s this is called with (`filterRetired`),
- * so nothing eligible for a fresh retire is ever double-counted.
- * See SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3.
+ * Rows eligible for the bulk "Clear completed" action: every terminal-status (not "active") row
+ * across all `AgentTreeNode`s as `(rowKey, lastEventAt)` pairs for `retireRow`. Pure, for unit
+ * tests. Already-retired rows need no exclusion: `buildTree()` filters them out (`filterRetired`)
+ * before this runs (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3).
  */
 export function collectClearableRows(nodes: AgentTreeNode[]): { rowKey: string; lastEventAt: number }[] {
     const result: { rowKey: string; lastEventAt: number }[] = [];
@@ -432,14 +389,10 @@ export function collectClearableRows(nodes: AgentTreeNode[]): { rowKey: string; 
             }
         }
         for (const w of node.workflowRows) {
-            // WorkflowDispatch.status is "active" | "retired" — "retired"
-            // here means "every member completed" (backend-derived), NOT
-            // "the user manually retired this row." Naming collision with
-            // this exact feature, not a bug — see that field's own doc
-            // comment on the WorkflowDispatch interface above.
+            // `WorkflowDispatch.status` "retired" means every member completed (backend-derived),
+            // NOT that the user retired the row: a naming collision with this feature, not a bug.
             if (w.status !== "active") {
-                // workflowRetireSignal, NOT w.lastEventAt — see that
-                // function's doc comment (reagent P1 on PR #2677).
+                // `workflowRetireSignal`, not `w.lastEventAt` (#2677).
                 result.push({ rowKey: w.dispatchId, lastEventAt: workflowRetireSignal(w) });
             }
         }
@@ -448,37 +401,19 @@ export function collectClearableRows(nodes: AgentTreeNode[]): { rowKey: string; 
 }
 
 /**
- * Compute the label `SubagentRow` shows for a subagent, in priority order:
- * `display_name` (Haiku-resolved — as of
- * SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A, resolved
- * EAGERLY at dispatch time for the common case, not just on-click) > `slug`
- * > a short prefix of `agent_id`.
+ * The label `SubagentRow` shows, in priority: `display_name` (Haiku-resolved, eagerly at dispatch
+ * time for the common case; SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A) > `slug` +
+ * a short `agent_id` suffix > the short `agent_id`.
  *
- * `slug` is NOT a per-subagent-unique identifier — it's read straight
- * through from whatever the Claude Code CLI happened to write into the
- * first line of the subagent's own JSONL file (`subagent_watcher/parse.rs`'s
- * `read_jsonl_from_offset`), which in practice is that CLI's own
- * per-session/per-batch codename. A whole Task/Workflow-tool batch of
- * genuinely distinct, unrelated subagents legitimately shares one slug —
- * an expected, non-buggy signature ("one shared slug = one legitimate
- * concurrent spawn"), and one relied on by
- * `buildDispatchBuckets`'s `WorkflowDispatch.name` derivation above as a
- * fallback for the brief window before eager naming resolves.
- *
- * Falling back to a bare `slug` as a ROW LABEL, though, silently assumed
- * the opposite — that it WAS subagent-unique — so every member of such a
- * batch rendered as a visually identical `SubagentRow` until its own
- * `display_name` resolved. Live-reproduced in task #44: 17 structurally
- * distinct `agent_id`s, one shared literal slug, spawned within ~50ms of
- * each other under one parent, rendered as 17 apparently-duplicate rows —
- * not a slug-generation bug or a spawn-dedup bug (all 17 were genuinely
- * separate, correctly-ungrouped subagents; `dispatch_id`/`display_name`
- * grouping never entered the picture since neither had resolved yet).
- * Appending a short, always-unique `agent_id` suffix keeps same-slug
- * siblings visually distinct without claiming a uniqueness `slug` never
- * had — the same `agent_id.substring(0, 7)` disambiguator the now-retired
- * `SubagentDetailPane` used to show as a separate meta chip, for the same
- * reason.
+ * `slug` is NOT unique per subagent: it is read from the first line of the subagent's JSONL
+ * (`subagent_watcher/parse.rs`'s `read_jsonl_from_offset`), the CLI's per-session/per-batch
+ * codename, so a whole Task/Workflow batch of distinct subagents legitimately shares one
+ * (`WorkflowDispatch.name` relies on that as a fallback). A bare `slug` as a row label rendered
+ * every member of such a batch identically until its `display_name` resolved (task #44: 17 distinct
+ * `agent_id`s sharing one slug rendered as 17 apparent duplicates; not a slug or spawn-dedup bug).
+ * The always-unique `agent_id.substring(0, 7)` suffix, the same disambiguator the retired
+ * `SubagentDetailPane` showed as a meta chip, keeps siblings distinct without claiming a uniqueness
+ * `slug` lacks.
  */
 export function subagentDisplayLabel(
     sub: Pick<ActiveSubagent, "display_name" | "slug" | "agent_id">
@@ -504,14 +439,10 @@ function shallowEqualSubagent(a: ActiveSubagent, b: ActiveSubagent): boolean {
 }
 
 /**
- * Merge a freshly-fetched subagent list into the previous one, reusing the
- * OLD object reference for any entry whose fields are unchanged. `ListActive`
- * returns a brand-new JSON-deserialized array on every call — without this,
- * every subagent (not just the one that actually changed) gets a fresh
- * object identity on every spawn/completed refresh, and SolidJS's `<For>`
- * (which diffs list items by reference, not value) tears down and remounts
- * every row in the tree on every refresh, silently collapsing any row a
- * user has expanded.
+ * Merges a freshly-fetched subagent list into the previous one, reusing the OLD object reference
+ * for entries whose fields are unchanged. `ListActive` returns a new array every call; without this
+ * every subagent gets a new identity on each spawn/completed refresh, and SolidJS's `<For>` (which
+ * diffs by reference) remounts every row, collapsing any the user expanded.
  */
 export function mergeSubagentsPreservingIdentity(
     prev: ActiveSubagent[],
@@ -524,9 +455,10 @@ export function mergeSubagentsPreservingIdentity(
     });
 }
 
-/** Content-equality check for a `WorkflowDispatch` wrapper — used by
- *  `stabilizeGroupIdentity` to decide whether to reuse the old object
- *  reference or accept the freshly-built one. */
+/**
+ * Content equality for a `WorkflowDispatch`, used by `stabilizeGroupIdentity` to reuse the old
+ * reference or accept the new one.
+ */
 function shallowEqualWorkflowDispatch(a: WorkflowDispatch, b: WorkflowDispatch): boolean {
     return (
         a.dispatchId === b.dispatchId &&
@@ -538,62 +470,47 @@ function shallowEqualWorkflowDispatch(a: WorkflowDispatch, b: WorkflowDispatch):
     );
 }
 
-/** Cache key for a `WorkflowDispatch` — namespaced (`wf:`) even though only
- *  one kind uses this cache now, kept from the pre-two-bucket design so
- *  `expandedIdsAtom`'s ids stay stable across the change (a `NameGroup`'s
- *  `name:`-namespaced keys no longer exist — see the two-bucket redesign,
- *  SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19). */
+/**
+ * Cache key for a `WorkflowDispatch`: `wf:`-namespaced although only one kind uses the cache now,
+ * so `expandedIdsAtom`'s ids stay stable across the two-bucket redesign
+ * (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19).
+ */
 export function groupCacheKey(child: WorkflowDispatch): string {
     return `wf:${child.dispatchId}`;
 }
 
-/** Row identity for an Agent Tool row — the same `agent:${agent_id}` key
- *  `swarm-view.tsx`'s `SubagentRow` already computes locally for expand-
- *  state/`DispatchActivityFeed` identity (SPEC_SWARM_DISPATCH_NAMING_AND_
- *  ROW_MODEL_2026_07_19 §4, decoupled from `dispatch_id` in the reagent
- *  P1 fix on #2232 — see `getDispatchDetail`'s doc comment). Exported so
- *  `SwarmViewModel`'s retire filter (§ below) and the row's own Retire
- *  button compute the identical key rather than two independently-written
- *  string templates drifting apart. */
+/**
+ * Row identity for an Agent Tool row: the `agent:${agent_id}` key `swarm-view.tsx`'s `SubagentRow`
+ * computes for expand state and `DispatchActivityFeed` identity
+ * (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4, decoupled from `dispatch_id` in #2232;
+ * see `getDispatchDetail`). Exported so the retire filter and the Retire button compute one key,
+ * not two drifting templates.
+ */
 export function subagentRowKey(agentId: string): string {
     return `agent:${agentId}`;
 }
 
 /**
- * The "has anything genuinely new happened" signal `filterRetired` compares
- * for a `WorkflowDispatch` row — `memberCount`/`membersDone`, NOT
- * `lastEventAt`. Reagent P1 on PR #2677: `lastEventAt` is sourced from two
- * structurally different clocks depending on whether the row is currently a
- * synthesized placeholder (`buildDispatchBuckets`'s `orphanedWorkflowMembers`
- * fallback — `Math.max` of each member's OWN event timestamp, i.e. when
- * Claude Code wrote that JSONL line) or the real `AgentDispatch`
- * (`agentmux-srv`'s `refresh_dispatch_info` sets it to `now_millis()`, i.e.
- * when the BACKEND processed that event — always later, by an unpredictable
- * amount, than the event's own timestamp). Those two values essentially
- * never numerically match for the same underlying activity, so retiring a
- * placeholder row under `lastEventAt` and later comparing against the real
- * row's `lastEventAt` looked like "new activity happened" the moment
- * `ListDispatches` caught up — even with zero real change — silently
- * un-retiring the exact row the placeholder fallback and the persisted-
- * retire feature both exist to keep dismissed. `memberCount`/`membersDone`
- * are counts, not timestamps — both the placeholder and the real dispatch
- * derive them from "how many members are known, how many are done," which
- * converges to the same numbers for the same underlying member set
- * regardless of which representation (placeholder or real) is currently
- * rendering it.
+ * The "has anything genuinely new happened" signal `filterRetired` compares for a
+ * `WorkflowDispatch` row: `memberCount` / `membersDone`, not `lastEventAt` (#2677). `lastEventAt`
+ * comes from two different clocks: a synthesized placeholder row (`buildDispatchBuckets`'s
+ * `orphanedWorkflowMembers` fallback) takes the max of each member's own event timestamp (when
+ * Claude Code wrote the JSONL line), while the real `AgentDispatch` (`refresh_dispatch_info` in
+ * agentmux-srv) sets `now_millis()`, when the backend processed the event. The two never match for
+ * the same activity, so a placeholder retired under one clock looked like new activity once
+ * `ListDispatches` caught up, un-retiring exactly the row the fallback and the persisted retire
+ * exist to keep dismissed. The counts converge to the same numbers for the same member set,
+ * whichever representation renders it.
  */
 export function workflowRetireSignal(w: Pick<WorkflowDispatch, "memberCount" | "membersDone">): number {
     return w.membersDone * 1_000_000 + w.memberCount;
 }
 
 /**
- * Drop any row whose key is in `retired` AND whose own `lastEventAt` still
- * matches the snapshot taken at retire time — genuinely new activity for
- * that same key (a later `lastEventAt`) makes the row visible again
- * automatically, without a separate un-retire action
- * (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6). Shared by
- * both `AgentTreeNode` buckets in `buildTree()` — parameterized over `T`
- * rather than duplicated per row type.
+ * Drop any row whose key is in `retired` and whose `lastEventAt` still matches the snapshot taken
+ * at retire time; newer activity for the same key shows the row again with no separate un-retire
+ * action (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6). Shared by both
+ * `AgentTreeNode` buckets in `buildTree()`, generic over `T`.
  */
 export function filterRetired<T>(
     rows: T[],
@@ -605,15 +522,11 @@ export function filterRetired<T>(
 }
 
 /**
- * Drop `retired` entries whose key is no longer in `liveKeys` at all — a row
- * gone from live state entirely (block closed, dispatch pruned — #2233) can
- * never un-retire itself (`filterRetired`'s lastEventAt-snapshot comparison
- * has nothing left to compare against), so keeping its retired entry around
- * is pure unbounded growth for the life of the session (reagent P2 on
- * #2235). A row still genuinely live keeps its entry regardless of this
- * pass — only entries for keys absent from `liveKeys` are dropped. Returns
- * `retired` unchanged (same reference) if nothing was actually dropped, so
- * callers using this in a signal setter don't trigger a no-op update.
+ * Drop `retired` entries whose key is no longer in `liveKeys` at all: a row gone from live state
+ * (block closed, dispatch pruned, #2233) can never un-retire itself, so its entry would only grow
+ * for the life of the session (#2235). A row still live keeps its entry. Returns `retired`
+ * unchanged (same reference) when nothing was dropped, so a signal setter doesn't fire a no-op
+ * update.
  */
 export function pruneRetiredEntries(retired: Map<string, number>, liveKeys: Set<string>): Map<string, number> {
     let changed = false;
@@ -628,17 +541,13 @@ export function pruneRetiredEntries(retired: Map<string, number>, liveKeys: Set<
     return changed ? next : retired;
 }
 
-// ── Retired-row persistence (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3) ──
+// Retired-row persistence (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3).
 //
-// `_retiredRowKeys` used to be purely in-memory/ephemeral (reset on every
-// reload/restart) — the only "dismiss" mechanism for a dead-session row,
-// forgotten the moment the pane remounted, which is a direct contributor to
-// the "48 rows for a couple of real calls" symptom that spec root-causes.
-// Persisted to localStorage, local-machine scope (not synced/cross-device —
-// a deliberate choice, see that spec's §6 decisions), mirroring the
-// existing `toolchain-view.tsx` `loadWidgetPorts`/`saveWidgetPort` pattern
-// (namespaced key, JSON, defensive try/catch — localStorage access can
-// throw in some embedding contexts).
+// `_retiredRowKeys` was in-memory only, so a dismissed dead-session row came back on every reload,
+// a direct contributor to the "48 rows for a couple of real calls" symptom that spec root-causes.
+// It is now persisted to localStorage, local-machine scope (not synced; a deliberate choice, spec
+// §6), following `toolchain-view.tsx`'s `loadWidgetPorts` / `saveWidgetPort`: a namespaced key,
+// JSON, and a defensive try/catch because localStorage can throw in some embedding contexts.
 
 const RETIRED_ROW_KEYS_STORAGE_KEY = "agentmux:swarm-retired-rows";
 
@@ -657,31 +566,22 @@ export function saveRetiredRowKeysToStorage(retired: Map<string, number>): void 
     try {
         localStorage.setItem(RETIRED_ROW_KEYS_STORAGE_KEY, JSON.stringify(Array.from(retired.entries())));
     } catch {
-        // best-effort — a full localStorage or a context where it throws
-        // just means this session's retires don't survive reload, same as
-        // the old always-ephemeral behavior.
+        // best-effort: a full localStorage, or a context where it throws, just means this session's
+        // retires don't survive a reload.
     }
 }
 
 /**
- * Stabilize `WorkflowDispatch` wrapper identity across `buildTree()` calls,
- * mirroring `mergeSubagentsPreservingIdentity` one level up.
- * `buildDispatchBuckets` is a pure function — it unconditionally builds
- * brand-new wrapper objects per call, even when nothing about a given
- * dispatch actually changed. Left alone, that fresh wrapper still remounts
- * `WorkflowDispatchRow` — and everything nested inside an expanded one — on
- * every unrelated tree recompute, which for a large workflow dispatch
- * defeats the very remount fix `expandedIdsAtom`/`getDispatchDetail` were
- * meant to provide.
+ * Stabilize `WorkflowDispatch` wrapper identity across `buildTree()` calls, mirroring
+ * `mergeSubagentsPreservingIdentity` one level up. `buildDispatchBuckets` is pure and builds new
+ * wrapper objects on every call, and a fresh wrapper remounts `WorkflowDispatchRow` (and everything
+ * nested in an expanded one) on every unrelated tree recompute, defeating the remount fix
+ * `expandedIdsAtom` / `getDispatchDetail` provide for a large dispatch.
  *
- * `cache` is a `Map<groupCacheKey, dispatch>` the caller keeps around (one
- * per `SwarmViewModel`), shared and called once per BLOCK within one
- * `buildTree()` pass — this function only reuses-or-replaces into `cache`,
- * it never prunes it (pruning here, scoped to one block's rows, would evict
- * entries a DIFFERENT block's call just wrote). Callers doing a full
- * multi-block tree rebuild should prune the cache once afterward against
- * every key actually produced across the whole tree — see
- * `pruneGroupIdentityCache`.
+ * `cache` is a `Map<groupCacheKey, dispatch>` the caller keeps (one per `SwarmViewModel`), shared
+ * by the once-per-BLOCK calls of one `buildTree()` pass. This only reuses or replaces entries and
+ * never prunes: pruning scoped to one block's rows would evict entries another block's call just
+ * wrote. After a full multi-block rebuild, prune once with `pruneGroupIdentityCache`.
  */
 export function stabilizeGroupIdentity(
     cache: Map<string, WorkflowDispatch>,
@@ -748,16 +648,13 @@ function dispatchActivityEntryKey(e: DispatchActivityEntry): string {
 }
 
 /**
- * Merge freshly-arrived entries into `prev`, de-duplicating by
- * `dispatchActivityEntryKey`, re-sorting by timestamp, and capping to
- * `MAX_DISPATCH_FEED_ENTRIES`. Exported (pure, no signal access) so the
- * de-dup behavior itself is unit-testable — see swarm-model.test.ts.
+ * Merge freshly arrived entries into `prev`: de-duplicate by `dispatchActivityEntryKey`, sort by
+ * timestamp, cap to `MAX_DISPATCH_FEED_ENTRIES`. Exported (pure, no signal access) so the de-dup is
+ * unit-testable (swarm-model.test.ts).
  *
- * De-dup matters because a solo dispatch's `GetHistory` backfill and the
- * live `dispatch:activity` broadcast race independently: an event the
- * backend already flushed into `pending_activity` before `GetHistory`
- * resolves is present in both, so blindly concatenating double-counts it
- * (reagent P1 on #2232).
+ * De-dup matters because a solo dispatch's `GetHistory` backfill and the live `dispatch:activity`
+ * broadcast race: an event the backend flushed into `pending_activity` before `GetHistory` resolves
+ * is in both, so concatenating would double-count it (#2232).
  */
 export function mergeDispatchActivityEntries(
     prev: DispatchActivityEntry[],
@@ -779,37 +676,25 @@ export function mergeDispatchActivityEntries(
 }
 
 /**
- * Expanding a row (`WorkflowDispatchRow`, or an Agent Tool row —
- * SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4) shows this: every
- * member's new events, merged into one chronological, member-tagged stream,
- * fed by the backend's coalesced `dispatch:activity` broadcast
- * (`subagent_watcher/jsonl.rs`'s `flush_pending_dispatch_activity` — as of Phase A
- * this fires for solo `dispatch_id`s too, dual-emitted alongside the
- * existing immediate `subagent:activity`).
+ * Expanding a row (`WorkflowDispatchRow`, or an Agent Tool row,
+ * SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4) shows this: every member's new events
+ * merged into one chronological, member-tagged stream, fed by the backend's coalesced
+ * `dispatch:activity` broadcast (`flush_pending_dispatch_activity` in `subagent_watcher/jsonl.rs`;
+ * solo `dispatch_id`s too since Phase A, dual-emitted with the immediate `subagent:activity`).
  *
- * Live activity is LIVE-ONLY for a Workflow dispatch — SPEC §9.4 leaves the
- * backfill/pagination question for a large multi-hundred-member workflow
- * explicitly open (eagerly fetching + merging thousands of prior events on
- * every expand would reintroduce the exact request/render volume problem
- * this redesign exists to fix), and there is no bulk-backfill RPC for a
- * whole workflow's history today. A single subagent's history, though, is
- * bounded (one member) and an RPC for it already exists — `subagent.
- * GetHistory` — so backfilling it here closes the one real regression this
- * unification would otherwise introduce (the retired `SubagentDetailPane`/
- * `createSubagentDetail` DID backfill via that same RPC).
+ * Live activity is live-only for a Workflow dispatch: SPEC §9.4 leaves backfill for a
+ * multi-hundred-member workflow open (fetching thousands of prior events on every expand would
+ * bring back the request and render volume this redesign removes), and no bulk-backfill RPC exists.
+ * A single subagent's history is bounded and `subagent.GetHistory` exists, so it is backfilled
+ * here, as the retired `SubagentDetailPane` / `createSubagentDetail` did.
  *
- * `backfillAgentId` (optional): scopes BOTH the `GetHistory` backfill AND
- * the live `dispatch:activity` subscription down to this one agent's own
- * events. Callers rendering a single-subagent row (any Agent Tool row,
- * including an orphaned workflow member — see `getDispatchDetail`'s doc
- * comment) should pass the subagent's own `agent_id` explicitly rather than
- * relying on `dispatchId` happening to start with `"solo:"` — that prefix
- * alone doesn't cover the orphaned-member case, AND an orphaned member's
- * `dispatchId` can be shared with sibling rows, so without this filter a
- * single-subagent row would render every sibling's live events too. Falls
- * back to parsing the `"solo:"` prefix when omitted, for callers with no
- * `ActiveSubagent` in scope. Omitted entirely for a genuine multi-member
- * `WorkflowDispatchRow`, which legitimately wants every member's events.
+ * `backfillAgentId` (optional) scopes both the `GetHistory` backfill and the live
+ * `dispatch:activity` subscription to one agent's events. A single-subagent row (any Agent Tool
+ * row, including an orphaned workflow member, see `getDispatchDetail`) should pass the subagent's
+ * own `agent_id` rather than rely on a `"solo:"` `dispatchId` prefix: the prefix doesn't cover an
+ * orphaned member, whose `dispatchId` can be shared with sibling rows and would show their live
+ * events. Without it, the `"solo:"` prefix is parsed, for callers with no `ActiveSubagent`. A
+ * multi-member `WorkflowDispatchRow` omits it and gets every member's events.
  */
 export function createDispatchDetail(dispatchId: string, backfillAgentId?: string): DispatchDetail {
     const [entries, setEntries] = createSignal<DispatchActivityEntry[]>([]);
@@ -851,17 +736,13 @@ export function createDispatchDetail(dispatchId: string, backfillAgentId?: strin
 // ── Status derivation ────────────────────────────────────────────────────
 
 /**
- * `turn_active` is turn-precise (backed by the health monitor wired to the
- * NDJSON stream) but only meaningful for persistent/ACP agent controllers —
- * `is_agent_pane` is the discriminator, since `turn_active: false` and "this
- * controller never populates turn_active" are indistinguishable on the wire
- * (the Rust struct omits `false` fields — `skip_serializing_if = "is_false"`).
- * For `is_agent_pane` panes, trust `turn_active` alone: `shellprocstatus`
- * stays `"running"` for a persistent agent's entire process lifetime,
- * idle-between-turns included, so OR-ing it back in would misrepresent an
- * idle agent as "working" again — the exact bug this field exists to fix.
- * For everything else (shell/PTY panes with no turn concept), fall back to
- * `shellprocstatus` as before. See
+ * `turn_active` is turn-precise (from the health monitor on the NDJSON stream) but only meaningful
+ * for persistent/ACP agent controllers. `is_agent_pane` is the discriminator, because the Rust
+ * struct omits `false` fields (`skip_serializing_if = "is_false"`), so `turn_active: false` and
+ * "never populated" look the same on the wire. For `is_agent_pane` panes trust `turn_active` alone:
+ * `shellprocstatus` stays `"running"` for a persistent agent's whole process lifetime, idle
+ * included, so OR-ing it in would show an idle agent as working. Other panes (shell/PTY, no turn
+ * concept) fall back to `shellprocstatus`. See
  * docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md Finding 1.
  */
 function derivedRunningStatus(
@@ -940,12 +821,10 @@ export class SwarmViewModel {
     selectedBlockIdsAtom: Accessor<Set<string>> = this._selectedBlockIds[0];
     private setSelectedBlockIds: Setter<Set<string>> = this._selectedBlockIds[1];
 
-    // Result of the most recently completed bulk action, rendered as a
-    // per-target success/failure list — never collapsed to a single
-    // aggregate toast (spec §3/§5.4: silent partial failure is the most
-    // commonly-cited fleet-ops UX pitfall). Cleared explicitly by the user
-    // dismissing the panel, not auto-cleared on a timer, so a failure list
-    // can't disappear before it's been read.
+    // Result of the most recent bulk action, shown as a per-target success/failure list and never
+    // collapsed to one aggregate toast (spec §3/§5.4: silent partial failure is the commonly cited
+    // fleet-ops UX pitfall). Cleared only when the user dismisses the panel, so a failure list
+    // can't vanish before it is read.
     private _lastFleetResult = createSignal<FleetResultEntry | null>(
         null,
     );
@@ -962,32 +841,21 @@ export class SwarmViewModel {
     loadingAtom: Accessor<boolean> = this._loading[0];
     private setLoading: Setter<boolean> = this._loading[1];
 
-    // Rows the user has expanded — keyed by dispatchId (WorkflowDispatchRow
-    // and, since the two-bucket redesign, SubagentRow too — both use
-    // toggleDispatchExpanded now). Lives here, not as row-local component
-    // state: `tree()` recomputes on every trackedBlockIds/subagents/
-    // agentStatuses change (agentStatuses updates on every controllerstatus
-    // tick — very frequent during an active turn) and rebuilds fresh
-    // WorkflowDispatch/AgentTreeNode wrapper objects every time regardless
-    // of whether that row's own data changed, so `<For>`'s reference-diffing
-    // remounts row components far more often than "the user actually
-    // changed something." Local expand state would silently collapse on the
-    // very next unrelated status tick; keying by a stable string id here
-    // survives that churn.
+    // Rows the user has expanded, keyed by dispatchId (`WorkflowDispatchRow` and `SubagentRow` both
+    // use toggleDispatchExpanded). Lives here, not in row-local state: `tree()` recomputes on every
+    // trackedBlockIds / subagents / agentStatuses change (controllerstatus ticks are frequent
+    // mid-turn) and rebuilds fresh wrapper objects each time, so `<For>`'s reference diffing
+    // remounts rows far more often than the user changes anything, and local expand state would
+    // collapse on the next unrelated tick. A stable string id here survives that churn.
     private _expandedIds = createSignal<Set<string>>(new Set());
     expandedIdsAtom: Accessor<Set<string>> = this._expandedIds[0];
     private setExpandedIds: Setter<Set<string>> = this._expandedIds[1];
 
-    // Top-level agent rows now share the SAME default (collapsed) and
-    // polarity (absent-means-collapsed) as the group/subagent _expandedIds
-    // set above — this tracks which agent blockIds have been explicitly
-    // expanded, so the empty default set means every agent starts
-    // collapsed. Kept as its own signal rather than folded into
-    // _expandedIds since agent blockIds and subagent/workflow row keys are
-    // different id spaces that could theoretically collide. Same
-    // ViewModel-residency rationale as _expandedIds: tree() rebuilds
-    // wrapper objects on every status tick, so row-local state would
-    // silently reset on unrelated refreshes.
+    // Top-level agent rows share the same default (collapsed) and polarity (absent-means-collapsed)
+    // as `_expandedIds`; this set tracks the agent blockIds explicitly expanded. Its own signal,
+    // not folded into `_expandedIds`, because agent blockIds and subagent/workflow row keys are
+    // different id spaces that could collide. Same residency reason as `_expandedIds`: `tree()`
+    // rebuilds wrappers on every status tick.
     // Other instances' agents, for the sections below this instance's tree
     // (swarm-remote.ts). Null until the first answer; refreshed with the tracked
     // blocks' poll, since the source (the host-global registry) has no event.
@@ -997,17 +865,12 @@ export class SwarmViewModel {
     expandedAgentIdsAtom: Accessor<Set<string>> = this._expandedAgentIds[0];
     private setExpandedAgentIds: Setter<Set<string>> = this._expandedAgentIds[1];
 
-    // Rows the user has retired (dismissed) — client-local (no backend
-    // write), but persisted to localStorage as of
-    // SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3, so a
-    // dismissal survives reload/restart instead of resurfacing every time
-    // (it was ephemeral before). Maps rowKey -> the
-    // row's own lastEventAt AT THE MOMENT it was retired, not just a bare
-    // membership set: this is what lets a row un-retire itself automatically
-    // the moment genuinely new activity arrives for that same key
-    // (buildTree()'s filter only suppresses a row whose CURRENT lastEventAt
-    // still matches the snapshot) instead of requiring an explicit
-    // un-retire action — see SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6.
+    // Rows the user has retired (dismissed): client-local, persisted to localStorage so a dismissal
+    // survives reload (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3). Maps
+    // rowKey -> the row's `lastEventAt` at the moment it was retired, not a bare set: buildTree()
+    // suppresses a row only while its CURRENT `lastEventAt` matches the snapshot, so new activity
+    // un-retires it with no explicit action
+    // (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6).
     private _retiredRowKeys = createSignal<Map<string, number>>(loadRetiredRowKeysFromStorage());
     retiredRowKeysAtom: Accessor<Map<string, number>> = this._retiredRowKeys[0];
     private rawSetRetiredRowKeys: Setter<Map<string, number>> = traced("retired", this._retiredRowKeys);
@@ -1024,48 +887,34 @@ export class SwarmViewModel {
     }
 
     // Auto-linger countdown on a row's first clean-terminal appearance
-    // (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06) — same rowKey space
-    // as _retiredRowKeys above (subagentRowKey(agent_id) or a Workflow
-    // dispatchId). `lastEventAt` is the row's own value at arm/last-reset
-    // time, same snapshot-comparison idea `_retiredRowKeys` already uses so
-    // genuinely new activity un-arms rather than lets a stale countdown
-    // fire. `startedAt` (Date.now()) is what the visible remaining-seconds
-    // display renders against while live. `pausedAt`: null while counting
-    // down; set to Date.now() by pauseCountdown() so the DISPLAYED number
-    // actually freezes (countdownSecondsRemaining computes elapsed against
-    // pausedAt instead of the live clock while it's non-null) — merely
-    // clearing the pending timer, as an earlier draft of this did, stops
-    // the auto-retire from firing but does nothing to the wall-clock-
-    // derived display, which kept counting to and clamping at 0 while
-    // "paused" (reagentx P1 on #2440). resumeCountdown() clears pausedAt
-    // and resets startedAt for a fresh 60s window.
+    // (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06), in the same rowKey space as
+    // `_retiredRowKeys` (`subagentRowKey(agent_id)` or a Workflow dispatchId). `lastEventAt` is the
+    // row's value at arm/last-reset time, the same snapshot comparison `_retiredRowKeys` uses, so
+    // new activity un-arms instead of letting a stale countdown fire. `startedAt` (Date.now()) is
+    // what the visible seconds render against. `pausedAt` is null while counting down;
+    // `pauseCountdown()` sets it so the DISPLAYED number freezes (countdownSecondsRemaining
+    // measures elapsed against `pausedAt` while it is non-null). Clearing only the timer stops the
+    // auto-retire but leaves the wall-clock display counting down and clamping at 0 (#2440).
+    // `resumeCountdown()` clears `pausedAt` and resets `startedAt` for a fresh 60s window.
     private _countdownState = createSignal<Map<string, CountdownEntry>>(new Map());
     countdownStateAtom: Accessor<Map<string, CountdownEntry>> = this._countdownState[0];
     private setCountdownState: Setter<Map<string, CountdownEntry>> = this._countdownState[1];
     private countdownTimers = new Map<string, ReturnType<typeof setTimeout>>();
-    // The visible "Nn s" tick source lives in the view (useTick(1000),
-    // frontend/app/hook/useTick.ts) — it's already the established,
-    // ref-counted, auto-cleanup pattern this exact file uses elsewhere for
-    // relative-time displays, so the ViewModel only needs to own the
-    // start/lastEventAt state, not a second timer driving re-renders.
+    // The visible "Nn s" tick source is in the view (useTick(1000), frontend/app/hook/useTick.ts),
+    // the ref-counted, auto-cleanup pattern this file already uses for relative-time displays, so
+    // the ViewModel owns only the start / lastEventAt state, not a second timer.
 
-    // One DispatchDetail (concatenated activity feed) per currently-expanded
-    // row — Agent Tool (solo) rows and Workflow rows alike, unified in
-    // SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4 (retired the
-    // separate per-subagent SubagentDetail/detailCache this used to be split
-    // from). Created lazily on first expand: if this fetch+subscribe
-    // lifecycle lived inside the row component instead, every incidental
-    // remount (see expandedIds above) would refetch/resubscribe from
-    // scratch — potentially several times a second while a row is open
-    // during an active turn.
+    // One DispatchDetail (concatenated activity feed) per currently expanded row, Agent Tool (solo)
+    // and Workflow alike (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4). Created lazily
+    // on first expand: if the fetch+subscribe lifecycle lived in the row component, every
+    // incidental remount (see expandedIds above) would refetch and resubscribe, potentially several
+    // times a second while a row is open mid-turn.
     private dispatchDetailCache = new Map<string, DispatchDetail>();
 
-    // Persisted across buildTree() calls so stabilizeGroupIdentity can reuse
-    // the same WorkflowDispatch wrapper object when a dispatch's own content
-    // is unchanged — without this, expandedIds/dispatchDetailCache above
-    // still don't help a row NESTED inside an expanded one, since <For>
-    // remounts the whole WorkflowDispatchRow subtree whenever the wrapper's
-    // own reference changes, which is every buildTree() call otherwise.
+    // Persisted across buildTree() calls so stabilizeGroupIdentity can reuse a WorkflowDispatch
+    // wrapper whose content is unchanged. Without it, expandedIds / dispatchDetailCache don't help
+    // a row nested in an expanded one: `<For>` remounts the whole WorkflowDispatchRow subtree
+    // whenever the wrapper's reference changes.
     private groupIdentityCache = new Map<string, WorkflowDispatch>();
 
     private unsubs: (() => void)[] = [];
@@ -1075,14 +924,11 @@ export class SwarmViewModel {
     // see loadTrackedBlocks's use of this (codex P2 on PR #3219).
     private lastSubscribedBlockIds: Set<string> = new Set();
 
-    // Backend broadcasts one subagent:spawned/subagent:completed event per
-    // subagent file (see subagent_watcher/jsonl.rs's process_jsonl_change, and
-    // flush_pending_dispatch_activity for workflow members) — a backfill scan
-    // on pane reopen can fire dozens of these in a burst.
-    // Debounce the resulting loadSubagents() RPC here instead of batching the
-    // broadcasts themselves, since activity/subagent-source.ts (a different
-    // consumer of the same events, driving the ActivityDock) needs one event
-    // per subagent.
+    // The backend broadcasts one subagent:spawned / subagent:completed event per subagent file
+    // (`process_jsonl_change`, and `flush_pending_dispatch_activity` for workflow members, in
+    // `subagent_watcher/jsonl.rs`), and a backfill scan on pane reopen can fire dozens in a burst.
+    // The loadSubagents() RPC is debounced here rather than batching the broadcasts, since
+    // activity/subagent-source.ts (the ActivityDock) needs one event per subagent.
     private loadSubagentsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
     private static readonly LOAD_SUBAGENTS_DEBOUNCE_MS = 150;
 
@@ -1113,15 +959,12 @@ export class SwarmViewModel {
 
         void this.loadAll();
 
-        // Bounded backfill-naming backlog pass (agentmuxai/agentmux#2829) —
-        // fired once, only here, because this constructor only runs when a
-        // human actually opens the Swarm pane (block-registry.ts's "swarm"
-        // view), never from the headless per-agent-pane backfill scan that
-        // runs on every reopen regardless of whether this pane is even
-        // open. Resolves a capped batch of whatever's currently unnamed in
-        // the backfilled/historical backlog server-side; results stream
-        // back through the existing subagent:named / dispatch:updated
-        // handlers below — no response to await here.
+        // Bounded backfill-naming backlog pass (#2829), fired once, here: this constructor runs
+        // only when a human opens the Swarm pane (block-registry.ts's "swarm" view), never from the
+        // headless per-agent-pane backfill scan that runs on every reopen. It resolves a capped
+        // batch of whatever is unnamed in the historical backlog server-side; results stream back
+        // through the subagent:named / dispatch:updated handlers below, so there is no response to
+        // await.
         void callBackendService("subagent", "ResolveUnnamedBacklog", []);
 
         this.listenSubagentEvents();
@@ -1130,10 +973,8 @@ export class SwarmViewModel {
         this.listenTrackedBlockEvents();
         this.startTrackedBlocksPoll();
 
-        // term:osc_title / term:ambient_summary meta changes — force re-read
-        // of block meta. The block atom in MOS updates reactively, so the
-        // memo in the view already reacts; no explicit handler needed here
-        // beyond the MOS atom.
+        // term:osc_title / term:ambient_summary meta changes need no handler here: the block atom
+        // in MOS updates reactively and the view's memo already reacts.
     }
 
     // Subagent and dispatch events: each one reloads the subagent list.
@@ -1150,23 +991,16 @@ export class SwarmViewModel {
         const unsubUpdated = onMuxEvent(WpsEvent.SubagentUpdated, () => this.scheduleLoadSubagents());
         if (unsubUpdated) this.unsubs.push(unsubUpdated);
 
-        // One or more subagents just reconciled active -> abandoned, either
-        // live (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20
-        // Phase A, #2234 — the instant their parent's turn ends) or at
-        // reopen — reload so the row's display status
-        // (subagentDisplayStatus) updates without waiting for an unrelated
-        // event. The backend broadcast for this event lives in #2234, a
-        // separate PR from this one (Phase B) — if this merges first, the
-        // listener is simply inert until #2234 lands (subagent:abandoned
-        // is never emitted yet), not broken; #2234's own PR description
-        // covers the same sequencing from the backend side.
+        // One or more subagents just reconciled active -> abandoned, live
+        // (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 Phase A, #2234: the instant
+        // their parent's turn ends) or at reopen. Reload so the row's display status
+        // (subagentDisplayStatus) updates without waiting for an unrelated event.
         const unsubAbandoned = onMuxEvent(WpsEvent.SubagentAbandoned, () => this.scheduleLoadSubagents());
         if (unsubAbandoned) this.unsubs.push(unsubAbandoned);
 
-        // dispatch:updated fires for both Solo and Workflow kinds (SPEC §5) —
-        // a member count/status change on either warrants the same reload
-        // used for subagent spawn/completion (they're closely correlated:
-        // a workflow member spawning/completing IS a dispatch update).
+        // dispatch:updated fires for Solo and Workflow kinds (SPEC §5); a member count or status
+        // change on either warrants the same reload as a subagent spawn or completion (a workflow
+        // member spawning IS a dispatch update).
         const unsubDispatchUpdated = onMuxEvent(WpsEvent.DispatchUpdated, () => this.scheduleLoadSubagents());
         if (unsubDispatchUpdated) this.unsubs.push(unsubDispatchUpdated);
 
@@ -1254,29 +1088,23 @@ export class SwarmViewModel {
         const unsubReactiveUnreg = onMuxEvent(WpsEvent.AgentReactiveUnregistered, () => void this.loadTrackedBlocks());
         if (unsubReactiveUnreg) this.unsubs.push(unsubReactiveUnreg);
 
-        // Authoritative signal, in addition to the four above: published
-        // directly from blockcontroller::register_controller/delete_controller
-        // — the exact functions that determine what agent.tracked-blocks
-        // returns — rather than from a structurally different, independently-
-        // timed mechanism standing in as a proxy for it. The four events
-        // above are process_tracker's 2s poll-and-diff loop and the separate
-        // `reactive` registration map; neither is guaranteed to fire in step
-        // with a controller actually (de)registering, which is how a
-        // restored agent's controller could register successfully server-side
-        // while this list stayed stale client-side indefinitely. See
-        // docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
+        // Authoritative signal, in addition to the four above: published directly from
+        // blockcontroller::register_controller / delete_controller, the functions that determine
+        // what agent.tracked-blocks returns. The four above are process_tracker's 2s poll-and-diff
+        // and the separate `reactive` registration map, neither guaranteed to fire in step with a
+        // controller (de)registering, which is how a restored agent's controller could register
+        // server-side while this list stayed stale client-side indefinitely
+        // (docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md).
         const unsubTrackedBlocksChanged = onMuxEvent(WpsEvent.ProcessBrokerTrackedBlocksChanged, () => void this.loadTrackedBlocks());
         if (unsubTrackedBlocksChanged) this.unsubs.push(unsubTrackedBlocksChanged);
     }
 
     // The safety-net poll behind those events.
     private startTrackedBlocksPoll(): void {
-        // Bounded self-healing safety net: re-poll regardless of whether any
-        // of the five event-based triggers above actually fired. Deliberately
-        // redundant with them — its only job is to guarantee this list can't
-        // go stale forever from a gap in event wiring not yet discovered, the
-        // same class of bug this poll is itself a response to. Cheap: the RPC
-        // is a HashMap clone + Vec filter server-side, not a per-block probe.
+        // Bounded self-healing safety net: re-poll whether or not any of the five event triggers
+        // above fired, so a gap in event wiring not yet discovered can't leave this list stale
+        // forever. Cheap: the RPC is a HashMap clone + Vec filter server-side, not a per-block
+        // probe.
         this.trackedBlocksPollTimer = setInterval(() => {
             void this.loadTrackedBlocks();
             void this.loadOtherInstances();
@@ -1295,13 +1123,10 @@ export class SwarmViewModel {
                 this.loadBackgroundTasks(),
                 this.loadOtherInstances(),
             ]);
-            // codex P2 on PR #2677: a transient ListActive/ListDispatches
-            // failure is swallowed by its own loader (silent catch below),
-            // leaving the corresponding atom stale/empty — pruning against
-            // that would treat "not loaded yet" as "genuinely gone,"
-            // permanently deleting persisted retire entries for rows that
-            // are actually just not loaded yet. Only prune once BOTH
-            // sources this pass actually reflect real backend state.
+            // A transient ListActive/ListDispatches failure is swallowed by its loader (silent
+            // catch below) and leaves the atom stale or empty; pruning against that would treat
+            // "not loaded yet" as "gone" and permanently delete persisted retire entries (#2677).
+            // Prune only once BOTH sources reflect real backend state.
             if (subagentsOk && dispatchesOk) {
                 this.pruneRetiredRowKeys();
             }
@@ -1398,11 +1223,9 @@ export class SwarmViewModel {
         }, SwarmViewModel.LOAD_BACKGROUND_TASKS_DEBOUNCE_MS);
     };
 
-    // Coalesces a burst of subagent:spawned/subagent:completed/dispatch:
-    // updated events (e.g. a backfill scan on pane reopen, or a large
-    // workflow dispatch spawning many members at once) into a single
-    // reload fired after the burst settles, instead of one RPC pair per
-    // event.
+    // Coalesces a burst of subagent:spawned / subagent:completed / dispatch:updated events (a
+    // backfill scan on reopen, a large workflow dispatch spawning many members) into one reload
+    // after the burst settles, not one RPC pair per event.
     scheduleLoadSubagents = (): void => {
         if (this.loadSubagentsDebounceTimer !== undefined) {
             clearTimeout(this.loadSubagentsDebounceTimer);
@@ -1418,18 +1241,13 @@ export class SwarmViewModel {
                 this.reconcileCountdowns();
             });
 
-            // agentmuxai/agentmux#2829 (Codex P1 on #2830): the constructor's
-            // one-shot ResolveUnnamedBacklog call only covers whatever's
-            // already backfilled by the time the Swarm pane opens. A
-            // backfill that lands on an *already-open* pane (e.g. a
-            // different agent pane reopening while this one is up) reaches
-            // this same debounced handler via subagent:spawned/dispatch:
-            // updated but never re-fires the backlog resolver — those rows
-            // stay raw-slugged until the whole view model is torn down and
-            // rebuilt. Re-firing here too closes that gap. Cheap when
-            // there's nothing new: the backend's naming_triggered claim
-            // makes an already-drained backlog a fast no-op scan, not a
-            // real Haiku spend.
+            // (#2829, #2830) The constructor's one-shot ResolveUnnamedBacklog call covers only what
+            // is backfilled when the Swarm pane opens. A backfill landing on an already-open pane
+            // (another agent pane reopening) reaches this debounced handler via subagent:spawned /
+            // dispatch:updated but never re-fires the resolver, so those rows stay raw-slugged
+            // until the view model is rebuilt. Re-firing here closes that gap and costs little when
+            // nothing is new: the backend's naming_triggered claim makes a drained backlog a fast
+            // no-op scan, not a model call.
             void callBackendService("subagent", "ResolveUnnamedBacklog", []);
         }, SwarmViewModel.LOAD_SUBAGENTS_DEBOUNCE_MS);
     };
@@ -1457,14 +1275,12 @@ export class SwarmViewModel {
         }, SwarmViewModel.LOAD_CRONS_DEBOUNCE_MS);
     };
 
-    /** Drop `_retiredRowKeys` entries for rows no longer present in live
-     *  state at all (block closed, dispatch pruned — #2233) — those can
-     *  never un-retire themselves (`filterRetired`'s lastEventAt-snapshot
-     *  comparison has nothing left to compare against), so keeping them
-     *  around is pure unbounded growth for the life of the session (reagent
-     *  P2 on #2235). Called after `loadSubagents`/`loadDispatches` settle
-     *  (a plain state update, not from inside `buildTree()`'s own read of
-     *  `retiredRowKeysAtom`, which would be a reactive write-during-read). */
+    /**
+     * Drop `_retiredRowKeys` entries for rows no longer in live state (see `pruneRetiredEntries`).
+     * Called after `loadSubagents` / `loadDispatches` settle, as a plain state update and not from
+     * inside `buildTree()`'s read of `retiredRowKeysAtom`, which would be a reactive write during a
+     * read.
+     */
     private pruneRetiredRowKeys(): void {
         const liveKeys = new Set<string>();
         const subagents = this.subagentsAtom();
@@ -1477,15 +1293,12 @@ export class SwarmViewModel {
                 knownWorkflowDispatchIds.add(d.dispatch_id);
             }
         }
-        // codex P2 on PR #2677: a placeholder WorkflowDispatch row
-        // (`buildDispatchBuckets`'s `orphanedWorkflowMembers` fallback,
-        // rendered exactly when `dispatchesAtom` is lagging/missing this
-        // dispatch_id) is retired under its own `dispatch_id`, same as a
-        // real one. Without also treating an orphaned member's dispatch_id
-        // as live here, that key was never in `liveKeys` — the pruning pass
-        // judged it dead on the very next refresh and deleted the
-        // dismissal, resurrecting the row this same lag was already
-        // showing. Mirrors buildDispatchBuckets's own orphan detection.
+        // A placeholder WorkflowDispatch row (`buildDispatchBuckets`'s `orphanedWorkflowMembers`
+        // fallback, rendered when `dispatchesAtom` lags this dispatch_id) is retired under its own
+        // `dispatch_id` like a real one. If an orphaned member's dispatch_id weren't also treated
+        // as live here, it would never be in `liveKeys`, and the next refresh's pruning would
+        // delete the dismissal and resurrect the row (#2677). Mirrors buildDispatchBuckets's orphan
+        // detection.
         for (const s of subagents) {
             if (!s.dispatch_id.startsWith("solo:") && !knownWorkflowDispatchIds.has(s.dispatch_id)) {
                 liveKeys.add(s.dispatch_id);
@@ -1649,35 +1462,26 @@ export class SwarmViewModel {
         this.setLastFleetResult(null);
     }
 
-    /** Retire (dismiss) a row — `rowKey` is `subagentRowKey(agent_id)` for
-     *  an Agent Tool row or the raw `dispatchId` for a `WorkflowDispatchRow`
-     *  (same keys `buildTree()`'s filter checks against). `lastEventAt` is
-     *  the row's own value at the moment of retiring — see `_retiredRowKeys`
-     *  for why this snapshot, not a bare membership set, is what makes a
-     *  row un-retire itself automatically on new activity. Callers should
-     *  only expose this for a terminal-status row (`"idle"`/`"interrupted"`)
-     *  — nothing to dismiss on a row still genuinely `"working"`. Also
-     *  short-circuits any pending auto-linger countdown for this row (a
-     *  manual dismiss mid-countdown shouldn't leave an orphaned timer that
-     *  fires later against an already-retired key — harmless since
-     *  retireRow is idempotent, but pointless to leave running). */
+    /**
+     * Retire (dismiss) a row: `rowKey` is `subagentRowKey(agent_id)` for an Agent Tool row or the
+     * raw `dispatchId` for a `WorkflowDispatchRow` (the keys `buildTree()`'s filter checks).
+     * `lastEventAt` is the row's value at retire time (see `_retiredRowKeys`). Expose it only for a
+     * terminal-status row (`"idle"` / `"interrupted"`). Also clears any pending auto-linger
+     * countdown for the row, so no timer fires later against an already-retired key.
+     */
     retireRow(rowKey: string, lastEventAt: number): void {
         this.setRetiredRowKeys((prev) => withRetiredEntry(prev, rowKey, lastEventAt));
         this.clearCountdown(rowKey);
     }
 
-    /** Bulk "Clear completed" — retires every currently-visible terminal-
-     *  status row across every block in one action, instead of requiring a
-     *  human to click Retire one row at a time on a large historical
-     *  backlog. The persisted-retire fix (`_retiredRowKeys` now surviving
-     *  reload) makes this genuinely useful — a bulk clear that reset itself
-     *  every reload wouldn't have been worth adding.
-     *
-     *  One batched `setRetiredRowKeys` write (and one countdown-clear pass)
-     *  for the whole set, not N calls into `retireRow` — reagent P2 on
-     *  PR #2677: N sequential calls meant N full JSON.stringify +
-     *  localStorage.setItem round-trips for what's conceptually one action.
-     *  See SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3. */
+    /**
+     * Bulk "Clear completed": retires every visible terminal-status row across every block in one
+     * action, instead of one Retire click per row on a large historical backlog (useful since
+     * `_retiredRowKeys` survives reload). One batched `setRetiredRowKeys` write and one
+     * countdown-clear pass for the whole set, not N `retireRow` calls: N calls meant N
+     * JSON.stringify + localStorage.setItem round trips for one action (#2677;
+     * SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3).
+     */
     retireAllCompleted(): void {
         const rows = collectClearableRows(this.buildTree());
         if (rows.length === 0) return;
@@ -1773,43 +1577,31 @@ export class SwarmViewModel {
         this.armCountdownTimer(rowKey);
     }
 
-    /** Arm/clear countdowns against current subagent/dispatch state — called
-     *  after loadSubagents()/loadDispatches() settle, same timing as
-     *  pruneRetiredRowKeys(). In scope: agentToolRows/workflowRows only,
-     *  per the spec's own "out of scope: shellRows/cronRows" note.
+    /**
+     * Arm/clear countdowns against current subagent/dispatch state, called after
+     * loadSubagents()/loadDispatches() settle (same timing as pruneRetiredRowKeys()). In scope:
+     * agentToolRows/workflowRows only (the spec's "out of scope: shellRows/cronRows").
      *
-     *  Critically, "agentToolRows" here means `buildDispatchBuckets()`'s
-     *  actual `agentToolRows` output (solo + orphaned-workflow-member
-     *  subagents) — NOT the raw, unfiltered `subagentsAtom()` list, which
-     *  also contains every NORMAL (non-orphaned) member of a still-tracked
-     *  Workflow dispatch. Those never get their own `SubagentRow` (SPEC §7
-     *  — a Workflow dispatch this large can't hold thousands of members'
-     *  rows, hence `WorkflowDispatchRow`'s aggregate-only display). Arming
-     *  a countdown per completed member of, say, a 1,030-member workflow
-     *  (a real scale documented elsewhere in this file) would reintroduce
-     *  exactly the per-member `setTimeout`/state-entry cost this design
-     *  otherwise avoids — AND permanently hide a member that later surfaces
-     *  through the `orphanedWorkflowMembers` fallback (a stale/failed
-     *  `ListDispatches` call): `retireRow` would already have marked its
-     *  `subagentRowKey` retired against its (unchanged, since it already
-     *  completed) `last_event_at`, so `filterRetired` suppresses it forever
-     *  the moment it needs that exact fallback to stay visible during the
-     *  lag (reagentx P1 on #2440, second pass). Reusing
-     *  `buildDispatchBuckets` directly — rather than re-deriving its
-     *  solo/orphaned logic here — keeps this arming scope byte-for-byte in
-     *  sync with what actually renders, including if that logic changes.
+     * "agentToolRows" means `buildDispatchBuckets()`'s actual `agentToolRows` output (solo +
+     * orphaned-workflow-member subagents), NOT the raw `subagentsAtom()` list, which also holds
+     * every NORMAL member of a still-tracked Workflow dispatch. Those never get their own
+     * `SubagentRow` (SPEC §7: a dispatch that large can't hold thousands of member rows, hence
+     * `WorkflowDispatchRow`'s aggregate-only display). Arming a countdown per completed member of,
+     * say, a 1,030-member workflow would bring back the per-member `setTimeout`/state-entry cost
+     * this design avoids, AND permanently hide a member that later surfaces through the
+     * `orphanedWorkflowMembers` fallback (a stale or failed `ListDispatches`): `retireRow` would
+     * already have retired its `subagentRowKey` against its unchanged `last_event_at`, so
+     * `filterRetired` would suppress it forever just when it needs the fallback to stay visible
+     * (#2440). Reusing `buildDispatchBuckets` rather than re-deriving its solo/orphaned logic keeps
+     * the arming scope in sync with what renders.
      *
-     *  A subagent's `status === "completed"` is exactly
-     *  `subagentDisplayStatus()`'s (swarm-view.tsx) `"idle"` case regardless
-     *  of parent status — `"active"`/`"abandoned"` never map to `"idle"` —
-     *  so checking it directly here arms the same set that function's
-     *  `"idle"` would, without duplicating its parent-status branching or
-     *  importing across the model/view boundary. A `"completed"` Workflow
-     *  dispatch is this bucket's equivalent terminal state. Neither bucket
-     *  has a distinct dispatch-level "failed" status to exclude beyond
-     *  what's already excluded by only matching `"completed"` — an
-     *  `"abandoned"` subagent (interrupted) is never `"completed"`, so it's
-     *  already outside `liveTerminal` without a separate check.
+     * A subagent's `status === "completed"` is exactly `subagentDisplayStatus()`'s (swarm-view.tsx)
+     * `"idle"` case regardless of parent status (`"active"` / `"abandoned"` never map to `"idle"`),
+     * so checking it directly arms the same set without duplicating that function's parent-status
+     * branching or importing across the model/view boundary. A `"completed"` Workflow dispatch is
+     * the bucket's equivalent terminal state. Neither bucket has a distinct dispatch-level "failed"
+     * status to exclude, and an `"abandoned"` (interrupted) subagent is never `"completed"`, so it
+     * is already outside `liveTerminal`.
      */
     private reconcileCountdowns(): void {
         const dispatches = this.dispatchesAtom();
@@ -1834,20 +1626,16 @@ export class SwarmViewModel {
         }
     }
 
-    /** Every row's toggle. `rowKey` must be a per-ROW-unique identity, NOT
-     *  necessarily the row's `dispatch_id` — a `WorkflowDispatchRow`'s own
-     *  `dispatch_id` is always 1:1 with its row, but an Agent Tool row's
-     *  `dispatch_id` is NOT: an orphaned workflow member (falling back into
-     *  the Agent Tool bucket while `ListDispatches` is stale/lagging) shares
-     *  its real `dispatch_id` with every sibling member still waiting on
-     *  the same lag. Callers rendering a single-subagent row must pass a
-     *  key derived from something per-row-unique instead (e.g.
-     *  `agent:${sub.agent_id}`) — see `getDispatchDetail`'s doc comment.
-     *  Tears down the cached DispatchDetail (and its WS subscriptions) on
-     *  collapse, so a row a user opened once and moved on from doesn't keep
-     *  a live subscription forever. Unified in
-     *  SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4 (was split
-     *  into toggleSubagentExpanded/toggleDispatchExpanded). */
+    /**
+     * Every row's toggle. `rowKey` must be a per-ROW-unique identity, not necessarily the row's
+     * `dispatch_id`: a `WorkflowDispatchRow`'s `dispatch_id` is 1:1 with its row, but an Agent Tool
+     * row's is not, because an orphaned workflow member (falling back into the Agent Tool bucket
+     * while `ListDispatches` lags) shares its real `dispatch_id` with every sibling still waiting
+     * on the same lag. A single-subagent row must pass a per-row-unique key (e.g.
+     * `agent:${sub.agent_id}`; see `getDispatchDetail`). Tears down the cached DispatchDetail (and
+     * its WS subscriptions) on collapse, so a row opened once doesn't keep a live subscription
+     * forever (SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4).
+     */
     toggleDispatchExpanded(rowKey: string): void {
         const wasExpanded = this.isExpanded(rowKey);
         this.toggleExpanded(rowKey);
@@ -1858,24 +1646,20 @@ export class SwarmViewModel {
     }
 
     /**
-     * `rowKey`: cache identity for THIS row — must be unique per row (see
-     * `toggleDispatchExpanded`'s doc comment for why this can't just be
-     * `dispatchId` for an Agent Tool row). Two sibling rows sharing one
-     * `dispatchId` but caching under distinct `rowKey`s previously each
-     * subscribed to the SAME live `dispatch:activity` broadcast unfiltered,
-     * so each would render every OTHER sibling's events too — fixed by
-     * `dispatchId`: the real dispatch_id to subscribe to for live
-     * `dispatch:activity` events (may legitimately be shared across sibling
-     * rows — `createDispatchDetail` itself filters live events down to
-     * `backfillAgentId` when one is given, so this is safe even then).
+     * `rowKey`: cache identity for THIS row, unique per row (see `toggleDispatchExpanded` for why
+     * it can't be `dispatchId` for an Agent Tool row). Two sibling rows sharing a `dispatchId` but
+     * cached under distinct `rowKey`s used to subscribe to the same live `dispatch:activity`
+     * broadcast unfiltered, so each rendered every other sibling's events too.
      *
-     * `backfillAgentId`: pass the row's own single `ActiveSubagent.agent_id`
-     * whenever the caller is rendering exactly one subagent's row (an Agent
-     * Tool row, including an orphaned workflow member) — NOT just when
-     * `dispatchId` happens to start with `"solo:"`, which silently dropped
-     * an orphaned member's `GetHistory` backfill (reagent P1 on #2232).
-     * Omit it for a genuine `WorkflowDispatchRow`, which represents many
-     * members and has no one agent to backfill or filter to.
+     * `dispatchId`: the real dispatch_id to subscribe to for live `dispatch:activity` events; it
+     * may be shared across sibling rows, since `createDispatchDetail` filters live events to
+     * `backfillAgentId` when one is given.
+     *
+     * `backfillAgentId`: pass the row's own single `ActiveSubagent.agent_id` whenever the caller
+     * renders exactly one subagent's row (an Agent Tool row, including an orphaned workflow
+     * member), not just when `dispatchId` starts with `"solo:"`, which dropped an orphaned member's
+     * `GetHistory` backfill (#2232). Omit it for a genuine `WorkflowDispatchRow`, which represents
+     * many members and has no one agent to backfill or filter to.
      */
     getDispatchDetail(rowKey: string, dispatchId: string, backfillAgentId?: string): DispatchDetail {
         let detail = this.dispatchDetailCache.get(rowKey);
@@ -1900,14 +1684,12 @@ export class SwarmViewModel {
             new Map(blockIds.map((id) => [id, prev.get(id) ?? ("idle" as const)]))
         );
 
-        // Prune pushed progress for blocks that are gone, mirroring the
-        // backend watcher's own per-sweep `retain` (reagent P2 on PR #2952).
-        // `agent:progress` is push-only, so without this the Map keeps an
-        // entry for every block that ever reported — unbounded across a long
-        // session with many ephemeral panes. This is the right place rather
-        // than the `block_pruned` event: the block-list refresh is the general
-        // case, and it's where the statuses Map above is already rebuilt from
-        // the same authoritative list.
+        // Prune pushed progress for blocks that are gone, mirroring the backend watcher's per-sweep
+        // `retain` (#2952). `agent:progress` is push-only, so the Map would keep an entry for every
+        // block that ever reported, unbounded over a long session of ephemeral panes. The
+        // block-list refresh is the right place rather than the `block_pruned` event: it is the
+        // general case, and the statuses Map above is already rebuilt from the same authoritative
+        // list.
         const live = new Set(blockIds);
         this.setProgress((prev) => {
             if (![...prev.keys()].some((id) => !live.has(id))) return prev;
@@ -1948,23 +1730,19 @@ export class SwarmViewModel {
         const parentIds = subagents.map((s) => s.parent_block_id).filter(Boolean);
         const allBlockIds = [...new Set([...blockIds, ...parentIds])];
 
-        // Collected from the WorkflowDispatch rows actually produced below,
-        // not derived from the raw dispatch list, so stabilizeGroupIdentity's
-        // cache only ever retains keys for dispatches actually present this
-        // pass — same "harmless either way, but this is the precise set"
-        // rationale the pre-two-bucket design used for NameGroup keys.
+        // Collected from the WorkflowDispatch rows actually produced below, not derived from the
+        // raw dispatch list, so stabilizeGroupIdentity's cache retains keys only for dispatches
+        // present this pass (harmless either way, but this is the precise set).
         const liveGroupKeys = new Set<string>();
         const retired = this.retiredRowKeysAtom();
         const nodes = allBlockIds.flatMap((blockId) => {
             const blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
-            // isLoading distinguishes "this oref hasn't resolved yet" from
-            // "this oref resolved to nothing" — both read as block == null,
-            // but only the latter means the id is genuinely phantom.
-            // getMuxObjectLoadingAtom returns `null` while loading, `false`
-            // once GetObject has resolved either way — found, or a definitive
-            // "not found" (mos.ts's `startFetch`; any other fetch error leaves
-            // it `null`).
+            // isLoading distinguishes "this oref hasn't resolved yet" from "resolved to nothing":
+            // both read as block == null, but only the latter means the id is genuinely phantom.
+            // getMuxObjectLoadingAtom returns `null` while loading and `false` once GetObject has
+            // resolved either way, found or a definitive "not found" (mos.ts's `startFetch`; any
+            // other fetch error leaves it `null`).
             const isLoading = MOS.getMuxObjectLoadingAtom(`block:${blockId}`)() !== false;
             if (!hasRenderableBlock(block, isLoading)) return [];
             const agentName =

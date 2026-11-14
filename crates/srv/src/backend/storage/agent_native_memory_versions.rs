@@ -70,7 +70,7 @@ use agentmux_common::time::now_ms;
 /// `content_hash` on insert and, later, by §4.5 drift detection to compare
 /// a live file's current hash against the last recorded version without
 /// storing the live content redundantly.
-pub(crate) fn content_hash(content: &str) -> String {
+pub fn content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     hex::encode(hasher.finalize())

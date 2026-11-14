@@ -16,9 +16,18 @@ use crate::backend::storage::store::Store;
 /// On a sign-in made on a sign-up form that hasn't been sent with it yet.
 pub const UNCONFIRMED: &str = "unconfirmed: made on sign-up, not yet sent";
 
+/// On a password an agent made in an Incognito tab, which keeps no sign-ins: it
+/// is kept in Personal, since the account it opened is real (spec §9.2).
+pub const FROM_INCOGNITO: &str = "made in an Incognito tab";
+
 /// Keeps `password`, made for a sign-up on `s`, as a new entry with the user
 /// name typed so far. Returns its id and label.
 pub fn create(store: &Store, s: &Space, username: &str, password: &str) -> Result<(String, String), String> {
+    create_tagged(store, s, username, password, None)
+}
+
+/// [`create`], with one more tag.
+pub fn create_tagged(store: &Store, s: &Space, username: &str, password: &str, extra: Option<&str>) -> Result<(String, String), String> {
     let mut fields = BTreeMap::from([(signins::SITE.to_string(), s.origin.clone()), (signins::PROFILE.to_string(), s.profile.clone())]);
     if !username.is_empty() {
         fields.insert(signins::USERNAME.to_string(), username.to_string());
@@ -26,7 +35,7 @@ pub fn create(store: &Store, s: &Space, username: &str, password: &str) -> Resul
     let mut parts = Parts::default();
     parts.0.insert("password".to_string(), password.to_string());
     let label = signins::label_for(s);
-    let entry = NewEntry { kind: "login".into(), label: label.clone(), fields, tags: vec![UNCONFIRMED.to_string()], parts };
+    let entry = NewEntry { kind: "login".into(), label: label.clone(), fields, tags: std::iter::once(UNCONFIRMED).chain(extra).map(str::to_string).collect(), parts };
     let id = insert_in(store, entry, PERSON, "made", "on a sign-up form", &signins::vault_for(store, &s.profile)?)?;
     Ok((id, label))
 }

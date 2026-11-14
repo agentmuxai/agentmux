@@ -330,6 +330,39 @@ describe("MuxBus Cloud visibility setting", () => {
     });
 });
 
+describe("HostPopoverPanel — many LAN peers on a short window", () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    // Clare@starpower, macOS look check of #7002: four open peers made the popover 795 px tall in a 750 px
+    // window, so its top went off the window. jsdom has no layout; guard the structure and the two declarations.
+    it("keeps the peer list in its own scroll area, between the peer count and the MuxBus section", () => {
+        renderPanel(muxbus, {
+            lanDiscoveryEnabled: () => true,
+            lanCount: () => 1,
+            lanInstances: () => [
+                { hostname: "peer-a", ip: "203.0.113.30", version: "0.60.26", channel: "stable", agents: [] },
+            ],
+        });
+        const area = screen.getByTestId("lan-peers-scroll");
+        expect(area).toHaveClass("host-popover-peers");
+        expect(area.previousElementSibling).toHaveTextContent("1 peer");
+    });
+
+    it("caps the scroll area at the window's room over the chrome zoom, and the popover fits the window", async () => {
+        const { readFileSync } = await import("node:fs");
+        const { join } = await import("node:path");
+        const scss = readFileSync(join(__dirname, "_lan-peer-row.scss"), "utf8");
+        const start = scss.search(/^\s*\.host-popover-peers\s*\{/m);
+        const body = scss.slice(start, scss.indexOf("}", start));
+        expect(body).toMatch(/max-height:[^;]*100vh[^;]*var\(--zoomfactor/);
+        expect(body).toMatch(/overflow-y:\s*auto;/);
+        const tsx = readFileSync(join(__dirname, "HostPopover.tsx"), "utf8");
+        expect(tsx).toMatch(/class="status-bar-popover host-popover"\s+fitHeight/);
+    });
+});
+
 describe("HostPopoverPanel — undiscoverable warning", () => {
     afterEach(() => {
         cleanup();

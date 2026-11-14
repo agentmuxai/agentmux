@@ -41,7 +41,7 @@ pub(super) fn handle_register(
         pid,
         ProcessRecord {
             state: ProcessState::Running,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             version: version.clone(),
         },
     );

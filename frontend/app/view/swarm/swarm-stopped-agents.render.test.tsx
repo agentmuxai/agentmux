@@ -15,6 +15,7 @@ const agent = (id: string, state: AgentRuntime["state"] = "stopped"): AgentRunti
     name: `Agent ${id}`,
     provider: "claude",
     icon: "",
+    runtime: "host",
 });
 
 describe("StoppedAgents", () => {

@@ -23,7 +23,7 @@ impl MediaContinuation for cef::PermissionPromptCallback {
 }
 
 /// Whether a permission prompt asks only for a location and/or notifications.
-fn is_location_or_notifications(requested: u32) -> bool {
+pub(super) fn is_location_or_notifications(requested: u32) -> bool {
     requested != 0 && requested & !(PROMPT_GEOLOCATION | PROMPT_NOTIFICATIONS) == 0
 }
 

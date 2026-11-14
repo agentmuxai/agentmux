@@ -391,6 +391,30 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// The newest run of every job the ledger has runs of, whatever its source (scheduled, Drone or cloud),
+    /// newest first, at most `limit`.
+    pub fn job_runs_latest_per_job(&self, limit: i64) -> Result<Vec<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM db_job_runs r
+              WHERE collapsed_into = ''
+                AND r.rowid = (SELECT rowid FROM db_job_runs
+                                WHERE job_id = r.job_id AND collapsed_into = ''
+                                ORDER BY started_at_ms DESC, rowid DESC LIMIT 1)
+              ORDER BY started_at_ms DESC, rowid DESC LIMIT ?1"
+        ))?;
+        let rows = stmt.query_map(params![limit.max(0)], row_to_run)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// The ids of the jobs the ledger has runs of that `text` names: by id, or by the name its runs carry.
+    pub fn job_ids_named(&self, text: &str) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare("SELECT DISTINCT job_id FROM db_job_runs WHERE job_id = ?1 OR job_name = ?1 ORDER BY job_id")?;
+        let rows = stmt.query_map(params![text], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     /// The job's newest run, if any.
     pub fn job_run_last(&self, job_id: &str) -> Result<Option<JobRun>, StoreError> {
         Ok(self.job_runs_for_job(job_id, 1, None)?.pop())

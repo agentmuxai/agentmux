@@ -1,0 +1,20 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.check-and-file-task",
+  "name": "Check and file a task",
+  "version": "1.0.0",
+  "kind": "drone",
+  "description": "On a schedule, an agent checks something and answers OK or describes the problem. Only a problem files a Kanban task, and a problem that is still there on the next check adds a line to the same task instead of filing another. Change what to check first.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "check": { "type": "string", "title": "What to check", "description": "What the agent looks at, such as: Is the nightly build of acme/site green on its latest run?" },
+      "target": { "type": "string", "title": "Who gets the task", "description": "The id of the agent the task is for. Leave it empty to put the task in the backlog.", "default": "" }
+    },
+    "required": ["check"]
+  },
+  "trigger": { "kind": "cron", "cron": "0 */6 * * *", "tz": "UTC" },
+  "policy": { "overlap": "skip", "catch_up": "skip", "caps": { "run_usd": 1 } },
+  "outputs": ["kanban_task"],
+  "secrets": []
+}

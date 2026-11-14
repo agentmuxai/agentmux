@@ -211,13 +211,17 @@ fn finish_gated_reveal(
 /// §5.3), fired together once `finish_gated_reveal` knows the window is
 /// either shown or permanently unshowable — never any earlier.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-fn signal_gated_reveal_complete(elapsed_ms: u64, reason: &'static str, status: &str) {
+fn signal_gated_reveal_complete(armed_ms: u64, reason: &'static str, status: &str) {
+    // The row ends with the whole wait, not the last arm's: read before the row is marked final.
+    let elapsed_ms = super::startup_paint::final_elapsed_ms(armed_ms);
     super::startup_paint::mark_finished();
     crate::launcher_ipc::report_startup_stage_end(
         "paint",
         elapsed_ms,
         status,
-        Some(reason.to_string()),
+        // An ok row carries what revealed it; a failed one says so, since the
+        // splash now shows a warn or error row's detail under it.
+        Some(if status == "ok" { reason.to_string() } else { format!("The window did not show ({reason})") }),
     );
     if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
         if !path.is_empty() {

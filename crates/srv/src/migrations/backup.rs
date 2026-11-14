@@ -11,7 +11,7 @@ use std::path::Path;
 /// `objects.db` is skipped when this process copied it forward from the
 /// previous version: that version's folder still holds it untouched.
 pub(super) fn backup_stores(home: &Path, shared_store_path: &Path, data_dir: &Path) -> std::io::Result<()> {
-    let skip_objects = crate::bootstrap::carry_forward::carried_forward_this_run();
+    let skip_objects = crate::migrations::carry_forward::carried_forward_this_run();
     crate::boot_timing::step("backup", "Backing up your data", || {
         backup_stores_to(home, shared_store_path, data_dir, skip_objects)
     })

@@ -170,7 +170,7 @@ describe("Import a skill", () => {
 
     it("a computer-use skill shows who signed it and its scripts, and says they are not run until approved", async () => {
         const app = {
-            files: [], verified: [], content_hash: "c".repeat(64), publisher: "acme", id: "word", name: "Word", version: "1.0.0",
+            files: [], verified: [], content_hash: "c".repeat(64), from_catalog: false, publisher: "acme", id: "word", name: "Word", version: "1.0.0",
             vendor: "Acme", executables: {}, title_hints: [], platforms: ["windows"], ladder: [], mcp: null, supported: "", tested: [],
             references: [],
             scripts: [{ path: "scripts/toc.py", purpose: "Fills the table of contents", needs: ["python 3"] }],

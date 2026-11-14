@@ -901,6 +901,8 @@ declare global {
         "agent:spend_today"?: { day: number; spent: number; cap: number | null } | null;
         /** From 80% of the daily spend cap: a line above the composer. Cleared (null) when the stop shows or the cap is raised. */
         "agent:spend_warning"?: { at: number; scope: "agent" | "route"; cap: number; spent: number; route: string; place: string } | null;
+        /** The context stayed far over its compaction budget after srv sent /compact twice: a line above the composer, until it is back under. */
+        "agent:context_warning"?: { at: number; context: number } | null;
         /** The daily spend cap is used and the gateway refuses the agent's requests: the stop card. Cleared (null) by a raise, a reset or a new UTC day. */
         "agent:spend_stopped"?: { at: number; scope: "agent" | "route"; cap: number; spent: number; route: string; place: string } | null;
         /** The `at` of the stop whose card the person dismissed (the stop itself stays). */

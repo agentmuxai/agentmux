@@ -140,7 +140,7 @@ export type CreateAgentSkillInput = Pick<CommandCreateAgentSkillData, "agent_id"
     Partial<Omit<CommandCreateAgentSkillData, "agent_id" | "name">>;
 
 // The Drone pane's wire types are GENERATED from their Rust definitions by
-// ts-rs (crates/srv/src/drone/types.rs + server/drone_handlers.rs).
+// ts-rs (crates/srv/src/backend/storage/drone_types.rs + server/drone_handlers.rs).
 export type { BlockKind } from "@/types/rpc/BlockKind";
 export type { DeleteDroneReq } from "@/types/rpc/DeleteDroneReq";
 export type { DeleteDroneResp } from "@/types/rpc/DeleteDroneResp";

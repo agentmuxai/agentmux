@@ -9,7 +9,7 @@
  */
 
 import clsx from "clsx";
-import { Button, IconButton, Tag } from "@/app/element/ui";
+import { Button, CloseButton, Tag } from "@/app/element/ui";
 import { Show, type JSX } from "solid-js";
 import { formatBytes } from "@/util/format-bytes";
 import { useAttachmentText, useAttachmentUrl } from "./attachment-url";
@@ -169,12 +169,11 @@ export function AttachmentTile(props: Props) {
                 </Show>
             </Button>
             <Show when={props.onRemove}>
-                <IconButton
+                <CloseButton
+                    size="sm"
                     class="agent-attachment-tile__remove"
-                    icon="xmark"
                     label={`Remove ${props.tile.name}`}
                     tooltip={false}
-                    tabIndex={-1}
                     onClick={(e) => {
                         e.stopPropagation();
                         props.onRemove!();

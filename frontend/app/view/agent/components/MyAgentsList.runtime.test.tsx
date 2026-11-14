@@ -57,6 +57,7 @@ const runtime = (state: AgentRuntime["state"]): AgentRuntime => ({
     name: "Maks",
     provider: "claude",
     icon: "",
+    runtime: "host",
 });
 
 const load = (rows: RecentSessionRow[]) =>

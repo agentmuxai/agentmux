@@ -7,8 +7,10 @@
  * microphone it asks for and what each refusal reports, how both capture modes (webm from a
  * MediaRecorder, WAV from raw PCM) cut speech into utterances on silence and on the length cap,
  * what is posted to the transcribe endpoint and how its answers and failures reach the pane, that
- * utterances are applied in the order they were spoken, and what stopping releases. The microphone,
- * the audio graph, the recorder and `fetch` are fakes; the level reading is set by the test.
+ * utterances are applied in the order they were spoken, what stopping releases, what a start does when
+ * srv says the engine is not set up, and the level the mic button shows. The microphone, the audio graph,
+ * the recorder and `fetch` are fakes; the level reading is set by the test. `fetchMock` sees the
+ * transcribe requests only; the question a start asks srv first goes to `statusMock`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,7 +21,8 @@ vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv:1" 
 vi.mock("@/app/store/auth-headers", () => ({
     authHeaders: (extra: Record<string, string> = {}) => ({ ...extra, "X-Auth": "key" }),
 }));
-vi.mock("./audioLevel", () => ({
+vi.mock("./audioLevel", async (original) => ({
+    ...(await original<typeof import("./audioLevel")>()),
     computeRms: () => {
         h.polls++;
         return h.rms;
@@ -100,6 +103,9 @@ class FakeRecorder {
 let tracks: FakeTrack[];
 const getUserMedia = vi.fn();
 const fetchMock = vi.fn();
+const statusMock = vi.fn();
+const fetchByRoute = (url: string, init?: RequestInit) =>
+    String(url).includes("/api/v1/voice/status") ? statusMock(url, init) : fetchMock(url, init);
 const errors = vi.fn();
 const onErrorEvent = (e: Event) => errors((e as CustomEvent).detail);
 
@@ -130,12 +136,14 @@ beforeEach(() => {
     });
     fetchMock.mockReset();
     fetchMock.mockImplementation(async () => okJson({ text: "hello" }));
+    statusMock.mockReset();
+    statusMock.mockImplementation(async () => okJson({ engine: "groq", ready: true, missing: null, error: null }));
     errors.mockReset();
     setMediaDevices({ getUserMedia });
     setLanguage("en-US");
     vi.stubGlobal("AudioContext", FakeAudioContext);
     vi.stubGlobal("MediaRecorder", FakeRecorder);
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", fetchByRoute);
     window.addEventListener("voice-input-error", onErrorEvent);
 });
 afterEach(() => {
@@ -953,5 +961,132 @@ describe("stopping", () => {
         session.toggleListening();
         await flush();
         expect(session.isListening()).toBe(false);
+    });
+});
+
+describe("a start asks srv whether the engine is set up", () => {
+    const notSetUp = (missing = "groq-key", error: string | null = "Groq backend not configured") =>
+        statusMock.mockImplementation(async () => okJson({ engine: "groq", ready: false, missing, error }));
+
+    it("asks with the window's credentials before it touches the microphone", async () => {
+        await listen();
+        expect(statusMock).toHaveBeenCalledTimes(1);
+        const [url, init] = statusMock.mock.calls[0];
+        expect(url).toBe("http://srv:1/api/v1/voice/status");
+        expect(init.headers).toEqual({ "X-Auth": "key" });
+        expect(getUserMedia).toHaveBeenCalledTimes(1);
+    });
+
+    it("records nothing when the engine is not set up, and says which pane asked and what is missing", async () => {
+        notSetUp();
+        const { session } = await listen();
+        expect(getUserMedia).not.toHaveBeenCalled();
+        expect(session.isListening()).toBe(false);
+        expect(session.lastError()).toBe("not-configured");
+        expect(session.lastErrorDetail()).toBe("Groq backend not configured");
+        expect(session.notSetUp!()).toEqual({ blockId: "blk", missing: "groq-key", detail: "Groq backend not configured" });
+        // No pane's mic is the live one.
+        expect(session.currentTargetId()).toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("leaves the telling to a pane that shows it, and toasts for one that does not", async () => {
+        notSetUp();
+        await listen();
+        expect(errors).toHaveBeenCalledTimes(1);
+        expect(errors).toHaveBeenCalledWith("not-configured");
+
+        errors.mockReset();
+        const session = createWhisperVoiceSession();
+        session.registerPane("agent", { ...makeHandle(), showsSetupNotice: true });
+        session.toggleListening();
+        await flush();
+        expect(session.notSetUp!()?.blockId).toBe("agent");
+        expect(errors).not.toHaveBeenCalled();
+    });
+
+    it("names a gap srv did not name, and passes on a missing sentence as none", async () => {
+        statusMock.mockImplementation(async () => okJson({ ready: false }));
+        const { session } = await listen();
+        expect(session.notSetUp!()).toEqual({ blockId: "blk", missing: "engine", detail: null });
+        expect(session.lastErrorDetail()).toBeNull();
+    });
+
+    it("records as before when srv gives no answer: a refusal, a failed request, an answer with no verdict", async () => {
+        const answers = [
+            async () => failJson(404, {}),
+            async () => {
+                throw new Error("offline");
+            },
+            async () => okJson({}),
+        ];
+        for (const answer of answers) {
+            getUserMedia.mockClear();
+            statusMock.mockImplementation(answer);
+            const { session } = await listen();
+            expect(getUserMedia).toHaveBeenCalledTimes(1);
+            expect(session.isListening()).toBe(true);
+            expect(session.notSetUp!()).toBeNull();
+            session.toggleListening();
+            await flush();
+        }
+    });
+
+    it("takes the line down when a later start records", async () => {
+        notSetUp();
+        const { session } = await listen();
+        expect(session.notSetUp!()).not.toBeNull();
+        statusMock.mockImplementation(async () => okJson({ ready: true }));
+        session.registerPane("blk", makeHandle());
+        session.toggleListening();
+        await flush();
+        expect(session.isListening()).toBe(true);
+        expect(session.notSetUp!()).toBeNull();
+        expect(session.lastError()).toBeNull();
+    });
+
+    it("starts once for two clicks while the question is out, and can start again after", async () => {
+        let answer: (value: unknown) => void = () => {};
+        statusMock.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+        const { session } = open();
+        session.toggleListening();
+        session.toggleListening();
+        expect(statusMock).toHaveBeenCalledTimes(1);
+        answer(okJson({ ready: true }));
+        await flush();
+        expect(getUserMedia).toHaveBeenCalledTimes(1);
+        expect(session.isListening()).toBe(true);
+        session.toggleListening();
+        await flush();
+        session.toggleListening();
+        await flush();
+        expect(statusMock).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("the level the mic button shows", () => {
+    it("follows what the microphone hears in webm mode, and is zero once stopped", async () => {
+        const { session } = await listen();
+        expect(session.level!()).toBe(0);
+        h.rms = 0.156;
+        await tick(100);
+        expect(session.level!()).toBe(1);
+        h.rms = 0.001;
+        await tick(100);
+        expect(session.level!()).toBe(0);
+        h.rms = 0.05;
+        await tick(100);
+        expect(session.level!()).toBeGreaterThan(0.4);
+        session.toggleListening();
+        await flush();
+        expect(session.level!()).toBe(0);
+    });
+
+    it("follows each block of samples in WAV mode", async () => {
+        const { session } = await listen(true);
+        block([0.5, 0.5]);
+        expect(session.level!()).toBe(1);
+        block([0, 0]);
+        expect(session.level!()).toBe(0);
     });
 });

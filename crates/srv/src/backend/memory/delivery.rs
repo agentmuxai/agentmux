@@ -151,7 +151,7 @@ impl Tracked {
 
 /// [`compose`], also recording where each item landed so the notice can say
 /// which items a cut delivery carried whole, in part, or not at all.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn compose_items(entries: &[Entry], reason: Reason, running_summary: Option<&str>) -> Option<Composed> {
     compose_items_with(entries, reason, running_summary, false)
 }

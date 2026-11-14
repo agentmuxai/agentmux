@@ -124,9 +124,9 @@ fn update(
     // below, so a pane refreshing on them already sees it. Not in unit tests,
     // which would write the file into whatever config dir the test process
     // resolves.
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     let recorded = updated.connected && super::remotes::record_recent(connection);
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     let recorded = false;
     if let Some(broker) = broker {
         broker.publish_event::<crate::backend::mps_events::ConnChange>(&updated, vec![], 0);

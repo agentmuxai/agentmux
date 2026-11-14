@@ -200,10 +200,20 @@ pub struct GithubConnection {
     pub github_user_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub login: Option<String>,
+    /// This computer has gh-agent, which gives agents their GitHub identity instead of the App
+    /// (crate::backend::gh_guard). True whether or not the person is signed in to AgentMux Cloud.
+    #[serde(default)]
+    pub gh_agent_on_this_computer: bool,
 }
 
 /// The broker's word on this account's GitHub connection, for Connectors.
 pub async fn connection_of(mstore: &Arc<Store>) -> GithubConnection {
+    let gh_agent = tokio::task::spawn_blocking(crate::backend::gh_guard::gh_agent_on_this_computer).await.unwrap_or(false);
+    GithubConnection { gh_agent_on_this_computer: gh_agent, ..broker_connection_of(mstore).await }
+}
+
+/// What the broker says, without what this computer has.
+async fn broker_connection_of(mstore: &Arc<Store>) -> GithubConnection {
     let who = match github_broker::caller(mstore).await {
         Ok(who) => who,
         Err(e) => return GithubConnection { signed_in: false, reason: Some(e.to_string()), ..Default::default() },
@@ -294,6 +304,16 @@ mod tests {
         stamp_context(&mut c, &device);
         assert!(c.get("broker").is_none());
         assert_eq!(c["github_login"], "octo");
+    }
+
+    #[test]
+    fn the_answer_says_whether_this_computer_has_gh_agent_signed_in_or_not() {
+        let signed_out = GithubConnection { gh_agent_on_this_computer: true, ..Default::default() };
+        let v = serde_json::to_value(&signed_out).unwrap();
+        assert_eq!((v["signedIn"].clone(), v["ghAgentOnThisComputer"].clone()), (json!(false), json!(true)));
+        let old_answer: GithubConnection = serde_json::from_value(json!({ "signedIn": true, "connected": true })).unwrap();
+        assert!(!old_answer.gh_agent_on_this_computer, "absent means no");
+        assert!(!grant_is_gone(&signed_out), "it says nothing about the grant");
     }
 
     #[test]

@@ -4,9 +4,9 @@
 import { getApi } from "@/util/app-api";
 
 /**
- * Whether browser panes in this window are CEF Views overlays on Windows (the
- * default; AGENTMUX_PANE_BACKEND=hwnd goes back to child windows; the host
- * reports the kind as `paneBackend` in the about details). What such a pane does while a DOM overlay is over it is
+ * Whether browser panes in this window are CEF Views overlays on Windows
+ * (AGENTMUX_PANE_BACKEND=views; the host reports it as `paneBackend` in the
+ * about details). What such a pane does while a DOM overlay is over it is
  * `hidesPaneUnderOverlay`.
  *
  * Never in a floating pane's window (`?windowLabel=floating-…`, a warm pool

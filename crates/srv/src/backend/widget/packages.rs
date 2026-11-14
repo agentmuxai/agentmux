@@ -816,7 +816,7 @@ impl WidgetPackages {
     /// The process-wide service for tests, in one temp folder that lives as
     /// long as the process: every test that needs the global service shares
     /// it, so each finds its own package by id.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn for_tests() -> &'static Arc<WidgetPackages> {
         static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
         let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());

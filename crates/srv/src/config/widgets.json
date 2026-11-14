@@ -129,6 +129,19 @@
             }
         }
     },
+    "defwidget@atlas": {
+        "singleton": true,
+        "display:order": 25,
+        "display:pinned": false,
+        "icon": "map",
+        "label": "Atlas",
+        "description": "Every agent on every machine, as a map",
+        "blockdef": {
+            "meta": {
+                "view": "atlas"
+            }
+        }
+    },
     "defwidget@kanban": {
         "singleton": true,
         "display:order": 9,

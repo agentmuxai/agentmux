@@ -86,9 +86,6 @@ pub(crate) fn apply_with(def: &mut Value, previous: Option<&TemplateRef>, svc: &
             e
         }
     })?;
-    if approved.manifest.kind == jt::manifest::JobTemplateKind::Drone {
-        return Err(format!("{id} is a Drone template: it makes a drone, not a brief-based job, and this build can't make one from it yet"));
-    }
     let hash = text(&asked, "hash");
     if !hash.is_empty() && hash != approved.hash {
         return Err(format!("{id} changed since the job's template pin was recorded; it needs the operator's approval again"));
@@ -101,7 +98,11 @@ pub(crate) fn apply_with(def: &mut Value, previous: Option<&TemplateRef>, svc: &
     obj.insert("template".into(), json!({ "id": approved.id, "version": approved.version, "hash": approved.hash }));
     obj.insert("outputs".into(), json!(approved.manifest.outputs));
     obj.insert("secrets".into(), secrets_of(&approved, &rendered.params));
-    set_brief(obj, &approved, &rendered.brief);
+    if approved.manifest.kind == jt::manifest::JobTemplateKind::Drone {
+        drone_action(obj, &approved.id)?;
+    } else {
+        set_brief(obj, &approved, &rendered.brief);
+    }
     if previous.is_none() {
         fill_defaults(obj, &approved);
     } else if moved {
@@ -122,6 +123,16 @@ fn secrets_of(t: &ApprovedTemplate, params: &Map<String, Value>) -> Value {
         .filter_map(|s| params.get(&s.param).and_then(Value::as_str).map(|vault| json!({ "name": s.name, "vault": vault })))
         .collect();
     Value::Array(list)
+}
+
+/// A job made from a Drone template runs a drone made from it
+/// (`jobs.templates.make_drone`): the action names that drone, and carries no brief.
+fn drone_action(obj: &Map<String, Value>, id: &str) -> Result<(), String> {
+    let action = obj.get("action").unwrap_or(&Value::Null);
+    if text(action, "kind") == "drone" && !text(action, "drone_id").trim().is_empty() {
+        return Ok(());
+    }
+    Err(format!("{id} is a Drone template: make its drone first (jobs.templates.make_drone), then give the job the action {{\"kind\": \"drone\", \"drone_id\": …}}"))
 }
 
 /// The action with the rendered brief in it: a task's payload, else the brief.

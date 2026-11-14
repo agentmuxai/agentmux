@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    CONTEXT_WARNING_META_KEY,
     SPEND_DISMISSED_META_KEY,
     SPEND_STOPPED_META_KEY,
     SPEND_TODAY_META_KEY,
@@ -15,6 +16,7 @@ import {
     spendChipTitle,
     spendChipTone,
     spendStoppedText,
+    spendWarningText,
 } from "./spend-stopped";
 
 const NOW = 1_700_000_000_000;
@@ -67,6 +69,29 @@ describe("readSpendWarning", () => {
         expect(readSpendWarning({ [SPEND_WARNING_META_KEY]: warning }, tomorrow)).toBeNull();
         const newWarning = { ...warning, at: tomorrow };
         expect(readSpendWarning({ [SPEND_WARNING_META_KEY]: newWarning, [SPEND_STOPPED_META_KEY]: { ...stopped, at: NOW } }, tomorrow)?.at).toBe(tomorrow);
+    });
+});
+
+describe("the context warning", () => {
+    it("says the context is large and compaction did not run, not that the cap is near", () => {
+        const card = readSpendWarning({ [CONTEXT_WARNING_META_KEY]: { at: NOW, context: 480_000 } }, NOW);
+        expect(card?.context).toBe(480_000);
+        expect(spendWarningText(card!)).toBe("Context is 480K; compaction did not run.");
+    });
+
+    it("gives way to the 80% spend line and to the stop, and does not expire with the UTC day", () => {
+        const both = { [CONTEXT_WARNING_META_KEY]: { at: NOW, context: 480_000 }, [SPEND_WARNING_META_KEY]: { ...stopped, at: NOW, spent: 16.5 } };
+        const spend = readSpendWarning(both, NOW);
+        expect(spend?.context).toBeUndefined();
+        expect(spendWarningText(spend!)).toBe("$16.50 of $20 used today: the agent stops at its cap.");
+        expect(readSpendWarning({ ...both, [SPEND_STOPPED_META_KEY]: { ...stopped, at: NOW } }, NOW)).toBeNull();
+        const tomorrow = (DAY + 3) * 86_400_000;
+        expect(readSpendWarning(both, tomorrow)?.context).toBe(480_000);
+    });
+
+    it("ignores a context line that is not the shape srv writes", () => {
+        expect(readSpendWarning({ [CONTEXT_WARNING_META_KEY]: { at: NOW, context: "big" } }, NOW)).toBeNull();
+        expect(readSpendWarning({ [CONTEXT_WARNING_META_KEY]: null }, NOW)).toBeNull();
     });
 });
 

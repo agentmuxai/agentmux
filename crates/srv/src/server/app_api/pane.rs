@@ -244,32 +244,72 @@ fn add_title(meta: &mut MetaMapType, cmd: &CommandPaneOpenData) {
     }
 }
 
+/// The `file` an editor or media pane opens, refused when the request names none.
+fn required_file<'a>(cmd: &'a CommandPaneOpenData, view: &str) -> Result<&'a str, String> {
+    cmd.file.as_deref().filter(|s| !s.is_empty()).ok_or_else(|| format!("MISSING_ARG: view={view} requires 'file'"))
+}
+
+/// The Editor: the file, then what only an explicit caller value writes. Tree state: without one the Editor decides
+/// (collapsed for a pane opened on a file, which this always is).
+fn editor_meta(meta: &mut MetaMapType, cmd: &CommandPaneOpenData) -> Result<(), String> {
+    let file = required_file(cmd, "editor")?;
+    meta.insert("view".to_string(), json!("editor"));
+    meta.insert("file".to_string(), json!(file));
+    if let Some(expanded) = cmd.tree_expanded {
+        meta.insert("editor:tree_expanded".to_string(), json!(expanded));
+    }
+    if let Some(line) = cmd.line.filter(|&n| n > 0) {
+        meta.insert("editor:line".to_string(), json!(line));
+    }
+    if cmd.follow_folder == Some(true) {
+        meta.insert(META_FOLLOW_FOLDER.to_string(), json!(true));
+    }
+    if let Some(viewer) = requested_viewer(cmd)? {
+        meta.insert(META_VIEWER.to_string(), json!(viewer));
+    }
+    Ok(())
+}
+
+/// The Files pane. The folder comes from `file`, else `cwd`, else home; `select` becomes a one-shot `files:select`
+/// the view applies after its first listing and then clears. SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2, §8.1.
+fn files_meta(meta: &mut MetaMapType, cmd: &CommandPaneOpenData) -> Result<(), String> {
+    let path = cmd
+        .file
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .or_else(|| cmd.cwd.as_deref().filter(|s| !s.is_empty()))
+        .map(str::to_string)
+        .or_else(|| dirs::home_dir().map(|h| h.to_string_lossy().into_owned()))
+        .ok_or_else(|| "MISSING_ARG: view=files requires 'file' (no home directory to default to)".to_string())?;
+    meta.insert("view".to_string(), json!("files"));
+    meta.insert("files:path".to_string(), json!(path));
+    if let Some(select) = cmd.select.as_ref().filter(|s| !s.is_empty()) {
+        meta.insert("files:select".to_string(), json!(select));
+    }
+    Ok(())
+}
+
+/// The connection the pane works on, for the views that have one; media reads this computer's files only.
+fn add_connection(meta: &mut MetaMapType, cmd: &CommandPaneOpenData) -> Result<(), String> {
+    let Some(conn) = cmd.connection.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != "local") else { return Ok(()) };
+    match cmd.view.as_str() {
+        "editor" | "term" | "files" => {
+            meta.insert("connection".to_string(), json!(conn));
+        }
+        "media" if crate::backend::fs_ops::remote::ssh_connection(Some(conn)).is_some() => {
+            return Err(format!("INVALID_ARG: media files on {conn} can't be shown yet"));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Build the metadata map for a pane.open request, validating required args.
 pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
     let mut meta = MetaMapType::new();
 
     match cmd.view.as_str() {
-        "editor" => {
-            let file = cmd.file.as_deref().filter(|s| !s.is_empty())
-                .ok_or_else(|| "MISSING_ARG: view=editor requires 'file'".to_string())?;
-            meta.insert("view".to_string(), json!("editor"));
-            meta.insert("file".to_string(), json!(file));
-
-            // Tree state: only an explicit caller value is written. Without one the Editor decides
-            // (collapsed for a pane opened on a file, which this always is).
-            if let Some(expanded) = cmd.tree_expanded {
-                meta.insert("editor:tree_expanded".to_string(), json!(expanded));
-            }
-            if let Some(line) = cmd.line.filter(|&n| n > 0) {
-                meta.insert("editor:line".to_string(), json!(line));
-            }
-            if cmd.follow_folder == Some(true) {
-                meta.insert(META_FOLLOW_FOLDER.to_string(), json!(true));
-            }
-            if let Some(viewer) = requested_viewer(cmd)? {
-                meta.insert(META_VIEWER.to_string(), json!(viewer));
-            }
-        }
+        "editor" => editor_meta(&mut meta, cmd)?,
         "term" => {
             meta.insert("view".to_string(), json!("term"));
             meta.insert("controller".to_string(), json!("shell"));
@@ -283,46 +323,21 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             meta.insert("view".to_string(), json!("browser"));
             meta.insert("url".to_string(), json!(url));
         }
-        "sysinfo" => {
-            meta.insert("view".to_string(), json!("sysinfo"));
-        }
-        "help" => {
-            meta.insert("view".to_string(), json!("help"));
-        }
         // Tower, the read-only task manager. Opening one is harmless: its data
         // goes only to the window (`tower.*` refuses agents).
-        "tower" => {
-            meta.insert("view".to_string(), json!("tower"));
+        "sysinfo" | "help" | "tower" => {
+            meta.insert("view".to_string(), json!(cmd.view));
         }
         // The Media pane is folded into the Editor: a media request opens an
         // Editor whose tab follows newer files in the folder, as Media did.
         // SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.11.
         "media" => {
-            let file = cmd.file.as_deref().filter(|s| !s.is_empty())
-                .ok_or_else(|| "MISSING_ARG: view=media requires 'file'".to_string())?;
+            let file = required_file(cmd, "media")?;
             meta.insert("view".to_string(), json!("editor"));
             meta.insert("file".to_string(), json!(file));
             meta.insert(META_FOLLOW_FOLDER.to_string(), json!(true));
         }
-        // The Files pane. The folder comes from `file`, else
-        // `cwd`, else home; `select` becomes a one-shot `files:select` the
-        // view applies after its first listing and then clears.
-        // SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2, §8.1.
-        "files" => {
-            let path = cmd
-                .file
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .or_else(|| cmd.cwd.as_deref().filter(|s| !s.is_empty()))
-                .map(str::to_string)
-                .or_else(|| dirs::home_dir().map(|h| h.to_string_lossy().into_owned()))
-                .ok_or_else(|| "MISSING_ARG: view=files requires 'file' (no home directory to default to)".to_string())?;
-            meta.insert("view".to_string(), json!("files"));
-            meta.insert("files:path".to_string(), json!(path));
-            if let Some(select) = cmd.select.as_ref().filter(|s| !s.is_empty()) {
-                meta.insert("files:select".to_string(), json!(select));
-            }
-        }
+        "files" => files_meta(&mut meta, cmd)?,
         other => {
             return Err(format!(
                 "INVALID_VIEW: unsupported view '{other}' (expected editor/term/browser/sysinfo/help/media/files/tower)"
@@ -331,20 +346,7 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
     }
 
     add_title(&mut meta, cmd);
-
-    // The connection the pane works on, for the views that have one; media
-    // reads this computer's files only.
-    if let Some(conn) = cmd.connection.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != "local") {
-        match cmd.view.as_str() {
-            "editor" | "term" | "files" => {
-                meta.insert("connection".to_string(), json!(conn));
-            }
-            "media" if crate::backend::fs_ops::remote::ssh_connection(Some(conn)).is_some() => {
-                return Err(format!("INVALID_ARG: media files on {conn} can't be shown yet"));
-            }
-            _ => {}
-        }
-    }
+    add_connection(&mut meta, cmd)?;
     Ok(meta)
 }
 

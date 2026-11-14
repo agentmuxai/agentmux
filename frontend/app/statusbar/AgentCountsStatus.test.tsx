@@ -38,6 +38,7 @@ const agent = (id: string, state: AgentRuntime["state"]): AgentRuntime => ({
     name: id,
     provider: "claude",
     icon: "",
+    runtime: "host",
 });
 
 describe("AgentCountsStatus", () => {

@@ -10,8 +10,10 @@
 // queries the instance the caller is ALREADY inside (via $AGENTMUX_LOCAL_URL /
 // $AGENTMUX_AUTH_KEY, inherited from the environment exactly the way
 // agentmux-mcp already does for every other /api/v1/* route — no new IPC, no
-// new auth scheme). Cross-instance querying (`muxspect targets` / `-i <other>`)
-// is Phase 2, not implemented here.
+// new auth scheme). Phase 2a of docs/specs/SPEC_MUXSPECT_CROSS_TIER_INSTANCE_
+// INSPECTION_2026_09_02.md adds `muxspect instances` (every live AgentMux
+// instance on this machine) and `--channel <name>`, which asks one of them
+// instead: the instance you are in forwards the read to it.
 //
 // Deployed by agentmux-srv next to muxlog.mjs (~/.agentmux/shell/muxspect.mjs);
 // the bash/zsh/pwsh/fish `muxspect` functions delegate here. Run standalone
@@ -120,6 +122,18 @@ Usage:
                                   Exits 3 on any MISMATCH or error, matching
                                   the CLI (docs/incident/RUNBOOK_MIGRATION_
                                   RECOVERY_2026_09_07.md §4).
+  muxspect instances [--json]     every live AgentMux instance on this
+                                  machine: channel, version, pid, agents,
+                                  uptime (yours is marked '*'). Includes a
+                                  channel with no agent in it. A dev build
+                                  started by 'task dev' has a data home of
+                                  its own, so it is listed only by itself.
+  muxspect --channel <name> <command>
+                                  run a read against another instance on this
+                                  machine instead of the one you are in. For
+                                  list, describe, watch, dock, layout and
+                                  verify-sender; name it as 'muxspect
+                                  instances' shows it. Never dock clear.
   muxspect help                   this message
 
 Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment.
@@ -154,7 +168,7 @@ function requireEnv() {
     if (!url || !authKey) {
         fail(
             "$AGENTMUX_LOCAL_URL / $AGENTMUX_AUTH_KEY not set — run this from inside an AgentMux agent pane.\n" +
-            "muxspect only queries the instance you're already running in; it can't discover or guess another one."
+            "muxspect asks the instance you're running in; 'muxspect instances' lists the others on this machine and --channel <name> asks one of them."
         );
     }
     return { url, authKey };
@@ -174,19 +188,40 @@ export function logSrvVersion(resp) {
     return v;
 }
 
+// The commands `--channel` can aim at another instance: the read routes the
+// server forwards (`forwardable_muxspect_routes` in server/routes.rs).
+export const CHANNEL_COMMANDS = ["list", "describe", "watch", "dock", "layout", "verify-sender"];
+
+// Set from `--channel` for the whole run; every apiGet then names it.
+let activeChannel;
+
+/** `urlPath` asking for `channel`'s instance instead of this one. */
+export function withChannel(urlPath, channel) {
+    if (!channel) return urlPath;
+    return `${urlPath}${urlPath.includes("?") ? "&" : "?"}channel=${encodeURIComponent(channel)}`;
+}
+
+/** The version line for a response: this instance's, or the other one's when forwarded. */
+function logResponseVersion(resp) {
+    if (!activeChannel) return logSrvVersion(resp);
+    const v = resp.headers.get("x-agentmux-forwarded-srv-version");
+    console.error(`[channel ${activeChannel}${v ? `, srv v${v}` : ""}]`);
+    return v;
+}
+
 async function apiGet(url, authKey, urlPath) {
     let resp;
     try {
-        ({ resp } = await agentmuxFetch(url, authKey, urlPath));
+        ({ resp } = await agentmuxFetch(url, authKey, withChannel(urlPath, activeChannel)));
     } catch (e) {
         fail(`could not reach ${url} — instance unreachable (${e.message})`);
     }
-    const srvVersion = logSrvVersion(resp);
+    const srvVersion = logResponseVersion(resp);
     if (!resp.ok) {
         const body = await resp.text().catch(() => "");
         const versionHint =
             resp.status === 404 && srvVersion
-                ? ` (this instance is running srv v${srvVersion} — a 404 here may mean it predates this command; check you're not talking to a stale build)`
+                ? ` (${activeChannel ? `channel ${activeChannel}` : "this instance"} is running srv v${srvVersion} — a 404 here may mean it predates this command; check you're not talking to a stale build)`
                 : "";
         fail(`request failed (${resp.status}): ${body || resp.statusText}${versionHint}`);
     }
@@ -739,6 +774,8 @@ export function renderLayout(data) {
  * Exported (pure, no I/O) for muxspect.test.mjs.
  */
 export function parseArgs(argv) {
+    const { channel, rest } = splitChannelFlag(argv);
+    argv = rest;
     const json = argv.includes("--json");
     const help = argv.includes("--help") || argv.includes("-h");
     const positional = argv.filter((a) => !a.startsWith("-"));
@@ -751,16 +788,90 @@ export function parseArgs(argv) {
     } else {
         blockId = positional[1];
     }
-    return { cmd, sub, blockId, nodeId, json, help };
+    return { cmd, sub, blockId, nodeId, json, help, channel };
+}
+
+/**
+ * Pull `--channel <name>` (or `--channel=<name>`) out of argv, wherever it sits, so its value
+ * is never read as a positional. `channel` is `undefined` when absent, `""` when the flag has
+ * no value (the caller reports that).
+ */
+export function splitChannelFlag(argv) {
+    const rest = [];
+    let channel;
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i];
+        if (a === "--channel") {
+            const value = argv[i + 1];
+            if (value === undefined || value.startsWith("-")) channel = "";
+            else {
+                channel = value;
+                i++;
+            }
+        } else if (a.startsWith("--channel=")) {
+            channel = a.slice("--channel=".length);
+        } else {
+            rest.push(a);
+        }
+    }
+    return { channel, rest };
+}
+
+/** `--channel` is only meaningful for the reads the server forwards; say so for the rest. */
+export function channelProblem(cmd, sub, channel) {
+    if (channel === undefined) return null;
+    if (channel === "") return "--channel needs a name — 'muxspect instances' lists them";
+    if (cmd === "dock" && sub === "clear") return "dock clear changes the instance it runs in, so it never takes --channel";
+    if (!CHANNEL_COMMANDS.includes(cmd)) {
+        return `'${cmd}' does not take --channel (only ${CHANNEL_COMMANDS.join(", ")} do)`;
+    }
+    return null;
+}
+
+/** A long uptime as days, hours and minutes: '2d 3h', '5h 12m', '40s'. */
+export function uptimeString(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return "?";
+    const s = Math.floor(ms / 1000);
+    const [d, h, m] = [Math.floor(s / 86400), Math.floor((s % 86400) / 3600), Math.floor((s % 3600) / 60)];
+    if (d > 0) return `${d}d ${h}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return m > 0 ? `${m}m` : `${s}s`;
+}
+
+/** `muxspect instances`: one row per live instance on this machine. */
+export function renderInstances(data) {
+    const rows = data.instances ?? [];
+    if (data.error) console.log(`note: ${data.error}`);
+    if (rows.length === 0) {
+        console.log("no live AgentMux instances listed on this machine");
+        return;
+    }
+    const cols = ["CHANNEL", "VERSION", "PID", "AGENTS", "UPTIME"];
+    const table = rows.map((r) => [
+        `${r.self ? "*" : " "} ${r.channel}`,
+        r.version ?? "",
+        String(r.pid ?? ""),
+        String(r.agent_count ?? ""),
+        uptimeString(r.uptime_ms),
+    ]);
+    const widths = cols.map((c, i) => Math.max(c.length + (i === 0 ? 2 : 0), ...table.map((t) => t[i].length)));
+    const line = (cells) => cells.map((c, i) => c.padEnd(widths[i])).join("  ").trimEnd();
+    console.log(line(cols.map((c, i) => (i === 0 ? `  ${c}` : c))));
+    for (const t of table) console.log(line(t));
+    console.log("\n* = the instance you are in");
 }
 
 async function main() {
-    const { cmd, sub, blockId, nodeId, json, help } = parseArgs(process.argv.slice(2));
+    const { cmd, sub, blockId, nodeId, json, help, channel } = parseArgs(process.argv.slice(2));
 
     if (cmd === "help" || help) {
         console.log(USAGE);
         return;
     }
+
+    const problem = channelProblem(cmd, sub, channel);
+    if (problem) fail(problem);
+    activeChannel = channel;
 
     // Handled before the unconditional requireEnv() below — tier 0
     // (checkSpawnerTier) is a pure env-var check that shouldn't need
@@ -769,7 +880,8 @@ async function main() {
     if (cmd === "verify-sender") {
         const senderName = blockId;
         if (!senderName) fail("verify-sender requires an agent name — 'muxspect verify-sender <agent_name>'");
-        const spawnerVerdict = checkSpawnerTier(senderName, process.env);
+        // Tier 0 reads THIS pane's environment; another instance's is not in it.
+        const spawnerVerdict = channel ? null : checkSpawnerTier(senderName, process.env);
         const data = spawnerVerdict ?? (await (async () => {
             const { url, authKey } = requireEnv();
             return apiGet(url, authKey, `/api/v1/muxspect/verify-sender?name=${encodeURIComponent(senderName)}`);
@@ -781,6 +893,13 @@ async function main() {
     }
 
     const { url, authKey } = requireEnv();
+
+    if (cmd === "instances") {
+        const data = await apiGet(url, authKey, "/api/v1/muxspect/instances");
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderInstances(data);
+        return;
+    }
 
     if (cmd === "list") {
         const data = await apiGet(url, authKey, "/api/v1/muxspect/list");

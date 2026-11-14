@@ -21,8 +21,9 @@ import type { ActiveSubagent } from "./subagent-types";
 
 export type ActivityKind = "shell" | "cron" | "subagent" | "tool";
 
-/** Normalized lifecycle across every kind (D3/D4 ordering + retention). */
-export type ActivityStatus = "running" | "done" | "error" | "stopped";
+/** Normalized lifecycle across every kind (D3/D4 ordering + retention). `unknown` is a registry row with no
+ *  pid that nothing has confirmed for hours (background-adapter.ts): not claimed running, not claimed ended. */
+export type ActivityStatus = "running" | "unknown" | "done" | "error" | "stopped";
 
 export interface PinnedActivity {
     id: string;
@@ -79,6 +80,7 @@ export const KIND_SIGIL: Record<ActivityKind, string> = {
  *  read the error (well above `done`/`stopped`) while still self-clearing. */
 export const RETENTION_MS: Record<ActivityStatus, number> = {
     running: Infinity,
+    unknown: Infinity,
     done: 8_000,
     stopped: 3_000,
     error: 15_000,

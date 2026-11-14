@@ -3,7 +3,7 @@
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { tip } from "@/app/element/tip";
-import { Button, IconButton, openMenuAt, Tag } from "@/app/element/ui";
+import { Button, CloseButton, openMenuAt, Tag } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { accountStatus } from "@/app/view/accounts/account-card";
@@ -130,10 +130,9 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                             ⚠
                         </span>
                         <span class="identity-delete-notice-text">{notice()}</span>
-                        <IconButton
-                            icon="xmark"
+                        <CloseButton
+                            size="sm"
                             label="Dismiss"
-                            density="compact"
                             onClick={() => model.dismissDeleteNotice()}
                         />
                     </div>
@@ -176,10 +175,9 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                             >
                                 Remove anyway
                             </Button>
-                            <IconButton
-                                icon="xmark"
+                            <CloseButton
+                                size="sm"
                                 label="Dismiss"
-                                density="compact"
                                 onClick={() => model.dismissRevokeFailure()}
                             />
                         </div>

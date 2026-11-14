@@ -1,0 +1,20 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.scheduled-report",
+  "name": "Scheduled report",
+  "version": "1.0.0",
+  "kind": "drone",
+  "description": "On a schedule, one agent looks into something and writes a short report, and the report is sent to an agent of yours as a message. Change the question first; change the schedule when the first report is not wanted on Monday morning.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "question": { "type": "string", "title": "What to report on", "description": "The question the agent answers each time, such as: What changed in the repository acme/site this week? List the merged pull requests and anything left open." },
+      "owner": { "type": "string", "title": "Who to tell", "description": "The id of the agent that gets the report as a message." }
+    },
+    "required": ["question", "owner"]
+  },
+  "trigger": { "kind": "cron", "cron": "0 9 * * 1", "tz": "UTC" },
+  "policy": { "overlap": "skip", "catch_up": "skip", "caps": { "run_usd": 2 } },
+  "outputs": ["message:owner"],
+  "secrets": []
+}

@@ -229,6 +229,7 @@ pub(super) fn file_card(state: &AppState, item: &WorkItem, card: &NewCard) -> Op
     let for_itself = !item.target_agent.is_empty() && item.target_agent == filer;
     let state_now = if item.state == work_state::HELD { work_state::HELD } else { work_state::OPEN };
     record(state, &item.id, &filer, "agent", if for_itself { "filed_for_later" } else { "created" }, "", state_now, "");
+    super::task_flow_notes::note(state, &item.id, crate::backend::task_flow::TaskFlowKind::Filed, &filer, &item.target_agent);
     num
 }
 

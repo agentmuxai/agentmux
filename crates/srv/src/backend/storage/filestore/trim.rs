@@ -102,10 +102,25 @@ impl FileStore {
     /// restarts: a terminal flood grew it to 4.3 GB. A pass made by the writer
     /// itself, with no write in progress, leaves nothing behind, and its next
     /// write starts the log over (cut back to `journal_size_limit`).
+    ///
+    /// It waits for the background checkpointer's pass first, if one is
+    /// running: SQLite refuses a second checkpoint at once, so a pass made then
+    /// would copy nothing and the log would go on growing until the writer's
+    /// next one (a nightly on a slow disk saw 78 MB that way, with a pass due
+    /// every 8 MB).
+    ///
+    /// Returns whether the log was left fully copied back. It is not when
+    /// another process was checkpointing the same database, or a reader still
+    /// needs part of the log: the caller tries again soon.
     #[track_caller]
-    pub fn checkpoint_between_writes(&self) -> Result<(), StoreError> {
-        self.lock_conn().query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))?;
-        Ok(())
+    pub fn checkpoint_between_writes(&self) -> Result<bool, StoreError> {
+        let _turn = self.checkpointer.as_ref().map(|c| c.hold_pass());
+        // (busy, frames in the log, frames copied back); the last two are -1
+        // when the pass was refused, or the database has no log (in memory).
+        let (busy, log, copied) = self
+            .lock_conn()
+            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))?;
+        Ok(busy == 0 && log == copied)
     }
 
     /// Delete the parts of a circular `name` that lie wholly below its window.

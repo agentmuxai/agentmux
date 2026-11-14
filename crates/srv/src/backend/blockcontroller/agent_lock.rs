@@ -85,7 +85,7 @@ use std::sync::{Mutex, OnceLock};
 
 /// The block meta key holding the lease's expiry (ms since the epoch). `server::http_shell`
 /// re-exports it: `server::websocket`'s `controllerinput` handler also reads it.
-pub(crate) const META_KEY_AGENT_LOCK_UNTIL: &str = "term:agentlockuntil";
+pub const META_KEY_AGENT_LOCK_UNTIL: &str = "term:agentlockuntil";
 
 /// block_id → absolute unix-ms timestamp the lease expires at.
 static LEASES: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();

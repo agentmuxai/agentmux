@@ -412,7 +412,7 @@ impl BindingInjector<'_> {
             if let Some(provider_cfg) =
                 crate::backend::providers::get_provider(resolve_provider_alias(&binding.provider))
             {
-                crate::server::identity_auth_dirs::link_history_if_isolated(
+                crate::identity::auth_dirs::link_history_if_isolated(
                     &paths,
                     std::path::Path::new(dir),
                     provider_cfg,

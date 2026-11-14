@@ -274,7 +274,7 @@ impl Store {
     /// Replaces an entry's label, fields, tags and sealed parts. False if
     /// there is no such entry. Tests only: an edit goes through
     /// `vault_update_kept`, a capture through `vault_capture_commit`.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn vault_update(&self, row: &VaultRow) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let n = conn.execute(

@@ -37,8 +37,9 @@ import { debounce } from "throttle-debounce";
 import { describeRejection } from "@/util/describe-rejection";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
+import { pageCutsPending } from "@/app/drag/page-cut-gate";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
-import { REFLOW_CLIP, REFLOW_EDGES, REFLOW_TRANSFORM, reflowEdges, shownPx } from "./liveReflow";
+import { movesWithReflow, REFLOW_CLIP, REFLOW_EDGES, REFLOW_TRANSFORM, reflowEdges, shownPx } from "./liveReflow";
 import "./tilelayout.scss";
 import { LayoutNode, ResizeHandleProps, TileLayoutContents } from "./types";
 import { clearPlacement } from "./placementPreview";
@@ -567,7 +568,11 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     // starts (`waiting`): a pass stands at its start while the first frames lay the panes out, its neighbours
     // still cover its place for that time, and a fade that ran through it would be over before they moved.
     const enters = createMemo(() => props.layoutModel.settlingPass()?.enters.includes(props.node.id) ?? false);
-    const entering = createMemo(() => enters() && !!props.layoutModel.settlingPass()?.gliding);
+    // A pane whose fade began in the pass this one replaced keeps fading (`fading`): not drawn again at 0.
+    const entering = createMemo(() => {
+        const pass = props.layoutModel.settlingPass();
+        return enters() && !!pass && (pass.gliding || (pass.fading?.includes(props.node.id) ?? false));
+    });
     const waiting = createMemo(() => enters() && !entering());
     const tileStyle = createMemo<JSX.CSSProperties>(() => {
         const entry = reflow();
@@ -624,6 +629,8 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
     // reparented into the magnify overlay, outside the tile nodes.
     const magnifyActive = () => !!props.layoutModel.magnifiedNodeIdAtom();
     const [isDragging, setIsDragging] = createSignal(false);
+    // This pane is a browser pane and a page is still on screen at the drag's start (page-cut-gate.ts).
+    const ownPageUncut = () => pageCutsPending() && !movesWithReflow(props.node);
 
     // Clear isDragging when activeDrag goes false without onDrop having
     // fired — see `TileLayoutPlatform.clearDraggingWhenInactive`.
@@ -670,7 +677,8 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
 
     const { skipsLayout, tileStyle, entering } = useTileStyle(props, nodeModel);
     // The pane's own place until the layout first shows a drop or the tear-off: a release tears it off.
-    const tearOffOffered = () => isDragging() && !paneCaptureInFlight() && props.layoutModel.tearOffOffered();
+    const tearOffOffered = () =>
+        isDragging() && !paneCaptureInFlight() && !ownPageUncut() && props.layoutModel.tearOffOffered();
     // One of the pane's tabs dragged out of it (tabTearOff.ts): its place under the header offers the
     // tear-off. Not while the tab's picture is still being taken. Once the tab has left, the pane itself
     // shows the tab that takes its place (app/tab/pane-leaf-state.ts).
@@ -688,6 +696,8 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
             class={clsx("tile-node", {
                 // The pane is being dragged. Not while its picture is still being taken (pane-capture-gate.ts).
                 dragging: isDragging() && !paneCaptureInFlight(),
+                // The pane's own place until the layout first shows a drop or the tear-off: a release tears it off.
+                // A browser pane's sign waits for its page to be cut away: the page is drawn above it until then.
                 "tear-off-offered": tearOffOffered(),
                 "tab-tear-off-offered": tabTearOffOffered(),
                 "tile-hidden": magnifyActive(),

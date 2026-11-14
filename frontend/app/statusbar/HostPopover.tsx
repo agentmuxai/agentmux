@@ -46,6 +46,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
             placement="top-end"
             onDismiss={props.onClose}
             class="status-bar-popover host-popover"
+            fitHeight
             role="dialog"
             aria-label="Host info"
             style={{ width: `${POPOVER_WIDTH}px` }}

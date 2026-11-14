@@ -17,6 +17,12 @@
 //!
 //! A nonce is used once and expires after [`TTL`]. Registering the connection
 //! as an agent afterwards drops the proof (`WshRpcEngine::set_rpc_context`).
+//!
+//! A headless srv has no CEF host. A browser the person signed in there (a
+//! confirmed `local_session`, which the person approved by comparing a check
+//! phrase in a terminal) is their window too: [`vouch_for_signed_in_browser`]
+//! gives its connection the same proof. An agent never has such a session: it
+//! holds the key, which takes the other path in `auth_middleware`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
@@ -102,6 +108,13 @@ pub fn issue(engine: &Arc<WshRpcEngine>) -> String {
 pub fn attest(nonce: &str) -> bool {
     let engine = challenges().take(nonce, Instant::now());
     engine.is_some_and(|e| e.mark_operator_proven())
+}
+
+/// Mark a connection the person's when a browser they signed in opened it
+/// (`session` is set only for a confirmed local session). The proof is dropped
+/// again if the connection registers as an agent, like the app window's.
+pub(super) fn vouch_for_signed_in_browser(engine: &WshRpcEngine, session: Option<&super::local_session::SessionId>) -> bool {
+    session.is_some() && engine.mark_operator_proven()
 }
 
 /// Register `operator.challenge` on one connection's engine. The handler holds

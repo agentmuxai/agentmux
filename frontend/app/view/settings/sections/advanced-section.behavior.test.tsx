@@ -133,6 +133,7 @@ const CONFIGURED = {
     "agent:previewskidnotches": 7,
     "agent:container_memory": 4096,
     "agent:container_cpus": 0,
+    "model:spend_cap_usd:openrouter": "none",
     "agent:subagentmodel": "opus",
     "agent:exploremodel": "inherit",
     "agent:compacthints": false,
@@ -202,6 +203,8 @@ describe("AdvancedSection, pinned", () => {
         trigger("auto_answer_timeout", 12.4);
         trigger("compact_at", 480.6);
         trigger("compact_at", -3);
+        trigger("route_spend_cap", 250);
+        trigger("route_spend_cap", -5);
         trigger("preview_skid_notches", 4.6);
         trigger("preview_skid_notches", 999);
         trigger("preview_skid_notches", -2);

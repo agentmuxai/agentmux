@@ -10,7 +10,7 @@
 
 import { formatKey, type KeyPlatform } from "./keys";
 
-export type TipArea = "Panes" | "Window" | "Tabs" | "Terminal" | "Editor" | "Files" | "Media" | "Agent" | "Find" | "Browser";
+export type TipArea = "Panes" | "Window" | "Tabs" | "Terminal" | "Editor" | "Files" | "Media" | "Agent" | "Find" | "Browser" | "Memory" | "Atlas" | "Drone";
 
 export interface TipRow {
     id: string;
@@ -342,6 +342,14 @@ export const TIPS: TipRow[] = [
         label: "Send files to an agent, editor or terminal pane; dropping copies here, or into the folder under the pointer",
         source: { file: "frontend/app/view/files/files-view-drag.ts", anchor: "registerFileDropTarget(model.blockId" },
     },
+    {
+        id: "files:column:resize",
+        area: "Files",
+        gesture: "drag / dblclick",
+        where: "on the right edge of a column header",
+        label: "Drag to resize that column; double-click to give it its default width back",
+        source: { file: "frontend/app/view/files/files-column-resizer.tsx", anchor: "props.columns.reset(props.colKey)" },
+    },
 
     // ── Editor viewers ──
     {
@@ -455,6 +463,60 @@ export const TIPS: TipRow[] = [
         where: "over a browser pane",
         label: "Back / forward in that page (a plain side button re-selects panes)",
         source: { file: "crates/cef/src/browser_pane/hwnd.rs", anchor: "WM_XBUTTONUP" },
+    },
+
+    // ── Memory ──
+    {
+        id: "memory:divider",
+        area: "Memory",
+        gesture: "drag / dblclick / key:↑ / key:↓",
+        where: "on the line between an open entry's toolbar and its text",
+        label: "Drag to resize the toolbar against the text (the arrow keys step it once the line has keyboard focus); double-click resets it",
+        source: { file: "frontend/app/view/memory-editor/PinnedEditorLayout.tsx", anchor: "onDblClick={resetSplit}" },
+    },
+
+    // ── Atlas ──
+    {
+        id: "atlas:zoom",
+        area: "Atlas",
+        gesture: "wheel",
+        where: "over the map",
+        label: "Zoom in or out around the pointer",
+        source: { file: "frontend/app/view/atlas/atlas-pan-zoom.ts", anchor: "Math.exp(-e.deltaY * 0.0015)" },
+    },
+    {
+        id: "atlas:pan",
+        area: "Atlas",
+        gesture: "drag",
+        where: "on the map's empty background",
+        label: "Pan the map",
+        source: { file: "frontend/app/view/atlas/atlas-pan-zoom.ts", anchor: "viewport?.setPointerCapture(e.pointerId)" },
+    },
+
+    // ── Drone ──
+    {
+        id: "drone:zoom",
+        area: "Drone",
+        gesture: "wheel",
+        where: "over the graph",
+        label: "Zoom the graph around the pointer",
+        source: { file: "frontend/app/view/drone/drone-view.tsx", anchor: "const zoom = clampZoom(v.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));" },
+    },
+    {
+        id: "drone:pan",
+        area: "Drone",
+        gesture: "drag / middleclick+drag",
+        where: "the graph's empty background, or anywhere with the middle button",
+        label: "Pan the graph",
+        source: { file: "frontend/app/view/drone/drone-view.tsx", anchor: "e.button === 1 || (e.button === 0 && isBackground(s, t))" },
+    },
+    {
+        id: "drone:delete",
+        area: "Drone",
+        gesture: "key:Delete / key:Backspace",
+        where: "with a node selected",
+        label: "Remove it (Esc only clears the selection)",
+        source: { file: "frontend/app/view/drone/drone-view.tsx", anchor: 'e.key === "Delete" || e.key === "Backspace"' },
     },
 ];
 

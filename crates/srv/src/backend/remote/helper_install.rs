@@ -21,6 +21,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::backend::memory::record::sha256_hex;
+
 /// The helper's build target for `uname -sm` output (`Linux x86_64`,
 /// `Darwin arm64`, ...). `None` for a platform without a build.
 pub fn target_for(uname: &str) -> Option<&'static str> {
@@ -66,11 +68,6 @@ fn candidate_paths(dev_dir: Option<&Path>, exe_dir: Option<&Path>, version: &str
         (None, Some(exe_dir)) => packaged_paths(exe_dir, target).to_vec(),
         (None, None) => Vec::new(),
     }
-}
-
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    hex::encode(Sha256::digest(bytes))
 }
 
 /// The helper's folder on the host, relative to the remote home.

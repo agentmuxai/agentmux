@@ -27,10 +27,13 @@ import type { BlockRefEvent } from "@/types/rpc/BlockRefEvent";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
 import type { BrowserPauseAll } from "@/types/rpc/BrowserPauseAll";
 import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
+import type { ChecksFlowEvent } from "@/types/rpc/ChecksFlowEvent";
 import type { CompactionStarted } from "@/types/rpc/CompactionStarted";
 import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import type { ConnectivityStatus } from "@/types/rpc/ConnectivityStatus";
+import type { ContainerRuntimeStatus } from "@/types/rpc/ContainerRuntimeStatus";
+import type { ContainerStatus } from "@/types/rpc/ContainerStatus";
 import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
 import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
@@ -52,7 +55,9 @@ import type { LanDiscoveryError } from "@/types/rpc/LanDiscoveryError";
 import type { LanFirewall } from "@/types/rpc/LanFirewall";
 import type { LanInstanceList } from "@/types/rpc/LanInstanceList";
 import type { LspMessageEvent } from "@/types/rpc/LspMessageEvent";
+import type { MergeFlowEvent } from "@/types/rpc/MergeFlowEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
+import type { MessageFlowEvent } from "@/types/rpc/MessageFlowEvent";
 import type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
 import type { MuxObjBatch } from "@/types/rpc/MuxObjBatch";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
@@ -73,6 +78,7 @@ import type { ProcessExitedEvent } from "@/types/rpc/ProcessExitedEvent";
 import type { ProcessStatus } from "@/types/rpc/ProcessStatus";
 import type { ProtocolFrame } from "@/types/rpc/ProtocolFrame";
 import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
+import type { ReviewFlowEvent } from "@/types/rpc/ReviewFlowEvent";
 import type { RunEvent } from "@/types/rpc/RunEvent";
 import type { SensitiveClearedEvent } from "@/types/rpc/SensitiveClearedEvent";
 import type { SensitiveView } from "@/types/rpc/SensitiveView";
@@ -90,6 +96,7 @@ import type { SubagentCompletedEvent } from "@/types/rpc/SubagentCompletedEvent"
 import type { SubagentNamedEvent } from "@/types/rpc/SubagentNamedEvent";
 import type { SubagentSpawnedEvent } from "@/types/rpc/SubagentSpawnedEvent";
 import type { SubagentUpdatedEvent } from "@/types/rpc/SubagentUpdatedEvent";
+import type { TaskFlowEvent } from "@/types/rpc/TaskFlowEvent";
 import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 import type { ToolChunk } from "@/types/rpc/ToolChunk";
 import type { UpgradeRequestsEvent } from "@/types/rpc/UpgradeRequestsEvent";
@@ -148,10 +155,13 @@ export type MuxEventPayloads = {
   browserpauseall: BrowserPauseAll;
   "browserprofiles:changed": null;
   btw_answer_chunk: BtwAnswerChunkEvent;
+  "checks-flow": ChecksFlowEvent;
   compaction_started: CompactionStarted;
   config: ConfigEvent;
   connchange: ConnStatus;
   "connectivity:changed": ConnectivityStatus;
+  "container-runtime": ContainerRuntimeStatus;
+  "container-status": ContainerStatus;
   controllerstatus: BlockControllerRuntimeStatus;
   cron_changed: null;
   "dispatch:activity": DispatchActivityEvent;
@@ -179,6 +189,8 @@ export type MuxEventPayloads = {
   "mcp:observed": BlockRefEvent;
   "media:file_changed": PathChangedEvent;
   "memories:changed": null;
+  "merge-flow": MergeFlowEvent;
+  "message-flow": MessageFlowEvent;
   "muxbus:status": MuxBusDeliveryStatus;
   "namedagents:changed": null;
   notification: OsNotification;
@@ -193,6 +205,7 @@ export type MuxEventPayloads = {
   "processbroker:status-changed": ProcessStatus;
   "processbroker:tracked-blocks-changed": null;
   remoteschange: null;
+  "review-flow": ReviewFlowEvent;
   "sensitive:cleared": SensitiveClearedEvent;
   "sensitive:pending": SensitiveView;
   shell_chunk: ShellChunkEvent;
@@ -209,6 +222,7 @@ export type MuxEventPayloads = {
   "subagent:spawned": SubagentSpawnedEvent;
   "subagent:updated": SubagentUpdatedEvent;
   sysinfo: TimeSeriesData;
+  "task-flow": TaskFlowEvent;
   tool_chunk: ToolChunk;
   userattention: UserAttentionEvent;
   vault: VaultEvent;
@@ -276,10 +290,13 @@ export const TYPED_MUX_EVENTS = [
   "browserpauseall",
   "browserprofiles:changed",
   "btw_answer_chunk",
+  "checks-flow",
   "compaction_started",
   "config",
   "connchange",
   "connectivity:changed",
+  "container-runtime",
+  "container-status",
   "controllerstatus",
   "cron_changed",
   "dispatch:activity",
@@ -307,6 +324,8 @@ export const TYPED_MUX_EVENTS = [
   "mcp:observed",
   "media:file_changed",
   "memories:changed",
+  "merge-flow",
+  "message-flow",
   "muxbus:status",
   "namedagents:changed",
   "notification",
@@ -321,6 +340,7 @@ export const TYPED_MUX_EVENTS = [
   "processbroker:status-changed",
   "processbroker:tracked-blocks-changed",
   "remoteschange",
+  "review-flow",
   "sensitive:cleared",
   "sensitive:pending",
   "shell_chunk",
@@ -337,6 +357,7 @@ export const TYPED_MUX_EVENTS = [
   "subagent:spawned",
   "subagent:updated",
   "sysinfo",
+  "task-flow",
   "tool_chunk",
   "userattention",
   "vault",

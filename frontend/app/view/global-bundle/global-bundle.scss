@@ -204,11 +204,16 @@ code.global-bundle-file-label {
     min-width: 0;
     max-width: 100%;
 
-    // An option wider than the strip can't wrap onto another line: it is cut.
+    // An option wider than the strip can't wrap onto another line: it ends in an ellipsis. The option's label is a bare
+    // text node, which an inline-flex option holds as an anonymous flex item that `text-overflow` does not reach, so the
+    // option is a block container here, its one line as tall as the option's content box so it stays centred.
     .ui-segmented-option {
+        display: block;
         max-width: 100%;
         overflow: hidden;
         text-overflow: ellipsis;
+        text-align: center;
+        line-height: calc(var(--ui-height) - 2px - 2 * var(--ui-pad-y));
     }
 }
 

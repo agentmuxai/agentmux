@@ -22,6 +22,18 @@ describe("authHeaders", () => {
         });
     });
 
+    it("sends the tab's session when the host holds no key (a browser signed in by srv)", () => {
+        window.api = makeTestHostApi({ getAuthKey: () => "", getSessionToken: () => "tok" });
+        expect(authHeaders({ Range: "bytes=0-1" })).toEqual({ Range: "bytes=0-1", "X-AM-Session": "tok" });
+    });
+
+    it("sends the key alone when a host has both, and no session header when there is none", () => {
+        window.api = makeTestHostApi({ getAuthKey: () => "k1", getSessionToken: () => "tok" });
+        expect(authHeaders()).toEqual({ "X-AuthKey": "k1" });
+        window.api = makeTestHostApi({ getAuthKey: () => "", getSessionToken: () => undefined });
+        expect(authHeaders()).toEqual({});
+    });
+
     it("sends no X-AuthKey when the host gives none (a proxy adds it)", () => {
         window.api = makeTestHostApi({ getAuthKey: () => "" });
         expect(authHeaders({ Range: "bytes=0-1" })).toEqual({ Range: "bytes=0-1" });

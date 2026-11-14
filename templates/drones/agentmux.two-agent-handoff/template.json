@@ -1,0 +1,21 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.two-agent-handoff",
+  "name": "Two-agent hand-off",
+  "version": "1.0.0",
+  "kind": "drone",
+  "description": "One agent does a first piece of work, a second agent takes the first one's answer and does the next piece, and the result is sent to an agent of yours as a message. Use it to split a job where the second step needs the first one's findings, such as research then a summary. Run it by hand; add a schedule in the Jobs tab if you want one.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "first": { "type": "string", "title": "First agent's work", "description": "What the first agent does, such as: List the open pull requests of acme/site older than a week." },
+      "second": { "type": "string", "title": "Second agent's work", "description": "What the second agent does with the first one's answer, such as: Write a two-line status for each pull request." },
+      "owner": { "type": "string", "title": "Who to tell", "description": "The id of the agent that gets the result as a message." }
+    },
+    "required": ["first", "second", "owner"]
+  },
+  "trigger": { "kind": "manual" },
+  "policy": { "overlap": "skip", "caps": { "run_usd": 3 } },
+  "outputs": ["message:owner"],
+  "secrets": []
+}

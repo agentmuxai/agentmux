@@ -165,12 +165,7 @@ export function createSearch(props: SearchProps) {
         click: onNextWrapper,
     };
 
-    const closeDecl: IconButtonDecl = {
-        elemtype: "iconbutton",
-        icon: "xmark",
-        title: "Close (Esc)",
-        click: () => isOpenAtom._set(false),
-    };
+    const close = () => isOpenAtom._set(false);
 
     const regexDecl = createToggleButtonDecl(props.regex, "custom@regex", "Regular Expression");
     const wholeWordDecl = createToggleButtonDecl(props.wholeWord, "custom@whole-word", "Whole Word");
@@ -187,7 +182,7 @@ export function createSearch(props: SearchProps) {
         onKeyDown,
         prevDecl,
         nextDecl,
-        closeDecl,
+        close,
         regexDecl,
         wholeWordDecl,
         caseSensitiveDecl,

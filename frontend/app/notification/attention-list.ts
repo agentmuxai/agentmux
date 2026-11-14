@@ -5,7 +5,8 @@
  * Everything that waits on the person, as one list (SPEC_ATTENTION_TOAST_WITH_LINK_TO_AGENT_2026_11_02 §3.1):
  * this window's registry (`waitingPanes`, with what each wants, instantly) joined with srv's agent runtime rows
  * that are `waiting_on_user`, which cover the agents of every other window. A pane is one item, whichever
- * feed names it; the registry's words win.
+ * feed names it; the registry's words win. An agent that waits on a Browser request (`waiting_in`) is listed
+ * as that Browser pane, where the answer is given.
  */
 
 import { paneRoleColor } from "@/app/block/pane-color-scheme";
@@ -14,6 +15,7 @@ import { isLightThemeActive } from "@/app/block/pane-identity";
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { MOS, workspace } from "@/app/store/global";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
+import { BROWSER_WHAT, browserWaitsShown } from "./browser-waits";
 import { waitingPanes, type WaitingPane } from "./waiting-for-you";
 
 export interface AttentionItem {
@@ -67,15 +69,20 @@ export function mergeAttention(
     });
     const have = new Set(panes.map((p) => p.blockId));
     for (const r of rows) {
-        if (r.state !== "waiting_on_user" || !r.block_id || have.has(r.block_id)) continue;
+        if (r.state !== "waiting_on_user") continue;
+        // A Browser request is answered in the pane it waits in, so that pane is the item, once: where the pane
+        // is, this window's registry has it already. No agent id: the pane is not the agent's to open.
+        const blockId = r.waiting_in ?? r.block_id;
+        if (!blockId || have.has(blockId)) continue;
+        have.add(blockId);
         items.push({
-            blockId: r.block_id,
+            blockId,
             name: r.name || "An agent",
-            agentId: r.agent_id,
+            agentId: r.waiting_in ? undefined : r.agent_id,
             color: r.color,
-            what: REMOTE_WHAT,
-            since: seen(r.block_id),
-            local: here(r.block_id) !== false,
+            what: r.waiting_in ? BROWSER_WHAT : REMOTE_WHAT,
+            since: seen(blockId),
+            local: here(blockId) !== false,
         });
     }
     return items.sort((a, b) => a.since - b.since);
@@ -105,9 +112,23 @@ function ownPaneName(blockId: string): string | undefined {
 // When this window first saw a pane that srv alone reports waiting, so its row has an age; forgotten once it stops.
 const firstSeen = new Map<string, number>();
 
+/** The rows as the list and the counts read them. With Browser waits switched off (Settings → Sounds) an agent
+ *  that waits only on a Browser request reads idle here, as its pane's own announcement is left out. */
+export function attentionRows(rows: AgentRuntime[], browserWaits: boolean): AgentRuntime[] {
+    if (browserWaits) return rows;
+    return rows.map((r) =>
+        r.state === "waiting_on_user" && r.waiting_in
+            ? { ...r, state: "idle" as const, detail: undefined, waiting_in: undefined }
+            : r
+    );
+}
+
+/** srv's runtime rows for the list and the status bar's counts; reactive. */
+export const sharedAttentionRows = (): AgentRuntime[] => attentionRows(sharedAgentRuntime().rows(), browserWaitsShown());
+
 /** The panes that wait on the person, anywhere on this machine; reactive. */
 export function attentionItems(): AttentionItem[] {
-    const rows = sharedAgentRuntime().rows();
+    const rows = sharedAttentionRows();
     const items = mergeAttention(
         waitingPanes(),
         rows,

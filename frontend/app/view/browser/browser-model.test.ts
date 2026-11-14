@@ -402,6 +402,23 @@ describe("BrowserViewModel nav-state loading wiring", () => {
         expect(vm.loadingAtom()).toBe(false);
     });
 
+    // The host reports "" for a page that has committed nothing yet, right after the pane is created
+    // (task #47585). It cleared the address and title the pane had just been given, and "" was saved
+    // as the pane's address.
+    it("an empty address from the host does not clear the tab's address or get saved", () => {
+        const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        const urlBefore = vm.urlAtom();
+        expect(urlBefore).not.toBe("");
+        ctxSetMeta.mockClear();
+        navStateHandler({ block_id: "test-block-id", url: "", is_loading: false, can_go_back: false, can_go_forward: false });
+        expect(vm.urlAtom()).toBe(urlBefore);
+        expect(ctxSetMeta).not.toHaveBeenCalled();
+        // The address the page then settles on is taken and saved as before.
+        navStateHandler({ block_id: "test-block-id", url: "https://example.com/", is_loading: true });
+        expect(vm.urlAtom()).toBe("https://example.com/");
+        expect(ctxSetMeta).toHaveBeenCalledWith(expect.objectContaining({ url: "https://example.com/" }));
+    });
+
     it("a nav-state event for a different block_id is ignored", () => {
         const { vm, navStateHandler } = makeVMWithNavStateHandler();
         expect(vm.loadingAtom()).toBe(true);
@@ -731,6 +748,15 @@ describe("BrowserViewModel Save link as / Save image as (SPEC_BROWSER_PANE_DOWNL
         expect(invokeCommand).toHaveBeenCalledWith("browser_download_start", { block_id: vm.blockId, url: "https://example.com/a.pdf" });
         itemNamed(items, "Save image as…").click?.();
         expect(invokeCommand).toHaveBeenCalledWith("browser_download_start", { block_id: vm.blockId, url: "https://example.com/p.png" });
+    });
+
+    it("says so when a copied link can't reach any clipboard, rather than staying silent", async () => {
+        const vm = makeVM();
+        vi.mocked(invokeCommand).mockImplementationOnce(() => Promise.reject(new Error("clipboard write failed (install wl-copy, xclip, or xsel)")));
+        itemNamed(vm.getBodyContextMenuItems({ x: 1, y: 2, linkUrl: "https://example.com/a" }), "Copy Link Address").click?.();
+        await vi.waitFor(() => expect(vm.attentionAtom()?.message).toMatch(/Couldn't copy the link/));
+        expect(vm.attentionAtom()).toMatchObject({ kind: "notice", local: true });
+        expect(invokeCommand).toHaveBeenCalledWith("write_clipboard", { text: "https://example.com/a" });
     });
 
     it("gives both rows the download icon", () => {

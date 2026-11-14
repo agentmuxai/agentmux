@@ -39,13 +39,13 @@ use crate::backend::storage::store::Store;
 use crate::broker::RefreshErrorKind;
 use crate::muxbus::delivery_status;
 
-mod delivery;
-pub(crate) mod live_names;
+pub mod delivery;
+pub mod live_names;
 #[cfg(test)]
 mod recovery_tests;
-mod session;
-mod sign_in;
-mod supervisor;
+pub mod session;
+pub mod sign_in;
+pub mod supervisor;
 use delivery::{claim_and_deliver, PendingResp};
 use session::{SessionLimits, Watchdog};
 use sign_in::{refreshed_same_account, token_for_loop, usable_or_refreshable, wait_for_sign_in};
@@ -54,7 +54,7 @@ use sign_in::{refreshed_same_account, token_for_loop, usable_or_refreshable, wai
 // the domain root: no path suffix. The relay side is designed in the private
 // cloud repo.
 /// Fallback when the cloud publishes no settings (`discovery::ws_url`).
-pub(crate) const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
+pub const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
 pub(crate) const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
 const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_RECONNECT_DELAY_SECS: u64 = 60;
@@ -1267,7 +1267,7 @@ pub(crate) fn drop_cloud_subscription_on_exit(registration_was_ours: bool, still
 /// wasn't subscribed. `id_store` is where muxbus credentials live.
 /// What a Take over's relay release did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RelayRelease {
+pub enum RelayRelease {
     /// Not in the relay subscription: no relay lease to release.
     NotSubscribed,
     /// Unsubscribed and the lease released (or none was held).
@@ -1285,7 +1285,7 @@ pub(crate) fn is_subscribed(agent: &str) -> bool {
 /// Take over's relay step on the requester ([`super::wan_lease::take_over`]),
 /// with a fresh shared token. `Unknown` (fail open) when this instance has no
 /// MuxBus session or no token can be loaded.
-pub(crate) async fn take_over_lease_now(
+pub async fn take_over_lease_now(
     id_store: &Arc<Store>,
     http: &reqwest::Client,
     agent: &str,
@@ -1300,7 +1300,7 @@ pub(crate) async fn take_over_lease_now(
     super::wan_lease::take_over(&super::relay::rest_base_url(), agent, &token, http).await
 }
 
-pub(crate) async fn release_agent_now(id_store: &Arc<Store>, agent: &str) -> RelayRelease {
+pub async fn release_agent_now(id_store: &Arc<Store>, agent: &str) -> RelayRelease {
     let Some(sub) = get_global_subscriber() else { return RelayRelease::NotSubscribed };
     sub.release_now(agent, &super::relay::rest_base_url(), shared_token_now(id_store, "")).await
 }
@@ -1328,7 +1328,7 @@ async fn shared_token_now(mstore: &Arc<Store>, connection_token: &str) -> String
 /// pub(crate): also used by agent_credentials.rs to authenticate the
 /// POST /agents/provision call, which requires the human's own user-level
 /// (PKCE) token, not an agent-bound M2M one.
-pub(crate) async fn load_valid_token(
+pub async fn load_valid_token(
     mstore: &Arc<Store>,
     scheduler: &crate::broker::RefreshScheduler,
 ) -> Option<String> {

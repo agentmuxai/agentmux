@@ -708,7 +708,7 @@ impl WanIdentityStore {
 /// Test helper: attach a fresh `wan.db` in a temp dir to `store`, as
 /// bootstrap does for the runtime object store. Keep the returned dir alive
 /// for the test's duration.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn attach_temp_wan_identity(store: &super::store::Store) -> (tempfile::TempDir, std::sync::Arc<WanIdentityStore>) {
     let dir = tempfile::tempdir().unwrap();
     let wan = std::sync::Arc::new(WanIdentityStore::open(&dir.path().join("wan.db")).unwrap());

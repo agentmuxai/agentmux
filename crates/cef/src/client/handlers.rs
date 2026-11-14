@@ -211,6 +211,16 @@ wrap_focus_handler! {
             // when creating a 2nd browser pane). The input owner puts back
             // focus a page takes that wasn't asked for.
             tracing::info!("[pane-focus] on_set_focus source={:?} cancel=false", source);
+            // Where Views says the focus is as CEF reports this one (#47567): a click that never reaches the
+            // input owner leaves no other trace.
+            #[cfg(not(target_os = "macos"))]
+            if let Some((block, window)) = browser.as_ref().and_then(|b| {
+                let block = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)?;
+                let window = self.state.browser_pane_window_label(&block)?;
+                crate::pane_backend::pane_is_views(&self.state, &block).then_some((block, window))
+            }) {
+                tracing::info!("[pane-focus] views focus on pane:{} in win={window}: {}", &block[..block.len().min(8)], crate::input_owner::views::focus_report(&self.state, &window));
+            }
             // Linux, and Windows with Views panes, have no click hook into a
             // pane's page (Windows' child-window panes and macOS do): focus
             // the user gave the page (a click, Tab) is the user choosing that
@@ -1296,7 +1306,19 @@ wrap_permission_handler! {
             }
             // A location or notification prompt in a pane an agent drives goes through the countdown.
             let origin = requesting_origin.map(|s| s.to_string()).unwrap_or_default();
-            ::std::os::raw::c_int::from(super::agent_permission::hold_prompt(&self.state, cb, &block_id, &origin, requested_permissions))
+            if super::agent_permission::hold_prompt(&self.state, cb, &block_id, &origin, requested_permissions) {
+                return 1;
+            }
+            // The person's own pane: there is no prompt for a location request here, and under Alloy the
+            // default answer is IGNORE, which leaves the page's request pending until its own timeout
+            // (20 s on a page that sets one, forever on one that doesn't). Say no at once instead: the
+            // page's error callback gets PERMISSION_DENIED, which it can read and act on.
+            if super::agent_permission::is_location_or_notifications(requested_permissions) {
+                tracing::info!(target: "pane-media", %block_id, %origin, requested = requested_permissions, "refusing the page's location request at once: this pane has no prompt for it");
+                cb.cont(PermissionRequestResult::DENY);
+                return 1;
+            }
+            0
         }
     }
 }

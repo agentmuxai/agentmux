@@ -12,7 +12,7 @@ import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES, SUPERVISOR_OFF_REASON
 import { localTarget, partitionTargets, remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
-import { Button, IconButton, openMenuAt, Tag, TextInput } from "@/app/element/ui";
+import { Button, CloseButton, openMenuAt, Tag, TextInput } from "@/app/element/ui";
 
 // Staged rollout only offered once a selection is large enough that
 // blast-radius capping is actually meaningful (spec §5.3) — for a
@@ -233,7 +233,7 @@ export function FleetResultPanel(props: { model: SwarmViewModel; quietWhenClean?
                             {e().result.failed.length} failed
                             <Show when={e().result.aborted_early}> — staged rollout aborted early</Show>
                         </span>
-                        <IconButton icon="xmark" label="Dismiss" density="compact" onClick={() => model.dismissFleetResult()} />
+                        <CloseButton size="sm" label="Dismiss" onClick={() => model.dismissFleetResult()} />
                     </div>
                     {/* Per-target rows, never a single aggregate line alone — see
                         this panel's own reason for existing (spec §3/§5.4). */}

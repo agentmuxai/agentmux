@@ -62,7 +62,7 @@ const PUBLISH_TIMEOUT_SECS: u64 = 10;
 /// relay move or a sign-in to another account is a directory that has never
 /// seen this install's keys — so `wan.db` records publications per this id,
 /// and a key counts as published only to the directory it went to.
-pub(crate) fn directory_id(base_url: &str, account_sub: &str) -> String {
+pub fn directory_id(base_url: &str, account_sub: &str) -> String {
     format!("{}#{}", base_url.trim_end_matches('/'), account_sub)
 }
 
@@ -75,7 +75,7 @@ fn nudge_handle() -> Arc<tokio::sync::Notify> {
 /// Ask the publisher to run a pass soon — called by the spawn path after it
 /// provisions an agent's WAN key. Cheap and safe to call with no publisher
 /// running.
-pub(crate) fn nudge() {
+pub fn nudge() {
     nudge_handle().notify_one();
 }
 
@@ -299,7 +299,7 @@ pub(crate) async fn publish_pending(
 /// [`IDLE_RECHECK_SECS`] when none do;
 /// after a 404 it waits [`NOT_SUPPORTED_RETRY_SECS`] (nudges included, so a
 /// burst of spawns can't turn an old cloud into a hot loop).
-pub(crate) fn spawn(mstore: Arc<Store>, id_store: Arc<Store>) {
+pub fn spawn(mstore: Arc<Store>, id_store: Arc<Store>) {
     let Some(wan) = mstore.wan_identity() else { return };
     let notify = nudge_handle();
     tokio::spawn(async move {

@@ -15,6 +15,7 @@ mod resume_poison;
 mod agent_id;
 mod shutdown;
 mod loop_stop;
+mod cap_interrupt;
 mod reopen_guard;
 mod eager_resume;
 mod immediate_delivery;

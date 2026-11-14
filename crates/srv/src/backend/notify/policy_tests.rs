@@ -325,6 +325,19 @@ fn a_vault_reminder_is_not_folded_by_the_global_rate_cap() {
 }
 
 #[test]
+fn a_drone_note_shows_with_the_blocks_own_title_and_no_agent_summary() {
+    let k = NotifyKind::DroneNote;
+    assert_eq!(k.setting_suffix(), None, "no per-kind setting yet: the master switch, pause and quiet hours apply");
+    assert_eq!(title_for(k, "Backup is late"), "Backup is late");
+    let s = Settings::default();
+    let mut p = PolicyState::new();
+    p.step(Input::Emit(Request { kind: k, block_id: "drone:1".into(), agent_name: "Backup is late".into(), body: Some("x".into()), summary: Some("s".into()), shutdown: None }), 0, &s);
+    let n = shows(&p.step(Input::Tick, 0, &s)).into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(n.len(), 1, "{n:?}");
+    assert_eq!(n[0].summary, None, "about no agent");
+}
+
+#[test]
 fn burst_folds_into_one_summary_and_focus_clears_it() {
     let s = Settings::default();
     let mut p = PolicyState::new();

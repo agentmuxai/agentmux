@@ -499,6 +499,15 @@ describe("KanbanDrawer: the result", () => {
         expect(heading("Last handed back because")).toBeTruthy();
     });
 
+    it("does not call a running holder's task stopped: its result is the previous holder's hand-back", () => {
+        mount(task({ state: "claimed", claimed_by: "deephar", result: "agent stopped" }));
+        expect(heading("Last handed back because")).toBeTruthy();
+        expect(heading("Result")).toBeNull();
+        cleanup();
+        mount(task({ state: "blocked", claimed_by: "deephar", result: "agent quit" }));
+        expect(heading("Last handed back because")).toBeTruthy();
+    });
+
     it("shows no result section without a result", () => {
         mount(task({ state: "done" }));
         expect(heading("Result")).toBeNull();

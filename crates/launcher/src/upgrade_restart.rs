@@ -21,7 +21,7 @@
 //! 3. quits the host the way the tray's Quit does, which closes the windows and
 //!    saves the session;
 //! 4. after srv has stopped (so the new version copies complete data,
-//!    `srv/src/bootstrap/carry_forward.rs`), starts the new launcher, or a
+//!    `srv/src/migrations/carry_forward.rs`), starts the new launcher, or a
 //!    hidden PowerShell that waits for this launcher to be gone, runs the
 //!    installer silently and starts AgentMux again ([`relaunch`]), and exits.
 

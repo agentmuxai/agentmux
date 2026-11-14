@@ -27,6 +27,7 @@ use zeroize::Zeroizing;
 use super::import::{self, Incoming, Mapping, MappingNeeded, ReadError, Source};
 use super::kinds::{self, VaultSection};
 use super::seal::{self, Parts};
+use super::signins;
 use super::{new_id, record, validate, PERSON};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
@@ -212,6 +213,9 @@ struct StagedEntry {
     updated_at: i64,
     /// The existing entry this one duplicates, if any.
     duplicate_of: Option<String>,
+    /// A login with a site from a browser's export: it belongs to one browser profile, in that
+    /// profile's sign-in Vault, where the browser offers it from (spec §8).
+    browser_sign_in: bool,
 }
 
 fn staged() -> &'static Mutex<HashMap<String, Staged>> {
@@ -257,6 +261,9 @@ pub struct ImportPreview {
     pub source_label: String,
     /// The file holds every secret in it unencrypted: the person is offered to delete it.
     pub plaintext_file: bool,
+    /// How many logins a browser's export gave a site: they go to one browser profile's sign-in Vault
+    /// (`commit`'s `profile`), where the browser offers them; none for any other file.
+    pub browser_signins: usize,
 }
 
 /// How many entries of each section the preview lists.
@@ -339,6 +346,7 @@ pub fn inspect_keyed(store: &Store, path: &Path, passphrase: Option<&str>, mappi
             continue;
         }
         let duplicate_of = fingerprint(kind, &fields, &parts).and_then(|f| existing.get(&f).cloned());
+        let browser_sign_in = source == Source::Chrome && kind.name == "login" && fields.contains_key(signins::SITE);
         entries.push(StagedEntry {
             id: e.id,
             kind,
@@ -349,10 +357,36 @@ pub fn inspect_keyed(store: &Store, path: &Path, passphrase: Option<&str>, mappi
             created_at: e.created_at,
             updated_at: e.updated_at,
             duplicate_of,
+            browser_sign_in,
         });
     }
+    let sections = preview_sections(&entries);
+    let preview = ImportPreview {
+        token: uuid::Uuid::new_v4().to_string(),
+        file_name: file_name.clone(),
+        total: entries.len(),
+        duplicates: entries.iter().filter(|e| e.duplicate_of.is_some()).count(),
+        sections,
+        skipped,
+        source,
+        source_label: source.label().to_string(),
+        plaintext_file,
+        browser_signins: entries.iter().filter(|e| e.browser_sign_in).count(),
+    };
+    let mut held = staged().lock().unwrap_or_else(|p| p.into_inner());
+    held.retain(|_, s| s.at.elapsed() < STAGED_TTL);
+    while held.len() >= MAX_STAGED {
+        let Some(oldest) = held.iter().min_by_key(|(_, s)| s.at).map(|(k, _)| k.clone()) else { break };
+        held.remove(&oldest);
+    }
+    held.insert(preview.token.clone(), Staged { file_name, entries, at: Instant::now() });
+    Ok(preview)
+}
+
+/// What the preview lists of each section: how many, and the first few.
+fn preview_sections(entries: &[StagedEntry]) -> Vec<PreviewSection> {
     let mut sections: Vec<PreviewSection> = Vec::new();
-    for e in &entries {
+    for e in entries {
         let section = e.kind.section;
         let slot = match sections.iter().position(|s| s.section == section) {
             Some(i) => i,
@@ -366,25 +400,7 @@ pub fn inspect_keyed(store: &Store, path: &Path, passphrase: Option<&str>, mappi
             sections[slot].first.push(PreviewEntry { label: e.label.clone(), kind: e.kind.name.into(), duplicate: e.duplicate_of.is_some() });
         }
     }
-    let preview = ImportPreview {
-        token: uuid::Uuid::new_v4().to_string(),
-        file_name: file_name.clone(),
-        total: entries.len(),
-        duplicates: entries.iter().filter(|e| e.duplicate_of.is_some()).count(),
-        sections,
-        skipped,
-        source,
-        source_label: source.label().to_string(),
-        plaintext_file,
-    };
-    let mut held = staged().lock().unwrap_or_else(|p| p.into_inner());
-    held.retain(|_, s| s.at.elapsed() < STAGED_TTL);
-    while held.len() >= MAX_STAGED {
-        let Some(oldest) = held.iter().min_by_key(|(_, s)| s.at).map(|(k, _)| k.clone()) else { break };
-        held.remove(&oldest);
-    }
-    held.insert(preview.token.clone(), Staged { file_name, entries, at: Instant::now() });
-    Ok(preview)
+    sections
 }
 
 /// Decrypts an age file with a passphrase; the plaintext is wiped on drop.
@@ -450,8 +466,20 @@ pub struct ImportResult {
     pub skipped: usize,
 }
 
-/// Writes a staged import: all of it or none of it.
+/// Writes a staged import: all of it or none of it, with every browser sign-in in Personal's.
 pub fn commit(store: &Store, token: &str, duplicates: Duplicates, vault_id: &str) -> Result<ImportResult, String> {
+    commit_for(store, token, duplicates, vault_id, None)
+}
+
+/// [`commit`], with the browser profile the logins a browser's export gave a site belong to.
+///
+/// `profile` (`personal` or `profile:<id>`, Personal when left out) is the browser profile the logins a
+/// browser's export gave a site belong to: they go to that profile's sign-in Vault, not `vault_id`.
+pub fn commit_for(store: &Store, token: &str, duplicates: Duplicates, vault_id: &str, profile: Option<&str>) -> Result<ImportResult, String> {
+    let profile = profile.map(str::trim).filter(|p| !p.is_empty()).unwrap_or(signins::PERSONAL);
+    if !signins::is_profile(profile) {
+        return Err(format!("profile is personal or profile:<id>, not {profile:?}"));
+    }
     let taken = {
         let mut held = staged().lock().unwrap_or_else(|p| p.into_inner());
         held.remove(token)
@@ -459,7 +487,7 @@ pub fn commit(store: &Store, token: &str, duplicates: Duplicates, vault_id: &str
     let Some(staged_import) = taken.filter(|s| s.at.elapsed() < STAGED_TTL) else {
         return Err("this import has expired: choose the file again".into());
     };
-    match write_staged(store, &staged_import, duplicates, vault_id) {
+    match write_staged(store, &staged_import, duplicates, vault_id, profile) {
         Ok(result) => Ok(result),
         Err(e) => {
             // Nothing was written: the import stays staged, so Import can be pressed again.
@@ -476,7 +504,7 @@ fn settle_incoming(kind: &kinds::Kind, fields: &mut BTreeMap<String, String>, pa
 }
 
 /// Writes `incoming`, all of it or none of it.
-fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates, vault_id: &str) -> Result<ImportResult, String> {
+fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates, vault_id: &str, profile: &str) -> Result<ImportResult, String> {
     store.vault_info(vault_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault {vault_id}"))?;
     let key = seal::key(store.vault_count().map_err(|e| e.to_string())? == 0)?;
     let now = now_ms();
@@ -490,24 +518,37 @@ fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates, vault_
             continue;
         }
         let created = if e.created_at > 0 { e.created_at } else { now };
-        let fields = serde_json::to_string(&e.fields).map_err(|err| err.to_string())?;
         let tags = serde_json::to_string(&e.tags).map_err(|err| err.to_string())?;
         if let (Some(existing), Duplicates::Replace) = (&e.duplicate_of, duplicates) {
+            let current = store.vault_get(existing).map_err(|err| err.to_string())?;
+            let mut fields = e.fields.clone();
+            if e.browser_sign_in {
+                // A sign-in the browser already saved keeps its profile; one the Vault had gets the chosen one.
+                let kept = current.as_ref().and_then(|row| signins::fields_of(row).get(signins::PROFILE).cloned());
+                fields.insert(signins::PROFILE.to_string(), kept.unwrap_or_else(|| profile.to_string()));
+            }
             updates.push(VaultRow {
                 id: existing.clone(),
                 kind: e.kind.name.into(),
                 label: e.label.clone(),
-                fields,
+                fields: serde_json::to_string(&fields).map_err(|err| err.to_string())?,
                 tags,
                 sealed: seal::seal(&key, existing, &e.parts)?,
                 created_at: created,
                 updated_at: now,
                 last_used_at: 0,
                 // A replaced entry stays in the Vault it is in.
-                vault_id: store.vault_get(existing).map_err(|err| err.to_string())?.map_or_else(|| vault_id.to_string(), |row| row.vault_id),
+                vault_id: current.map_or_else(|| vault_id.to_string(), |row| row.vault_id),
             });
             continue;
         }
+        let mut fields = e.fields.clone();
+        let mut entry_vault = vault_id.to_string();
+        if e.browser_sign_in {
+            fields.insert(signins::PROFILE.to_string(), profile.to_string());
+            entry_vault = signins::vault_for(store, profile)?;
+        }
+        let fields = serde_json::to_string(&fields).map_err(|err| err.to_string())?;
         // The file's own id when it is free, so an agent's reference survives
         // a round trip; else a new one.
         let wanted = e.id.trim();
@@ -539,7 +580,7 @@ fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates, vault_
             created_at: created,
             updated_at: now,
             last_used_at: 0,
-            vault_id: vault_id.to_string(),
+            vault_id: entry_vault,
         });
     }
     store.vault_write_many(&inserts, &updates).map_err(|e| e.to_string())?;

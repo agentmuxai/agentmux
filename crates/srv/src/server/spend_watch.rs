@@ -99,6 +99,7 @@ fn refresh_chips(state: &AppState) {
     for def in &defs {
         let on_route = launch::choice_of(&state.mstore, &def.id).is_some();
         drop_stale(state, &def.id, on_route, now);
+        forget_alert_off_route(&def.slug, on_route, now);
         if on_route && spending.contains(&def.slug) {
             let spent = spend::today(&def.slug, now).cost_usd;
             publish_today(state, &def.id, &def.slug, cap::agent_cap(&state.mstore, &def.id), spent, now, true);
@@ -120,6 +121,15 @@ fn stale_keys(meta: &obj::MetaMapType, on_route: bool, now: i64) -> Vec<&'static
         .collect()
 }
 
+/// An agent off a model route has had its stop and warning taken off its panes, so the alert level the gateway's refusals
+/// check goes back to zero with them. Left at 100, an agent stopped at its cap that returns to a route the same UTC day
+/// is refused on its first request and gets no stop card, because the stop was already counted as sent.
+fn forget_alert_off_route(slug: &str, on_route: bool, now: i64) {
+    if !on_route && spend::alerted(slug, now) > 0 {
+        spend::set_alerted(slug, 0, now);
+    }
+}
+
 fn drop_stale(state: &AppState, def_id: &str, on_route: bool, now: i64) {
     for block_id in worker_notes::live_panes_of(&state.mstore, def_id) {
         let Some(block) = state.mstore.get::<obj::Block>(&block_id).ok().flatten() else { continue };
@@ -132,7 +142,10 @@ fn drop_stale(state: &AppState, def_id: &str, on_route: bool, now: i64) {
 fn handle(state: &AppState, event: Event) {
     let now = agentmux_common::time::now_ms();
     match event {
-        Event::Settled(grant) => on_settled(state, &grant, now),
+        Event::Settled(grant) => {
+            on_settled(state, &grant, now);
+            crate::server::compact_backstop::after_settled(state, &grant);
+        }
         Event::Refused(grant, hit) => {
             if spend::alerted(&grant.agent, now) < 100 {
                 spend::set_alerted(&grant.agent, 100, now);
@@ -207,7 +220,7 @@ fn card(state: &AppState, grant: &Grant, hit: &Hit, now: i64) -> Value {
     json!({ "at": now, "scope": scope, "cap": hit.cap, "spent": hit.spent, "route": grant.route, "place": place_of(state, grant) })
 }
 
-fn set_meta(state: &AppState, block_id: &str, key: &str, value: Value) {
+pub(crate) fn set_meta(state: &AppState, block_id: &str, key: &str, value: Value) {
     let mut update = obj::MetaMapType::new();
     update.insert(key.to_string(), value);
     match crate::server::service::update_object_meta(&state.mstore, &format!("block:{block_id}"), &update) {
@@ -240,7 +253,7 @@ fn stop(state: &AppState, grant: &Grant, hit: &Hit, now: i64) {
         set_meta(state, &block_id, WARNING_META_KEY, Value::Null);
         // The turn in flight ends now rather than retrying against the refusal.
         if let Some(ctrl) = blockcontroller::get_controller(&block_id) {
-            if let Err(e) = ctrl.send_input(BlockInputUnion::signal("SIGINT"), None) {
+            if let Err(e) = ctrl.interrupt_turn() {
                 tracing::warn!(block_id, error = %e, "spend cap: the turn was not interrupted");
             }
         }
@@ -252,7 +265,7 @@ fn stop(state: &AppState, grant: &Grant, hit: &Hit, now: i64) {
             hit.spent, hit.cap, place_of(state, grant)
         ),
         Scope::Route => format!(
-            "{name} is stopped: the cap of ${:.2} for today on its model route is used (${:.2}). It can go on when the cap is raised in Settings or the UTC day ends.",
+            "{name} is stopped: the cap of ${:.2} for today on its model route is used (${:.2}). It can go on when the cap is raised in Settings (Advanced) or the UTC day ends.",
             hit.cap, hit.spent
         ),
     };
@@ -339,6 +352,19 @@ mod tests {
         let shown = view(&store, &defs, "dsh-def").expect("a line saying so");
         assert_eq!(shown["measured"], json!(false));
         assert!(shown.get("spent_usd").is_none() && shown.get("cap_usd").is_none(), "no figure is made up");
+    }
+
+    #[test]
+    fn an_agent_stopped_at_its_cap_that_leaves_a_route_and_returns_gets_its_stop_again() {
+        let model = crate::backend::model_gateway::catalog::route("openrouter").unwrap().model("deepseek/deepseek-v4.1-flash-1017").unwrap();
+        let used = TokenCounts { input: 1_000_000, ..Default::default() };
+        let now = 5_000;
+        spend::record("stop-return", "openrouter", model, &used, Some(1.0), now);
+        spend::set_alerted("stop-return", 100, now);
+        forget_alert_off_route("stop-return", true, now);
+        assert_eq!(spend::alerted("stop-return", now), 100, "on its route the stop stays counted as sent");
+        forget_alert_off_route("stop-return", false, now);
+        assert_eq!(spend::alerted("stop-return", now), 0, "off the route it is forgotten, so the next refusal sends the stop");
     }
 
     fn meta_of(entries: &[(&str, Value)]) -> obj::MetaMapType {

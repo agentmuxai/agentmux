@@ -970,6 +970,21 @@ impl Router {
         }));
     }
 
+    /// A drone's Notify block (`drone::executor::blocks::notify`). `key` is
+    /// `drone:<id>`, one per notification; `title` is the block's own words,
+    /// written in the graph (never a value from outside); the body is the
+    /// block's text with its outside values quoted.
+    pub fn drone_note(&self, key: &str, title: &str, body: String) {
+        self.step(Input::Emit(Request {
+            kind: NotifyKind::DroneNote,
+            block_id: key.to_string(),
+            agent_name: sanitize_name(title),
+            body: Some(body),
+            summary: None,
+            shutdown: None,
+        }));
+    }
+
     /// This channel's MuxBus sign-in stopped working
     /// (`muxbus::delivery_status`). Fixed text; about no agent. Taken down
     /// with `resolve("", Family::Cloud)`.
@@ -1106,7 +1121,7 @@ impl Router {
     /// Hold `pending` for a window opened on its workspace. A newer request for the same workspace
     /// replaces the older one; requests for other workspaces are kept, so two panes in two closed
     /// workspaces both reach their windows.
-    pub(crate) fn park_activation(&self, pending: PendingActivation) {
+    pub fn park_activation(&self, pending: PendingActivation) {
         let mut parked = self.pending_activation.lock().unwrap_or_else(|e| e.into_inner());
         parked.retain(|p| now_ms() - p.at_ms <= PENDING_ACTIVATION_MAX_AGE_MS && p.workspace_id != pending.workspace_id);
         parked.push(pending);

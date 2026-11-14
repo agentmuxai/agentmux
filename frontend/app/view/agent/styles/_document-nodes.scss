@@ -2033,7 +2033,7 @@ $tool-name-colors: (
         font-size: var(--text-divider-label);
         font-weight: 600;
         letter-spacing: 0.05em;
-        color: rgba(255, 255, 255, 0.35);
+        color: var(--secondary-text-color);
         padding: 1px 9px;
         border-radius: var(--radius-full);
         background: var(--panel-bg-color);
@@ -2079,7 +2079,7 @@ $tool-name-colors: (
 
     .agent-session-outcome-detail {
         font-size: var(--text-xs);
-        color: rgba(255, 255, 255, 0.3);
+        color: var(--secondary-text-color);
     }
 
     &.agent-session-outcome-fresh {

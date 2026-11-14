@@ -203,290 +203,13 @@ impl SubagentWatcher {
     // `retries_remaining: 0` to test the exhausted-retry path without
     // depending on a real spawned watcher's tokio::spawn actually firing.
     pub(super) fn reconcile_stale_subagents_impl(&self, parent_block_id: &str, session_id: &str, retries_remaining: u32) {
-        let turn_active = crate::backend::blockcontroller::get_block_controller_status(parent_block_id)
-            .map(|s| s.turn_active);
-        match turn_active {
-            Some(true) => {
-                tracing::info!(
-                    parent_block_id = %parent_block_id,
-                    session_id = %session_id,
-                    "reconcile_stale_subagents: parent turn active — nothing to reconcile"
-                );
-                return;
-            }
-            // The pane was closed: its controller left the registry on
-            // purpose and will never register again. Retrying (~15s of
-            // "not yet registered" lines after every mid-turn close) would
-            // only chase a block that's gone.
-            None if self.parent_block_closed(parent_block_id) => {
-                tracing::debug!(
-                    parent_block_id = %parent_block_id,
-                    session_id = %session_id,
-                    "reconcile_stale_subagents: parent block closed — nothing to reconcile"
-                );
-                return;
-            }
-            None if retries_remaining > 0 => {
-                tracing::info!(
-                    parent_block_id = %parent_block_id,
-                    session_id = %session_id,
-                    retries_remaining,
-                    "reconcile_stale_subagents: controller not yet registered — retrying, not giving up silently"
-                );
-                self.retry_reconcile_once(parent_block_id, session_id, retries_remaining - 1);
-                return;
-            }
-            None => {
-                tracing::info!(
-                    parent_block_id = %parent_block_id,
-                    session_id = %session_id,
-                    "reconcile_stale_subagents: controller still not registered after all retries — giving up (bounded)"
-                );
-                return;
-            }
-            Some(false) => {} // confirmed idle — proceed below
+        if !self.parent_turn_is_confirmed_idle(parent_block_id, session_id, retries_remaining) {
+            return;
         }
-
-        // Scoped so the `sessions` lock is released before broadcasting (or
-        // touching `self.dispatches`, a separate mutex — never held at the
-        // same time as `sessions` anywhere in this function, to avoid any
-        // lock-ordering deadlock risk against other call sites) below —
-        // `broadcast_subagents_abandoned` doesn't need it, and this call
-        // site can now run live (Phase A), not just at reopen, so holding
-        // the lock any longer than the mutation itself is unnecessary
-        // contention against the live filesystem watcher.
-        //
-        // Alongside `reconciled_agent_ids`, also snapshot every member's
-        // (dispatch_id, status) for this block — not just the ones just
-        // reconciled — so the Workflow-dispatch aggregation pass below has
-        // the full picture per dispatch_id, not just this pass's deltas.
-        // Which of this block's still-`Active` members actually RETURNED.
-        //
-        // Until this existed, every one of them was downgraded to `Abandoned`
-        // on the reasoning that a subagent file without a terminal `Result`
-        // line must have been cut off. That premise is false: AgentMux
-        // transcripts contain no `"type":"result"` line at all, so the
-        // inference fired on healthy dispatches too and the Swarm pane showed
-        // successful Agent-tool calls as "interrupted". `completion.rs` asks a
-        // question the format can actually answer — did the PARENT record a
-        // `tool_result` for this dispatch's `tool_use_id`. See
-        // docs/reports/REPORT_SUBAGENT_COMPLETION_NEVER_DETECTED_2026_09_05.md.
-        //
-        // Resolved BEFORE taking the `sessions` lock, and in two phases: read
-        // the candidate list under a short lock, do the file IO (a parent
-        // transcript is routinely tens of MB) unlocked, then apply. This
-        // function is deliberately careful not to hold that mutex across
-        // anything slow — see the scoping comment below. The apply pass
-        // re-checks `Active`, so a member whose status moved in between is
-        // left alone rather than clobbered by a stale decision.
-        let resolved_statuses: HashMap<String, SubAgentStatus> = {
-            let candidates: Vec<(String, PathBuf)> = {
-                let sessions = self.sessions.lock().unwrap();
-                sessions
-                    .get(session_id)
-                    .map(|session| {
-                        session
-                            .subagents
-                            .values()
-                            .filter(|s| {
-                                s.info.parent_block_id == parent_block_id
-                                    && s.info.status == SubAgentStatus::Active
-                            })
-                            .map(|s| {
-                                (s.info.agent_id.clone(), PathBuf::from(&s.info.jsonl_path))
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
-            // Each candidate resolves its OWN parent transcript, with reads
-            // cached per distinct path. Resolving once from an arbitrary
-            // member and reusing it for the rest was wrong twice over
-            // (reagent P1 on #3007): Workflow-tool members sit one level
-            // deeper (`subagents/workflows/<run-id>/`) so they don't all
-            // share a resolution, and `candidates` comes from a HashMap with
-            // unspecified iteration order — so in a mixed batch an
-            // unresolvable member landing first would zero the map and drag
-            // every Solo member into `Abandoned` too, non-deterministically.
-            let mut results_by_parent: HashMap<PathBuf, HashMap<String, bool>> = HashMap::new();
-            candidates
-                .into_iter()
-                .map(|(agent_id, path)| {
-                    let status = match completion::parent_transcript_for(&path) {
-                        Some(parent) => {
-                            let results = results_by_parent
-                                .entry(parent.clone())
-                                .or_insert_with(|| completion::parent_tool_results_at(&parent));
-                            let tool_use_id = completion::tool_use_id_for(&path);
-                            completion::terminal_status(tool_use_id.as_deref(), results)
-                        }
-                        // No `subagents` ancestor — unrecognised layout.
-                        // Fall back to the historical inference.
-                        None => SubAgentStatus::Abandoned,
-                    };
-                    (agent_id, status)
-                })
-                .collect()
-        };
-
-        let (reconciled_agent_ids, completed_members, member_statuses_by_dispatch): (
-            Vec<String>,
-            Vec<(String, String, usize)>,
-            HashMap<String, Vec<SubAgentStatus>>,
-        ) = {
-            let mut sessions = self.sessions.lock().unwrap();
-            let Some(session) = sessions.get_mut(session_id) else { return };
-            // A session's subagent map can hold entries from a DIFFERENT block —
-            // the watcher dedupes purely by agent_id (see watch_agent's doc
-            // comment), so two blocks that both ran the same underlying Claude
-            // session id (e.g. one reattached to a session another block also
-            // touched) can have subagents from both mixed into one
-            // `SessionWatch`. We only have a confirmed-idle read for THIS one
-            // `parent_block_id` — a sibling block's subagent could easily still
-            // be genuinely active, so only reconcile entries this block itself
-            // owns (mirrors unwatch_agent's own parent-scoped filter). muxreview
-            // P1 on PR #2131.
-            let mut reconciled_agent_ids = Vec::new();
-            let mut completed_members: Vec<(String, String, usize)> = Vec::new();
-            let mut member_statuses_by_dispatch: HashMap<String, Vec<SubAgentStatus>> =
-                std::collections::HashMap::new();
-            for state in session.subagents.values_mut() {
-                if state.info.parent_block_id != parent_block_id {
-                    continue;
-                }
-                if state.info.status == SubAgentStatus::Active {
-                    // Absent a resolution (no sidecar, unreadable parent, an
-                    // entry that appeared after the snapshot above) fall back
-                    // to the historical `Abandoned` — never optimistically
-                    // complete something we could not correlate.
-                    let resolved = resolved_statuses
-                        .get(&state.info.agent_id)
-                        .cloned()
-                        .unwrap_or(SubAgentStatus::Abandoned);
-                    state.info.status = resolved.clone();
-                    if resolved == SubAgentStatus::Completed {
-                        tracing::info!(
-                            agent_id = %state.info.agent_id,
-                            parent_block_id = %parent_block_id,
-                            session_id = %session_id,
-                            dispatch_id = %state.info.dispatch_id,
-                            "subagent reconciled: active -> completed (parent recorded a tool_result)"
-                        );
-                        completed_members.push((
-                            state.info.agent_id.clone(),
-                            state.info.dispatch_id.clone(),
-                            state.info.event_count,
-                        ));
-                        member_statuses_by_dispatch
-                            .entry(state.info.dispatch_id.clone())
-                            .or_default()
-                            .push(state.info.status.clone());
-                        continue;
-                    }
-                    reconciled_agent_ids.push(state.info.agent_id.clone());
-                    // Every field a NAME-based grouping/dedup bug needs to
-                    // reconstruct offline: which subagent, which dispatch,
-                    // which display_name it had already resolved (grouping is
-                    // keyed on this), and which block/session it's bound to.
-                    tracing::info!(
-                        agent_id = %state.info.agent_id,
-                        parent_block_id = %parent_block_id,
-                        session_id = %session_id,
-                        dispatch_id = %state.info.dispatch_id,
-                        display_name = ?state.info.display_name,
-                        slug = %state.info.slug,
-                        "subagent reconciled: active -> abandoned (parent turn ended)"
-                    );
-                }
-                member_statuses_by_dispatch
-                    .entry(state.info.dispatch_id.clone())
-                    .or_default()
-                    .push(state.info.status.clone());
-            }
-            (
-                reconciled_agent_ids,
-                completed_members,
-                member_statuses_by_dispatch,
-            )
-        };
-        // Push the corrections the same way the abandoned ones are pushed —
-        // an already-open Swarm pane otherwise keeps showing these as running
-        // until some unrelated reload happens to refresh it.
-        for (agent_id, dispatch_id, total_events) in &completed_members {
-            self.broadcast_subagent_completed(
-                parent_block_id,
-                agent_id,
-                dispatch_id,
-                *total_events,
-            );
-        }
-        if !reconciled_agent_ids.is_empty() {
-            tracing::info!(
-                parent_block_id = %parent_block_id,
-                session_id = %session_id,
-                reconciled = reconciled_agent_ids.len(),
-                "reconcile_stale_subagents: pass complete"
-            );
-            self.broadcast_subagents_abandoned(parent_block_id, &reconciled_agent_ids);
-        }
-
-        // Propagate to the owning Workflow-kind `AgentDispatch` aggregate —
-        // a Solo dispatch needs no separate step (its status is synthesized
-        // directly from its one member's status, see `solo_dispatch`).
-        // SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2:
-        // Abandoned iff every member is Completed|Abandoned and at least one
-        // is Abandoned — otherwise leave the existing counts-based Running/
-        // Completed status (set by `refresh_dispatch_status`) alone.
-        let abandoned_dispatch_infos: Vec<AgentDispatch> = {
-            let mut dispatches = self.dispatches.lock().unwrap();
-            let mut updated = Vec::new();
-            for (dispatch_id, statuses) in &member_statuses_by_dispatch {
-                if dispatch_id.starts_with("solo:") {
-                    continue;
-                }
-                let Some(state) = dispatches.get_mut(dispatch_id) else { continue };
-                // reagent P2 on PR #2677: `statuses` only reflects members
-                // currently visible in `session.subagents` — a member whose
-                // JSONL file the filesystem watcher hasn't picked up yet
-                // (an async notify/debounce lag racing this exact
-                // reconciliation pass) is invisible here, so `all_done`
-                // could be true against an INCOMPLETE member set. Cross-
-                // check against the dispatch's own authoritative
-                // `member_count` (tracked separately via journal_started/
-                // member_files) — only trust `all_done` when we've actually
-                // seen status for every member the dispatch itself believes
-                // exist. Under-counting here is safe (skip this round, the
-                // next new-evidence event or reconciliation pass reruns
-                // this check with a fuller picture) — over-counting would
-                // risk abandoning a dispatch with a member reconciliation
-                // hasn't even observed yet.
-                if statuses.len() < state.info.member_count {
-                    continue;
-                }
-                let all_done = statuses
-                    .iter()
-                    .all(|s| matches!(s, SubAgentStatus::Completed | SubAgentStatus::Abandoned));
-                let any_abandoned = statuses.iter().any(|s| *s == SubAgentStatus::Abandoned);
-                if !(all_done && any_abandoned) {
-                    continue;
-                }
-                if state.info.status != DispatchStatus::Abandoned {
-                    state.info.status = DispatchStatus::Abandoned;
-                    tracing::info!(
-                        dispatch_id = %dispatch_id,
-                        parent_block_id = %parent_block_id,
-                        session_id = %session_id,
-                        member_count = statuses.len(),
-                        "dispatch reconciled: -> abandoned (all members done, at least one abandoned)"
-                    );
-                    updated.push(state.info.clone());
-                }
-            }
-            updated
-        };
-        for info in &abandoned_dispatch_infos {
-            self.broadcast_dispatch_updated(info);
-        }
+        let resolved = self.resolve_active_members(parent_block_id, session_id);
+        let Some(reconciled) = self.apply_resolved_statuses(parent_block_id, session_id, &resolved) else { return };
+        self.announce_reconciled(parent_block_id, session_id, &reconciled);
+        self.abandon_finished_dispatches(parent_block_id, session_id, &reconciled.statuses_by_dispatch);
     }
 
     /// Bounded retry for `reconcile_stale_subagents`'s `None`
@@ -512,7 +235,7 @@ impl SubagentWatcher {
             || matches!(self.mstore.get::<crate::backend::obj::Block>(parent_block_id), Ok(None))
     }
 
-    fn retry_reconcile_once(&self, parent_block_id: &str, session_id: &str, retries_remaining: u32) {
+    pub(super) fn retry_reconcile_once(&self, parent_block_id: &str, session_id: &str, retries_remaining: u32) {
         let Some(watcher) = self.self_ref.lock().unwrap().as_ref().and_then(|w| w.upgrade()) else {
             return;
         };
@@ -542,7 +265,7 @@ impl SubagentWatcher {
     /// merges is only "push the correction to an already-open Swarm pane
     /// immediately" (an already-open pane still picks up the correction on
     /// its next unrelated reload in the meantime).
-    fn broadcast_subagents_abandoned(&self, parent_block_id: &str, agent_ids: &[String]) {
+    pub(super) fn broadcast_subagents_abandoned(&self, parent_block_id: &str, agent_ids: &[String]) {
         self.event_bus.broadcast_typed::<crate::backend::mps_events::SubagentAbandoned>(&super::events::SubagentAbandonedEvent {
             parent_block_id: parent_block_id.to_string(),
             agent_ids: agent_ids.to_vec(),
@@ -565,7 +288,7 @@ impl SubagentWatcher {
     ///
     /// `parentAgent` is omitted (the live emitter includes it): reconcile is
     /// keyed on the block, and no consumer reads that field.
-    fn broadcast_subagent_completed(
+    pub(super) fn broadcast_subagent_completed(
         &self,
         parent_block_id: &str,
         agent_id: &str,

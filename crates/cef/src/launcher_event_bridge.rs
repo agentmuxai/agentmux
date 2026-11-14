@@ -163,7 +163,7 @@ pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event)
     let (pool_inventory, browsers) = state.user_visibility_snapshot();
 
     for (label, browser) in browsers {
-        if label.starts_with("browser-pane-") {
+        if crate::browser_pane::label::is_pane_label(&label) {
             continue;
         }
         if pool_inventory.contains(label.as_str()) {

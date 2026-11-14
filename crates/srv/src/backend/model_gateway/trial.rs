@@ -7,8 +7,9 @@
 //! answers every turn with a 400. So a change starts a trial: the place the agent came from is kept, the first turn the
 //! relaunched harness runs decides it, and a request the new place refuses puts the agent back where it was and says why.
 //!
-//! The trial is armed when the harness is relaunched on the new place ([`arm`], from the launch): a turn that was still
-//! running on the old one when the change was recorded must not settle it. It is armed for that pane: an agent's other
+//! The trial is armed when the harness is relaunched on the new place ([`arm_for_block`], from the persistent
+//! controller's install of the new process, not from building its environment, which a message to a process that is
+//! already running does too): a turn that was still running on the old one when the change was recorded must not settle it. It is armed for that pane: an agent's other
 //! panes, still on the old place, do not decide it. (A late frame of a process the pane has since replaced is dropped
 //! by the pane's reader before it gets here.)
 
@@ -90,6 +91,13 @@ pub fn arm(mstore: &Store, def_id: &str, block_id: &str) {
     if let Err(e) = save(mstore, def_id, &trial) {
         tracing::warn!(def_id, error = %e, "model route: the trial of a change was not armed");
     }
+}
+
+/// The persistent harness of pane `block_id` was started (a new process is installed): arms the trial of its agent, if
+/// one is waiting. A message that only reaches a process already running does not come here.
+pub fn arm_for_block(mstore: &Store, block_id: &str) {
+    let Ok(Some(instance)) = mstore.instance_get_active_for_block(block_id) else { return };
+    arm(mstore, &instance.definition_id, block_id);
 }
 
 /// What the `result` frame that ends a turn says about the change.

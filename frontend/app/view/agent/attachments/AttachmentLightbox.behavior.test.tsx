@@ -35,6 +35,14 @@ vi.mock("@/app/element/modal", () => ({
     },
 }));
 vi.mock("@/app/element/ui", () => ({
+    CloseButton: (p: { label?: string; tooltip?: boolean; onClick?: () => void }) => (
+        <span
+            data-stand="CloseButton"
+            data-label={p.label ?? "Close"}
+            data-tooltip={String(p.tooltip)}
+            onClick={() => (log(`CloseButton ${p.label ?? "Close"} click`), p.onClick?.())}
+        />
+    ),
     Button: (p: { tone?: string; onClick?: () => void; children?: JSX.Element }) => (
         <span data-stand="Button" data-tone={p.tone} onClick={() => (log(`Button ${p.children} click`), p.onClick?.())}>
             {p.children}
@@ -106,7 +114,7 @@ const flush = async () => {
     for (let i = 0; i < 12; i++) await Promise.resolve();
 };
 const click = (label: string) => {
-    const b = [...host.querySelectorAll<HTMLElement>("[data-stand='IconButton'],[data-stand='Button']")].find(
+    const b = [...host.querySelectorAll<HTMLElement>("[data-stand='IconButton'],[data-stand='CloseButton'],[data-stand='Button']")].find(
         (x) => x.dataset.label === label || x.textContent?.trim() === label
     );
     fireEvent.click(b!);

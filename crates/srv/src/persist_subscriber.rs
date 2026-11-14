@@ -31,9 +31,9 @@ use crate::backend::storage::store::Store;
 use crate::backend::wcore;
 use crate::state::State;
 
-mod layout_queue;
-pub(crate) mod parked;
-mod resync;
+pub mod layout_queue;
+pub mod parked;
+pub mod resync;
 
 use layout_queue::apply_layout_backend_actions_queued;
 
@@ -104,7 +104,7 @@ async fn run_persist_subscriber(
 /// to read it. Calling this from the RPC handler followed by the
 /// subscriber receiving the broadcast event is safe because the
 /// arms are idempotent — the subscriber's later apply is a no-op.
-pub(crate) fn apply_event_to_mstore(
+pub fn apply_event_to_mstore(
     event: &Event,
     mstore: &Store,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -517,7 +517,7 @@ fn apply_srv_window_opened(
 /// when the reducer never knew the window (silent no-op, no event) but
 /// the store still holds it (#2051). Deliberately defensive/idempotent:
 /// both callers rely on the already-gone cases being safe.
-pub(crate) fn apply_srv_window_closed(
+pub fn apply_srv_window_closed(
     mstore: &Store,
     window_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {

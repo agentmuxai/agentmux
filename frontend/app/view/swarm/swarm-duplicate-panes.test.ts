@@ -90,7 +90,7 @@ describe("an agent whose record names its closed second pane", () => {
             paneIdentity("live", { agentId: "a" }),
             paneIdentity("old", { agentId: "a", ...closedFor("live") }),
         ]);
-        const record: AgentRuntime = { agent_id: "a", state: "idle", desired: "running", name: "A", provider: "claude", icon: "", block_id: "old" };
+        const record: AgentRuntime = { agent_id: "a", state: "idle", desired: "running", name: "A", provider: "claude", icon: "", runtime: "host", block_id: "old" };
         expect(agentsWithoutRow([record], new Set(["live", ...closed]))).toEqual([]);
         expect(agentsWithoutRow([record], new Set(["live"]))).toEqual([record]);
     });

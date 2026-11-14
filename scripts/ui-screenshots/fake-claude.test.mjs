@@ -160,6 +160,34 @@ describe("install-fake-claude", () => {
         expect(homeProblem(alias, realHome)).toMatch(/own/);
         expect(homeProblem(join(dir, "other"), realHome)).toBeNull();
     });
+
+    describe("when the native realpath can't resolve a path (UNKNOWN on a junction)", () => {
+        const unknown = () => {
+            throw Object.assign(new Error("UNKNOWN: unknown error, realpath"), { code: "UNKNOWN" });
+        };
+        const missing = () => {
+            throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        };
+        const table = (map) => (p) => map[p] ?? missing();
+
+        it("falls back to the next resolver, so the alias is still refused", () => {
+            const native = (p) => (p === "/a/alias" ? unknown() : table({ "/h/.agentmux": "/h/.agentmux" })(p));
+            const next = table({ "/a/alias": "/h/.agentmux", "/h/.agentmux": "/h/.agentmux" });
+            expect(homeProblem("/a/alias", "/h/.agentmux", [native, next])).toMatch(/own/);
+            expect(homeProblem("/a/other", "/h/.agentmux", [native, next])).toBeNull();
+        });
+
+        it("refuses a path no resolver can resolve, rather than comparing it as written", () => {
+            const next = table({ "/h/.agentmux": "/h/.agentmux" });
+            expect(homeProblem("/a/alias", "/h/.agentmux", [unknown, unknown])).toMatch(/can't be told apart/);
+            expect(homeProblem("/h/.agentmux", "/a/alias", [next, unknown])).toMatch(/can't be told apart/);
+        });
+
+        it("compares a path that does not exist yet as written", () => {
+            expect(homeProblem("/new/home", "/h/.agentmux", [missing, missing])).toBeNull();
+            expect(homeProblem("/h/.agentmux", "/h/.agentmux", [missing, missing])).toMatch(/own/);
+        });
+    });
 });
 
 describe("agent suite", () => {

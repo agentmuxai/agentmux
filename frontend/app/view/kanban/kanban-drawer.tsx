@@ -45,6 +45,7 @@ const EVENT_WORDS: Record<string, string> = {
     reopened: "took the acceptance back",
     sent_back: "sent it back",
     released: "handed it back",
+    handed_back: "handed it back: not its area",
     expired: "lost its lease",
     cancelled: "cancelled it",
     retried: "tried it again",
@@ -296,12 +297,16 @@ function DrawerDocs(props: { m: DrawerState }): JSX.Element {
     );
 }
 
+/** States where the stored result is why a previous holder handed the task back, not an outcome: a task that
+ *  waits, failed, or has a holder now (claimed, or blocked on a question). */
+const HANDED_BACK_STATES: ReadonlySet<string> = new Set(["failed", "open", "held", "claimed", "blocked"]);
+
 function DrawerResult(props: { m: DrawerState }): JSX.Element {
     const t = props.m.t;
     return (
         <Show when={t().result}>
             <section class="kanban-drawer__section">
-                <h4>{t().state === "failed" || t().state === "open" ? "Last handed back because" : "Result"}</h4>
+                <h4>{HANDED_BACK_STATES.has(t().state) ? "Last handed back because" : "Result"}</h4>
                 <div class="kanban-drawer__payload">{t().result}</div>
             </section>
         </Show>

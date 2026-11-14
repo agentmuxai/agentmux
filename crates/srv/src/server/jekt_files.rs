@@ -352,6 +352,7 @@ pub(super) async fn handle_reactive_inject_files(
         let body = serde_json::json!({ "success": false, "error": "busy receiving other files" });
         return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(body)).into_response();
     };
+    super::lan_watch::stage("reading the request");
     let stream = body.into_data_stream().map(|r| r.map_err(std::io::Error::other));
     let mut reader = tokio_util::io::StreamReader::new(stream);
     let header = tokio::time::timeout(HEADER_TIMEOUT, read_request(&mut reader)).await;
@@ -362,6 +363,8 @@ pub(super) async fn handle_reactive_inject_files(
             return (axum::http::StatusCode::BAD_REQUEST, axum::Json(body)).into_response();
         }
     };
+    super::lan_watch::claimed(req.source_agent.as_deref().unwrap_or(""));
+    super::lan_watch::stage("delivery");
     super::actor::check_actor(&state, caller.as_deref(), super::actor::ActorSite::Inject, req.source_agent.as_deref());
     let caller_uid = super::caller::attributed_uid(caller.as_deref());
     axum::Json(receive(&state, auth_via, &caller_uid, req, &mut reader).await).into_response()
@@ -434,7 +437,7 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     if tier == "lan" && withheld {
         return refused(&req, format!("files refused: {}", withheld_reason(&req).unwrap_or_default()));
     }
-    super::jekt_ack::remember_arrival(&state.mstore, &req);
+    crate::backend::ack_policy::remember_arrival(&state.mstore, &req);
     let msgid = req.request_id.clone().unwrap_or_default();
     let claimed = tier == "lan" && !withheld;
     if claimed && !reserve(&msgid) {

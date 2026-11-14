@@ -83,6 +83,7 @@ const mountNoPane = async (extra: { onFork?: () => Promise<void> } = {}) => {
                 name: "Maks",
                 provider: "claude",
                 icon: "",
+                runtime: "host",
             })}
         />
     ));

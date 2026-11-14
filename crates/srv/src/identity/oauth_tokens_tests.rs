@@ -90,7 +90,7 @@ pub(crate) fn jwt(claims: serde_json::Value) -> String {
     format!("{}.{}.sig", enc(&serde_json::json!({ "alg": "RS256" })), enc(&claims))
 }
 
-pub(crate) fn oauth_account(id: &str, provider: &str, client_id: &str) -> IdentityAccount {
+pub fn oauth_account(id: &str, provider: &str, client_id: &str) -> IdentityAccount {
     IdentityAccount {
         id: id.to_string(),
         name: format!("{provider}-test"),

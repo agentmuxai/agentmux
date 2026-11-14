@@ -261,6 +261,14 @@ async fn check_pr(ctx: &'static Context, pr: NewPr) {
         None => super::git::merge_base_setting(&root, &branch).await,
     };
     let files = super::git::branch_files(&root, base.as_deref(), &branch).await;
+    // A release PR deletes every changeset it consumes: not a file anyone is
+    // still working on.
+    let files = if files.iter().any(|f| is_changeset(f)) {
+        let deleted = super::git::branch_deleted_files(&root, base.as_deref(), &branch).await;
+        without_consumed_changesets(files, &deleted)
+    } else {
+        files
+    };
     if files.is_empty() {
         return;
     }
@@ -282,7 +290,16 @@ async fn check_pr(ctx: &'static Context, pr: NewPr) {
     }
     let mut branch_files = Vec::new();
     for (agent, their_root, their_branch) in theirs {
-        let changed = super::git::branch_files(&their_root, None, &their_branch).await;
+        // A branch already merged into the default branch is done work.
+        if super::git::branch_contained_in_default(&their_root, &their_branch).await {
+            continue;
+        }
+        let mut changed = super::git::branch_files(&their_root, None, &their_branch).await;
+        // Only the files this PR changes can matter; of those, drop the ones
+        // whose change is already in the PR's base (a squash-merged branch).
+        changed.retain(|f| files.contains(f));
+        let landed = super::git::landed_files(&root, base.as_deref(), &their_root, &their_branch, &changed).await;
+        changed.retain(|f| !landed.contains(f));
         branch_files.push((agent, their_branch, changed));
     }
     let repo = me.repo.clone().unwrap_or_else(|| root.clone());
@@ -298,6 +315,17 @@ async fn check_pr(ctx: &'static Context, pr: NewPr) {
         .and_then(|r| r.uid.clone())
         .unwrap_or_else(|| pr.agent_id.clone());
     tell(&target, &pr.block_id, &text);
+}
+
+/// A changeset file: `.changesets/<name>.md`.
+fn is_changeset(path: &str) -> bool {
+    path.strip_prefix(".changesets/").is_some_and(|rest| rest.ends_with(".md") && !rest.contains('/'))
+}
+
+/// `files` without the changesets the PR deletes (`deleted`): consuming a
+/// changeset is a release's job, whoever's branch added it.
+fn without_consumed_changesets(files: Vec<String>, deleted: &[String]) -> Vec<String> {
+    files.into_iter().filter(|f| !(is_changeset(f) && deleted.contains(f))).collect()
 }
 
 /// Give `target` (in `block_id`) the note `text` in its running turn, where
@@ -494,6 +522,20 @@ mod tests {
         let text = overlap::pr_note_text("agenty/x", &got);
         assert!(text.starts_with("[AgentMux] The PR you are opening from agenty/x changes files other agents are working on: Agent4 has uncommitted changes in crates/a.rs and recently edited crates/b.rs; Agent5 changes crates/c.rs on its branch agent5/x."), "{text}");
         assert!(!text.contains('\n'));
+    }
+
+    #[test]
+    fn a_release_pr_does_not_count_the_changesets_it_deletes() {
+        let cs = |n: &str| format!(".changesets/{n}.md");
+        let files = vec![cs("1"), cs("2"), "VERSION".to_string(), ".changesets/README.md".to_string()];
+        // Deleted changesets go; a changeset the PR adds or edits, and every other file, stay.
+        let kept = without_consumed_changesets(files.clone(), &[cs("1"), ".changesets/README.md".to_string()]);
+        assert_eq!(kept, vec![cs("2"), "VERSION".to_string()]);
+        assert_eq!(without_consumed_changesets(files.clone(), &[]), files);
+        assert!(is_changeset(".changesets/1794419068-x.md"));
+        assert!(!is_changeset(".changesets/sub/x.md"));
+        assert!(!is_changeset("docs/.changesets/x.md"));
+        assert!(!is_changeset(".changesets/x.txt"));
     }
 
     #[test]

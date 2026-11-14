@@ -8,6 +8,7 @@ import {
     COMPACT_ORDER,
     accountInitial,
     chooseCompactKeys,
+    chooseForms,
     chooseMiddleBudget,
     middleTruncate,
     shortContextText,
@@ -178,5 +179,81 @@ describe("chooseMiddleBudget", () => {
 
     it("skips a budget that was not measured", () => {
         expect(chooseMiddleBudget(ACCOUNT_BUDGETS, (b) => (b === 9 ? 100 : undefined), () => true)).toBe(9);
+    });
+});
+
+
+describe("chooseForms: the account never shows a shorter form in a wider strip", () => {
+    // A long address (full 192) with the middle forms at 30 + 8 px a character and a 32 px letter, a view chip that
+    // spells out (150) or is an eye (24), and the context reading and Shell, as the strip at about 400 to 700 px.
+    const full = { runtime: 168, auth: 192, ctx: 160, hostShell: 72, view: 150 };
+    const compact = { auth: 32, ctx: 112, hostShell: 32, view: 24 };
+    const middle = Object.fromEntries(ACCOUNT_BUDGETS.map((b) => [b, 30 + b * 8]));
+    const order = COMPACT_ORDER;
+    // How wide the account's form is, from its letter (0) to full: a number that only grows with the form.
+    const rank = (compactAuth: boolean, budget: number | undefined): number =>
+        !compactAuth ? ACCOUNT_BUDGETS.length + 1 : budget === undefined ? 0 : ACCOUNT_BUDGETS.length - ACCOUNT_BUDGETS.indexOf(budget as 15);
+
+    /** What the strip did before: the fewest collapses first, then the account's widest middle form under them. */
+    const before = (width: number) => {
+        const rows = rowsAt(width);
+        const keys = chooseCompactKeys(order, full, compact, rows);
+        if (!keys.has("auth")) return rank(false, undefined);
+        const base = { ...full, ...Object.fromEntries([...keys].map((k) => [k, compact[k as keyof typeof compact]])) };
+        const target = rows(base);
+        const budget = chooseMiddleBudget(ACCOUNT_BUDGETS, (b) => middle[b], (w) => rows({ ...base, auth: w }) <= target);
+        return rank(true, budget);
+    };
+    const after = (width: number) => {
+        const { keys, budget } = chooseForms(order, full, compact, rowsAt(width), {
+            key: "auth",
+            budgets: ACCOUNT_BUDGETS,
+            middle,
+        });
+        return rank(keys.has("auth"), budget);
+    };
+    const widths = Array.from({ length: 121 }, (_, i) => 330 + i * 4);
+
+    // The rows the strip keeps at a width: the fewest its compact forms give. A strip that gets a row fewer by
+    // giving the account its letter is the one trade the account's form does not win (rows first).
+    const rowsKept = (width: number) => rowsAt(width)({ ...full, ...compact });
+    // Neighbouring widths with the same rows, the account compact at both (the order keeps it full where it stays full):
+    // the pairs where its form must not shrink.
+    const compactAt = (w: number) => chooseCompactKeys(order, full, compact, rowsAt(w)).has("auth");
+    const sameRows = widths.flatMap((w, i) =>
+        i > 0 && rowsKept(w) === rowsKept(widths[i - 1]) && compactAt(w) && compactAt(widths[i - 1]) ? [[widths[i - 1], w]] : []
+    );
+
+    it("was not monotone before: a wider strip, with the same rows, gave the account a shorter form", () => {
+        expect(sameRows.some(([narrow, wide]) => before(wide) < before(narrow))).toBe(true);
+    });
+
+    it("is monotone now: at the same rows, the account's form only grows as the strip widens", () => {
+        for (const [narrow, wide] of sameRows) {
+            expect(after(wide), `${narrow} px to ${wide} px`).toBeGreaterThanOrEqual(after(narrow));
+        }
+    });
+
+    it("keeps the rows the strip had, and a slot that stays full stays full", () => {
+        for (const width of widths) {
+            const rows = rowsAt(width);
+            const { keys, budget } = chooseForms(order, full, compact, rows, { key: "auth", budgets: ACCOUNT_BUDGETS, middle });
+            const old = chooseCompactKeys(order, full, compact, rows);
+            const widthsNow = {
+                ...full,
+                ...Object.fromEntries([...keys].map((k) => [k, compact[k as keyof typeof compact]])),
+                ...(keys.has("auth") && budget !== undefined ? { auth: middle[budget] } : {}),
+            };
+            const rowsOld = rows({ ...full, ...Object.fromEntries([...old].map((k) => [k, compact[k as keyof typeof compact]])) });
+            expect(rows(widthsNow), `rows at ${width} px`).toBeLessThanOrEqual(rowsOld);
+            if (!old.has("auth")) expect(keys.has("auth")).toBe(false);
+        }
+    });
+
+    it("is chooseCompactKeys when there is no ranked slot, or it has no middle form measured", () => {
+        const rows = rowsAt(420);
+        const plain = [...chooseCompactKeys(order, full, compact, rows)];
+        expect([...chooseForms(order, full, compact, rows).keys]).toEqual(plain);
+        expect([...chooseForms(order, full, compact, rows, { key: "auth", budgets: ACCOUNT_BUDGETS, middle: {} }).keys]).toEqual(plain);
     });
 });

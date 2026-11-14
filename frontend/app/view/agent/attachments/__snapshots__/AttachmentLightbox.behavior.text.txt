@@ -19,7 +19,7 @@ initialFocus -> agent-attachment-lightbox__dialog
           "·"
           "12 B"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- whole file, no note
 <div>
   <div data-stand="Modal" data-aria-label="File 1: notes.txt">
@@ -39,7 +39,7 @@ world"
           "·"
           "12 B"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- cut
 Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
 useAttachmentUrl send id=undefined
@@ -65,7 +65,7 @@ initialFocus -> agent-attachment-lightbox__dialog
           "·"
           "4.9 KB"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- gone
 Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
 useAttachmentUrl send id=undefined
@@ -88,4 +88,4 @@ initialFocus -> agent-attachment-lightbox__dialog
           "·"
           "12 B"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">

@@ -2,7 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { AUTH_KEY_HEADER } from "./sharedconst";
+import { getApi } from "./app-api";
+import { AUTH_KEY_HEADER, SESSION_WS_PROTOCOL } from "./sharedconst";
 
 type ComboWebSocket = WebSocket;
 
@@ -15,7 +16,10 @@ function newWebSocket(url: string, headers: { [key: string]: string }): ComboWeb
         const separator = url.includes("?") ? "&" : "?";
         finalUrl = `${url}${separator}authkey=${encodeURIComponent(headers[AUTH_KEY_HEADER])}`;
     }
-    return new WebSocket(finalUrl);
+    // A browser signed in by `agentmux-srv open` has no key: its session token is the second
+    // protocol it offers, because a WebSocket can carry no header. srv selects the fixed first one.
+    const session = finalUrl === url && typeof window !== "undefined" && window.api ? getApi().getSessionToken?.() : undefined;
+    return session ? new WebSocket(finalUrl, [SESSION_WS_PROTOCOL, session]) : new WebSocket(finalUrl);
 }
 
 export { newWebSocket };

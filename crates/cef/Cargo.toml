@@ -49,7 +49,7 @@ patched-libcef = []
 resources_path = "resources"
 
 [dependencies]
-agentmux-common = { path = "../common" }
+agentmux-common = { path = "../common", features = ["tls-provider"] }
 zeroize = "1"
 # CEF 156, all platforms (SPEC_CEF_156_UPGRADE_2026_11_10.md);
 # one milestone everywhere since 152's Phase E collapsed the temporary
@@ -84,7 +84,7 @@ whoami = "1"
 # run_cli_login. See SPEC_OPENCLAW_AGENT_2026_05_17.md §6.
 portable-pty = "0.9"
 # Talks only to srv at AGENTMUX_LOCAL_URL (http://127.0.0.1:<port>): no TLS feature on purpose (#4207).
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
 # A window renderer's size, for recycling it (commands/recycle.rs).
 agentmux-procstats = { path = "../procstats" }
 
@@ -109,6 +109,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_SystemInformation",
     "Win32_System_ProcessStatus",
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
     "Win32_System_ErrorReporting",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_UI_Shell",
@@ -178,6 +179,8 @@ ash = "0.38"
 x11rb = "0.13"
 
 [dev-dependencies]
+# Installs the ring TLS provider once per test binary (tls_test_init.rs): reqwest 0.13 builds no client without one.
+ctor = "1"
 # Property tests for the shadow projection (master spec §8.14
 # subscriber idempotency contract). Mirrors agentmux-launcher's
 # proptest setup.

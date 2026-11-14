@@ -284,13 +284,13 @@ impl Tokens {
     }
 
     /// The tokens held, for tests.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fn cached(&self) -> usize {
         self.st().cache.len()
     }
 
     /// The per-token locks kept, for tests.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fn locks(&self) -> usize {
         self.st().locks.len()
     }
@@ -431,7 +431,7 @@ pub const CONTAINER_HOOKS_DIR: &str = "/opt/agentmux/github-hooks";
 /// whose pushes aren't scanned.
 pub fn container_git_hooks() -> Option<std::path::PathBuf> {
     // The machine running the tests has its own answer; the tests give theirs.
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return None;
     }
     if crate::identity::gh_agent_token::installed().is_none() && !broker_account_connected() {

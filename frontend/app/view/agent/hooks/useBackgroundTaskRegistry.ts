@@ -61,6 +61,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { addWSReconnectHandler } from "@/app/store/ws";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
+import { isStaleRegistryRow } from "../activity/background-adapter";
 
 export interface UseBackgroundTaskRegistryOptions {
     blockId: string;
@@ -68,10 +69,13 @@ export interface UseBackgroundTaskRegistryOptions {
 }
 
 /** Pure: the `since` timestamp to observe from a set of registry rows, or
- * `null` if none are currently running. Exported for direct unit coverage
- * without a SolidJS reactive-root harness. */
-export function resolveAttachedTaskObservation(tasks: BackgroundTaskView[]): number | null {
-    const running = tasks.filter((t) => t.status === "running");
+ * `null` if none are currently running. A stale row (no pid, unconfirmed for
+ * `STALE_AFTER_MS`) is not running work: left counting, one orphaned row
+ * would hold the pane in the background-only carve-out of
+ * `turnHeldOnlyByBackgroundWork` on every turn. Exported for direct unit
+ * coverage without a SolidJS reactive-root harness. */
+export function resolveAttachedTaskObservation(tasks: BackgroundTaskView[], now: number = Date.now()): number | null {
+    const running = tasks.filter((t) => t.status === "running" && !isStaleRegistryRow(t, now));
     if (running.length === 0) return null;
     return Math.min(...running.map((t) => t.started_at_ms));
 }

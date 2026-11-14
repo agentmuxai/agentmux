@@ -43,6 +43,10 @@ export type UnavailableReason = "limited" | "signed_out";
 /** The META key a pane sets while a sensitive jekt waits for the person's confirmation. */
 export const META_AWAITING_CONFIRM = "term:awaiting_confirm";
 
+/** The META key srv sets while the agent is between turns and a Browser request of its is still open
+ *  (crates/srv/src/server/agent_runtime.rs, from the agent's runtime row). */
+export const META_AWAITING_BROWSER = "term:awaiting_browser";
+
 /** Status kinds, best first. */
 export const STATUS_ORDER: readonly AgentStatusKind[] = ["needs-you", "held", "working", "unavailable", "interrupted", "errored", "idle"];
 
@@ -67,6 +71,10 @@ export interface AgentStatusFacts {
      *  nothing is `live`: a turn in flight means the pause is over
      *  (docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.6). */
     pausedForYou?: boolean;
+    /** The agent ended its turn with a Browser request still open (`META_AWAITING_BROWSER`): the person is
+     *  asked in that Browser pane. Counts only while nothing is `live`: a turn in flight means a message
+     *  started more work. */
+    browserRequest?: boolean;
     /** Each reason that applies. Reconnecting and compacting can hold an
      *  agent with no turn in flight. */
     held?: Partial<Record<HeldReason, boolean>>;
@@ -80,7 +88,7 @@ export interface AgentStatusFacts {
 
 /** The status that wins for these facts. */
 export function rankAgentStatus(facts: AgentStatusFacts): AgentStatus {
-    if (facts.confirmPending || (facts.live ? facts.needsYou : facts.pausedForYou)) return { kind: "needs-you" };
+    if (facts.confirmPending || (facts.live ? facts.needsYou : facts.pausedForYou || facts.browserRequest)) return { kind: "needs-you" };
     const reason = HELD_ORDER.find((r) => facts.held?.[r]);
     if (reason) return { kind: "held", reason };
     if (facts.live) return { kind: "working" };

@@ -85,18 +85,28 @@ export function useAddressBarState(props: BrowserNavBarProps): AddressBarState {
     // Inline completion: when the engine's default match completes what was
     // typed ("git" -> "github.com"), show the rest selected after the caret,
     // as Chrome does. Not while deleting, and only if the caret is still at
-    // the end of exactly what was typed.
+    // the end of exactly what was typed, or a completion carried over from
+    // the text before is still selected after it (the input's onInput). A
+    // carried one stays until the engine has answered for this text, then
+    // gives way to that answer's completion, or to none.
     createEffect(() => {
-        const inline = inlineCompletion(
-            typed(),
-            { matches: autocomplete.matches(), matchesFor: autocomplete.matchesFor() },
-            flags.deleting
-        );
+        const text = typed();
+        const matches = autocomplete.matches();
+        const matchesFor = autocomplete.matchesFor();
+        const inline = inlineCompletion(text, { matches, matchesFor }, flags.deleting);
         const el = addressInputRef;
-        if (!inline || !el || flags.composing || document.activeElement !== el) return;
-        if (el.value !== typed() || el.selectionEnd !== typed().length) return;
-        showInInput(typed() + inline);
-        el.setSelectionRange(typed().length, el.value.length);
+        if (!el || flags.composing || document.activeElement !== el) return;
+        const plain = el.value === text && el.selectionEnd === text.length;
+        const carrying =
+            el.value.length > text.length &&
+            el.value.startsWith(text) &&
+            el.selectionStart === text.length &&
+            el.selectionEnd === el.value.length;
+        const answered = matchesFor === text || matches.length === 0;
+        if (!(plain && inline) && !(carrying && answered)) return;
+        if (el.value === text + inline) return;
+        showInInput(text + inline);
+        el.setSelectionRange(text.length, el.value.length);
     });
     // Reactively mirror the model's URL into the address-bar input whenever
     // CEF reports a navigation via the `browser-pane-nav-state` event (in-

@@ -22,16 +22,12 @@ name: Release (core)
 # the tag NAME: a tag deleted and made again at another commit during the signing
 # wait (see sign-release) must not change what is built, signed or run.
 #
-# The WinGet submission job is disabled (see "Phase 4" below, commented out,
-# 2026-08-12). The Microsoft Store job (`ms-store`) is off until the repository
-# variable MSSTORE_SUBMIT_ENABLED is 'true'; until then the Store is uploaded by
-# hand. WinGet's automated job never actually worked: `wingetcreate update` requires an
-# existing manifest in microsoft/winget-pkgs, which was never bootstrapped
-# via a first-time `wingetcreate new` submission, so every release back
-# through at least v0.54.14 failed this job identically
-# ("repos/microsoft/winget-pkgs/.../AgentMux was not found"). Re-enable once
-# a manifest actually exists there (or bootstrap one and switch back to
-# `update`).
+# The WinGet job (`winget`) is off until the repository variable
+# WINGET_SUBMIT_ENABLED is 'true'. `wingetcreate update` needs a manifest that already
+# exists in microsoft/winget-pkgs, which is the first-time `new` submission for
+# AgentMux.AI (see docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md): set the
+# variable once that submission has merged. The Microsoft Store job (`ms-store`) is
+# off until MSSTORE_SUBMIT_ENABLED is 'true'; until then the Store is uploaded by hand.
 #
 # See docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md and the correction
 # docs/specs/SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md for the full design, and
@@ -289,6 +285,34 @@ jobs:
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.macos-tag }}
     secrets: inherit
 
+  # The server package (no desktop app): one tarball per platform. It is built from the release commit like the desktop
+  # builds and reaches the release through the same two file selections below, so the signed manifest lists it and
+  # `install.sh --server` can check it
+  # (docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md section 4).
+  #
+  # `legs: release`: Linux x64, Linux arm64 and macOS arm64, on kinds of runner a release already waits for (the desktop
+  # builds use ubuntu-22.04 and macos-latest; container-image, which `sign-release` needs, uses the hosted arm64 Linux
+  # kind). `sign-release` and `publish` wait for this job, so it never asks for a kind they do not already wait for: a leg
+  # queued for a scarce runner (macOS x64) would hold the whole release for as long as GitHub keeps it queued, and one leg
+  # of a run cannot be cancelled. That platform is not in a release's package set: the manifest is signed once, from the
+  # files the release has when `sign-release` runs, and `install.sh --server` installs nothing the manifest does not
+  # list, so a tarball added after the signature would be an asset nobody can install. It stays buildable by hand (the
+  # workflow's `legs: all`, from workflow_dispatch). `publish` says so in its summary.
+  #
+  # Advisory for now: `sign-release` and `publish` wait for it but do not look at its result, so a new job on three legs
+  # cannot hold back a desktop release (its legs have their own time limits). The legs that built are published and
+  # signed; a platform that did not is absent from the manifest, and `install.sh --server` says that version has no server
+  # package for it. It becomes required after the first release in which all three legs are green.
+  build-server-package:
+    name: Build — server package
+    needs: gate
+    permissions:
+      contents: read
+    uses: agentmuxai/agentmux/.github/workflows/build-server-package.yml@main
+    with:
+      ref: ${{ github.sha }}
+      legs: release
+
   # ── Phase 2b: Sign the release's manifest ───────────────────────────────
   # docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md. The app downloads
   # nothing a signed manifest doesn't list, so this runs between the builds and
@@ -319,7 +343,7 @@ jobs:
     # container-image is needed for its digest, not for the release: a failed image job
     # leaves the manifest without an image (the app then uses its versioned tag, as before),
     # so the other jobs are checked one by one instead of by `!failure()`.
-    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, container-image]
+    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, container-image]
     if: >-
       ${{ vars.RELEASE_SIGNING_ENABLED == 'true' && !cancelled()
       && contains(fromJSON('["success","skipped"]'), needs.gate.result)
@@ -384,7 +408,7 @@ jobs:
       - name: Flatten artifact tree
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-server-*.tar.gz" \) -exec cp {} dist-flat/ \;
           # The install scripts are release assets too, so the signed manifest covers them
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" dist-flat/; fi; done
@@ -465,7 +489,7 @@ jobs:
   # because macOS signing isn't set up (check-macos), never anything else.
   publish:
     name: Publish release
-    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, sign-release]
+    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, sign-release]
     if: >-
       ${{ !cancelled()
       && contains(fromJSON('["success","skipped"]'), needs.gate.result)
@@ -490,6 +514,18 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Say which server packages this release has
+        env:
+          PACKAGE_RESULT: ${{ needs.build-server-package.result }}
+        run: |
+          line="Release v${VERSION}: the server package is built for Linux x64, Linux arm64 and macOS arm64; for macOS x64 the release has none, and install.sh --server says so."
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PACKAGE_RESULT" != success ]; then
+            line="Release v${VERSION}: the server package is incomplete (its build ended ${PACKAGE_RESULT}); the platforms that built are published, the others have no server package."
+            echo "::warning::$line"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -508,7 +544,7 @@ jobs:
         # the only *.zip (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-server-*.tar.gz" \) -exec cp {} dist-flat/ \;
           # The install scripts are release assets too, so the signed manifest covers them
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" dist-flat/; fi; done
@@ -549,18 +585,54 @@ jobs:
           echo "Release notes:"
           cat /tmp/release-notes.md
 
+      # The release is uploaded as a draft and published in one step: a published release can't be changed
+      # (its files are fixed, and so is its tag, once it is out), so every file is in place before it is.
+      # A draft left by an earlier attempt is finished. A release that is already published is not touched: if it
+      # holds exactly the files of this run (an earlier attempt of this run published them, and a later step of the
+      # job failed), the job goes on to the steps after this one; if it holds different files, the job stops.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.gate.outputs.version }}
         run: |
-          if ! gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release create "v${VERSION}" \
-              --title "AgentMux v${VERSION}" \
-              --notes-file /tmp/release-notes.md \
-              dist-flat/*
+          set -euo pipefail
+          # The release list shows drafts too (a lookup by tag does not); one line per release of this tag: draft or published.
+          state="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | if .draft then \"draft\" else \"published\" end")"
+          publish=yes
+          if echo "$state" | grep -qx published; then
+            # Every file of this run, the signed manifest included, must be a published asset of the same name with the same digest.
+            same=yes
+            if [ -z "$(ls -A release-manifest 2> /dev/null)" ]; then
+              echo "This run has no signed manifest to compare with"
+              same=no
+            fi
+            assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.assets[] | "\(.name) \(.digest)"')"
+            for f in dist-flat/*; do
+              if ! echo "$assets" | grep -qxF "$(basename "$f") sha256:$(sha256sum < "$f" | cut -d' ' -f1)"; then
+                echo "Not the same as the published file: $(basename "$f")"
+                same=no
+              fi
+            done
+            if [ "$same" = no ]; then
+              echo "::error::release ${TAG} is published and cannot be changed; cut a new version"
+              exit 1
+            fi
+            echo "Release ${TAG} was already published by an earlier attempt: nothing to upload"
+            publish=no
+          elif echo "$state" | grep -qx draft; then
+            echo "Release ${TAG} exists as a draft -- uploading/overwriting artifacts, then publishing"
+            gh release upload "$TAG" dist-flat/* --clobber --repo "$GITHUB_REPOSITORY"
           else
-            echo "Release v${VERSION} already exists -- uploading/overwriting artifacts only"
-            gh release upload "v${VERSION}" dist-flat/* --clobber
+            gh release create "$TAG" \
+              --draft \
+              --verify-tag \
+              --title "AgentMux ${TAG}" \
+              --notes-file /tmp/release-notes.md \
+              --repo "$GITHUB_REPOSITORY" \
+              dist-flat/*
+          fi
+          if [ "$publish" = yes ]; then
+            gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
           fi
 
       # Replaces LANDING_DEPLOY_TOKEN, which fingerprinted as an `a5af`
@@ -629,53 +701,83 @@ jobs:
       version: ${{ needs.gate.outputs.version }}
 
   # ── Phase 4: Distribution channels ────────────────────────────────────────
-  # WinGet automation never worked (see header comment above): its job body is
-  # kept for reference, fully commented out. The Microsoft Store job follows it.
-  # WinGet identifier corrected to AgentMux.AI 2026-09-10 (distinct from the
-  # already-published MSIX/Store identity AgentMux.AgentMux — see
-  # docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) so this job is
-  # ready to uncomment once that spec's bootstrap PR merges into
-  # microsoft/winget-pkgs. Still commented out here: `wingetcreate update`
-  # requires the manifest to already exist, which it doesn't yet.
-  # winget:
-  #   name: Submit WinGet update
-  #   needs: [gate, publish]
-  #   # microsoft/winget-create's release no longer ships a Linux binary (only
-  #   # wingetcreate.exe) — mirrors the ms-store job's runner below.
-  #   runs-on: windows-latest
-  #   continue-on-error: true
-  #   env:
-  #     VERSION: ${{ needs.gate.outputs.version }}
-  #   steps:
-  #     - name: Install wingetcreate
-  #       shell: pwsh
-  #       run: |
-  #         Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile wingetcreate.exe
+  # WinGet: opens the version-bump pull request in microsoft/winget-pkgs for the
+  # installer `publish` attached to the GitHub Release, with `wingetcreate update`.
+  # A moderator merges it; a release is on GitHub before it is in WinGet.
   #
-  #     - name: Submit WinGet manifest PR
-  #       shell: bash
-  #       env:
-  #         WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #       run: |
-  #         # Resolve the GitHub Release asset download URL directly — GitHub
-  #         # Releases is the source of truth (no separate CDN). package-installer.ps1
-  #         # produces AgentMux-<ver>-x64-setup.exe.
-  #         INSTALLER_URL=$(gh release view "v${VERSION}" \
-  #           --repo agentmuxai/agentmux \
-  #           --json assets \
-  #           --jq '.assets[] | select(.name | test("setup\\.exe$"; "i")) | .url' | head -1)
-  #         if [ -z "$INSTALLER_URL" ]; then
-  #           echo "❌ No setup.exe asset found in GitHub Release v${VERSION}" >&2
-  #           exit 1
-  #         fi
-  #         echo "WinGet installer URL: $INSTALLER_URL"
-  #         ./wingetcreate.exe update AgentMux.AI \
-  #           --version "${VERSION}" \
-  #           --urls "$INSTALLER_URL" \
-  #           --submit \
-  #           --token "$WINGET_TOKEN"
+  # Off until the repository variable WINGET_SUBMIT_ENABLED is 'true' (see the header:
+  # `update` fails until the AgentMux.AI manifest exists upstream). The PackageIdentifier
+  # is AgentMux.AI, distinct from the Store identity AgentMux.AgentMux (see
+  # docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md).
   #
+  # Not a need of `publish` or `sign-release`, and `continue-on-error`: a WinGet
+  # problem never changes whether a release that is already published went out.
+  # WINGET_TOKEN is the AgentMuxAI-bot token (public_repo); it is given to the one
+  # step that submits, and the run must be for the release tag.
+  winget:
+    name: Submit the WinGet update
+    needs: [gate, publish]
+    if: ${{ vars.WINGET_SUBMIT_ENABLED == 'true' && !cancelled() && needs.publish.result == 'success' }}
+    # microsoft/winget-create ships no Linux binary (only wingetcreate.exe).
+    runs-on: windows-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    env:
+      TAG: v${{ needs.gate.outputs.version }}
+      VERSION: ${{ needs.gate.outputs.version }}
+      # Pinned, with the digest GitHub shows for the asset: this job holds a token.
+      WINGETCREATE_URL: https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe
+      WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
+    steps:
+      - name: The run is for the release tag
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" != "tag" ] || [ "$REF_NAME" != "$TAG" ]; then
+            echo "::error::this run is for $REF_TYPE '$REF_NAME', not the release tag '$TAG'"
+            exit 1
+          fi
+
+      - name: Install wingetcreate (pinned)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri $env:WINGETCREATE_URL -OutFile wingetcreate.exe
+          $got = (Get-FileHash wingetcreate.exe -Algorithm SHA256).Hash
+          if ($got -ne $env:WINGETCREATE_SHA256.ToUpper()) {
+            Write-Error "wingetcreate.exe has SHA-256 $got, not the pinned $($env:WINGETCREATE_SHA256)"
+            exit 1
+          }
+
+      # The installer URL is the one the release published, so WinGet gets what
+      # GitHub has; wingetcreate downloads it and writes its hash into the manifest.
+      - name: Submit the WinGet manifest pull request
+        shell: bash
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "::error::the repository has no secret WINGET_TOKEN"
+            exit 1
+          fi
+          INSTALLER_URL=$(gh release view "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '[.assets[] | select(.name | test("-x64-setup\\.exe$"))] | if length == 1 then .[0].url else empty end')
+          if [ -z "$INSTALLER_URL" ]; then
+            echo "::error::expected exactly one -x64-setup.exe asset in release $TAG"
+            exit 1
+          fi
+          echo "WinGet installer URL: $INSTALLER_URL"
+          ./wingetcreate.exe update AgentMux.AI \
+            --version "$VERSION" \
+            --urls "$INSTALLER_URL" \
+            --submit \
+            --token "$WINGET_TOKEN"
+
   # The Microsoft Store: submits the MSIX that `publish` attached to the GitHub
   # Release, through the Store Developer CLI (`msstore`). The Store certifies it
   # after this; a release is on GitHub before it is in the Store.

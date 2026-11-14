@@ -20,6 +20,11 @@
  * `getVoiceSession()` swaps engines with the rest of the per-pane plumbing
  * (MicButton, red indicator, "Speak to <agent>" ghost text) unchanged.
  *
+ * Before it records, a start asks srv whether the engine has what it needs (`/api/v1/voice/status`). With
+ * no key or no local whisper the mic used to turn red and stay silent: the refusal came only after the
+ * person had spoken, and only as a toast. Now nothing is recorded and the pane says what is missing
+ * (`notSetUp`, VoiceSetupNotice.tsx).
+ *
  * Spec: docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md · tracking #1591.
  */
 
@@ -27,8 +32,8 @@ import { createSignalAtom, type SignalAtom } from "@/util/util";
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { getSettingsKeyAtom } from "@/app/store/global";
-import { computeRms } from "./audioLevel";
-import type { PaneVoiceHandle, VoiceSession } from "./useVoiceInput";
+import { computeRms, micLevelOf } from "./audioLevel";
+import type { PaneVoiceHandle, VoiceSession, VoiceSetupGap } from "./useVoiceInput";
 
 // VAD tuning. RMS below SILENCE_RMS for >= SILENCE_MS after speech ends an
 // utterance; a hard cap keeps any single clip small (Whisper isn't streaming,
@@ -92,6 +97,10 @@ interface WhisperState {
     currentTargetId: SignalAtom<string | null>;
     lastError: SignalAtom<string | null>;
     lastErrorDetail: SignalAtom<string | null>;
+    notSetUp: SignalAtom<VoiceSetupGap | null>;
+    level: SignalAtom<number>;
+    /** A start is asking srv about the engine: a second click does not start another. */
+    starting: boolean;
     isLocal: boolean;
     activeHandle: PaneVoiceHandle | null;
     stream: MediaStream | null;
@@ -229,7 +238,9 @@ function startRecorder(s: WhisperState) {
 
 function pollLevel(s: WhisperState) {
     if (!s.analyser) return;
-    if (vadShouldCut(s, computeRms(s.analyser))) {
+    const rms = computeRms(s.analyser);
+    s.level._set(micLevelOf(rms));
+    if (vadShouldCut(s, rms)) {
         if (s.recorder && s.recorder.state !== "inactive") s.recorder.stop();
     }
 }
@@ -258,7 +269,9 @@ function onAudioProcess(s: WhisperState, e: AudioProcessingEvent) {
     s.pcm.push(new Float32Array(input));
     let sum = 0;
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
-    if (vadShouldCut(s, Math.sqrt(sum / input.length))) cutWavSegment(s);
+    const rms = Math.sqrt(sum / input.length);
+    s.level._set(micLevelOf(rms));
+    if (vadShouldCut(s, rms)) cutWavSegment(s);
     // Leave outputBuffer silent (don't write it) → no mic echo to speakers.
 }
 
@@ -267,6 +280,7 @@ function onAudioProcess(s: WhisperState, e: AudioProcessingEvent) {
 async function stopCapture(s: WhisperState) {
     s.isListening._set(false);
     s.currentTargetId._set(null);
+    s.level._set(0);
     if (s.levelTimer != null) {
         clearInterval(s.levelTimer);
         s.levelTimer = null;
@@ -317,6 +331,7 @@ async function startCapture(s: WhisperState) {
         return;
     }
     s.lastError._set(null);
+    s.notSetUp._set(null);
     s.isListening._set(true);
 
     // Building the audio graph can throw — e.g. a runtime that rejects the
@@ -349,9 +364,45 @@ async function startCapture(s: WhisperState) {
     }
 }
 
+/**
+ * What srv says the chosen engine still needs, or null: it is ready, or the question got no answer (an
+ * older srv, a failed request). With no answer the capture goes ahead, and a refusal is reported as it
+ * was before, after the first utterance.
+ */
+async function readSetupGap(): Promise<Pick<VoiceSetupGap, "missing" | "detail"> | null> {
+    try {
+        const resp = await fetch(`${getWebServerEndpoint()}/api/v1/voice/status`, { headers: authHeaders() });
+        if (!resp.ok) return null;
+        const data = (await resp.json()) as { ready?: boolean; missing?: string | null; error?: string | null };
+        if (data.ready !== false) return null;
+        return { missing: data.missing ?? "engine", detail: data.error ?? null };
+    } catch {
+        return null;
+    }
+}
+
+async function start(s: WhisperState) {
+    const askedFor = s.currentTargetId();
+    const gap = await readSetupGap();
+    if (!gap) return startCapture(s);
+    // Nothing is recorded. The pane that was asked says what is missing; one that cannot gets the toast.
+    s.lastError._set("not-configured");
+    s.lastErrorDetail._set(gap.detail);
+    s.notSetUp._set({ blockId: askedFor, ...gap });
+    s.currentTargetId._set(null);
+    if (!s.activeHandle?.showsSetupNotice) {
+        window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "not-configured" }));
+    }
+}
+
 function toggleListening(s: WhisperState) {
-    if (s.isListening()) void stopCapture(s);
-    else void startCapture(s);
+    if (s.isListening()) {
+        void stopCapture(s);
+        return;
+    }
+    if (s.starting) return;
+    s.starting = true;
+    void start(s).finally(() => (s.starting = false));
 }
 
 export function createWhisperVoiceSession(): VoiceSession {
@@ -359,6 +410,8 @@ export function createWhisperVoiceSession(): VoiceSession {
     const currentTargetId = createSignalAtom<string | null>(null);
     const lastError = createSignalAtom<string | null>(null);
     const lastErrorDetail = createSignalAtom<string | null>(null);
+    const notSetUp = createSignalAtom<VoiceSetupGap | null>(null);
+    const level = createSignalAtom(0);
 
     // Capture mode is fixed for the session: whisper-local → WAV, else webm.
     const isLocal = getSettingsKeyAtom("voice:engine")() === "whisper-local";
@@ -389,6 +442,9 @@ export function createWhisperVoiceSession(): VoiceSession {
         currentTargetId,
         lastError,
         lastErrorDetail,
+        notSetUp,
+        level,
+        starting: false,
         isLocal,
         activeHandle: null,
         stream: null,
@@ -411,6 +467,8 @@ export function createWhisperVoiceSession(): VoiceSession {
         currentTargetId,
         lastError,
         lastErrorDetail,
+        notSetUp,
+        level,
         isAvailable: () => true,
         toggleListening: () => toggleListening(s),
         registerPane: (blockId, handle) => {

@@ -6,8 +6,8 @@ import { atoms } from "@/app/store/global";
 import { refocusNode } from "@/app/store/block-component-registry";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { Button } from "@/element/button";
-import { Button as UiButton } from "@/element/ui";
+import { tip } from "@/app/element/tip";
+import { Button as UiButton, CloseButton } from "@/element/ui";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";
 import { createEffect, createSignal, onCleanup, onMount, Show, on } from "solid-js";
@@ -68,9 +68,7 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => (
             <UiButton density="compact" icon="pen" class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
                 Rename
             </UiButton>
-            <UiButton density="compact" icon="xmark" class="tab-context-btn tab-context-btn-close" onClick={() => props.onClose()}>
-                Close menu
-            </UiButton>
+            <CloseButton size="sm" text="Close menu" class="tab-context-btn-close" onClick={() => props.onClose()} />
         </div>
     </AnchoredPopover>
 );
@@ -293,17 +291,16 @@ function Tab(props: TabProps): JSX.Element {
                     >
                         {tabData()?.name}
                     </div>
-                    <Button
-                        className="ghost grey close"
+                    <CloseButton
+                        size="tab"
+                        class="close"
+                        label="Close tab"
+                        tooltip={false}
+                        {...tip("Close Tab")}
                         onClick={handleCloseClick}
                         onMouseDown={handleMouseDownOnClose}
-                        title="Close Tab"
                         draggable={false}
-                    >
-                        {/* The same X as every other close in the app: Free's `xmark`
-                            (docs/reports/REPORT_PANE_HEADER_ICONS_FA_FREE_2026_10_11.md §8, D5). */}
-                        <i class="fa-solid fa-xmark" aria-hidden="true" />
-                    </Button>
+                    />
                 </div>
             </div>
             <Show when={showColorPicker() && colorPickerAnchor()}>

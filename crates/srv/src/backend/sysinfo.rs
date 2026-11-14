@@ -513,7 +513,7 @@ fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit
         .map(|r| r.stats())
         .unwrap_or((0, 0));
     let (reaper_candidates, reaper_first_seen, reaper_reaped_cumulative) =
-        crate::sagas::orphan_reaper::last_sweep_stats();
+        crate::backend::sweep_stats::last_sweep_stats();
 
     tracing::info!(
         target: "mem_attribution",

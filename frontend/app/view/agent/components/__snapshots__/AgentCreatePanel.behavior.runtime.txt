@@ -108,6 +108,22 @@
         <button data-testid="agent-create-install-start" type="button" class="ui-button ui-tone-accent">
           "Install now"
   call ListIdentityAccounts [{}]
+== nothing chosen yet: a container by default, straight to Create
+<div>
+  <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">
+    <header class="agent-create-panel-header">
+      <h3 class="agent-create-panel-title">
+        "New"
+        "Codex"
+        "agent"
+    <div data-testid="agent-create-form" data-template="Codex" data-runtime="container" data-deciding="false">
+      <button>
+        "form-cancel"
+      <button>
+        "form-busy"
+      <button>
+        "form-created"
+  call ListIdentityAccounts [{}]
 == container offered on the install step
 <div>
   <section class="agent-create-panel" data-testid="agent-create-panel" aria-label="New Codex agent">

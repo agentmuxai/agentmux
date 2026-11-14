@@ -60,6 +60,7 @@ impl BrowserPaneManager {
     /// `close`, saying who closed the pane (for the log of its page's "Leave site?").
     pub(crate) fn close_by(&self, block_id: &str, state: &Arc<AppState>, by: ClosedBy) {
         crate::browser_pane::trace::pane_trace(block_id, "close", "");
+        crate::browser_pane::open_timing::forget(block_id);
         // Phase H.1.d (PR #5) — sole pane-close entry point. The reducer
         // flips Live→Closing atomically and returns the entry's label iff
         // the transition fired. None means missing or already-Closing —

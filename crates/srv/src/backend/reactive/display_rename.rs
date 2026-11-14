@@ -63,7 +63,7 @@ impl ReactiveHandler {
 /// turn's registration writes (`input.rs`) with it: the controller's own id,
 /// the same-channel and cross-channel registry files, and the relay
 /// subscription of the new names. `local_url` is this instance's.
-pub(crate) fn renamed(uid: &str, old_title: &str, title: &str, local_url: &str) -> Option<RenamedBinding> {
+pub fn renamed(uid: &str, old_title: &str, title: &str, local_url: &str) -> Option<RenamedBinding> {
     let r = crate::backend::reactive::get_global_handler().rebind_renamed(uid, old_title, title)?;
     if let Some(ctrl) = crate::backend::blockcontroller::get_controller(&r.block_id) {
         ctrl.set_agent_id(Some(r.display.clone()));

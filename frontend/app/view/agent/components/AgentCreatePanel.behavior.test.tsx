@@ -639,6 +639,11 @@ describe("AgentCreatePanel behavior", () => {
         lastRuntimeForTest.value = null;
         renderPanel({ installed: false });
         await flush();
+        panel("nothing chosen yet: a container by default, straight to Create");
+        cleanup();
+        lastRuntimeForTest.value = "host";
+        renderPanel({ installed: false });
+        await flush();
         panel("container offered on the install step");
         fireEvent.click(screen.getByTestId("agent-create-use-container"));
         await flush();

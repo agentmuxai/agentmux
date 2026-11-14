@@ -564,7 +564,7 @@ impl ContainerManager {
     /// Stages the Keychain login of the account whose config dir is `config_dir` for the container about to be
     /// created, and returns the folder to mount as the account's credentials; `Err` with the reason in plain words
     /// when there is no login to give. Only called on macOS, where a config dir has a `keychain_config_dir`.
-    pub(crate) async fn stage_keychain_login(
+    pub async fn stage_keychain_login(
         &self,
         container_name: &str,
         config_dir: &str,

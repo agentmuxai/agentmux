@@ -290,10 +290,11 @@ async fn logs(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if let Some(n) = arguments.get("lines").and_then(Value::as_u64) {
         params["lines"] = json!(n);
     }
-    for key in ["level", "contains"] {
-        if let Some(v) = str_arg(arguments, key).filter(|v| !v.trim().is_empty()) {
-            params[key] = json!(v);
-        }
+    if let Some(level) = str_arg(arguments, "level") {
+        params["level"] = json!(level);
+    }
+    if let Some(text) = contains_arg(arguments) {
+        params["contains"] = json!(text);
     }
     let Some(host) = remote_op::host_arg(arguments) else {
         let url = format!("{}/api/v1/app/logs", cx.local_url.trim_end_matches('/'));
@@ -464,6 +465,13 @@ fn mb(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / 1_048_576.0)
 }
 
+/// `logs`' `contains`, exactly as given: the text is searched for as written, so leading and trailing spaces
+/// are part of it (`" store "` does not match "storefront") and a text of only spaces is a real filter. Only the
+/// empty string means no filter.
+fn contains_arg(args: &Value) -> Option<String> {
+    args.get("contains").and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string)
+}
+
 /// `key`'s value, if it is a non-empty string.
 fn str_arg(args: &Value, key: &str) -> Option<String> {
     args.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
@@ -558,6 +566,17 @@ fn describe_outcome(o: &Value) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_contains_text_keeps_its_whitespace_and_only_the_empty_text_is_no_filter() {
+        assert_eq!(contains_arg(&json!({ "contains": " store " })).as_deref(), Some(" store "));
+        assert_eq!(contains_arg(&json!({ "contains": "  " })).as_deref(), Some("  "));
+        assert_eq!(contains_arg(&json!({ "contains": "" })), None);
+        assert_eq!(contains_arg(&json!({})), None);
+        assert_eq!(contains_arg(&json!({ "contains": 7 })), None);
+        // `level` is a word, so it is still trimmed.
+        assert_eq!(str_arg(&json!({ "level": " warn " }), "level").as_deref(), Some("warn"));
+    }
 
     #[test]
     fn a_machine_is_called_a_release_or_a_local_build_by_its_build_never_by_its_channel() {

@@ -26,7 +26,7 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 import { CopyableErrorMessage } from "@/app/errors/CopyableErrorMessage";
 import { createMuxBusCloudConfig } from "./muxbus-cloud-config";
 import { muxbusNeedsSignInAgain } from "./muxbus-session";
-import { IconButton } from "@/app/element/ui";
+import { CloseButton } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import { Rich } from "@/app/i18n/rich";
 import { acceptMuxbusDelivery, type MuxBusDeliveryStatus } from "@/store/muxbus-delivery";
@@ -230,13 +230,13 @@ export function AgentMuxConnectPanel(props: {
             class="accounts-chooser-overlay"
             onClick={(e) => e.target === e.currentTarget && props.onClose()}
         >
-            <div class="accounts-chooser" role="dialog" aria-label="Connect AgentMux">
+            <div class="accounts-chooser" role="dialog" aria-label={t("agentmuxConnect.title")}>
                 <div class="accounts-chooser-header">
                     <span class="account-tile-logo">
                         <ProviderLogo provider="agentmux" size={20} />
                     </span>
-                    <span class="accounts-chooser-title">Connect AgentMux</span>
-                    <IconButton icon="xmark" label="Close" tooltip={false} onClick={() => props.onClose()} />
+                    <span class="accounts-chooser-title">{t("agentmuxConnect.title")}</span>
+                    <CloseButton label={t("agentmuxConnect.close")} tooltip={false} onClick={() => props.onClose()} />
                 </div>
                 <AgentMuxConnectBody muxbus={props.muxbus} />
             </div>
@@ -258,8 +258,7 @@ export function AgentMuxConnectBody(props: { muxbus: MuxBusController }): JSX.El
                 when={muxbus.isConfigured()}
                 fallback={
                     <div class="oauth-byo-note">
-                        ⓘ AgentMux Cloud sign-in isn’t configured in this build (client ID
-                        missing). Contact the AgentMux team.
+                        {t("agentmuxConnect.notConfigured")}
                     </div>
                 }
             >

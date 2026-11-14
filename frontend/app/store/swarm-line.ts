@@ -32,7 +32,7 @@
  */
 
 import { readSwarmSummary } from "./activitySummary";
-import { META_AWAITING_CONFIRM, rankAgentStatus, type AgentStatus } from "./agent-status";
+import { META_AWAITING_BROWSER, META_AWAITING_CONFIRM, rankAgentStatus, type AgentStatus } from "./agent-status";
 import { isUsableTitle } from "./ambient-title";
 import { META_TITLE_AT } from "./meta-keys";
 import { supervisorPauseReason } from "./supervisor";
@@ -70,6 +70,8 @@ export const LAST_PROMPT_MAX_CHARS = 240;
 export const STATUS_WORKING = "Working";
 export const STATUS_THINKING = "Thinking";
 export const STATUS_WAITING = "Waiting for you";
+/** The line while only a Browser request of the agent waits: the answer is given in that pane, not the agent's. */
+export const STATUS_WAITING_BROWSER = "Waiting for you in a browser pane";
 /** The line's lead when the Supervisor stopped the agent: "Needs you: <why>". */
 export const STATUS_NEEDS_YOU = "Needs you";
 export const STATUS_SUMMARIZING = "Summarizing work completed";
@@ -219,25 +221,34 @@ export function readPaneSummary(meta: Record<string, unknown> | undefined, now: 
 }
 
 /** The ranked status of a Swarm agent, from what its row knows: whether a
- *  turn is in flight, the pending-question flag (`term:awaiting_user`), and
- *  whether the Swarm Supervisor stopped it for the user. */
+ *  turn is in flight, the pending-question flag (`term:awaiting_user`),
+ *  whether the Swarm Supervisor stopped it for the user, and whether a Browser
+ *  request of its is open between turns (`term:awaiting_browser`). */
 function swarmAgentStatus(meta: Record<string, unknown> | undefined, status: "running" | "idle"): AgentStatus {
     const live = status === "running";
     return rankAgentStatus({
         live,
         needsYou: meta?.[META_AWAITING_USER] === true,
         confirmPending: meta?.[META_AWAITING_CONFIRM] === true,
+        browserRequest: meta?.[META_AWAITING_BROWSER] === true,
         pausedForYou: supervisorPauseReason(meta, live) !== null,
     });
 }
 
 /**
  * Whether the agent is waiting on the user: a question is pending and a turn
- * is in flight, or the Supervisor stopped it for the user. The row's line and
+ * is in flight, the Supervisor stopped it for the user, or it ended its turn
+ * with a Browser request still open. The row's line and
  * the status chip's "question" state both use this.
  */
 export function isAwaitingUser(meta: Record<string, unknown> | undefined, status: "running" | "idle"): boolean {
     return swarmAgentStatus(meta, status).kind === "needs-you";
+}
+
+/** Whether the agent ended its turn with a Browser request still open: the person is asked in that Browser
+ *  pane, with no turn in flight (`term:awaiting_browser`, kept by srv). */
+export function awaitsBrowserAnswer(meta: Record<string, unknown> | undefined, status: "running" | "idle"): boolean {
+    return status !== "running" && meta?.[META_AWAITING_BROWSER] === true;
 }
 
 /** The line for one agent row. Always returns something. */
@@ -247,7 +258,10 @@ export function resolveSwarmLine(input: SwarmLineInput): SwarmLine {
 
     if (status.kind === "needs-you") {
         const paused = supervisorPauseReason(meta, input.status === "running");
-        return { text: paused ? `${STATUS_NEEDS_YOU}: ${paused}` : STATUS_WAITING, source: "status" };
+        if (paused) return { text: `${STATUS_NEEDS_YOU}: ${paused}`, source: "status" };
+        // Only a Browser request asks: the line says where the answer is given.
+        const inBrowser = awaitsBrowserAnswer(meta, input.status) && meta?.[META_AWAITING_CONFIRM] !== true;
+        return { text: inBrowser ? STATUS_WAITING_BROWSER : STATUS_WAITING, source: "status" };
     }
 
     const declared = readLivePhrase(meta, input.now ?? Date.now());

@@ -16,12 +16,11 @@ use serde_json::json;
 use super::agent::{CommandCreateAgentDefinitionData, CommandCreateAgentSkillData, CommandUpdateAgentDefinitionData};
 use super::block::{CommandBlockInputData, CommandResolveCliData};
 use super::bundle::CommandUpsertBundleData;
-use super::identity::CommandUnlinkAgentIdentityData;
+use super::identity::{CommandUnlinkAgentIdentityData, StartProviderAuthReq};
 use super::instance::CommandCreateAgentInstanceData;
 use super::mcp::{CommandMcpCatalogUpsertData, CommandMcpUpsertData};
+use super::widget::WidgetInstallReq;
 use super::skill::{CommandSkillCatalogUpsertData, CommandSkillCatalogUpsertForBundleData, CommandSkillUpsertData};
-use crate::server::identity_handlers::StartProviderAuthReq;
-use crate::server::widget_handlers::WidgetInstallReq;
 
 /// Commands whose `optionalFields` this module proves.
 const PROVEN: &[&str] = &[

@@ -239,7 +239,7 @@ impl ViewerService {
         list.len()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn open_feeds(&self) -> usize {
         self.feeds.lock().total()
     }

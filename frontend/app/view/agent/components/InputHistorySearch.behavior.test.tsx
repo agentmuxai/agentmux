@@ -37,7 +37,10 @@ vi.mock("../agent-input-history", () => ({
     clearInputHistory: (agent: string) => (log(`clearInputHistory ${agent}`), h.clear()),
 }));
 vi.mock("@/app/element/tip", () => ({ tip: (text: string) => ({ "data-tip": text }) }));
-vi.mock("@/app/i18n/i18n", () => ({ formatLocale: () => "xx-XX" }));
+vi.mock("@/app/i18n/i18n", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/i18n/i18n")>()),
+    formatLocale: () => "xx-XX",
+}));
 vi.mock("@/util/format-time", () => ({
     formatTimeOrDate: (ms: number, now: Date, locale?: string) => `at ${ms} (${now instanceof Date ? "now" : "?"}, ${locale})`,
 }));

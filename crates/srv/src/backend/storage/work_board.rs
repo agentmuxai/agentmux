@@ -1043,13 +1043,14 @@ impl Store {
         Ok(out)
     }
 
-    /// Whether this agent released (or let expire) this task in the last
-    /// `window_ms`: a reminder must not offer it again (§10).
+    /// Whether this agent released (or let expire) this task in the last `window_ms`, or ever handed it
+    /// back as outside its area: a reminder must not offer it again (§10).
     pub fn work_recently_released_by(&self, work_id: &str, agent: &str, now_ms: i64, window_ms: i64) -> Result<bool, StoreError> {
         let conn = self.conn().lock().unwrap();
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM db_work_events
-              WHERE work_id = ?1 AND actor = ?2 AND kind IN ('released', 'expired') AND at >= ?3",
+              WHERE work_id = ?1 AND actor = ?2
+                AND ((kind IN ('released', 'expired') AND at >= ?3) OR kind = 'handed_back')",
             params![work_id, agent, now_ms - window_ms],
             |r| r.get(0),
         )?;

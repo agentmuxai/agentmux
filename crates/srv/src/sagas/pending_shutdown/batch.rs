@@ -9,8 +9,6 @@
 //! A block that already has an active request joins that one, as it always did; only the blocks no
 //! request covers are put in the new one.
 
-use serde::Serialize;
-
 use super::*;
 
 /// The notification group of a batch's toast: it is no one block's, so the request is its own.
@@ -18,29 +16,6 @@ pub(super) const GROUP_PREFIX: &str = "batch:";
 
 pub(super) fn group(request_id: &str) -> String {
     format!("{GROUP_PREFIX}{request_id}")
-}
-
-/// An agent of a batch.
-#[derive(Clone, Debug, Serialize, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct BatchBlock {
-    pub block_id: String,
-    /// Its display name, cleaned for the user.
-    pub name: String,
-}
-
-/// What became of one agent of a batch.
-#[derive(Clone, Debug, Serialize, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct BlockOutcome {
-    pub block_id: String,
-    pub name: String,
-    /// `kept_by_user`, or how its close ended: `shut_down`, `superseded` (already gone) or `failed`.
-    #[ts(type = r#""kept_by_user" | "shut_down" | "superseded" | "failed""#)]
-    pub outcome: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub error: Option<String>,
 }
 
 /// The name the user knows the agent in `block_id` by.

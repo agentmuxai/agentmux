@@ -31,9 +31,9 @@ pub fn note_text(job_name: &str, refusal: Refusal) -> String {
 impl RunLedger {
     /// Raise the once-a-day alert for `job`, skipped for `refusal`.
     pub(super) fn alert_cap(&self, job: &CronJob, refusal: Refusal) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         self.cap_alerts.lock().unwrap().push((job.id.clone(), refusal.reason().to_string()));
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "test-support")))]
         {
             use super::incidents::owning_leader;
             if let Some(leader) = owning_leader(self.mstore.as_ref(), job) {

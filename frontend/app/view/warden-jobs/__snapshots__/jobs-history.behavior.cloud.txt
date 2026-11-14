@@ -19,9 +19,10 @@ loadRuns c1 before=- limit=50
       <div class="warden-jobs-actions">
         <span data-stand="CloudRunNow">
           "nightly-bot"
-        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <button type="button" class="ui-close ui-close--sm ui-close--text">
           <i aria-hidden="true" class="fa-solid fa-xmark">
-          "Close"
+          <span class="ui-close__text">
+            "Close"
     <table class="warden-manager-table warden-jobs-runs">
       <thead>
         <tr>

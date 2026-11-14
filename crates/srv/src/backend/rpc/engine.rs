@@ -312,13 +312,13 @@ impl WshRpcEngine {
     /// Snapshot of every typed command's request/response pair, in command
     /// order. Handlers registered through the untyped [`Self::register_handler`]
     /// are absent — that is what lets the migration proceed one at a time.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn schema_json(&self) -> serde_json::Value {
         self.lock_inner().schema.to_json()
     }
 
     /// Every command with a handler, typed or not, sorted.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn command_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.lock_inner().handlers.keys().cloned().collect();
         names.sort();
@@ -369,8 +369,9 @@ impl WshRpcEngine {
         self.lock_inner().rpc_context.clone().unwrap_or_default()
     }
 
-    /// Record that the CEF host vouched for this connection as the AgentMux
-    /// window's (`server::operator_proof`). Refused, returning false, once the
+    /// Record that the CEF host (or, on a headless srv, a confirmed local
+    /// browser session) vouched for this connection as the person's window
+    /// (`server::operator_proof`). Refused, returning false, once the
     /// connection has registered as an agent. [`Self::set_rpc_context`]
     /// replaces the whole context, so registering afterwards drops the proof.
     pub fn mark_operator_proven(&self) -> bool {

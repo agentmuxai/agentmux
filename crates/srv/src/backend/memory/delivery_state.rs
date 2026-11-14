@@ -16,23 +16,23 @@ use super::delivery::Reason;
 
 /// How long a composed delivery stays cached for its remaining parts and
 /// acknowledgements. The hooks of one session start run within seconds.
-pub(crate) const DELIVERY_TTL_MS: i64 = 5 * 60_000;
+pub const DELIVERY_TTL_MS: i64 = 5 * 60_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct DeliveryKey {
-    pub(crate) block_id: String,
-    pub(crate) session_id: String,
-    pub(crate) reason: Reason,
+pub struct DeliveryKey {
+    pub block_id: String,
+    pub session_id: String,
+    pub reason: Reason,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Delivery {
-    pub(crate) parts: Vec<String>,
-    pub(crate) entries: Vec<EntrySize>,
-    pub(crate) summary_bytes: usize,
-    pub(crate) acked: Vec<bool>,
-    pub(crate) created_ms: i64,
-    pub(crate) notice_sent: bool,
+pub struct Delivery {
+    pub parts: Vec<String>,
+    pub entries: Vec<EntrySize>,
+    pub summary_bytes: usize,
+    pub acked: Vec<bool>,
+    pub created_ms: i64,
+    pub notice_sent: bool,
 }
 
 /// One item of a delivery as the notice shows it: one card row
@@ -40,7 +40,7 @@ pub(crate) struct Delivery {
 /// what older builds read; the rest is per-item detail. Sizes are those of
 /// what was delivered, so an item cut by the part cap reports its slice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct EntrySize {
+pub struct EntrySize {
     pub label: String,
     /// `global`, `personal`, or `summary` for the running summary.
     pub source: &'static str,
@@ -75,7 +75,7 @@ pub(crate) struct EntrySize {
 
 impl EntrySize {
     /// The running summary's row: what a compaction delivery carries last.
-    pub(crate) fn running_summary(
+    pub fn running_summary(
         size_bytes: usize,
         tokens: usize,
         delivered: &'static str,
@@ -104,7 +104,7 @@ impl EntrySize {
 /// What a `startup_file` item adds (SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_
 /// STARTUP_FILES_2026_09_30.md §4.1, `backend::startup_files`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct StartupDetail {
+pub struct StartupDetail {
     /// `user_instructions`, `instructions`, `instructions_import`, `skills`
     /// or `mcp_servers`.
     pub role: &'static str,
@@ -123,66 +123,66 @@ pub(crate) struct StartupDetail {
 /// seconds of each other, and one block has no two such events that close.
 /// Not for a fallback that waited behind a turn: a dated claim
 /// ([`DeliveryState::claim_event`]) covers that.
-pub(crate) const CLAIM_WINDOW_MS: i64 = 60_000;
+pub const CLAIM_WINDOW_MS: i64 = 60_000;
 
 /// A fresh session's `agentmux_session_outcome` frame can be written just
 /// after the respawn it reports (`retry_after_resume_failure`), so a hook
 /// delivery composed up to this long before the frame is still that
 /// session's.
-pub(crate) const EVENT_SLACK_MS: i64 = 10_000;
+pub const EVENT_SLACK_MS: i64 = 10_000;
 
 /// How long the fallback waits for a hook delivery still in flight, and how
 /// often it looks. A hook that never finishes must not leave the agent with
 /// no memory, so after this the fallback delivers instead.
-pub(crate) const PENDING_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
-pub(crate) const PENDING_POLL: std::time::Duration = std::time::Duration::from_millis(200);
+pub const PENDING_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
+pub const PENDING_POLL: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// How many compaction boundaries' origins are remembered. Boundary uuids are
 /// unique across blocks.
-pub(crate) const BOUNDARY_ORIGINS_MAX: usize = 256;
+pub const BOUNDARY_ORIGINS_MAX: usize = 256;
 
 /// Deliveries and fallback claims, behind one lock so "who claimed this event
 /// first" is decided atomically.
 #[derive(Default)]
-pub(crate) struct DeliveryState {
-    pub(crate) deliveries: HashMap<DeliveryKey, Delivery>,
+pub struct DeliveryState {
+    pub deliveries: HashMap<DeliveryKey, Delivery>,
     /// Events the frontend's hidden-reinjection fallback claimed:
     /// (block, reason) → when.
-    pub(crate) fallback_claims: HashMap<(String, Reason), i64>,
+    pub fallback_claims: HashMap<(String, Reason), i64>,
     /// Re-deliveries srv composed for the frontend's fallback, by
     /// `delivery_id`, until the hidden message that sends one arrives.
-    pub(crate) fallbacks: HashMap<String, FallbackDelivery>,
+    pub fallbacks: HashMap<String, FallbackDelivery>,
     /// Which block's CLI wrote each compaction boundary, and when: (`uuid`,
     /// block, ms), oldest first.
-    pub(crate) boundary_origins: VecDeque<(String, String, i64)>,
+    pub boundary_origins: VecDeque<(String, String, i64)>,
     /// The newest hook delivery each (block, reason) finished: when it was
     /// composed. Unlike `deliveries` it isn't pruned, so a fallback deferred
     /// behind a long turn still finds it. One entry per block and reason.
-    pub(crate) completed: HashMap<(String, Reason), i64>,
+    pub completed: HashMap<(String, Reason), i64>,
     /// One gate per delivery being composed. The 8 parts of a session start
     /// ask at once; the first composes while the rest wait here and then read
     /// its result, instead of each reading the memory and composing it again.
-    pub(crate) compose_gates: HashMap<DeliveryKey, std::sync::Arc<tokio::sync::Mutex<()>>>,
+    pub compose_gates: HashMap<DeliveryKey, std::sync::Arc<tokio::sync::Mutex<()>>>,
     /// Session starts that composed to nothing (no memory to deliver), by the
     /// time they did: the parts that ask after the first answer from here,
     /// instead of each reading the memory again to find it still empty.
-    pub(crate) composed_nothing: HashMap<DeliveryKey, i64>,
+    pub composed_nothing: HashMap<DeliveryKey, i64>,
     /// A compaction's notice that finished before this block's stdout showed
     /// the boundary (the CLI runs its `SessionStart` hooks first): block →
     /// (delivery composed at, notice line). The stdout reader writes them
     /// after the boundary and its summary ([`take_parked_notices`]); a timer
     /// writes any left after [`PARKED_NOTICE_WAIT`]
     /// (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 C2).
-    pub(crate) parked: HashMap<String, Vec<(i64, String)>>,
+    pub parked: HashMap<String, Vec<(i64, String)>>,
 }
 
 /// How long a compaction's notice waits for its boundary before it is written
 /// anyway, so a CLI that never writes one still leaves the card.
-pub(crate) const PARKED_NOTICE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+pub const PARKED_NOTICE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// What the fallback's claim found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FallbackClaim {
+pub enum FallbackClaim {
     /// Nothing delivered this event yet, or the fallback claimed it already:
     /// the fallback delivers.
     Deliver,
@@ -197,14 +197,14 @@ pub(crate) enum FallbackClaim {
 }
 
 impl DeliveryState {
-    pub(crate) fn prune(&mut self, now: i64) {
+    pub fn prune(&mut self, now: i64) {
         self.deliveries.retain(|_, d| now - d.created_ms < DELIVERY_TTL_MS);
         self.composed_nothing.retain(|_, at| now - *at < DELIVERY_TTL_MS);
         self.fallback_claims.retain(|_, at| now - *at < CLAIM_WINDOW_MS);
         self.fallbacks.retain(|_, f| now - f.created_ms < FALLBACK_TTL_MS);
     }
 
-    pub(crate) fn fallback_claimed(&self, block_id: &str, reason: Reason) -> bool {
+    pub fn fallback_claimed(&self, block_id: &str, reason: Reason) -> bool {
         self.fallback_claims.contains_key(&(block_id.to_string(), reason))
     }
 
@@ -226,7 +226,7 @@ impl DeliveryState {
     /// The fallback's atomic claim on an event. A `Deliver` for an unclaimed
     /// event records the claim, so the hook's parts for it come back empty.
     /// Hook deliveries created at or before `since` belong to an earlier event.
-    pub(crate) fn claim_fallback(&mut self, block_id: &str, reason: Reason, now: i64, since: i64) -> FallbackClaim {
+    pub fn claim_fallback(&mut self, block_id: &str, reason: Reason, now: i64, since: i64) -> FallbackClaim {
         if self.fallback_claimed(block_id, reason) {
             return FallbackClaim::Deliver;
         }
@@ -241,7 +241,7 @@ impl DeliveryState {
         }
     }
 
-    pub(crate) fn record_boundary(&mut self, uuid: &str, block_id: &str, now: i64) {
+    pub fn record_boundary(&mut self, uuid: &str, block_id: &str, now: i64) {
         if self.boundary_origins.iter().any(|(u, _, _)| u == uuid) {
             return;
         }
@@ -264,7 +264,7 @@ impl DeliveryState {
     /// reconnect, a remount reading the gap) doesn't deliver the memory twice
     /// (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 B2). The hook's first part can
     /// reach srv before the stdout reader sees the boundary, hence the slack.
-    pub(crate) fn claim_boundary(&mut self, block_id: &str, reason: Reason, boundary_uuid: Option<&str>, now: i64) -> FallbackClaim {
+    pub fn claim_boundary(&mut self, block_id: &str, reason: Reason, boundary_uuid: Option<&str>, now: i64) -> FallbackClaim {
         let mut since = i64::MIN;
         if let Some(uuid) = boundary_uuid {
             let Some(idx) = self.boundary_origins.iter().position(|(u, b, _)| u == uuid && b == block_id) else {
@@ -289,7 +289,7 @@ impl DeliveryState {
     /// however long ago, so a fallback deferred behind the session's first
     /// turn stands down even past [`CLAIM_WINDOW_MS`]. One from before it
     /// was an earlier session's and doesn't count.
-    pub(crate) fn claim_event(&mut self, block_id: &str, reason: Reason, event_at: i64, now: i64) -> FallbackClaim {
+    pub fn claim_event(&mut self, block_id: &str, reason: Reason, event_at: i64, now: i64) -> FallbackClaim {
         let since = event_at.saturating_sub(EVENT_SLACK_MS);
         let hook_finished = self.completed.get(&(block_id.to_string(), reason)).is_some_and(|at| *at > since);
         if hook_finished && !self.fallback_claimed(block_id, reason) {
@@ -303,7 +303,7 @@ impl DeliveryState {
     /// `Some(line)` when the boundary was already written: write it now. A
     /// boundary from up to [`EVENT_SLACK_MS`] before the delivery was composed
     /// counts, as the hook can be asked just before the reader sees the line.
-    pub(crate) fn park_compaction_notice(&mut self, block_id: &str, created_ms: i64, line: String) -> Option<String> {
+    pub fn park_compaction_notice(&mut self, block_id: &str, created_ms: i64, line: String) -> Option<String> {
         let since = created_ms.saturating_sub(EVENT_SLACK_MS);
         if self.boundary_origins.iter().any(|(_, b, at)| b == block_id && *at >= since) {
             return Some(line);
@@ -314,7 +314,7 @@ impl DeliveryState {
 
     /// The notices parked for `block_id`, oldest first, taken once. With
     /// `created_ms`, only that delivery's (the timer's own).
-    pub(crate) fn take_parked(&mut self, block_id: &str, created_ms: Option<i64>) -> Vec<String> {
+    pub fn take_parked(&mut self, block_id: &str, created_ms: Option<i64>) -> Vec<String> {
         let Some(list) = self.parked.get_mut(block_id) else { return Vec::new() };
         let (taken, kept): (Vec<_>, Vec<_>) = list.drain(..).partition(|(at, _)| created_ms.map_or(true, |c| c == *at));
         *list = kept;
@@ -325,7 +325,7 @@ impl DeliveryState {
     }
 
     /// The hook finished a delivery: its notice went out.
-    pub(crate) fn note_completed(&mut self, key: &DeliveryKey, created_ms: i64) {
+    pub fn note_completed(&mut self, key: &DeliveryKey, created_ms: i64) {
         let at = self.completed.entry((key.block_id.clone(), key.reason)).or_insert(created_ms);
         *at = (*at).max(created_ms);
     }
@@ -333,7 +333,7 @@ impl DeliveryState {
     /// The fallback gave up waiting for the hook: it delivers, and the hook's
     /// unfinished delivery is closed so a late acknowledgement adds no second
     /// notice.
-    pub(crate) fn take_over_from_hook(&mut self, block_id: &str, reason: Reason, now: i64) {
+    pub fn take_over_from_hook(&mut self, block_id: &str, reason: Reason, now: i64) {
         for d in self.hook_deliveries_mut(block_id, reason, now, i64::MIN) {
             d.notice_sent = true;
         }
@@ -343,7 +343,7 @@ impl DeliveryState {
 
 pub(crate) static STATE: LazyLock<Mutex<DeliveryState>> = LazyLock::new(|| Mutex::new(DeliveryState::default()));
 
-pub(crate) fn state_lock() -> std::sync::MutexGuard<'static, DeliveryState> {
+pub fn state_lock() -> std::sync::MutexGuard<'static, DeliveryState> {
     STATE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -353,13 +353,13 @@ pub(crate) const FALLBACK_TTL_MS: i64 = 10 * 60_000;
 
 /// A re-delivery srv composed for the frontend's fallback (CD2b).
 #[derive(Debug, Clone)]
-pub(crate) struct FallbackDelivery {
-    pub(crate) delivery_id: String,
-    pub(crate) block_id: String,
-    pub(crate) text: String,
+pub struct FallbackDelivery {
+    pub delivery_id: String,
+    pub block_id: String,
+    pub text: String,
     /// The card, written to the pane when the hidden message is accepted.
-    pub(crate) frame: serde_json::Value,
-    pub(crate) created_ms: i64,
+    pub frame: serde_json::Value,
+    pub created_ms: i64,
 }
 
 /// The compaction notices parked for `block_id`, taken once: its stdout

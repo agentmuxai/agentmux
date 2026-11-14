@@ -931,6 +931,11 @@ pub(crate) async fn locate_provider_cli(provider_id: &str) -> Option<LocatedCli>
     locate_provider_cli_with(provider_id, crate::backend::providers::uses_path_cli(provider_id)).await
 }
 
+/// [`locate_provider_cli`]'s path, for the ambient calls: registered once at startup (`ambient::cli_locator`).
+pub(crate) fn locate_for_ambient(provider_id: &str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + '_>> {
+    Box::pin(async move { locate_provider_cli(provider_id).await.map(|l| l.path) })
+}
+
 async fn locate_provider_cli_with(provider_id: &str, use_path: bool) -> Option<LocatedCli> {
     let provider = crate::backend::providers::get_provider(provider_id)?;
     if use_path {

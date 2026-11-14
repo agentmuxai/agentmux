@@ -137,3 +137,61 @@ fn the_latest_relaunch_decides_so_a_closed_pane_cannot_hold_the_change() {
     assert!(settle(&s, "a1", "second", &ok_frame()).is_none());
     assert!(pending(&s, "a1").is_none());
 }
+
+/// Pane `block_id` is a pane of agent `a1`.
+fn pane_of_a1(s: &Store, block_id: &str) {
+    use crate::backend::storage::store::{AgentInstance, InstanceStatus};
+    let mut block = crate::backend::obj::Block {
+        oid: block_id.to_string(),
+        parentoref: String::new(),
+        version: 0,
+        runtimeopts: None,
+        stickers: None,
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert("agentId".to_string(), json!("a1"));
+            m
+        },
+        subblockids: None,
+    };
+    s.insert(&mut block).unwrap();
+    s.instance_create(&AgentInstance {
+        id: format!("inst-{block_id}"),
+        definition_id: "a1".to_string(),
+        parent_instance_id: String::new(),
+        block_id: block_id.to_string(),
+        session_id: String::new(),
+        status: InstanceStatus::Running.as_str().to_string(),
+        github_context: String::new(),
+        started_at: 0,
+        ended_at: 0,
+        created_at: 0,
+        identity_id: String::new(),
+        memory_id: String::new(),
+        instance_name: String::new(),
+        working_directory: String::new(),
+        display_hidden: false,
+    })
+    .unwrap();
+}
+
+#[test]
+fn a_message_to_a_running_pane_does_not_take_the_trial_and_a_relaunch_does() {
+    let s = store();
+    pane_of_a1(&s, "pane-a");
+    pane_of_a1(&s, "pane-b");
+    to(&s, FLASH);
+
+    // Pane A relaunched on the new model.
+    arm_for_block(&s, "pane-a");
+    assert_eq!(pending(&s, "a1").map(|t| (t.armed, t.block)), Some((true, "pane-a".to_string())));
+
+    // A message to pane B, still finishing an old-model turn, builds the route environment (and no process is started).
+    launch::carry_for_block(&s, "pane-b", &mut Default::default());
+    assert_eq!(pending(&s, "a1").map(|t| t.block), Some("pane-a".to_string()), "the trial stays with the pane that relaunched");
+    assert!(settle(&s, "a1", "pane-b", &error_frame("API Error: 400 bad request")).is_none(), "the old-model pane settles nothing");
+
+    // Pane B really relaunching is the latest relaunch: it decides.
+    arm_for_block(&s, "pane-b");
+    assert_eq!(pending(&s, "a1").map(|t| t.block), Some("pane-b".to_string()));
+}

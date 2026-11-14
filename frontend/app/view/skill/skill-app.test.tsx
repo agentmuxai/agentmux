@@ -15,6 +15,8 @@ const rpc = vi.hoisted(() => ({
     SkillCatalogAppFileCommand: vi.fn(),
     SkillCatalogAppScriptCommand: vi.fn(),
     SkillCatalogExportCommand: vi.fn(),
+    AppSkillsHereCommand: vi.fn(),
+    KanbanActCommand: vi.fn(),
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -67,6 +69,7 @@ function app(over: Record<string, unknown> = {}) {
         ],
         verified: [record()],
         content_hash: "c".repeat(64),
+        from_catalog: false,
         publisher: "acme",
         id: "word",
         name: "Word",
@@ -135,6 +138,11 @@ describe("App skill status", () => {
             references: [reference(), reference({ path: "references/b.png", appVersion: "16.1" }), reference({ path: "references/c.png", platform: "macos" })],
         });
         expect(referenceDrift(a as never, "windows")).toBe("1 of 2 references were taken on 16.0; the last pass was on 16.1");
+        // Against the app on this computer when it is known: a build of the crop's version fits, another version does not.
+        expect(referenceDrift(a as never, "windows", "16.1.4")).toBe("1 of 2 references were taken on 16.0; Word here is 16.1.4");
+        expect(referenceDrift(a as never, "windows", "16.0.9")).toBe("1 of 2 references were taken on 16.1; Word here is 16.0.9");
+        expect(referenceDrift(app({ references: [reference({ appVersion: "16.1" })] }) as never, "windows", "16.1.4")).toBeNull();
+        expect(referenceDrift(a as never, "windows", null)).toBe("1 of 2 references were taken on 16.0; the last pass was on 16.1");
         expect(referenceDrift(app() as never, "windows")).toBeNull();
         expect(referenceDrift(app({ references: [] }) as never, "windows")).toBeNull();
     });
@@ -232,6 +240,150 @@ describe("Signature and script approval", () => {
     it("shows the signature line in the detail", async () => {
         const detail = await openDetail();
         expect(within(detail).getByText(/Signed by acme · AAAA-BBBB/)).toBeTruthy();
+    });
+
+    it("shows the app on this computer on the card and in the detail, and flags drift from the version the last pass was run on", async () => {
+        const answer = (here: Record<string, unknown>) => rpc.AppSkillsHereCommand.mockResolvedValue({ items: [{ skill_id: "k1", ...here }] });
+        const card = async () => (await screen.findByText("acme-word")).closest(".skill-card")?.textContent ?? "";
+
+        // A build of the tested version: still verified, with the version it found.
+        answer({ found: true, version: "16.0.18227.20162" });
+        render(() => <SkillManager />);
+        await vi.waitFor(async () => expect(await card()).toContain("installed 16.0.18227.20162"));
+        expect(await card()).toContain("verified 16.0");
+        expect(await card()).not.toContain("tested on 16.0, installed");
+        fireEvent.click(await screen.findByText("acme-word"));
+        let detail = await screen.findByRole("region", { name: "App skill" });
+        expect(detail.textContent).toContain("Word on this computer: version 16.0.18227.20162.");
+        expect(detail.textContent).not.toContain("check before trusting it");
+        cleanup();
+
+        // Another version: drift, said on the card and in the detail.
+        answer({ found: true, version: "17.1.2" });
+        render(() => <SkillManager />);
+        await vi.waitFor(async () => expect(await card()).toContain("tested on 16.0, installed 17.1.2"));
+        fireEvent.click(await screen.findByText("acme-word"));
+        detail = await screen.findByRole("region", { name: "App skill" });
+        expect(detail.textContent).toContain("Word on this computer: version 17.1.2. It was last tested on another version: check before trusting it.");
+        expect(detail.textContent).toContain("1 of 1 references were taken on 16.0; Word here is 17.1.2");
+        cleanup();
+
+        // Not found, found without a version: said, and the test status is left as it was.
+        answer({ found: false, version: null });
+        render(() => <SkillManager />);
+        await vi.waitFor(async () => expect(await card()).toContain("not found here"));
+        expect(await card()).toContain("verified 16.0");
+        cleanup();
+        answer({ found: true, version: null });
+        render(() => <SkillManager />);
+        await vi.waitFor(async () => expect(await card()).toContain("found here"));
+        expect(await card()).toContain("verified 16.0");
+    });
+
+    it("a lookup that fails leaves the card as it was", async () => {
+        rpc.AppSkillsHereCommand.mockRejectedValue(new Error("boom"));
+        render(() => <SkillManager />);
+        const text = (await screen.findByText("acme-word")).closest(".skill-card")?.textContent ?? "";
+        expect(text).toContain("verified 16.0");
+        expect(text).not.toContain("installed");
+        expect(text).not.toContain("not found here");
+    });
+
+    describe("Run test", () => {
+        const testJson = { path: "test.json", bytes: 700, script: false, approved: false, image: false, sha256: "a".repeat(64) };
+        const withTest = (over: Record<string, unknown> = {}) =>
+            rpc.SkillCatalogListCommand.mockResolvedValue([skill({ app: app({ files: [testJson], ...over }) }), plain()]);
+        const open = async () => {
+            rpc.ListAgentDefinitionsCommand.mockResolvedValue([{ id: "a1", name: "Posa" }, { id: "a2", name: "Parlo" }]);
+            render(() => <SkillManager />);
+            fireEvent.click(await screen.findByText("acme-word"));
+            return screen.findByRole("region", { name: "App skill" });
+        };
+
+        it("is not offered for a skill without a test task", async () => {
+            const detail = await openDetail();
+            expect(within(detail).queryByRole("button", { name: "Run test" })).toBeNull();
+        });
+
+        it("files a normal task for the agent the person picks, and does not run anything itself", async () => {
+            withTest();
+            rpc.AppSkillsHereCommand.mockResolvedValue({ items: [{ skill_id: "k1", found: true, version: "16.0.18227" }] });
+            rpc.KanbanActCommand.mockResolvedValue({ ok: true, num: 7 });
+            const detail = await open();
+            fireEvent.click(within(detail).getByRole("button", { name: "Run test" }));
+            const panel = await within(detail).findByRole("group", { name: "Run test" });
+            expect(within(panel).getByRole("button", { name: "File the task" }).hasAttribute("disabled")).toBe(true);
+            fireEvent.change(within(panel).getByLabelText("Agent to run the test"), { target: { value: "Posa" } });
+            fireEvent.click(within(panel).getByRole("button", { name: "File the task" }));
+            await vi.waitFor(() => expect(rpc.KanbanActCommand).toHaveBeenCalledTimes(1));
+            const req = rpc.KanbanActCommand.mock.calls[0][1];
+            expect(req).toMatchObject({ action: "create", agent: "Posa", review: false, title: "Run the test of Word 1.0.0 on Windows" });
+            expect(req.payload).toContain("Skills get skill_id=k1 file=test.json");
+            expect(req.payload).toContain("AgentMux found Word 16.0.18227 on this computer");
+            expect(req.payload).toContain("Skills record skill_id=k1 skill_version=1.0.0 app_version=<the version you confirmed> platform=windows");
+            expect(await within(detail).findByText(/Task #7 filed for Posa/)).toBeTruthy();
+            expect(within(detail).queryByRole("group", { name: "Run test" })).toBeNull();
+        });
+
+        it("says so, and offers nothing to click, when the app is not on this computer", async () => {
+            withTest();
+            rpc.AppSkillsHereCommand.mockResolvedValue({ items: [{ skill_id: "k1", found: false, version: null }] });
+            const detail = await open();
+            await vi.waitFor(() => expect(within(detail).getByRole("button", { name: "Run test" }).hasAttribute("disabled")).toBe(true));
+            expect(detail.textContent).toContain("Word is not found on this computer: install it first.");
+        });
+
+        it("shows a refusal and files nothing twice", async () => {
+            withTest();
+            rpc.KanbanActCommand.mockRejectedValue(new Error("the board is read-only"));
+            const detail = await open();
+            fireEvent.click(within(detail).getByRole("button", { name: "Run test" }));
+            const panel = await within(detail).findByRole("group", { name: "Run test" });
+            fireEvent.change(within(panel).getByLabelText("Agent to run the test"), { target: { value: "Parlo" } });
+            fireEvent.click(within(panel).getByRole("button", { name: "File the task" }));
+            expect((await within(detail).findByRole("alert")).textContent).toContain("the board is read-only");
+        });
+    });
+
+    describe("Reference crops", () => {
+        it("reads a crop only when asked, shows it with a caption, and says so when it cannot be read", async () => {
+            rpc.SkillCatalogAppFileCommand.mockResolvedValue({ path: "references/ribbon.png", text: "", image_data_url: "data:image/png;base64,AAAA" });
+            const detail = await openDetail();
+            expect(rpc.SkillCatalogAppFileCommand).not.toHaveBeenCalled();
+            expect(within(detail).queryByRole("img")).toBeNull();
+
+            fireEvent.click(within(detail).getByRole("button", { name: "Show" }));
+            const img = await within(detail).findByRole("img");
+            expect(img.getAttribute("src")).toBe("data:image/png;base64,AAAA");
+            expect(img.getAttribute("alt")).toBe("ribbon: the Home tab");
+            expect(rpc.SkillCatalogAppFileCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "references/ribbon.png" });
+
+            fireEvent.click(within(detail).getByRole("button", { name: "Hide" }));
+            expect(within(detail).queryByRole("img")).toBeNull();
+            cleanup();
+
+            rpc.SkillCatalogAppFileCommand.mockRejectedValue(new Error("references/ribbon.png is not a PNG image"));
+            const again = await openDetail();
+            fireEvent.click(within(again).getByRole("button", { name: "Show" }));
+            expect((await within(again).findByRole("alert")).textContent).toContain("is not a PNG image");
+        });
+    });
+
+    it("says it is from the AgentMux catalog, in the detail and in the script's review, only when it is exactly what the catalog listed", async () => {
+        const line = "From the AgentMux catalog: its files and its publisher's key are the ones the catalog lists.";
+        rpc.SkillCatalogAppFileCommand.mockResolvedValue({ path: "scripts/run.py", text: "print('toc')" });
+        let detail = await openDetail();
+        expect(detail.textContent).not.toContain("From the AgentMux catalog");
+        fireEvent.click(within(detail).getByRole("button", { name: "Review" }));
+        expect((await within(detail).findByRole("group", { name: "Script scripts/run.py" })).textContent).not.toContain("From the AgentMux catalog");
+        cleanup();
+
+        rpc.SkillCatalogListCommand.mockResolvedValue([skill({ app: app({ from_catalog: true }) }), plain()]);
+        detail = await openDetail();
+        expect(within(detail).getAllByText(line)).toHaveLength(1);
+        fireEvent.click(within(detail).getByRole("button", { name: "Review" }));
+        const panel = await within(detail).findByRole("group", { name: "Script scripts/run.py" });
+        expect(panel.textContent).toContain(line);
     });
 
     it("reviewing a script shows its purpose, needs, hash and text, and Approve sends the approval", async () => {

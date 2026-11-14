@@ -6,7 +6,7 @@ use std::sync::Arc;
 use axum::{
     extract::{
         ws::{Message, WebSocket},
-        State, WebSocketUpgrade,
+        Extension, State, WebSocketUpgrade,
     },
     response::Response,
 };
@@ -56,12 +56,16 @@ fn srv_info_event(info: crate::srv_info::SrvInfo) -> serde_json::Value {
 
 pub(super) async fn handle_ws(
     State(state): State<AppState>,
+    session: Option<Extension<super::local_session::SessionId>>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    ws.on_upgrade(move |socket| handle_ws_connection(socket, state))
+    let session = session.map(|Extension(s)| s);
+    // A signed-in browser offers its session token as a second protocol (it can't set a header on a
+    // WebSocket); srv selects only the fixed name, never the token.
+    ws.protocols([super::local_session_routes::WS_PROTOCOL]).on_upgrade(move |socket| handle_ws_connection(socket, state, session))
 }
 
-async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
+async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: Option<super::local_session::SessionId>) {
     let ws_start = std::time::Instant::now();
     let conn_id = uuid::Uuid::new_v4().to_string();
     let tab_id = String::new();
@@ -130,6 +134,8 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     let mut pending_priority: std::collections::VecDeque<serde_json::Value> =
         std::collections::VecDeque::new();
 
+    let session_ended = { super::operator_proof::vouch_for_signed_in_browser(&engine, session.as_ref()); super::local_session_routes::session_ended(session) };
+    tokio::pin!(session_ended);
     'ws: loop {
         tokio::select! {
             // Biased: poll branches top-to-bottom so interactive terminal I/O
@@ -138,6 +144,8 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             // echo) → background events (sysinfo/blockstats) → keepalive ping.
             // See docs/specs/SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md.
             biased;
+
+            _ = &mut session_ended => break, // the browser's sign-in ended (logout, idle expiry)
 
             // Incoming WebSocket messages → parse & dispatch (keystrokes first)
             msg = socket.recv() => {

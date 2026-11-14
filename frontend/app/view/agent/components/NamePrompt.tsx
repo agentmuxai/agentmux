@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, TextInput } from "@/app/element/ui";
+import { Button, CloseButton, TextInput } from "@/app/element/ui";
 import { createEffect, Show, type JSX } from "solid-js";
 
 export interface NamePromptProps {
@@ -60,14 +60,13 @@ export const NamePrompt = (props: NamePromptProps): JSX.Element => (
             >
                 {props.loading ? "…" : props.submitLabel}
             </Button>
-            <Button
-                tone="quiet"
+            <CloseButton
+                size="sm"
+                label="Cancel"
+                tooltip={false}
                 class="agent-fork-btn agent-fork-btn--ghost"
                 onClick={() => props.onCancel()}
-                aria-label="Cancel"
-            >
-                ✕
-            </Button>
+            />
         </div>
         <Show when={props.error}>
             <span class="agent-fork-error">{props.error}</span>

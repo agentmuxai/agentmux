@@ -17,14 +17,14 @@ use crate::backend::storage::store::Store;
 /// Used by the "My Agents" reattach path on the frontend: after a tab reload
 /// the picker reads `block.meta["agent:sessionid"]` and passes it as the
 /// `--resume` value so the CLI picks up the prior conversation.
-pub(crate) const META_SESSION_ID: &str = "agent:sessionid";
+pub const META_SESSION_ID: &str = "agent:sessionid";
 
 /// Block metadata key for the last classified agent failure.
 /// Written on every non-zero / in-band-error exit; cleared on clean success.
 /// The frontend reads this on pane mount so the recovery banner survives
 /// tab switches and page reloads without requiring the MPS event to be
 /// received in real time.
-pub(crate) const META_LAST_FAILURE: &str = "agent:last_failure";
+pub const META_LAST_FAILURE: &str = "agent:last_failure";
 /// The field of the stored failure that says when it was recorded (unix ms).
 pub(crate) const META_FAILURE_AT_MS: &str = "atMs";
 /// Where a pane's model API calls go when that is not srv's own address: `{service, url}`
@@ -99,7 +99,7 @@ pub(crate) fn apply_working_dir(
 }
 
 /// Expand a leading `~/` or bare `~` to the user's home directory.
-pub(crate) fn expand_home_dir(dir: &str) -> String {
+pub fn expand_home_dir(dir: &str) -> String {
     if let Some(under_override) = crate::backend::base::expand_under_home_override(dir) {
         return under_override.to_string_lossy().to_string();
     }
@@ -261,7 +261,7 @@ pub(crate) fn attach_model_api(
 /// remove the key (setting it to JSON null triggers `merge_meta`'s delete path).
 /// Broadcasts a `waveobj:update` so active frontend subscribers see the change
 /// immediately via the block atom, not just on next full load.
-pub(crate) fn persist_last_failure(
+pub fn persist_last_failure(
     block_id: &str,
     failure: Option<&crate::agents::failure::AgentFailure>,
     mstore: &Option<Arc<Store>>,
@@ -379,7 +379,7 @@ pub(crate) fn persist_last_failure(
 
 /// Broadcast the block's current state as a `waveobj:update` on `block:<id>`,
 /// so an open pane sees a meta write live. Does nothing if the block can't be read.
-pub(crate) fn broadcast_block_update(store: &Store, event_bus: &EventBus, block_id: &str) {
+pub fn broadcast_block_update(store: &Store, event_bus: &EventBus, block_id: &str) {
     let Ok(block) = store.must_get::<crate::backend::obj::Block>(block_id) else {
         return;
     };

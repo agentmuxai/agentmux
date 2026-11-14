@@ -52,9 +52,9 @@ export function OsNotificationsGroup(): JSX.Element {
                             value={(s()["notify:os:when"] as string) ?? "unfocused"}
                             onChange={(v) => set("notify:os:when", v)}
                         >
-                            <option value="unfocused">When AgentMux isn't focused</option>
-                            <option value="always">Always (except the pane you're looking at)</option>
-                            <option value="never">Never</option>
+                            <option value="unfocused">{t("settings.notifications.when.unfocused")}</option>
+                            <option value="always">{t("settings.notifications.when.always")}</option>
+                            <option value="never">{t("settings.notifications.when.never")}</option>
                         </Select>
                     }
                 />
@@ -108,9 +108,9 @@ export function OsNotificationsGroup(): JSX.Element {
                             value={(s()["notify:os:preview"] as string) ?? "redacted"}
                             onChange={(v) => set("notify:os:preview", v)}
                         >
-                            <option value="redacted">Short preview</option>
-                            <option value="full">Longer preview</option>
-                            <option value="none">Title only</option>
+                            <option value="redacted">{t("settings.notifications.preview.short")}</option>
+                            <option value="full">{t("settings.notifications.preview.long")}</option>
+                            <option value="none">{t("settings.notifications.preview.titleOnly")}</option>
                         </Select>
                     }
                 />
@@ -131,7 +131,7 @@ export function TestNotificationRow(): JSX.Element {
                     <Button
                         onClick={() => void RpcApi.NotifyTestCommand(TabRpcClient).catch(() => {})}
                     >
-                        Send
+                        {t("settings.notifications.test.send")}
                     </Button>
                 }
             />

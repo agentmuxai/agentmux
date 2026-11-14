@@ -15,9 +15,9 @@
 //! The rows go to the same place the jekt audit file does ([`reactive::audit_store::write_path`]'s folder): the
 //! shared `audit` folder, or the srv's own while it does not use the shared one.
 
-mod line;
+pub mod line;
 pub mod scrub;
-mod store;
+pub mod store;
 
 use serde::{Deserialize, Serialize};
 

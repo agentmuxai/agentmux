@@ -59,6 +59,7 @@ describe("a stopped agent's row", () => {
         name: "Ann",
         provider: "claude",
         icon: "",
+        runtime: "host",
     };
 
     it("shows the messages held for it, which go out when it starts", () => {

@@ -5,7 +5,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 
-import { Button as UiButton, IconButton, TextInput } from "@/app/element/ui";
+import { Button as UiButton, CloseButton, TextInput } from "@/app/element/ui";
 import { formatBytes } from "@/util/format-bytes";
 import type { BundleImportPreviewActions, BundleImportPreviewState } from "./bundle-import-preview-state";
 
@@ -152,11 +152,10 @@ export function WarningsBanner(props: SectionProps): JSX.Element {
     return (
         <Show when={s.preview.warnings.length > 0 && !s.warningsDismissed()}>
             <div class="bundle-import-warnings-banner">
-                <IconButton
-                    icon="xmark"
+                <CloseButton
+                    size="sm"
                     label="Dismiss warnings"
                     tooltip={false}
-                    density="compact"
                     class="bundle-import-warnings-dismiss"
                     onClick={() => s.setWarningsDismissed(true)}
                 />

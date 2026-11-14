@@ -157,7 +157,7 @@ pub enum ParamKind {
     Credential,
 }
 
-fn valid_param_name(n: &str) -> bool {
+pub(super) fn valid_param_name(n: &str) -> bool {
     n.len() <= 40 && n.starts_with(|c: char| c.is_ascii_lowercase()) && n.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
@@ -281,6 +281,9 @@ pub fn validate(m: &JobTemplateManifest, folder: &str, brief: Option<&str>) -> R
     let kinds = validate_params(m)?;
     validate_defaults(m)?;
     validate_outputs_and_secrets(m, &kinds)?;
+    if m.kind == JobTemplateKind::Drone && !m.secrets.is_empty() {
+        return Err("a Drone template can't declare secrets in this version of AgentMux".to_string());
+    }
     super::cloud::validate(m)?;
     match (m.kind, brief) {
         (JobTemplateKind::Job, None) => return Err("a job template needs its brief in brief.md".to_string()),
@@ -466,7 +469,7 @@ pub fn resolve_params(m: &JobTemplateManifest, given: &Map<String, Value>) -> Re
 }
 
 /// A value as it reads in a brief.
-fn as_text(v: &Value) -> String {
+pub(super) fn as_text(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         Value::Array(items) => items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "),

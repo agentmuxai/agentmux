@@ -128,6 +128,21 @@ impl Answer {
     }
 }
 
+/// How a request ended: the human's answer, or the lack of one, and whether the agent that asked took the
+/// request back itself ([`withdraw`]). Both are written in the one step that settles the request, so whoever
+/// waits on it reads who ended it from the answer, not from a table kept somewhere else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Settled {
+    pub(crate) answer: Answer,
+    pub(crate) by_agent: bool,
+}
+
+impl From<Answer> for Settled {
+    fn from(answer: Answer) -> Settled {
+        Settled { answer, by_agent: false }
+    }
+}
+
 /// Why a request couldn't be put up. Callers handle each: a busy slot must
 /// never turn into silence (RCA §7.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,7 +177,7 @@ struct Pending {
     kind: Kind,
     /// Taken by the first answer. The entry itself stays until the asker's
     /// [`Waiting`] is dropped, so the pane stays locked until it's done.
-    tx: Option<oneshot::Sender<Answer>>,
+    tx: Option<oneshot::Sender<Settled>>,
     /// The banner it shows, kept so it can come back when a question shown
     /// over it is answered.
     banner: Value,
@@ -210,6 +225,19 @@ pub(crate) fn asking(kind: Kind) -> Vec<String> {
 /// Resolve request `id` on `block_id` with the human's answer. Called only
 /// by the host-authenticated route.
 pub(crate) fn resolve(id: &str, block_id: &str, answer: Answer) -> Result<(), String> {
+    settle(id, block_id, answer.into())
+}
+
+/// The agent that asked takes request `id` on `block_id` back: it ends as Cancelled, marked as the agent's own
+/// doing ([`Settled::by_agent`]) in the same step that takes the answer, so a person's Cancel that got there
+/// first is never read as the agent's, and the other way round. Fails like [`resolve`] when the request is
+/// already answered.
+pub(crate) fn withdraw(id: &str, block_id: &str) -> Result<(), String> {
+    settle(id, block_id, Settled { answer: Answer::Cancelled, by_agent: true })
+}
+
+fn settle(id: &str, block_id: &str, settled: Settled) -> Result<(), String> {
+    let answer = settled.answer;
     let mut map = pending().lock().unwrap_or_else(|p| p.into_inner());
     let tx = match map.get_mut(id) {
         Some(p) if p.block_id == block_id && answer == Answer::YesAlways && p.kind != Kind::Bypass => {
@@ -225,7 +253,7 @@ pub(crate) fn resolve(id: &str, block_id: &str, answer: Answer) -> Result<(), St
     let Some(tx) = tx else {
         return Err("that request was already answered".to_string());
     };
-    let _ = tx.send(answer);
+    let _ = tx.send(settled);
     Ok(())
 }
 
@@ -235,7 +263,7 @@ pub(crate) fn cancel_for(block_id: &str) {
     let mut map = pending().lock().unwrap_or_else(|p| p.into_inner());
     for p in map.values_mut().filter(|p| p.block_id == block_id) {
         if let Some(tx) = p.tx.take() {
-            let _ = tx.send(Answer::Cancelled);
+            let _ = tx.send(Answer::Cancelled.into());
         }
     }
 }
@@ -246,7 +274,7 @@ pub(crate) fn cancel_kind_for(block_id: &str, kind: Kind) {
     let mut map = pending().lock().unwrap_or_else(|p| p.into_inner());
     for p in map.values_mut().filter(|p| p.block_id == block_id && p.kind == kind) {
         if let Some(tx) = p.tx.take() {
-            let _ = tx.send(Answer::Cancelled);
+            let _ = tx.send(Answer::Cancelled.into());
         }
     }
 }
@@ -338,7 +366,7 @@ fn slot_taken(map: &HashMap<String, Pending>, block_id: &str, kind: Kind) -> Opt
 
 /// A request put up in its pane's banner, not yet answered.
 pub(crate) struct Raised {
-    rx: oneshot::Receiver<Answer>,
+    rx: oneshot::Receiver<Settled>,
     waiting: Waiting,
     _asking: Option<crate::backend::user_attention::Asking>,
 }
@@ -351,10 +379,15 @@ impl Raised {
 
     /// The human's answer if it comes within `grace`; else the request itself, still up and unanswered, to
     /// wait on further ([`Raised::answer`]) from a task of its own: the caller's call ends, the banner stays.
-    pub(crate) async fn answer_within(mut self, grace: Duration) -> Result<(Answer, Waiting), Raised> {
+    pub(crate) async fn answer_within(self, grace: Duration) -> Result<(Answer, Waiting), Raised> {
+        self.settled_within(grace).await.map(|(settled, waiting)| (settled.answer, waiting))
+    }
+
+    /// [`Raised::answer_within`], with who ended the request too.
+    pub(crate) async fn settled_within(mut self, grace: Duration) -> Result<(Settled, Waiting), Raised> {
         match tokio::time::timeout(grace, &mut self.rx).await {
-            Ok(Ok(a)) => Ok((a, self.waiting)),
-            Ok(Err(_)) => Ok((Answer::Cancelled, self.waiting)),
+            Ok(Ok(settled)) => Ok((settled, self.waiting)),
+            Ok(Err(_)) => Ok((Answer::Cancelled.into(), self.waiting)),
             Err(_) => Err(self),
         }
     }
@@ -364,11 +397,18 @@ impl Raised {
     /// as Cancelled. The pane stays as it is until the returned [`Waiting`]
     /// is dropped.
     pub(crate) async fn answer(self, timeout: Option<Duration>) -> (Answer, Waiting) {
+        let (settled, waiting) = self.settled(timeout).await;
+        (settled.answer, waiting)
+    }
+
+    /// [`Raised::answer`], with who ended the request too: `by_agent` only for a request its agent took
+    /// back ([`withdraw`]).
+    pub(crate) async fn settled(self, timeout: Option<Duration>) -> (Settled, Waiting) {
         let Raised { rx, waiting, _asking } = self;
-        let answer = match timeout {
+        let settled = match timeout {
             Some(t) => match tokio::time::timeout(t, rx).await {
                 Ok(Ok(a)) => a,
-                Ok(Err(_)) => Answer::Cancelled,
+                Ok(Err(_)) => Answer::Cancelled.into(),
                 Err(_) => {
                     // Settled as answered, like any other answer: a late click
                     // finds it over, and the slot is free for what follows
@@ -377,12 +417,12 @@ impl Raised {
                     if let Some(p) = map.get_mut(&waiting.id) {
                         p.tx = None;
                     }
-                    Answer::TimedOut
+                    Answer::TimedOut.into()
                 }
             },
-            None => rx.await.unwrap_or(Answer::Cancelled),
+            None => rx.await.unwrap_or(Answer::Cancelled.into()),
         };
-        (answer, waiting)
+        (settled, waiting)
     }
 }
 
@@ -452,7 +492,7 @@ pub(crate) async fn ask(
 pub(crate) mod tests {
     use super::*;
 
-    fn park(id: &str, block: &str, kind: Kind) -> oneshot::Receiver<Answer> {
+    fn park(id: &str, block: &str, kind: Kind) -> oneshot::Receiver<Settled> {
         let (tx, rx) = oneshot::channel();
         let p = Pending { block_id: block.to_string(), kind, tx: Some(tx), banner: json!({ "id": id }), seq: next_seq() };
         pending().lock().unwrap().insert(id.to_string(), p);
@@ -600,7 +640,7 @@ pub(crate) mod tests {
     async fn resolve_answers_the_waiting_request_once() {
         let rx = park("attn-test-1", "pane-a", Kind::Approval);
         resolve("attn-test-1", "pane-a", Answer::Yes).unwrap();
-        assert_eq!(rx.await.unwrap(), Answer::Yes);
+        assert_eq!(rx.await.unwrap().answer, Answer::Yes);
         assert!(resolve("attn-test-1", "pane-a", Answer::Yes).is_err(), "single use");
         // Answered, but the asker hasn't finished acting on it: still locked.
         assert_eq!(waiting_on_user("pane-a"), Some(Kind::Approval));
@@ -612,7 +652,7 @@ pub(crate) mod tests {
         let rx = park("attn-test-5", "pane-f", Kind::Approval);
         let _other = park("attn-test-6", "pane-g", Kind::Approval);
         cancel_for("pane-f");
-        assert_eq!(rx.await.unwrap(), Answer::Cancelled);
+        assert_eq!(rx.await.unwrap().answer, Answer::Cancelled);
         // A late Approve finds the request already answered.
         assert!(resolve("attn-test-5", "pane-f", Answer::Yes).is_err());
         // Another pane's request is untouched.
@@ -657,7 +697,7 @@ pub(crate) mod tests {
         let _other = park("attn-test-9", "pane-j", Kind::Dialog);
         cancel_kind_for("pane-i", Kind::Approval);
         cancel_kind_for("pane-i", Kind::Dialog);
-        assert_eq!(rx.await.unwrap(), Answer::Cancelled);
+        assert_eq!(rx.await.unwrap().answer, Answer::Cancelled);
         assert!(resolve("attn-test-9", "pane-j", Answer::Yes).is_ok());
         pending().lock().unwrap().remove("attn-test-8");
         pending().lock().unwrap().remove("attn-test-9");
@@ -682,9 +722,30 @@ pub(crate) mod tests {
         crate::server::browser_owner::record(&pane, "lark");
         let rx = park("attn-test-handoff-cancel", &pane, Kind::Handoff);
         resolve("attn-test-handoff-cancel", &pane, Answer::Cancelled).unwrap();
-        assert_eq!(rx.await.unwrap(), Answer::Cancelled);
+        assert_eq!(rx.await.unwrap().answer, Answer::Cancelled);
         assert_eq!(crate::server::browser_owner::owner_of(&pane).as_deref(), Some("lark"));
         pending().lock().unwrap().remove("attn-test-handoff-cancel");
         crate::server::browser_owner::forget(&pane);
+    }
+
+    #[tokio::test]
+    async fn a_request_the_agent_takes_back_says_so_in_its_answer_and_a_person_who_answered_first_stands() {
+        let rx = park("attn-test-withdraw-1", "pane-w1", Kind::Approval);
+        withdraw("attn-test-withdraw-1", "pane-w1").unwrap();
+        assert_eq!(rx.await.unwrap(), Settled { answer: Answer::Cancelled, by_agent: true });
+        assert!(withdraw("attn-test-withdraw-1", "pane-w1").is_err(), "single use");
+
+        let rx = park("attn-test-withdraw-2", "pane-w2", Kind::Approval);
+        resolve("attn-test-withdraw-2", "pane-w2", Answer::Cancelled).unwrap();
+        assert!(withdraw("attn-test-withdraw-2", "pane-w2").is_err(), "the person got there first");
+        assert_eq!(rx.await.unwrap(), Settled { answer: Answer::Cancelled, by_agent: false });
+
+        let rx = park("attn-test-withdraw-3", "pane-w3", Kind::Approval);
+        withdraw("attn-test-withdraw-3", "pane-w3").unwrap();
+        assert!(resolve("attn-test-withdraw-3", "pane-w3", Answer::Cancelled).is_err(), "the agent's cancel settled it");
+        assert_eq!(rx.await.unwrap().by_agent, true);
+        assert!(withdraw("attn-test-withdraw-4", "pane-w3").is_err(), "no such request");
+        let _rx = park("attn-test-withdraw-5", "pane-w5", Kind::Approval);
+        assert!(withdraw("attn-test-withdraw-5", "pane-other").is_err(), "another pane's request");
     }
 }

@@ -95,7 +95,7 @@ impl PersistentSubprocessController {
     /// history (no continuation packet: `spawn.rs` skips it for this start), and
     /// a new segment of the agent's chain (`continuity_segments`), so the old
     /// session stays in its record. Only between turns. Returns the old id.
-    pub(crate) fn start_fresh_session(&self) -> Result<Option<String>, &'static str> {
+    pub fn start_fresh_session(&self) -> Result<Option<String>, &'static str> {
         // The idle check and the stop are one `inner` acquisition, as message
         // delivery's turn reservation is: a message arriving at the boundary
         // either started its turn first (refused here, the caller retries) or
@@ -331,7 +331,7 @@ impl PersistentSubprocessController {
     /// A heartbeat from this pane's MCP process (`POST /api/v1/agent/self/mcp-beat`):
     /// it says whether the server is wedged, which is repaired like one that
     /// didn't connect (#2614).
-    pub(crate) fn mcp_beat(&self, beat: &crate::backend::mcp_health::Beat) {
+    pub fn mcp_beat(&self, beat: &crate::backend::mcp_health::Beat) {
         use crate::backend::mcp_health as heal;
         let generation = self.inner.lock().unwrap().spawn_generation;
         let now = agentmux_common::time::now_ms_u64();
@@ -345,7 +345,7 @@ impl PersistentSubprocessController {
 
     /// The watcher found `process`'s MCP server silent. Nothing if that
     /// process is no longer this pane's.
-    pub(crate) fn mcp_wedged(&self, process: &str, wedge: &crate::backend::mcp_health::Wedge) {
+    pub fn mcp_wedged(&self, process: &str, wedge: &crate::backend::mcp_health::Wedge) {
         use crate::backend::mcp_health as heal;
         let (generation, running) = {
             let inner = self.inner.lock().unwrap();
@@ -386,7 +386,7 @@ impl PersistentSubprocessController {
 
     /// `agentmux-mcp doctor --heal`: start the repair over now. `Err` says why
     /// nothing started (`mcp_health::heal_now`).
-    pub(crate) fn mcp_heal_now(&self) -> Result<(), &'static str> {
+    pub fn mcp_heal_now(&self) -> Result<(), &'static str> {
         let generation = self.inner.lock().unwrap().spawn_generation;
         let now = agentmux_common::time::now_ms_u64();
         let decision = crate::backend::mcp_health::heal_now(&self.block_id, &self.mcp_process_key(generation), now)?;
@@ -518,7 +518,7 @@ impl PersistentSubprocessController {
 
 /// The pane of this process, other than `except`, whose CLI process holds agent `uid`'s
 /// single-live-instance lease: its block id.
-pub(crate) fn local_holder_of(uid: &str, except: &str) -> Option<String> {
+pub fn local_holder_of(uid: &str, except: &str) -> Option<String> {
     super::super::get_all_controllers().into_iter().find_map(|(block_id, ctrl)| {
         if block_id == except {
             return None;
@@ -533,7 +533,7 @@ impl PersistentSubprocessController {
     /// The early admission check (spec I9) for this controller's agent:
     /// refuses while another pane of this process or another instance holds it.
     /// Runs before any shared write.
-    pub(crate) async fn check_admission(&self, uid: &str, agent: &str) -> Result<(), String> {
+    pub async fn check_admission(&self, uid: &str, agent: &str) -> Result<(), String> {
         // Another pane of this process: the lease store below skips a holder with this srv's boot id,
         // so it never sees one, and the spawn env's shared writes would run for a doomed spawn.
         if !uid.is_empty() {

@@ -42,7 +42,7 @@ pub const ALWAYS: &[&str] = &[
     "identity.account.move_agents", "identity.account.upsert", "identity.ensureaccountdir", "identity.self.unlink",
     "importagentfromclaw", "importagents", "install.cancel", "install.start", "install.uninstall", "installtool", "jobs.act", "jobs.reporters.add",
     "jobs.reporters.forget", "jobs.save",
-    "jobs.templates.approve", "jobs.templates.catalog.install", "jobs.templates.install", "jobs.templates.uninstall",
+    "jobs.templates.approve", "jobs.templates.catalog.install", "jobs.templates.install", "jobs.templates.make_drone", "jobs.templates.uninstall",
     "kanban.act", "linkagentidentity", "lspstart", "lspstop", "mcp.bind", "mcp.catalog.bind", "mcp.catalog.delete",
     "mcp.catalog.probe", "mcp.catalog.set_reach", "mcp.catalog.unbind", "mcp.catalog.upsert", "mcp.delete",
     "mcp.probe", "mcp.unbind", "mcp.upsert", "memory.write", "movescratchfile", "muxbus.cloudconfig",
@@ -85,7 +85,7 @@ pub const LIVE_INPUT: &[&str] = &[
 
 /// Returns data and changes nothing.
 pub const READ_ONLY: &[&str] = &[
-    "account.oauth.client.get", "account.oauth.poll", "app_skills.catalog", "agent.input-history",
+    "account.oauth.client.get", "account.oauth.poll", "app_skills.catalog", "app_skills.here", "agent.input-history",
     "agent.input-history-search", "agent.list", "agent.model.panel", "agent.notice.grants", "agent.open-panes", "agent.output", "agent.peer-labels", "agent.process-list",
     "agent.project_instructions", "agent.status", "agent.tracked-blocks", "agent:memory:adoption_list",
     "agent:memory:claims", "agent:memory:diff", "agent:memory:history", "agent:memory:list", "agent:memory:read_file",

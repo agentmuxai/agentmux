@@ -298,3 +298,180 @@ fn a_capture_into_any_part_keeps_the_old_entry_for_seven_days() {
     assert_eq!(value(&s, &card, "cvc"), "cvc-98765432");
     assert_eq!(versions::list(&s, &card).unwrap().len(), 1, "the person was told the old value is kept");
 }
+
+// ── A card from several values of one output (SPEC_VAULT_CARD_ENTRIES... C3) ──────────────────────────────────
+
+const VIRTUAL_CARD: &str = r#"{"pan": "4242 4242 4242 4242", "expiry": "03/30", "cvv": "123", "holder": "Alex Doe", "zip": "94107"}"#;
+
+fn json(path: &str) -> CaptureFrom {
+    CaptureFrom::Json(path.into())
+}
+
+fn card_from(parts: &[(&str, CaptureFrom)]) -> CaptureFrom {
+    CaptureFrom::Parts(parts.iter().map(|(k, f)| (k.to_string(), f.clone())).collect())
+}
+
+fn virtual_card() -> CaptureRule {
+    CaptureRule {
+        into: CaptureInto { kind: Some("card".into()), label: Some("Virtual Visa".into()), ..Default::default() },
+        from: card_from(&[("number", json("$.pan")), ("exp", json("$.expiry")), ("cvc", json("$.cvv")), ("name", json("$.holder")), ("zip", json("$.zip"))]),
+    }
+}
+
+#[test]
+fn a_card_is_made_whole_from_one_output_settled_and_the_output_is_cleaned_of_every_part() {
+    let s = store();
+    let cap = plan(&s, &[virtual_card()], "Agent2-6", "virtual-card show").unwrap();
+    assert_eq!(cap.replaces().count(), 0, "a new card asks nobody");
+    let Outcome::Stored { ids, scrubber, .. } = cap.finish(&s, VIRTUAL_CARD, VIRTUAL_CARD, false, 0) else { panic!("stored") };
+    assert_eq!(ids.len(), 1, "one entry from five values");
+    let id = &ids[0];
+    // Settled as a save by the person is: the number as digits, the expiry as month and year, no older `expiry`.
+    assert_eq!(value(&s, id, "number"), "4242424242424242");
+    assert_eq!((value(&s, id, "exp_month").as_str(), value(&s, id, "exp_year").as_str()), ("03", "2030"));
+    assert_eq!((value(&s, id, "cvc").as_str(), value(&s, id, "name").as_str(), value(&s, id, "zip").as_str()), ("123", "Alex Doe", "94107"));
+    assert!(reveal(&s, id, "expiry", "revealed").is_err(), "the older single expiry is read into the month and year and dropped");
+    let fields: BTreeMap<String, String> = serde_json::from_str(&s.vault_get(id).unwrap().unwrap().fields).unwrap();
+    assert_eq!((fields.get("brand").map(String::as_str), fields.get("expires").map(String::as_str)), (Some("visa"), Some("2030-03-31")));
+    // The output shows the entry in place of each part, and none of them is left.
+    let clean = scrubber.scrub(VIRTUAL_CARD);
+    for secret in ["4242", "03/30", "123", "Alex Doe", "94107"] {
+        assert!(!clean.contains(secret), "{secret} is left in {clean}");
+    }
+    assert_eq!(clean.matches(&format!("[vault:{id}]")).count(), 5, "{clean}");
+    let log = activity(&s, 10).unwrap();
+    assert!(log.iter().any(|a| a.entry_id == *id && a.action == "captured" && a.actor == "Agent2-6"), "{log:?}");
+}
+
+#[test]
+fn a_parts_capture_makes_only_a_new_card_and_needs_its_number() {
+    let s = store();
+    let refused = |rule: CaptureRule| plan(&s, &[rule], "Agent2-6", "true").unwrap_err();
+    let into = |kind: &str| CaptureInto { kind: Some(kind.into()), label: Some("C".into()), ..Default::default() };
+    let parts = |list: &[(&str, CaptureFrom)]| card_from(list);
+    assert!(refused(CaptureRule { into: into("api-key"), from: parts(&[("number", json("$.a"))]) }).contains("new card"));
+    assert!(refused(CaptureRule { into: CaptureInto { id: Some("card-x".into()), ..Default::default() }, from: parts(&[("number", json("$.a"))]) }).contains("new card"));
+    assert!(refused(CaptureRule { into: into("card"), from: parts(&[("cvc", json("$.a"))]) }).contains("needs the card's \"number\""));
+    assert!(refused(CaptureRule { into: into("card"), from: parts(&[("number", json("$.a")), ("pin", json("$.b"))]) }).contains("no \"pin\""));
+    assert!(refused(CaptureRule { into: into("card"), from: parts(&[("number", json("$.a")), ("exp", json("$.b")), ("exp_year", json("$.c"))]) }).contains("not both"));
+    assert!(refused(CaptureRule { into: into("card"), from: parts(&[("number", parts(&[("number", json("$.a"))]))]) }).contains("number: "));
+    assert!(refused(CaptureRule { into: CaptureInto { part: Some("cvc".into()), ..into("card") }, from: parts(&[("number", json("$.a"))]) }).contains("leave part out"));
+    assert!(refused(CaptureRule { into: into("card"), from: parts(&[("number", CaptureFrom::Line(0))]) }).contains("number: lines are counted from 1"));
+}
+
+#[test]
+fn a_part_that_is_not_in_the_output_withholds_it_and_names_the_part_never_the_value() {
+    let s = store();
+    let cap = plan(&s, &[virtual_card()], "Agent2-6", "virtual-card show").unwrap();
+    let no_cvv = VIRTUAL_CARD.replace("\"cvv\": \"123\", ", "");
+    let Outcome::Withheld { why, .. } = cap.finish(&s, &no_cvv, &no_cvv, false, 0) else { panic!("withheld") };
+    assert!(why.contains("the card's cvc") && why.contains("matched nothing"), "{why}");
+    assert!(!why.contains("4242") && !why.contains("94107"), "{why}");
+    assert!(s.vault_list().unwrap().iter().all(|r| r.kind != "card"), "nothing was stored");
+    // A one-character part is too short to clean; the number still needs eight.
+    let one_char = VIRTUAL_CARD.replace("\"123\"", "\"1\"");
+    let Outcome::Withheld { why, .. } = cap.finish(&s, &one_char, &one_char, false, 0) else { panic!("withheld") };
+    assert!(why.contains("the card's cvc is too short"), "{why}");
+    let short_number = VIRTUAL_CARD.replace("4242 4242 4242 4242", "4242");
+    let Outcome::Withheld { why, .. } = cap.finish(&s, &short_number, &short_number, false, 0) else { panic!("withheld") };
+    assert!(why.contains("shorter than 8"), "{why}");
+}
+
+#[test]
+fn a_captured_expiry_replaces_the_month_and_year_of_a_card_that_exists_and_is_settled() {
+    let s = store();
+    let id = create(
+        &s,
+        NewEntry {
+            kind: "card".into(),
+            label: "Everyday".into(),
+            fields: Default::default(),
+            tags: vec![],
+            parts: Parts([("number", "4242424242424242"), ("exp_month", "03"), ("exp_year", "2027")].map(|(k, v)| (k.to_string(), v.to_string())).into()),
+        },
+    )
+    .unwrap();
+    let rule = CaptureRule { into: CaptureInto { id: Some(id.clone()), part: Some("expiry".into()), ..Default::default() }, from: CaptureFrom::Stdout("all".into()) };
+    let cap = plan(&s, &[rule], "Agent2-6", "virtual-card renew").unwrap();
+    let Outcome::Stored { ids, .. } = cap.finish(&s, "08/31\n", "08/31", false, 0) else { panic!("a five-character expiry is a card's to take") };
+    assert_eq!(ids, [id.clone()]);
+    assert_eq!((value(&s, &id, "exp_month").as_str(), value(&s, &id, "exp_year").as_str()), ("08", "2031"), "the next save does not put 03/2027 back");
+    let fields: BTreeMap<String, String> = serde_json::from_str(&s.vault_get(&id).unwrap().unwrap().fields).unwrap();
+    assert_eq!(fields.get("expires").map(String::as_str), Some("2031-08-31"), "the reminders follow the new date");
+    // A captured number is settled too: digits only, the brand worked out again.
+    let rule = CaptureRule { into: CaptureInto { id: Some(id.clone()), part: Some("number".into()), ..Default::default() }, from: CaptureFrom::Stdout("all".into()) };
+    let cap = plan(&s, &[rule], "Agent2-6", "virtual-card renew").unwrap();
+    let Outcome::Stored { .. } = cap.finish(&s, "5555 5555 5555 4444\n", "5555 5555 5555 4444", false, 0) else { panic!("stored") };
+    assert_eq!(value(&s, &id, "number"), "5555555555554444");
+    let fields: BTreeMap<String, String> = serde_json::from_str(&s.vault_get(&id).unwrap().unwrap().fields).unwrap();
+    assert_eq!(fields.get("brand").map(String::as_str), Some("mastercard"));
+}
+
+#[test]
+fn a_card_part_other_than_the_number_may_be_short_but_any_other_entry_still_needs_eight() {
+    let s = store();
+    let id = create(
+        &s,
+        NewEntry { kind: "card".into(), label: "Everyday".into(), fields: Default::default(), tags: vec![], parts: Parts([("number".to_string(), "4242424242424242".to_string())].into()) },
+    )
+    .unwrap();
+    let cvc = CaptureRule { into: CaptureInto { id: Some(id), part: Some("cvc".into()), ..Default::default() }, from: CaptureFrom::Stdout("all".into()) };
+    let cap = plan(&s, &[cvc], "Agent2-6", "true").unwrap();
+    assert!(matches!(cap.finish(&s, "123\n", "123", false, 0), Outcome::Stored { .. }));
+    let key = new_key("K", CaptureFrom::Stdout("all".into()));
+    let cap = plan(&s, &[key], "Agent2-6", "true").unwrap();
+    assert!(matches!(cap.finish(&s, "123\n", "123", false, 0), Outcome::Withheld { .. }), "an API key of three characters is still refused");
+}
+
+#[test]
+fn a_card_part_the_scrubber_could_not_clean_is_refused_naming_the_part_and_never_the_value() {
+    let s = store();
+    let with = |extra: (&str, &str)| {
+        let out = format!(r#"{{"pan": "4242 4242 4242 4242", "exp": "03/30", "cvv": "123", "m": "03", "y": "2030", "n": "Al", "z": "SW1", "c2": "12", "{}": "{}"}}"#, extra.0, extra.1);
+        out
+    };
+    let rule = |list: &[(&str, &str)]| CaptureRule {
+        into: CaptureInto { kind: Some("card".into()), label: Some("C".into()), ..Default::default() },
+        from: card_from(&[&[("number", "$.pan")][..], list].concat().iter().map(|(k, p)| (*k, json(p))).collect::<Vec<_>>()),
+    };
+    let out = with(("x", "y"));
+    for (key, path, why) in [("exp_month", "$.m", "exp_month"), ("cvc", "$.c2", "cvc"), ("name", "$.n", "name"), ("zip", "$.z", "zip")] {
+        let cap = plan(&s, &[rule(&[(key, path)])], "Agent2-6", "show").unwrap();
+        let Outcome::Withheld { why: said, .. } = cap.finish(&s, &out, &out, false, 0) else { panic!("{key} should be withheld") };
+        assert!(said.contains(&format!("the card's {why} is too short")), "{said}");
+        for value in ["03", "Al", "SW1", "12"] {
+            assert!(!said.contains(&format!("\"{value}\"")), "the value is in {said}");
+        }
+    }
+    // A three-digit code, a four-digit year and a five-character expiry are taken.
+    let cap = plan(&s, &[rule(&[("cvc", "$.cvv"), ("exp", "$.exp")])], "Agent2-6", "show").unwrap();
+    assert!(matches!(cap.finish(&s, &out, &out, false, 0), Outcome::Stored { .. }));
+    // The same for a part captured into a card that exists.
+    let id = create(&s, NewEntry { kind: "card".into(), label: "Everyday".into(), fields: Default::default(), tags: vec![], parts: Parts([("number".to_string(), "4111111111111111".to_string())].into()) }).unwrap();
+    let month = CaptureRule { into: CaptureInto { id: Some(id), part: Some("exp_month".into()), ..Default::default() }, from: CaptureFrom::Stdout("all".into()) };
+    let cap = plan(&s, &[month], "Agent2-6", "show").unwrap();
+    let Outcome::Withheld { why, .. } = cap.finish(&s, "03\n", "03", false, 0) else { panic!("withheld") };
+    assert!(why.contains("the card's exp_month is too short") && why.contains("exp (like 03/30)"), "{why}");
+}
+
+#[test]
+fn a_capture_into_an_entry_that_is_not_a_card_leaves_its_plain_fields_exactly_as_they_are() {
+    let s = store();
+    let id = create(
+        &s,
+        NewEntry {
+            kind: "api-key".into(),
+            label: "Stripe".into(),
+            fields: [("service".to_string(), "stripe".to_string()), ("notes".to_string(), "keep me".to_string())].into(),
+            tags: vec![],
+            parts: Parts([("value".to_string(), "sk_old_value_123".to_string())].into()),
+        },
+    )
+    .unwrap();
+    let before = s.vault_get(&id).unwrap().unwrap().fields;
+    let rule = CaptureRule { into: CaptureInto { id: Some(id.clone()), ..Default::default() }, from: CaptureFrom::Stdout("all".into()) };
+    let cap = plan(&s, &[rule], "Agent2-6", "rotate").unwrap();
+    assert!(matches!(cap.finish(&s, "sk_new_value_456\n", "sk_new_value_456", false, 0), Outcome::Stored { .. }));
+    assert_eq!(s.vault_get(&id).unwrap().unwrap().fields, before, "the plain fields are byte for byte what they were");
+    assert_eq!(value(&s, &id, "value"), "sk_new_value_456");
+}

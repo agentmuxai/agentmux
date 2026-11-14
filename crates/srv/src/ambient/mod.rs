@@ -22,6 +22,7 @@
 //! other RPC result. The gateway's job is coalescing/cancellation only.
 
 pub mod call;
+pub mod cli_locator;
 pub mod cli;
 pub mod digest;
 pub mod limits;

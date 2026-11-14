@@ -29,6 +29,22 @@
 set -e
 this_dir="$(readlink -f "$(dirname "$0")")"
 
+# The data channel this run advertises as its window's app_id, in the order the
+# host resolves it (crates/common data_paths.rs): an explicit AGENTMUX_CHANNEL,
+# else the channel an in-app upgrade recorded beside the AppImage
+# (<file>.agentmux-channel), else the one baked into this build. Skipping the
+# record registered agentmux-stable-<v>.desktop while the host advertised
+# agentmux-<recorded channel>-<v>, so a local-build channel showed GNOME's cog
+# after every upgrade. A record that is not a plain channel name is ignored.
+desktop_channel() {
+    local rec=""
+    if [ -z "${AGENTMUX_CHANNEL:-}" ] && [ -n "${APPIMAGE:-}" ]; then
+        rec="$(head -n 1 "$APPIMAGE.agentmux-channel" 2>/dev/null | tr -d '[:space:]')" || rec=""
+        case "$rec" in *[!A-Za-z0-9._-]*) rec="" ;; esac
+    fi
+    printf '%s' "${AGENTMUX_CHANNEL:-${rec:-$(cat "$this_dir/usr/share/agentmux/CHANNEL" 2>/dev/null || echo stable)}}"
+}
+
 # ---- run_normally: shared body for both "ran from extract dir" and
 # ---- "ran from FUSE mount as fallback". Sets env, registers desktop file,
 # ---- exec's the LAUNCHER (which then supervises srv + the CEF host).
@@ -46,7 +62,7 @@ run_normally() {
         # Same resolution order as agentmux_common::DataPaths for
         # Installed/Portable modes: an explicit AGENTMUX_CHANNEL override
         # wins, else the channel baked into this build at compile time.
-        CHANNEL="${AGENTMUX_CHANNEL:-$(cat "$this_dir/usr/share/agentmux/CHANNEL" 2>/dev/null || echo stable)}"
+        CHANNEL="$(desktop_channel)"
         APP_ID="agentmux-${CHANNEL}-${VERSION}"
         bash "$this_dir/install-linux-desktop.sh" "$APPIMAGE" "$APP_ID" || true
     fi

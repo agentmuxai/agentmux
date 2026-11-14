@@ -88,7 +88,7 @@ fn unconfirmed_note(w: &Watched) -> String {
 
 /// Watch a message just queued at the relay for `to` by `from`: once the window has passed with no
 /// word from `to`, `from` gets the note at its next turn.
-pub(crate) fn watch(handler: &'static ReactiveHandler, from: &str, to: &str, id: &str) {
+pub fn watch(handler: &'static ReactiveHandler, from: &str, to: &str, id: &str) {
     if from.is_empty() || to.is_empty() || id.is_empty() {
         return;
     }
@@ -105,7 +105,7 @@ pub(crate) fn watch(handler: &'static ReactiveHandler, from: &str, to: &str, id:
 
 /// A message from `sender` to `receiver` arrived: if `receiver` had queued one for `sender`, `sender`
 /// is reachable and that one is no longer watched.
-pub(crate) fn heard_from(sender: Option<&str>, receiver: &str) {
+pub fn heard_from(sender: Option<&str>, receiver: &str) {
     if let Some(sender) = sender.filter(|s| !s.is_empty()) {
         book().heard_from(sender, receiver);
     }
@@ -116,7 +116,7 @@ pub(crate) fn heard_from(sender: Option<&str>, receiver: &str) {
 /// the sender's own account's agents; `lan_peers` are the LAN peers this machine can see, in words
 /// (`peer_words::describe_peer`), because the message got this far only because the target is not
 /// running here or on any of them.
-pub(crate) fn queued_answer(request_id: String, target_in_account: Option<bool>, lan_peers: Vec<String>, timestamp: u64) -> Value {
+pub fn queued_answer(request_id: String, target_in_account: Option<bool>, lan_peers: Vec<String>, timestamp: u64) -> Value {
     let body = InjectionResponse {
         deferred: None,
         success: true,

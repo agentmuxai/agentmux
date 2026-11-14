@@ -11,11 +11,11 @@ name = "agentmux-mcp"
 path = "src/main.rs"
 
 [dependencies]
-agentmux-common = { path = "../common" }
+agentmux-common = { path = "../common", features = ["tls-provider"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "time", "fs", "sync"] }
 # Talks only to srv at AGENTMUX_LOCAL_URL (http://127.0.0.1:<port>): no TLS feature on purpose (#4207).
 # `stream`: SendMessage streams files to srv's attachment upload route.
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "query", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
@@ -39,6 +39,8 @@ base64 = "0.22"
 regex = "1"
 
 [dev-dependencies]
+# Installs the ring TLS provider once per test binary (tls_test_init.rs): reqwest 0.13 builds no client without one.
+ctor = "1"
 tempfile = "3"
 
 # Desktop: SendInput, window geometry and focus (desktop_input.rs). The same

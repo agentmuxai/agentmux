@@ -61,6 +61,7 @@ import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 import type { AppSkillInstallResult } from "@/types/rpc/AppSkillInstallResult";
 import type { AppSkillsCatalog } from "@/types/rpc/AppSkillsCatalog";
+import type { AppSkillsHere } from "@/types/rpc/AppSkillsHere";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
@@ -119,6 +120,7 @@ import type { CommandAgentTakeoverData } from "@/types/rpc/CommandAgentTakeoverD
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
 import type { CommandAppSkillsCatalogData } from "@/types/rpc/CommandAppSkillsCatalogData";
 import type { CommandAppSkillsCatalogInstallData } from "@/types/rpc/CommandAppSkillsCatalogInstallData";
+import type { CommandAppSkillsHereData } from "@/types/rpc/CommandAppSkillsHereData";
 import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
 import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
 import type { CommandAttachmentsCancelData } from "@/types/rpc/CommandAttachmentsCancelData";
@@ -441,6 +443,8 @@ import type { LspSendReq } from "@/types/rpc/LspSendReq";
 import type { LspStartReq } from "@/types/rpc/LspStartReq";
 import type { LspStartResult } from "@/types/rpc/LspStartResult";
 import type { LspStopReq } from "@/types/rpc/LspStopReq";
+import type { MakeDroneReq } from "@/types/rpc/MakeDroneReq";
+import type { MakeDroneResult } from "@/types/rpc/MakeDroneResult";
 import type { McpAgentBindingData } from "@/types/rpc/McpAgentBindingData";
 import type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
 import type { McpAgentScopeData } from "@/types/rpc/McpAgentScopeData";
@@ -1792,6 +1796,10 @@ export const GeneratedApi = {
   JobsTemplatesListCommand(client: RpcClient, opts?: RpcOpts): Promise<JobTemplatesResult> {
     return client.rpcCall("jobs.templates.list", {}, opts);
   },
+  // command "jobs.templates.make_drone"
+  JobsTemplatesMakeDroneCommand(client: RpcClient, data: MakeDroneReq, opts?: RpcOpts): Promise<MakeDroneResult> {
+    return client.rpcCall("jobs.templates.make_drone", data, opts);
+  },
   // command "jobs.templates.uninstall"
   JobsTemplatesUninstallCommand(
     client: RpcClient,
@@ -2577,6 +2585,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AppSkillInstallResult> {
     return client.rpcCall("app_skills.catalog.install", data, opts);
+  },
+  // command "app_skills.here"
+  AppSkillsHereCommand(client: RpcClient, data?: CommandAppSkillsHereData, opts?: RpcOpts): Promise<AppSkillsHere> {
+    return client.rpcCall("app_skills.here", data ?? {}, opts);
   },
   // command "skill.catalog.app_file"
   SkillCatalogAppFileCommand(

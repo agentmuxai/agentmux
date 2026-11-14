@@ -5,7 +5,7 @@
 //! (`docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §6.3).
 //!
 //! CEF's cache folder is per version (`channels/<ch>/versions/<v>/cef-cache`),
-//! like the databases srv carries forward (`srv/src/bootstrap/carry_forward.rs`),
+//! like the databases srv carries forward (`srv/src/migrations/carry_forward.rs`),
 //! and it holds what browser panes are signed in with: the Personal profile's
 //! cookies, local storage and IndexedDB, and each named profile
 //! (`profile-<id>`, `identity.rs`), plus the app UI's own

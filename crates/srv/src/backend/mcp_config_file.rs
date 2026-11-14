@@ -147,16 +147,16 @@ fn merge_project_servers(ours: &str, theirs: &str) -> String {
 /// The one lock every test holds while it points `AGENTMUX_DATA_HOME` at a temp folder. The
 /// variable is process-wide, so tests in different modules must not overlap; a second private
 /// mutex would let one test restore the value under another.
-#[cfg(test)]
-pub(crate) fn data_home_lock() -> std::sync::MutexGuard<'static, ()> {
+#[cfg(any(test, feature = "test-support"))]
+pub fn data_home_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// A test points `AGENTMUX_DATA_HOME` at a temp folder so the relocated configs it writes never
 /// reach the real data root. Tests that set it hold [`data_home_lock`].
-#[cfg(test)]
-pub(crate) fn with_data_home<T>(root: &Path, f: impl FnOnce() -> T) -> T {
+#[cfg(any(test, feature = "test-support"))]
+pub fn with_data_home<T>(root: &Path, f: impl FnOnce() -> T) -> T {
     let _held = data_home_lock();
     let saved = std::env::var_os("AGENTMUX_DATA_HOME");
     std::env::set_var("AGENTMUX_DATA_HOME", root);

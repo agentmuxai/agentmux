@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::runtime_adapter::RuntimeKind;
+
 /// The state of one agent as a viewer sees it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -17,7 +19,8 @@ pub enum AgentRuntimeState {
     Starting,
     Idle,
     Working,
-    /// A turn is running and a question waits for the user.
+    /// A question waits for the user in a running turn, or the agent is between turns and a Browser request
+    /// of its is still open (`detail` is `browser_request`).
     WaitingOnUser,
     /// Out of quota; `resets_at` when the provider said when it lifts.
     Limited,
@@ -43,7 +46,8 @@ pub struct AgentRuntime {
     /// The agent's UID, the id of `agentidentities:changed:<agent id>`.
     pub agent_id: String,
     pub state: AgentRuntimeState,
-    /// Why, for a state that has a reason: `usage_limit`, `needs_login` or `starts_on_first_message`.
+    /// Why, for a state that has a reason: `usage_limit`, `needs_login`, `starts_on_first_message` or
+    /// `browser_request`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub detail: Option<String>,
@@ -55,6 +59,11 @@ pub struct AgentRuntime {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub block_id: Option<String>,
+    /// The pane where the person answers, when that is not the agent's own: the Browser pane its open
+    /// request waits in (`detail` is `browser_request`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub waiting_in: Option<String>,
     pub desired: AgentDesiredState,
     pub name: String,
     pub provider: String,
@@ -68,4 +77,8 @@ pub struct AgentRuntime {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub blocked: Option<String>,
+    /// Where it runs: from its pane's `agentMode` when it has a block, else from its definition's
+    /// `agent_type`, so a stopped agent says it too. Anything unknown is `host`.
+    #[serde(default)]
+    pub runtime: RuntimeKind,
 }

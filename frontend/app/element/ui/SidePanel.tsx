@@ -5,7 +5,7 @@ import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
 
-import { IconButton } from "./Button";
+import { CloseButton } from "./CloseButton";
 import "./side-panel.scss";
 
 export interface SidePanelProps {
@@ -37,7 +37,7 @@ export function SidePanel(props: SidePanelProps): JSX.Element {
             <header class="ui-side-panel__head">
                 <Show when={props.lead}>{(lead) => lead()}</Show>
                 <h3 class="ui-side-panel__title">{props.title}</h3>
-                <IconButton icon="xmark" label="Close" onClick={props.onClose} />
+                <CloseButton onClick={props.onClose} />
             </header>
             {props.children}
         </aside>

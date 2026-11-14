@@ -215,7 +215,7 @@ pub(super) async fn handle_availability(State(state): State<AppState>, Query(q):
 }
 
 /// [`describe_block`] for the agent `agent` (a name or a UID) names on this instance.
-pub(super) async fn view_of_agent(state: &AppState, agent: &str) -> Known {
+pub(crate) async fn view_of_agent(state: &AppState, agent: &str) -> Known {
     let route = crate::backend::reactive::sanitize::route_name(agent).unwrap_or_else(|| agent.to_string());
     let block_id = match state.reactive_handler.lookup_delivery_target(&route) {
         LookupOutcome::One(reg) => Some(reg.block_id),
@@ -309,7 +309,7 @@ fn classify_stopped(defined_here: bool, matching: usize) -> Stopped {
     }
 }
 
-pub(super) enum Known {
+pub(crate) enum Known {
     Live(Value),
     Ambiguous,
     Unknown,

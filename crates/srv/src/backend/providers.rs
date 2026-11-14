@@ -101,7 +101,7 @@ pub struct ProviderConfig {
     /// through the live protocol stream instead, not a fixed on-disk
     /// path). Per-provider, filesystem-verified table:
     /// `docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` §2.1.
-    /// Used by `identity_auth_dirs.rs` to redirect an isolated identity's
+    /// Used by `identity/auth_dirs.rs` to redirect an isolated identity's
     /// history to the always-global
     /// `DataPaths::identity_history_dir` — reagentx P1 on PR #2605 caught
     /// that hardcoding `"projects"` there only worked for `claude`,
@@ -290,25 +290,25 @@ impl ProviderConfig {
 //
 // One file per provider under providers/, so adding a provider adds a file.
 
-mod claude;
-mod codex;
-mod gemini;
-mod qwen;
-mod kimi;
-mod openclaw;
-mod pi;
-mod muxcode;
-mod copilot;
-mod antigravity;
-mod aider;
-mod cline;
-mod crush;
-mod dsh;
-mod goose;
-mod grok;
-mod kilo;
-mod muse;
-mod opencode;
+pub mod claude;
+pub mod codex;
+pub mod gemini;
+pub mod qwen;
+pub mod kimi;
+pub mod openclaw;
+pub mod pi;
+pub mod muxcode;
+pub mod copilot;
+pub mod antigravity;
+pub mod aider;
+pub mod cline;
+pub mod crush;
+pub mod dsh;
+pub mod goose;
+pub mod grok;
+pub mod kilo;
+pub mod muse;
+pub mod opencode;
 
 use claude::CLAUDE;
 use codex::CODEX;

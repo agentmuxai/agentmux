@@ -30,7 +30,7 @@ mod x11;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use crate::splash_core::{tally_label, trunc, visible_rows, RowKind, StageTimeline};
+use crate::splash_core::{tally_label, trunc, visible_rows, DetailLayout, RowKind, StageTimeline};
 use crate::startup_events::{StartupEvent, StartupStatus};
 
 // ── Shared look (matches splash_mac.rs / splash.rs) ─────────────────────────
@@ -106,6 +106,11 @@ pub(crate) const CARD_H: i32 = BRAIN_H + PADDING * 2 + STAGE_H + FOOTER_H;
 // that part of the mac/Windows parity work is deliberately not ported here;
 // see docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md.
 
+/// A finished row's end detail: the stage rows are 28 characters wide (`ok `,
+/// 18 for the label, 5 for the time and `ms`), so a detail line is that less
+/// its three-space indent, and at most two lines of it are shown.
+const DETAIL_LAYOUT: DetailLayout = DetailLayout { width: 25, max_lines: 2 };
+
 /// Accumulates startup events and emits rendered text lines for the stage band.
 pub(super) struct StageList {
     timeline: StageTimeline,
@@ -146,7 +151,7 @@ impl StageList {
     /// the stage actually running.
     pub(super) fn lines(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for entry in visible_rows(&self.timeline.stages, STAGE_MAX_LINES) {
+        for entry in visible_rows(&self.timeline.stages, STAGE_MAX_LINES, Some(DETAIL_LAYOUT)) {
             match entry.kind {
                 RowKind::Stage(s) => {
             let pfx = match &s.done {
@@ -180,6 +185,12 @@ impl StageList {
                 // per-item times are exactly what this row stands in for.
                 RowKind::SubTally { done, total } => {
                     out.push(format!("   >{:<16}", trunc(&tally_label(done, total), 16)));
+                }
+                // Why the row above warned or failed. Plain text under it: this
+                // band is one colour, and the row's "!!" already says it went wrong.
+                RowKind::Detail { text, indented, .. } => {
+                    let pad = if indented { "     " } else { "   " };
+                    out.push(format!("{pad}{text}"));
                 }
                 RowKind::Sub(sub) => {
                     let sub_ms = match &sub.done {

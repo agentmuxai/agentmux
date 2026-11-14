@@ -7,7 +7,7 @@
 import { Button, TextInput } from "@/app/element/ui";
 import { For, Show, type JSX } from "solid-js";
 import { tip } from "@/app/element/tip";
-import { formatLocale } from "@/app/i18n/i18n";
+import { formatLocale, t } from "@/app/i18n/i18n";
 import { formatTimeOrDate } from "@/util/format-time";
 import type { InputHistorySearchProps, InputHistorySearchState } from "./input-history-search-state";
 
@@ -23,12 +23,12 @@ export function SearchField(props: Parts & Pick<InputHistorySearchProps, "onDone
     const { s, onDone } = props;
     return (
         <div class="input-history-search__query">
-            <span>Search history</span>
+            <span>{t("inputHistory.search.label")}</span>
             <TextInput
                 variant="plain"
                 ref={s.setInput}
                 value={s.query()}
-                placeholder="Type to filter"
+                placeholder={t("inputHistory.search.placeholder")}
                 spellcheck={false}
                 aria-controls="input-history-search-list"
                 onInput={(e) => s.setQuery(e.currentTarget.value)}
@@ -86,20 +86,20 @@ export function SearchFooter(props: Parts): JSX.Element {
                 <div class="input-history-search__empty" role="alert">{s.error()}</div>
             </Show>
             <div class="input-history-search__hint">
-                <span>Enter to use</span>
-                <span>Shift+Del to forget</span>
-                <span>Esc to close</span>
+                <span>{t("inputHistory.hint.use")}</span>
+                <span>{t("inputHistory.hint.forget")}</span>
+                <span>{t("inputHistory.hint.close")}</span>
                 <span class="input-history-search__clear">
                     <Show
                         when={s.confirmClear()}
                         fallback={
                             <Button density="compact" onMouseDown={(e) => e.preventDefault()} onClick={() => s.setConfirmClear(true)} disabled={s.items().length === 0 && !s.query()}>
-                                Clear history
+                                {t("inputHistory.clear")}
                             </Button>
                         }
                     >
                         <Button density="compact" tone="danger" onMouseDown={(e) => e.preventDefault()} onClick={s.clearAll}>
-                            Forget everything typed to this agent
+                            {t("inputHistory.clear.confirm")}
                         </Button>
                     </Show>
                 </span>

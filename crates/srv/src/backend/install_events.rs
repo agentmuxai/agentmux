@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The `install_chunk` event an install publishes (`server/install_handlers.rs`,
+//! The `install_chunk` event an install publishes (`server/install_task.rs`,
 //! `server/system_install_handlers.rs`), kept below the server so `mps_events` can name it.
 
 use serde::Serialize;

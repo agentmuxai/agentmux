@@ -74,7 +74,7 @@ impl RunLedger {
     }
 
     /// Tests: the cap alerts raised so far, `(job id, reason)`.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn cap_alerts(&self) -> Vec<(String, String)> {
         self.cap_alerts.lock().unwrap().clone()
     }
@@ -89,7 +89,7 @@ impl RunLedger {
 
     /// The start of the operator's local day containing `now`.
     pub(super) fn day_start(&self, now: i64) -> i64 {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(f) = self.day_start.lock().unwrap().clone() {
             return f(now);
         }

@@ -157,6 +157,7 @@ static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 /// Start following the episodes. Call once at startup.
 pub fn install(state: AppState) {
+    crate::identity::sign_in_hook::set_after_sign_in(after_sign_in);
     crate::backend::account_availability::set_covers_block(covers_block);
     let baseline = baseline(&state.mstore);
     let broker = state.broker.clone();

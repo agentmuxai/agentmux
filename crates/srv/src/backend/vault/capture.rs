@@ -14,13 +14,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use agentmux_common::api_types::{CaptureFrom, CaptureRule};
+use agentmux_common::api_types::{CaptureFrom, CaptureInto, CaptureRule};
 use agentmux_common::time::now_ms;
 use serde_json::value::RawValue;
 use zeroize::Zeroizing;
 
-use super::scrub::{Scrubber, MIN_LINE};
-use super::{insert, kinds, new_id_besides, record_line, seal, validate, versions, Line, NewEntry, Parts};
+use super::scrub::{self, Scrubber, MIN_LINE};
+use super::{card, insert, kinds, new_id_besides, record_line, seal, validate, versions, Line, NewEntry, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
 use crate::backend::storage::vault_versions::CaptureWrite;
@@ -29,6 +29,8 @@ use crate::backend::storage::vault_versions::CaptureWrite;
 pub const MOST: usize = 8;
 /// A shorter value is refused: the output couldn't be cleaned of it reliably.
 pub const MIN_LEN: usize = 8;
+/// A card's other parts (a security code, an expiry, a ZIP) are short by nature: they are taken at any length and then
+/// checked against what the scrubber can clean (`scrub::cleanable`), so none is stored that would still show in the output.
 /// The most output held for a capture; past it the capture fails and the
 /// output kept for the person is cut here.
 pub const MAX_HELD: usize = 1024 * 1024;
@@ -67,6 +69,9 @@ pub enum Step {
 pub struct Rule {
     pub into: Target,
     pub from: Source,
+    /// A new card's other parts, from the same output (`CaptureFrom::Parts`): the part and where it is. `from` is
+    /// then the card's number.
+    pub also: Vec<(&'static str, Source)>,
 }
 
 /// A command's capture, checked before it runs.
@@ -200,7 +205,64 @@ fn rule_from(from: &CaptureFrom) -> Result<Source, String> {
         }
         CaptureFrom::Line(0) => Err("lines are counted from 1".into()),
         CaptureFrom::Line(n) => Ok(Source::Line(*n as usize)),
+        CaptureFrom::Parts(_) => Err("\"parts\" is a whole rule's, not one part's".into()),
     }
+}
+
+/// The keys a `parts` capture takes and the card part each fills (`exp` is the older single text, read into the month
+/// and year when the card is settled).
+const CARD_KEYS: [(&str, &str); 7] = [("number", "number"), ("exp", "expiry"), ("exp_month", "exp_month"), ("exp_year", "exp_year"), ("cvc", "cvc"), ("name", "name"), ("zip", "zip")];
+
+/// A card's parts read from a page, by the keys a `parts` capture takes: the number as the main value and the rest
+/// beside it, ready for [`Capture::store`]. The page's parts are not cleaned out of an output, so they have no
+/// minimum length.
+pub fn card_found(values: BTreeMap<String, Zeroizing<String>>) -> Result<Found, String> {
+    let mut number = None;
+    let mut also = Vec::new();
+    for (key, value) in values {
+        let Some((_, part)) = CARD_KEYS.iter().find(|(k, _)| *k == key) else {
+            return Err(format!("a card has no {key:?}"));
+        };
+        if value.trim().is_empty() {
+            return Err(format!("the card's {key} is empty"));
+        }
+        let found = Found { value, printed: None, also: Vec::new() };
+        if *part == "number" {
+            number = Some(found);
+        } else {
+            also.push((*part, found));
+        }
+    }
+    let mut main = number.ok_or("a card needs its number")?;
+    main.also = also;
+    Ok(main)
+}
+
+/// A `parts` capture's sources: the card's number, and its other parts. Only a new card is made this way.
+fn card_parts(map: &BTreeMap<String, CaptureFrom>, into: &CaptureInto) -> Result<(Source, Vec<(&'static str, Source)>), String> {
+    if into.id.is_some() || into.kind.as_deref().map(str::trim) != Some("card") {
+        return Err("\"parts\" makes a new card: name it in \"as\" by kind \"card\" and a label, not by an entry's id".into());
+    }
+    if into.part.as_deref().is_some_and(|p| !p.trim().is_empty()) {
+        return Err("\"parts\" fills each part it names: leave part out".into());
+    }
+    if map.contains_key("exp") && (map.contains_key("exp_month") || map.contains_key("exp_year")) {
+        return Err("give the expiry as \"exp\", or as \"exp_month\" and \"exp_year\", not both".into());
+    }
+    let (mut number, mut also) = (None, Vec::new());
+    for (key, from) in map {
+        let Some((_, part)) = CARD_KEYS.iter().find(|(k, _)| k == key) else {
+            let names: Vec<&str> = CARD_KEYS.iter().map(|(k, _)| *k).collect();
+            return Err(format!("a card has no {key:?} to capture; its parts are {}", names.join(", ")));
+        };
+        let source = rule_from(from).map_err(|e| format!("{key}: {e}"))?;
+        if *part == "number" {
+            number = Some(source);
+        } else {
+            also.push((*part, source));
+        }
+    }
+    Ok((number.ok_or("\"parts\" needs the card's \"number\"")?, also))
 }
 
 /// Checks a command's capture before it runs: every rule readable, every entry
@@ -215,7 +277,10 @@ pub fn plan(store: &Store, rules: &[CaptureRule], agent: &str, cmd: &str) -> Res
     let mut out = Vec::with_capacity(rules.len());
     for (n, r) in rules.iter().enumerate() {
         let which = |e: String| if rules.len() > 1 { format!("capture rule {}: {e}", n + 1) } else { e };
-        let from = rule_from(&r.from).map_err(which)?;
+        let (from, also) = match &r.from {
+            CaptureFrom::Parts(map) => card_parts(map, &r.into).map_err(which)?,
+            one => (rule_from(one).map_err(which)?, Vec::new()),
+        };
         let into = match (&r.into.id, &r.into.kind) {
             (Some(_), Some(_)) => return Err(which("\"as\" names an entry by id, or a new one by kind and label, not both".into())),
             (Some(id), None) => {
@@ -257,7 +322,7 @@ pub fn plan(store: &Store, rules: &[CaptureRule], agent: &str, cmd: &str) -> Res
         if out.iter().any(|r: &Rule| same(&r.into)) {
             return Err(which("two rules write the same entry; give each its own".into()));
         }
-        out.push(Rule { into, from });
+        out.push(Rule { into, from, also });
     }
     Ok(Capture { rules: out, agent: agent.to_string(), cmd: cmd.to_string(), reason: String::new() })
 }
@@ -285,10 +350,17 @@ fn walk<'a>(mut raw: &'a RawValue, steps: &[Step]) -> Option<&'a RawValue> {
 pub struct Found {
     pub value: Zeroizing<String>,
     pub printed: Option<Zeroizing<String>>,
+    /// A card's other parts, when the rule was a `parts` one.
+    pub also: Vec<(&'static str, Found)>,
 }
 
 /// One rule's value in `stdout`, or why there is none. Never says what it found.
 pub fn extract(from: &Source, stdout: &str) -> Result<Found, String> {
+    extract_min(from, stdout, MIN_LEN)
+}
+
+/// [`extract`], taking a value of at least `min` characters.
+pub fn extract_min(from: &Source, stdout: &str, min: usize) -> Result<Found, String> {
     let mut printed = None;
     let value: Zeroizing<String> = match from {
         Source::All => Zeroizing::new(stdout.trim().to_string()),
@@ -318,10 +390,45 @@ pub fn extract(from: &Source, stdout: &str) -> Result<Found, String> {
     if value.is_empty() {
         return Err("the value it matched is empty".into());
     }
-    if value.chars().count() < MIN_LEN {
-        return Err(format!("the value it matched is shorter than {MIN_LEN} characters, too short to clean out of the output"));
+    if value.chars().count() < min {
+        return Err(format!("the value it matched is shorter than {min} characters, too short to clean out of the output"));
     }
-    Ok(Found { value, printed })
+    Ok(Found { value, printed, also: Vec::new() })
+}
+
+impl Rule {
+    /// Whether the rule's main value is one of a card's short parts (a security code, an expiry or a ZIP captured into a
+    /// card that exists), not the number or another kind's value.
+    fn short_part(&self) -> Option<&'static str> {
+        match &self.into {
+            Target::Existing { kind, part, .. } if kind == card::KIND && *part != "number" => Some(part),
+            _ => None,
+        }
+    }
+}
+
+/// A card's part the output could not be cleaned of is refused, naming the part and never the value.
+fn cleanable(part: &str, f: &Found) -> Result<(), String> {
+    if scrub::cleanable(&f.value) {
+        return Ok(());
+    }
+    let hint = if part.starts_with("exp_") { ": give the expiry as one text, exp (like 03/30)" } else { "" };
+    Err(format!("the card's {part} is too short to clean out of the output (under {} characters, and not a 3-digit code){hint}", scrub::MIN_LEN))
+}
+
+/// A rule's values in `stdout`: its main one, and a card's other parts, which may be short.
+fn extract_rule(r: &Rule, stdout: &str) -> Result<Found, String> {
+    let short = r.short_part();
+    let mut found = extract_min(&r.from, stdout, if short.is_some() { 1 } else { MIN_LEN })?;
+    if let Some(part) = short {
+        cleanable(part, &found)?;
+    }
+    for (part, from) in &r.also {
+        let f = extract_min(from, stdout, 1).map_err(|e| format!("the card's {part}: {e}"))?;
+        cleanable(part, &f)?;
+        found.also.push((part, f));
+    }
+    Ok(found)
 }
 
 impl Capture {
@@ -343,7 +450,7 @@ impl Capture {
             self.rules
                 .iter()
                 .enumerate()
-                .map(|(n, r)| extract(&r.from, stdout).map_err(|e| if self.rules.len() > 1 { format!("capture rule {}: {e}", n + 1) } else { e }))
+                .map(|(n, r)| extract_rule(r, stdout).map_err(|e| if self.rules.len() > 1 { format!("capture rule {}: {e}", n + 1) } else { e }))
                 .collect::<Result<Vec<_>, _>>()
         };
         let found = match why {
@@ -358,6 +465,12 @@ impl Capture {
                     known.push((id.clone(), f.value.to_string()));
                     if let Some(p) = &f.printed {
                         known.push((id.clone(), p.to_string()));
+                    }
+                    for (_, x) in &f.also {
+                        known.push((id.clone(), x.value.to_string()));
+                        if let Some(p) = &x.printed {
+                            known.push((id.clone(), p.to_string()));
+                        }
                     }
                     if f.value.contains('\n') {
                         short.extend(f.value.lines().map(str::trim).filter(|l| !l.is_empty() && l.len() < MIN_LINE).map(|l| Zeroizing::new(l.to_string())));
@@ -383,8 +496,13 @@ impl Capture {
                     let k = kinds::kind(kind).ok_or_else(|| format!("unknown kind {kind:?}"))?;
                     let mut parts = Parts::default();
                     parts.0.insert(part.to_string(), f.value.to_string());
+                    for (other, x) in &f.also {
+                        parts.0.insert(other.to_string(), x.value.to_string());
+                    }
                     let tags = Vec::<String>::new();
-                    let fields: BTreeMap<String, String> = fields.iter().filter(|(_, v)| !v.trim().is_empty()).map(|(k, v)| (k.clone(), v.trim().to_string())).collect();
+                    let mut fields: BTreeMap<String, String> = fields.iter().filter(|(_, v)| !v.trim().is_empty()).map(|(k, v)| (k.clone(), v.trim().to_string())).collect();
+                    // A card's number, expiry, brand and reminder date agree, as they do for a save by the person.
+                    card::settle(k.name, &mut fields, &mut parts)?;
                     validate(k, label, &fields, &tags, &parts)?;
                     let taken: Vec<String> = made.iter().map(|(id, _)| id.clone()).collect();
                     let id = new_id_besides(store, kind, label, &taken)?;
@@ -409,11 +527,24 @@ impl Capture {
                     if let Some(mut old) = parts.0.insert(part.to_string(), f.value.to_string()) {
                         zeroize::Zeroize::zeroize(&mut old);
                     }
+                    // A captured expiry replaces the month and year, or the next save would put them back.
+                    if row.kind == card::KIND && *part == "expiry" {
+                        for stale in ["exp_month", "exp_year"] {
+                            if let Some(mut old) = parts.0.remove(stale) {
+                                zeroize::Zeroize::zeroize(&mut old);
+                            }
+                        }
+                    }
+                    // Only a card's plain fields follow its parts; any other kind's are left exactly as they are.
+                    let is_card = row.kind == card::KIND;
+                    let mut fields: BTreeMap<String, String> = if is_card { serde_json::from_str(&row.fields).map_err(|_| format!("{label}'s details can't be read, so nothing was changed"))? } else { BTreeMap::new() };
+                    card::settle(&row.kind, &mut fields, &mut parts)?;
+                    let fields_text = if is_card { serde_json::to_string(&fields).map_err(|e| e.to_string())? } else { row.fields.clone() };
                     // The whole entry as it was, whichever part this replaces: the person was
                     // told the old value is kept for 7 days.
                     let kept = Some(versions::of(&row, &self.agent, CAPTURED));
                     let was = row.sealed.clone();
-                    let changed = VaultRow { sealed: seal::seal(&key, &row.id, &parts)?, updated_at: now, ..row };
+                    let changed = VaultRow { sealed: seal::seal(&key, &row.id, &parts)?, fields: fields_text, updated_at: now, ..row };
                     writes.push(CaptureWrite::Replace { row: changed, was, kept });
                     made.push((id.clone(), label.clone()));
                 }

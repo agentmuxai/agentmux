@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
+import type { DocumentNode } from "../../../agent-model/types";
 import { atBottomOf, keptScrollTop, onScreenRows } from "./keep-on-screen";
 
 /** A view of rows `ids`, each `px` tall with a 4 px gap, windowed to all rows. */
@@ -55,5 +56,33 @@ describe("keep-on-screen (SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §4.1
         expect(atBottomOf(v, 100, 300)).toBe(true); // 16 px short
         expect(atBottomOf(v, 50, 300)).toBe(false);
         expect(atBottomOf(null, 0, 300)).toBe(false);
+    });
+    describe("a change of view (SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md §4.6)", () => {
+        const run = (id: string, hiddenIds: string[]): DocumentNode =>
+            ({ type: "hidden_run", id, counts: [], failed: 0, open: false, hiddenIds }) as DocumentNode;
+
+        it("keeps the run that now holds the topmost row in place, not a row further down", () => {
+            // a..f; the viewport shows c (offset 42) to f. The view hides a and b into one run, c and d into another.
+            const rows = onScreenRows(view(["a", "b", "c", "d", "e", "f"]), 250, 300);
+            const after = view(["hidden-run:a", "hidden-run:c", "e", "f"]);
+            const nodes = [run("hidden-run:a", ["a", "b"]), run("hidden-run:c", ["c", "d"])];
+            // The second run sits at 104 and keeps c's 42: the top of the pane does not move.
+            expect(keptScrollTop(rows, after, 250, nodes)).toBe(146);
+            // Without the runs in the nodes, the first row still there (e) is held instead.
+            expect(keptScrollTop(rows, after, 250)).toBe(42);
+        });
+
+        it("keeps the first row of a run that opened out in place", () => {
+            const rows = onScreenRows(view(["a", "hidden-run:b", "e", "f"]), 120, 300); // the run at offset 16
+            const after = view(["x", "a", "b", "c", "d", "e", "f"]); // b starts at 208
+            expect(keptScrollTop(rows, after, 120, [])).toBe(224);
+        });
+
+        it("keeps the offset within a run shorter than the row it replaced", () => {
+            const rows = [{ nodeId: "c", offsetPx: 90 }];
+            const after = { ...view(["a", "hidden-run:c"]) };
+            after.rows[1] = { ...after.rows[1], height: 24, end: after.rows[1].start + 24 };
+            expect(keptScrollTop(rows, after, 0, [run("hidden-run:c", ["c"])])).toBe(128);
+        });
     });
 });

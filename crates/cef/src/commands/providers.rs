@@ -86,20 +86,26 @@ fn save_config(config_dir: &str, config: &ProviderConfig) -> Result<(), String> 
 
 /// Puts a PTY login's writer back after a code was written to it, so the CLI's
 /// input side stays open until the child exits. Only while that login is still
-/// running and nothing newer holds the slot: a stale writer left behind would
+/// the current one (`owner` is the login generation the writer was taken under)
+/// and running, and nothing holds the slot: a stale writer left behind would
 /// make the next `set_provider_auth` write to a dead PTY instead of falling
-/// through to the config-file path. The login's reaper clears `active` before
-/// it clears the slot, so this can't refill the slot after the reap.
+/// through to the config-file path, and a superseded login's writer put over a
+/// newer login's empty slot would make that login's own restore drop its writer.
+/// The login's reaper clears `active` before it clears the slot, so this can't
+/// refill the slot after the reap.
 fn restore_pty_writer(
     slot: &parking_lot::Mutex<Option<CliLoginStdin>>,
     active: &std::sync::atomic::AtomicBool,
+    generation: &std::sync::atomic::AtomicU64,
+    owner: u64,
     stdin: CliLoginStdin,
 ) {
     if !matches!(stdin, CliLoginStdin::Pty(_)) {
         return;
     }
     let mut slot = slot.lock();
-    if slot.is_none() && active.load(std::sync::atomic::Ordering::SeqCst) {
+    let current = generation.load(std::sync::atomic::Ordering::SeqCst) == owner;
+    if current && slot.is_none() && active.load(std::sync::atomic::Ordering::SeqCst) {
         *slot = Some(stdin);
     }
 }
@@ -121,7 +127,10 @@ pub async fn set_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) 
     // The stdin is either a piped tokio::process::ChildStdin (typical) or a
     // portable_pty master writer (for TTY-required providers like OpenClaw)
     // — `CliLoginStdin::write_line` dispatches on the variant.
-    let maybe_stdin = state.cli_login_stdin.lock().take();
+    let (maybe_stdin, owner) = {
+        let mut slot = state.cli_login_stdin.lock();
+        (slot.take(), state.cli_login_generation.load(std::sync::atomic::Ordering::SeqCst))
+    };
     if let Some(mut child_stdin) = maybe_stdin {
         tracing::info!(provider = %provider, "set_provider_auth: delivering code to CLI stdin");
         if let Err(e) = child_stdin.write_line(&token).await {
@@ -133,7 +142,7 @@ pub async fn set_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) 
         // write: dropping it closes ConPTY's input side, which the CLI reads
         // as a hangup, so it exits (129) before it can exchange a valid code.
         // Put it back; the login's reaper drops it when the child exits.
-        restore_pty_writer(&state.cli_login_stdin, &state.cli_login_active, child_stdin);
+        restore_pty_writer(&state.cli_login_stdin, &state.cli_login_active, &state.cli_login_generation, owner, child_stdin);
         return Ok(serde_json::Value::Null);
     }
 
@@ -242,7 +251,7 @@ fn normalize_path_for_platform(path: &str) -> String {
 #[cfg(test)]
 mod login_writer_tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
     /// A PTY writer that records its bytes and whether it was dropped.
     struct Probe {
@@ -280,7 +289,7 @@ mod login_writer_tests {
         let slot = parking_lot::Mutex::new(None);
         let active = AtomicBool::new(true);
 
-        restore_pty_writer(&slot, &active, stdin);
+        restore_pty_writer(&slot, &active, &AtomicU64::new(3), 3, stdin);
 
         assert_eq!(written.lock().as_slice(), b"the-code\n");
         assert!(!dropped.load(Ordering::SeqCst), "the writer must outlive the code delivery");
@@ -293,9 +302,19 @@ mod login_writer_tests {
     fn a_writer_of_a_finished_login_is_not_kept() {
         let (stdin, _written, dropped) = probe();
         let slot = parking_lot::Mutex::new(None);
-        restore_pty_writer(&slot, &AtomicBool::new(false), stdin);
+        restore_pty_writer(&slot, &AtomicBool::new(false), &AtomicU64::new(1), 1, stdin);
         assert!(slot.lock().is_none());
         assert!(dropped.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_superseded_logins_writer_is_not_put_into_the_newer_logins_empty_slot() {
+        // The code was written under login generation 4; a newer login (5) has started and has not stored its writer yet.
+        let (old, _written, old_dropped) = probe();
+        let slot = parking_lot::Mutex::new(None);
+        restore_pty_writer(&slot, &AtomicBool::new(true), &AtomicU64::new(5), 4, old);
+        assert!(slot.lock().is_none(), "the slot stays free for the newer login's own writer");
+        assert!(old_dropped.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -303,7 +322,7 @@ mod login_writer_tests {
         let (newer, _w, newer_dropped) = probe();
         let slot = parking_lot::Mutex::new(Some(newer));
         let (old, _w2, old_dropped) = probe();
-        restore_pty_writer(&slot, &AtomicBool::new(true), old);
+        restore_pty_writer(&slot, &AtomicBool::new(true), &AtomicU64::new(1), 1, old);
         assert!(old_dropped.load(Ordering::SeqCst));
         assert!(!newer_dropped.load(Ordering::SeqCst));
         assert!(slot.lock().is_some());

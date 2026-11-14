@@ -99,7 +99,8 @@ pub(super) fn split_caller(facts: Vec<WorkFacts>, caller_block: Option<&str>) ->
     (mine.into_iter().next(), others)
 }
 
-/// LAN and WAN agents: name and liveness only.
+/// LAN and WAN agents: name and liveness only. A WAN agent that the account's cloud list (`cloud_installs`) has
+/// says its state there (`working`, `idle`, ...) instead of a bare "online"; the Swarm reads the same list.
 fn remote_agents(state: &AppState) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     for lan in state.lan_discovery.get_instances() {
@@ -108,8 +109,12 @@ fn remote_agents(state: &AppState) -> Vec<serde_json::Value> {
         }
     }
     if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+        // The cache as it is: `who` never waits on the relay, and an old cache starts a read for the next ask.
+        let cloud = crate::muxbus::cloud_installs::cached();
+        let own_wan_id = crate::backend::swarm_cloud::own_wan_id();
+        let now_ms = agentmux_common::time::now_ms_u64();
         for name in sub.subscribed_agents() {
-            out.push(json!({ "agent": name, "channel": "wan", "status": "online" }));
+            out.push(json!({ "agent": name, "channel": "wan", "status": cloud.as_ref().and_then(|c| crate::backend::swarm_cloud::agent_state(c, &name, own_wan_id.as_deref(), now_ms)).unwrap_or("online") }));
         }
     }
     out

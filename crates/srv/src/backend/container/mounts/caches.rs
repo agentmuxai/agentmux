@@ -101,7 +101,7 @@ impl ContainerManager {
 
     /// The cache volumes of `container_name` and what each holds, largest first (Docker's own disk-usage report,
     /// which does not scan the volumes; a volume whose driver can't say is counted as 0).
-    pub(crate) async fn cache_volumes(&self, container_name: &str) -> Result<Vec<ContainerCacheVolume>, String> {
+    pub async fn cache_volumes(&self, container_name: &str) -> Result<Vec<ContainerCacheVolume>, String> {
         let usage = self.docker().df().await.map_err(|e| format!("Docker would not report volume sizes: {e}"))?;
         let mut out: Vec<ContainerCacheVolume> = usage
             .volumes
@@ -117,7 +117,7 @@ impl ContainerManager {
     /// Removes the container and its cache volumes (the CLI and Claude home volumes stay): the next message starts a
     /// new container, which fills them again. Returns what was removed. The caller makes sure no turn is using the
     /// container.
-    pub(crate) async fn clear_caches(&self, container_name: &str) -> Result<Vec<ContainerCacheVolume>, String> {
+    pub async fn clear_caches(&self, container_name: &str) -> Result<Vec<ContainerCacheVolume>, String> {
         let volumes = self.cache_volumes(container_name).await?;
         let _ = self.stop(container_name, 10).await;
         let _ = self.remove(container_name, true).await;
@@ -134,7 +134,7 @@ impl ContainerManager {
     /// Removes the container and every volume made for an agent, once the agent is deleted: its cache volumes
     /// (by label), and the CLI and Claude home volumes older versions made without one. Best effort: what is
     /// not there, or is still in use, is skipped and logged.
-    pub(crate) async fn remove_agent_storage(&self, container_name: &str) {
+    pub async fn remove_agent_storage(&self, container_name: &str) {
         let _ = self.stop(container_name, 10).await;
         let _ = self.remove(container_name, true).await;
         let mut names = vec![format!("agentmux-cli-{container_name}"), format!("agentmux-claude-{container_name}")];

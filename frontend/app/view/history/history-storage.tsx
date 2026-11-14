@@ -10,7 +10,7 @@ import { createEffect, createSignal, For, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { formatLocale } from "@/app/i18n/i18n";
+import { formatLocale, t } from "@/app/i18n/i18n";
 import { measuredAgo } from "@/app/statusbar/HistoryUsagePopover";
 import type { HistoryCompression } from "@/types/rpc/HistoryCompression";
 import type { HistoryReclaim } from "@/types/rpc/HistoryReclaim";
@@ -29,17 +29,21 @@ const CompressionLine = (props: { c: HistoryCompression }): JSX.Element => {
                 when={props.c.frames > 0}
                 fallback={
                     <span class="warden-manager-dim">
-                        {props.c.enabled ? "Pane history compression is on; nothing is compressed yet." : "Pane history compression is turned off (agent:transcriptframes is false)."}
+                        {props.c.enabled ? t("historyStorage.compression.empty") : t("historyStorage.compression.off")}
                     </span>
                 }
             >
                 <span>
-                    Pane history compressed: {formatBytes(props.c.logical_bytes)} of transcript in {formatBytes(props.c.stored_bytes)} ({ratio()}×),{" "}
-                    {props.c.frames.toLocaleString()} frames.
+                    {t("historyStorage.compression.done", {
+                        logical: formatBytes(props.c.logical_bytes),
+                        stored: formatBytes(props.c.stored_bytes),
+                        ratio: ratio(),
+                        frames: props.c.frames,
+                    })}
                 </span>
             </Show>
             <Show when={props.c.enabled && props.c.waiting}>
-                <span class="warden-manager-dim"> Compression waits: {props.c.waiting}</span>
+                <span class="warden-manager-dim"> {t("historyStorage.compression.waits", { waiting: props.c.waiting })}</span>
             </Show>
         </div>
     );
@@ -78,46 +82,46 @@ const ReclaimLine = (props: { c: HistoryCompression; onChange: (r: HistoryReclai
         <div class="warden-history-compression" data-testid="history-reclaim">
             <Show when={r().pending}>
                 <span>
-                    {formatBytes(props.c.free_bytes)} of free space is given back the next time AgentMux starts (after an update, or quit
-                    and reopen it).
+                    {t("historyStorage.reclaim.pending", { size: formatBytes(props.c.free_bytes) })}
                 </span>
                 <Show when={r().waiting_for}>
-                    <span class="warden-manager-dim"> Last start: {r().waiting_for}.</span>
+                    <span class="warden-manager-dim"> {t("historyStorage.reclaim.lastStart", { reason: r().waiting_for ?? "" })}</span>
                 </Show>{" "}
                 <Button tone="quiet" density="compact" busy={busy()} onClick={() => void act("cancel")}>
-                    Don't reclaim
+                    {t("historyStorage.reclaim.cancel")}
                 </Button>
             </Show>
             <Show when={reclaimOffered(props.c)}>
-                <span>{formatBytes(props.c.free_bytes)} of the shared pane history's file is free space AgentMux can give back.</span>{" "}
+                <span>{t("historyStorage.reclaim.offer", { size: formatBytes(props.c.free_bytes) })}</span>{" "}
                 <Show
                     when={confirm()}
                     fallback={
                         <Button tone="quiet" density="compact" onClick={() => setConfirm(true)}>
-                            {`Reclaim ${formatBytes(props.c.free_bytes)}…`}
+                            {t("historyStorage.reclaim.button", { size: formatBytes(props.c.free_bytes) })}
                         </Button>
                     }
                 >
                     <span class="warden-manager-dim">
-                        It runs at the next start, before agents load, and takes about a minute; nothing is deleted.{" "}
+                        {t("historyStorage.reclaim.explain")}{" "}
                     </span>
                     <Button tone="accent" density="compact" busy={busy()} onClick={() => void act("request")}>
-                        Reclaim at next start
+                        {t("historyStorage.reclaim.confirm")}
                     </Button>
                     <Button tone="quiet" density="compact" onClick={() => setConfirm(false)}>
-                        Cancel
+                        {t("historyStorage.reclaim.back")}
                     </Button>
                 </Show>
             </Show>
             <Show when={!r().pending && r().last_done_ms > 0}>
                 <span class="warden-manager-dim">
-                    Gave back {formatBytes(Math.max(0, r().last_before_bytes - r().last_after_bytes))} on{" "}
-                    {new Date(r().last_done_ms).toLocaleDateString()}
-                    {props.c.incremental ? "; freed space now goes back by itself." : "."}
+                    {t(props.c.incremental ? "historyStorage.reclaim.doneIncremental" : "historyStorage.reclaim.done", {
+                        size: formatBytes(Math.max(0, r().last_before_bytes - r().last_after_bytes)),
+                        date: new Date(r().last_done_ms).toLocaleDateString(),
+                    })}
                 </span>
             </Show>
             <Show when={r().last_error}>
-                <span class="warden-manager-error"> Reclaiming failed: {r().last_error}</span>
+                <span class="warden-manager-error"> {t("historyStorage.reclaim.failed", { error: r().last_error ?? "" })}</span>
             </Show>
             <Show when={error()}>
                 <span class="warden-manager-error"> ⚠ {error()}</span>
@@ -157,20 +161,20 @@ export const HistoryStorage = (props: { visible: boolean }): JSX.Element => {
             <Show when={error()}>
                 <div class="warden-manager-error">⚠ {error()}</div>
             </Show>
-            <Show when={usage()} fallback={<div class="warden-section-stub">{loading() ? "Measuring…" : ""}</div>}>
+            <Show when={usage()} fallback={<div class="warden-section-stub">{loading() ? t("historyUsage.measuring") : ""}</div>}>
                 {(u) => (
                     <>
                         <div class="warden-history-total">
                             <span class="warden-history-total-bytes">{formatBytes(u().total_bytes)}</span>
-                            <span class="warden-manager-dim">of agent history on this machine</span>
+                            <span class="warden-manager-dim">{t("historyStorage.total.suffix")}</span>
                         </div>
                         <table class="warden-manager-table warden-history-stores">
                             <thead>
                                 <tr>
-                                    <th>Kept in</th>
+                                    <th>{t("historyStorage.table.keptIn")}</th>
                                     <th class="warden-history-share-col" />
-                                    <th class="warden-history-num">Size</th>
-                                    <th class="warden-history-num">Files</th>
+                                    <th class="warden-history-num">{t("historyStorage.table.size")}</th>
+                                    <th class="warden-history-num">{t("historyStorage.table.files")}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -199,21 +203,21 @@ export const HistoryStorage = (props: { visible: boolean }): JSX.Element => {
                             )}
                         </Show>
                         <div class="warden-history-bar">
-                            <span class="warden-manager-dim">Measured {measuredAgo(u().computed_at_ms, Date.now(), formatLocale())}</span>
+                            <span class="warden-manager-dim">{t("historyUsage.measured", { ago: measuredAgo(u().computed_at_ms, Date.now(), formatLocale()) })}</span>
                             <Button tone="quiet" density="compact" busy={loading()} onClick={() => void load(true)}>
-                                {loading() ? "Measuring…" : "Measure again"}
+                                {loading() ? t("historyUsage.measuring") : t("historyUsage.measureAgain")}
                             </Button>
                         </div>
                     </>
                 )}
             </Show>
-            <section class="warden-history-retention" aria-label="Retention">
-                <h3>Retention</h3>
-                <p>Agent history is kept forever. AgentMux deletes none of it on its own:</p>
+            <section class="warden-history-retention" aria-label={t("historyStorage.retention.title")}>
+                <h3>{t("historyStorage.retention.title")}</h3>
+                <p>{t("historyStorage.retention.intro")}</p>
                 <ul>
-                    <li>Claude Code keeps its session files: AgentMux sets its cleanup to 36,500 days, unless its config already sets another value.</li>
-                    <li>Conversations archived by "New conversation" and inactive panes' archived transcripts are never pruned.</li>
-                    <li>The record of messages between agents is written to disk and kept.</li>
+                    <li>{t("historyStorage.retention.claude")}</li>
+                    <li>{t("historyStorage.retention.archived")}</li>
+                    <li>{t("historyStorage.retention.messages")}</li>
                 </ul>
             </section>
         </div>

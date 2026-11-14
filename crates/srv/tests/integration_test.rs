@@ -237,6 +237,7 @@ fn rpc(
 #[test]
 fn restore_last_session_survives_a_real_process_restart() {
     let data_dir = tempfile::tempdir().expect("failed to create temp data dir");
+    agentmux_common::tls_provider::install_ring_provider();
     let client = reqwest::blocking::Client::new();
     let marker = "hello-restore-e2e";
 

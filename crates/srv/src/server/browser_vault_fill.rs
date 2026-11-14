@@ -52,9 +52,31 @@ pub(crate) struct VaultFillRequest {
     reason: Option<String>,
 }
 
+/// The site a use is asked about and granted for: the origin of the frame the field is in, and when that is another
+/// site's frame (Stripe Elements, Braintree, Adyen, a bank's hosted field), the page it is on too. A grant is for that
+/// pair, so a look-alike frame on the page, or the provider's frame on another page, never inherits it.
+pub(crate) fn grant_site(origin: &str, page_origin: &str) -> String {
+    if page_origin.is_empty() || origin == page_origin || origin.is_empty() {
+        origin.to_string()
+    } else {
+        format!("{origin} on {page_origin}")
+    }
+}
+
+/// The page's origin when the field is in another site's frame, else empty: what a question shows beside `origin`.
+pub(crate) fn framed_in(origin: &str, page_origin: &str) -> String {
+    if page_origin.is_empty() || origin.is_empty() || origin == page_origin {
+        String::new()
+    } else {
+        page_origin.to_string()
+    }
+}
+
 /// What the host says about the field.
 struct Field {
     origin: String,
+    /// The page's own origin (see [`grant_site`]).
+    page_origin: String,
     label: String,
     fingerprint: String,
     slots: Vec<String>,
@@ -62,10 +84,18 @@ struct Field {
     fillable: bool,
 }
 
+impl Field {
+    /// The site this field is asked about and granted for (see [`grant_site`]).
+    fn grant_key(&self) -> String {
+        grant_site(&self.origin, &self.page_origin)
+    }
+}
+
 fn parse_field(v: &Value) -> Result<Field, String> {
     let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     Ok(Field {
         origin: s("origin"),
+        page_origin: s("page_origin"),
         label: s("label"),
         fingerprint: s("fingerprint"),
         slots: v.get("slots").and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
@@ -156,6 +186,7 @@ fn fill_request(agent: &str, block_id: String, target: &FillTarget, field: &Fiel
         entry_label: target.label.clone(),
         what: target.what.clone(),
         origin: field.origin.clone(),
+        page: framed_in(&field.origin, &field.page_origin),
         field: field.label.clone(),
         offer_always: ask.0,
         reason: ask.1.to_string(),
@@ -217,10 +248,10 @@ pub(crate) async fn handle_vault_fill(
         },
         Err((code, e)) => return err_response(code, e),
     };
-    let site = format!("{} ({})", field.origin, field.label);
+    let site = format!("{} ({})", field.grant_key(), field.label);
 
     let store = state.identity_store.clone();
-    let (entry, origin) = (target.id.clone(), field.origin.clone());
+    let (entry, origin) = (target.id.clone(), field.grant_key());
     let granted = !target.typed && tokio::task::spawn_blocking(move || store.vault_grant_check(&entry, &origin).unwrap_or(false)).await.unwrap_or(false);
     let fits = target.slot.is_some_and(|s| field.slots.iter().any(|x| x == s));
 
@@ -252,7 +283,7 @@ pub(crate) async fn handle_vault_fill(
         }
     }
     if always {
-        let (store, entry, origin, created) = (state.identity_store.clone(), target.id.clone(), field.origin.clone(), target.created_at);
+        let (store, entry, origin, created) = (state.identity_store.clone(), target.id.clone(), field.grant_key(), target.created_at);
         let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&entry, &origin, agentmux_common::time::now_ms(), created)).await;
     }
 
@@ -303,7 +334,7 @@ pub(crate) async fn handle_vault_fill(
             let mut saved_note = None;
             if let Some(kept) = to_keep {
                 let (store, kind, label, part) = (state.identity_store.clone(), target.kind.to_string(), target.label.clone(), target.part);
-                let (origin, fit) = (field.origin.clone(), fits);
+                let (origin, fit) = (field.grant_key(), fits);
                 let made = tokio::task::spawn_blocking(move || {
                     let parts = vault::seal::Parts([(part.to_string(), kept.to_string())].into());
                     let id = vault::create(&store, vault::NewEntry { kind, label, fields: Default::default(), tags: vec![], parts })?;

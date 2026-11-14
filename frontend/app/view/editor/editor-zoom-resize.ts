@@ -61,11 +61,22 @@ function dragUntilRelease(e: MouseEvent, cursor: string, onMove: (ev: MouseEvent
     document.addEventListener("mouseup", onUp);
 }
 
+/**
+ * The width the tree column is drawn at, in the pane's own CSS pixels. In a narrow pane the column
+ * shrinks below the stored width (`flex: 0 1 <width>px`), and a drag starts from where the divider
+ * is. `stored` stands in when the column has no box to measure (not laid out).
+ */
+function renderedTreeWidth(handle: Element | null, stored: number, zoom: number): number {
+    const column = handle?.previousElementSibling;
+    const drawn = column ? column.getBoundingClientRect().width / zoom : 0;
+    return drawn > 0 ? drawn : stored;
+}
+
 /** The tree column's resize handle: live width while dragging, saved once on release. */
 export function treeResizeHandler(model: EditorViewModel, rootZoom: () => number) {
     return (e: MouseEvent) => {
         const startX = e.clientX;
-        const startWidth = model.treeWidthAtom();
+        const startWidth = renderedTreeWidth(e.currentTarget as Element | null, model.treeWidthAtom(), rootZoom());
         // document mousemove coords are in viewport CSS pixels; divide by zoom so the delta
         // maps correctly to local CSS pixels inside the zoomed .editor-view element.
         dragUntilRelease(e, "col-resize", (ev) => model.setTreeWidth(startWidth + (ev.clientX - startX) / rootZoom()), () => void model.commitTreeWidth());

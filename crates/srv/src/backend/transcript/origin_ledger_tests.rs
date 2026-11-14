@@ -19,7 +19,7 @@ fn echo(text: &str) -> String {
 }
 
 fn read(fs: &Arc<FileStore>, ms: &Arc<Store>, block: &str) -> Vec<Value> {
-    crate::server::transcript_tail::tail_lines(ms, fs, block, 50)
+    crate::backend::transcript::tail::tail_lines(ms, fs, block, 50)
         .unwrap()
         .lines
         .iter()

@@ -1,0 +1,33 @@
+{
+  "nodes": [
+    {
+      "id": "check",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "kind": "agent",
+        "task": "{{param.check}}\n\nIf everything is fine, reply with exactly OK and nothing else. Otherwise reply with one short paragraph that says what is wrong and what you saw.",
+        "max_turns": 15
+      }
+    },
+    {
+      "id": "problem",
+      "position": { "x": 280, "y": 0 },
+      "data": { "kind": "condition", "expr": "{{check.response}} != OK" }
+    },
+    {
+      "id": "file",
+      "position": { "x": 560, "y": 0 },
+      "data": {
+        "kind": "task",
+        "title": "The scheduled check found a problem",
+        "body": "{{check.response}}",
+        "target": "{{param.target}}",
+        "dedupe": "agentmux.check-and-file-task:{{param.check}}"
+      }
+    }
+  ],
+  "edges": [
+    { "id": "check-problem", "source": "check", "target": "problem" },
+    { "id": "problem-file", "source": "problem", "target": "file", "sourceHandle": "true" }
+  ]
+}

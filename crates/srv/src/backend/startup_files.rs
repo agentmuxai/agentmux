@@ -67,7 +67,7 @@ pub fn claude_startup_files(cwd: &Path, config_dir: Option<&Path>, home: Option<
     claude_startup_files_with_ancestors(cwd, config_dir, home, cwd.ancestors())
 }
 
-pub(crate) fn claude_startup_files_with_ancestors<'a>(
+pub fn claude_startup_files_with_ancestors<'a>(
     cwd: &Path,
     config_dir: Option<&Path>,
     home: Option<&Path>,
@@ -79,7 +79,7 @@ pub(crate) fn claude_startup_files_with_ancestors<'a>(
 /// The startup files of a container agent's workspace, which the container can write: only files that
 /// resolve (symlinks and `@` imports followed) to somewhere inside the workspace are read, so nothing
 /// it plants there makes srv read another path on the host.
-pub(crate) fn workspace_startup_files(workspace: &Path) -> Vec<StartupFile> {
+pub fn workspace_startup_files(workspace: &Path) -> Vec<StartupFile> {
     let Ok(root) = std::fs::canonicalize(workspace) else { return Vec::new() };
     startup_files_confined(workspace, None, None, std::iter::once(workspace), Some(&root))
 }

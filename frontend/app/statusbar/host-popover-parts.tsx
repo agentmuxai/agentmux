@@ -170,7 +170,11 @@ export function LanRows(props: Props): JSX.Element {
                 <div class="status-bar-popover-row">
                     <span>{p.lanCount()} peer{p.lanCount() !== 1 ? "s" : ""}</span>
                 </div>
-                <LanPeerList peers={p.lanInstances()} selfHost={getHostName()} />
+                {/* The peer list scrolls inside this cap, so many open peers never push the host header or the
+                    MuxBus section off a short window (the popover's own fitHeight is the backstop). */}
+                <div class="host-popover-peers" data-testid="lan-peers-scroll">
+                    <LanPeerList peers={p.lanInstances()} selfHost={getHostName()} />
+                </div>
             </Show>
             <Show when={p.lanDiscoveryEnabled() && p.lanCount() === 0 && !p.lanDiscoveryError()}>
                 <div

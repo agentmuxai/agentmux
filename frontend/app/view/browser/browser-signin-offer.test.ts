@@ -61,7 +61,7 @@ describe("an agent's sign-in notice", () => {
     const meta = { "browser:signin_pending": { id: "n1", agent: "Agent1", origin: "https://accounts.example.com", user: "al***", deadline_ms: 10_000 } };
 
     it("is read only from its meta", () => {
-        expect(readSigninPending(meta)).toEqual({ id: "n1", agent: "Agent1", origin: "https://accounts.example.com", user: "al***", deadlineMs: 10_000 });
+        expect(readSigninPending(meta)).toEqual({ id: "n1", agent: "Agent1", origin: "https://accounts.example.com", user: "al***", kind: "signin", deadlineMs: 10_000 });
         expect(readSigninPending({ "browser:signin_pending": { id: "n1", agent: "Agent1" } })).toBeUndefined();
         expect(readSigninPending({ "browser:signin_pending": null })).toBeUndefined();
         expect(readSigninPending(undefined)).toBeUndefined();
@@ -71,5 +71,12 @@ describe("an agent's sign-in notice", () => {
         const p = readSigninPending(meta)!;
         expect(signinPendingText(p, 6_200)).toBe("Agent1 is signing in to https://accounts.example.com as al*** with your saved sign-in (4 s)");
         expect(signinPendingText(p, 12_000)).toContain("(0 s)");
+    });
+    it("says an agent is making an account, when it is", () => {
+        const made = { "browser:signin_pending": { id: "n2", agent: "Agent1", origin: "https://shop.example.com", user: "", kind: "account", deadline_ms: 10_000 } };
+        const p = readSigninPending(made)!;
+        expect(p.kind).toBe("account");
+        expect(signinPendingText(p, 6_200)).toBe("Agent1 is creating an account on https://shop.example.com: the password comes from your Vault (4 s)");
+        expect(readSigninPending({ "browser:signin_pending": { ...made["browser:signin_pending"], kind: "other" } })!.kind).toBe("signin");
     });
 });

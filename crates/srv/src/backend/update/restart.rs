@@ -81,7 +81,7 @@ fn with_wait(d: &DownloadStatus, state: &str, waiting_on: Vec<WaitingOn>, error:
 }
 
 /// [`stopping`] off the async threads.
-pub(crate) async fn stopping_now() -> Vec<String> {
+pub async fn stopping_now() -> Vec<String> {
     tokio::task::spawn_blocking(stopping).await.unwrap_or_default()
 }
 

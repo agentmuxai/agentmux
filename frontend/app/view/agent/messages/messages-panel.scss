@@ -25,14 +25,10 @@
     .ui-side-panel__head {
         align-items: center;
     }
-    .ui-side-panel__head .ui-icon-button {
-        --ui-height: 36px;
-        font-size: var(--text-lg);
-    }
-    .ui-side-panel__head .ui-icon-button:hover:not(:disabled) {
-        color: var(--error-text-color);
-        border-color: var(--error-line);
-        background: var(--error-bg);
+    // A larger close (the red hover is the kit's own).
+    .ui-side-panel__head .ui-close {
+        --ui-close-size: 36px;
+        --ui-close-icon: var(--text-lg);
     }
 }
 
