@@ -107,8 +107,16 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     // A headless srv serving its own UI also serves the browser sign-in (`local_session_routes`).
     let sign_in = if super::local_session_routes::enabled() { super::local_session_routes::routes() } else { Router::new() };
 
+    // A script on this computer starts an event job's run (`server::hook_handlers`): full router only, never the
+    // LAN, and the job's own secret is its key.
+    let local_hook = Router::new().route(
+        "/agentmux/hook/:job",
+        post(super::hook_handlers::handle_hook).layer(axum::extract::DefaultBodyLimit::max(crate::backend::jobs::webhook_local::MAX_BODY)),
+    );
+
     let full = Router::new()
         .merge(full_health)
+        .merge(local_hook)
         .merge(sign_in)
         .merge(widget_files)
         .merge(model_gateway)

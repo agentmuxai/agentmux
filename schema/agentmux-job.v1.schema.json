@@ -88,7 +88,7 @@
               "type": "object",
               "maxProperties": 8,
               "additionalProperties": { "type": ["string", "number", "boolean"], "maxLength": 200 },
-              "description": "Plain values the source matches an event against; each source says which keys it reads. Never an expression. An app_event filter names its event (agent.turn_ended: agent, outcome, cost_usd; agent.crashed: agent, reason). A file_watch filter names a project folder as path, and optionally glob (like **/*.rs) and change (created, modified or removed)."
+              "description": "Plain values the source matches an event against; each source says which keys it reads. Never an expression. An app_event filter names its event (agent.turn_ended: agent, outcome, cost_usd; agent.crashed: agent, reason). A file_watch filter names a project folder as path, and optionally glob (like **/*.rs) and change (created, modified or removed). A webhook_local filter holds only secret_sha256, the SHA-256 (64 lowercase hex) of the secret a local script sends in the X-AgentMux-Hook-Secret header to POST /agentmux/hook/<job id>; the definition never holds the secret."
             },
             "delay": {
               "type": "integer",
