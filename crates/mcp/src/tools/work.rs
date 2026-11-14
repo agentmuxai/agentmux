@@ -470,6 +470,53 @@ async fn run_work_accept(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     Ok(decision_text(id, accept, &v))
 }
 
+/// The fields each of the Kanban's moves takes, as the tool's description lists them. A field that only
+/// other moves take is refused by name: answered "done", it would be dropped and the task left as it was.
+const MOVE_FIELDS: &[(&str, &[&str])] = &[
+    ("title", &["edit"]),
+    ("payload", &["edit"]),
+    ("kind", &["edit"]),
+    ("priority", &["edit"]),
+    ("repo", &["edit"]),
+    ("review", &["edit"]),
+    ("after", &["edit"]),
+    ("target_agent", &["move", "start", "reassign"]),
+    ("hold", &["move"]),
+    ("rank", &["move"]),
+    ("board", &["move"]),
+    ("drop_deps", &["move"]),
+    ("confirm", &["take_back", "reassign"]),
+    ("followers", &["cancel"]),
+];
+
+/// The tool-facing name of a move: what the agent passes as `action`.
+fn move_action_name(tool: &str) -> &'static str {
+    match tool {
+        "WorkEdit" => "edit",
+        "WorkMove" => "move",
+        "WorkStart" => "start",
+        "WorkAnswer" => "answer",
+        "WorkCancel" => "cancel",
+        "WorkReopen" => "reopen",
+        "WorkRetry" => "retry",
+        "WorkTakeBack" => "take_back",
+        _ => "reassign",
+    }
+}
+
+/// Refuse a field this move doesn't take, naming the moves that do.
+fn refuse_unused_fields(tool: &str, arguments: &Value) -> Result<()> {
+    let action = move_action_name(tool);
+    for (field, takers) in MOVE_FIELDS {
+        if takers.contains(&action) || arguments.get(*field).map_or(true, Value::is_null) {
+            continue;
+        }
+        let hint = if *field == "target_agent" { "to change who a task is for, use move with target_agent".to_string() } else { format!("{field} belongs to {}", takers.join(", ")) };
+        anyhow::bail!("Tasks {action} doesn't take {field}: {hint}. Nothing was changed.");
+    }
+    Ok(())
+}
+
 /// The Kanban's other moves, made by this agent (`POST /agentmux/work/act`).
 async fn run_work_edit(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
@@ -477,6 +524,7 @@ async fn run_work_edit(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Resul
     let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
     let id = task_id(arguments)?;
+    refuse_unused_fields(name, arguments)?;
     let action = match name {
         "WorkEdit" => "edit",
         "WorkMove" => "move",
@@ -578,8 +626,18 @@ async fn run_work_list(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         let st = it.get("state").and_then(|x| x.as_str()).unwrap_or("");
         let title = it.get("title").and_then(|x| x.as_str()).unwrap_or("");
         let holder = it.get("claimed_by").and_then(|x| x.as_str()).unwrap_or("");
-        let who = if holder.is_empty() { String::new() } else { format!(" [{holder}]") };
-        out.push_str(&format!("  {id}  {st}{who}  {title}\n"));
+        let target = it.get("target_agent").and_then(|x| x.as_str()).unwrap_or("");
+        let group = it.get("target_group").and_then(|x| x.as_str()).unwrap_or("");
+        // Who it is for (a started task is for its holder: said once), and who holds it.
+        let for_who = if !target.is_empty() && target != holder {
+            format!(", for {target}")
+        } else if target.is_empty() && !group.is_empty() {
+            format!(", for group {group}")
+        } else {
+            String::new()
+        };
+        let held = if holder.is_empty() { String::new() } else { format!(", held by {holder}") };
+        out.push_str(&format!("  {id}  {st}{for_who}{held}  {title}\n"));
         // `result` is the completion trace for a done item, and the
         // reason for a failed/released one — the very thing
         // WorkComplete calls "the only record". Omitting it here left

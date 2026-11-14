@@ -159,7 +159,28 @@ fn cases() -> Vec<Case> {
             json!({ "items": [{ "num": 4, "state": "claimed", "claimed_by": "deephar", "title": "Tt", "result": "agent stopped" }] }),
             "/agentmux/work?state=claimed&limit=5",
             json!({}),
-            &["#4  claimed [deephar]  Tt", "(handed back earlier: agent stopped)"],
+            &["#4  claimed, held by deephar  Tt", "(handed back earlier: agent stopped)"],
+        ),
+        // Who a task is for and who holds it.
+        c(
+            "WorkList",
+            json!({ "state": "open", "limit": 5 }),
+            json!({ "items": [
+                { "num": 5, "state": "open", "target_agent": "Dax", "title": "Aimed" },
+                { "num": 6, "state": "open", "target_group": "g1", "title": "Grouped" },
+                { "num": 7, "state": "open", "title": "Anyone" },
+                { "num": 8, "state": "claimed", "target_agent": "Dax", "claimed_by": "loap", "title": "Taken" },
+                { "num": 9, "state": "claimed", "target_agent": "loap", "claimed_by": "loap", "title": "Started" },
+            ] }),
+            "/agentmux/work?state=open&limit=5",
+            json!({}),
+            &[
+                "#5  open, for Dax  Aimed",
+                "#6  open, for group g1  Grouped",
+                "#7  open  Anyone",
+                "#8  claimed, for Dax, held by loap  Taken",
+                "#9  claimed, held by loap  Started",
+            ],
         ),
         c("WorkList", json!({}), json!({ "items": [] }), "/agentmux/work?state=&limit=50", json!({}), &["Queue is empty."]),
         // Several boards.
@@ -290,6 +311,12 @@ async fn a_tool_missing_what_it_needs_refuses_before_it_asks_srv() {
         ("WorkAccept", json!({}), "missing required parameter: id"),
         ("WorkSendBack", json!({ "id": "7" }), "reason is required"),
         ("WorkEdit", json!({}), "missing required parameter: id"),
+        // A field another move takes is refused by name, never answered "done".
+        ("WorkEdit", json!({ "id": "7", "target_agent": "Dax" }), "to change who a task is for, use move with target_agent"),
+        ("WorkEdit", json!({ "id": "7", "rank": 1.5 }), "rank belongs to move"),
+        ("WorkMove", json!({ "id": "7", "title": "N" }), "title belongs to edit"),
+        ("WorkCancel", json!({ "id": "7", "target_agent": "Dax" }), "Tasks cancel doesn't take target_agent"),
+        ("WorkReopen", json!({ "id": "7", "hold": true }), "hold belongs to move"),
     ];
     for (tool, args, wanted) in refusals {
         let srv = stub_srv("200 OK", json!({}));
