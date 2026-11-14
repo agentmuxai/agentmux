@@ -36,11 +36,22 @@ fn ignored(node: &Value) -> bool {
     node.get("ignored").and_then(Value::as_bool).unwrap_or(false)
 }
 
-/// The text a label holds: its shown text pieces, squeezed.
+/// Controls a label can wrap (`<label>Name <input value=x></label>`): their own text (a value, a caption) is not
+/// the label's sentence.
+const CONTROLS: &[&str] = &[
+    "textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "spinbutton", "slider", "button", "listbox",
+    "menuitemcheckbox", "menuitemradio", "ComboBoxSelect", "ComboBoxMenuButton", "PopUpButton", "TextField",
+    "SearchBox", "Switch", "ToggleButton", "progressbar", "meter",
+];
+
+/// The text a label holds: its shown text pieces, squeezed, apart from what a field inside it holds.
 fn label_text(label: &Value, by_id: &std::collections::HashMap<&str, &Value>) -> String {
     let mut text = String::new();
     let mut stack = vec![label];
     while let Some(n) = stack.pop() {
+        if !std::ptr::eq(n, label) && CONTROLS.contains(&str_of(n, "role")) {
+            continue;
+        }
         if str_of(n, "role") == "StaticText" && !ignored(n) {
             text.push_str(&squeezed(str_of(n, "name")));
         }
