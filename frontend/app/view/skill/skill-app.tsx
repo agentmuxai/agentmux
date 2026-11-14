@@ -24,6 +24,7 @@ import {
     type AppFilter,
 } from "./skill-app-model";
 import { ExportSkill } from "./skill-app-export";
+import { CropImage } from "./skill-app-crop";
 import { RunTest } from "./skill-app-run-test";
 import { ScriptReview } from "./skill-app-scripts";
 import "./skill-app.scss";
@@ -161,7 +162,8 @@ export function SkillAppDetail(p: { skillId: string; app: SkillApp; here?: AppSk
                     <For each={p.app.references}>
                         {(r) => (
                             <li>
-                                {r.label} <span class="skill-app-muted">{r.appVersion} · {r.platform} · {r.theme} · {r.scale}% · {r.date}</span>
+                                {r.label} <span class="skill-app-muted">{r.appVersion} · {r.platform} · {r.theme} · {r.scale}% · {r.date}</span>{" "}
+                                <CropImage skillId={p.skillId} reference={r} />
                                 <div class="skill-app-muted">{r.shows}</div>
                             </li>
                         )}

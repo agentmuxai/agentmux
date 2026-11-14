@@ -49,6 +49,14 @@
 }
 
 // Run test: the button, and under it what it asks and what it did.
+.skill-app-crop {
+    display: block;
+    max-width: 100%;
+    margin-top: var(--space-1);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
 .skill-app-run-test {
     display: flex;
     flex-direction: column;

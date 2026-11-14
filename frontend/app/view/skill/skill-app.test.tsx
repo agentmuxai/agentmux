@@ -345,6 +345,30 @@ describe("Signature and script approval", () => {
         });
     });
 
+    describe("Reference crops", () => {
+        it("reads a crop only when asked, shows it with a caption, and says so when it cannot be read", async () => {
+            rpc.SkillCatalogAppFileCommand.mockResolvedValue({ path: "references/ribbon.png", text: "", image_data_url: "data:image/png;base64,AAAA" });
+            const detail = await openDetail();
+            expect(rpc.SkillCatalogAppFileCommand).not.toHaveBeenCalled();
+            expect(within(detail).queryByRole("img")).toBeNull();
+
+            fireEvent.click(within(detail).getByRole("button", { name: "Show" }));
+            const img = await within(detail).findByRole("img");
+            expect(img.getAttribute("src")).toBe("data:image/png;base64,AAAA");
+            expect(img.getAttribute("alt")).toBe("ribbon: the Home tab");
+            expect(rpc.SkillCatalogAppFileCommand).toHaveBeenCalledWith({}, { skill_id: "k1", path: "references/ribbon.png" });
+
+            fireEvent.click(within(detail).getByRole("button", { name: "Hide" }));
+            expect(within(detail).queryByRole("img")).toBeNull();
+            cleanup();
+
+            rpc.SkillCatalogAppFileCommand.mockRejectedValue(new Error("references/ribbon.png is not a PNG image"));
+            const again = await openDetail();
+            fireEvent.click(within(again).getByRole("button", { name: "Show" }));
+            expect((await within(again).findByRole("alert")).textContent).toContain("is not a PNG image");
+        });
+    });
+
     it("says it is from the AgentMux catalog, in the detail and in the script's review, only when it is exactly what the catalog listed", async () => {
         const line = "From the AgentMux catalog: its files and its publisher's key are the ones the catalog lists.";
         rpc.SkillCatalogAppFileCommand.mockResolvedValue({ path: "scripts/run.py", text: "print('toc')" });
