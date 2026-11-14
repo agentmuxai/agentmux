@@ -240,7 +240,10 @@ download_verified() {
 
     dv_man="$(tr -d ' \n\r\t' < "$TMP/manifest.json")"
     dv_entry="$(printf '%s' "$dv_man" | grep -o '{"name":"'"$(printf '%s' "$dv_name" | sed 's/\./\\./g')"'","size":[0-9]*,"sha256":"[0-9a-f]*"}' | head -n 1 || true)"
-    [ -n "$dv_entry" ] || die "the signed manifest does not list $dv_name"
+    if [ -z "$dv_entry" ]; then
+        case "$dv_name" in agentmux-server-*) die "this release has no server package for this system (the signed manifest does not list $dv_name)" ;; esac
+        die "the signed manifest does not list $dv_name"
+    fi
     dv_want_size="$(json_field "$dv_entry" size)"
     dv_want_sha="$(json_field "$dv_entry" sha256)"
 
@@ -382,7 +385,7 @@ install_server() {
         printf '+ ln -sfn %s %s/current\n' "$dest" "$base"
         printf '+ ln -sf %s %s/.local/bin/agentmux-server\n' "$target" "$HOME"
         if agentmux_name_is_free "$target"; then printf '+ ln -sf %s %s/.local/bin/agentmux\n' "$target" "$HOME"; fi
-        if [ "$SETUP" = 1 ]; then printf '+ agentmux-server setup --yes --no-open\n'; fi
+        if [ "$SETUP" = 1 ]; then printf '+ agentmux-server setup --yes --no-open --service\n'; fi
         return
     fi
     mktmp
@@ -410,7 +413,7 @@ install_server() {
     fi
     case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) say "add $HOME/.local/bin to your PATH to run  $cmd" ;; esac
     if [ "$SETUP" = 1 ]; then
-        "$HOME/.local/bin/$cmd" setup --yes --no-open || die "setup did not finish: run  $cmd doctor  to see why"
+        "$HOME/.local/bin/$cmd" setup --yes --no-open --service || die "setup did not finish: run  $cmd doctor  to see why"
     else
         say "next: run  $cmd setup  to choose a port, start the server and sign in"
     fi

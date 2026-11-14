@@ -217,6 +217,7 @@ else
     expect "a package with no web UI is refused" 1 "is not an AgentMux server package" run_server_install "$W/snoweb"
     make_server_release "$W/sunlisted" "v$VER"; sign_release "$W/sunlisted" "v$VER" "Other.tar.gz" "$SNAME"
     expect "a server package the signed manifest does not list is refused" 1 "does not list $SNAME" run_server_install "$W/sunlisted"
+    expect "a release with no package for this system says so" 1 "has no server package for this system" run_server_install "$W/sunlisted"
 
     # With the app's real key the test signature must not verify.
     expect "another key's signature is refused" 1 "signature does not match" env AGENTMUX_INSTALL_TEST_KEYS="k1:m9HRZ4UOiBU2vyrjlHXj1D0CjfhAazI2DGdII9JSJLE=" HOME="$W/h" AGENTMUX_INSTALL_ROOT="$W/none" AGENTMUX_INSTALL_OS=Linux AGENTMUX_INSTALL_ARCH=x86_64 AGENTMUX_INSTALL_PM=none AGENTMUX_INSTALL_RELEASE_BASE="$W/good" sh "$SCRIPT" --no-launch --method download --version "$VER"

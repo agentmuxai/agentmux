@@ -64,7 +64,7 @@ pub trait Ask {
 }
 
 /// What setup would do, from the flags, the current settings and the answers.
-pub fn plan(args: &SetupArgs, current: &Settings, service_supported: bool, ask: &mut impl Ask) -> Result<Plan, String> {
+pub fn plan(args: &SetupArgs, current: &Settings, service_supported: bool, service_installed: bool, ask: &mut impl Ask) -> Result<Plan, String> {
     if !ask.interactive() && !args.yes {
         return Err("setup asks questions and there is no terminal: add --yes to take the defaults, and give each choice as a flag (--port, --secret-store, --service or --no-service)".into());
     }
@@ -105,7 +105,8 @@ pub fn plan(args: &SetupArgs, current: &Settings, service_supported: bool, ask: 
     } else if asking {
         ask.yes_no("Start AgentMux at every login (a user service, no root)?", true)
     } else {
-        true
+        // Not named and not asked: the service stays as it is, so a rerun changes only what it is told to.
+        service_installed
     };
     let start = !args.no_start;
     // Signing in needs the person at a terminal to confirm; a script is told the command instead.
@@ -201,17 +202,21 @@ mod tests {
     #[test]
     fn with_no_terminal_and_no_yes_setup_refuses_and_asks_nothing() {
         let mut ask = Script::new(false, &[]);
-        let e = plan(&SetupArgs::default(), &Settings::default(), true, &mut ask).unwrap_err();
+        let e = plan(&SetupArgs::default(), &Settings::default(), true, false, &mut ask).unwrap_err();
         assert!(e.contains("--yes") && e.contains("no terminal"), "{e}");
         assert!(ask.asked.is_empty());
     }
 
     #[test]
-    fn yes_with_no_terminal_takes_the_defaults_the_install_script_wants() {
+    fn yes_with_no_terminal_takes_the_defaults_and_leaves_the_service_as_it_is() {
         let mut ask = Script::new(false, &[]);
-        let p = plan(&flags(|a| a.yes = true), &Settings::default(), true, &mut ask).unwrap();
-        assert_eq!(p, Plan { settings: Settings::default(), service: true, start: true, open: false });
+        let p = plan(&flags(|a| a.yes = true), &Settings::default(), true, false, &mut ask).unwrap();
+        assert_eq!(p, Plan { settings: Settings::default(), service: false, start: true, open: false });
         assert!(ask.asked.is_empty(), "nothing is asked");
+        let p = plan(&flags(|a| a.yes = true), &Settings::default(), true, true, &mut Script::new(false, &[])).unwrap();
+        assert!(p.service, "an installed service is kept by a rerun that does not name it");
+        let p = plan(&flags(|a| a.port = Some(7500)), &Settings::default(), true, false, &mut Script::new(false, &[])).unwrap_err();
+        assert!(p.contains("--yes"), "{p}");
     }
 
     #[test]
@@ -223,21 +228,21 @@ mod tests {
             a.service = true;
             a.no_open = true;
         });
-        let p = plan(&a, &Settings::default(), true, &mut Script::new(false, &[])).unwrap();
+        let p = plan(&a, &Settings::default(), true, false, &mut Script::new(false, &[])).unwrap();
         assert_eq!((p.settings.port, p.settings.secret_store, p.service, p.start, p.open), (7380, SecretStore::File, true, true, false));
     }
 
     #[test]
     fn yes_keeps_what_an_earlier_run_chose() {
         let current = Settings { port: 7500, secret_store: SecretStore::Keychain, public_origin: Some("http://127.0.0.1:9000".into()) };
-        let p = plan(&flags(|a| a.yes = true), &current, true, &mut Script::new(true, &[])).unwrap();
+        let p = plan(&flags(|a| a.yes = true), &current, true, false, &mut Script::new(true, &[])).unwrap();
         assert_eq!(p.settings, current);
     }
 
     #[test]
     fn a_flag_is_not_asked_and_the_rest_are() {
         let mut ask = Script::new(true, &["keychain", "n", ""]);
-        let p = plan(&flags(|a| a.port = Some(7400)), &Settings::default(), true, &mut ask).unwrap();
+        let p = plan(&flags(|a| a.port = Some(7400)), &Settings::default(), true, false, &mut ask).unwrap();
         assert_eq!(p.settings.port, 7400);
         assert_eq!(p.settings.secret_store, SecretStore::Keychain);
         assert!(!p.service, "the person said no to the service");
@@ -250,7 +255,7 @@ mod tests {
     fn an_empty_answer_keeps_the_current_choice() {
         let current = Settings { port: 7555, ..Settings::default() };
         let mut ask = Script::new(true, &["", "", "", ""]);
-        let p = plan(&SetupArgs::default(), &current, true, &mut ask).unwrap();
+        let p = plan(&SetupArgs::default(), &current, true, false, &mut ask).unwrap();
         assert_eq!(p.settings.port, 7555);
         assert_eq!(p.settings.secret_store, SecretStore::File);
         assert!(p.service && p.start && p.open);
@@ -262,12 +267,12 @@ mod tests {
             let e = plan(&flags(|a| {
                 a.yes = true;
                 a.port = Some(bad);
-            }), &Settings::default(), true, &mut Script::new(false, &[])).unwrap_err();
+            }), &Settings::default(), true, false, &mut Script::new(false, &[])).unwrap_err();
             assert!(e.contains("1024 to 65534"), "{bad}: {e}");
         }
-        let e = plan(&SetupArgs::default(), &Settings::default(), true, &mut Script::new(true, &["seven thousand"])).unwrap_err();
+        let e = plan(&SetupArgs::default(), &Settings::default(), true, false, &mut Script::new(true, &["seven thousand"])).unwrap_err();
         assert!(e.contains("not a port number"), "{e}");
-        let e = plan(&SetupArgs::default(), &Settings::default(), true, &mut Script::new(true, &["", "vault"])).unwrap_err();
+        let e = plan(&SetupArgs::default(), &Settings::default(), true, false, &mut Script::new(true, &["", "vault"])).unwrap_err();
         assert!(e.contains("neither"), "{e}");
     }
 
@@ -278,24 +283,24 @@ mod tests {
                 a.yes = true;
                 a.public_origin = Some(ok.into());
             });
-            assert_eq!(plan(&a, &Settings::default(), true, &mut Script::new(false, &[])).unwrap().settings.public_origin.as_deref(), Some(ok));
+            assert_eq!(plan(&a, &Settings::default(), true, false, &mut Script::new(false, &[])).unwrap().settings.public_origin.as_deref(), Some(ok));
         }
         for bad in ["https://127.0.0.1:8080", "http://localhost:8080", "http://example.com", "http://127.0.0.1", "http://127.0.0.1:0", "http://127.0.0.1:x"] {
             let a = flags(|a| {
                 a.yes = true;
                 a.public_origin = Some(bad.into());
             });
-            assert!(plan(&a, &Settings::default(), true, &mut Script::new(false, &[])).is_err(), "{bad}");
+            assert!(plan(&a, &Settings::default(), true, false, &mut Script::new(false, &[])).is_err(), "{bad}");
         }
     }
 
     #[test]
     fn where_there_is_no_service_none_is_installed_or_asked_about() {
         let mut ask = Script::new(true, &["", "", ""]);
-        let p = plan(&SetupArgs::default(), &Settings::default(), false, &mut ask).unwrap();
+        let p = plan(&SetupArgs::default(), &Settings::default(), false, false, &mut ask).unwrap();
         assert!(!p.service);
         assert!(ask.asked.iter().all(|q| !q.contains("every login")), "{:?}", ask.asked);
-        let p = plan(&flags(|a| a.service = true), &Settings::default(), false, &mut Script::new(true, &["", "", ""])).unwrap();
+        let p = plan(&flags(|a| a.service = true), &Settings::default(), false, false, &mut Script::new(true, &["", "", ""])).unwrap();
         assert!(!p.service, "--service where there is none installs none");
     }
 
@@ -304,12 +309,12 @@ mod tests {
         let p = plan(&flags(|a| {
             a.yes = true;
             a.no_start = true;
-        }), &Settings::default(), true, &mut Script::new(true, &[])).unwrap();
+        }), &Settings::default(), true, false, &mut Script::new(true, &[])).unwrap();
         assert!(!p.start && !p.open);
         let p = plan(&flags(|a| {
             a.yes = true;
             a.no_open = true;
-        }), &Settings::default(), true, &mut Script::new(true, &[])).unwrap();
+        }), &Settings::default(), true, false, &mut Script::new(true, &[])).unwrap();
         assert!(p.start && !p.open);
         let both = SetupArgs::try_parse_from_flags(&["--service", "--no-service"]);
         assert!(both.is_err(), "the two flags exclude each other");
