@@ -17,6 +17,7 @@ use rusqlite::{params, OptionalExtension};
 
 use super::error::StoreError;
 use super::store::Store;
+use crate::backend::memory::record::sha256_hex;
 
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS db_skill_app (
         skill_id     TEXT PRIMARY KEY,
@@ -45,6 +46,11 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS db_skill_app (
         skill_id  TEXT PRIMARY KEY,
         skill_md  TEXT NOT NULL,
         signature TEXT
+    );
+    CREATE TABLE IF NOT EXISTS db_skill_catalog_source (
+        skill_id      TEXT PRIMARY KEY,
+        content_hash  TEXT NOT NULL,
+        publisher_key TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS db_skill_publisher_pin (
         publisher  TEXT PRIMARY KEY,
@@ -207,6 +213,9 @@ pub struct SkillApp {
     pub verified: Vec<VerifiedRecord>,
     /// The SHA-256 the publisher's signature covers (empty for a skill that came without one).
     pub content_hash: String,
+    /// Installed from the public catalog, and still exactly what the catalog listed then: the same files (content
+    /// hash) signed by the same publisher key. An edited skill, or one replaced from another source, is not.
+    pub from_catalog: bool,
 }
 
 /// A file ready to store: its text and whether it is a script.
@@ -234,11 +243,6 @@ fn pins_of(conn: &rusqlite::Connection) -> Result<crate::backend::widget::signat
     let mut stmt = conn.prepare("SELECT publisher, public_key FROM db_skill_publisher_pin")?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
-}
-
-fn hex_sha256(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 impl Store {
@@ -273,7 +277,7 @@ impl Store {
         )?;
         tx.execute("DELETE FROM db_skill_file WHERE skill_id = ?1", params![skill_id])?;
         for f in files {
-            let sha = hex_sha256(f.image.as_deref().unwrap_or(f.content.as_bytes()));
+            let sha = sha256_hex(f.image.as_deref().unwrap_or(f.content.as_bytes()));
             let keep = f.script && approved.contains(&(f.path.clone(), sha.clone()));
             tx.execute(
                 "INSERT INTO db_skill_file (skill_id, path, content, image, sha256, script, approved) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -287,18 +291,35 @@ impl Store {
     /// The computer-use fields of one skill, if it is one.
     pub fn skill_app_get(&self, skill_id: &str) -> Result<Option<SkillApp>, StoreError> {
         let mut map = self.skill_app_query(Some(skill_id))?;
+        self.confirm_catalog_text(&mut map);
         Ok(map.remove(skill_id))
     }
 
     /// Every computer-use skill, by skill id.
     pub fn skill_app_map(&self) -> Result<BTreeMap<String, SkillApp>, StoreError> {
-        self.skill_app_query(None)
+        let mut map = self.skill_app_query(None)?;
+        self.confirm_catalog_text(&mut map);
+        Ok(map)
+    }
+
+    /// A skill is still what the catalog listed only while its text is too: the content hash does not follow an edit made
+    /// in Memory, so the `SKILL.md` kept from the install is compared with the skill as it is now.
+    fn confirm_catalog_text(&self, map: &mut BTreeMap<String, SkillApp>) {
+        for (id, app) in map.iter_mut().filter(|(_, a)| a.from_catalog) {
+            let folder = format!("{}-{}", app.info.publisher, app.info.id);
+            let same = match (self.skill_get(id), self.skill_origin_get(id)) {
+                (Ok(Some(skill)), Ok(Some((md, _)))) => crate::backend::skill_file::original_still_applies(&folder, &md, &skill),
+                _ => false,
+            };
+            app.from_catalog = same;
+        }
     }
 
     fn skill_app_query(&self, only: Option<&str>) -> Result<BTreeMap<String, SkillApp>, StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(SCHEMA)?;
         let mut out = BTreeMap::new();
+        let mut signers: BTreeMap<String, String> = BTreeMap::new();
         let pins = pins_of(&conn)?;
         {
             let mut stmt = conn.prepare("SELECT skill_id, manifest, content_hash FROM db_skill_app WHERE (?1 IS NULL OR skill_id = ?1)")?;
@@ -309,7 +330,7 @@ impl Store {
                 if let Ok(info) = crate::backend::computer_use_skill::info_from_manifest(&manifest) {
                     let scripts = crate::backend::computer_use_skill::script_infos(&manifest);
                     let signature = crate::backend::widget::signature::describe(&format!("{}.{}", info.publisher, info.id), None, &pins);
-                    out.insert(id, SkillApp { info, scripts, signature, files: Vec::new(), verified: Vec::new(), content_hash });
+                    out.insert(id, SkillApp { info, scripts, signature, files: Vec::new(), verified: Vec::new(), content_hash, from_catalog: false });
                 }
             }
         }
@@ -320,6 +341,17 @@ impl Store {
                 let (id, key) = row?;
                 if let Some(app) = out.get_mut(&id) {
                     app.signature = crate::backend::widget::signature::describe(&format!("{}.{}", app.info.publisher, app.info.id), Some(&key), &pins);
+                    signers.insert(id, key);
+                }
+            }
+        }
+        {
+            let mut stmt = conn.prepare("SELECT skill_id, content_hash, publisher_key FROM db_skill_catalog_source WHERE (?1 IS NULL OR skill_id = ?1)")?;
+            let rows = stmt.query_map(params![only], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
+            for row in rows {
+                let (id, hash, key) = row?;
+                if let Some(app) = out.get_mut(&id) {
+                    app.from_catalog = !hash.is_empty() && app.content_hash == hash && signers.get(&id) == Some(&key);
                 }
             }
         }
@@ -452,6 +484,18 @@ impl Store {
         Ok(())
     }
 
+    /// Record that `skill_id` was installed from the public catalog's entry with this content hash and publisher key.
+    pub fn skill_catalog_source_set(&self, skill_id: &str, content_hash: &str, publisher_key: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(SCHEMA)?;
+        conn.execute(
+            "INSERT INTO db_skill_catalog_source (skill_id, content_hash, publisher_key) VALUES (?1, ?2, ?3)
+             ON CONFLICT(skill_id) DO UPDATE SET content_hash = excluded.content_hash, publisher_key = excluded.publisher_key",
+            params![skill_id, content_hash, publisher_key],
+        )?;
+        Ok(())
+    }
+
     /// The manifest as the skill was installed with it.
     pub fn skill_manifest_get(&self, skill_id: &str) -> Result<Option<String>, StoreError> {
         let conn = self.conn.lock().unwrap();
@@ -536,6 +580,7 @@ impl Store {
         conn.execute_batch(SCHEMA)?;
         conn.execute("DELETE FROM db_skill_signature WHERE skill_id = ?1", params![skill_id])?;
         conn.execute("DELETE FROM db_skill_origin WHERE skill_id = ?1", params![skill_id])?;
+        conn.execute("DELETE FROM db_skill_catalog_source WHERE skill_id = ?1", params![skill_id])?;
         conn.execute("DELETE FROM db_skill_app WHERE skill_id = ?1", params![skill_id])?;
         conn.execute("DELETE FROM db_skill_file WHERE skill_id = ?1", params![skill_id])?;
         conn.execute("DELETE FROM db_skill_verified WHERE skill_id = ?1", params![skill_id])?;

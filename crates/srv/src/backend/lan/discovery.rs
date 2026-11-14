@@ -24,16 +24,16 @@ use tokio::sync::oneshot;
 
 use crate::backend::eventbus::EventBus;
 
-mod agent_names;
-mod events;
-mod lan_instances;
-mod one_per_instance;
-mod udp_peers;
-mod uid_refetch;
+pub mod agent_names;
+pub mod events;
+pub mod lan_instances;
+pub mod one_per_instance;
+pub mod udp_peers;
+pub mod uid_refetch;
 
 pub use events::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
-pub(crate) use agent_names::{agent_names_body, parse_agent_names_body, PeerAgents};
-pub(crate) use one_per_instance::{one_per_instance, peer_base_url};
+pub use agent_names::{agent_names_body, parse_agent_names_body, PeerAgents};
+pub use one_per_instance::{one_per_instance, peer_base_url};
 pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
 
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
@@ -223,13 +223,13 @@ pub struct LanInstance {
     /// "stable"), so a host running two channels can be told apart in the
     /// Swarm (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md Phase 2). Empty
     /// for a peer on a build from before it was advertised.
-    #[serde(default)]
-    pub channel: String,
+    #[serde(default)] pub channel: String,
     /// The peer's operating system (`windows`, `macos`, `linux`), for the
     /// platform tag in the Swarm. Display only; empty for a peer that does not
     /// advertise it (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
-    #[serde(default)]
-    pub os: String,
+    #[serde(default)] pub os: String,
+    /// The install's WAN instance id as the peer advertises it, a well-formed one only; empty for a peer that predates it. An identifier, never proof (`peer_words::install_id_token`).
+    #[serde(default)] #[ts(skip)] pub install_id: String,
     /// How the peer is installed (`InstallKind::label`, e.g. `windows-store`); empty when it predates advertising it.
     #[serde(default)] pub install: String,
     /// The kind of build the peer says its binary is (`BuildKind::label`), never read off its channel; empty when it predates advertising it.
@@ -250,6 +250,10 @@ pub struct LanInstance {
     /// Each listed agent's provider id, a known one only (`agent_names.rs`).
     #[serde(default)]
     pub agent_providers: BTreeMap<String, String>,
+    /// Each listed agent's runtime, `host` or `container`, as the peer reported it (`agent_names.rs`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(as = "Option<BTreeMap<String, crate::backend::runtime_adapter::RuntimeKind>>", optional)]
+    pub agent_kinds: BTreeMap<String, crate::backend::runtime_adapter::RuntimeKind>,
     /// Each listed agent's account, as the peer's stable account id (`agent_names.rs`,
     /// SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md §4.4). Omitted when none has one.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -1186,7 +1190,7 @@ impl LanDiscovery {
                     .to_string();
                 let channel = info.get_property_val_str("channel").unwrap_or_default().to_string();
                 // Self-reported by the peer, so only a plain token is kept.
-                let (os, install, build) = crate::backend::lan::peer_words::advertised(&info);
+                let (os, install, build, install_id) = crate::backend::lan::peer_words::advertised(&info);
                 let other_ttl_secs = info.get_other_ttl();
 
                 let mut instances = self.instances.write();
@@ -1199,14 +1203,14 @@ impl LanDiscovery {
                     hostname: hostname.clone(),
                     version: version.clone(),
                     channel: channel.clone(),
-                    os: os.clone(), install: install.clone(), build: build.clone(),
+                    os: os.clone(), install: install.clone(), build: build.clone(), install_id: install_id.clone(),
                     address: address.clone(),
                     port: info.get_port(),
                     auth_key: auth_key.clone(),
                     agents: Vec::new(),
                     agent_status: Default::default(),
                     agent_lines: Default::default(),
-                    agent_providers: Default::default(),
+                    agent_providers: Default::default(), agent_kinds: Default::default(),
                     agent_accounts: Default::default(),
                     agent_resets: Default::default(),
                     agent_seats: Default::default(),
@@ -1233,7 +1237,7 @@ impl LanDiscovery {
                 if !peer_id.is_empty() {
                     entry.instance_id = peer_id.clone();
                 }
-                crate::backend::lan::peer_words::keep_known(&mut entry.install, install); crate::backend::lan::peer_words::keep_known(&mut entry.build, build);
+                crate::backend::lan::peer_words::keep_known(&mut entry.install, install); crate::backend::lan::peer_words::keep_known(&mut entry.build, build); crate::backend::lan::peer_words::keep_known(&mut entry.install_id, install_id);
                 if !hostname.is_empty() {
                     entry.hostname = hostname;
                 }
@@ -1462,7 +1466,7 @@ pub struct LanDiscoveryController {
     /// per-id cache) bounds the damage regardless of how many distinct
     /// identities are probed.
     pubkey_lookup_limiter: std::sync::Mutex<LookupRateLimiter>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     peers_for_test: std::sync::Mutex<Vec<LanInstance>>,
 }
 
@@ -1491,7 +1495,7 @@ struct LanPubkeyCacheEntry {
 /// function is ever called, `verify_lan_signature` has already confirmed a
 /// `lan_sig` was actually presented — so "we didn't check" must be
 /// distinguishable from "there was nothing to check."
-pub(crate) enum LanPubkeyLookup {
+pub enum LanPubkeyLookup {
     /// A peer has a public key on file for this agent_id.
     Found(Vec<u8>),
     /// No peer (that answered) has ever minted a LAN key for this agent_id
@@ -1583,7 +1587,7 @@ impl LanDiscoveryController {
             event_bus,
             agent_cache: std::sync::RwLock::new(HashMap::new()),
             pubkey_cache: std::sync::RwLock::new(HashMap::new()),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             peers_for_test: Default::default(),
             pubkey_lookup_limiter: std::sync::Mutex::new(LookupRateLimiter::new(LAN_PUBKEY_LOOKUP_RATE_LIMIT)),
         }
@@ -1796,7 +1800,7 @@ impl LanDiscoveryController {
     }
 
     /// Cache a peer's answer for `agent_id` as `find_agent_lan_pubkey` would.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn seed_lan_pubkey_for_test(&self, agent_id: &str, public_key: Vec<u8>, uid_key: Option<(String, Vec<u8>)>) {
         self.pubkey_cache.write().unwrap().insert(
             agent_id.to_string(),

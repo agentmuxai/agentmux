@@ -12,6 +12,7 @@ mod accounts;
 mod agents_tool;
 mod app_tool;
 mod browser;
+mod browser_account;
 mod browser_tool;
 mod browser_waiting;
 mod browser_zoom;
@@ -131,6 +132,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("BrowserRequestValue", "Browser with action \"request_value\""),
     ("BrowserCapture", "Browser with action \"capture\""),
     ("BrowserSignin", "Browser with action \"signin\""),
+    ("BrowserGeneratePassword", "Browser with action \"generate_password\""),
     ("BrowserSelect", "Browser with action \"select\""),
     ("BrowserCheck", "Browser with action \"check\""),
     ("BrowserSetFiles", "Browser with action \"set_files\""),

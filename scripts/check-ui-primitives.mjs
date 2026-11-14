@@ -113,6 +113,13 @@
 //                   upward, keyboard-driven), so the count only goes down as each is converted. A hard zero
 //                   everywhere: MENUS_ALLOWLIST names the three window-chrome menus left, each with why.
 //
+//  17. closeControls  a close, dismiss or remove control built outside the kit's `CloseButton`
+//                   (element/ui/CloseButton.tsx), per file in .tsx outside element/ui/: an `icon="xmark"` or
+//                   `icon="close"`, a `fa-xmark` / `fa-close` class, `makeIconClass("xmark")`, or a `✕`, `✖` or
+//                   `&times;` glyph. Every close in the app highlights red on hover from the one shared control, with
+//                   an accessible name and a keyboard focus ring; a hand-made one has its own hover, or none. A hard
+//                   zero everywhere: CLOSE_CONTROLS_ALLOWLIST names the ✕ that is a status mark, not a control.
+//
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
 // one used to live in scripts/ui-primitives-baseline.json, and since every
@@ -157,6 +164,40 @@ export function countMenus(source) {
     return (stripScriptComments(source).match(/role="menu"|<(?:FlyoutMenu|PopoverMenu|MenuButton)\b|\bshowContextMenu\(/g) ?? []).length;
 }
 
+/** The Font Awesome names a ✕ goes by (the `fa-` classes and the icon names the kit's IconButton takes). */
+const CLOSE_ICON_NAMES = "xmark|xmark-large|close|times|circle-xmark|square-xmark|rectangle-xmark|circle-x|square-x|window-close|x";
+
+/**
+ * A ✕ drawn as a close, dismiss or remove control: an icon name (as a prop or a data row), a Font Awesome class, a
+ * glyph (the ✕ and ✖ anywhere; the × and ⨯ and the entities where they stand alone in a tag or a string, so "×3",
+ * a size like "1.5×" and the ✗ that marks a failed state are not it), or a control that only says Close or Dismiss in
+ * its label (a CloseButton, which is the kit's, is taken out first).
+ */
+export function countCloseControls(source) {
+    const code = stripScriptComments(source);
+    const marks = new RegExp(
+        [
+            `\\bicon\\s*[=:]\\s*\\{?\\s*["'](?:${CLOSE_ICON_NAMES})["']`,
+            `\\bfa-(?:${CLOSE_ICON_NAMES})(?![-\\w])`,
+            `makeIconClass\\(["'](?:${CLOSE_ICON_NAMES})["']`,
+            "[✕✖]",
+            "&(?:times|#215|#10005|#10006|#x2715|#x2716);",
+            "[>\"'`]\\s*[×⨯]\\s*[<\"'`]",
+        ].join("|"),
+        "g"
+    );
+    // A label that says Close or Dismiss on anything but the kit's own CloseButton, whose label is its name.
+    const labels = [...code.matchAll(/(?:aria-label|label)=(["'])\s*(?:Close|Dismiss)\b[^"']*\1/g)].filter(
+        (m) => !code.slice(code.lastIndexOf("<", m.index), m.index).startsWith("<CloseButton")
+    );
+    return (code.match(marks) ?? []).length + labels.length;
+}
+
+/** A host stylesheet that sets the hover or press of the kit's close button, which would take the red from it. */
+export function closeHoverOverrides(source) {
+    return (stripComments(source).match(/\.ui-close[^{}]*:(?:hover|active)[^{}]*\{/g) ?? []).length;
+}
+
 export function countButtons(source) {
     return (stripScriptComments(source).match(/<button\b/g) ?? []).length;
 }
@@ -180,8 +221,8 @@ export const BUTTON_ALLOWLIST = {
         reason: "the window-chrome menu trigger: the hand-drawn AgentMux mark (a 5x5 grid of rects) that must stay pixel-exact, inside the drag region",
     },
     "frontend/app/element/PaneTabStrip.tsx": {
-        max: 2,
-        reason: "the tab strip's own add (+) and close (x) controls: drawn glyph, hover-revealed, sized to the tab",
+        max: 1,
+        reason: "the tab strip's own add (+) control: drawn glyph, sized to the tab (its close is the kit's CloseButton)",
     },
     "frontend/app/statusbar/StatusBar.tsx": {
         max: 1,
@@ -251,10 +292,6 @@ export const FONT_SIZES_ALLOWLIST = {
 
 /** A native `title=` on a control (button, a, input, select, textarea, summary) that has no kit component to take it. */
 export const CONTROL_TITLES_ALLOWLIST = {
-    "frontend/app/element/PaneTabStrip.tsx": {
-        max: 1,
-        reason: "the tab close control's title carries its state (Closing, Close with unsaved changes) and sits on a control already on the button allowlist",
-    },
     "frontend/app/statusbar/InstancePanel.tsx": {
         max: 1,
         reason: "the opacity range slider: a bare input with a title and an aria-label; a Tooltip wrapper would break its row",
@@ -369,8 +406,55 @@ export const MENUS_ALLOWLIST = {
     },
 };
 
+/**
+ * The only ✕ left in a .tsx outside the kit, and why it is not a close control: a mark that shows a state, which
+ * nobody can click.
+ */
+export const CLOSE_CONTROLS_ALLOWLIST = {
+    "frontend/app/statusbar/UpdateStatus.tsx": {
+        max: 1,
+        reason: "the ✕ that marks a failed update in the status bar: a state glyph, not a control",
+    },
+    "frontend/app/view/settings/sections/recording-section.tsx": {
+        max: 1,
+        reason: "the icon that marks a recorder binary as not found: a state mark in a status line, not a control",
+    },
+    "frontend/app/modals/conntypeahead-items.ts": {
+        max: 1,
+        reason: "the icon beside the Disconnect row of the connection list: a row's picture, not a control",
+    },
+    "frontend/app/element/quicktips-state.ts": {
+        max: 1,
+        reason: "the icon beside the Close pane tip: a row's picture, not a control",
+    },
+    "frontend/app/store/command-registry.ts": {
+        max: 3,
+        reason: "the icons beside the palette rows Close Window, Close Tab and Close Pane: a row's picture, not a control",
+    },
+    "frontend/app/view/term/termViewModel.ts": {
+        max: 1,
+        reason: "the shell's exit-code mark, an icon button with no action (noAction): a state mark, nobody can click it",
+    },
+    "frontend/app/view/agent/defaults/cli-catalog.ts": {
+        max: 1,
+        reason: "the glyph that is a provider's logo in the catalog, not a control",
+    },
+    "frontend/app/view/browser/browser-reload-button.ts": {
+        max: 1,
+        reason: "the glyph of the reload button's stop state (Stop loading): it stops a load, it closes nothing",
+    },
+    "frontend/app/window/window-controls.darwin.tsx": {
+        max: 1,
+        reason: "the macOS traffic-light Close: the OS's own control, red at rest; its look is the platform's",
+    },
+    "frontend/app/window/window-controls.win32.tsx": {
+        max: 1,
+        reason: "the caption Close: the OS-style control, already red on hover through --window-close-hover-bg",
+    },
+};
+
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, rawFieldProblems: {}, tsColours: TS_COLOURS_ALLOWLIST, menus: MENUS_ALLOWLIST, tags: {} };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, rawFieldProblems: {}, tsColours: TS_COLOURS_ALLOWLIST, menus: MENUS_ALLOWLIST, closeControls: CLOSE_CONTROLS_ALLOWLIST, tags: {} };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
@@ -946,6 +1030,7 @@ export function collect(files) {
     const disabledTips = {};
     const rawFieldProblemCounts = {};
     const menus = {};
+    const closeControls = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -968,6 +1053,9 @@ export function collect(files) {
             countInto(rawFieldProblemCounts, path, rawFieldProblems(source).length);
             countInto(menus, path, countMenus(source));
         }
+        // The close controls: any script outside the kit (a .ts data row too), and a host stylesheet's hover on the kit's button.
+        if (isScript && !path.endsWith(".d.ts") && !path.startsWith(UI_DIR)) countInto(closeControls, path, countCloseControls(source));
+        if (isStyle && !path.startsWith(UI_DIR)) countInto(closeControls, path, closeHoverOverrides(source));
         if (isStyle) {
             for (const selector of solidFills(source)) fills.add(`${path} :: ${selector}`);
             const n = badRadii(source).length;
@@ -1011,6 +1099,7 @@ export function collect(files) {
         disabledTips: sortObject(disabledTips),
         rawFieldProblems: sortObject(rawFieldProblemCounts),
         menus: sortObject(menus),
+        closeControls: sortObject(closeControls),
     };
 }
 
@@ -1024,7 +1113,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles", "menus"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles", "menus", "closeControls"];
 
 /**
  * `baseline` with each renamed file's counts moved to its new path, so a file moved or renamed since the base is
@@ -1185,7 +1274,7 @@ if (isMain(import.meta.url)) {
             `${total(current.colours)} colour literals in styles, ${total(current.tsColours)} in scripts, ` +
             `${total(current.tags)} hand-drawn tags, ` +
             `${total(current.nativeTitles)} native title= labels, ${total(current.textFields)} hand-written text fields, ` +
-            `${total(current.menus)} menus outside the kit's Menu.`
+            `${total(current.menus)} menus outside the kit's Menu, ${total(current.closeControls)} close controls outside CloseButton.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);

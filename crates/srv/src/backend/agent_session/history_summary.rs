@@ -64,7 +64,7 @@ pub struct AgentHistory {
 /// The store to read: the process-global transcript store, or in tests the one
 /// the current thread installed.
 fn history_store() -> Option<std::sync::Arc<FileStore>> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         if let Some(s) = TEST_STORE.with(|t| t.borrow().clone()) {
             return Some(s);
@@ -73,15 +73,15 @@ fn history_store() -> Option<std::sync::Arc<FileStore>> {
     super::global_store::global_transcript_store().cloned()
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static TEST_STORE: std::cell::RefCell<Option<std::sync::Arc<FileStore>>> =
         const { std::cell::RefCell::new(None) };
 }
 
 /// Install a transcript store for the current thread only (tests).
-#[cfg(test)]
-pub(crate) fn set_test_store(store: Option<std::sync::Arc<FileStore>>) {
+#[cfg(any(test, feature = "test-support"))]
+pub fn set_test_store(store: Option<std::sync::Arc<FileStore>>) {
     TEST_STORE.with(|t| *t.borrow_mut() = store);
 }
 

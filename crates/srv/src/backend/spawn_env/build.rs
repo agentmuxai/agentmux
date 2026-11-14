@@ -28,7 +28,7 @@ use std::sync::Arc;
 ///
 /// `Err(SpawnGateError)` means the caller must NOT spawn — same contract as
 /// `inject_identity_env_async` itself, which this wraps.
-pub(crate) async fn build_persistent_spawn_env(
+pub async fn build_persistent_spawn_env(
     mstore: Arc<crate::backend::storage::store::Store>,
     id_store: Arc<crate::backend::storage::store::Store>,
     identity_store: Arc<crate::backend::storage::store::Store>,

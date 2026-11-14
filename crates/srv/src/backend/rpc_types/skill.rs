@@ -399,12 +399,16 @@ pub struct CommandSkillCatalogAppFileData {
     pub path: String,
 }
 
-/// A file of a computer-use skill, as text.
+/// A file of a computer-use skill: its text, or for a reference crop (a PNG) the image as a data URL and no text.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SkillAppFile {
     pub path: String,
     pub text: String,
+    /// `data:image/png;base64,...` for a reference crop; `None` for a text file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub image_data_url: Option<String>,
 }
 
 /// `skill.catalog.app_script` — window-scoped. Approve or revoke one script of a computer-use skill. A script is
@@ -455,6 +459,19 @@ pub struct CommandAppSkillsCatalogData {}
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AppSkillsCatalog {
     pub items: Vec<crate::backend::skill_catalog::AppSkillCatalogItem>,
+}
+
+/// `app_skills.here` — window-scoped. For each installed computer-use skill that lists an executable for this
+/// computer, whether its application is here and which version (SPEC_PACKS §8: a lookup per skill, no inventory scan).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAppSkillsHereData {}
+
+/// The answer of `app_skills.here`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AppSkillsHere {
+    pub items: Vec<crate::backend::skill_catalog::AppSkillHere>,
 }
 
 /// `app_skills.catalog.install` — window-scoped. Install or update one skill from the catalog, by its id

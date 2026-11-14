@@ -12,6 +12,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "BrowserFind" => run_find(arguments, cx).await,
         "BrowserRequestValue" => run_request_value(arguments, cx).await,
         "BrowserSignin" => run_signin(arguments, cx).await,
+        "BrowserGeneratePassword" => super::browser_account::run(arguments, cx).await,
         "BrowserCapture" => run_capture(arguments, cx).await,
         "BrowserClick" | "BrowserFill" | "BrowserSelect" | "BrowserCheck" => run_act(name, arguments, cx).await,
         "BrowserSetFiles" => run_set_files(arguments, cx).await,
@@ -1054,7 +1055,7 @@ async fn vault_fill(
 
 async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiAutomationAuth, pane: Option<String>, arguments: &Value) -> Result<String> {
     let mut body = json!({ "auth": auth, "pane": pane });
-    for k in ["ref", "as", "entry", "download", "reason"] {
+    for k in ["ref", "as", "entry", "download", "reason", "card"] {
         if let Some(v) = arguments.get(k).filter(|v| !v.is_null()) {
             body[k] = v.clone();
         }
@@ -1108,7 +1109,7 @@ async fn browser_signin(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiAu
 
 /// srv's word that a Vault use went ahead because nobody answered the person's
 /// prompt in time, as a sentence to end the answer with; empty when someone did.
-fn approval_text(approval: Option<&Value>) -> String {
+pub(super) fn approval_text(approval: Option<&Value>) -> String {
     approval.and_then(Value::as_str).filter(|a| !a.is_empty()).map(|a| format!(" The person didn't answer: {a}.")).unwrap_or_default()
 }
 

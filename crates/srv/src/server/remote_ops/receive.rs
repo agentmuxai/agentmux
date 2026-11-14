@@ -93,7 +93,7 @@ fn settle(key: &(String, String), result: &RemoteOpResult) {
 }
 
 /// The name of the machine at `from`, among the LAN `peers`; a short label when none is known.
-pub(super) fn machine_in(peers: &[crate::backend::lan::discovery::LanInstance], from: Option<SocketAddr>) -> String {
+pub(crate) fn machine_in(peers: &[crate::backend::lan::discovery::LanInstance], from: Option<SocketAddr>) -> String {
     let Some(ip) = from.map(|a| a.ip().to_string()) else { return "unknown machine".into() };
     peers
         .iter()
@@ -160,6 +160,7 @@ pub(crate) async fn handle_remote_op(
     peer: Option<ConnectInfo<SocketAddr>>,
     Json(signed): Json<SignedRemoteOp>,
 ) -> Json<RemoteOpResult> {
+    crate::server::lan_watch::claimed(&signed.op.requester.slug);
     let peer_ip = peer.map(|c| c.0);
     let via = via.map(|Extension(v)| v);
     Json(receive(&state, via, peer_ip, signed, agentmux_common::time::now_secs(), *STARTED_AT).await)
@@ -204,7 +205,7 @@ pub(super) async fn receive(
     if op.ts < started_at {
         return refuse("signed_before_restart", "unproven");
     }
-    let key = match lan_signer::resolve(state, &op.requester.slug).await {
+    let key = match crate::server::lan_watch::during("sender key lookup", lan_signer::resolve(state, &op.requester.slug)).await {
         SignerKey::Pinned(key) => key,
         SignerKey::Unknown => return refuse("unknown_sender", "unproven"),
         SignerKey::Unproven | SignerKey::Refused => return refuse("unverified_sender", "unproven"),
@@ -212,7 +213,7 @@ pub(super) async fn receive(
     if !signed.verify_with(&key, max_params) {
         return refuse("bad_signature", "unproven");
     }
-    crate::server::reactive::lan_continuity::bind_after_verified(state, &op.requester.slug, &key).await;
+    crate::server::lan_watch::during("sender continuity", crate::server::reactive::lan_continuity::bind_after_verified(state, &op.requester.slug, &key)).await;
     // The install is named by the certificate its agent's host issued, when this machine holds one; the
     // request's own claim must agree with it. A certificate counts only if it certifies this agent's name
     // and exactly this key, on the LAN channel, and is fresh (`lan_continuity::check_cert`).
@@ -246,7 +247,7 @@ pub(super) async fn receive(
         }
         // A certificate any install can issue for itself proves nothing about who hosts the agent:
         // the install must be one this machine already trusts, as for moving a pinned key.
-        if let Err(why) = crate::server::reactive::lan_continuity::instance_trust(state, &caller.instance_id).await {
+        if let Err(why) = crate::server::lan_watch::during("install trust check", crate::server::reactive::lan_continuity::instance_trust(state, &caller.instance_id)).await {
             tracing::info!(agent = %caller.slug, install = %caller.instance_id, %why, "remote operation refused: the install that vouches for the agent is not trusted here");
             return refuse("install_not_trusted", proof);
         }
@@ -258,9 +259,9 @@ pub(super) async fn receive(
         Ok(Reservation::Repeat(first)) => return first,
         Err(why) => return refuse(why, proof),
     }
-    let ran: RemoteResult = match tokio::time::timeout(RUN_TIMEOUT, (operation.run)(state, &caller, op.params.clone())).await {
+    let ran: RemoteResult = match tokio::time::timeout(RUN_TIMEOUT, crate::server::lan_watch::during(&format!("operation {}", op.op), (operation.run)(state, &caller, op.params.clone()))).await {
         Ok(ran) => ran,
-        Err(_) => Err(super::RemoteRefusal::failed("the operation did not finish in time")),
+        Err(_) => Err(crate::server::lan_watch::timed_out(super::RemoteRefusal::failed("the operation did not finish in time"))),
     };
     let mut result = match ran {
         Ok(value) => RemoteOpResult::done(value),

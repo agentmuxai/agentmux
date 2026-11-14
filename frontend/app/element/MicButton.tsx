@@ -37,12 +37,18 @@ export function MicButton(props: MicButtonProps): JSX.Element {
                 return "Microphone blocked — enable mic access in your OS privacy settings, then click again";
             case "audio-capture":
                 return "No microphone detected";
+            case "not-configured":
+                return "Voice input isn't set up: it needs a transcription engine (Settings > Recording)";
             case "service-not-allowed":
                 return "Voice transcription unavailable in this build";
             default:
                 return "Voice input unavailable";
         }
     };
+
+    // What the microphone hears now, for the halo behind the button (MicButton.scss): a mic that is on
+    // and hears the person must not look like one that is on and hears nothing.
+    const level = () => (isActiveHere() ? (voice.level?.() ?? 0) : 0);
 
     const handleClick = () => {
         // Snapshot pre-click state — registerPane below will overwrite
@@ -75,6 +81,8 @@ export function MicButton(props: MicButtonProps): JSX.Element {
             <div
                 class="mic-button-wrap"
                 classList={{ "mic-active": isActiveHere(), "mic-blocked": isBlocked() }}
+                style={{ "--mic-level": String(level()) }}
+                data-mic-level={level()}
             >
                 <DeclIconButton
                     decl={{

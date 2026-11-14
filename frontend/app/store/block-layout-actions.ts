@@ -17,6 +17,7 @@ import {
     LayoutTreeSplitVerticalAction,
 } from "@/layout/lib/types";
 import { takeFloatRequest } from "./float-modifier";
+import { notePaneOpen } from "./pane-open-marks";
 import { recordBlockOpened } from "./shortcuts-recent";
 import { fireAndForget } from "@/util/util";
 import { ObjectService } from "./services";
@@ -76,7 +77,9 @@ export async function createBlock(blockDef: BlockDef, magnified = false, ephemer
     }
     const layoutModel = getLayoutModelForStaticTab();
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
+    const startedAt = performance.now();
     const blockId = await ObjectService.CreateBlock(blockDef, rtOpts);
+    notePaneOpen(blockId, startedAt);
     recordBlockOpened(blockDef);
     if (ephemeral) {
         layoutModel.newEphemeralNode(blockId);

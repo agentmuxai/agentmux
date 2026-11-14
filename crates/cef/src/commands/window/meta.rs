@@ -103,7 +103,7 @@ pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
     let labels: Vec<String> = browsers
         .into_iter()
         .map(|(l, _)| l)
-        .filter(|l| !pool_labels.contains(l.as_str()) && !l.starts_with("browser-pane-"))
+        .filter(|l| !pool_labels.contains(l.as_str()) && !crate::browser_pane::label::is_pane_label(l))
         .collect();
     // Read backend window IDs via `state.backend_window_id()`,
     // which queries the launcher-fed `shadow_backend_window_ids`

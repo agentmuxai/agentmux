@@ -1,0 +1,265 @@
+name: build-server-package
+
+# The AgentMux server package: the server, the `agentmux` command, the two helper programs agents run, and the built
+# web UI, as one tarball per platform (docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md section 4).
+# Linux x64 and arm64, macOS arm64 and x64. release-core.yml calls this and publishes the tarballs with the release;
+# `scripts/install/install.sh --server` installs one after checking it against the release's signed manifest.
+#
+# Each leg builds natively, packs with scripts/package-server.sh, then unpacks the tarball it made and runs it: the
+# command answers, and a server started from the package serves /health and the web UI. Linux legs build on the
+# oldest runner image so the programs run on older distributions.
+#
+# `legs` says which platforms: `release` is the three legs on kinds of runner a release already waits for (ubuntu-22.04
+# and macos-latest, which the desktop builds use, and the hosted arm64 Linux kind, which container-image.yml uses), which
+# is all release-core.yml asks for, because `sign-release` and `publish` wait for this workflow and a leg queued for a
+# scarce runner (macos-15-intel) would hold the release for as long as GitHub keeps it queued (up to 24 hours) and nobody
+# can cancel one leg of a run. `all` (the default, and what a pull request that changes this file runs) adds that one, so
+# a workflow_dispatch can still build it; a release does not publish it, because the signed manifest is made once from
+# the files the release has when `sign-release` runs and `install.sh --server` accepts nothing the manifest does not list.
+# A release without it says so in its summary, and `install.sh --server` says that version has no server package for the
+# platform.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "agentmux ref to build (tag / branch / SHA)"
+        required: true
+        type: string
+      legs:
+        description: "release (the legs on runner kinds a release already waits for) or all"
+        required: false
+        type: string
+        default: all
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "agentmux ref to build (tag / branch / SHA)"
+        required: true
+        default: main
+      legs:
+        description: "release (the legs on runner kinds a release already waits for) or all"
+        required: false
+        default: all
+  pull_request:
+    paths:
+      - '.github/workflows/build-server-package.yml'
+      - 'scripts/package-server.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan the legs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      legs: ${{ steps.legs.outputs.legs }}
+    steps:
+      - id: legs
+        env:
+          LEGS: ${{ inputs.legs }}
+        run: |
+          # timeout: the leg's limit in minutes, about three times what it takes cold (a release builds with no cache).
+          release='[{"os":"linux","arch":"x64","runner":"ubuntu-22.04","timeout":50},{"os":"linux","arch":"arm64","runner":"ubuntu-22.04-arm","timeout":50},{"os":"macos","arch":"arm64","runner":"macos-latest","timeout":140}]'
+          late='[{"os":"macos","arch":"x64","runner":"macos-15-intel","timeout":160}]'
+          if [ "$LEGS" = release ]; then
+            legs="$release"
+          else
+            legs=$(jq -cn --argjson a "$release" --argjson b "$late" '$a + $b')
+          fi
+          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+          echo "$legs"
+
+  package:
+    name: Server package (${{ matrix.os }}-${{ matrix.arch }})
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.legs) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: ${{ github.ref_type != 'tag' && 'npm' || '' }}
+
+      # Before any step runs code from the checkout (npm scripts, build scripts). Only main's history, or the gated
+      # release commit of a tag run, gets this far: a `workflow_dispatch` can name any ref to build, and a tag's own
+      # workflow can call this file on main with a tag of its own making. The same gate as build-macos.yml's; a build
+      # of another branch is made on a machine of ours, not here. A pull request that changes this file builds its own
+      # merge commit, and what it saves is kept for that pull request alone.
+      - name: The code to be built is main's
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          STATUS="$(gh api "repos/${REPO}/compare/main...${HEAD_SHA}" --jq .status)"
+          case "$STATUS" in
+            identical|behind) ;;
+            *) echo "::error::the commit to build ($HEAD_SHA) is not on main (compare main...sha says '$STATUS'): only main's history is built here"; exit 1 ;;
+          esac
+          if [ "$REF_TYPE" = "tag" ]; then
+            # A release: the same gate release-core.yml runs, from main's copy of the script, and the
+            # checkout must be the tagged commit itself.
+            tmp="$RUNNER_TEMP"
+            if command -v cygpath > /dev/null 2>&1; then tmp="$(cygpath -m "$RUNNER_TEMP")"; fi
+            gate="$tmp/release-gate.mjs"
+            out="$tmp/release-gate.out"
+            rm -f "$out"
+            gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPO}/contents/scripts/release-gate.mjs?ref=main" > "$gate"
+            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO" --github-output "$out"
+            # The script checks only when node was started with it as the main file; if that comparison is ever false
+            # (a path form, a drive letter's case) node exits 0 having checked nothing. So it must say it ran.
+            if ! grep -qx "sha=${RUN_SHA}" "$out" 2> /dev/null; then
+              echo "::error::the release gate did not say it ran"; exit 1
+            fi
+            if [ "$HEAD_SHA" != "$RUN_SHA" ]; then
+              echo "::error::the checkout ($HEAD_SHA) is not the tagged commit ($RUN_SHA)"; exit 1
+            fi
+          else
+            case "$EVENT" in
+              schedule|workflow_dispatch|repository_dispatch) ;;
+              *) echo "::error::event '$EVENT' does not build here"; exit 1 ;;
+            esac
+            if [ "$RUN_REF" != "refs/heads/main" ]; then
+              echo "::error::a run on '$RUN_REF' does not build here: only main and release tags do"; exit 1
+            fi
+          fi
+
+      - uses: dtolnay/rust-toolchain@1.99.1
+
+      # agentmux-mcp links libdbus and libxcb (its screen capture); the Linux package needs them at run time too.
+      - name: System libraries (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          bash scripts/ci-apt.sh update
+          bash scripts/ci-apt.sh install -y pkg-config libdbus-1-dev libxcb1-dev
+
+      # release builds use no cache
+      - uses: Swatinem/rust-cache@v2
+        if: github.ref_type != 'tag'
+        with:
+          key: server-package-${{ matrix.os }}-${{ matrix.arch }}
+
+      - run: npm ci
+
+      - name: Build the web UI
+        run: node scripts/build-web.mjs --out dist/web
+
+      # The build's own time stamp, from the release commit (the same on every leg and on a rebuild), in the form the
+      # server's own build label has (`20261020.101010`): `agentmux version --json` and the server's start-up line say
+      # which build it is, and "dev" when this is not set.
+      - name: Time stamp of the build
+        shell: bash
+        run: echo "BUILD_TIME=$(TZ=UTC git log -1 --date=format-local:%Y%m%d.%H%M%S --format=%cd)" >> "$GITHUB_ENV"
+
+      # The fast-release profile (thin LTO, optimised for speed) rather than release (full LTO, one codegen unit, optimised
+      # for size): the full-LTO link of the server did not finish in two hours on a 7 GB macOS runner, and the desktop
+      # apps keep the release profile.
+      #
+      # On Linux the build runs under the guard of the srv test step (scripts/ci-nextest-run.sh, see its header): a resource
+      # trace every 5 seconds in the log, a cgroup memory ceiling so that a build that wants more memory than the runner
+      # has is paged or killed inside it and not the whole machine (a frozen runner cannot even cancel), a time limit per
+      # attempt and one retry of an attempt that stalled. The server compile is the same one that froze the test step
+      # (#617): `top=` and `demand=` in the trace say what it took.
+      - name: Build the programs (Linux)
+        if: matrix.os == 'linux'
+        env:
+          CI_STEP_NAME: server package build
+          CI_ATTEMPT_CMD: cargo build --profile fast-release --locked -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap
+          CI_ATTEMPT1_SECONDS: 2100
+          CI_ATTEMPT2_SECONDS: 600
+          CI_TRACE_FILE: ${{ runner.temp }}/package-trace.log
+          CI_BUILD_LOG: ${{ runner.temp }}/package-build.log
+        run: bash scripts/ci-nextest-run.sh
+
+      - name: Build the programs (macOS)
+        if: matrix.os == 'macos'
+        run: cargo build --profile fast-release --locked -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap
+
+      - name: Upload the resource trace
+        if: ${{ always() && matrix.os == 'linux' && (failure() || cancelled()) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-package-trace-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/package-trace.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Pack
+        run: |
+          bash scripts/package-server.sh --os "${{ matrix.os }}" --arch "${{ matrix.arch }}" \
+            --bin-dir target/fast-release --web-dir dist/web --out dist-server
+          ls -l dist-server
+
+      # What was packed, not what was built: unpack it and run it as a user would.
+      - name: Run the package
+        run: |
+          set -eu
+          tarball=$(ls dist-server/agentmux-server-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz)
+          test "$(ls dist-server/*.tar.gz | wc -l | tr -d ' ')" = 1
+          mkdir unpacked
+          tar -xzf "$tarball" -C unpacked
+          top=$(ls unpacked)
+          bin="$PWD/unpacked/$top/bin"
+          test -f "unpacked/$top/web/index.html"
+          test -f "unpacked/$top/VERSION"
+          "$bin/agentmux" version --json
+          export AGENTMUX_HOME_OVERRIDE="$RUNNER_TEMP/server-home"
+          mkdir -p "$AGENTMUX_HOME_OVERRIDE"
+          "$bin/agentmux" start --port 17380
+          trap '"$bin/agentmux" stop || true' EXIT
+          curl -fsS http://127.0.0.1:17380/health
+          echo
+          curl -fsS http://127.0.0.1:17380/ | grep -qi '<html'
+          "$bin/agentmux" status
+
+      # The server's https trusts the system's certificates, and a minimal Linux image has none. The packaged command must
+      # say so plainly there (and not once the package that holds them is installed).
+      #
+      # The image is Debian's own, from Amazon's public mirror of the official images and by digest (that of the
+      # `bookworm-slim` tag on 2026-11-04, the same index Docker Hub serves): Docker Hub limits anonymous pulls per
+      # address, and the runners share addresses, so a pull from there can fail a leg for no fault of the package. A newer
+      # Debian point release is a deliberate change of this line.
+      - name: Run the package in an image with no certificates (Linux)
+        if: matrix.os == 'linux'
+        env:
+          IMAGE: public.ecr.aws/docker/library/debian@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+        run: |
+          set -eu
+          top=$(ls unpacked)
+          dir="$PWD/unpacked/$top"
+          # `doctor` exits 1 when a check fails: the missing certificates are the failure expected here.
+          out=$(docker run --rm -v "$dir:/pkg:ro" -e AGENTMUX_HOME_OVERRIDE=/tmp/h "$IMAGE" /pkg/bin/agentmux doctor || true)
+          echo "$out"
+          echo "$out" | grep -q "no system certificates found"
+          echo "$out" | grep -q "apt install ca-certificates"
+          out=$(docker run --rm -v "$dir:/pkg:ro" -e AGENTMUX_HOME_OVERRIDE=/tmp/h "$IMAGE" sh -c 'apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends ca-certificates >/dev/null && /pkg/bin/agentmux doctor || true')
+          echo "$out"
+          echo "$out" | grep -q "certificates: the system's certificates are found"
+          if echo "$out" | grep -q "no system certificates found"; then exit 1; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-package-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist-server/agentmux-server-*.tar.gz
+          if-no-files-found: error
+          retention-days: 14

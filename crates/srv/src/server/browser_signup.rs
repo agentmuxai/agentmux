@@ -131,6 +131,15 @@ pub(crate) fn new_password(field: &Field) -> Result<Zeroizing<String>, String> {
 pub(crate) async fn make(state: &AppState, block_id: &str) -> Result<String, String> {
     let profile = super::browser_signin_offer::profile_of(state, block_id).ok_or("this tab keeps no sign-ins (Incognito)")?;
     let field = OFFERED.lock().get(block_id).cloned().ok_or("the page has no field for a new password now")?;
+    make_for(state, block_id, field, profile, PERSON, "", None).await.map(|(origin, _)| origin)
+}
+
+/// Make a password for `field` of pane `block_id`, keep it in the Vault under
+/// `profile` (with `extra` as one more tag; `reason` is the agent's, kept with the Activity line) before anything is typed, then set
+/// it into the page, as `actor`'s doing. Gives the site and the entry; never
+/// the value. A password made earlier for this pane and site, still unconfirmed,
+/// is replaced (the site refused it), the refused one kept as a version.
+pub(crate) async fn make_for(state: &AppState, block_id: &str, field: Field, profile: String, actor: &str, reason: &str, extra: Option<&'static str>) -> Result<(String, String), String> {
     let earlier = MADE.lock().get(block_id).filter(|m| m.origin == field.origin && m.at.elapsed() < CONFIRM_WITHIN).map(|m| m.entry.clone());
     let password = new_password(&field)?;
     let (origin, field_token) = (field.origin.clone(), field.field.clone());
@@ -142,7 +151,7 @@ pub(crate) async fn make(state: &AppState, block_id: &str) -> Result<String, Str
                 return Ok((id, label));
             }
         }
-        signups::create(&store, &space, &field.username, &value)
+        signups::create_tagged(&store, &space, &field.username, &value, extra)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -152,9 +161,10 @@ pub(crate) async fn make(state: &AppState, block_id: &str) -> Result<String, Str
     let filled = super::ui_handlers::proxy_value(state, "signup_fill", body, HOST_WAIT).await;
     drop(password);
     let outcome = if filled.is_ok() { "done" } else { "failed" };
-    crate::backend::vault::record(&state.identity_store, &entry, &label, PERSON, "filled on sign-up", &origin, outcome);
+    let line = crate::backend::vault::Line { entry_id: &entry, label: &label, actor, action: "filled on sign-up", target: &origin, outcome, reason };
+    crate::backend::vault::record_line(&state.identity_store, line);
     filled.map_err(|(_, e)| format!("the password is saved in the Vault as {label}, but wasn't filled: {e}"))?;
-    Ok(origin)
+    Ok((origin, entry))
 }
 
 /// A sign-up form of `origin` was sent in pane `block_id`. A password made for

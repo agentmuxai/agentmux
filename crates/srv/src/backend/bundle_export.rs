@@ -95,7 +95,7 @@ pub(crate) struct ContextFileEntry {
 /// implementation means the two can never drift apart on what counts as
 /// safe (see `docs/specs/SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md`
 /// §4.3.4).
-pub(crate) fn sanitize_context_relative_path(path: &str) -> Option<String> {
+pub fn sanitize_context_relative_path(path: &str) -> Option<String> {
     if path.is_empty() {
         return None;
     }

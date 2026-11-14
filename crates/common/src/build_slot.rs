@@ -46,7 +46,7 @@ pub fn shim_dir(home: &Path) -> PathBuf {
 const STALE_SECS: u64 = 90;
 
 /// Who holds the build slot right now, read from the lock's owner file.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SlotHolder {
     /// The holder's `AGENTMUX_AGENT_ID` (else its user name), as the script recorded it.
     pub agent: String,
@@ -56,11 +56,30 @@ pub struct SlotHolder {
     pub reason: String,
     /// The command line it runs, cut to 120 characters: a background subagent's build holds the slot under its leader's id, and this says what is really running.
     pub command: String,
+    /// The run's own token: tells this holder's slot from one a later holder made.
+    #[serde(default)]
+    pub token: String,
+    /// The pid the script saw for itself. A real one on Linux and macOS; on Windows a Git Bash
+    /// pid, which no native tool can use (see `winpid`).
+    #[serde(default)]
+    pub pid: Option<u32>,
+    /// The script's Windows process id (Git Bash only): the root of the holder's process tree.
+    #[serde(default)]
+    pub winpid: Option<u32>,
+}
+
+impl SlotHolder {
+    /// The operating system's id for the script's process, the root of the holder's process
+    /// tree: the Windows id on Windows (none for a script older than version 9, which did not
+    /// record it), the pid elsewhere.
+    pub fn process_id(&self) -> Option<u32> {
+        if cfg!(windows) { self.winpid } else { self.pid }.filter(|p| *p > 1)
+    }
 }
 
 /// `~/.agentmux/shared/locks/build`, the lock's own folder, or `AGENTMUX_BUILD_SLOT_DIR` when
 /// that is set (the script honours it too).
-fn lock_dir() -> Option<PathBuf> {
+pub fn lock_dir() -> Option<PathBuf> {
     match std::env::var_os("AGENTMUX_BUILD_SLOT_DIR").filter(|d| !d.is_empty()) {
         Some(dir) => Some(PathBuf::from(dir)),
         None => dirs::home_dir().map(|h| h.join(".agentmux").join("shared").join("locks").join("build")),
@@ -92,7 +111,38 @@ pub fn read_holder(root: &Path, now_secs: u64) -> Option<SlotHolder> {
     let start: u64 = field("start")?.parse().ok()?;
     let reason = field("reason").filter(|r| !r.is_empty()).or_else(|| field("cmd")).unwrap_or_default().to_string();
     let command: String = field("cmd").unwrap_or_default().chars().take(120).collect();
-    Some(SlotHolder { agent, since_ms: start.saturating_mul(1000), reason, command })
+    let number = |key: &str| field(key).and_then(|v| v.parse::<u32>().ok());
+    Some(SlotHolder {
+        agent,
+        since_ms: start.saturating_mul(1000),
+        reason,
+        command,
+        token: field("token").unwrap_or_default().to_string(),
+        pid: number("pid"),
+        winpid: number("winpid"),
+    })
+}
+
+/// The file srv writes into the held slot once the holder's process tree has used no CPU for a
+/// while; `build-slot status` prints it (`idle_note` in the script).
+fn idle_path(root: &Path) -> PathBuf {
+    root.join("slot").join("idle")
+}
+
+/// Records that the holder with `token` has been idle since `since_secs` (epoch seconds). Does
+/// nothing when the slot now belongs to another holder: a note about the last run must never
+/// land on the next one.
+pub fn write_idle(root: &Path, token: &str, since_secs: u64) -> io::Result<()> {
+    let owner = std::fs::read_to_string(root.join("slot").join("owner")).unwrap_or_default();
+    if !owner.lines().any(|l| l.strip_prefix("token=").is_some_and(|t| t.trim() == token)) {
+        return Ok(());
+    }
+    std::fs::write(idle_path(root), format!("token={token}\nidle_since={since_secs}\n"))
+}
+
+/// Removes the idle note: the holder is busy again, or gone.
+pub fn clear_idle(root: &Path) {
+    let _ = std::fs::remove_file(idle_path(root));
 }
 
 /// Environment variables that make a bash started with them define `cargo`, `task`, `npm`, `npx`
@@ -257,8 +307,23 @@ mod tests {
         write_slot(root, "agent=Lazo\npid=1\ntoken=t\nstart=1792830000\ncwd=/x\ncmd=/c/bin/cargo test -p x\nreason=cargo test\n", true);
         assert_eq!(
             read_holder(root, now_secs()),
-            Some(SlotHolder { agent: "Lazo".into(), since_ms: 1_792_830_000_000, reason: "cargo test".into(), command: "/c/bin/cargo test -p x".into() })
+            Some(SlotHolder {
+                agent: "Lazo".into(),
+                since_ms: 1_792_830_000_000,
+                reason: "cargo test".into(),
+                command: "/c/bin/cargo test -p x".into(),
+                token: "t".into(),
+                pid: Some(1),
+                winpid: None,
+            })
         );
+        write_slot(root, "agent=Lazo\npid=77\nwinpid=4242\ntoken=t\nstart=1792830000\ncmd=x\n", true);
+        let holder = read_holder(root, now_secs()).unwrap();
+        assert_eq!((holder.pid, holder.winpid), (Some(77), Some(4242)));
+        let expected = if cfg!(windows) { Some(4242) } else { Some(77) };
+        assert_eq!(holder.process_id(), expected, "the Windows id on Windows, the pid elsewhere");
+        write_slot(root, "agent=Lazo\npid=1\ntoken=t\nstart=1792830000\ncmd=x\n", true);
+        assert_eq!(read_holder(root, now_secs()).unwrap().process_id(), None, "a pid of 1 is no process of ours");
         assert_eq!(read_holder(root, now_secs() + 10 * 60), None, "no heartbeat for minutes: its holder died");
         write_slot(root, "agent=Manoz\nstart=1792830001\ncmd=npm run build\n", true);
         assert_eq!(read_holder(root, now_secs()).unwrap().reason, "npm run build", "no reason: the command line");
@@ -357,8 +422,31 @@ mod tests {
 
     /// What the `tool` shim ran, given `args`, for a home with or without the lock script.
     fn run_tool_env(tool: &str, with_slot: bool, off: bool, args: &[&str], env: &[(&str, &str)]) -> Option<String> {
+        // In a project with a package.json beside a Cargo.toml: what npm and npx are queued for.
+        run_tool_in(tool, with_slot, off, args, env, &["proj/package.json", "proj/Cargo.toml"], "proj").map(|(out, _)| out)
+    }
+
+    /// [`run_tool_env`] with the files of a project laid out under the home (`files`, paths from
+    /// it) and the shim run from `cwd` (a folder in it). Also returns the home, so a test can
+    /// read what the shim wrote there.
+    fn run_tool_in(
+        tool: &str,
+        with_slot: bool,
+        off: bool,
+        args: &[&str],
+        env: &[(&str, &str)],
+        files: &[&str],
+        cwd: &str,
+    ) -> Option<(String, tempfile::TempDir)> {
         let bash = bash()?;
         let h = home();
+        for f in files {
+            let path = h.path().join(f);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "{}").unwrap();
+        }
+        let cwd = h.path().join(cwd);
+        std::fs::create_dir_all(&cwd).unwrap();
         let real_dir = h.path().join("real");
         let shim = shim_dir(h.path());
         std::fs::create_dir_all(&real_dir).unwrap();
@@ -378,7 +466,7 @@ mod tests {
         let sep = if cfg!(windows) { ";" } else { ":" };
         let path = format!("{}{sep}{}{sep}{}", shim.display(), real_dir.display(), std::env::var("PATH").unwrap_or_default());
         let mut cmd = std::process::Command::new(bash);
-        cmd.arg(shim.join(tool)).args(args).env("PATH", path).env("HOME", h.path());
+        cmd.arg(shim.join(tool)).args(args).env("PATH", path).env("HOME", h.path()).env_remove("AGENTMUX_BUILD_SLOT_DIR").current_dir(&cwd);
         if off {
             cmd.env("AGENTMUX_BUILD_SLOT_OFF", "1");
         }
@@ -389,7 +477,7 @@ mod tests {
             cmd.no_window();
         }
         let out = cmd.output().unwrap();
-        Some(String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n").trim().to_string())
+        Some((String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n").trim().to_string(), h))
     }
 
     fn run_tool(tool: &str, with_slot: bool, off: bool, args: &[&str]) -> Option<String> {
@@ -520,6 +608,59 @@ mod tests {
         ] {
             assert_eq!(with_tty(tool, args), Some(false), "{tool} {args:?} watches with a terminal, so it is not slotted");
         }
+    }
+
+    /// What npm and npx do in a folder laid out as `files` (paths under the home), run from `cwd`:
+    /// whether the command went through the slot, and the text of the lock folder's unqueued.log.
+    fn npm_in(files: &[&str], cwd: &str, tool: &str, args: &[&str]) -> Option<(bool, String)> {
+        let (out, home) = run_tool_in(tool, true, false, args, &[], files, cwd)?;
+        let log = std::fs::read_to_string(home.path().join(".agentmux/shared/locks/build/unqueued.log")).unwrap_or_default();
+        Some((out.starts_with("SLOT "), log))
+    }
+
+    /// The slot is for Rust and agentmux-frontend builds: an npm or npx build in a site-style repo
+    /// (a package.json with no Cargo.toml above it) runs at once, and says so in the lock folder's
+    /// log. A package in or below a Rust tree is still queued.
+    #[test]
+    fn npm_and_npx_queue_only_in_a_tree_with_a_cargo_toml() {
+        if bash().is_none() {
+            return;
+        }
+        let rust = &["agentmux/package.json", "agentmux/Cargo.toml"][..];
+        let site = &["site/package.json"][..];
+        for (tool, args) in [("npm", &["run", "build"][..]), ("npx", &["vite", "build"][..]), ("npm", &["test"][..])] {
+            let (slotted, log) = npm_in(rust, "agentmux", tool, args).unwrap();
+            assert!(slotted && log.is_empty(), "{tool} {args:?} beside a Cargo.toml queues, and says nothing: {log:?}");
+            let (slotted, log) = npm_in(site, "site", tool, args).unwrap();
+            assert!(!slotted, "{tool} {args:?} in a site repo runs at once");
+            assert!(log.trim_end().ends_with("not queued: no Cargo.toml") && log.contains(&format!("{tool}")), "one line for it: {log:?}");
+            assert_eq!(log.lines().count(), 1, "{log:?}");
+        }
+        // The line carries epoch, agent, command and folder, tab-separated.
+        let (_, log) = npm_in(site, "site", "npm", &["run", "build"]).unwrap();
+        let fields: Vec<&str> = log.trim_end().split('\t').collect();
+        assert_eq!(fields.len(), 5, "{log:?}");
+        assert!(fields[0].parse::<u64>().is_ok() && fields[2] == "npm run build" && fields[3].ends_with("/site"), "{fields:?}");
+        // A package nested in a Rust tree: the nearest package.json has no Cargo.toml beside it, but
+        // one sits above it, so it builds in that tree and is queued.
+        let nested = &["agentmux/Cargo.toml", "agentmux/widgets/clock/package.json"][..];
+        assert_eq!(npm_in(nested, "agentmux/widgets/clock", "npm", &["run", "build"]).unwrap().0, true, "nested in the tree: queued");
+        // A folder inside a site, below its package.json, is the site's.
+        assert_eq!(npm_in(site, "site", "npm", &["run", "build"]).unwrap().0, false);
+        let deep = &["site/package.json", "site/src/deep/x.ts"][..];
+        assert_eq!(npm_in(deep, "site/src/deep", "npm", &["run", "build"]).unwrap().0, false, "the nearest package.json is found from a subfolder");
+        // `--prefix` names the project, wherever the command is run from.
+        let both = &["agentmux/package.json", "agentmux/Cargo.toml", "site/package.json"][..];
+        assert_eq!(npm_in(both, "agentmux", "npm", &["run", "build", "--prefix", "../site"]).unwrap().0, false, "--prefix to a site");
+        assert_eq!(npm_in(both, "site", "npm", &["--prefix=../agentmux", "run", "build"]).unwrap().0, true, "--prefix=dir to the Rust tree");
+        // No package.json anywhere: not known to be a site, so it queues as before.
+        assert_eq!(npm_in(&[], "nowhere", "npx", &["vite", "build"]).unwrap().0, true);
+        // Light commands are never queued and never noted; cargo is unchanged.
+        let (slotted, log) = npm_in(site, "site", "npm", &["install"]).unwrap();
+        assert!(!slotted && log.is_empty(), "a light command is not a skipped queue: {log:?}");
+        let (out, home) = run_tool_in("cargo", true, false, &["test"], &[], site, "site").unwrap();
+        assert!(out.starts_with("SLOT "), "cargo queues wherever it is run: {out}");
+        assert!(!home.path().join(".agentmux/shared/locks/build/unqueued.log").exists());
     }
 
     /// Runs the lock script under bash with its slot directory at `root`, as a fresh top-level call.
@@ -674,25 +815,8 @@ mod tests {
     }
 
     fn spawn_slot(bash: &Path, script: &Path, root: &Path, limit: Option<&str>, args: &[&str]) -> std::process::Child {
-        let mut cmd = std::process::Command::new(bash);
-        cmd.arg(script)
-            .args(args)
-            .env("AGENTMUX_BUILD_SLOT_DIR", root)
-            .env_remove("BUILD_SLOT_HELD")
-            .env_remove("BUILD_SLOT_MAX")
-            .env("BUILD_SLOT_POLL", "1")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        if let Some(n) = limit {
-            cmd.env("BUILD_SLOT_MAX", n);
-        }
-        #[cfg(windows)]
-        {
-            use crate::win32::NoWindow;
-            cmd.no_window();
-        }
-        cmd.spawn().unwrap()
+        let env: Vec<(&str, &str)> = limit.map(|n| ("BUILD_SLOT_MAX", n)).into_iter().collect();
+        spawn_slot_env(bash, script, root, &env, args)
     }
 
     /// One run at a time by default; with a limit of two, two hold a slot at once and a third waits,
@@ -844,5 +968,195 @@ mod tests {
         assert!(!err.contains("is gone"), "the wait took its parent for gone: {err}");
         assert_eq!(out.status.code(), Some(75), "it should wait out BUILD_SLOT_MAX_WAIT and give up: {err}");
         assert!(!String::from_utf8_lossy(&out.stdout).contains("never"), "the command must not run while the slot is held");
+    }
+
+    /// `spawn_slot` with more environment (a slower poll, a shorter ticket limit).
+    fn spawn_slot_env(bash: &Path, script: &Path, root: &Path, env: &[(&str, &str)], args: &[&str]) -> std::process::Child {
+        let mut cmd = std::process::Command::new(bash);
+        cmd.arg(script)
+            .args(args)
+            .env("AGENTMUX_BUILD_SLOT_DIR", root)
+            .env_remove("BUILD_SLOT_HELD")
+            .env_remove("BUILD_SLOT_MAX")
+            .env("BUILD_SLOT_POLL", "1")
+            .envs(env.iter().copied())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        #[cfg(windows)]
+        {
+            use crate::win32::NoWindow;
+            cmd.no_window();
+        }
+        cmd.spawn().unwrap()
+    }
+
+    fn queue_tickets(root: &Path) -> Vec<(String, String)> {
+        let mut tickets: Vec<(String, String)> = std::fs::read_dir(root.join("queue"))
+            .map(|d| {
+                d.filter_map(|e| e.ok())
+                    .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+                    .map(|e| (e.file_name().to_string_lossy().to_string(), std::fs::read_to_string(e.path()).unwrap_or_default()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        tickets.sort();
+        tickets
+    }
+
+    /// Polls `ok` for up to 30 s (process start-up is slow under load).
+    fn wait_for(what: &str, mut ok: impl FnMut() -> bool) {
+        for _ in 0..120 {
+            if ok() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        panic!("never saw {what}");
+    }
+
+    /// The owner file carries what srv needs to watch the holder, and `status` says when srv found
+    /// it idle: only for the run that srv named, and never for a run it has not flagged.
+    #[test]
+    fn status_says_a_holder_is_idle_only_when_srv_flagged_that_run() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        let status = || {
+            let out = spawn_slot(&bash, &script, &root, None, &["status"]).wait_with_output().unwrap();
+            String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n")
+        };
+        let mut holder = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "90"]);
+        wait_for("the holder", || read_holder(&root, now_secs()).is_some());
+        let held = read_holder(&root, now_secs()).expect("a live holder");
+        assert!(held.pid.is_some_and(|p| p > 1), "the owner file names the script's pid: {held:?}");
+        if cfg!(windows) {
+            assert!(held.winpid.is_some_and(|p| p > 1), "Git Bash records its Windows process id: {held:?}");
+        }
+        let busy = status();
+        assert!(busy.contains("HELD by") && !busy.contains("idle"), "a holder srv has not flagged is not idle: {busy}");
+
+        write_idle(&root, "some-other-run", now_secs() - 5 * 60).unwrap();
+        assert!(!root.join("slot").join("idle").exists(), "a note for another run is not written onto this one");
+        std::fs::write(root.join("slot").join("idle"), format!("token=an-earlier-run\nidle_since={}\n", now_secs() - 5 * 60)).unwrap();
+        assert!(!status().contains("idle"), "a note an earlier holder left is not this holder's");
+
+        write_idle(&root, &held.token, now_secs() - 12 * 60).unwrap();
+        let idle = status();
+        assert!(
+            idle.contains("idle for 12 min, no CPU") && idle.contains("not stopped"),
+            "got {idle}; owner {:?}; idle file {:?}",
+            std::fs::read_to_string(root.join("slot").join("owner")),
+            std::fs::read_to_string(root.join("slot").join("idle"))
+        );
+        clear_idle(&root);
+        assert!(!status().contains("idle"), "work removes the note");
+        let _ = holder.kill();
+        let _ = holder.wait();
+    }
+
+    /// A waiter that a loaded host makes slow (more than the ticket limit between two touches of
+    /// its ticket) still goes in the order it arrived. The script used to delete any other
+    /// waiter's ticket older than 30 s, so a later arrival that was quicker took the slot first.
+    /// Here the ticket limit is 2 s and the first waiter polls every 4 s, which is the same thing
+    /// at test speed.
+    #[test]
+    fn a_slow_waiter_keeps_its_place_in_the_line() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        let order = h.path().join("order.txt");
+        let append = |who: &str| format!("echo {who} >> \"{}\"", order.to_string_lossy().replace('\\', "/"));
+
+        let holder = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "8"]);
+        wait_for("the holder", || root.join("slot").join("owner").exists());
+        wait_for("the holder's ticket to go", || queue_tickets(&root).is_empty());
+        let limit = [("BUILD_SLOT_TICKET_STALE_SECS", "2")];
+        let slow = [("BUILD_SLOT_TICKET_STALE_SECS", "2"), ("BUILD_SLOT_POLL", "4")];
+        let a = spawn_slot_env(&bash, &script, &root, &slow, &["--", "bash", "-c", &append("A")]);
+        wait_for("A's ticket", || queue_tickets(&root).len() == 1);
+        // B arrives in a later second than A, so its ticket sorts after A's.
+        std::thread::sleep(std::time::Duration::from_millis(2200));
+        let b = spawn_slot_env(&bash, &script, &root, &limit, &["--", "bash", "-c", &append("B")]);
+        assert_eq!(a.wait_with_output().unwrap().status.code(), Some(0));
+        assert_eq!(b.wait_with_output().unwrap().status.code(), Some(0));
+        holder.wait_with_output().unwrap();
+        let ran = std::fs::read_to_string(&order).unwrap().replace("\r\n", "\n");
+        assert_eq!(ran, "A\nB\n", "A arrived first and must run first, even though its loop is slow");
+    }
+
+    /// A ticket whose waiter is gone is dropped once it is stale, so a dead waiter never holds up
+    /// the line; this is what the 30 s rule was for, and it still works.
+    #[test]
+    fn the_ticket_of_a_waiter_that_is_gone_is_dropped() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        std::fs::create_dir_all(root.join("queue")).unwrap();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        // Arrived five minutes ago, untouched for two, and no process has this pid.
+        let ticket = root.join("queue").join(format!("{}-2147483000", now - 300));
+        std::fs::write(&ticket, "gone: cargo test\n").unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(120);
+        std::fs::File::options().write(true).open(&ticket).unwrap().set_modified(old).unwrap();
+        // The dead waiter's ticket is first in line, so a run that gives up (exit 75) or has to wait
+        // out the ticket's age (the limit is 300 s) shows the ticket held the line.
+        let out = spawn_slot_env(&bash, &script, &root, &[("BUILD_SLOT_MAX_WAIT", "150")], &["--", "echo", "ran"])
+            .wait_with_output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(String::from_utf8_lossy(&out.stdout).contains("ran"));
+        assert!(!ticket.exists(), "the dead waiter's ticket is removed");
+    }
+
+    /// A waiter whose ticket was removed writes it again under the same name (the same place in
+    /// the line), with its text.
+    #[test]
+    fn a_ticket_that_goes_missing_comes_back_in_the_same_place() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        let holder = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "9"]);
+        wait_for("the holder", || root.join("slot").join("owner").exists());
+        // The holder takes its own ticket out of the queue just after it writes the owner file.
+        wait_for("the holder's ticket to go", || queue_tickets(&root).is_empty());
+        let waiter = spawn_slot(&bash, &script, &root, None, &["--", "true"]);
+        wait_for("the waiter's ticket", || {
+            let t = queue_tickets(&root);
+            t.len() == 1 && !t[0].1.is_empty()
+        });
+        let (name, text) = queue_tickets(&root).remove(0);
+        assert!(text.contains("true"), "the ticket says who waits and for what: {text:?}");
+        std::fs::remove_file(root.join("queue").join(&name)).unwrap();
+        wait_for("the ticket again", || !queue_tickets(&root).is_empty());
+        assert_eq!(queue_tickets(&root), vec![(name, text)], "back under its own name, with its text");
+        assert_eq!(waiter.wait_with_output().unwrap().status.code(), Some(0));
+        holder.wait_with_output().unwrap();
+    }
+
+    /// `status` names every live waiter, in line; a ticket still being written is shown by its pid.
+    #[test]
+    fn status_lists_the_waiters_in_line_and_never_an_empty_entry() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        std::fs::create_dir_all(root.join("queue")).unwrap();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        std::fs::write(root.join("queue").join(format!("{}-4242", now - 5)), "lazo: cargo test\n").unwrap();
+        std::fs::write(root.join("queue").join(format!("{}-4343", now - 4)), "").unwrap();
+        let out = spawn_slot(&bash, &script, &root, None, &["status"]).wait_with_output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+        assert!(text.contains("queued #1: lazo: cargo test"), "got {text:?}");
+        assert!(text.contains("queued #2: (waiter pid 4343)"), "got {text:?}");
     }
 }

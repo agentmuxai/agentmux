@@ -31,6 +31,7 @@ import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWi
 import { getLayoutModelForTabById, moveBlocksToTab } from "@/layout/index";
 import { stackMovePlan } from "@/layout/lib/stackMembers";
 import { getApi } from "@/store/global";
+import { afterTwoFrames } from "@/app/util/after-two-frames";
 import { fireAndForget } from "@/util/util";
 import { setTabGrabOffset } from "./tab-grab-offset";
 import { armWindowTabDrag } from "./tab-live-follow";
@@ -305,10 +306,8 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                     // geometry. Force a tree re-measure once the tab has
                     // real bounds (double rAF: display flip applies on the
                     // next frame; measure the one after).
-                    requestAnimationFrame(() => {
-                        requestAnimationFrame(() => {
-                            fireAndForget(async () => model?.onTreeStateAtomUpdated(true));
-                        });
+                    afterTwoFrames(() => {
+                        fireAndForget(async () => model?.onTreeStateAtomUpdated(true));
                     });
                 }, SPRING_SWITCH_MS);
             },

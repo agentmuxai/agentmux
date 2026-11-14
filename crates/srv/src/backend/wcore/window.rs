@@ -49,7 +49,7 @@ pub fn create_window(
 ///
 /// Returns the created Window. Production creates windows through the
 /// reducer (`server/service/window_create.rs`); tests use this to seed rows.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn create_window_full(
     store: &Store,
     workspace_id: &str,

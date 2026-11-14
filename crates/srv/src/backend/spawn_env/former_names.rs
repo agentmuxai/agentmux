@@ -28,7 +28,7 @@ use crate::backend::storage::store::Store;
 
 /// What the server holds of an agent's rename history.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct FormerNames {
+pub struct FormerNames {
     /// Display names it had (`db_agent_former_names`), as stored.
     names: Vec<String>,
     /// Slugs it answered to (`db_agent_former_slugs`).

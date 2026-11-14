@@ -173,7 +173,7 @@ function lapsedRow(f: AgentFailure, view: FailureViewState, on: FailureActions):
         accent: "idle",
         actions: [
             { glyph: "↻", label: "Retry", title: "Re-run the last turn", disabled: view.retrying, onClick: on.retry },
-            { glyph: "×", title: "Dismiss", danger: true, onClick: on.dismiss },
+            { close: true, title: "Dismiss", onClick: on.dismiss },
         ],
         expanded: false,
         detail: f.detail,
@@ -365,7 +365,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             onClick: on.toggleDetails,
         });
     }
-    actions.push({ glyph: "×", title: "Dismiss", danger: true, onClick: on.dismiss });
+    actions.push({ close: true, title: "Dismiss", onClick: on.dismiss });
 
     return {
         sigil: ICON[f.code] ?? "⚠",

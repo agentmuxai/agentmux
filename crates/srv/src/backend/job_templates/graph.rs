@@ -16,21 +16,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::manifest::{self, JobTemplateManifest};
-use crate::drone::types::{BlockKind, DroneGraph};
+use crate::backend::storage::drone_types::{BlockKind, DroneGraph};
 
 /// The most nodes and edges a template graph holds.
 pub const MAX_NODES: usize = 100;
 pub const MAX_EDGES: usize = 300;
 
 /// The node kinds this build has, for the error that names a missing one.
-const KINDS: &str = "agent, condition, api, response, variables, message, task, notify, app_query, transform, foreach";
+const KINDS: &str = "agent, condition, api, response, variables, message, task, notify, app_query, spawn, transform, foreach";
 
 /// What the approval prompt shows of a template's graph.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DroneSummary {
     pub nodes: u32,
-    /// Nodes that start an agent, each of which spends money.
+    /// Nodes that start an agent (an Agent node, or a Spawn node that opens a worker), each of which spends money.
     pub agents: u32,
     /// Every call that writes outside AgentMux, as `node id: METHOD url`.
     pub writes_outside: Vec<String>,
@@ -44,7 +44,7 @@ pub fn parse(raw: &[u8]) -> Result<DroneGraph, String> {
 }
 
 /// The kind a node names in `data.kind`.
-fn kind_of(node: &crate::drone::types::FlowNode) -> Result<BlockKind, String> {
+fn kind_of(node: &crate::backend::storage::drone_types::FlowNode) -> Result<BlockKind, String> {
     let name = node.data.get("kind").and_then(|k| k.as_str()).unwrap_or("");
     BlockKind::parse(name).ok_or_else(|| format!("graph.json: node {:?} is a {name:?} node, and this AgentMux has only {KINDS}", node.id))
 }
@@ -76,14 +76,15 @@ pub fn check(graph: &DroneGraph) -> Result<(), String> {
 }
 
 /// What the prompt shows of a checked graph. An `api` node that is not a
-/// plain read writes outside; the other nodes this build has stay inside
-/// AgentMux (a message goes to an agent on this computer).
+/// plain read writes outside; a Spawn node starts an agent, so it counts with
+/// the Agent nodes; the other nodes this build has stay inside AgentMux (a
+/// message goes to an agent on this computer).
 pub fn summarize(graph: &DroneGraph) -> DroneSummary {
     let mut out = DroneSummary { nodes: graph.nodes.len() as u32, ..DroneSummary::default() };
     for node in &graph.nodes {
         let text = |key: &str| node.data.get(key).and_then(|v| v.as_str()).map(str::trim).unwrap_or("");
         match kind_of(node) {
-            Ok(BlockKind::Agent) => out.agents += 1,
+            Ok(BlockKind::Agent | BlockKind::Spawn) => out.agents += 1,
             Ok(BlockKind::Api) => {
                 let method = text("method").to_uppercase();
                 let method = if method.is_empty() { "GET".to_string() } else { method };

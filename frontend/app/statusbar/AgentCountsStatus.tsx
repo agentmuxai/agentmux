@@ -1,9 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { attentionItems, type AttentionItem } from "@/app/notification/attention-list";
+import { attentionItems, sharedAttentionRows, type AttentionItem } from "@/app/notification/attention-list";
 import { runtimeCounts, type AgentRuntimeCounts } from "@/app/store/agent-runtime";
-import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
@@ -29,7 +28,7 @@ export function AgentCountsStatus(props: {
     rows?: Accessor<AgentRuntime[]>;
     items?: Accessor<AttentionItem[]>;
 }): JSX.Element {
-    const rows = () => (props.rows ?? sharedAgentRuntime().rows)();
+    const rows = () => (props.rows ?? sharedAttentionRows)();
     const items = () => (props.items ?? attentionItems)();
     const counts = createMemo(() => {
         const c = runtimeCounts(rows());

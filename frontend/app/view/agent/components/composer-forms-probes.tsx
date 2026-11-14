@@ -10,7 +10,7 @@
 
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor, type JSX } from "solid-js";
 
-import { COMPACT_ORDER, chooseCompactKeys, chooseMiddleBudget } from "./composer-forms";
+import { COMPACT_ORDER, chooseForms, type RankedSlot } from "./composer-forms";
 
 /** The part of a strip slot the forms need. */
 export interface FormSlot {
@@ -86,34 +86,6 @@ function formWidthsOf(
     return { full, compact, order: COMPACT_ORDER.filter((k) => probed.includes(k)) };
 }
 
-/**
- * A compact slot with budgets takes the widest one that keeps the rows the strip has: free room in the row is
- * used, never a row more. Chosen from measured widths (bucketed), so a ticking readout can't flip it.
- */
-function chooseBudgets(
-    slots: FormSlot[],
-    w: ReturnType<typeof formWidthsOf>,
-    collapsed: Set<string>,
-    middle: Measured["middle"],
-    rowCount: (widths: Record<string, number>) => number
-): Record<string, number> {
-    const out: Record<string, number> = {};
-    if (!w) return out;
-    const base = { ...w.full, ...Object.fromEntries([...collapsed].map((k) => [k, w.compact[k]])) };
-    const rows = rowCount(base);
-    for (const slot of slots) {
-        if (!slot.budgets || !collapsed.has(slot.key)) continue;
-        const measuredAt = middle[slot.key] ?? {};
-        const budget = chooseMiddleBudget(
-            slot.budgets,
-            (b) => measuredAt[b],
-            (width) => rowCount({ ...base, [slot.key]: width }) <= rows
-        );
-        if (budget !== undefined) out[slot.key] = budget;
-    }
-    return out;
-}
-
 export function useSlotForms(
     slots: Accessor<FormSlot[]>,
     stripWidth: Accessor<number>,
@@ -143,15 +115,18 @@ export function useSlotForms(
 
     const formWidths = createMemo(() => formWidthsOf(stripWidth(), slotWidths(), measured(), probeKeys()));
 
-    const compactKeys = createMemo((): Set<string> => {
+    // The slots that go compact, and the middle form of the one with budgets (the account) that keeps the widest form
+    // room can be made for: its form comes first, so it is never shorter in a wider strip (composer-forms.ts chooseForms).
+    const forms = createMemo((): { keys: Set<string>; budgets: Record<string, number> } => {
         const w = formWidths();
-        return w ? chooseCompactKeys(w.order, w.full, w.compact, rowCount) : new Set();
-    }, new Set<string>());
-
-    const budgets = createMemo(
-        () => chooseBudgets(slots(), formWidths(), compactKeys(), measured().middle, rowCount),
-        {} as Record<string, number>
-    );
+        if (!w) return { keys: new Set(), budgets: {} };
+        const slot = slots().find((s) => s.compact && s.budgets && w.order.includes(s.key));
+        const ranked: RankedSlot | undefined = slot && { key: slot.key, budgets: slot.budgets!, middle: measured().middle[slot.key] ?? {} };
+        const { keys, budget } = chooseForms(w.order, w.full, w.compact, rowCount, ranked);
+        return { keys, budgets: slot && budget !== undefined ? { [slot.key]: budget } : {} };
+    }, { keys: new Set<string>(), budgets: {} });
+    const compactKeys = (): Set<string> => forms().keys;
+    const budgets = (): Record<string, number> => forms().budgets;
 
     const layoutWidths = createMemo((): Record<string, number> => {
         const widths = { ...slotWidths() };

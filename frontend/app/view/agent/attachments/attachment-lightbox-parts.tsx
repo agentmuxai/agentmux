@@ -4,7 +4,7 @@
 /* The attachment preview's views, over a state from attachment-lightbox-state.ts: the picture, text or details, and the bar. */
 
 import { Match, Show, Switch, type JSX } from "solid-js";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, CloseButton, IconButton } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { formatBytes } from "@/util/format-bytes";
 import type { AttachmentInfo } from "@/types/rpc/AttachmentInfo";
@@ -162,7 +162,7 @@ function Actions(props: { s: LightboxState; p: LightboxProps }): JSX.Element {
                     Remove
                 </Button>
             </Show>
-            <IconButton icon="xmark" label="Close preview" tooltip={false} title="Close (Esc)" onClick={() => p.onClose()} />
+            <CloseButton label="Close preview" tooltip={false} title="Close (Esc)" onClick={() => p.onClose()} />
         </span>
     );
 }

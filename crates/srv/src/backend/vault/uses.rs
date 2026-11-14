@@ -66,6 +66,9 @@ pub struct UseRequest {
     /// An agent's sign-in with a saved `login` (`Browser` `signin`): `field` is
     /// then the masked user name, and "Always" is for this agent on this site.
     pub signin: bool,
+    /// An agent's new account on a sign-up form (`Browser` `generate_password`): the
+    /// Vault makes the password. There is no entry yet; `origin` is the site.
+    pub account: bool,
     #[ts(type = "number")]
     pub requested_ms: u64,
     /// When silence decides: it goes ahead then if `goes_ahead`, else it is
@@ -136,9 +139,10 @@ pub fn goes_ahead_on_silence(kind: &str, needs_value: bool) -> bool {
     !needs_value && matches!(kind, "api-key" | "login" | "note")
 }
 
-/// Whether `req` goes ahead when nobody answers: [`goes_ahead_on_silence`], and never a copy of a secret from elsewhere.
+/// Whether `req` goes ahead when nobody answers: [`goes_ahead_on_silence`], and never a copy of a secret from elsewhere,
+/// nor a new account (an agent makes one only on the person's yes).
 pub fn goes_ahead(req: &UseRequest) -> bool {
-    req.import.is_none() && goes_ahead_on_silence(&req.kind, req.needs_value)
+    req.import.is_none() && !req.account && goes_ahead_on_silence(&req.kind, req.needs_value)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

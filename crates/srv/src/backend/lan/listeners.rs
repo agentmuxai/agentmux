@@ -479,7 +479,7 @@ impl LanListenerSupervisor {
     /// HTTP/1.1 until `token` is cancelled, which also drops every open
     /// connection (and with it every open feed). Each request carries the
     /// peer's address as `ConnectInfo`, for the pairing rate limit.
-    pub(crate) fn serve_tls(
+    pub fn serve_tls(
         router: axum::Router,
         std_listener: std::net::TcpListener,
         acceptor: tokio_rustls::TlsAcceptor,

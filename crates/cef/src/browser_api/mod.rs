@@ -45,6 +45,7 @@ pub mod hibernation;
 pub mod hidden_choices;
 pub mod key_typing;
 pub mod last_input;
+pub mod nav_settle;
 pub mod page_state;
 pub mod page_url;
 pub mod press;
@@ -58,6 +59,7 @@ pub mod shortcuts;
 pub mod shown_once;
 pub mod signin_fill;
 pub mod signup_fill;
+pub mod signup_probe;
 pub mod snapshot;
 pub mod terminal;
 pub mod text_read;
@@ -95,6 +97,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/card_form", post(vault_card_form::card_form_route))
         .route("/agentmux/browser/signin_fill", post(signin_fill::signin_fill_route))
         .route("/agentmux/browser/signup_fill", post(signup_fill::signup_fill_route))
+        .route("/agentmux/browser/signup_probe", post(signup_probe::signup_probe_route))
         .route("/agentmux/browser/capture_value", post(capture::capture_value_route))
         .route("/agentmux/browser/capture_mark", post(capture::capture_mark_route))
         .route("/agentmux/browser/capture_download", post(capture_download::capture_download_route))

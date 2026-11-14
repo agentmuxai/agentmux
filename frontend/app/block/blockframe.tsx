@@ -10,7 +10,7 @@ import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { connBarShows } from "@/app/store/conn-status-rules";
-import { openMenuAt } from "@/app/element/ui";
+import { CloseButton, openMenuAt } from "@/app/element/ui";
 import { devModeOn } from "@/app/store/dev-mode";
 import { atoms, getConnStatusAtom, getSettingsKeyAtom, MOS, useBlockAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -20,7 +20,8 @@ import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ClosingLabel } from "./closing-label";
-import { minimizeToHeader, useBlockConnection, useBodyContextMenu, useHeaderFit, useHeaderScrollRange } from "./blockframe-hooks";
+import { minimizeToHeader, useBlockConnection, useBodyContextMenu, useHeaderFit } from "./blockframe-hooks";
+import { useHeaderScrollRange } from "./header-scroll-range";
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -29,7 +30,7 @@ import * as util from "@/util/util";
 import { FaviconImage } from "@/app/element/FaviconImage";
 import clsx from "clsx";
 import type { Accessor, JSX, Setter } from "solid-js";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { CopyButton } from "../element/copybutton";
 import { getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { BlockFrameProps } from "./blocktypes";
@@ -421,13 +422,6 @@ function EndIcons(props: {
         return (floatingLabel() && tabId ? floaterPaneBlockId(tabId) : undefined) ?? props.blockId();
     };
 
-    const closeDecl: IconButtonDecl = {
-        elemtype: "iconbutton",
-        icon: "xmark",
-        title: "Close",
-        click: props.nodeModel.onClose,
-    };
-
     const closing = () => props.nodeModel.isClosing?.() ?? false;
 
     return (
@@ -479,7 +473,7 @@ function EndIcons(props: {
                     }}
                 />
             </Show>
-            <DeclIconButton decl={closeDecl} className="block-frame-default-close" />
+            <CloseButton size="header" class="block-frame-default-close" tooltip={false} {...tip("Close")} onClick={props.nodeModel.onClose} />
         </Show>
     );
 }
@@ -596,17 +590,17 @@ function BlockFrame_Header(
         );
     };
     const viewFaviconUrl = createMemo(() => util.useAtomValueSafe(props.viewModel?.viewFaviconUrl));
+    // All the icon draws from the block. Read whole, every write to the block rebuilt the icon.
+    const iconColor = createMemo(() => blockData()?.meta?.["icon:color"]);
     const viewIconElem = createMemo(() => {
         const favUrl = viewFaviconUrl();
-        // Diag for the favicon path — log every recomputation of this
-        // memo for browser-view blocks so muxlog shows whether the
-        // atom is being read with a non-empty value. Throttle is the
-        // memo itself: it only re-fires when the dependent atom
-        // changes, so this won't spam.
-        if (paneTabCapability(blockData()?.meta?.view, "nativeSurface")) {
+        iconColor();
+        const bd = untrack(blockData);
+        // Diag for the favicon path: one line per rebuild of a browser pane's icon.
+        if (paneTabCapability(bd?.meta?.view, "nativeSurface")) {
             const vmId = (props.viewModel as any)?.__diagVmId ?? "?";
             console.log(
-                `[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)} vm=${vmId}] header-render favUrl=${JSON.stringify(favUrl ?? "")}`
+                `[browser-pane:diag][${(bd?.oid ?? "").slice(0, 7)} vm=${vmId}] header-render favUrl=${JSON.stringify(favUrl ?? "")}`
             );
         }
         if (favUrl) {
@@ -617,13 +611,13 @@ function BlockFrame_Header(
                         src={favUrl}
                         size={14}
                         onLoad={() =>
-                            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load ok src=${JSON.stringify(favUrl)}`)
+                            console.log(`[browser-pane:diag][${(bd?.oid ?? "").slice(0, 7)}] favicon-load ok src=${JSON.stringify(favUrl)}`)
                         }
                     />
                 </div>
             );
         }
-        return getViewIconElem(viewIconUnion(), blockData());
+        return getViewIconElem(viewIconUnion(), bd);
     });
 
     // With the tab strip in place of the iconview, the view icon itself is

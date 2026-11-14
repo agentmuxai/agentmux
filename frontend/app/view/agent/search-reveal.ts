@@ -10,6 +10,7 @@
  */
 
 import type { DocumentNode, HiddenRunNode } from "../../agent-model/types";
+import { afterTwoFrames } from "../../util/after-two-frames";
 
 export interface SearchRevealOptions {
     /** The rows the pane shows now, hidden-run lines included. */
@@ -21,8 +22,6 @@ export interface SearchRevealOptions {
     /** Run a jump once the opened run's rows are laid out; the default waits two frames. */
     afterOpen?: (jump: () => void) => void;
 }
-
-const afterTwoFrames = (jump: () => void) => requestAnimationFrame(() => requestAnimationFrame(jump));
 
 export function createSearchReveal(opts: SearchRevealOptions) {
     const opened = new Set<string>();

@@ -270,7 +270,7 @@ fn system_path_of(name: &str) -> Option<String> {
 /// Run `cmd --version-arg` and extract the first version-looking token.
 /// Returns `Some(version_string)` on success, `None` if the command fails or
 /// the output contains no recognisable version token.
-pub(crate) fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<String> {
+pub fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<String> {
     probe_version_with_env(cmd, version_arg, &[])
 }
 

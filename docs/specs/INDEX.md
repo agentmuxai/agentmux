@@ -359,6 +359,7 @@ partial list.
 | [`SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29`](SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md) | SPEC: Floating-pane edge-resize (Win32) |
 | [`SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15`](SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15.md) | Spec: A Redock button in the floating pane's header |
 | [`SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03`](SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03.md) | Spec: Redock puts a floating pane back where it was torn from (best effort), else to the right as today |
+| [`SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16`](SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16.md) | Spec: Floating pane window controls: Redock placement and size, a real Restore when maximized, and drag-to-restore |
 | [`SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02`](SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02.md) | SPEC: `GlobalMemoryList` lists the system rows too, flagged and read-only |
 | [`SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) | SPEC: Global Memory "system" tier — an AgentMux-controlled, highest-priority entry |
 | [`SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15`](SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md) | Spec: Global Memory — unify "system" and "ordinary" into one Memory list (postmortem + refactor plan) |
@@ -390,6 +391,7 @@ partial list.
 | [`SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13`](SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md) | Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes |
 | [`SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17`](SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17.md) | SPEC: Linux Dock/Taskbar Instance Grouping Fix |
 | [`SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13`](SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) | SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection) |
+| [`SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16`](SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16.md) | Spec: Linux window controls that look like Linux |
 | [`SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24`](SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md) | SPEC — macOS browser pane: show AgentMux's right-click menu above the page |
 | [`SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24`](SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24.md) | SPEC — macOS browser pane: typing reaches the page |
 | [`SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24`](SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md) | SPEC: macOS DMG Per-Build Channel Isolation |
@@ -477,6 +479,7 @@ partial list.
 | [`SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03`](SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md) | SPEC: resize through collapsed panes — every edge of a collapsed run resizes the expanded panes either side |
 | [`SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24`](SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md) | SPEC: Move the narrow-width responsive tab bar to the top (from the bottom) |
 | [`SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05`](SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md) | SPEC: Retire the Armory — two panes, Connectors and Knowledge |
+| [`SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14`](SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14.md) | Spec: review and checks flow, two events and a recent list (for the Atlas review bot and CI nodes) |
 | [`SPEC_SAGA_DURABILITY_2026-05-01`](SPEC_SAGA_DURABILITY_2026-05-01.md) | SPEC: Saga durability — durable saga log |
 | [`SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) | Spec: Make `settings.json` isolated-by-default for every non-`stable` channel |
 | [`SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22`](SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md) | SPEC — Settings commit on blur, not on change; plus the remaining terminal live-apply gaps |
@@ -737,6 +740,7 @@ partial list.
 | [`SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14`](SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md) | SPEC: Google in Connectors: Gmail, Calendar and Drive for every agent |
 | [`SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01`](SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01.md) | SPEC: Google Phase B: AgentMux's own client, so a person clicks Connect, signs in and consents |
 | [`SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24`](SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24.md) | Spec: GPU Memory Tracing Scaffolding — a real trace, not another process-level guess |
+| [`SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12`](SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md) | Spec: AgentMux as a server-only package, with a free local web UI (task #2522, build #2523) |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |
 | [`SPEC_HELP_HIDDEN_TIPS_2026_10_10`](SPEC_HELP_HIDDEN_TIPS_2026_10_10.md) | Hidden tips in the Help pane: the gestures nobody would guess |
 | [`SPEC_HELP_PANE_FILTER_2026_10_08`](SPEC_HELP_PANE_FILTER_2026_10_08.md) | A filter for the Help pane, on one shared filter box |
@@ -783,6 +787,7 @@ partial list.
 | [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for MuxAPI |
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over MuxAPI |
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
+| [`SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02`](SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md) | muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN) |
 | [`SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03`](SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md) | SPEC: My Agents tiles — larger tiles, an honest auth line, real history summaries, and no ambient credentials |
 | [`SPEC_NIGHTLY_PERF_REGRESSION_2026_10_19`](SPEC_NIGHTLY_PERF_REGRESSION_2026_10_19.md) | Spec: a nightly performance regression check |
 | [`SPEC_NINE_NEW_HARNESSES_2026_10_14`](SPEC_NINE_NEW_HARNESSES_2026_10_14.md) | Spec: Nine new harnesses — OpenCode, Kilo Code, Cline, goose, Grok Build, DeepSeek Harness, Muse Code, Crush, Aider |
@@ -830,6 +835,7 @@ partial list.
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SUPER_AGENT_2026_10_25`](SPEC_SUPER_AGENT_2026_10_25.md) | Spec: the super agent, one place for sensitive operations |
+| [`SPEC_SWARM_CLOUD_TIER_2026_11_14`](SPEC_SWARM_CLOUD_TIER_2026_11_14.md) | Spec: The cloud tier: agents on the account's other machines that are not on the LAN, listed by srv for the Swarm and Atlas |
 | [`SPEC_SWARM_FILTER_BAR_2026_10_29`](SPEC_SWARM_FILTER_BAR_2026_10_29.md) | The Swarm filter bar: narrow the agent list by name and by what an agent is working on |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_SWARM_REFINEMENTS_2026_10_17`](SPEC_SWARM_REFINEMENTS_2026_10_17.md) | Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents |
@@ -946,7 +952,6 @@ partial list.
 | [`SPEC_FLOATING_PANE_SOURCE_WINDOW_2026_10_13`](SPEC_FLOATING_PANE_SOURCE_WINDOW_2026_10_13.md) | Spec: "Open in Floating Pane" knows which window it came from |
 | [`SPEC_FLOATING_PANE_TEAROFF_2026_05_11`](SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) | Floating pane tear-off (subordinate window, owned by mother instance) |
 | [`SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26`](SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) | Floating pane tear-off — cross-platform recipes |
-| [`SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16`](SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16.md) | Spec: Floating pane window controls: Redock placement and size, a real Restore when maximized, and drag-to-restore |
 | [`SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20`](SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20.md) | Spec: Foreground/Background Process Abstraction for Agent-Run Commands |
 | [`SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24`](SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md) | SPEC — Global Identity, Memory, and Drone Definitions |
 | [`SPEC_GPU_PROCESS_MEMORY_2026_10_13`](SPEC_GPU_PROCESS_MEMORY_2026_10_13.md) | Spec: why the GPU process holds 394 MB in the field, and what stops it |
@@ -960,7 +965,6 @@ partial list.
 | [`SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25`](SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md) | SPEC: Linux AppImage Per-Build Channel Isolation |
 | [`SPEC_LINUX_DOCS_UPDATE_2026_06_06`](SPEC_LINUX_DOCS_UPDATE_2026_06_06.md) | SPEC — Linux documentation catch-up |
 | [`SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30`](SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md) | Linux floating-pane tear-off — implementation spec |
-| [`SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16`](SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16.md) | Spec: Linux window controls that look like Linux |
 | [`SPEC_LOCAL_BUILD_VERSIONING_2026_05_28`](SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) | SPEC: Local-build versioning — stop committing bumps for smoke builds (2026-05-28) |
 | [`SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24`](SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md) | SPEC — Long-Running Process UX: Working Stuck + Red X |
 | [`SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28`](SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md) | macOS CEF Framework Bundling for `task dev` and `task package:macos` |
@@ -980,7 +984,6 @@ partial list.
 | [`SPEC_MODEL_EFFORT_CAPABILITY_VALIDATION_2026_07_02`](SPEC_MODEL_EFFORT_CAPABILITY_VALIDATION_2026_07_02.md) | SPEC — Per-model effort-capability validation for the composer strip |
 | [`SPEC_MULTIWINDOW_TASKBAR_GROUPING`](SPEC_MULTIWINDOW_TASKBAR_GROUPING.md) | SPEC: Multi-Window Taskbar Behaviour — Full Instances + Sub-Windows |
 | [`SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15`](SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md) | SPEC: MuxBus cloud-relayed login callback (no loopback listener) |
-| [`SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02`](SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md) | muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN) |
 | [`SPEC_NAMED_AGENT_CONTINUATION_2026_05_12`](SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md) | Spec: Named agent continuation — launch modal dropdown of existing agents |
 | [`SPEC_ORPHAN_THINKING_NODES_2026_05_27`](SPEC_ORPHAN_THINKING_NODES_2026_05_27.md) | SPEC: Orphan in-progress nodes — cancel + collapse on session reopen |
 | [`SPEC_PANE_CLOSE_CONFIRM_NAMES_PROCESSES_2026_09_23`](SPEC_PANE_CLOSE_CONFIRM_NAMES_PROCESSES_2026_09_23.md) | SPEC: The pane-close confirmation names the processes it will stop |
@@ -1151,6 +1154,7 @@ partial list.
 | [`SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05`](SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05.md) | SPEC: Practice time for building computer-use skills, and two new ones: Voicemeeter and Cantabile |
 | [`SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13`](SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md) | SPEC — Consolidate Forge + Identity into the Agent Pane |
 | [`SPEC_CONTAINER_PANE_SUPPORT_2026_06_11`](SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) | SPEC: Container Pane Support |
+| [`SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14`](SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14.md) | Spec: Container status in the frontend: each agent's runtime kind, and a live list of this machine's agent containers |
 | [`SPEC_CONTEXT_VISIBILITY_2026_06_17`](SPEC_CONTEXT_VISIBILITY_2026_06_17.md) | SPEC: Context & Token Visibility — what we can show the user, and how |
 | [`SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25`](SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md) | Cron & Loop Robustness — Research + Design |
 | [`SPEC_CROSS_PROCESS_DISPATCH_2026-05-01`](SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md) | Cross-Process Dispatch — Launcher → Host Command Pipe |

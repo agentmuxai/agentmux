@@ -12,9 +12,10 @@
 //! Variables. The Function block (`quickjs-rs` sandbox) is Phase 2.
 //!
 //! Architecture:
-//!   * `types.rs`        — DroneDefinition, DroneRun, FlowNode, FlowEdge.
-//!   * `storage.rs`      — mstore CRUD over db_drone_definitions
-//!                         + db_drone_runs.
+//!   * `types`           — DroneDefinition, DroneRun, FlowNode, FlowEdge
+//!                         (backend/storage/drone_types.rs).
+//!   * `storage`         — mstore CRUD over db_drone_definitions
+//!                         + db_drone_runs (backend/storage/drone_store.rs).
 //!   * `executor/`       — DAG topological sort + per-layer concurrent runner.
 //!   * `executor/blocks` — one file per block type.
 //!   * `data_flow.rs`    — `{{var}}` interpolation (Mustache-style; see RFC §2 Q5).
@@ -24,9 +25,9 @@ pub mod data_flow;
 pub mod executor;
 pub(crate) mod host;
 pub mod state;
-pub mod storage;
+pub use crate::backend::storage::drone_store as storage;
 pub mod transform;
-pub mod types;
+pub use crate::backend::storage::drone_types as types;
 pub mod value;
 pub mod versions;
 
@@ -35,6 +36,8 @@ pub mod versions;
 // tests are `ignore`d until then (see the head of each file).
 #[cfg(test)]
 mod state_acceptance_tests;
+#[cfg(test)]
+mod store_tests;
 #[cfg(test)]
 mod transform_acceptance_tests;
 #[cfg(test)]

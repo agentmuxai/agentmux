@@ -46,7 +46,7 @@ use rusqlite::Connection;
 use super::error::StoreError;
 
 #[path = "agents_consolidate_steps.rs"]
-mod steps;
+pub mod steps;
 
 /// Marker filename. Lives in the data dir (one level above the `db/`
 /// subdir that holds `objects.db`).

@@ -9,14 +9,14 @@
       ],
       "why": "Accounts, bundles, MuxBus credentials, jobs, and the agent-to-account links, memory and cron jobs follow the person across installs and channels (SPEC_IDENTITY_STORE_SPLIT_2026_08_17, SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03).",
       "gate": "user_version (SHARED_STORE_SCHEMA_VERSION, IDENTITY_STORE_SCHEMA_VERSION): a build refuses a newer file (check_schema_compat) before it opens it, and the person is told.",
-      "lock": "SQLite WAL between srvs of one version; shared/locks/srv-writers keeps a srv of another version out (bootstrap/shared_guard.rs); migrations.lock.db for a migration batch.",
+      "lock": "SQLite WAL between srvs of one version; shared/locks/srv-writers keeps a srv of another version out (registry/shared_guard.rs); migrations.lock.db for a migration batch.",
       "users": [
         "crates/srv/src/registry/paths.rs",
         "crates/srv/src/registry/mod.rs",
         "crates/srv/src/bootstrap/store_attach.rs",
         "crates/srv/src/bootstrap/stores.rs",
         "crates/srv/src/bootstrap/shared_root.rs",
-        "crates/srv/src/bootstrap/shared_guard.rs"
+        "crates/srv/src/registry/shared_guard.rs"
       ]
     },
     {
@@ -102,6 +102,19 @@
       ]
     },
     {
+      "name": "running instances",
+      "paths": [
+        "instances/"
+      ],
+      "why": "One instance on the machine can name and reach another (muxspect instances, muxspect --channel; SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02). A record holds the loopback URL and auth key of its srv.",
+      "gate": "None; a record that does not parse or names a non-loopback address is ignored, and a record is listed only while its process is alive and it was written in the last minute.",
+      "lock": "One file per instance, written atomically, rewritten every 20 s, removed at exit and by the reader once its process is gone.",
+      "users": [
+        "crates/srv/src/backend/instance_registry.rs",
+        "crates/srv/src/server/muxspect_instances.rs"
+      ]
+    },
+    {
       "name": "LAN instances",
       "paths": [
         "lan/instances/"
@@ -162,7 +175,7 @@
         "crates/srv/src/backend/continuity_relocate.rs",
         "crates/srv/src/server/agent_handlers/bundle.rs",
         "crates/srv/src/server/agent_handlers/identity_delete.rs",
-        "crates/srv/src/server/identity_auth_dirs.rs",
+        "crates/srv/src/identity/auth_dirs.rs",
         "crates/srv/src/server/providers_handlers.rs",
         "crates/srv/src/backend/providers.rs",
         "crates/srv/src/backend/codex_models.rs"

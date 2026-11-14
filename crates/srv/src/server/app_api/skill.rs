@@ -745,6 +745,7 @@ fn preview_app(
             .collect(),
         verified: b.verified.clone(),
         content_hash: b.content_hash.clone(),
+        from_catalog: false,
     }
 }
 

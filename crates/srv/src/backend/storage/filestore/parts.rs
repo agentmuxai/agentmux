@@ -71,8 +71,8 @@ pub(super) fn tail_capacity(content: usize) -> usize {
 /// append does to a padded row, which is to bump `rev` (its `REPLACE` writes a row shorter than
 /// the old one, which the revision trigger reads as a rewrite): a new generation, once, when a
 /// file's writer goes from the new build to an older one (tests_tail_slack.rs).
-#[cfg(test)]
-pub(crate) fn strip_slack(conn: &Connection, zone_id: &str, name: &str) {
+#[cfg(any(test, feature = "test-support"))]
+pub fn strip_slack(conn: &Connection, zone_id: &str, name: &str) {
     let row: Option<(i64, Option<i64>)> = conn
         .query_row("SELECT size, rev FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![zone_id, name], |r| Ok((r.get(0)?, r.get(1)?)))
         .optional()

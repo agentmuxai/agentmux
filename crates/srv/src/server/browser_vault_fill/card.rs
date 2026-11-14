@@ -66,6 +66,9 @@ fn part_names(fields: &[CardField]) -> Vec<&'static str> {
 
 /// Takes the call when `vault` names a whole card, `None` for any other fill.
 pub(super) async fn whole_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, block_id: &str, agent: &str, reason: &str) -> Option<Response> {
+    if req.vault.is_none() && req.request_kind.as_deref().map(str::trim) == Some("card") {
+        return Some(typed::typed_card(state, caller, req, block_id, agent).await);
+    }
     let wanted = req.vault.clone()?;
     let (store, who) = (state.identity_store.clone(), agent.to_string());
     let found = tokio::task::spawn_blocking(move || {
@@ -177,10 +180,10 @@ async fn fill_all(state: &AppState, block_id: &str, origin: &str, fields: &[Card
     done
 }
 
-fn answer(card: &CardTarget, origin: &str, page: &str, done: &Outcome, went_ahead: bool) -> Value {
+fn answer(entry: &str, origin: &str, page: &str, done: &Outcome, went_ahead: bool) -> Value {
     let mut out = json!({
         // The entry's id and part names only: the brand, last four and expiry are the person's to see.
-        "filled_from_vault": card.fill.id,
+        "filled_from_vault": entry,
         "parts_filled": done.filled,
         "value": "[secret: hidden]",
         "site": origin,
@@ -288,25 +291,46 @@ async fn settle(state: &AppState, caller: Option<&Caller>, req: &VaultFillReques
     Ok(Settled { always: ended == Ended::Always && !card.expired, went_ahead: ended == Ended::WentAhead, card })
 }
 
-async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, block_id: &str, agent: &str, reason: &str, card: Option<CardTarget>, picker: Vec<CardTarget>) -> Response {
-    tracing::info!(agent = %agent, block_id = %block_id, entry = %card.as_ref().map(|c| c.fill.id.as_str()).unwrap_or("(the person picks)"), "[vault] a whole-card web form fill was asked for");
-    let form = match proxy_value(state, "card_form", json!({ "block_id": block_id, "ref": req.ref_ }), HOST_WAIT).await {
+/// What the host found of a card form: where it is, and the fields it matched to a card's parts.
+struct CardForm {
+    origin: String,
+    /// The page's origin when the fields are in another site's frame, else empty: the question and the grant carry both.
+    page: String,
+    grant_key: String,
+    fields: Vec<CardField>,
+    names: Vec<&'static str>,
+}
+
+/// Asks the host for the card form the field `ref_` is in, or says why there is none.
+async fn read_form(state: &AppState, block_id: &str, ref_: &str, instead: &str) -> Result<CardForm, Response> {
+    let form = match proxy_value(state, "card_form", json!({ "block_id": block_id, "ref": ref_ }), HOST_WAIT).await {
         Ok(v) => v,
-        Err((code, e)) => return err_response(code, e),
+        Err((code, e)) => return Err(err_response(code, e)),
     };
     let origin = form.get("origin").and_then(Value::as_str).unwrap_or("").to_string();
-    // The page's origin, when the fields are in another site's frame: the question and the grant carry both.
     let page = framed_in(&origin, form.get("page_origin").and_then(Value::as_str).unwrap_or(""));
     let grant_key = grant_site(&origin, &page);
     let fields = parse_fields(&form);
     if !fields.iter().any(|f| MAIN_SLOTS.contains(&f.shape.slot.as_str())) {
-        let named = card.as_ref().map(|c| c.fill.id.as_str()).unwrap_or("<id>");
-        return err_response(
-            StatusCode::BAD_REQUEST,
-            format!("no card number, expiry or security code field was found with that one: fill a single field with {named}.<part> (number, exp_month, exp_year, cvc, name, zip), or take a new snapshot"),
-        );
+        return Err(err_response(StatusCode::BAD_REQUEST, format!("no card number, expiry or security code field was found with that one: {instead}, or take a new snapshot")));
     }
     let names = part_names(&fields);
+    Ok(CardForm { origin, page, grant_key, fields, names })
+}
+
+/// Why nothing was filled, by part name: never a value.
+fn why_nothing(done: &Outcome) -> String {
+    done.failed.iter().chain(&done.left).map(|v| format!("{}: {}", v["part"].as_str().unwrap_or("?"), v["why"].as_str().unwrap_or("?"))).collect::<Vec<_>>().join("; ")
+}
+
+async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, block_id: &str, agent: &str, reason: &str, card: Option<CardTarget>, picker: Vec<CardTarget>) -> Response {
+    tracing::info!(agent = %agent, block_id = %block_id, entry = %card.as_ref().map(|c| c.fill.id.as_str()).unwrap_or("(the person picks)"), "[vault] a whole-card web form fill was asked for");
+    let named = card.as_ref().map(|c| c.fill.id.as_str()).unwrap_or("<id>");
+    let instead = format!("fill a single field with {named}.<part> (number, exp_month, exp_year, cvc, name, zip)");
+    let CardForm { origin, page, grant_key, fields, names } = match read_form(state, block_id, &req.ref_, &instead).await {
+        Ok(f) => f,
+        Err(response) => return response,
+    };
     let site = format!("{grant_key} (card form)");
     let Settled { mut card, always, went_ahead } = match settle(state, caller, req, (block_id, agent, reason), (&origin, &page, &names), (card, picker)).await {
         Ok(s) => s,
@@ -334,14 +358,16 @@ async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillReq
     card.fill.what = format!("card ({})", if done.filled.is_empty() { "nothing".to_string() } else { done.filled.join(", ") });
     if done.filled.is_empty() {
         record(state, block_id, &card.fill, agent, &site, "failed", reason);
-        let why = done.failed.iter().chain(&done.left).map(|v| format!("{}: {}", v["part"].as_str().unwrap_or("?"), v["why"].as_str().unwrap_or("?"))).collect::<Vec<_>>().join("; ");
+        let why = why_nothing(&done);
         return err_response(StatusCode::BAD_REQUEST, format!("nothing was filled: {why}"));
     }
     record(state, block_id, &card.fill, agent, &site, "done", reason);
     let (store, entry) = (state.identity_store.clone(), card.fill.id.clone());
     let _ = tokio::task::spawn_blocking(move || store.vault_touch(&entry, agentmux_common::time::now_ms())).await;
-    (StatusCode::OK, Json(json!({ "ok": true, "data": answer(&card, &origin, &page, &done, went_ahead) }))).into_response()
+    (StatusCode::OK, Json(json!({ "ok": true, "data": answer(&card.fill.id, &origin, &page, &done, went_ahead) }))).into_response()
 }
+
+mod typed;
 
 #[cfg(test)]
 mod tests {
@@ -370,8 +396,8 @@ mod tests {
     #[test]
     fn a_card_never_goes_ahead_on_silence_so_the_answer_carries_no_approval_note_unless_one_did() {
         let done = Outcome { filled: vec!["number"], ..Default::default() };
-        assert!(answer(&a_card(), "https://shop.example", "", &done, false).get("approval").is_none());
-        assert_eq!(answer(&a_card(), "https://shop.example", "", &done, true)["approval"], uses::WENT_AHEAD);
+        assert!(answer("card-a", "https://shop.example", "", &done, false).get("approval").is_none());
+        assert_eq!(answer("card-a", "https://shop.example", "", &done, true)["approval"], uses::WENT_AHEAD);
         assert!(!uses::goes_ahead(&card_question("a", String::new(), &Question { card: Some(&a_card()), picker: &[], origin: "https://shop.example", page: "", names: &["number"], offer_always: false, why: "x" }, "")), "silence denies a card");
     }
 }

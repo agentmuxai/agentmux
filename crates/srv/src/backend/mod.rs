@@ -3,6 +3,8 @@
 
 
 pub mod agent_admission;
+pub mod agent_route;
+pub mod session_snapshot;
 pub mod agent_grants;
 pub mod agent_line;
 pub mod agent_seat;
@@ -42,6 +44,7 @@ pub mod job_templates;
 pub mod vault;
 pub mod build_cache;
 pub mod build_cache_service;
+pub mod build_slot_idle;
 pub mod disk_notice;
 pub mod old_versions;
 pub mod old_versions_service;
@@ -51,11 +54,15 @@ pub mod bundle_import_skill_text;
 pub mod bundle_use;
 pub mod bundle_widgets;
 pub mod bundle_validate;
+pub mod background_task_exit;
 pub mod background_task_feed;
+pub mod background_task_pid;
+pub mod background_task_sweep;
 pub mod desktop_gate;
 pub mod dock_snapshot;
 pub mod fleet_feed;
 pub mod fleet_source;
+pub mod instance_registry;
 pub mod narrated_events;
 pub mod pending_background_pids;
 pub mod mcp_config_file;
@@ -106,6 +113,7 @@ pub mod host_os;
 pub mod lan;
 pub mod lsp;
 pub mod message_flow;
+pub mod pr_flow;
 pub mod task_flow;
 pub mod messagebus;
 pub mod notify;
@@ -140,6 +148,8 @@ pub mod continuity_state;
 pub mod builtin_skills;
 /// Reading a skill from a folder, a git repository or a URL, for import.
 pub mod computer_use_skill;
+/// The version of an application on this computer, found from the executable names a computer-use skill lists.
+pub mod app_version;
 pub mod skill_catalog;
 pub mod skill_file;
 pub mod skill_import;
@@ -156,6 +166,7 @@ pub mod pane_env;
 pub mod posix_shell;
 pub mod shellintegration;
 pub mod shells;
+pub mod swarm_cloud;
 pub mod swarm_remote;
 pub mod sampler;
 // The commit attribution that uses it is Windows-only; the logic is tested everywhere.
@@ -188,11 +199,12 @@ pub mod mps;
 pub mod mps_events;
 pub mod osc_extractor;
 pub mod tool_store;
-pub(crate) mod packaged_tools;
+pub mod packaged_tools;
 pub mod agent_env_scope;
-pub(crate) mod spawn_env;
+pub mod spawn_env;
 pub mod agent_tools;
 pub mod container;
+pub mod container_status;
 pub mod runtime_adapter;
 pub mod route_audience;
 pub mod audience;
@@ -222,8 +234,15 @@ pub mod sensitive_ops;
 /// The requests for those operations and what became of them.
 pub mod sensitive_requests;
 pub mod shutdown_events;
+pub mod startup_mode;
+pub mod sweep_stats;
+pub mod teardown_hooks;
+pub mod work_claims;
+pub mod prompt_events;
+pub mod drone_run_event;
 /// Replies that say nothing are not sent (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).
 pub mod ack_policy;
+pub mod jekt_seal;
 /// Quota mode, a fleet setting (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md section 5).
 pub mod quota_mode;
 /// How a bulletin reads to its receiver (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).

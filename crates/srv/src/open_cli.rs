@@ -24,27 +24,44 @@ use crate::server::local_proof;
 const STEP_LIMIT: Duration = Duration::from_secs(60);
 const POLL: Duration = Duration::from_millis(500);
 
-/// Runs `open` and exits when that is what srv was started as; returns for any other start.
+/// Runs `open` or `logout` and exits when that is what srv was started as; returns for any other start.
 pub(crate) async fn exit_if_requested() {
     let Ok(cli) = <CliArgs as clap::Parser>::try_parse_from(std::env::args_os()) else { return };
-    let Some(SrvCommand::Open { port, key_file, print, origin }) = cli.command else { return };
+    let (name, port, key_file, print, origin) = match cli.command {
+        Some(SrvCommand::Open { port, key_file, print, origin }) => ("open", port, key_file, print, origin),
+        Some(SrvCommand::Logout { port, key_file }) => ("logout", port, key_file, false, None),
+        _ => return,
+    };
     let code = match prepare(cli.wavedata.as_deref(), port, key_file, origin) {
-        Ok(target) => {
-            let mut terminal = Stdio;
-            match HttpServer::connect(&target).await {
-                Ok(server) => run(&server, &target.origin, print, &mut terminal).await,
-                Err(e) => {
-                    eprintln!("agentmux-srv open: {e}");
-                    3
-                }
+        Ok(target) => match HttpServer::connect(&target).await {
+            Ok(server) if name == "logout" => logout(&server).await,
+            Ok(server) => run(&server, &target.origin, print, &mut Stdio).await,
+            Err(e) => {
+                eprintln!("agentmux-srv {name}: {e}");
+                3
             }
-        }
+        },
         Err(e) => {
-            eprintln!("agentmux-srv open: {e}");
+            eprintln!("agentmux-srv {name}: {e}");
             3
         }
     };
     std::process::exit(code);
+}
+
+/// End every browser session of the server (`logout`): 0 done, 3 could not.
+async fn logout(server: &HttpServer) -> i32 {
+    match server.post("/auth/logout", serde_json::json!({})).await {
+        Ok(v) => {
+            let n = v["revoked"].as_u64().unwrap_or(0);
+            println!("Signed out {n} browser session{}.", if n == 1 { "" } else { "s" });
+            0
+        }
+        Err(e) => {
+            eprintln!("agentmux-srv logout: {e}");
+            3
+        }
+    }
 }
 
 pub(crate) struct Target {
@@ -156,7 +173,7 @@ pub(crate) async fn run<S: Server, T: Terminal>(server: &S, origin: &str, print:
             0
         }
         Ok(true) => {
-            terminal.say("Discarded. If your browser did not show that phrase, someone else used the code. Run `agentmux-srv open --print` and paste the line into your own browser.");
+            terminal.say("Discarded. If your browser did not show that phrase, someone else used the code. Run it again with --print and paste the line into your own browser.");
             1
         }
         Ok(false) => {

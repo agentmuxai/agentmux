@@ -28,8 +28,8 @@ export interface AtlasPanZoom {
     onPointerUp: (e: PointerEvent) => void;
 }
 
-/** A press on one of these is not a pan. */
-const NOT_BACKGROUND = ".atlas-node, .atlas-fold, .atlas-card";
+/** A press on one of these is not on the map's background: it neither pans nor draws a selection box. */
+export const NOT_BACKGROUND = ".atlas-node, .atlas-fold, .atlas-card";
 
 /**
  * `size` is the map's size, `mode` the layout shown (a change of layout is a new picture: it fits again), and

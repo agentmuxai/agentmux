@@ -32,7 +32,7 @@ impl SubprocessController {
     /// tell the pane (the `fresh` session-outcome frame: its divider, the meter
     /// reset and the memory fallback follow from it). Only between turns.
     /// Returns the old thread id.
-    pub(crate) fn start_fresh_session(&self) -> Result<Option<String>, &'static str> {
+    pub fn start_fresh_session(&self) -> Result<Option<String>, &'static str> {
         let old = {
             let mut inner = self.inner.lock().unwrap();
             if self.run_lock.load(Ordering::SeqCst) || !inner.pending_messages.is_empty() || self.health_monitor.is_active_turn() {

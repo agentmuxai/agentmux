@@ -8,7 +8,13 @@ use tower::ServiceExt;
 
 use crate::backend::reactive as backend_reactive;
 use crate::backend::wconfig;
-use crate::backend::wcore;
+
+// Tests that need the whole server (its router and state) but belong to a module below it.
+mod agent_move_here_tests;
+mod container_listener_tests;
+mod listener_itest;
+mod tower_peers_tests;
+mod turn_itest;
 
 /// A token for the agent whose slug is `name`, creating its row on first use:
 /// what a test attaches to a request that acts for an agent.
@@ -29,17 +35,10 @@ pub(crate) fn actor_in(body: &serde_json::Value) -> String {
 }
 
 pub(crate) fn test_state() -> AppState {
-    let mstore = Arc::new(Store::open_in_memory().unwrap());
-    // This one store backs mstore/id_store/identity_store below, so it has to
-    // carry BOTH schemas. Without the identity schema, any handler touching a
-    // table that lives only in the global identity store (`db_work_queue`)
-    // failed with a bare "no such table" 500 in tests while being perfectly
-    // correct in production. Additive and idempotent — every statement in that
-    // schema is CREATE ... IF NOT EXISTS.
-    mstore.apply_identity_schema_for_tests().unwrap();
-    let filestore = Arc::new(FileStore::open_in_memory().unwrap());
-    let event_bus = Arc::new(EventBus::new());
-    let broker = Arc::new(Broker::new());
+    // The store, file store, event bus and broker come from the core fixture, which core tests use
+    // by themselves. This one store backs mstore/id_store/identity_store below and carries both
+    // schemas (see `core_parts`).
+    let crate::test_support::CoreParts { mstore, filestore, event_bus, broker, srv_state } = crate::test_support::core_parts();
     let reactive_handler = backend_reactive::get_global_handler();
     let poller = Arc::new(Poller::new(
         backend_reactive::PollerConfig {
@@ -49,9 +48,6 @@ pub(crate) fn test_state() -> AppState {
         },
         reactive_handler,
     ));
-
-    // Bootstrap initial data
-    wcore::ensure_initial_data(&mstore).unwrap();
 
     let config_watcher = Arc::new(wconfig::ConfigState::new());
 
@@ -111,11 +107,10 @@ pub(crate) fn test_state() -> AppState {
         process_tracker,
         process_broker,
         dock_snapshots: Arc::new(crate::backend::dock_snapshot::DockSnapshotCache::new()),
-        pending_background_pids: Arc::new(crate::backend::pending_background_pids::PendingBackgroundPids::new()),
         narrated_events: Arc::new(crate::backend::narrated_events::NarratedEvents::new()),
         // Phase E.2c.2 — workspace RPC dispatches through reducer.
         // Tests get fresh state + a dummy broadcast bus.
-        srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
+        srv_state,
         srv_events_tx: tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(64).0,
         saga_id_alloc: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         // Saga durability (PR 1) — in-memory log so tests stay

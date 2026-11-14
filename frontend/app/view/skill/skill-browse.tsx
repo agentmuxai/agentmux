@@ -15,7 +15,7 @@ import { Button, Pill } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AppSkillCatalogItem } from "@/types/rpc/AppSkillCatalogItem";
-import { appPlatform, catalogStatus, forAnotherOs, osNames, pillTone } from "./skill-app-model";
+import { appHereLine, appPlatform, catalogStatus, forAnotherOs, osNames, pillTone } from "./skill-app-model";
 import type { SkillCatalogModel } from "./skill-model";
 import "./skill-app.scss";
 import "./skill-browse.scss";
@@ -28,7 +28,7 @@ function installAction(item: AppSkillCatalogItem): { label: string; note?: strin
         case "update":
             return { label: `Update to ${item.entry.version}`, note: `Installed here: ${item.installed_version}` };
         case "changed":
-            return { label: "Replace with the catalog's", note: `The same version ${item.entry.version} is installed here with other files` };
+            return { label: "Replace with the catalog's", note: `The same version ${item.entry.version} is installed here, but not as the catalog lists it` };
         case "newer_here":
             return null;
         default:
@@ -97,6 +97,7 @@ function BrowseItem(p: {
                 <BadgePill item={p.item} /> <Pill tone={pillTone(status().tone)}>{status().label}</Pill>
             </p>
             <p class="skill-app-line">{p.item.entry.description}</p>
+            <Show when={appHereLine(p.item, platform)}>{(line) => <p class="skill-app-line skill-app-muted">{line()}</p>}</Show>
             <p class="skill-app-line skill-app-muted">
                 Works on {osNames(p.item.entry.platforms) || "no platform listed"} · routes: {[...new Set(p.item.entry.routes)].join(", ")}
             </p>

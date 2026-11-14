@@ -11,13 +11,15 @@
 //! leaves ([`crate::server`] `file_icons`). Elsewhere there is no source yet and
 //! the route answers 501, which the page reads as "use the built-in icons".
 
-mod assoc;
-mod cache;
+pub mod assoc;
+#[cfg(windows)]
+pub(crate) use assoc::registry_string;
+pub mod cache;
 pub mod child;
-mod pool;
+pub mod pool;
 pub mod request;
 #[cfg(windows)]
-mod shell_windows;
+pub mod shell_windows;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

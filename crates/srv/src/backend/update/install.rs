@@ -386,6 +386,9 @@ mod tests {
     fn the_filesystem_checks_follow_the_real_folder() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
+        // `tempdir()` makes the folder 0777 & !umask: group-writable under a umask of 002 (charlie's), and
+        // an app beside a folder its group can change is refused on purpose. Set the mode, not the umask's.
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(writable_dir(dir.path()));
         assert!(!on_read_only_volume(dir.path()));
         // A bundle laid out like the release's, in a folder the user can write.

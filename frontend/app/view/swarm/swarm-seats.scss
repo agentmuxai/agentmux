@@ -3,21 +3,44 @@
 //
 // Seats in the Swarm (swarm-seats.tsx; docs/specs/SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4).
 
-// The badge sits right after the name; the row's other chips stay at its end.
-.swarm-agent-label:has(+ .swarm-seat-badge) {
+// The badge sits right after the name (the row's rule for a name with a badge, in swarm-view.scss, keeps the
+// name from growing). The row lays out the badge's slot; the slot's margin keeps the row's other chips at the
+// row's end.
+//
+// The badge fills its slot and is cut with an ellipsis as the slot narrows, down to about three letters.
+// Narrower than that it is not shown at all, never as a stub of its padding: the slot is one line high and
+// wraps, and the badge comes after an empty first item as high as the slot, so a badge that no longer fits
+// wraps under that item and is clipped away.
+.swarm-seat-slot {
     flex: 0 1 auto;
-    min-width: 2em;
-}
-
-.swarm-seat-badge {
-    flex: 0 1 auto;
+    display: inline-flex;
+    flex-wrap: wrap;
     min-width: 0;
     max-width: 45%;
+    // The badge's own height: its line and its border. The slot has the badge's font size, so `lh` is the same.
+    height: calc(1lh + 2px);
     margin-right: auto;
+    overflow: hidden;
+    font-size: var(--text-xs);
+    line-height: 1.5;
+
+    &::before {
+        content: "";
+        height: calc(1lh + 2px);
+    }
+}
+
+// Under the slot, so it outranks the kit pill's own rules whichever stylesheet comes last. A block and not the
+// pill's flex box, which takes no ellipsis. Its least width leaves its words 4ch, or their own width when they
+// are shorter: the width is the whole box, so the pill's padding and border (pill.scss) are added to the 4ch.
+.swarm-seat-slot .swarm-seat-badge {
+    display: block;
+    flex: 1 1 0;
+    box-sizing: border-box;
+    min-width: calc-size(max-content, min(size, 4ch + 2 * var(--space-2) + 2px));
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    line-height: 1.5;
 }
 
 // Select all / none on the left, Group by on the right; they wrap under each other when narrow.

@@ -26,6 +26,7 @@ import type { JektMessageNode, SystemNoteNode } from "../../../agent-model/types
 import { arrivedLive } from "../virtualization/live-arrival";
 import { CollapsibleMessage } from "./CollapsibleMessage";
 import { JektMeta, JektTags } from "./JektParts";
+import { sigLabel, sigTone } from "./jekt-trust-wording";
 import { PreviewLines } from "./PreviewLines";
 import { previewBox } from "./scroll-handoff";
 
@@ -120,15 +121,15 @@ function NoteVariant(props: { node: SystemNoteNode }): JSX.Element {
             {/* Colour marks a trust problem only: a sender nothing proved, a signature that did not hold. */}
             <Show when={props.node.origin?.trust}>
                 {(trust) => (
-                    <Tag tone={trust().endsWith("-verified") ? "neutral" : "warn"} detail={`Trust: ${trust()}`}>
+                    <Tag tone={trust().endsWith("-verified") || props.node.origin?.sig === "expired" ? "neutral" : "warn"} detail={`Trust: ${trust()}`}>
                         {trust()}
                     </Tag>
                 )}
             </Show>
             <Show when={props.node.origin?.sig}>
                 {(sig) => (
-                    <Tag tone={sig() === "verified" ? "neutral" : "warn"} detail={`Signature: ${sig()}`}>
-                        {sig() === "verified" ? "signed" : "signature invalid"}
+                    <Tag tone={sigTone(sig())} detail={`Signature: ${sig()}`}>
+                        {sigLabel(sig())}
                     </Tag>
                 )}
             </Show>

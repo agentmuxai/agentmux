@@ -21,13 +21,13 @@ impl LanDiscoveryController {
     /// because the cached answer is gone or held none. `None` when the peers
     /// give none, give another name key, or the limiter refuses the fan-out:
     /// the caller reads that as "not shown", never as "nothing to check".
-    pub(crate) async fn refetch_lan_uid_key(&self, agent_id: &str, name_key: &[u8], http: &reqwest::Client) -> Option<(String, Vec<u8>)> {
+    pub async fn refetch_lan_uid_key(&self, agent_id: &str, name_key: &[u8], http: &reqwest::Client) -> Option<(String, Vec<u8>)> {
         self.refetch_lan_uid_key_from(&self.get_all_instances(), agent_id, name_key, http).await
     }
 
     /// [`Self::find_agent_lan_pubkey`], and when it says `NotFound`, one more ask
     /// if that answer came from the cache.
-    pub(crate) async fn find_agent_lan_pubkey_asking_again(&self, agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {
+    pub async fn find_agent_lan_pubkey_asking_again(&self, agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {
         match self.find_agent_lan_pubkey(agent_id, http).await {
             LanPubkeyLookup::NotFound => self.find_agent_lan_pubkey_again(agent_id, http).await,
             other => other,
@@ -47,7 +47,7 @@ impl LanDiscoveryController {
     }
 
     fn peers_to_ask(&self) -> Vec<LanInstance> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(seeded) = Some(self.peers_for_test.lock().unwrap().clone()).filter(|p| !p.is_empty()) {
             return seeded;
         }
@@ -105,7 +105,7 @@ impl LanDiscoveryController {
     }
 
     /// Give the cached answer for `agent_id` a certificate, as a host's lookup answer carries.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn seed_lan_cert_for_test(&self, agent_id: &str, cert: agentmux_common::jekt_sign::WanKeyRecord) {
         if let Some(entry) = self.pubkey_cache.write().unwrap().get_mut(agent_id) {
             entry.cert = Some(cert);
@@ -135,7 +135,7 @@ impl LanDiscoveryController {
     }
 
     /// Give the cached answer for `agent_id` the agent's statement of which install hosts it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn seed_lan_install_sig_for_test(&self, agent_id: &str, sig: String) {
         if let Some(entry) = self.pubkey_cache.write().unwrap().get_mut(agent_id) {
             entry.install_sig = Some(sig);
@@ -143,10 +143,10 @@ impl LanDiscoveryController {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl LanDiscoveryController {
     /// A peer at `addr` ("host:port"), listed as discovery would list it now.
-    pub(crate) fn seed_peer_at_for_test(&self, addr: &str) {
+    pub fn seed_peer_at_for_test(&self, addr: &str) {
         let (host, port) = addr.rsplit_once(':').unwrap();
         let instance = LanInstance {
             instance_id: format!("peer-{port}"),
@@ -163,19 +163,21 @@ impl LanDiscoveryController {
             agent_status: Default::default(),
             agent_lines: Default::default(),
             agent_providers: Default::default(),
+            agent_kinds: Default::default(),
             agent_accounts: Default::default(),
             agent_resets: Default::default(),
             agent_seats: Default::default(),
             first_seen: 0,
             last_seen: agentmux_common::time::now_secs_u64(),
             last_polled_ok: 0,
+            install_id: String::new(),
             other_ttl_secs: 4500,
         };
         self.peers_for_test.lock().unwrap().push(instance);
     }
 
     /// A miss for `agent_id` that was cached `age_secs` ago.
-    pub(crate) fn seed_lan_pubkey_miss_for_test(&self, agent_id: &str, age_secs: u64) {
+    pub fn seed_lan_pubkey_miss_for_test(&self, agent_id: &str, age_secs: u64) {
         let life = std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS);
         let left = life.saturating_sub(std::time::Duration::from_secs(age_secs));
         self.pubkey_cache.write().unwrap().insert(
@@ -185,7 +187,7 @@ impl LanDiscoveryController {
     }
 
     /// [`Self::seed_lan_pubkey_for_test`], with the certificate the answer carried.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn seed_lan_pubkey_with_cert_for_test(&self, agent_id: &str, public_key: Vec<u8>, cert: Option<agentmux_common::jekt_sign::WanKeyRecord>) {
         self.pubkey_cache.write().unwrap().insert(
             agent_id.to_string(),

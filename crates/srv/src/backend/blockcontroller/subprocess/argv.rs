@@ -111,7 +111,7 @@ fn build_legacy_argv(
 /// `--output-format stream-json` is NOT added here — every subprocess-mode
 /// provider's base one-shot `launch_args` already carries it (see
 /// `providers.rs`), so `base_one_shot_args` already has it.
-pub(crate) fn build_side_question_argv(base_one_shot_args: &[String]) -> Vec<String> {
+pub fn build_side_question_argv(base_one_shot_args: &[String]) -> Vec<String> {
     let mut argv = base_one_shot_args.to_vec();
     argv.push("--disallowedTools".to_string());
     argv.push("*".to_string());
@@ -156,7 +156,7 @@ const CODEX_TOOL_FEATURES: &[&str] = &[
 ///   tool-less turn has nothing to protect with it.
 ///
 /// `model` is the pane's `-m`/`--model`, if it had one.
-pub(crate) fn build_codex_side_question_argv(model: Option<&str>) -> Vec<String> {
+pub fn build_codex_side_question_argv(model: Option<&str>) -> Vec<String> {
     let mut argv: Vec<String> = [
         "exec",
         "--json",
@@ -188,7 +188,7 @@ pub(crate) fn build_codex_side_question_argv(model: Option<&str>) -> Vec<String>
 /// disk for `--policy`. Checked against the pinned CLI (0.60.0) by
 /// capturing its request: with this policy the request declares no tools
 /// at all, even with `--yolo` on.
-pub(crate) const GEMINI_DENY_ALL_TOOLS_POLICY: &str = "\
+pub const GEMINI_DENY_ALL_TOOLS_POLICY: &str = "\
 [[rule]]
 toolName = \"*\"
 decision = \"deny\"
@@ -206,7 +206,7 @@ priority = 999
 /// approval mode `default` instead of the pane's `--yolo`. No
 /// `--skip-trust`: trusting the folder would load the project's own Gemini
 /// settings, hooks included, so `/btw` gets the same trust as the pane.
-pub(crate) fn build_gemini_side_question_argv(policy_path: &str, model: Option<&str>) -> Vec<String> {
+pub fn build_gemini_side_question_argv(policy_path: &str, model: Option<&str>) -> Vec<String> {
     let mut argv: Vec<String> = [
         "--output-format",
         "stream-json",
@@ -229,7 +229,7 @@ pub(crate) fn build_gemini_side_question_argv(policy_path: &str, model: Option<&
 }
 
 /// The value of `-m` / `--model` (or `--model=<v>`) in `args`, if any.
-pub(crate) fn model_flag_value(args: &[String]) -> Option<String> {
+pub fn model_flag_value(args: &[String]) -> Option<String> {
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         if arg == "-m" || arg == "--model" {

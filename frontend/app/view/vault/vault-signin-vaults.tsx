@@ -12,7 +12,7 @@ import { setSigninVault, signinVaultOf, vaultList } from "./vault-store";
 import { vaultChoices } from "./vault-vaults";
 
 /** The profiles that keep sign-ins: Personal, then the person's own. Incognito never saves one. */
-function profileRows(): { key: string; label: string }[] {
+export function profileRows(): { key: string; label: string }[] {
     const named = browserProfiles()
         .filter((p) => !p.owner_agent)
         .map((p) => ({ key: `profile:${p.id}`, label: p.name }));

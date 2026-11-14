@@ -72,7 +72,7 @@ fn row_to_workspace(row: &Row) -> rusqlite::Result<UserWorkspaceRow> {
 
 /// Every row of `db_workspaces` in `conn`, the most recently opened first. A
 /// database without the table (one an older version wrote) errors.
-pub(crate) fn list_in(conn: &Connection) -> Result<Vec<UserWorkspaceRow>, StoreError> {
+pub fn list_in(conn: &Connection) -> Result<Vec<UserWorkspaceRow>, StoreError> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLS} FROM db_workspaces ORDER BY COALESCE(opened_at, 0) DESC, updated_at DESC, rowid"
     ))?;
@@ -193,7 +193,7 @@ impl LayoutWrites {
     }
 
     /// Count a write of an object of `otype`.
-    pub(crate) fn wrote(&self, otype: &str) {
+    pub fn wrote(&self, otype: &str) {
         if Self::tracks(otype) {
             self.changed.fetch_add(1, Ordering::Relaxed);
             if otype != "block" {

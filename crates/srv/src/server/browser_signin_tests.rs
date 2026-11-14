@@ -244,7 +244,7 @@ async fn the_notice_goes_when_the_agents_call_is_cancelled_while_it_shows() {
             }
             false
         });
-        let n = notice(&s.state, &s.block, "a", &s.site, "alex");
+        let n = notice(&s.state, &s.block, "a", &s.site, "alex", "signin", NOTICE);
         tokio::pin!(n);
         tokio::select! { _ = &mut n => false, up = seen => up.unwrap() && !showing().is_null() }
     })

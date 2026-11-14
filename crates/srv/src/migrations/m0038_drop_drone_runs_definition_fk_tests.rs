@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::drone::storage::DroneStore;
-use crate::drone::types::DroneRun;
+use crate::backend::storage::drone_store::DroneStore;
+use crate::backend::storage::drone_types::DroneRun;
 
 fn run(id: &str, drone_id: &str) -> DroneRun {
     DroneRun {

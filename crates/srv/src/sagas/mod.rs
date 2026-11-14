@@ -50,6 +50,7 @@
 // * Saga state across srv restart (gap; Phase F+).
 
 pub mod agent_teardown;
+pub(crate) mod teardown_hooks;
 pub mod close_pane;
 pub mod delete_block;
 pub mod delete_tab;
@@ -84,6 +85,8 @@ pub mod tear_off_tab;
 mod integration_tests;
 #[cfg(test)]
 mod shutdown_events_tests;
+#[cfg(test)]
+mod prompt_events_tests;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 

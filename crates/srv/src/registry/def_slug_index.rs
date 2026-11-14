@@ -71,7 +71,7 @@ struct State {
     unstatted: Vec<String>,
     /// Rebuilt from `by_id` when a file changed; `None` until then.
     snapshot: Option<Arc<HashMap<String, SlugEntry>>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     parses: usize,
 }
 
@@ -189,7 +189,7 @@ impl State {
             }
             Err(e) => (Err(format!("can't be read: {e}")), false),
         };
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         {
             self.parses += 1;
         }

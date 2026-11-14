@@ -549,7 +549,7 @@ impl FileStore {
 
     /// Turn every frame of a file back into part rows; the number undone.
     /// For `decompress` (spec §5.4), which comes with the recovery tool.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     #[track_caller]
     pub(crate) fn unframe_file(&self, zone_id: &str, name: &str) -> Result<usize, StoreError> {
         let out = self.write_txn(|tx| unframe(tx, zone_id, name, 0, i32::MAX - MAX_FRAME_PARTS))?;
@@ -597,6 +597,6 @@ impl FileStore {
 #[path = "tests_frames.rs"]
 mod tests;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[path = "tests_frame_vector.rs"]
 mod tests_vector;

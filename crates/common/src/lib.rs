@@ -13,6 +13,7 @@ pub mod client_events;
 mod cli;
 pub mod copy_into_dir;
 pub mod data_paths;
+pub mod dev_home_guard;
 mod data_home;
 pub mod disk_space;
 pub mod mcp_config_path;
@@ -54,6 +55,8 @@ pub mod srv_binary;
 pub mod srv_estart_wait;
 pub mod srv_stderr;
 pub mod time;
+#[cfg(feature = "tls-provider")]
+pub mod tls_provider;
 pub mod tokens;
 pub mod toolchain_path;
 pub mod update_manifest;

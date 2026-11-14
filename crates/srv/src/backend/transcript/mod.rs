@@ -11,3 +11,4 @@ pub mod origin_ledger;
 pub mod origin_resign;
 pub mod origin_sig;
 pub mod source;
+pub mod tail;

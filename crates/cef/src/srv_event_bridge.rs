@@ -53,7 +53,7 @@ pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event)
     let tab_pool_labels = state.pool_side_top_level_labels();
     for (label, browser) in state.list_browsers() {
         if label.starts_with("window-pool-")
-            || label.starts_with("browser-pane-")
+            || crate::browser_pane::label::is_pane_label(&label)
             || tab_pool_labels.contains(&label)
         {
             continue;

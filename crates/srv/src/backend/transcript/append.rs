@@ -412,7 +412,7 @@ fn transcript_order_lock(block_id: &str) -> std::sync::MutexGuard<'static, ()> {
 /// non-agent blocks, when there's no store, or when the block can't be loaded —
 /// the caller then passes `None` and no global mirror happens. Shared by the
 /// subprocess / persistent / acp agent controllers.
-pub(crate) fn resolve_global_output_zone(
+pub fn resolve_global_output_zone(
     mstore: &Option<Arc<crate::backend::storage::store::Store>>,
     block_id: &str,
 ) -> Option<String> {

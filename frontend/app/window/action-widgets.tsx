@@ -45,6 +45,7 @@ import {
     getPinnedWidgets,
     getSavedPinNames,
     openWidget,
+    preloadWidget,
     keyOfPinId,
     pinIdOf,
     pinWidget,
@@ -82,6 +83,7 @@ const ActionWidget = (props: {
         onContextMenu={props.onContextMenu}
         onMouseEnter={() => props.onMouseEnter?.()}
         onMouseLeave={(e) => props.onMouseLeave?.(e)}
+        onPointerEnter={() => preloadWidget(props.widget)}
     >
         <Tooltip
             content={props.widget.description || props.widget.label}

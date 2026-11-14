@@ -367,7 +367,7 @@ impl AcpController {
     /// Ends the agent's session so the next message opens a new one (`Agents fresh`): the process is stopped and the
     /// pane's saved session id forgotten, so the launch that follows sends `session/new` and not `session/resume`.
     /// Only between turns. Returns the old session id.
-    pub(crate) fn start_fresh_session(&self) -> Result<Option<String>, &'static str> {
+    pub fn start_fresh_session(&self) -> Result<Option<String>, &'static str> {
         let old = {
             let mut inner = self.inner.lock().unwrap();
             if self.health_monitor.is_active_turn() {
@@ -760,7 +760,7 @@ impl Controller for AcpController {
 }
 
 #[path = "acp_spawn.rs"]
-mod spawn_steps;
+pub mod spawn_steps;
 
 #[cfg(test)]
 #[path = "acp_tests.rs"]

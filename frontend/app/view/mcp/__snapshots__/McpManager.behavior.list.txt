@@ -168,8 +168,8 @@
         <span class="ui-filter ui-card-section-filter">
           <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
           <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Filter servers" aria-label="Filter servers" value="http linear">
-          <button type="button" class="ui-filter-clear" aria-label="Clear filter">
-            <i class="fa-solid fa-xmark" aria-hidden="true">
+          <button type="button" class="ui-close ui-close--sm ui-filter-clear" aria-label="Clear filter">
+            <i aria-hidden="true" class="fa-solid fa-xmark">
         <button type="button" class="ui-button ui-tone-accent mcp-cards-add">
           <i aria-hidden="true" class="fa-solid fa-plus">
           "Add server"
@@ -229,8 +229,8 @@
         <span class="ui-filter ui-card-section-filter">
           <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
           <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Filter servers" aria-label="Filter servers" value="claude">
-          <button type="button" class="ui-filter-clear" aria-label="Clear filter">
-            <i class="fa-solid fa-xmark" aria-hidden="true">
+          <button type="button" class="ui-close ui-close--sm ui-filter-clear" aria-label="Clear filter">
+            <i aria-hidden="true" class="fa-solid fa-xmark">
         <button type="button" class="ui-button ui-tone-accent mcp-cards-add">
           <i aria-hidden="true" class="fa-solid fa-plus">
           "Add server"
@@ -303,8 +303,8 @@
         <span class="ui-filter ui-card-section-filter">
           <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
           <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Filter servers" aria-label="Filter servers" value="zzz">
-          <button type="button" class="ui-filter-clear" aria-label="Clear filter">
-            <i class="fa-solid fa-xmark" aria-hidden="true">
+          <button type="button" class="ui-close ui-close--sm ui-filter-clear" aria-label="Clear filter">
+            <i aria-hidden="true" class="fa-solid fa-xmark">
         <button type="button" class="ui-button ui-tone-accent mcp-cards-add">
           <i aria-hidden="true" class="fa-solid fa-plus">
           "Add server"

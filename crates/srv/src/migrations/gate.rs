@@ -19,7 +19,7 @@ use super::{MigrationScope, REGISTRY};
 /// Why `data_dir` needs preparing, or `None` when srv can open it as it is.
 pub fn data_needs_preparing(data_dir: &Path, version: &str) -> Option<String> {
     let db_dir = data_dir.join("db");
-    if let Some(source) = crate::bootstrap::carry_forward::source_for(&db_dir, version) {
+    if let Some(source) = crate::migrations::carry_forward::source_for(&db_dir, version) {
         return Some(format!("this version has no data yet; {} has data to copy forward", source.display()));
     }
     // No shared root (CI, a bare cargo run): nothing to migrate, as for
@@ -95,7 +95,7 @@ const DEV_HOME_MODE_ENV: &str = "AGENTMUX_DEV_HOME_MODE";
 /// How many pending migration ids the refusal names; the rest are counted.
 const MAX_IDS_SHOWN: usize = 5;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     /// Lets a test act as a dev build on the real home without touching the process environment.
     pub(super) static FORCE_REAL_HOME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -103,7 +103,7 @@ thread_local! {
 
 /// Is this a dev build running on the real home?
 pub(super) fn dev_on_real_home() -> bool {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if FORCE_REAL_HOME.with(|f| f.get()) {
         return true;
     }

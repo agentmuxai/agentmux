@@ -36,6 +36,7 @@
 use serde::Serialize;
 
 use crate::backend::blockcontroller;
+pub(crate) use crate::backend::work_claims::release_claims;
 use crate::server::agent_resources::{self, AgentIdentity, AgentResources};
 use crate::server::AppState;
 
@@ -755,17 +756,6 @@ async fn wait_gone(mut procs: Vec<agent_resources::ProcessEntry>) -> Vec<agent_r
     }
 }
 
-/// Release the agent's claimed work items with `reason` (each counts as an
-/// attempt), so they go back to the pool now rather than when the 120 s lease
-/// expires. How many went. Blocking.
-pub(crate) fn release_claims(work_store: &crate::backend::storage::store::Store, a: &str, u: Option<&str>, reason: &str, now: i64) -> usize {
-    let items = work_store.work_queue_claimed_by(a, u.unwrap_or("")).unwrap_or_default();
-    agent_resources::claims_held_by(&items, a, u)
-        .into_iter()
-        .filter(|w| matches!(work_store.work_queue_release(&w.id, &w.claimed_by, &w.claimed_by_uid, w.attempts, reason, now), Ok(Some(_))))
-        .count()
-}
-
 /// Release the agent's work claims, so the items go back to the pool now
 /// rather than when the 120 s lease expires, and list the crons that target
 /// it (kept: a cron is a deliberate schedule that resumes when the agent is
@@ -906,7 +896,9 @@ mod tests {
                 }
                 let text = std::fs::read_to_string(&path).unwrap();
                 // Code only: skip comment lines and everything from a test module on.
-                let code = text.split("#[cfg(test)]").next().unwrap_or("");
+                // (A test-only item the core also builds for the server's tests carries the feature form.)
+                let cut = ["#[cfg(test)]", "#[cfg(any(test, feature = \"test-support\"))]"].iter().filter_map(|m| text.find(m)).min();
+                let code = &text[..cut.unwrap_or(text.len())];
                 for (i, line) in code.lines().enumerate() {
                     let t = line.trim_start();
                     if t.starts_with("//") {

@@ -287,7 +287,7 @@ jobs:
     # enforced after the service's grace period (2026-11-12: a 35-minute job was cancelled after 40).
     #
     # In the merge queue the Ubuntu leg gets 28: it takes 7 to 10 minutes there, the nextest step's two attempts
-    # are limited to 12 + 8, and a stalled leg holds every entry behind it until the limit ends it (and only the
+    # are limited to 14 + 8 (12 + 8 until the build was cut to two LLVM threads, which adds 1 to 2 minutes to a slow compile), and a stalled leg holds every entry behind it until the limit ends it (and only the
     # limit does: a cancel needs the runner to answer, which a stalled one cannot). 2026-11-13: nine stalls ran to
     # 50 + 5 minutes, the queue 19 deep behind them.
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && (needs.changes.outputs.queue == 'true' && 28 || 50) || 35 }}
@@ -474,6 +474,10 @@ jobs:
       # (.config/nextest.toml): only the tests that read the source tree or the
       # files generated from it, which a merge race breaks (#6193 + #6196).
       # Its build is srv's unit tests, nearly all of the step's time.
+      # A normal (non-test) resolve of the workspace has the test-only feature off.
+      - name: A shipped build never has the test-only feature
+        if: matrix.os == 'ubuntu-latest'
+        run: node scripts/check-test-support-off.mjs --resolved
       - name: Install cargo-nextest
         if: matrix.os != 'windows-latest'
         uses: taiki-e/install-action@nextest
@@ -484,9 +488,9 @@ jobs:
           # The attempt limits: a PR run takes 13 to 18 minutes (7 in the queue); a stalled attempt is ended at
           # about twice that and tried once more, which reuses what it built. The step's limit is the two together
           # and the job's (below) is just over it, so a stall is ended by the script and not by the job.
-          CI_ATTEMPT1_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 720 || 1500 }}
+          CI_ATTEMPT1_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 840 || 1500 }}
           CI_ATTEMPT2_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 480 || 900 }}
-        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 22 || 42 }}
+        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 24 || 42 }}
         # The build's warnings go to a file for the ts-rs check below, which used
         # to read them off a separate `cargo check`; pipefail keeps a failing
         # build or test failing the step.
@@ -776,6 +780,9 @@ jobs:
       # One Rust version everywhere (rust-toolchain.toml, each workflow's install, the developer image).
       - name: Rust version pinned the same everywhere
         run: node scripts/check-rust-pin.mjs
+      # A shipped build never has the test-only feature: no command asks for it.
+      - name: No build command enables the test-only feature
+        run: node scripts/check-test-support-off.mjs
 
       # The ratchet half of the same rule set. check-doc-status.sh is scoped to
       # CHANGED FILES on purpose (a repo-wide gate would fail every PR on the
@@ -1101,7 +1108,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator

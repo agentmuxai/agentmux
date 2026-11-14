@@ -549,3 +549,91 @@ fn a_keepass_database_that_has_only_a_key_file_is_previewed_with_it() {
     let wrong = inspect_keyed(&s, &path, None, None, Some(b"not the key")).unwrap_err();
     assert!(matches!(&wrong, InspectError::Other(m) if m.contains("didn't open")));
 }
+
+// ── A browser's export: logins with a site belong to a browser profile ──────
+
+const CHROME_CSV: &str = "name,url,username,password,note\n\
+    Accounts,https://accounts.example.com/signin?x=1,alex,pw-one,\n\
+    Bank,https://bank.example/login,carol,pw-two,\n\
+    Phone,android://c2hh@com.example.phone/,erin,pw-three,\n";
+
+fn staged_file(csv: &str, name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(name);
+    std::fs::write(&path, csv).unwrap();
+    (dir, path)
+}
+
+fn sign_in_fields(s: &Store, label: &str) -> (BTreeMap<String, String>, String) {
+    let row = s.vault_list().unwrap().into_iter().find(|r| r.label == label).unwrap_or_else(|| panic!("no entry {label}"));
+    (serde_json::from_str(&row.fields).unwrap(), row.vault_id)
+}
+
+#[test]
+fn a_chrome_export_gives_its_logins_a_site_and_a_profile_and_the_app_row_neither() {
+    let s = store();
+    let (_dir, path) = staged_file(CHROME_CSV, "Chrome Passwords.csv");
+    let preview = inspect(&s, &path, None).unwrap();
+    assert_eq!((preview.source, preview.total, preview.browser_signins), (Source::Chrome, 3, 2), "the app row isn't one the browser can offer");
+    commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
+
+    let (accounts, vault) = sign_in_fields(&s, "Accounts");
+    assert_eq!((accounts["site"].as_str(), accounts["profile"].as_str(), vault.as_str()), ("https://accounts.example.com", "personal", PERSONAL_VAULT));
+    let (phone, _) = sign_in_fields(&s, "Phone");
+    assert!(!phone.contains_key("site") && !phone.contains_key("profile"), "{phone:?}");
+    // The browser offers it: the page's site is exactly the origin, in the profile's own Vault.
+    let offered = signins::offered_for(&s, "personal", &["https://accounts.example.com".to_string()]).unwrap();
+    assert_eq!(offered.len(), 1);
+    assert_eq!((offered[0].1.as_str(), offered[0].2.as_str()), ("https://accounts.example.com", "alex"));
+}
+
+#[test]
+fn the_logins_go_to_the_chosen_profiles_sign_in_vault_whatever_vault_the_dialog_names() {
+    let s = store();
+    let work = vaults::create(&s, "Work", vaults::VaultAgents::None).unwrap();
+    let personal_signins = vaults::create(&s, "Sign-ins", vaults::VaultAgents::All).unwrap();
+    s.signin_vault_set("profile:work-1", &work.id).unwrap();
+    s.signin_vault_set("personal", &personal_signins.id).unwrap();
+    let (_dir, path) = staged_file(CHROME_CSV, "Chrome Passwords.csv");
+    let preview = inspect(&s, &path, None).unwrap();
+    commit_for(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT, Some("profile:work-1")).unwrap();
+
+    let (bank, vault) = sign_in_fields(&s, "Bank");
+    assert_eq!((bank["profile"].as_str(), vault.as_str()), ("profile:work-1", work.id.as_str()));
+    let (_, phone_vault) = sign_in_fields(&s, "Phone");
+    assert_eq!(phone_vault, PERSONAL_VAULT, "a row with no site stays in the Vault the dialog names");
+    assert_eq!(signins::offered_for(&s, "profile:work-1", &["https://bank.example".to_string()]).unwrap().len(), 1);
+    assert!(signins::offered_for(&s, "personal", &["https://bank.example".to_string()]).unwrap().is_empty(), "only in its own profile");
+}
+
+#[test]
+fn only_a_browser_export_is_given_a_profile_and_a_bad_profile_is_refused() {
+    let s = store();
+    let firefox = "url,username,password,httpRealm,formActionOrigin\nhttps://example.org,alex,pw1,,https://example.org\n";
+    let (_dir, path) = staged_file(firefox, "logins.csv");
+    let preview = inspect(&s, &path, None).unwrap();
+    assert_eq!(preview.browser_signins, 0);
+    commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
+    assert!(!sign_in_fields(&s, "example.org").0.contains_key("profile"));
+
+    let (_dir2, path2) = staged_file(CHROME_CSV, "Chrome Passwords.csv");
+    let again = inspect(&s, &path2, None).unwrap();
+    let refused = commit_for(&s, &again.token, Duplicates::Skip, PERSONAL_VAULT, Some("incognito:x")).unwrap_err();
+    assert!(refused.contains("profile is personal or profile:<id>"), "{refused}");
+    assert_eq!(s.vault_count().unwrap(), 1, "nothing was written, and the import can be pressed again");
+    commit_for(&s, &again.token, Duplicates::Skip, PERSONAL_VAULT, None).unwrap();
+}
+
+#[test]
+fn replacing_a_sign_in_the_browser_saved_keeps_its_profile() {
+    let s = store();
+    let space = signins::Space { profile: "profile:work-1".into(), origin: "https://accounts.example.com".into(), realm: String::new(), proxy: false };
+    let saved = signins::save(&s, &space, "alex", "old-password").unwrap();
+    let (_dir, path) = staged_file(CHROME_CSV, "Chrome Passwords.csv");
+    let preview = inspect(&s, &path, None).unwrap();
+    assert_eq!(preview.duplicates, 1, "the same site and user name");
+    commit_for(&s, &preview.token, Duplicates::Replace, PERSONAL_VAULT, Some("personal")).unwrap();
+    let row = s.vault_get(&saved).unwrap().unwrap();
+    let fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap();
+    assert_eq!(fields["profile"], "profile:work-1", "the sign-in stays in the profile it was saved for");
+}

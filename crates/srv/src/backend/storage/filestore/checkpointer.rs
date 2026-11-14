@@ -52,7 +52,7 @@ pub(super) const JOURNAL_SIZE_LIMIT: &str = "PRAGMA journal_size_limit=67108864;
 pub(super) struct Checkpointer {
     stop: Arc<AtomicBool>,
     /// Checkpoints this thread has run. Only the tests read it.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     runs: Arc<AtomicU64>,
     /// Held while this thread's pass runs, and by the store's writer for a pass
     /// of its own ([`Checkpointer::hold_pass`]).
@@ -125,7 +125,7 @@ impl Checkpointer {
     }
 
     /// Checkpoints run so far.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) fn runs(&self) -> u64 {
         self.runs.load(Ordering::Relaxed)
     }

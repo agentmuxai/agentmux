@@ -102,6 +102,17 @@ fn an_id_entry_is_never_approved_by_time_and_expires_denied() {
 }
 
 #[test]
+fn a_new_account_is_never_made_on_silence() {
+    let u = uses();
+    let (mut rx, _) = u.enqueue(UseRequest { account: true, kind: "login".into(), entry_id: String::new(), ..key("acct", "Agent1") }, WAIT, 0);
+    assert!(!u.get("acct").unwrap().goes_ahead, "a login for a saved sign-in goes ahead, an account doesn't");
+    u.decide_unanswered("acct", 30_000);
+    assert_eq!(ended(&mut rx), None, "30 seconds of silence is not a yes");
+    u.decide_unanswered("acct", 120_000);
+    assert_eq!(ended(&mut rx), Some(Ended::Expired), "and the wait's end is a no");
+}
+
+#[test]
 fn a_value_the_person_types_never_goes_ahead_on_silence() {
     let u = uses();
     let (mut rx, _) = u.enqueue(UseRequest { needs_value: true, ..key("typed", "Agent1") }, WAIT, 0);

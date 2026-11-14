@@ -42,7 +42,7 @@ pub(crate) fn strip_signing_keys(content: &str) -> Option<String> {
 /// This also covers a user's project: keys an older launch wrote there must not ride the workspace
 /// mount into the container (a launch no longer writes any, #3680). Best-effort: a failure is
 /// logged and the start goes on.
-pub(crate) fn strip_workspace_signing_keys(work_dir: &str) {
+pub fn strip_workspace_signing_keys(work_dir: &str) {
     if work_dir.trim().is_empty() {
         return;
     }
@@ -217,7 +217,7 @@ fn names_missing_a_key(content: &str, slug: &str) -> bool {
 
 /// `agent_open`'s generated `.mcp.json`: the agent's signing keys, except for a container agent, which
 /// gets none (its workspace is mounted into the container) and has any an earlier launch wrote taken out.
-pub(crate) fn keys_for_agent_open(
+pub fn keys_for_agent_open(
     content: &mut String,
     mstore: &crate::backend::storage::store::Store,
     agent_slug: &str,
@@ -247,7 +247,7 @@ pub(crate) fn keys_for_agent_open(
 /// lands where the caller says, and the keys it carries sign as the agent it names, so a caller
 /// that could name any agent would be handed the right to speak as it. Without them the agent's
 /// MCP fetches its own keys from srv (`/agentmux/agents/self/keys`).
-pub(crate) fn finish_launch(
+pub fn finish_launch(
     files: &mut [crate::backend::rpc_types::AgentConfigFile],
     mstore: &crate::backend::storage::store::Store,
     agent_id: Option<&str>,

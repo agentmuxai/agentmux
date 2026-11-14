@@ -21,7 +21,7 @@ const IDX: &str = "output.idx";
 /// process's `stat` cache, which another srv instance's append makes stale.
 /// A counter only behind (an older build appended since) is caught up first,
 /// so its generation holds across those appends (`filestore/counter.rs`).
-pub(crate) fn output_now(fs: &FileStore, zone: &str) -> Option<(u64, Option<String>)> {
+pub fn output_now(fs: &FileStore, zone: &str) -> Option<(u64, Option<String>)> {
     let state = match fs.catch_up_line_counter(zone, "output") {
         Ok(state) => state?,
         Err(e) => {
@@ -36,10 +36,10 @@ pub(crate) fn output_now(fs: &FileStore, zone: &str) -> Option<(u64, Option<Stri
 /// snapshot (Codex on #3634): separate reads of the index's size, header and
 /// label could each see a different version of an index another srv instance
 /// is rebuilding, and pass an old count off as fresh.
-pub(crate) struct OutputIndex {
+pub struct OutputIndex {
     pub output_size: u64,
     /// `output`'s valid generation; `None` when it is not counted.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub output_gen: Option<String>,
     /// The line count `output.idx` gives, if it describes `output` exactly:
     /// its covered size is `output_size` and it is labelled with
@@ -48,7 +48,7 @@ pub(crate) struct OutputIndex {
 }
 
 /// See [`OutputIndex`]. `None` when there is no `output`.
-pub(crate) fn output_index(fs: &FileStore, zone: &str) -> Option<OutputIndex> {
+pub fn output_index(fs: &FileStore, zone: &str) -> Option<OutputIndex> {
     let snap = fs.derived_snapshot(zone, "output", IDX, Some(OUTPUT_IDX_HEADER_LEN)).ok()??;
     let output_size = snap.output_size.max(0) as u64;
     let fresh_lines = snap.derived.as_ref().and_then(|idx| {
@@ -61,7 +61,7 @@ pub(crate) fn output_index(fs: &FileStore, zone: &str) -> Option<OutputIndex> {
     });
     Some(OutputIndex {
         output_size,
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         output_gen: snap.output_gen,
         fresh_lines,
     })
@@ -85,7 +85,7 @@ fn labelled_for(meta: &crate::backend::storage::filestore::FileMeta, output_gen:
 }
 
 /// Lines `[offset, offset + limit)` of `output`, read through `output.idx`.
-pub(crate) struct IndexedRead {
+pub struct IndexedRead {
     /// Total line count of `output` in the snapshot.
     pub total: u64,
     /// The bytes of the requested lines (from the first line's offset up to
@@ -111,7 +111,7 @@ pub(crate) struct IndexedRead {
 /// `None` when the index doesn't describe `output` in that snapshot (missing,
 /// stale, another generation's) or a read hits bytes not stored yet: the
 /// caller rebuilds the index and retries once, or takes its slow path.
-pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64) -> Option<IndexedRead> {
+pub fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64) -> Option<IndexedRead> {
     read_indexed(fs, zone, offset, limit, false)
 }
 
@@ -126,7 +126,7 @@ pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64
 /// leaves out are the newest few, which the pane's live stream delivers.
 /// `None` under the same conditions as [`read_via_index`], and when nothing
 /// requested is within the indexed prefix.
-pub(crate) fn read_via_stale_index(fs: &FileStore, zone: &str, offset: u64, limit: u64) -> Option<IndexedRead> {
+pub fn read_via_stale_index(fs: &FileStore, zone: &str, offset: u64, limit: u64) -> Option<IndexedRead> {
     read_indexed(fs, zone, offset, limit, true)
 }
 
@@ -194,7 +194,7 @@ fn read_indexed(fs: &FileStore, zone: &str, offset: u64, limit: u64, stale_ok: b
 /// there are: the line a reader loading up to `byte` stops at. A binary
 /// search over `output.idx`, from one snapshot; `None` when the index isn't
 /// fresh for `output` (extend it first, `extend_output_idx`).
-pub(crate) fn lines_before_byte(fs: &FileStore, zone: &str, byte: u64) -> Option<(u64, u64)> {
+pub fn lines_before_byte(fs: &FileStore, zone: &str, byte: u64) -> Option<(u64, u64)> {
     const H: i64 = OUTPUT_IDX_HEADER_LEN;
     fs.read_snapshot(|snap| {
         let Some(out) = snap.file(zone, "output")? else { return Ok(None) };
@@ -244,8 +244,8 @@ pub(crate) fn lines_before_byte(fs: &FileStore, zone: &str, byte: u64) -> Option
 /// Returns the number of indexed (non-blank) lines on success, or `None` if
 /// `output` is unreadable, was replaced during the scan, or the index write
 /// fails (caller falls back to slow path).
-#[cfg(test)]
-pub(crate) fn rebuild_output_idx(
+#[cfg(any(test, feature = "test-support"))]
+pub fn rebuild_output_idx(
     fs: &FileStore,
     block_id: &str,
     output_size: u64,
@@ -274,7 +274,7 @@ pub(crate) fn rebuild_output_idx(
 /// so an undercount silently drops the most recent history on reopen — codex
 /// P1 on PR #2838. The count has to stay exact; only the cost of keeping it
 /// exact is negotiable.
-pub(crate) fn extend_output_idx(fs: &FileStore, block_id: &str) -> Option<u64> {
+pub fn extend_output_idx(fs: &FileStore, block_id: &str) -> Option<u64> {
     // A counter merely behind (an older build appended) is caught up first:
     // otherwise the snapshot below sees no generation, the index is published
     // unlabelled, and the next reader — once the counter has caught up —

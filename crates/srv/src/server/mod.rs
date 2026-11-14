@@ -14,6 +14,7 @@ mod agent_only;
 mod http_action;
 mod http_action_routes;
 pub(crate) mod agent_move_here;
+pub(crate) mod lan_watch;
 pub(crate) mod agent_takeover;
 mod pane_binding;
 mod pane_commands;
@@ -21,7 +22,8 @@ mod agent_config_guard;
 mod editor_handlers;
 mod picker_config;
 mod fs_handlers;
-pub(crate) mod identity_auth_dirs;
+// Moved down to `identity/auth_dirs.rs` so the core does not reach up into `server`; the old path resolves.
+pub(crate) use crate::identity::auth_dirs as identity_auth_dirs;
 mod identity_auth_persist;
 mod identity_auth_spawn;
 pub(crate) mod held_input;
@@ -65,8 +67,9 @@ pub(crate) mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;
 pub(crate) mod jekt_ack;
+pub(crate) mod muxbus_hooks;
 pub(crate) mod jekt_cloud;
-pub(crate) mod jekt_seal;
+pub(crate) use crate::backend::jekt_seal;
 mod jekt_echo;
 pub(crate) mod jekt_entry;
 pub(crate) mod actor;
@@ -106,6 +109,7 @@ mod sensitive_handlers;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
+mod muxspect_instances;
 pub(crate) mod transcript_tail;
 mod coord_channel_handlers;
 mod bulletin_handlers;
@@ -113,8 +117,10 @@ mod quota_mode_handler;
 mod agent_status_handlers;
 mod work_claims_handlers;
 mod work_facts_handlers;
+mod containers_handler;
 mod message_flow_handler;
 mod message_stats_handler;
+mod pr_flow_handler;
 mod task_flow_handler;
 mod task_flow_notes;
 pub(crate) mod memory_launch_cost;
@@ -171,9 +177,11 @@ pub(crate) mod vault_import;
 pub(crate) mod vault_inspect;
 pub(crate) mod vault_rotate;
 pub(crate) mod browser_capture;
+pub(crate) mod browser_capture_card;
 pub(crate) mod browser_vault_fill;
 pub(crate) mod browser_signin_offer;
 pub(crate) mod browser_signin;
+pub(crate) mod browser_account;
 pub(crate) mod browser_signin_fill;
 pub(crate) mod browser_signup;
 pub(crate) mod google_handlers;
@@ -207,6 +215,9 @@ pub(crate) mod route_scan;
 #[cfg(test)]
 #[path = "tests/http_action_tests.rs"]
 mod http_action_tests;
+#[cfg(test)]
+#[path = "tests/route_audience_tests.rs"]
+mod route_audience_tests;
 #[cfg(test)]
 mod rpc_schema_export;
 

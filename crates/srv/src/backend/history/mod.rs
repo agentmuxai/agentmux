@@ -6,9 +6,9 @@
 pub mod adapter;
 pub mod claude_adapter;
 pub mod index;
-mod agent_sessions;
-pub(crate) mod record;
-mod typed;
+pub mod agent_sessions;
+pub mod record;
+pub mod typed;
 
 use std::sync::Arc;
 
@@ -292,12 +292,12 @@ impl HistoryService {
     /// modules (e.g. `app_api::bundle`'s `bundle.export_for_agent_with_history`
     /// tests) can build an isolated `HistoryService` too, instead of
     /// depending on `AppState::history_service`'s real filesystem scan.
-    #[cfg(test)]
-    pub(crate) fn from_index(index: SessionIndex) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn from_index(index: SessionIndex) -> Self {
         Self::from_index_and_records(index, record::AgentRecords::new(None))
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn from_index_and_records(index: SessionIndex, records: record::AgentRecords) -> Self {
         HistoryService {
             index: Arc::new(index),
@@ -661,7 +661,7 @@ impl HistoryService {
     /// This agent's own sessions — the actual "fast Conversation History
     /// lookup" protocol §4.4 asks for, resolving `agent_id` to its bound
     /// account(s) (`Store::agent_identity_list_for_agent`, the
-    /// same `db_agent_identity_links` table `identity_auth_dirs.rs`
+    /// same `db_agent_identity_links` table `identity/auth_dirs.rs`
     /// already keys off) and querying `SessionIndex::list_for_identity`'s
     /// O(sessions for this identity) HashMap-backed path instead of
     /// `list()`'s O(total sessions on disk) scan. An agent normally has

@@ -44,7 +44,7 @@ subscribe agents:changed
 </div>
 </div>
 <div class="warden-manager-error kanban-error" role="alert">Couldn't load the Kanban: srv is down<div class="ui-tooltip-anchor">
-<button aria-label="Dismiss" type="button" class="ui-button ui-tone-quiet ui-icon-button">
+<button type="button" class="ui-close ui-close--md" aria-label="Dismiss">
 <i aria-hidden="true" class="fa-solid fa-xmark">
 </i>
 </button>

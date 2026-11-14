@@ -7,7 +7,7 @@
 
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { MOS, atoms } from "@/app/store/global";
-import { isAwaitingUser } from "@/app/store/swarm-line";
+import { awaitsBrowserAnswer, isAwaitingUser } from "@/app/store/swarm-line";
 import { readZoom } from "@/app/store/zoom-factor";
 import { selectTrace } from "@/app/util/select-trace";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
@@ -178,7 +178,7 @@ function orderItems(rows: (readonly [string, AgentTreeNode])[], remote: RemoteRo
             return {
                 key,
                 remote: false,
-                working: chipStatus(status, isAwaitingUser(meta, n.agentStatus)) !== "idle",
+                working: chipStatus(status, isAwaitingUser(meta, n.agentStatus), awaitsBrowserAnswer(meta, n.agentStatus)) !== "idle",
                 lastActive: lastActiveMs(meta),
                 name: n.agentName,
             };

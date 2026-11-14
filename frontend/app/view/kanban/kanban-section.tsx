@@ -12,7 +12,7 @@
 
 import { Show, type JSX } from "solid-js";
 
-import { IconButton } from "@/app/element/ui";
+import { CloseButton } from "@/app/element/ui";
 
 import { AgentStrip, BoardArea, KanbanToolbar, OpenDrawer } from "./kanban-section-parts";
 import { createKanbanSection, type SectionProps } from "./kanban-section-state";
@@ -34,7 +34,7 @@ export const KanbanSection = (props: SectionProps): JSX.Element => {
                     {(e) => (
                         <div class="warden-manager-error kanban-error" role="alert">
                             {e()}
-                            <IconButton icon="xmark" label="Dismiss" onClick={() => s.model.dismissError()} />
+                            <CloseButton label="Dismiss" onClick={() => s.model.dismissError()} />
                         </div>
                     )}
                 </Show>

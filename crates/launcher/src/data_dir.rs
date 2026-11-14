@@ -129,7 +129,7 @@ pub fn settings_file() -> Option<PathBuf> {
 /// Idempotent. Delegates to the common implementation.
 ///
 /// It puts no database in them: what a new version's data starts from is
-/// srv's to decide, on its first start (`crates/srv/src/bootstrap/carry_forward.rs`:
+/// srv's to decide, on its first start (`crates/srv/src/migrations/carry_forward.rs`:
 /// the newest older version's databases, else the channel's pre-versioning
 /// `data/db/`). The launcher used to copy that pre-versioning folder here
 /// whenever a version's `data/db/` had no database yet, which is every

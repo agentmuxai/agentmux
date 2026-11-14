@@ -312,6 +312,7 @@ impl BrowserPaneManager {
 /// task has run (a focus, a resize, a close) is answered as the task will build it.
 fn post_creation(state: &Arc<AppState>, block_id: &str, label: String, url: &str, rect: Rect, window_label: &str) {
     crate::pane_backend::note_pane_created(state, &label, window_label);
+    crate::browser_pane::open_timing::begin_open(block_id);
     let mut task = CreateBrowserPaneTask::new(
         state.clone(),
         block_id.to_string(),

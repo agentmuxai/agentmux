@@ -285,6 +285,34 @@ jobs:
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.macos-tag }}
     secrets: inherit
 
+  # The server package (no desktop app): one tarball per platform. It is built from the release commit like the desktop
+  # builds and reaches the release through the same two file selections below, so the signed manifest lists it and
+  # `install.sh --server` can check it
+  # (docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md section 4).
+  #
+  # `legs: release`: Linux x64, Linux arm64 and macOS arm64, on kinds of runner a release already waits for (the desktop
+  # builds use ubuntu-22.04 and macos-latest; container-image, which `sign-release` needs, uses the hosted arm64 Linux
+  # kind). `sign-release` and `publish` wait for this job, so it never asks for a kind they do not already wait for: a leg
+  # queued for a scarce runner (macOS x64) would hold the whole release for as long as GitHub keeps it queued, and one leg
+  # of a run cannot be cancelled. That platform is not in a release's package set: the manifest is signed once, from the
+  # files the release has when `sign-release` runs, and `install.sh --server` installs nothing the manifest does not
+  # list, so a tarball added after the signature would be an asset nobody can install. It stays buildable by hand (the
+  # workflow's `legs: all`, from workflow_dispatch). `publish` says so in its summary.
+  #
+  # Advisory for now: `sign-release` and `publish` wait for it but do not look at its result, so a new job on three legs
+  # cannot hold back a desktop release (its legs have their own time limits). The legs that built are published and
+  # signed; a platform that did not is absent from the manifest, and `install.sh --server` says that version has no server
+  # package for it. It becomes required after the first release in which all three legs are green.
+  build-server-package:
+    name: Build — server package
+    needs: gate
+    permissions:
+      contents: read
+    uses: agentmuxai/agentmux/.github/workflows/build-server-package.yml@main
+    with:
+      ref: ${{ github.sha }}
+      legs: release
+
   # ── Phase 2b: Sign the release's manifest ───────────────────────────────
   # docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md. The app downloads
   # nothing a signed manifest doesn't list, so this runs between the builds and
@@ -315,7 +343,7 @@ jobs:
     # container-image is needed for its digest, not for the release: a failed image job
     # leaves the manifest without an image (the app then uses its versioned tag, as before),
     # so the other jobs are checked one by one instead of by `!failure()`.
-    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, container-image]
+    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, container-image]
     if: >-
       ${{ vars.RELEASE_SIGNING_ENABLED == 'true' && !cancelled()
       && contains(fromJSON('["success","skipped"]'), needs.gate.result)
@@ -380,7 +408,7 @@ jobs:
       - name: Flatten artifact tree
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-server-*.tar.gz" \) -exec cp {} dist-flat/ \;
           # The install scripts are release assets too, so the signed manifest covers them
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" dist-flat/; fi; done
@@ -461,7 +489,7 @@ jobs:
   # because macOS signing isn't set up (check-macos), never anything else.
   publish:
     name: Publish release
-    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, sign-release]
+    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, sign-release]
     if: >-
       ${{ !cancelled()
       && contains(fromJSON('["success","skipped"]'), needs.gate.result)
@@ -486,6 +514,18 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Say which server packages this release has
+        env:
+          PACKAGE_RESULT: ${{ needs.build-server-package.result }}
+        run: |
+          line="Release v${VERSION}: the server package is built for Linux x64, Linux arm64 and macOS arm64; for macOS x64 the release has none, and install.sh --server says so."
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PACKAGE_RESULT" != success ]; then
+            line="Release v${VERSION}: the server package is incomplete (its build ended ${PACKAGE_RESULT}); the platforms that built are published, the others have no server package."
+            echo "::warning::$line"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -504,7 +544,7 @@ jobs:
         # the only *.zip (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-server-*.tar.gz" \) -exec cp {} dist-flat/ \;
           # The install scripts are release assets too, so the signed manifest covers them
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" dist-flat/; fi; done
@@ -545,18 +585,54 @@ jobs:
           echo "Release notes:"
           cat /tmp/release-notes.md
 
+      # The release is uploaded as a draft and published in one step: a published release can't be changed
+      # (its files are fixed, and so is its tag, once it is out), so every file is in place before it is.
+      # A draft left by an earlier attempt is finished. A release that is already published is not touched: if it
+      # holds exactly the files of this run (an earlier attempt of this run published them, and a later step of the
+      # job failed), the job goes on to the steps after this one; if it holds different files, the job stops.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.gate.outputs.version }}
         run: |
-          if ! gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release create "v${VERSION}" \
-              --title "AgentMux v${VERSION}" \
-              --notes-file /tmp/release-notes.md \
-              dist-flat/*
+          set -euo pipefail
+          # The release list shows drafts too (a lookup by tag does not); one line per release of this tag: draft or published.
+          state="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | if .draft then \"draft\" else \"published\" end")"
+          publish=yes
+          if echo "$state" | grep -qx published; then
+            # Every file of this run, the signed manifest included, must be a published asset of the same name with the same digest.
+            same=yes
+            if [ -z "$(ls -A release-manifest 2> /dev/null)" ]; then
+              echo "This run has no signed manifest to compare with"
+              same=no
+            fi
+            assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.assets[] | "\(.name) \(.digest)"')"
+            for f in dist-flat/*; do
+              if ! echo "$assets" | grep -qxF "$(basename "$f") sha256:$(sha256sum < "$f" | cut -d' ' -f1)"; then
+                echo "Not the same as the published file: $(basename "$f")"
+                same=no
+              fi
+            done
+            if [ "$same" = no ]; then
+              echo "::error::release ${TAG} is published and cannot be changed; cut a new version"
+              exit 1
+            fi
+            echo "Release ${TAG} was already published by an earlier attempt: nothing to upload"
+            publish=no
+          elif echo "$state" | grep -qx draft; then
+            echo "Release ${TAG} exists as a draft -- uploading/overwriting artifacts, then publishing"
+            gh release upload "$TAG" dist-flat/* --clobber --repo "$GITHUB_REPOSITORY"
           else
-            echo "Release v${VERSION} already exists -- uploading/overwriting artifacts only"
-            gh release upload "v${VERSION}" dist-flat/* --clobber
+            gh release create "$TAG" \
+              --draft \
+              --verify-tag \
+              --title "AgentMux ${TAG}" \
+              --notes-file /tmp/release-notes.md \
+              --repo "$GITHUB_REPOSITORY" \
+              dist-flat/*
+          fi
+          if [ "$publish" = yes ]; then
+            gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
           fi
 
       # Replaces LANDING_DEPLOY_TOKEN, which fingerprinted as an `a5af`

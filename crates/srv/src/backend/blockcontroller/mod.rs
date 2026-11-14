@@ -12,8 +12,8 @@
 //! - Controllers dispatch I/O between the user and the process/service
 
 pub mod acp;
-mod acp_prelaunch;
-mod acp_mcp;
+pub mod acp_prelaunch;
+pub mod acp_mcp;
 pub mod agent_lock;
 pub mod app_server;
 pub mod app_server_controller;
@@ -22,16 +22,16 @@ pub mod core;
 pub mod durable_mode;
 pub mod durable_ssh;
 pub mod health;
-mod loop_stop;
+pub mod loop_stop;
 pub mod msp;
-mod msp_protocol;
-mod msp_session;
+pub mod msp_protocol;
+pub mod msp_session;
 pub mod persistent;
-mod persistent_resume;
+pub mod persistent_resume;
 pub mod pidregistry;
-mod prompt_record;
-mod resync_lock;
-mod resync_steps;
+pub mod prompt_record;
+pub mod resync_lock;
+pub mod resync_steps;
 pub mod process_tree;
 pub mod session_agent;
 pub mod session_recovery;

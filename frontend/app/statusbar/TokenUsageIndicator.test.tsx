@@ -22,6 +22,8 @@ describe("TokenUsageIndicator — AgentMux's own calls", () => {
         render(() => <TokenUsageIndicator />);
         const dot = await screen.findByTestId("ambient-failing-dot");
         expect(dot.getAttribute("data-hover-tip")).toBe("AgentMux can't write the session title (failed 2 times since start)");
+        // The bar keeps this item at its narrowest fit tier and shrinks it to the dot, through this class.
+        expect(dot.closest("button")?.classList.contains("token-usage-indicator--failing")).toBe(true);
     });
 
     it("shows no dot when every purpose is healthy", async () => {
@@ -29,5 +31,6 @@ describe("TokenUsageIndicator — AgentMux's own calls", () => {
         render(() => <TokenUsageIndicator />);
         // The counts of the previous test are still in the shared store until this ask answers.
         await waitFor(() => expect(screen.queryByTestId("ambient-failing-dot")).toBeNull());
+        expect(screen.getByRole("button").classList.contains("token-usage-indicator--failing")).toBe(false);
     });
 });

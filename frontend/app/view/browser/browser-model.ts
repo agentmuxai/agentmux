@@ -627,7 +627,11 @@ export class BrowserViewModel {
         this.diag(
             `nav-state recv url=${JSON.stringify(payload.url)} url_only=${!!payload.url_only} is_loading=${payload.is_loading} can_back=${payload.can_go_back} can_forward=${payload.can_go_forward}`,
         );
-        this._dispatch({ type: "UrlConfirmed", url: payload.url }, "nav-state");
+        // A page that has not committed anything yet has no address: the host reports "" for it,
+        // right after the pane is created. That is not the page settling on an empty address, so it
+        // must not clear the tab's address and title or be saved as the pane's.
+        const hasUrl = payload.url !== "";
+        if (hasUrl) this._dispatch({ type: "UrlConfirmed", url: payload.url }, "nav-state");
         // `url_only` events come from `on_load_end_browser_pane`, before the navigation
         // controller has committed, so their can_go_back / can_go_forward are stale: the
         // authoritative values come from `on_loading_state_change_browser_pane`.
@@ -666,7 +670,7 @@ export class BrowserViewModel {
         // here would bypass dispatchLoadingChanged's debounce hold (layer 3).
         // Persist the real URL to block meta so pane restore lands
         // on the last page, not whatever was passed at create time.
-        this.ctx.setMeta({ url: payload.url, ...titleMetaFor(this.meta(), payload.url) }).catch(() => {});
+        if (hasUrl) this.ctx.setMeta({ url: payload.url, ...titleMetaFor(this.meta(), payload.url) }).catch(() => {});
     }
 
     /** Clicks, close requests, notices and downloads of this pane's page. */
@@ -1120,7 +1124,7 @@ export class BrowserViewModel {
         const imageUrl = browserCtx?.imageUrl;
         if (linkUrl) {
             items.push(
-                { label: "Copy Link Address", icon: MENU_ICON.copyLink, click: () => { void clipboardWriteText(linkUrl); } },
+                { label: "Copy Link Address", icon: MENU_ICON.copyLink, click: () => { this.copyLink(linkUrl); } },
                 { label: "Save link as…", icon: MENU_ICON.saveAs, click: () => { this.saveAs(linkUrl); } },
             );
         }
@@ -1128,6 +1132,19 @@ export class BrowserViewModel {
             items.push({ label: "Save image as…", icon: MENU_ICON.saveAs, click: () => { this.saveAs(imageUrl); } });
         }
         return items.length ? [{ type: "separator" }, ...items] : [];
+    }
+
+    /** Put a link's address on the clipboard; when nothing can take it (a Linux machine with no clipboard
+     *  tool and no page clipboard), the pane says so instead of leaving the person to paste an old value. */
+    copyLink(url: string): void {
+        clipboardWriteText(url).catch(() => {
+            this._localNotice[1]({
+                id: `local-${Date.now()}`,
+                kind: "notice",
+                local: true,
+                message: "Couldn't copy the link: this computer has no clipboard tool. Install wl-clipboard (Wayland) or xclip or xsel (X11).",
+            });
+        });
     }
 
     /** Save a link or an image of the page: the host starts the download, and its Save As dialog and the strip take over. */

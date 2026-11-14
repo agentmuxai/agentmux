@@ -85,6 +85,8 @@ pub(crate) fn health_report(state: &AppState) -> Value {
         map.insert("disk".into(), disk.unwrap_or(Value::Null));
         map.insert("agents".into(), agents);
         map.insert("remote_ops".into(), json!(if super::enabled(state) { "on" } else { "off" }));
+        // Incoming LAN requests refused, still unanswered after a few seconds, or timed out since this srv started.
+        map.insert("lan_refusals".into(), crate::server::lan_watch::counts());
     }
     report
 }

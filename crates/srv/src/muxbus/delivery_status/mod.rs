@@ -23,7 +23,7 @@
 //!   note. The notes come from srv itself, never through the relay; see
 //!   [`notes::NOTE_MARKER`] for why one can't be forged.
 
-mod machine;
+pub mod machine;
 pub mod notes;
 
 use std::sync::atomic::{AtomicBool, Ordering};

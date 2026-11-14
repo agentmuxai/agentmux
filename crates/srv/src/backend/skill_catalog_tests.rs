@@ -45,7 +45,7 @@ fn entry_for(b: &Bundle, zip: &[u8], seed: u8) -> CatalogEntry {
         publisher_key: test_keys::public_key(seed),
         verification: vec![],
         zip: "https://catalog.test/acme-word-1.0.0.zip".into(),
-        zip_sha256: hex_sha256(zip),
+        zip_sha256: sha256_hex(zip),
     }
 }
 
@@ -98,6 +98,64 @@ fn the_pinned_key_is_a_real_key() {
 }
 
 #[test]
+fn an_installed_skill_is_looked_up_by_its_own_executables_for_this_platform_only() {
+    use crate::backend::app_version::Found;
+    let b = signed_with_script(1, "1.0.0");
+    let c = catalog();
+    c.skill_upsert_unique_global(&skill_row(&b)).unwrap();
+    install_checked(&c, "x", &b, 1).unwrap();
+    let installed = c.skill_app_map().unwrap();
+
+    let asked = std::cell::RefCell::new(Vec::new());
+    let here = installed_here(&installed, "windows", |names| {
+        asked.borrow_mut().push(names.to_vec());
+        Some(Found { version: Some("16.0.18227".into()) })
+    });
+    assert_eq!(here, vec![AppSkillHere { skill_id: "x".into(), found: true, version: Some("16.0.18227".into()) }]);
+    assert_eq!(*asked.borrow(), vec![vec!["WINWORD.EXE".to_string()]], "the skill's own executable names");
+
+    assert_eq!(installed_here(&installed, "windows", |_| Some(Found { version: None }))[0], AppSkillHere { skill_id: "x".into(), found: true, version: None });
+    assert_eq!(installed_here(&installed, "windows", |_| None)[0], AppSkillHere { skill_id: "x".into(), found: false, version: None });
+    let never = |_: &[String]| -> Option<Found> { panic!("a skill with no executable for this platform is not looked up") };
+    assert!(installed_here(&installed, "macos", never).is_empty());
+    assert!(installed_here(&BTreeMap::new(), "windows", never).is_empty());
+}
+
+#[test]
+fn browse_adds_the_version_of_the_app_found_here_by_the_executables_listed_for_this_platform() {
+    use crate::backend::app_version::Found;
+    let b = signed_with_script(1, "1.0.0");
+    let zip = zip_of(&b);
+    let with = |exes: &[(&str, &[&str])]| {
+        let mut e = entry_for(&b, &zip, 1);
+        e.app.executables = exes.iter().map(|(p, l)| (p.to_string(), l.iter().map(|x| x.to_string()).collect())).collect();
+        e
+    };
+    let mut listed = items(
+        vec![with(&[("windows", &["Live.exe"]), ("macos", &["Live"])]), with(&[("windows", &[])]), with(&[("macos", &["Live"])]), with(&[])],
+        &BTreeMap::new(),
+    );
+    assert!(listed.iter().all(|i| !i.app_found && i.app_version.is_none()), "nothing is looked up by items()");
+    let asked = std::cell::RefCell::new(Vec::new());
+    add_app_versions(&mut listed, "windows", |names| {
+        asked.borrow_mut().push(names.to_vec());
+        Some(Found { version: Some("12.2".into()) })
+    });
+    assert_eq!(*asked.borrow(), vec![vec!["Live.exe".to_string()]], "only the entry that lists a Windows executable is looked up, with those names");
+    assert_eq!((listed[0].app_found, listed[0].app_version.as_deref()), (true, Some("12.2")));
+    assert!(listed[1..].iter().all(|i| !i.app_found && i.app_version.is_none()));
+
+    // Found but saying no version, and not found at all.
+    let mut one = items(vec![with(&[("linux", &["blender"])])], &BTreeMap::new());
+    add_app_versions(&mut one, "linux", |_| Some(Found { version: None }));
+    assert_eq!((one[0].app_found, one[0].app_version.clone()), (true, None));
+    let mut none = items(vec![with(&[("linux", &["blender"])])], &BTreeMap::new());
+    add_app_versions(&mut none, "linux", |_| None);
+    assert_eq!((none[0].app_found, none[0].app_version.clone()), (false, None));
+    assert!(["windows", "macos", "linux"].contains(&this_platform()));
+}
+
+#[test]
 fn browse_says_what_is_installed_and_whether_the_catalog_is_ahead() {
     let b = signed_with_script(1, "1.0.0");
     let zip = zip_of(&b);
@@ -111,6 +169,9 @@ fn browse_says_what_is_installed_and_whether_the_catalog_is_ahead() {
     let c = catalog();
     c.skill_upsert_unique_global(&skill_row(&b)).unwrap();
     install_checked(&c, "x", &b, 1).unwrap();
+    let here = c.skill_app_map().unwrap();
+    assert_eq!(items(vec![entry.clone()], &here)[0].state, "changed", "the same files added another way are not as the catalog lists them");
+    install_download(&c, &zip, &entry, 2).unwrap();
     let here = c.skill_app_map().unwrap();
     assert_eq!(items(vec![entry.clone()], &here)[0].state, "current");
     let newer = CatalogEntry { version: "1.1.0".into(), hash: "f".repeat(64), ..entry.clone() };
@@ -201,6 +262,49 @@ fn a_catalog_skill_installs_unapproved_and_an_update_replaces_it_in_place() {
     assert_eq!(app.info.version, "1.1.0");
     assert!(app.files.iter().find(|f| f.script).unwrap().approved);
     assert_eq!(c.skill_app_map().unwrap().len(), 1);
+}
+
+#[test]
+fn a_skill_is_from_the_catalog_only_while_it_is_still_what_the_catalog_listed() {
+    let v1 = signed_with_script(1, "1.0.0");
+    let zip1 = zip_of(&v1);
+    let c = catalog();
+
+    // A skill added another way (here, a folder import) was never from the catalog.
+    c.skill_upsert_unique_global(&skill_row(&v1)).unwrap();
+    install_checked(&c, "x", &v1, 1).unwrap();
+    assert!(!c.skill_app_get("x").unwrap().unwrap().from_catalog);
+
+    // Installed from the catalog it is, in the one skill and in the list.
+    let first = install_download(&c, &zip1, &entry_for(&v1, &zip1, 1), 10).unwrap();
+    assert!(c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog);
+    assert!(c.skill_app_map().unwrap().get(&first.skill_id).unwrap().from_catalog);
+
+    // An edit of its text in Memory ends it: the content hash does not follow an edit, the text does.
+    let mut edited = c.skill_get(&first.skill_id).unwrap().unwrap();
+    edited.content.push_str("
+My own note.");
+    c.skill_upsert_unique_global(&edited).unwrap();
+    assert!(!c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog);
+    let entry = entry_for(&v1, &zip1, 1);
+    assert_eq!(items(vec![entry.clone()], &c.skill_app_map().unwrap())[0].state, "changed", "Browse offers the catalog's version back");
+
+    // Installing the catalog's version again puts it back.
+    let again = install_download(&c, &zip1, &entry_for(&v1, &zip1, 1), 11).unwrap();
+    assert_eq!(again.skill_id, first.skill_id);
+    assert!(c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog);
+    assert_eq!(items(vec![entry], &c.skill_app_map().unwrap())[0].state, "current");
+
+    // Different files than the catalog listed, or another key, are not: the record holds what the catalog said.
+    c.skill_catalog_source_set(&first.skill_id, &"f".repeat(64), &entry_for(&v1, &zip1, 1).publisher_key).unwrap();
+    assert!(!c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog, "other files");
+    let app = c.skill_app_get(&first.skill_id).unwrap().unwrap();
+    c.skill_catalog_source_set(&first.skill_id, &app.content_hash, "another-key").unwrap();
+    assert!(!c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog, "another key");
+
+    // Deleting the skill drops the record with it.
+    c.skill_catalog_forget(&first.skill_id).unwrap();
+    assert!(c.skill_app_get(&first.skill_id).unwrap().is_none());
 }
 
 #[test]

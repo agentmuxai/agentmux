@@ -47,7 +47,7 @@ fn key() -> &'static [u8; 32] {
     KEY.get_or_init(|| {
         // Never the real keychain from a unit test.
         let dev = matches!(agentmux_common::RuntimeMode::from_env(), Some(agentmux_common::RuntimeMode::Dev { .. }));
-        if cfg!(not(test)) && keychain_holds_key(dev, crate::identity::secret_store::backend_name()) {
+        if cfg!(not(any(test, feature = "test-support"))) && keychain_holds_key(dev, crate::identity::secret_store::backend_name()) {
             match stored_key() {
                 Ok(key) => return key,
                 Err(e) => tracing::warn!("transcript origin key: {e}; using one for this run only"),
@@ -473,7 +473,7 @@ mod tests {
     }
 
     fn tail(fs: &std::sync::Arc<crate::backend::storage::filestore::FileStore>, ms: &std::sync::Arc<crate::backend::storage::store::Store>, block: &str) -> Vec<Value> {
-        crate::server::transcript_tail::tail_lines(ms, fs, block, 50)
+        crate::backend::transcript::tail::tail_lines(ms, fs, block, 50)
             .unwrap()
             .lines
             .iter()

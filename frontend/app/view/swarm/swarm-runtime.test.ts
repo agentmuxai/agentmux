@@ -12,6 +12,7 @@ const row = (agent_id: string, state: AgentRuntime["state"], extra: Partial<Agen
     name: agent_id,
     provider: "claude",
     icon: "",
+    runtime: "host",
     ...extra,
 });
 

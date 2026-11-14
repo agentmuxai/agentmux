@@ -36,7 +36,7 @@ pub mod transfer;
 pub mod uses;
 pub mod vaults;
 pub mod versions;
-mod wordlist;
+pub mod wordlist;
 
 use std::collections::BTreeMap;
 
@@ -796,6 +796,8 @@ pub fn activity(store: &Store, limit: i64) -> Result<Vec<VaultActivity>, String>
         .collect())
 }
 
+#[cfg(test)]
+mod card_scan_tests;
 #[cfg(test)]
 mod history_tests;
 #[cfg(test)]

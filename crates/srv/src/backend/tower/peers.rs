@@ -32,7 +32,7 @@ use crate::backend::viewer::client::pinned_client;
 /// `TowerSampleReq::connection` for a paired computer: `peer:<id>`.
 pub const PEER_PREFIX: &str = "peer:";
 
-const FILE: &str = "tower-peers.json";
+pub const FILE: &str = "tower-peers.json";
 const TIMEOUT: Duration = Duration::from_secs(8);
 
 /// One paired computer, as kept on disk (no secret here).
@@ -393,29 +393,15 @@ pub async fn sample(peers: &'static Peers, id: &str, filter: &str, moved: Vec<St
     Err(last_err)
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
     use super::*;
 
-    const FP: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-    #[test]
-    fn a_pairing_link_is_read_and_anything_else_refused() {
-        let link = format!("agentmux://pair?v=1&host=198.51.100.20&port=47900&fp={FP}&code=ABCDEFGHJK&hostname=studio&channel=stable");
-        assert_eq!(
-            parse_link(&link).unwrap(),
-            Link { host: "198.51.100.20".into(), port: 47900, fingerprint: FP.into(), code: "ABCDEFGHJK".into(), hostname: "studio".into() }
-        );
-        assert!(parse_link("https://example.com/pair?v=1").is_err());
-        assert!(parse_link(&link.replace("v=1", "v=9")).is_err(), "unknown version");
-        assert!(parse_link(&link.replace(FP, "abc")).is_err(), "short fingerprint");
-        assert!(parse_link(&link.replace("198.51.100.20", "evil.example")).is_err(), "an address, not a name");
-        assert!(parse_link(&link.replace("&code=ABCDEFGHJK", "")).is_err());
-    }
+    pub const FP: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     /// Tokens in memory: tests never touch the user's keychain.
     #[derive(Default)]
-    struct MemTokens(std::sync::Mutex<std::collections::HashMap<String, String>>);
+    pub struct MemTokens(pub std::sync::Mutex<std::collections::HashMap<String, String>>);
 
     impl Tokens for std::sync::Arc<MemTokens> {
         fn put(&self, key: &str, token: &str) -> Result<(), String> {
@@ -433,9 +419,29 @@ mod tests {
 
     /// Peers for one test, kept for the test binary's life (`pair` and
     /// `sample` take `'static`, as the app's `Peers::global()` is).
-    fn peers_in(dir: &std::path::Path) -> (&'static Peers, std::sync::Arc<MemTokens>) {
+    pub fn peers_in(dir: &std::path::Path) -> (&'static Peers, std::sync::Arc<MemTokens>) {
         let tokens = std::sync::Arc::new(MemTokens::default());
         (Box::leak(Box::new(Peers::with_tokens(Some(dir.to_path_buf()), Box::new(tokens.clone())))), tokens)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+    use super::*;
+
+    #[test]
+    fn a_pairing_link_is_read_and_anything_else_refused() {
+        let link = format!("agentmux://pair?v=1&host=198.51.100.20&port=47900&fp={FP}&code=ABCDEFGHJK&hostname=studio&channel=stable");
+        assert_eq!(
+            parse_link(&link).unwrap(),
+            Link { host: "198.51.100.20".into(), port: 47900, fingerprint: FP.into(), code: "ABCDEFGHJK".into(), hostname: "studio".into() }
+        );
+        assert!(parse_link("https://example.com/pair?v=1").is_err());
+        assert!(parse_link(&link.replace("v=1", "v=9")).is_err(), "unknown version");
+        assert!(parse_link(&link.replace(FP, "abc")).is_err(), "short fingerprint");
+        assert!(parse_link(&link.replace("198.51.100.20", "evil.example")).is_err(), "an address, not a name");
+        assert!(parse_link(&link.replace("&code=ABCDEFGHJK", "")).is_err());
     }
 
     #[test]
@@ -485,61 +491,5 @@ mod tests {
         let err = pair(peers, &link, "me").await.unwrap_err();
         assert!(err.contains("Can't reach studio"), "{err}");
         assert!(peers.list().is_empty(), "nothing kept");
-    }
-
-    /// End to end against a real viewer listener over TLS: pair with the
-    /// link, get refused until the user shares, then read the snapshot; a
-    /// link pinning another certificate never pairs; a revoked device is
-    /// told so.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_peer_pairs_over_pinned_tls_and_reads_once_sharing_is_on() {
-        let viewer_dir = tempfile::tempdir().unwrap();
-        let mut state = crate::server::tests::test_state();
-        let broker = crate::backend::mps::Broker::new();
-        state.viewer = crate::backend::viewer::ViewerService::new(Some(viewer_dir.path().to_path_buf()), &broker);
-        let tls = state.viewer.tls().unwrap();
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let token = tokio_util::sync::CancellationToken::new();
-        crate::backend::lan::listeners::LanListenerSupervisor::serve_tls(
-            crate::server::build_viewer_router(state.clone()),
-            listener,
-            tokio_rustls::TlsAcceptor::from(tls.server_config().unwrap()),
-            token.clone(),
-        );
-        let link = |fp: &str| {
-            let (code, _) = state.viewer.pairing.start();
-            format!("agentmux://pair?v=1&host=127.0.0.1&port={port}&fp={fp}&code={code}&hostname=studio")
-        };
-
-        let dir = tempfile::tempdir().unwrap();
-        let (peers, tokens) = peers_in(dir.path());
-        // Another certificate's fingerprint: the handshake fails, no pairing.
-        let err = pair(peers, &link(FP), "laptop (Tower)").await.unwrap_err();
-        assert!(err.contains("Can't reach studio"), "{err}");
-        assert!(peers.list().is_empty());
-
-        let info = pair(peers, &link(&tls.fingerprint), "laptop (Tower)").await.unwrap();
-        let id = info.connection.strip_prefix(PEER_PREFIX).unwrap().to_string();
-        assert_eq!(tokens.0.lock().unwrap().len(), 1, "the token went to the token store");
-        assert!(!std::fs::read_to_string(dir.path().join(FILE)).unwrap().contains("amxv_"));
-
-        let err = sample(peers, &id, "", vec![]).await.unwrap_err();
-        assert!(err.contains("doesn't share"), "{err}");
-
-        let mut settings = state.config_watcher.get_settings();
-        settings.extra.insert("tower:sharewithpaired".to_string(), serde_json::json!(true));
-        state.config_watcher.update_settings(settings);
-        let snap = sample(peers, &id, "", vec![]).await.unwrap();
-        assert!(snap.remote);
-        assert!(snap.host.unwrap().total > 0);
-
-        // The other computer's user revokes this device.
-        let device = peers.get(&id).unwrap().device_id;
-        state.mstore.viewer_device_delete(&device).unwrap();
-        let err = sample(peers, &id, "", vec![]).await.unwrap_err();
-        assert!(err.contains("no longer accepts"), "{err}");
-        token.cancel();
     }
 }

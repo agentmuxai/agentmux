@@ -33,7 +33,7 @@ const TAIL_WINDOW_BYTES: i64 = 64 * 1024;
 /// How a segment began (§4.2's rungs; `relocated` arrives with P4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Rung {
+pub enum Rung {
     /// The provider resumed the previous session.
     Native,
     /// A fresh provider session, given AgentMux's record of the conversation.
@@ -77,7 +77,7 @@ enum Event {
 
 /// What is known about a segment when its process starts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct Start {
+pub struct Start {
     pub segment_id: String,
     pub agent_uid: String,
     /// The block's `agentId`: the transcript zone's key, which differs from
@@ -120,7 +120,7 @@ pub(crate) struct Start {
 
 /// One segment, folded from its events.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Segment {
+pub struct Segment {
     pub start: Start,
     pub ended_at_ms: Option<i64>,
     pub end_reason: Option<EndReason>,
@@ -130,7 +130,7 @@ pub(crate) struct Segment {
 
 /// `agent-uid:<uid>:segments`, or `None` for a UID outside the safe zone-name
 /// character set.
-pub(crate) fn zone_for(agent_uid: &str) -> Option<String> {
+pub fn zone_for(agent_uid: &str) -> Option<String> {
     crate::backend::agent_session::is_valid_definition_id(agent_uid).then(|| format!("agent-uid:{agent_uid}:segments"))
 }
 
@@ -206,7 +206,7 @@ fn newest_segment_id(fs: &FileStore, zone: &str) -> Option<String> {
 
 /// Records a segment's start and returns its id. `start.segment_id` and
 /// `start.predecessor_segment_id` are filled in here.
-pub(crate) fn record_start(fs: &FileStore, mut start: Start) -> Result<String, String> {
+pub fn record_start(fs: &FileStore, mut start: Start) -> Result<String, String> {
     let zone = zone_for(&start.agent_uid).ok_or("agent uid is not a valid zone key")?;
     start.segment_id = uuid::Uuid::new_v4().to_string();
     start.predecessor_segment_id = newest_segment_id(fs, &zone);
@@ -254,7 +254,7 @@ pub(crate) fn record_end_with_provider_bytes(
 
 /// Every segment the agent has run, oldest first. A segment with no `end` is
 /// running, or its srv died before it could record one.
-pub(crate) fn segments(fs: &FileStore, agent_uid: &str) -> Vec<Segment> {
+pub fn segments(fs: &FileStore, agent_uid: &str) -> Vec<Segment> {
     let Some(zone) = zone_for(agent_uid) else { return Vec::new() };
     let Some(data) = read_log(fs, &zone) else { return Vec::new() };
     fold(events_in(&data))
@@ -361,7 +361,7 @@ pub(crate) struct GateInput<'a> {
 /// Where the agent's conversation was last: the newest segment that has a
 /// provider session, and what that segment recorded about it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct Head {
+pub struct Head {
     pub session_id: String,
     pub identity_key: Option<String>,
     pub config_dir: Option<String>,
@@ -470,7 +470,7 @@ fn fork_from(input: &GateInput<'_>, resumable_at: &impl Fn(&str, &str, &str) -> 
 /// has a `branch_label` and a `parent_id`): what a fork with no conversation
 /// of its own starts from (`ResumeGate::ForkFrom`). Shared by the spawn's
 /// gate and the pane's resume preflight.
-pub(crate) fn fork_source_head(
+pub fn fork_source_head(
     store: &crate::backend::storage::store::Store,
     fs: &FileStore,
     agent_uid: &str,
@@ -494,7 +494,7 @@ fn same_dir(a: &str, b: &str) -> bool {
 /// which for an account's own dir is the login the session ran under unless
 /// the dir was since re-logged-into as someone else; a recorded key always
 /// wins. Unreadable (the dir is gone) stays unknown, which never relocates.
-pub(crate) fn with_legacy_identity(mut head: Head) -> Head {
+pub fn with_legacy_identity(mut head: Head) -> Head {
     if head.identity_key.is_none() {
         if let Some(dir) = head.config_dir.as_deref() {
             head.identity_key = crate::identity::account_email::identity_key_from_oauth_dir(&head.provider, dir);
@@ -505,7 +505,7 @@ pub(crate) fn with_legacy_identity(mut head: Head) -> Head {
 
 /// Where the agent's conversation was last, read from its chain in `fs`.
 /// `None` when the UID has no chain.
-pub(crate) fn chain_head(fs: &FileStore, agent_uid: &str) -> Option<Head> {
+pub fn chain_head(fs: &FileStore, agent_uid: &str) -> Option<Head> {
     segments(fs, agent_uid).into_iter().rev().find_map(|s| {
         let session_id = s.start.provider_session_id?;
         Some(Head {
@@ -521,7 +521,7 @@ pub(crate) fn chain_head(fs: &FileStore, agent_uid: &str) -> Option<Head> {
 
 /// The rung a spawn started on, from what the spawn knows: whether it passed
 /// `--resume`, and whether it carries a continuation packet.
-pub(crate) fn rung_for_spawn(resumed: bool, carries_packet: bool) -> Rung {
+pub fn rung_for_spawn(resumed: bool, carries_packet: bool) -> Rung {
     if resumed {
         Rung::Native
     } else if carries_packet {

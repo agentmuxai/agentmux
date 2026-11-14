@@ -12,9 +12,9 @@ use super::{now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 pub(super) use super::rate_limiter::RateLimiter;
 
 #[path = "former_slug.rs"]
-mod former_slug;
+pub mod former_slug;
 pub use former_slug::FormerSlugResolver;
-pub(crate) use former_slug::{former_slug_claim, refuse_former_slug_sender, renamed};
+pub use former_slug::{former_slug_claim, refuse_former_slug_sender, renamed};
 
 // ---- Handler ----
 
@@ -101,9 +101,9 @@ pub struct Handler {
 }
 
 #[path = "name_bindings.rs"]
-mod name_bindings;
+pub mod name_bindings;
 #[path = "deliver_steps.rs"]
-mod deliver_steps;
+pub mod deliver_steps;
 pub use name_bindings::NameBindings;
 
 /// What a by-name unregister did (identity M2, spec §4.4.4 Q7). A name held
@@ -231,7 +231,7 @@ impl Handler {
     /// Name-only registration. Every production site now goes through
     /// [`register_agent_full`] with its UID and counter site; this is the
     /// test-facing form (and the shape the pre-M2 API had).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn register_agent(
         &mut self,
         agent_id: &str,
@@ -260,7 +260,7 @@ impl Handler {
     /// ([`NameBindings::stable`]): kept when a later call replaces the
     /// display binding, so a jekt addressed to `AGENTMUX_AGENT_ID` still
     /// resolves after the display name has moved on post-rename.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn register_agent_with_nonce(
         &mut self,
         agent_id: &str,
@@ -888,6 +888,7 @@ impl Handler {
             delivery_tier,
             req.sig_verified,
             req.reagent_verified,
+            req.reagent_expired,
             req.lan_verified,
             req.channel_verified,
             req.wan_instance.as_ref().filter(|_| req.wan_verified == Some(true)),
@@ -903,11 +904,7 @@ impl Handler {
         // parse the JEKT block — the wrap_jekt_message output already includes
         // the source in the human-readable header so format_injected_message
         // is called with include_source=false here.
-        let final_msg = format_injected_message(
-            &wrapped,
-            req.source_agent.as_deref(),
-            false,
-        );
+        let final_msg = format_injected_message(&wrapped, req.source_agent.as_deref(), false);
 
         let delivery = deliver_steps::Delivery {
             req: &req,
@@ -1213,7 +1210,7 @@ impl ReactiveHandler {
     }
 
     /// Test-facing name-only form — see [`Handler::register_agent`].
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn register_agent(
         &self,
         agent_id: &str,
@@ -1227,7 +1224,7 @@ impl ReactiveHandler {
     }
 
     /// See the inner [`Handler::register_agent_with_nonce`].
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn register_agent_with_nonce(
         &self,
         agent_id: &str,
@@ -1289,7 +1286,7 @@ impl ReactiveHandler {
     /// skip left in place (if any) still belongs to whichever nonce is
     /// actually on record, not to this spawn's own unwritten one. See
     /// `spawn_process`'s handling of `try_register_agent_full`'s `Err` arm.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn try_register_agent_with_nonce(
         &self,
         agent_id: &str,

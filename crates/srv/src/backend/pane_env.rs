@@ -317,7 +317,7 @@ fn apply_edits_pty(c: &mut portable_pty::CommandBuilder, edits: Vec<(String, Opt
 /// uses the in-pane helpers. Call sites that spawn the CLI as a plain
 /// third-party binary (auth checks, version probes) tighten this to
 /// `sanitize_external_command` on top, which only removes more.
-pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
+pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     let mut cmd = agentmux_common::make_cli_cmd(cli_path);
     sanitize_process_command(&mut cmd);
     cmd
@@ -373,10 +373,22 @@ mod spawn_site_coverage {
          "sanitized: the host's `gh-agent token` for a container agent's repository, sanitize_external_command (it is told only the agent id); and its `scan-push`, which judges a container's push from data on stdin, sanitize_external_command, run in a temp directory with fixed arguments; and its `pr merge`, which srv runs for a container agent with arguments it builds itself, sanitize_external_command, run in a temp directory"),
         ("src/identity/aws_broker/mint.rs", "&spec.program", 1,
          "sanitized: the host program that mints a container agent's AWS session (aws configure export-credentials, or a grant's own recipe), sanitize_external_command, then only an allowlist of the environment is passed on"),
+        ("src/backend/app_version.rs", "\"/usr/bin/plutil\"", 1,
+         "sanitized: macOS only: reads a binary Info.plist's version for Browse (`plutil -extract CFBundleShortVersionString`), sanitize_external_std_command, no input, output parsed then discarded"),
         ("src/open_cli.rs", "\"open\"", 1,
          "sanitized: `agentmux-srv open` starts the person's browser (macOS) at the sign-in line, sanitize_external_std_command"),
         ("src/open_cli.rs", "\"rundll32\"", 1,
          "sanitized: `agentmux-srv open` starts the person's browser (Windows) at the sign-in line, sanitize_external_std_command"),
+        ("src/agentmux_cli/main.rs", "&srv", 2,
+         "own-exe: `agentmux` runs the server program of its own install (`migrate --prepare`, and the `open` and `logout` sign-in client); the command drops every AGENTMUX_* variable of the shell it runs in before it spawns anything"),
+        ("src/agentmux_cli/main.rs", "srv", 1,
+         "own-exe: `agentmux run` becomes the server program of its own install (exec), with the channel's own folders in its environment; the shell's AGENTMUX_* variables were dropped first"),
+        ("src/agentmux_cli/main.rs", "exe", 1,
+         "own-exe: `agentmux start` runs `agentmux run` in the background from its own executable; the shell's AGENTMUX_* variables were dropped first"),
+        ("src/agentmux_cli/service.rs", "program", 1,
+         "mixed: `agentmux setup` and `start`/`stop` drive the person's own service manager (systemctl --user, launchctl) at their command, to install, start or stop the server's user service; no agent code runs through it, and nothing of the environment is added"),
+        ("src/agentmux_cli/process.rs", "\"ps\"", 1,
+         "probe: names the program of one process id on macOS (`ps -o comm= -p <pid>`), to check it is the server before it is signalled; no input but the id, no environment passed on"),
         ("src/open_cli.rs", "\"xdg-open\"", 1,
          "sanitized: `agentmux-srv open` starts the person's browser (Linux) at the sign-in line, sanitize_external_std_command"),
         ("src/server/files_root.rs", "\"cmd\"", 1,

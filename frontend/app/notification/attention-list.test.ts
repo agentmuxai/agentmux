@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { describe, expect, it, vi } from "vitest";
-import { mergeAttention } from "./attention-list";
+import { attentionRows, mergeAttention } from "./attention-list";
 
 vi.mock("@/app/store/agent-runtime-live", () => ({ sharedAgentRuntime: () => ({ rows: () => [] }) }));
 vi.mock("./waiting-for-you", () => ({ waitingPanes: () => [] }));
 vi.mock("@/app/block/pane-color-scheme", () => ({ paneRoleColor: () => undefined }));
 vi.mock("@/app/block/pane-identity", () => ({ isLightThemeActive: () => false }));
-vi.mock("@/app/store/global", () => ({ MOS: {}, workspace: () => null }));
+vi.mock("@/app/store/global", () => ({ MOS: {}, workspace: () => null, getSettingsKeyAtom: () => () => undefined }));
 vi.mock("@/app/element/pane-tab-model", () => ({ describePaneTab: () => ({ label: "" }) }));
 
 const row = (over: Partial<AgentRuntime>): AgentRuntime =>
@@ -86,6 +86,35 @@ describe("mergeAttention", () => {
         ]);
         // A tab not loaded yet cannot place it: it is not called elsewhere.
         expect(mergeAttention([], rows.slice(0, 1), seen, () => undefined)[0].local).toBe(true);
+    });
+
+    it("lists an agent that waits on a Browser request as the Browser pane, once", () => {
+        const asks = row({ name: "Korp", color: "#00aa00", block_id: "agent-pane", state: "waiting_on_user", detail: "browser_request", waiting_in: "web" });
+        // Another window: only srv's row says so. The item is the pane where the answer is given.
+        const elsewhere = mergeAttention([], [asks], seen, () => false);
+        expect(elsewhere).toEqual([
+            { blockId: "web", name: "Korp", agentId: undefined, color: "#00aa00", what: "needs you in the browser", since: 500, local: false },
+        ]);
+        // The pane's own window: its registry has the request already, so the row adds nothing.
+        const here = mergeAttention([pane("web", "needs you in the browser", 100)], [asks], seen, () => true, () => "Browser");
+        expect(here.map((i) => [i.blockId, i.since])).toEqual([["web", 100]]);
+        // Two agents asking in one pane are one place to go.
+        const two = mergeAttention([], [asks, { ...asks, agent_id: "b", name: "Lazo" }], seen);
+        expect(two.map((i) => i.blockId)).toEqual(["web"]);
+    });
+
+    it("reads an agent that waits only on a Browser request as idle when Browser waits are switched off", () => {
+        const rows = [
+            row({ agent_id: "a", block_id: "b1", state: "waiting_on_user", detail: "browser_request", waiting_in: "web" }),
+            row({ agent_id: "b", block_id: "b2", state: "waiting_on_user" }),
+        ];
+        expect(attentionRows(rows, true)).toBe(rows);
+        const off = attentionRows(rows, false);
+        expect(off.map((r) => [r.agent_id, r.state, r.waiting_in])).toEqual([
+            ["a", "idle", undefined],
+            ["b", "waiting_on_user", undefined],
+        ]);
+        expect(mergeAttention([], off, seen).map((i) => i.blockId)).toEqual(["b2"]);
     });
 
     it("counts a pane that both feeds name once, from the registry", () => {

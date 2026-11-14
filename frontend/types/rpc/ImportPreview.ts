@@ -11,4 +11,9 @@ source: Source, source_label: string,
 /**
  * The file holds every secret in it unencrypted: the person is offered to delete it.
  */
-plaintext_file: boolean, };
+plaintext_file: boolean, 
+/**
+ * How many logins a browser's export gave a site: they go to one browser profile's sign-in Vault
+ * (`commit`'s `profile`), where the browser offers them; none for any other file.
+ */
+browser_signins: number, };

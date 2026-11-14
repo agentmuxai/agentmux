@@ -248,6 +248,7 @@ impl<'a> Scheduler<'a> {
             BlockKind::Task => blocks::task::run(node, scope).await,
             BlockKind::Notify => blocks::notify::run(node, scope).await,
             BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
+            BlockKind::Spawn => blocks::spawn::run(node, scope).await,
             BlockKind::Transform => blocks::transform::run(node, scope).await,
             BlockKind::ForEach => unreachable!("handled above"),
         }
@@ -308,7 +309,7 @@ impl<'a> Scheduler<'a> {
             }
             BlockKind::Response => read("template"),
             BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach => return,
-            BlockKind::Task | BlockKind::Notify => (false, false),
+            BlockKind::Task | BlockKind::Notify | BlockKind::Spawn => (false, false),
         };
         self.scope.bits.insert(node.id.clone(), bits);
     }

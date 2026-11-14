@@ -31,7 +31,7 @@ const HELD_ELSEWHERE_FRESH: Duration = Duration::from_secs(90);
 
 /// This AgentMux instance's id at the relay: host + channel. Stable across
 /// restarts of the same install, distinct between two installs on one host.
-pub(crate) fn instance_id() -> String {
+pub fn instance_id() -> String {
     format!(
         "{}/{}",
         crate::backend::reactive::registry::local_host_label(),
@@ -40,7 +40,7 @@ pub(crate) fn instance_id() -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Outcome {
+pub enum Outcome {
     /// This instance holds the agent's lease.
     Held,
     /// Another instance holds it; the text describes where.
@@ -78,7 +78,7 @@ fn key(agent_id: &str) -> String {
 
 /// `Some(where)` when a recent answer said another instance holds `agent`.
 /// The early admission check refuses on it without a network round trip.
-pub(crate) fn held_elsewhere(agent: &str) -> Option<String> {
+pub fn held_elsewhere(agent: &str) -> Option<String> {
     let state = STATE.lock().unwrap_or_else(|e| e.into_inner());
     let (desc, at) = state.get(&key(agent))?.elsewhere.clone()?;
     (at.elapsed() < HELD_ELSEWHERE_FRESH).then_some(desc)
@@ -87,7 +87,7 @@ pub(crate) fn held_elsewhere(agent: &str) -> Option<String> {
 /// Drop a cached "held elsewhere" answer for `agent` — after a Take over
 /// freed it, so the retried turn isn't refused from the cache for up to
 /// [`HELD_ELSEWHERE_FRESH`] (Codex P1 on #3899).
-pub(crate) async fn forget_elsewhere(agent: &str) {
+pub async fn forget_elsewhere(agent: &str) {
     // Under the per-agent op lock: a lease check already in flight records
     // its answer first, so a late pre-release 409 can't restore the
     // refusal after it was forgotten (Codex P2 on #3903).
@@ -101,7 +101,7 @@ pub(crate) async fn forget_elsewhere(agent: &str) {
 
 /// Is a [`describe_holder`] description about this computer (another
 /// AgentMux instance on the same host, e.g. a second channel)?
-pub(crate) fn holder_on_this_computer(desc: &str) -> bool {
+pub fn holder_on_this_computer(desc: &str) -> bool {
     desc == THIS_COMPUTER || desc.starts_with("this computer, ")
 }
 
@@ -109,7 +109,7 @@ const THIS_COMPUTER: &str = "this computer";
 
 /// The channel of another instance on this computer that, per a recent
 /// relay answer, holds `agent` — what Take over needs to find it.
-pub(crate) fn held_on_this_computer_by(agent: &str) -> Option<String> {
+pub fn held_on_this_computer_by(agent: &str) -> Option<String> {
     let desc = held_elsewhere(agent)?;
     if !holder_on_this_computer(&desc) {
         return None;
@@ -119,7 +119,7 @@ pub(crate) fn held_on_this_computer_by(agent: &str) -> Option<String> {
 
 /// Where the holder is when a recent relay answer put `agent` on another
 /// computer (a [`describe_holder`] description), else `None`.
-pub(crate) fn held_on_another_computer(agent: &str) -> Option<String> {
+pub fn held_on_another_computer(agent: &str) -> Option<String> {
     held_elsewhere(agent).filter(|desc| !desc.is_empty() && !holder_on_this_computer(desc))
 }
 
@@ -197,8 +197,8 @@ pub(crate) fn mark_held_for_test(agent_id: &str) {
 }
 
 /// Note a 409 `not_holder` the relay returned on a pending pull or an ack.
-#[cfg(test)]
-pub(crate) fn note_not_holder(agent_id: &str, body: &serde_json::Value) -> String {
+#[cfg(any(test, feature = "test-support"))]
+pub fn note_not_holder(agent_id: &str, body: &serde_json::Value) -> String {
     let desc = body.get("held_by").map(describe_holder).unwrap_or_default();
     record(agent_id, &Outcome::HeldElsewhere(desc.clone()));
     desc
@@ -265,12 +265,12 @@ fn claim_outcome(resp: Option<(u16, serde_json::Value)>) -> Outcome {
 /// The key this install wants `agent_id`'s file keys sealed to, when it
 /// holds a WAN key for the agent (spec §7). Never mints one: the spawn path
 /// decides an agent's key, importing an older one.
-fn seal_offer(agent_id: &str) -> Option<crate::server::jekt_seal::SealOffer> {
+fn seal_offer(agent_id: &str) -> Option<crate::backend::jekt_seal::SealOffer> {
     let wan = crate::backend::storage::wan_identity::global()?;
     let key = wan.agent_key_load(agent_id).ok().flatten()?;
     let instance = wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()).ok()?;
     let seed: [u8; 32] = agentmux_common::jekt_sign::decode_key(&key.private_key)?.try_into().ok()?;
-    crate::server::jekt_seal::offer(&instance.instance_id, agent_id, &key.public_key_bytes()?, &seed)
+    crate::backend::jekt_seal::offer(&instance.instance_id, agent_id, &key.public_key_bytes()?, &seed)
 }
 
 /// POST `path` for `agent_id`; `(status, json body)` or `None` on transport error.
@@ -463,7 +463,7 @@ pub(crate) async fn take_over(base: &str, agent_id: &str, token: &str, http: &re
 /// a *sender* about a message's target, so it never touches this
 /// instance's own lease state ([`record`], admission): a read only.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Holder {
+pub enum Holder {
     /// No live lease.
     Free,
     /// This instance holds it.
@@ -481,7 +481,7 @@ pub(crate) enum Holder {
 
 /// What the relay says about another install holding an agent's lease.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct HeldBy {
+pub struct HeldBy {
     /// Where, for a person to read ([`describe_holder`]).
     pub desc: String,
     /// The channel the agent runs in there, which is the one it signs as.
@@ -490,7 +490,7 @@ pub(crate) struct HeldBy {
     pub features: Vec<String>,
     /// The key it wants the agent's file keys sealed to; `None` from an
     /// install that predates sealing (spec §7).
-    pub seal: Option<crate::server::jekt_seal::SealOffer>,
+    pub seal: Option<crate::backend::jekt_seal::SealOffer>,
 }
 
 /// How long an answer is reused. Shorter than the lease TTL (60 s), so a
@@ -511,7 +511,7 @@ static HOLDER_UNSUPPORTED_UNTIL: LazyLock<Mutex<Option<Instant>>> = LazyLock::ne
 /// Ask the relay who holds `agent`'s lease, as `caller` (the message's
 /// sender, whose credential `token` is). Cached for [`HOLDER_FRESH`];
 /// "unreachable" is never cached.
-pub(crate) async fn holder(base: &str, agent: &str, caller: &str, token: &str, http: &reqwest::Client) -> Holder {
+pub async fn holder(base: &str, agent: &str, caller: &str, token: &str, http: &reqwest::Client) -> Holder {
     if HOLDER_UNSUPPORTED_UNTIL.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t > Instant::now()) {
         return Holder::Unsupported;
     }
@@ -600,7 +600,7 @@ mod tests {
                     async move {
                         let get = |k: &str| headers.get(k).and_then(|v| v.to_str().ok()).map(str::to_string);
                         sink.lock().unwrap().push((agent, get("authorization"), get("x-agent-id"), get("x-agent-instance")));
-                        axum::Json(serde_json::json!({ "state": "other", "held_by": { "host": "area54-holder-test", "channel": "stable" } }))
+                        axum::Json(serde_json::json!({ "state": "other", "held_by": { "host": "desk-holder-test", "channel": "stable" } }))
                     }
                 },
             ),
@@ -615,7 +615,7 @@ mod tests {
         let agent = format!("HolderTest-{}", &uuid::Uuid::new_v4().to_string()[..8]);
 
         let first = holder(&base, &agent, "lark", "tok", &http).await;
-        assert!(matches!(&first, Holder::Other(h) if h.desc.contains("area54-holder-test")), "{first:?}");
+        assert!(matches!(&first, Holder::Other(h) if h.desc.contains("desk-holder-test")), "{first:?}");
         let again = holder(&base, &agent, "lark", "tok", &http).await;
         assert_eq!(again, first);
         let seen = hits.lock().unwrap().clone();
@@ -643,6 +643,21 @@ mod tests {
         assert_ne!(holder_key("agenty", "tok-a"), holder_key("agenty", "tok-b"));
     }
 
+    /// A holder host name that is not a valid computer name, so it never matches
+    /// this machine's own name.
+    const HOLDER_HOST: &str = "holder host (test)";
+
+    /// A holder whose host is this machine's own name is another instance here,
+    /// whatever the machine is called: asked with the real local name on purpose.
+    #[test]
+    fn a_holder_with_this_machines_name_is_this_computer() {
+        let local = crate::backend::reactive::registry::local_host_label();
+        let body = serde_json::json!({ "state": "other", "held_by": { "host": local.to_uppercase(), "channel": "stable", "version": "0.59.5" } });
+        let Holder::Other(h) = holder_from(200, &body) else { panic!("a holder that is not ours is `Other`") };
+        assert_eq!(h.desc, "this computer, channel stable, v0.59.5");
+        assert!(holder_on_this_computer(&h.desc));
+    }
+
     /// The holder query's answers. Anything the relay
     /// does not say plainly is `Unknown`, which routes as before.
     #[test]
@@ -650,10 +665,13 @@ mod tests {
         use serde_json::json;
         assert_eq!(holder_from(200, &json!({ "state": "free" })), Holder::Free);
         assert_eq!(holder_from(200, &json!({ "state": "yours" })), Holder::Yours);
-        let other = holder_from(200, &json!({ "state": "other", "held_by": { "host": "area54", "channel": "stable", "version": "0.59.5" } }));
-        assert!(matches!(&other, Holder::Other(h) if h.desc.contains("area54") && h.channel == "stable" && h.seal.is_none()), "{other:?}");
+        // A holder name no computer can have (a space is not allowed in a host
+        // name), so these cases never turn into "this computer" on the machine
+        // running the test.
+        let other = holder_from(200, &json!({ "state": "other", "held_by": { "host": HOLDER_HOST, "channel": "stable", "version": "0.59.5" } }));
+        assert!(matches!(&other, Holder::Other(h) if h.desc.contains(HOLDER_HOST) && h.channel == "stable" && h.seal.is_none()), "{other:?}");
         let seal = json!({ "instance": "i", "key_fp": "f", "key": "k", "sig": "s" });
-        let sealed = holder_from(200, &json!({ "state": "other", "held_by": { "host": "area54", "channel": "stable", "features": ["files-cloud-v1"], "seal": seal } }));
+        let sealed = holder_from(200, &json!({ "state": "other", "held_by": { "host": HOLDER_HOST, "channel": "stable", "features": ["files-cloud-v1"], "seal": seal } }));
         let Holder::Other(h) = sealed else { panic!("{sealed:?}") };
         assert_eq!(h.features, vec!["files-cloud-v1".to_string()]);
         assert_eq!(h.seal.map(|s| s.instance), Some("i".to_string()));

@@ -5,6 +5,8 @@
 //! `{{block_id.path}}`, `{{var.name}}`, `{{env.NAME}}` against the
 //! execution context (RFC #753 §2 Q5).
 //!
+//! A reference may carry filters, `{{a.log | tail:20 | lower}}` (see `filters`).
+//!
 //! The Phase 1 resolver is intentionally simple: regex find-replace
 //! over the input string. Loop scope (`{{loop.index}}`, `{{loop.item}}`)
 //! is added in Phase 2 alongside the Loop block.
@@ -15,6 +17,8 @@ use serde_json::Value;
 
 use super::state::{Reducer, RunState};
 use super::value::Tv;
+
+mod filters;
 
 /// Only env vars starting with this prefix are exposed to drone
 /// templates via `{{env.NAME}}`. See `ExecutionScope::lookup` for
@@ -70,6 +74,12 @@ impl ExecutionScope {
         Value::String(self.resolve(template))
     }
 
+    /// What one `{{path}}` token names, as the value itself, or none when nothing is there. `value_of` answers a
+    /// missing token with its own text; this tells the two apart.
+    pub fn lookup_ref(&self, path: &str) -> Option<Value> {
+        self.lookup(path.trim())
+    }
+
     /// Declare how writes to `name` combine (`replace` when never declared).
     pub fn declare_var(&mut self, name: &str, reducer: Reducer) -> Result<(), String> {
         self.state.declare(name, reducer).map_err(|e| e.to_string())
@@ -93,7 +103,8 @@ impl ExecutionScope {
         let mut rest = template;
         while let Some(open) = rest.find("{{") {
             let Some(len) = find_close(&rest[open + 2..]) else { break };
-            let path = rest[open + 2..open + 2 + len].trim();
+            // A filter changes what the text looks like, not where it came from: the bits are the reference's own.
+            let (path, _) = filters::split(&rest[open + 2..open + 2 + len]);
             rest = &rest[open + 2 + len + 2..];
             let mut parts = path.split('.');
             let (t, d) = match parts.next().unwrap_or("") {
@@ -167,7 +178,15 @@ impl ExecutionScope {
         out
     }
 
-    fn lookup(&self, path: &str) -> Option<Value> {
+    /// What a token stands for: the reference, then each `| filter` after it.
+    fn lookup(&self, token: &str) -> Option<Value> {
+        match filters::split(token) {
+            (path, Some(steps)) => filters::apply(self.lookup_path(path), steps),
+            (path, None) => self.lookup_path(path),
+        }
+    }
+
+    fn lookup_path(&self, path: &str) -> Option<Value> {
         // Splits like `block1.response.text` → ["block1", "response", "text"].
         let mut parts = path.split('.');
         let head = parts.next()?;
@@ -379,5 +398,37 @@ mod tests {
         // without the prefix is rejected.
         let scope = ExecutionScope::new();
         assert_eq!(scope.resolve("{{env.PATH}}"), "{{env.PATH}}");
+    }
+
+    #[test]
+    fn filters_cut_and_reshape_a_reference() {
+        let mut scope = ExecutionScope::new();
+        scope.outputs.insert("run".to_string(), json!({ "log": "a\nb\nc\nd", "body": r#"{"conclusion":"FAILURE","n":3}"# }));
+        assert_eq!(scope.resolve("{{run.log | tail:2}}"), "c\nd");
+        assert_eq!(scope.resolve("{{ run.body | json:conclusion | lower }}!"), "failure!");
+        assert_eq!(scope.resolve("{{run.body | json:n}}"), "3");
+        assert_eq!(scope.resolve("{{run.nothing | default:none}}"), "none");
+        assert_eq!(scope.value_of("{{run.body | json:n}}"), json!(3), "a single token keeps its type");
+        assert_eq!(scope.value_of("{{run.log | head:1}}"), json!("a"));
+    }
+
+    #[test]
+    fn a_bad_filter_or_a_missing_value_leaves_the_token_visible() {
+        let mut scope = ExecutionScope::new();
+        scope.vars.insert("x".to_string(), json!("v"));
+        assert_eq!(scope.resolve("{{var.x | shout}}"), "{{var.x | shout}}");
+        assert_eq!(scope.resolve("{{var.gone | lower}}"), "{{var.gone | lower}}");
+        assert_eq!(scope.resolve("{{env.PATH | default:x}}"), "x", "the env guard still applies, and default fills the refusal");
+    }
+
+    #[test]
+    fn a_filter_does_not_clean_what_a_reference_holds() {
+        let mut scope = ExecutionScope::with_trigger(json!({ "title": "t" }));
+        scope.outputs.insert("a".to_string(), json!({ "r": "x" }));
+        scope.bits.insert("a".to_string(), (true, false));
+        assert_eq!(scope.bits_of("{{a.r}}"), (true, false));
+        assert_eq!(scope.bits_of("{{a.r | trunc:1 | lower}}"), (true, false));
+        assert_eq!(scope.bits_of("{{trigger.title | head:1}}"), (true, false));
+        assert_eq!(scope.bits_of("{{a.r | default:ok}}"), (true, false), "a default does not make the reference clean");
     }
 }

@@ -125,7 +125,7 @@ pub(crate) fn limit_text(reason: StopReason, limits: Limits) -> String {
 fn after_stop(work_store: &Store, broker: &Arc<Broker>, block_id: &str, limit: &str, agent: Option<(String, Option<String>)>) {
     let reason = format!("stopped by the watchdog after {limit}");
     if let Some((agent_id, uid)) = agent {
-        let released = crate::sagas::agent_teardown::release_claims(work_store, &agent_id, uid.as_deref(), &reason, agentmux_common::time::now_ms());
+        let released = crate::backend::work_claims::release_claims(work_store, &agent_id, uid.as_deref(), &reason, agentmux_common::time::now_ms());
         if released > 0 {
             tracing::info!(block_id = %block_id, released, "watchdog: released the stopped agent's claimed tasks");
             broker.publish_event::<crate::backend::mps_events::WorkQueueChanged>(&(), vec![], 0);
@@ -222,7 +222,7 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>, work
                 .into_iter()
                 .find(|r| r.block_id == block_id)
                 .map(|r| (r.agent_id, r.uid));
-            if crate::sagas::agent_teardown::stop_now(&block_id, true).is_ok() && !agent.is_shell {
+            if crate::backend::teardown_hooks::hooks().stop_now(&block_id, true).is_ok() && !agent.is_shell {
                 if let Some(reason) = verdict {
                     let (work_store, broker, block_id) = (work_store.clone(), broker.clone(), block_id.clone());
                     let limit = limit_text(reason, limits);

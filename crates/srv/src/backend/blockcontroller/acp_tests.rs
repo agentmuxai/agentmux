@@ -623,7 +623,7 @@ async fn a_delivered_prompt_is_stored_with_its_signed_origin() {
     c.send_message_from("typed in the pane".to_string(), Some("m1"), Some(&RecordOrigin::new(MessageOrigin::user()))).unwrap();
     c.send_message_from("said by nobody".to_string(), None, None).unwrap();
 
-    let lines: Vec<serde_json::Value> = crate::server::transcript_tail::tail_lines(&store, &fs, "block-acp-record", 50)
+    let lines: Vec<serde_json::Value> = crate::backend::transcript::tail::tail_lines(&store, &fs, "block-acp-record", 50)
         .unwrap()
         .lines
         .iter()

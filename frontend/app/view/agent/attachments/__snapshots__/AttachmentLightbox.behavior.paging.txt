@@ -36,7 +36,7 @@ initialFocus -> agent-attachment-lightbox__dialog
           <span data-stand="IconButton" data-icon="chevron-right" data-label="Next image" data-tooltip="false" data-title="Next (→)">
           <span data-stand="Button" data-tone="danger">
             "Remove"
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 preventDefault ArrowRight
 onIndex 1
 useAttachmentUrl send id=a2
@@ -83,7 +83,7 @@ useAttachmentText thumb id=undefined
           <span data-stand="IconButton" data-icon="chevron-right" data-label="Next image" data-tooltip="false" data-title="Next (→)">
           <span data-stand="Button" data-tone="danger">
             "Remove"
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 preventDefault ArrowLeft
 onIndex 2
 useAttachmentUrl send id=a3
@@ -122,7 +122,7 @@ useAttachmentText thumb id=undefined
           <span data-stand="IconButton" data-icon="chevron-right" data-label="Next image" data-tooltip="false" data-title="Next (→)">
           <span data-stand="Button" data-tone="danger">
             "Remove"
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 IconButton Previous image click
 onIndex 1
 useAttachmentUrl send id=a2
@@ -136,7 +136,7 @@ onRemove k3
 preventDefault Escape
 stopPropagation Escape
 onClose
-IconButton Close preview click
+CloseButton Close preview click
 onClose
 -- one item: no paging, no remove
 Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
@@ -169,7 +169,7 @@ initialFocus -> agent-attachment-lightbox__dialog
             ","
             "391 KB"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 preventDefault ArrowRight
 onIndex 0
 -- the index past the end shows the last
@@ -209,4 +209,4 @@ initialFocus -> agent-attachment-lightbox__dialog
             "/"
             "3"
           <span data-stand="IconButton" data-icon="chevron-right" data-label="Next image" data-tooltip="false" data-title="Next (→)">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">

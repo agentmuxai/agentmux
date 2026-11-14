@@ -63,9 +63,9 @@ impl AgentMuxHandler {
         // decided from what the browser is registered as. A browser not registered yet falls
         // back to the origin alone, as before; a pane is registered when it is created.
         let registered_as_pane = super::pane_frontend_guard::shows_web_pages(self.registered_kind(browser).as_ref());
-        let should_inject =
-            super::app_navigation::injects_ipc_credentials(&frame_url, &self.frontend_origins(), registered_as_pane);
-        if registered_as_pane && super::app_navigation::is_frontend_address(&frame_url, &self.frontend_origins()) {
+        let origins = self.frontend_origins();
+        let should_inject = super::app_navigation::injects_ipc_credentials(&frame_url, &origins, registered_as_pane);
+        if registered_as_pane && super::app_navigation::is_frontend_address(&frame_url, &origins) {
             tracing::warn!("a browser pane is showing the app's own address: it gets no IPC credentials");
         }
         if should_inject {

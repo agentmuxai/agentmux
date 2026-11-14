@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { META_AWAITING_CONFIRM } from "./agent-status";
+import { META_AWAITING_BROWSER, META_AWAITING_CONFIRM } from "./agent-status";
 import { describe, expect, it } from "vitest";
 import {
     FALLBACK_TOOLTIP,
@@ -28,6 +28,7 @@ import {
     STATUS_SUMMARIZING,
     STATUS_THINKING,
     STATUS_WAITING,
+    STATUS_WAITING_BROWSER,
     STATUS_WORKING,
     swarmLineTooltip,
     type SwarmLineInput,
@@ -142,6 +143,19 @@ describe("resolveSwarmLine", () => {
         });
         // And it is only the true flag: a cleared one falls through the ladder.
         expect(line({ meta: { ...waiting, [META_AWAITING_USER]: false }, status: "running" }).source).toBe("restored");
+    });
+
+    it("says where the answer is given while only a Browser request of an idle agent waits", () => {
+        const browser = { [META_AWAITING_BROWSER]: true, [META_LAST_PROMPT]: "Book the flight" };
+        expect(line({ meta: browser, status: "idle" })).toEqual({ text: STATUS_WAITING_BROWSER, source: "status" });
+        expect(isAwaitingUser(browser, "idle")).toBe(true);
+        // A message started another turn: the row says what it is doing until that turn ends.
+        expect(line({ meta: browser, status: "running" }).text).not.toBe(STATUS_WAITING_BROWSER);
+        expect(isAwaitingUser(browser, "running")).toBe(false);
+        // A message to confirm waits too: that one is answered in the agent's own pane.
+        expect(line({ meta: { ...browser, [META_AWAITING_CONFIRM]: true }, status: "idle" }).text).toBe(STATUS_WAITING);
+        // Only the true flag.
+        expect(isAwaitingUser({ [META_AWAITING_BROWSER]: null }, "idle")).toBe(false);
     });
 
     it("says it is waiting for you for a sensitive message awaiting confirmation, idle or not", () => {

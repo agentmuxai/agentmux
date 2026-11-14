@@ -61,6 +61,7 @@ import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 import type { AppSkillInstallResult } from "@/types/rpc/AppSkillInstallResult";
 import type { AppSkillsCatalog } from "@/types/rpc/AppSkillsCatalog";
+import type { AppSkillsHere } from "@/types/rpc/AppSkillsHere";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
@@ -119,6 +120,7 @@ import type { CommandAgentTakeoverData } from "@/types/rpc/CommandAgentTakeoverD
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
 import type { CommandAppSkillsCatalogData } from "@/types/rpc/CommandAppSkillsCatalogData";
 import type { CommandAppSkillsCatalogInstallData } from "@/types/rpc/CommandAppSkillsCatalogInstallData";
+import type { CommandAppSkillsHereData } from "@/types/rpc/CommandAppSkillsHereData";
 import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
 import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
 import type { CommandAttachmentsCancelData } from "@/types/rpc/CommandAttachmentsCancelData";
@@ -2583,6 +2585,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AppSkillInstallResult> {
     return client.rpcCall("app_skills.catalog.install", data, opts);
+  },
+  // command "app_skills.here"
+  AppSkillsHereCommand(client: RpcClient, data?: CommandAppSkillsHereData, opts?: RpcOpts): Promise<AppSkillsHere> {
+    return client.rpcCall("app_skills.here", data ?? {}, opts);
   },
   // command "skill.catalog.app_file"
   SkillCatalogAppFileCommand(

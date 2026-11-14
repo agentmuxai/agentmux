@@ -100,6 +100,33 @@ button:disabled {
     cursor: default;
 }
 
+/* A close or dismiss button: <button class="am-close" aria-label="Close">✕</button>. Red on hover and press, as the app's own are. */
+button.am-close {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    line-height: 1;
+    color: var(--am-muted);
+    border-color: transparent;
+}
+
+button.am-close:hover {
+    background: var(--am-error);
+    border-color: var(--am-error);
+    color: #fff;
+}
+
+button.am-close:active {
+    background: color-mix(in srgb, var(--am-error) 82%, #000);
+    border-color: transparent;
+    color: #fff;
+}
+
+button.am-close:focus-visible {
+    outline: 2px solid var(--am-accent);
+    outline-offset: 1px;
+}
+
 input,
 select,
 textarea {

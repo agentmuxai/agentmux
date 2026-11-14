@@ -6,13 +6,15 @@ instance doing **right now**." Shipped the same way, in every AgentMux
 terminal (bash / zsh / pwsh / fish), delegating to a small Node core
 (`muxspect.mjs`, deployed next to `muxlog.mjs`).
 
-> **Phase 1 scope:** `muxspect` only queries the instance you're already
-> inside — it reads `$AGENTMUX_LOCAL_URL`/`$AGENTMUX_AUTH_KEY` from its own
-> environment (already present in any agent pane, the same way
-> `agentmux-mcp` reaches every other `/api/v1/*` route). It cannot yet
-> discover or query a *different* running instance — see
-> [`docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md`](specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md) for the
-> full design and the planned Phase 2.
+> **Scope:** `muxspect` asks the instance you're already inside — it reads
+> `$AGENTMUX_LOCAL_URL`/`$AGENTMUX_AUTH_KEY` from its own environment
+> (already present in any agent pane, the same way `agentmux-mcp` reaches
+> every other `/api/v1/*` route). `muxspect instances` lists the other
+> AgentMux instances on this machine and `--channel <name>` asks one of them
+> (see [Other instances on this machine](#other-instances-on-this-machine-instances----channel)).
+> Reaching an instance on another machine (LAN, WAN) is not built — see
+> [`docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md`](specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md) and
+> [`docs/specs/SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md`](specs/SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md).
 
 ---
 
@@ -37,6 +39,8 @@ node ~/.agentmux/shell/muxspect.mjs dock clear <block_id> <node_id>
 node ~/.agentmux/shell/muxspect.mjs conversations
 node ~/.agentmux/shell/muxspect.mjs conversation <agent>
 node ~/.agentmux/shell/muxspect.mjs find <block_id_or_agent>
+node ~/.agentmux/shell/muxspect.mjs instances
+node ~/.agentmux/shell/muxspect.mjs --channel <name> list
 node ~/.agentmux/shell/muxspect.mjs help
 ```
 
@@ -118,6 +122,46 @@ An empty result is a legitimate answer — "not found on this host, in any
 known channel" — not an error. Same LAN/WAN boundary as `conversations`
 above (host + cross-channel only). See
 [`docs/specs/SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md`](specs/SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md).
+
+## Other instances on this machine (`instances`, `--channel`)
+
+`instances` lists every AgentMux instance running on this machine —
+channel, version, pid, agent count, uptime — including one with no agent in
+it (which `find` and `conversations` cannot see, because they go through
+the agent registry). Your own instance is marked `*`.
+
+```bash
+muxspect instances
+muxspect --channel dev-posa-fix list
+muxspect --channel dev-posa-fix describe <block_id>
+muxspect --channel dev-posa-fix dock <block_id>
+```
+
+`--channel <name>` runs a read against that instance instead of yours. It
+works for `list`, `describe`, `watch`, `dock`, `layout` and
+`verify-sender`; the instance you are in forwards the request, minus the
+channel, to the other one's own route and returns its answer. `dock clear`
+never takes it, and neither do `find`, `conversations`, `conversation`,
+`work` or `migrations` (the first two already look across channels on
+their own). stderr says which instance answered and its srv version
+(`[channel dev-posa-fix, srv v0.60.28]`).
+
+How it works: each running srv writes `~/.agentmux/shared/instances/<channel>-<hash>.json`
+at start, rewrites it every 20 seconds and removes it at a clean exit. The
+file holds the loopback URL and auth key a forward needs (readable by its
+owner only; `instances` never prints the key). A record is listed only
+while its process is alive and it was written in the last minute; a record
+whose process is gone is deleted by whoever reads it. A forward goes only to
+a `127.0.0.1` address, with a 5 second limit, and an answer over 8 MiB is
+refused. An unknown channel answers 404 with the live channel names; a listed
+instance that doesn't answer is a 502.
+
+Limits: **same machine only** (LAN and WAN are Phase 2b and later). A `task dev`
+build gets a data home of its own, so it writes its record there, not in
+yours: `instances` run inside it lists it, and one run from another home
+does not. The registry is under the shared folder of whichever home an
+instance runs in. See
+[`docs/specs/SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md`](specs/SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md).
 
 ## Inspecting the pane layout (`layout`)
 
@@ -264,14 +308,14 @@ for why that's the right tool for that specific gap. (Release builds only run
 that port when launched with `AGENTMUX_CDP_PORT` set; dev builds run it by
 default — #3681.)
 
-## Why it can't just query any instance yet
+## Why another machine's instance is out of reach
 
 Every AgentMux instance runs its own `agentmux-srv` on a dynamic port with
-its own auth key (isolation invariants I1–I6) — there's no existing
-mechanism for one instance to answer a state query from outside itself
-except the path `muxspect` already uses (env-inherited token, same as
-`agentmux-mcp`). Reaching a *different* instance needs a real
-discovery+auth story that doesn't exist yet — planned as Phase 2.
+its own auth key (isolation invariants I1–I6). On one machine the instance
+registry above solves discovery and the same-user file permissions solve
+auth. Another machine needs a signed, consented request over the LAN's jekt
+transport (Phase 2b in the spec above, waiting on its tier-rule spec and the
+repo owner's confirmation), so it is not built.
 
 ## Every response carries the instance's own version
 

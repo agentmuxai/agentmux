@@ -11,7 +11,7 @@ requestAnimationFrame
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0
 state: open=true search="" index=3 count=4
 onSearch "needle"
@@ -25,7 +25,7 @@ onSearch "needle"
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="needle" index=0 count=0
 -- the same text again, nothing re-runs
 <div class="search-container" style="position: absolute; left: 0px; top: 0px;">
@@ -37,7 +37,7 @@ state: open=true search="needle" index=0 count=0
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="needle" index=1 count=2
 onSearch "needles"
 -- typed 'needles'
@@ -50,9 +50,9 @@ onSearch "needles"
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="needles" index=0 count=0
-DeclIconButton Close (Esc) click
+CloseButton Close (Esc) click
 onSearch ""
 -- closed with the close button
 -
@@ -68,6 +68,6 @@ requestAnimationFrame
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0
 input props: {"placeholder":"Search","value":"","autoFocus":true,"autoSelect":true}

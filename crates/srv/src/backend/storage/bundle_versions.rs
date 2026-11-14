@@ -86,7 +86,7 @@ use agentmux_common::time::now_ms;
 /// bundle's `name` is content too (renaming a Global Memory entry without
 /// touching its body is a real, meaningful edit an operator or agent might
 /// make, and should still produce a new version + a changed hash).
-pub(crate) fn content_hash(name: &str, instructions: &str) -> String {
+pub fn content_hash(name: &str, instructions: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(name.as_bytes());
     hasher.update(b"\0");
@@ -178,7 +178,7 @@ impl Store {
     /// version without also touching the bundle row itself. Production
     /// write paths use `Store::bundle_upsert_with_version` (`bundles.rs`)
     /// instead, which keeps the bundle row and its version atomic.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn bundle_version_insert(
         &self,
         bundle_id: &str,

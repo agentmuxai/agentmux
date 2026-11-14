@@ -14,13 +14,9 @@ use crate::backend::{base, subagent_watcher};
 
 use super::AppState;
 
-/// Max cross-instance HTTP forwards a single inject request may go through
-/// (Tier 2a/2b/3 each increment before forwarding). A legitimate delivery
-/// is always exactly one hop (caller's instance → the owning instance);
-/// this only exists to bound a pathological cycle — two channels each
-/// holding a stale-but-PID-alive shared-registry entry pointing at the
-/// other for the same agent name would otherwise forward back and forth
-/// indefinitely, hanging the original request (reagent P1 on PR #2350).
+/// Max cross-instance forwards one inject may take (Tiers 2a/2b/3 each add one). A real delivery is
+/// one hop; the cap only stops two channels that hold stale-but-alive registry entries for the same
+/// agent from forwarding it back and forth forever (#2350).
 const MAX_FORWARD_HOPS: u8 = 3;
 
 pub(super) use super::jekt_echo::{echo_jekt_to_sender, EchoTrust};
@@ -66,25 +62,15 @@ pub(super) enum ForwardOutcome {
     NoAnswer,
 }
 
-/// The single implementation of "POST this injection to a peer srv and echo it
-/// to the sender if it lands", shared by every forwarding tier.
+/// POSTs `forwarded_req` to a peer srv and echoes it to the sender if it lands: the one
+/// implementation every forwarding tier shares. As three copies, a tier that forgot the echo or
+/// passed `delivery_tier` wrong failed silently and differently from its siblings
+/// (`docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md` §4).
 ///
-/// This existed as three hand-maintained copies (same-host same-channel,
-/// same-host cross-channel, LAN peer) differing only in how the URL and key
-/// were resolved and what they did on failure. That is the shape that has
-/// already produced drift bugs elsewhere in this repo: a tier that forgets the
-/// echo, or passes `delivery_tier` wrong, fails silently and differently from
-/// its siblings. See
-/// `docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md` §4.
-///
-/// **One behaviour was unified rather than preserved:** the LAN tier used to
-/// treat "anything but `success: false`" as delivered, while both host tiers
-/// required `success: true`. A 200 response whose body omits `success`
-/// entirely therefore counted as a successful LAN delivery — echoing a
-/// delivery confirmation to the sender for a message that may never have
-/// arrived. All three now require `success: true`. No real peer is affected:
-/// `InjectionResponse::success` is a plain `bool` with no
-/// `skip_serializing_if`, so a genuine AgentMux srv always sends it.
+/// Delivered means `success: true` in the body, in every tier. The LAN tier used to accept a body
+/// that omitted `success`, which echoed a delivery confirmation for a message that may never have
+/// arrived. A real peer always sends it (`InjectionResponse::success` has no
+/// `skip_serializing_if`).
 pub(super) async fn forward_inject_to_peer(
     state: &AppState,
     req: &InjectionRequest,
@@ -173,52 +159,29 @@ pub(super) async fn forward_inject_to_peer(
     }
 }
 
-/// Max age (seconds) a signed jekt's `ts_secs` may be from "now" and still
-/// verify (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2, anti-replay
-/// — reagentx P1 on PR #2565: `ts_secs` was bound into the signed material
-/// specifically for this purpose per `jekt_sign.rs`'s own doc comments, but
-/// nothing actually checked it, so a captured valid signature verified
-/// forever). Generous enough for normal host-tier delivery latency and
-/// modest clock skew between the signing agent process and this srv
-/// instance (same machine, but not guaranteed same clock read down to the
-/// second); tight enough to bound replay to a narrow window instead of
-/// indefinite reuse.
+/// Max age (seconds) of a signed jekt's `ts_secs` for it to verify
+/// (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2, anti-replay, #2565). Without the check a
+/// captured valid signature verified forever. Wide enough for same-machine latency and clock skew,
+/// narrow enough to bound replay.
 const JEKT_SIG_MAX_AGE_SECS: i64 = 300;
 
 use agentmux_common::{time::now_secs as now_unix_secs, AUTH_KEY_HEADER};
 
-/// Host-tier jekt sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
-/// §2.2). Mutates `req.sig_verified` in place based on whether the claimed
-/// `source_agent`'s stored signing key (if any) verifies `req.jekt_sig`,
-/// within the anti-replay freshness window.
+/// Host-tier jekt sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2): sets
+/// `req.sig_verified` by checking `req.jekt_sig` against the claimed `source_agent`'s stored
+/// signing key, inside the freshness window.
 ///
-/// **Every entry point that can build a host-tier `InjectionRequest` from
-/// client-supplied fields MUST call this before handing it to
-/// `Handler::inject_message`** — reagentx P0 on PR #2565 found two call
-/// sites (`messagebus.rs::handle_inject`, `websocket.rs`'s `bus:inject`
-/// message handling) that built `InjectionRequest` with a fully
-/// client-controlled `source_agent` and called `inject_message` directly,
-/// bypassing this entirely — those messages rendered `TRUST=self-declared`
-/// (unescalated) exactly as if this feature didn't exist. Both now call
-/// this too.
+/// **Every entry point that builds a host-tier `InjectionRequest` from client-supplied fields MUST
+/// call this before `Handler::inject_message`** (#2565): `messagebus.rs::handle_inject` and
+/// `websocket.rs`'s `bus:inject` once skipped it and rendered `TRUST=self-declared` for an
+/// impersonated sender.
 ///
-/// **Deliberately NOT gated on `delivery_tier == "host"`** (reagentx P0 on
-/// the LAN signing PR — this WAS gated that way originally, and it was the
-/// bug): `delivery_tier` is a value this instance largely trusts as
-/// self-declared by whoever authenticated with the full local `auth_key`
-/// (needed so legitimate same-host forwarding can carry an already-`"lan"`
-/// jekt through unmolested — see `resolve_delivery_tier`'s doc comment).
-/// That means a request claiming `delivery_tier: "lan"` (or `"wan"`) was
-/// otherwise a way to dodge THIS check entirely — impersonate a real,
-/// locally-known agent by simply not calling it "host," since
-/// `verify_lan_signature`/`verify_reagent_signature` only fire for their
-/// own tiers and leave an unsigned claim unforced by design. Running this
-/// check unconditionally closes that: it only ever does anything when
-/// `agent_jekt_key_load` finds a LOCAL key for the claimed `source_agent` —
-/// which is `None` for any genuinely-remote LAN/WAN sender this instance
-/// never spawned (no behavior change for real network traffic), but
-/// catches an unsigned/wrong-signature impersonation of an agent THIS
-/// instance actually knows, regardless of what tier the request claims.
+/// **Deliberately not gated on `delivery_tier == "host"`** (#2588). `delivery_tier` is
+/// self-declared by any caller holding the full local `auth_key` (see `resolve_delivery_tier`), so
+/// gating on it let a request claiming `"lan"` or `"wan"` dodge this check and impersonate a
+/// locally known agent. Ungated, it acts only when `agent_jekt_key_load` finds a LOCAL key for the
+/// claimed sender: never for a genuine remote LAN/WAN sender, always for an impersonation of an
+/// agent this instance knows.
 pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest) {
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
@@ -248,42 +211,23 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
     req.sig_verified = Some(verified);
 }
 
-/// Anti-replay window for `req.reagent_ts_secs`, same purpose as
-/// `JEKT_SIG_MAX_AGE_SECS` above but WAN-scoped: wider than host-tier's
-/// 300s because this covers real network delivery latency, not a
-/// same-machine call — matches `cloud_subscriber::REAGENT_SIG_MAX_AGE_SECS`
-/// (the WS delivery path's own constant of the same value) and the review
-/// notifications' own delivery window.
+/// Anti-replay window for `req.reagent_ts_secs`: WAN-scoped, so wider than host-tier's 300 s
+/// because it covers real network latency. Same value as
+/// `cloud_subscriber::REAGENT_SIG_MAX_AGE_SECS`.
 const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 
-/// WAN-tier reagent-signature verification for the HTTP
-/// `/agentmux/reactive/inject` path — mirrors
-/// `cloud_subscriber::sync_agent_reactive`'s in-process verification of the
-/// same four fields for the desktop app's WS delivery path, but for callers
-/// that deliver over HTTP instead (`@agentmuxai/muxbus-client`'s
-/// `pollAndDeliverInjections`, and any future standalone poller). Before
-/// this, `InjectionRequest` declared `reagent_sig`/`reagent_key_id` as
-/// deserializable input fields but nothing on the HTTP path ever read them
-/// — a reagent-signed notification delivered through this path arrived
-/// unsigned in effect, `reagent_verified` always `None`, and could never
-/// render `SIG=verified` (reagentx P1 on PR #41).
+/// WAN-tier reagent-signature check for the HTTP `/agentmux/reactive/inject` path, mirroring
+/// `cloud_subscriber::sync_agent_reactive` for the WS path. Before it, nothing on this path read
+/// `reagent_sig`/`reagent_key_id`, so a signed notification arrived effectively unsigned and never
+/// rendered `SIG=verified` (#41).
 ///
-/// Only meaningful for `delivery_tier == "wan"` — same scoping as
-/// `reagent_verified`'s doc comment ("meaningless off the WAN tier"). A
-/// partial set of the four fields (e.g. a sig but no key_id) is treated the
-/// same as "not signed" (`reagent_verified` stays `None`), not "signed but
-/// broken" — matches `cloud_subscriber.rs`'s identical policy: a legitimate
-/// sender always sends all four together, and a stripped signature reads
-/// exactly like an absent one (no `SIG=`, nothing forced), so it can't buy
-/// an attacker anything a fully-absent one couldn't already.
+/// Only for `delivery_tier == "wan"`. A partial set of the four fields reads as "not signed"
+/// (`reagent_verified` stays `None`), as in `cloud_subscriber.rs`: a legitimate sender sends all
+/// four, and a stripped signature looks exactly like an absent one, so it buys an attacker nothing.
 ///
-/// Takes `now` explicitly (rather than calling `now_unix_secs()` itself),
-/// same reasoning as `cloud_subscriber::reagent_sig_is_fresh`: the pinned
-/// Ed25519 key's matching private half isn't in this repo (it lives only in
-/// the cloud service), so tests can't mint a fresh signature
-/// on demand the way the host-tier HMAC tests below do — only a fixed
-/// offline-signed fixture at a fixed `ts_secs`. Injecting `now` lets a test
-/// hold that fixture inside the freshness window without mocking the clock.
+/// Takes `now` so a test can hold its fixed offline-signed fixture inside the window: the private
+/// half of the pinned Ed25519 key isn't in this repo (same as
+/// `cloud_subscriber::reagent_sig_is_fresh`).
 pub(super) fn verify_reagent_signature(req: &mut InjectionRequest, now: i64) {
     if req.delivery_tier.as_deref() != Some("wan") {
         return;
@@ -307,33 +251,22 @@ pub(super) fn verify_reagent_signature(req: &mut InjectionRequest, now: i64) {
     req.reagent_verified = Some(verified);
 }
 
-/// Anti-replay window for LAN `lan_sig` — reuses the WAN reasoning
-/// (`REAGENT_SIG_MAX_AGE_SECS`) rather than host-tier's tighter
-/// `JEKT_SIG_MAX_AGE_SECS`: LAN crosses an actual network hop (mDNS
-/// discovery + an HTTP round trip through a peer instance), not a
-/// same-process call, so it needs the wider real-network-delivery-latency
-/// margin WAN already established rather than host-tier's same-machine one.
+/// Anti-replay window for `lan_sig`: the WAN value, since LAN crosses a real network hop (mDNS plus
+/// an HTTP round trip), not a same-machine call.
 const LAN_SIG_MAX_AGE_SECS: i64 = REAGENT_SIG_MAX_AGE_SECS;
 
-/// LAN-tier per-agent Ed25519 signature verification —
-/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.4. Async, unlike
-/// `verify_jekt_signature`'s synchronous local-only key lookup: the claimed
-/// sender's public key lives on WHICHEVER peer instance actually hosts that
-/// agent, so finding it costs a LAN round trip
-/// (`LanDiscoveryController::find_agent_lan_pubkey`).
+/// LAN-tier per-agent Ed25519 signature check (docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md
+/// §2.4). Async because the claimed sender's public key lives on whichever peer hosts that agent: a
+/// LAN round trip (`LanDiscoveryController::find_agent_lan_pubkey`), unlike
+/// `verify_jekt_signature`'s local lookup.
 ///
-/// Only meaningful for `delivery_tier == "lan"` — by this point
-/// `req.delivery_tier` has already been through the server-side override in
-/// `handle_reactive_inject` (§3 of the spec), so this is never reachable
-/// off a genuinely `lan_key`-authenticated request.
+/// Only for `delivery_tier == "lan"`; `handle_reactive_inject` has already overridden the tier
+/// server-side (spec §3), so this never runs off a request that wasn't `lan_key`-authenticated.
 ///
-/// No `lan_sig` at all, or a claimed sender whose public key no peer has on
-/// file → `lan_verified` stays `None` — "nothing to check against," not a
-/// red flag on its own, same semantics as `sig_verified`/`reagent_verified`'s
-/// `None` case. A `lan_sig` present with a public key found but the
-/// signature doesn't verify → `Some(false)`, forced `TIER=sensitive`
-/// unconditionally in `handler.rs` — an active attempt to forge a specific
-/// agent's identity.
+/// No `lan_sig`, or no peer has the sender's public key: `lan_verified` stays `None` ("nothing to
+/// check against", as for `sig_verified`/`reagent_verified`). A `lan_sig` with a key found that
+/// doesn't verify: `Some(false)`, which `handler.rs` forces to `TIER=sensitive`, an active attempt
+/// to forge an agent's identity.
 pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRequest) {
     if req.delivery_tier.as_deref() != Some("lan") {
         return;
@@ -383,46 +316,33 @@ pub(crate) mod lan_continuity;
 pub(crate) mod lan_refusals;
 pub(super) mod replay;
 
-/// Anti-replay window for cross-channel `channel_sig` —
-/// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6: host-tier's tighter
-/// `JEKT_SIG_MAX_AGE_SECS`, NOT LAN/WAN's wider one. A cross-channel forward
-/// is a same-machine HTTP call to `127.0.0.1`; it has no real-network
-/// latency budget to accommodate, for the same reason host-tier doesn't.
+/// Anti-replay window for `channel_sig` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6):
+/// host-tier's tight one, since a cross-channel forward is a same-machine call to `127.0.0.1`.
 const CHANNEL_SIG_MAX_AGE_SECS: i64 = JEKT_SIG_MAX_AGE_SECS;
 
-/// Cross-channel (same machine, different AgentMux instance) per-agent
-/// Ed25519 signature verification —
-/// docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D2, Phase B.
+/// Cross-channel (same machine, other AgentMux instance) per-agent Ed25519 signature check
+/// (docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D2, Phase B). Like
+/// `verify_lan_signature`, but the sender's public key comes from the host-global shared registry
+/// (`AgentEntry::jekt_public_key`, published at registration, §D1): a local file read, so it is
+/// synchronous and has no LAN rate-limiter `Skipped` hazard.
 ///
-/// Mirrors `verify_lan_signature`'s structure but resolves the claimed
-/// sender's public key from the host-global shared registry
-/// (`AgentEntry::jekt_public_key`, published at registration by whichever
-/// instance actually spawned that agent — §D1) instead of a LAN round trip.
-/// A local file read, so this is synchronous and has none of the LAN
-/// lookup's rate-limiter `Skipped` hazard.
+/// Only for `delivery_tier == "channel"`, the label a same-host forward carries (§D4, set in
+/// `handle_reactive_inject`'s Tier 2a/2b); `channel_verified` stays `None` otherwise.
 ///
-/// Only meaningful for `delivery_tier == "channel"` — the label a same-host
-/// forward now carries (§D4, set by the forwarding instance in
-/// `handle_reactive_inject`'s Tier 2a/2b). Off that tier the field stays
-/// `None`, same scoping as `lan_verified`.
+/// Ordering (§D2 step 2): a sender this instance holds an HMAC key for is a same-instance agent
+/// that `verify_jekt_signature` owns entirely, so this returns without touching `channel_verified`
+/// and the two verifiers can never disagree.
 ///
-/// Ordering guarantee (§D2 step 2): a claimed sender THIS instance holds an
-/// HMAC key for is a same-instance agent, and `verify_jekt_signature` owns
-/// it entirely — this function returns without touching `channel_verified`,
-/// so the two verifiers can never disagree about one message.
+/// Outcomes:
 ///
-/// Outcomes, all three-state like its siblings:
-/// - `None` — no shared-registry entry for the claimed sender anywhere (a
-///   genuine bridge, or an agent that never registered), OR every entry
-///   found has an empty `jekt_public_key` (written before Phase A shipped —
-///   "cannot check," never "failed the check," §6). Nothing to verify
-///   against; not a red flag on its own.
-/// - `Some(true)` — `channel_sig` present, fresh, and verified against the
-///   published key of ANY of that agent's entries (one agent name can
-///   legitimately be live in several channels at once — §D2 step 5).
-/// - `Some(false)` — a published key WAS found but the signature was
-///   missing, stale, or wrong. The §D3 red flag; **not escalated in Phase
-///   B** (see `InjectionRequest::channel_verified`'s doc comment).
+/// - `None`: no shared-registry entry for the sender, or every entry has an empty `jekt_public_key`
+///   (written before Phase A: "cannot check", never "failed", §6).
+///
+/// - `Some(true)`: `channel_sig` is present, fresh and verifies against the published key of ANY of
+///   the agent's entries (one name can be live in several channels, §D2 step 5).
+///
+/// - `Some(false)`: a published key was found but the signature was missing, stale or wrong. The
+///   §D3 red flag; not escalated in Phase B (see `InjectionRequest::channel_verified`).
 pub(super) fn verify_cross_channel_signature(state: &AppState, req: &mut InjectionRequest) {
     let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() else {
         return;
@@ -430,9 +350,8 @@ pub(super) fn verify_cross_channel_signature(state: &AppState, req: &mut Injecti
     verify_cross_channel_signature_in(state, req, &shared_dir, now_unix_secs());
 }
 
-/// [`verify_cross_channel_signature`] with the shared registry dir and clock
-/// injected — the testable core; the wrapper above only resolves the real
-/// dir. Keeps tests off the process-global `AGENTMUX_SHARED_DIR` env var.
+/// [`verify_cross_channel_signature`] with the shared registry dir and clock injected: the testable
+/// core, which keeps tests off the process-global `AGENTMUX_SHARED_DIR`.
 pub(super) fn verify_cross_channel_signature_in(
     state: &AppState,
     req: &mut InjectionRequest,
@@ -445,11 +364,9 @@ pub(super) fn verify_cross_channel_signature_in(
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
-    // Identity M4d-6: a v2 signature proves which agent sent it, by UID. When
-    // that is the agent this instance knows by the claimed name, the name's
-    // checks are settled, including a failed HMAC check against a key it kept
-    // from when that agent ran here (a key outlives a move between
-    // instances). A different agent of the same name is not the name's.
+    // Identity M4d-6: a v2 signature proves the sender's UID. When it is the agent this instance
+    // knows by the claimed name, the name's checks are settled, even a failed HMAC against a key
+    // kept from when that agent ran here; a different agent of the same name is not the name's.
     if channel_v2::settle_by_uid(state, req, &claimed, shared_dir, now_secs) {
         return;
     }
@@ -457,9 +374,8 @@ pub(super) fn verify_cross_channel_signature_in(
     if matches!(state.mstore.agent_jekt_key_load(&claimed), Ok(Some(_))) {
         return;
     }
-    // Only entries that actually published a key count — a pre-Phase-A
-    // entry (empty key) is "cannot check," and must not turn a missing
-    // signature into `Some(false)` on a mixed-version machine (§6).
+    // Only entries that published a key count: an empty one (pre-Phase-A) is "cannot check", and
+    // must not turn a missing signature into `Some(false)` on a mixed-version machine (§6).
     let published_keys: Vec<Vec<u8>> = agent_registry::lookup_all_shared(shared_dir, &claimed)
         .into_iter()
         .filter(|e| !e.jekt_public_key.is_empty())
@@ -500,40 +416,22 @@ pub(super) fn verify_cross_channel_signature_in(
     req.channel_verified = Some(verified);
 }
 
-/// Server-derived `delivery_tier` for the LAN-key case only —
-/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3, revised after
-/// reagentx P0 on the implementing PR: an earlier version of this override
-/// also force-downgraded a "lan" claim to "host" whenever auth was via the
-/// full `auth_key`, reasoning that "nothing authenticated via the full key
-/// could have genuinely crossed the LAN boundary." That's false once
-/// same-host forwarding (Tier 2a/2b below in `handle_reactive_inject`) is
-/// considered: a jekt legitimately authenticated via `lan_key` at its FIRST
-/// hop, then relayed to a sibling channel/instance on this same machine,
-/// authenticates that SECOND hop with the sibling's own full `auth_key`
-/// (not `lan_key` — that credential is peer-to-peer between distinct
-/// machines, never shared across same-host channels). Downgrading there
-/// silently discarded an already-detected LAN signature failure's
-/// forced-sensitive escalation (`lan_verified`/`reagent_verified` are
-/// `#[serde(skip_deserializing)]`, so they reset to `None` on every hop and
-/// must be free to re-derive from whatever `delivery_tier` the forward
-/// legitimately carries).
+/// Server-derived `delivery_tier` for the LAN-key case only
+/// (docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3): a `lan_key` caller is forced to
+/// `"lan"` whatever the body says, so claiming `"host"` can't dodge LAN scrutiny. Any other
+/// caller's claim (host/wan/lan/channel) is kept.
 ///
-/// The actual gap this closes is narrower than "full auth_key can never
-/// claim lan": a `lan_key` holder is the ONLY credential that can FORCE
-/// `delivery_tier = "lan"` regardless of what the body says (closing the
-/// original bypass — claim "host" instead to dodge LAN scrutiny entirely).
-/// A full-`auth_key` caller's own claim (host/wan/lan) is otherwise trusted
-/// as-is: holding the full local key already grants complete control over
-/// this instance, so which tier it self-labels a request as grants nothing
-/// extra — at worst it triggers MORE verification
-/// (`verify_lan_signature` running), never less.
+/// A full-`auth_key` caller is not downgraded from `"lan"`: a jekt that arrived by `lan_key` and
+/// was relayed to a sibling instance on this machine authenticates that second hop with the
+/// sibling's full `auth_key` (`lan_key` is peer-to-peer between machines only). Downgrading
+/// discarded an already-detected LAN signature failure's forced-sensitive escalation
+/// (`lan_verified`/`reagent_verified` are `#[serde(skip_deserializing)]`, so they re-derive on
+/// every hop). Honouring the claim costs nothing: the full key already grants full control, and a
+/// self-labelled tier only adds verification, never removes it.
 ///
-/// `"channel"` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4) rides the
-/// same rule: it's set by the FORWARDING instance on a same-host Tier 2a/2b
-/// hop and authenticates here with this instance's full `auth_key`, so a
-/// full-key caller's own `"channel"` claim is honoured as-is. Claiming it
-/// gains nothing — it only adds `verify_cross_channel_signature` on top of
-/// the unconditional `verify_jekt_signature`, never removes a check.
+/// `"channel"` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4) follows the same rule: the
+/// forwarding instance sets it on a same-host Tier 2a/2b hop, and it only adds
+/// `verify_cross_channel_signature`.
 pub(super) fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: Option<&str>) -> String {
     if auth_via == super::ReactiveAuthVia::LanKey {
         "lan".to_string()
@@ -542,12 +440,9 @@ pub(super) fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: O
     }
 }
 
-/// The `delivery_tier` a same-host Tier 2a/2b forward carries to the peer
-/// instance — SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4. See the call
-/// site in `handle_reactive_inject` for the full reasoning; in short: a
-/// `host`-tier (or unlabelled) request becomes `channel` on the hop, and
-/// anything already carrying a network tier keeps it so the peer re-derives
-/// that tier's own verification.
+/// The `delivery_tier` a same-host Tier 2a/2b forward carries
+/// (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4): `host` or unlabelled becomes `channel`; a
+/// network tier is kept so the peer re-derives that tier's verification.
 fn same_host_forward_tier(current: Option<&str>) -> &str {
     match current {
         None | Some("host") => "channel",
@@ -556,27 +451,15 @@ fn same_host_forward_tier(current: Option<&str>) -> &str {
 }
 
 /// Server-side resolution of `InjectionRequest::is_transcript_request` /
-/// `transcript_request_escalate_forced` — see both fields' own doc comments
-/// (`backend/reactive/types.rs`) and
-/// `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`. Lives here (not
-/// `Handler::inject_message_inner`) because it needs `Store` access —
-/// `Handler` has no `Store` access "by design," same reason
-/// `sig_verified`/`lan_verified` are resolved by this same caller before
-/// the request reaches the handler.
+/// `transcript_request_escalate_forced` (fields documented in `backend/reactive/types.rs`;
+/// SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md). Here, not in
+/// `Handler::inject_message_inner`, because it needs `Store`, which `Handler` lacks by design.
 ///
-/// Takes `mstore: &Arc<Store>` directly (not `&AppState`) so
-/// `muxbus::cloud_subscriber::sync_agent_reactive` — the WAN delivery path,
-/// which calls `Handler::inject_message` directly and never goes through
-/// `handle_reactive_inject`/HTTP at all — can call this exact same
-/// resolution too (`pub(crate)`). Phase C (WAN) needs the identical rule 1/
-/// rule 2 computation this function already does; without also wiring it
-/// in there, a WAN-delivered `transcript_request` would silently skip both
-/// rules entirely, not just get weaker ones.
+/// Takes `&Arc<Store>` so `muxbus::cloud_subscriber::sync_agent_reactive`, the WAN path that calls
+/// `Handler::inject_message` directly, applies the same rules; without it a WAN
+/// `transcript_request` would skip both.
 ///
-/// Always re-parses `req.message` itself — never trusts anything the
-/// client might have set on these two fields (impossible anyway, since
-/// both are `#[serde(skip_deserializing)]`, but this function is the one
-/// place that actually computes their real value from scratch).
+/// Always recomputes from `req.message`, never from anything the client set on the two fields.
 pub(crate) fn resolve_transcript_request_tier_fields(mstore: &std::sync::Arc<crate::backend::storage::store::Store>, req: &mut InjectionRequest) {
     let Some(transcript_req) = crate::backend::reactive::transcript_request::parse_transcript_request(&req.message) else {
         return;
@@ -605,16 +488,11 @@ pub(crate) fn resolve_transcript_request_tier_fields(mstore: &std::sync::Arc<cra
                 .unwrap_or(false);
             !granted
         }
-        // "private" and any unrecognized value: fail-closed on the
-        // ESCALATE-forcing question too — an agent def loaded from a
-        // channel/registry state older than this feature (or IS
-        // genuinely "private") never had a chance to opt into
-        // relaxation, so it gets none. Rule 1's forced TIER=sensitive
-        // still applies regardless (set above) — only this ADDITIONAL
-        // escalate-forcing rule reads "private" as "no need to force it
-        // beyond the ordinary verified-sender relaxation," since a
-        // "private" agent auto-denies (once the responder auto-resolve
-        // is built) and was never going to disclose anything either way.
+        // "private" and any unrecognized value fail closed on the ESCALATE-forcing question too: a
+        // def from a state older than this feature never opted into relaxation. Rule 1's forced
+        // TIER=sensitive still applies; only this extra rule reads "private" as "no need to force
+        // more", since a "private" agent auto-denies (once the responder auto-resolve is built) and
+        // discloses nothing either way.
         _ => false,
     };
 }
@@ -629,7 +507,7 @@ pub(super) async fn handle_reactive_inject(
     caller: Option<Extension<super::caller::Caller>>,
     Json(req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(error) = super::actor::require_actor(&state, caller.as_deref(), super::actor::ActorSite::Inject, req.source_agent.as_deref()).await {
+    if let Err(error) = super::lan_watch::acting(req.source_agent.as_deref(), super::actor::require_actor(&state, caller.as_deref(), super::actor::ActorSite::Inject, req.source_agent.as_deref())).await {
         return Json(serde_json::json!({ "success": false, "error": error }));
     }
     tracing::info!(
@@ -662,7 +540,7 @@ pub(crate) async fn deliver(
     };
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
-    let resp = super::cron::inject_here_following_runs(state, &req).await;
+    let resp = super::lan_watch::during("local delivery", super::cron::inject_here_following_runs(state, &req)).await;
     if resp.success {
         replay.delivered();
         flow_notes::note_delivered(state, &req);
@@ -692,7 +570,7 @@ pub(crate) async fn deliver(
     }
 
     if is_not_found {
-        if let Some(body) = forward_tiers::Tiers::new(state, auth_via, caller_uid, &req, &resp).run(&mut replay).await {
+        if let Some(body) = super::lan_watch::during("forwarding", forward_tiers::Tiers::new(state, auth_via, caller_uid, &req, &resp).run(&mut replay)).await {
             return body;
         }
     }
@@ -721,7 +599,7 @@ async fn admit(
 
     verify_jekt_signature(state, req);
     verify_reagent_signature(req, now_unix_secs());
-    verify_lan_signature(state, req).await;
+    super::lan_watch::during("sender signature check", verify_lan_signature(state, req)).await;
     verify_cross_channel_signature(state, req);
     lan_v2::log_receipt(req);
     let mut replay = replay::reserve(req, now_unix_secs());
@@ -742,7 +620,7 @@ async fn admit(
     // session gone cold should not be woken by a routine one: hold it, or refuse it where it
     // can't be held (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5, SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_
     // 2026_10_25.md). Before `prepare`, which charges inline attachments to the session.
-    if let Some(held) = hold_before_delivery(state, auth_via, req, &mut replay).await {
+    if let Some(held) = super::lan_watch::during("hold check", hold_before_delivery(state, auth_via, req, &mut replay)).await {
         return Err(held);
     }
 
@@ -765,9 +643,8 @@ pub(super) fn echo_local_delivery(
         &resp.request_id,
         resp.effective_tier.as_deref(),
         resp.requires_stop,
-        // Same `req` this call's own `effective_tier`/`requires_stop` were
-        // computed from (via `inject_message`), so the echoed marker's
-        // TRUST/SIG stays consistent with its own ESCALATE=.
+        // Same `req` the `effective_tier`/`requires_stop` came from, so the marker's TRUST/SIG
+        // matches its ESCALATE=.
         EchoTrust::of(req),
         req.priority.as_deref().unwrap_or("normal"),
         req.files_delivery.as_ref(),
@@ -866,22 +743,16 @@ pub(crate) use super::hold_reason::HoldReason;
 pub(in crate::server) use super::jekt_hold::hold_for_absent_target;
 use super::jekt_hold::{hold_applies, hold_before_delivery};
 
-/// Tier 4. `Some(body)` when the cloud accepted the injection (and the sender
-/// echo has been emitted); `None` when tier 4 doesn't apply or didn't take,
-/// leaving the caller to return its original error.
+/// Tier 4. `Some(body)` when the cloud accepted the injection (sender echo emitted); `None` when it
+/// doesn't apply or didn't take, leaving the caller to return its original error.
 ///
-/// **Queued is not delivered.** The cloud persists the message and wakes
-/// subscribed sidecars; the recipient's srv picks it up on its next sync, which
-/// may be seconds away or never if that instance is offline. `success: true`
-/// here therefore means "handed to the relay" — which is the strongest claim
-/// any WAN tier can make, and is what `DELIVERY=wan` on the echoed marker
-/// already tells the sender.
+/// **Queued is not delivered:** `success: true` means "handed to the relay", the strongest claim
+/// any WAN tier makes (and what `DELIVERY=wan` on the echoed marker says). The recipient's srv
+/// picks it up on its next sync, or never if that instance is offline.
 pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, caller_uid: &str) -> Option<serde_json::Value> {
-    // Never re-relay something that ARRIVED over the cloud. An agent unknown to
-    // every instance would otherwise bounce between the relay and each
-    // subscriber indefinitely, re-queueing on every hop. `forward_hops` cannot
-    // catch this: the cloud hands the message to a fresh inbound request with
-    // the count reset, so this tier needs its own guard.
+    // Never re-relay what ARRIVED over the cloud: an agent unknown everywhere would bounce between
+    // the relay and every subscriber forever. `forward_hops` can't catch it (the cloud resets the
+    // count), so this tier needs its own guard.
     if req.delivery_tier.as_deref() == Some("wan") {
         return None;
     }
@@ -900,12 +771,10 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
     };
 
     let priority = req.priority.as_deref().unwrap_or("normal");
-    // SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md: srv signs, here at the
-    // origin, for the agent the request's own token names (`wan_signer`).
-    // Any unmet condition relays unsigned, as before; the reason rides on
-    // the "queued" line below, or the receiver can't tell it from a sender
-    // that never signed. The directory this send goes into: this relay plus
-    // the account of the credential it's sent with.
+    // SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md: srv signs at the origin for the agent the
+    // request's token names (`wan_signer`). Any unmet condition relays unsigned; the reason rides
+    // on the "queued" log line so the receiver can tell it from a sender that never signed.
+    // `directory` is this relay plus the credential's account.
     let directory = Some(credential.account_sub.as_str())
         .filter(|sub| !sub.is_empty())
         .map(|sub| crate::muxbus::wan_publish::directory_id(&crate::muxbus::relay::rest_base_url(), sub));
@@ -956,10 +825,9 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
                 None, // seen the message yet, so neither field is known
                 EchoTrust {
                     delivery_tier: "wan",
-                    // Signing on this path is issue #2586's unbuilt WAN half —
-                    // an outbound relay carries no proof of sender identity, and
-                    // claiming otherwise here would put a TRUST value on the
-                    // echoed marker that the receiving side will not agree with.
+                    // Signing here is #2586's unbuilt WAN half: an outbound relay carries no proof
+                    // of sender identity, and claiming one would put a TRUST value on the marker
+                    // the receiver won't agree with.
                     sig_verified: None,
                     reagent_verified: None,
                     lan_verified: None,
@@ -1037,17 +905,10 @@ pub(super) async fn handle_reactive_agent(
     }
     match state.reactive_handler.get_delivery_target(id) {
         Some(agent) => {
-            // Merged in, not part of AgentRegistration's own serialization —
-            // this is the LAN pubkey-lookup half of
-            // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2. The
-            // public half of an Ed25519 keypair is not secret; handing it to
-            // whichever peer already holds a valid lan_key (this whole route
-            // is gated by lan_or_full_auth_middleware) costs nothing and
-            // lets that peer verify this agent's future outgoing LAN
-            // signatures. `None` when the agent has no LAN key minted yet
-            // (never sent a LAN jekt since this shipped) — omitted from the
-            // JSON entirely rather than rendered `null`, so existing callers
-            // of this endpoint that don't know about this field see no
+            // Merged in, not part of AgentRegistration's serialization: the LAN pubkey-lookup half
+            // of docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2. A public key isn't
+            // secret, and this route is already gated by lan_or_full_auth_middleware. Omitted
+            // entirely (not `null`) when no LAN key is minted yet, so existing callers see no
             // change in shape.
             let mut value = serde_json::to_value(&agent).unwrap_or_default();
             if let Some(obj) = value.as_object_mut() {
@@ -1110,13 +971,11 @@ pub(super) async fn handle_reactive_register(
     let sent_name = req.agent_id.clone();
     req.agent_id = crate::backend::reactive::sanitize::route_name(&sent_name).unwrap_or_default();
     tracing::info!(agent_id = %req.agent_id, block_id = %req.block_id, "reactive register request");
-    // Identity M2 (spec §4.4.1 row 3): this is a presence signal keyed by
-    // block. The name the frontend sends, as its route name (above), becomes
-    // the display binding (and the cross-instance registries' name), but
-    // identity is NOT taken from it — it may be a stale meta value or an
-    // id the agent process itself emitted over OSC. The UID comes from the
-    // row the server created for this block, read on `spawn_blocking` like
-    // every other store read in an async handler (incident #1782).
+    // Identity M2 (spec §4.4.1 row 3): a presence signal keyed by block. The sent name, as its
+    // route name (above), becomes the display binding and the cross-instance registries' name, but
+    // identity is NOT taken from it (it may be a stale meta value or an id the agent emitted over
+    // OSC). The UID comes from the row the server made for this block, read on `spawn_blocking`
+    // like every async-handler store read (#1782).
     let uid = {
         let mstore = state.mstore.clone();
         let block_id = req.block_id.clone();
@@ -1130,13 +989,11 @@ pub(super) async fn handle_reactive_register(
     if let Some(refusal) = super::pane_binding::register_refusal(&state, caller.as_deref(), &req.block_id, uid.as_deref(), &sent_name, &req.agent_id).await {
         return refusal;
     }
-    // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
-    // Phase 1, I9): a pane whose agent runs in another AgentMux instance on
-    // this host must not register it — the cross-instance registries written
-    // below are how other senders route this agent's jekts, and delivery
-    // prefers the freshest entry, so registering here would pull the live
-    // instance's messages to a pane that is refused its turns. The frontend
-    // only logs a failed registration; it does not retry.
+    // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 Phase 1, I9): a pane
+    // whose agent runs in another instance on this host must not register it. The cross-instance
+    // registries written below send this agent's jekts to the freshest entry, so registering here
+    // would pull the live instance's messages to a pane refused its turns. The frontend only logs a
+    // failed registration; it doesn't retry.
     if let Some(uid) = uid.as_deref() {
         if let Err(refusal) = crate::backend::agent_admission::check_before_spawn(
             crate::backend::agent_admission::lease_store_for(state.mstore.shared_agent_registry()),
@@ -1169,46 +1026,36 @@ pub(super) async fn handle_reactive_register(
         "registration.no_uid.http_register",
     ) {
         Ok(()) => {
-            // Refresh the block's OWN captured identity too (reagentx P1 on
-            // #2697): this HTTP path can (re-)register an existing block_id
-            // under a different agent_id (a rename, or a reconfigured
-            // cmd:env) — without this, the controller's `agent_id()` stays
-            // stale at whatever it was captured as at spawn time, and
-            // `inject_message_inner`'s recipient-identity check (#2695)
-            // would then falsely reject the agent's own, correctly-addressed
-            // messages as a mismatch. `get_controller` returning `None`
-            // (block not tracked, or a controller type that doesn't
-            // implement `agent_id()`/`set_agent_id()`) is a harmless no-op.
+            // Refresh the block's own captured identity too (#2697): this path can re-register a
+            // block_id under a different agent_id (a rename, a changed cmd:env), and a stale
+            // controller `agent_id()` would make `inject_message_inner`'s recipient check (#2695)
+            // reject the agent's own correctly-addressed messages. `None` (untracked block, or a
+            // controller without `agent_id()`/`set_agent_id()`) is a no-op.
             if let Some(ctrl) = blockcontroller::get_controller(&req.block_id) {
                 ctrl.set_agent_id(Some(req.agent_id.clone()));
             }
 
-            // Also write to cross-instance file registry so other AgentMux
-            // instances can forward inject requests to this one.
+            // Also write to the cross-instance file registry so other AgentMux instances can
+            // forward inject requests here.
             let data_dir = base::get_mux_data_dir();
             agent_registry::write(&data_dir, &req.agent_id, &state.local_web_url, &req.block_id);
 
-            // And to the host-global shared registry (Tier 2b) so instances
-            // running in OTHER channels on this host can reach this agent
-            // too — closes issue #1916 (Tier 2 previously only ever reached
-            // the caller's own channel).
+            // And to the host-global shared registry (Tier 2b), so instances in OTHER channels
+            // reach this agent too (#1916).
             agent_registry::write_shared_from_env(
                 &req.agent_id,
                 &state.local_web_url,
                 &req.block_id,
             );
 
-            // Auto-watch this agent's Claude Code config dir for subagent JSONL files.
-            // Pass block_id so subagent events are stamped with the owning pane,
-            // letting the frontend route ⚡ panels to that pane only. See
-            // `resolve_claude_config_dir`'s doc comment for why this must read
-            // the block's own `cmd:env`, not just guess a path convention.
+            // Auto-watch this agent's Claude Code config dir for subagent JSONL files. `block_id`
+            // stamps subagent events with the owning pane so the frontend routes ⚡ panels to it
+            // only. The dir comes from the block's own `cmd:env` (see `resolve_claude_config_dir`).
             let block = state.mstore.get::<crate::backend::obj::Block>(&req.block_id).ok().flatten();
             let empty_meta = crate::backend::obj::MetaMapType::new();
-            // Identity-bound agents' real CLAUDE_CONFIG_DIR is never the
-            // stale `cmd:env` snapshot below — see
-            // `resolve_claude_config_dir`'s doc comment and
-            // SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md.
+            // An identity-bound agent's real CLAUDE_CONFIG_DIR is never the stale `cmd:env`
+            // snapshot (`resolve_claude_config_dir`,
+            // SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md).
             let bound_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
                 &state.mstore,
                 &state.id_store,
@@ -1224,27 +1071,13 @@ pub(super) async fn handle_reactive_register(
             if let Some(config_dir) = config_dir {
                 state.subagent_watcher.watch_agent(&req.agent_id, &req.block_id, config_dir.clone());
 
-                // Codex P1 on PR #2980: the resolution above and the
-                // `watch_agent` call are not atomic with an
-                // `agent_identity_link` write landing on a different
-                // thread — a bind can commit in the narrow window between
-                // computing `config_dir` and `watch_agent` actually
-                // installing the watch. If that happens, the bind's own
-                // `recheck_all_watched_agents` call can run and find
-                // nothing yet in `watched_agents` to correct, and no LATER
-                // bind event is guaranteed to retrigger it. Immediately
-                // re-resolving fresh right here — after the install has
-                // definitely committed — closes that window: if the bind
-                // already landed, this catches it on the spot instead of
-                // depending on an external trigger that might never come
-                // again. Safe/cheap to do unconditionally: `recheck_config_dir`
-                // is a same-ref no-op when nothing actually changed. Scoped
-                // to THIS call site specifically (not inside `watch_agent`
-                // itself) because this is the one place `config_dir` is
-                // actually derived from identity/binding resolution in the
-                // first place — see `watch_agent`'s own doc comment for why
-                // baking this into the shared primitive broke its other
-                // callers.
+                // Re-resolve now that the watch is installed (#2980): an `agent_identity_link`
+                // write on another thread can commit between resolving `config_dir` and
+                // `watch_agent`, and the bind's own `recheck_all_watched_agents` then finds nothing
+                // to correct, with no later bind guaranteed to retrigger it. `recheck_config_dir`
+                // is a no-op when nothing changed. Here, not in `watch_agent`, because this is the
+                // one site that derives `config_dir` from identity binding (baking it into
+                // `watch_agent` broke its other callers).
                 let fresh_bound_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
                     &state.mstore,
                     &state.id_store,
@@ -1259,14 +1092,10 @@ pub(super) async fn handle_reactive_register(
                     state.subagent_watcher.recheck_config_dir(&req.agent_id, fresh_dir);
                 }
 
-                // If this block already has a persisted session id, it's
-                // resuming a prior conversation (not starting fresh) —
-                // backfill just THAT session's own subagents, so a
-                // reopened pane shows what it already had without
-                // flooding in every OTHER session this agent identity has
-                // ever run. A brand-new session has nothing to backfill;
-                // watch_agent's live watcher picks up subagents as the
-                // Task tool spawns them.
+                // A block with a persisted session id is resuming: backfill only THAT session's
+                // subagents, so a reopened pane shows what it had without flooding in every other
+                // session of this identity. A new session has nothing to backfill; the live watcher
+                // picks up subagents as the Task tool spawns them.
                 let session_id = block.as_ref().map(|b| {
                     crate::backend::obj::meta_get_string(
                         &b.meta,
@@ -1289,11 +1118,10 @@ pub(super) async fn handle_reactive_register(
                 state.reactive_handler.names_for_block(&req.block_id).iter().for_each(|n| sub.add_agent(n));
             }
 
-            // Notify the Swarm view so it calls AgentTrackedBlocksCommand and
-            // shows this pane. We use a dedicated event name so useProcessCount
-            // (which subscribes to agent:process-added / agent:process-exited)
-            // doesn't treat this as a phantom OS process and show a spurious ⚙ N
-            // badge or trigger the kill-tree modal on pane close.
+            // Notify the Swarm view so it calls AgentTrackedBlocksCommand and shows this pane. A
+            // dedicated event name, because `useProcessCount` (on agent:process-added/-exited)
+            // would take this for a phantom OS process and show a spurious ⚙ N badge or the
+            // kill-tree modal on pane close.
             state.broker.publish_event::<crate::backend::mps_events::AgentReactiveRegistered>(&crate::backend::mps_events::BlockRefEvent { block_id: req.block_id.clone() }, vec![format!("block:{}", req.block_id)], 0);
 
             Json(json!({"success": true})).into_response()
@@ -1311,36 +1139,20 @@ pub(super) struct EnsureSigningKeyRequest {
     agent_id: String,
 }
 
-/// Mint-or-reuse `agent_id`'s host-tier jekt signing key and return it,
-/// base64-encoded — the same value `agent_config::inject_jekt_signing_keys_into_mcp_json`
-/// writes into a real agent's `.mcp.json` at spawn time, exposed directly
-/// here instead of only reachable through `agent.open`'s WebSocket
-/// (`WshRpcEngine`) path. That path also spawns a real provider session,
-/// which makes it unusable for anything that just wants to exercise
-/// host-tier jekt signing/verification (tests, external harnesses) without
-/// the cost and side effects of a live LLM session.
+/// Mints or reuses `agent_id`'s host-tier jekt signing key and returns it base64-encoded: the value
+/// `agent_config::inject_jekt_signing_keys_into_mcp_json` writes into a real agent's `.mcp.json` at
+/// spawn, exposed here so tests and external harnesses can exercise host-tier signing without
+/// `agent.open`'s WebSocket path, which also spawns a live provider session.
 ///
-/// reagentx P0 on this PR's first pass: gating this behind the same
-/// `X-AuthKey` as `register`/`unregister` is NOT the same trust level as
-/// those routes — `X-AuthKey`/`AGENTMUX_AUTH_KEY` is injected into every
-/// spawned agent's own subprocess env for its bashwrap/MCP tool calls
-/// (`agent_handlers/input.rs`), so any agent already holds it. Returning
-/// another agent's raw signing key to any caller with that shared key is
-/// secret-key exfiltration enabling cryptographic impersonation — it
-/// directly breaks the invariant `agent_jekt_keys.rs` documents (a key is
-/// served only to its own agent, by that agent's identity token) and the
-/// entire premise `TRUST=host-verified` depends on.
-///
-/// There is no way to additionally verify "the HTTP caller genuinely IS
-/// `agent_id`" from this request alone — that's the exact problem host-tier
-/// signing exists to solve, so this endpoint can't lean on it without being
-/// circular. Instead: **disabled unless `AGENTMUX_ENABLE_TEST_ENDPOINTS=1`
-/// was set in the srv process's own environment before it started** — set
-/// by whoever launches the instance, not settable by a running agent's tool
-/// calls (unlike `X-AuthKey`, which every spawned agent already holds
-/// regardless of what's set here). Off by default, so no real user's real
-/// instance with real agents ever exposes it; on only for a deliberately
-/// isolated test/verification instance where every "agent" is synthetic.
+/// **Disabled unless `AGENTMUX_ENABLE_TEST_ENDPOINTS=1` was set in the srv process's own
+/// environment at start** (#2635). `X-AuthKey` is not enough: it is injected into every spawned
+/// agent's env (`agent_handlers/input.rs`), so any agent holds it, and returning another agent's
+/// raw key would be exfiltration enabling impersonation, breaking the invariant
+/// `agent_jekt_keys.rs` documents (a key goes only to its own agent, by its identity token) and
+/// `TRUST=host-verified`. Nothing in the request can prove the caller IS `agent_id` (that is the
+/// problem host-tier signing solves, so leaning on it is circular); the env flag is set by whoever
+/// launches the instance, which a running agent's tool calls can't do. Off by default, on only for
+/// an isolated test instance of synthetic agents.
 pub(super) async fn handle_reactive_ensure_signing_key(
     State(state): State<AppState>,
     Json(req): Json<EnsureSigningKeyRequest>,
@@ -1413,13 +1225,11 @@ pub(super) async fn unregister_pane(state: &AppState, req: UnregisterRequest) ->
         }
     };
 
-    // Name-keyed side state is torn down for EVERY name the block held
-    // (display and stable). The name the caller asked by is used only when
-    // no block was found at all (the pre-M2 behaviour for an unknown name):
-    // when a block WAS torn down, its own bindings are authoritative — the
-    // caller's name may be a stale display value that another live block
-    // now legitimately holds, and removing that block's file entry and cloud
-    // subscription would knock it off cross-instance routing.
+    // Name-keyed side state is torn down for EVERY name the block held (display and stable). The
+    // caller's name is used only when no block was found at all (the pre-M2 behaviour for an
+    // unknown name): a torn-down block's own bindings are authoritative, since the caller's name
+    // may be a stale display value another live block now holds, and removing that block's file
+    // entry and cloud subscription would knock it off cross-instance routing.
     let mut all_names = names.clone();
     if block_id.is_none() {
         all_names.push(req.agent_id.clone());
@@ -1430,10 +1240,9 @@ pub(super) async fn unregister_pane(state: &AppState, req: UnregisterRequest) ->
         agent_registry::remove(&data_dir, name);
         // And from the host-global shared registry (Tier 2b).
         agent_registry::remove_shared_from_env(name);
-        // Drop the subagent filesystem watcher (handle + channel + task) — the
-        // symmetric teardown for the watch_agent() call in the register handler.
-        // Passes block_id so a shared-agent-id watcher with another still-open
-        // dependent block survives this one's teardown.
+        // Drop the subagent filesystem watcher (handle, channel, task): the symmetric teardown for
+        // `watch_agent()` in the register handler. `block_id` lets a watcher shared with another
+        // still-open block survive this one's teardown.
         state.subagent_watcher.unwatch_agent(name, block_id.as_deref());
         // Notify cloud subscriber so it stops subscribing for this agent
         if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
@@ -1477,9 +1286,8 @@ pub(super) async fn handle_reactive_poller_status(
     Json(serde_json::to_value(&status).unwrap_or(json!({})))
 }
 
-/// Server-side ceiling on `max_lines` — protects a transcript pull (and this route in general) from an unbounded read of a huge
-/// session file. Callers wanting more must paginate some other way; this
-/// route is a "recent tail" primitive, not a full-history export.
+/// Server-side ceiling on `max_lines`, so a transcript pull can't read a huge session file
+/// unbounded. This route is a "recent tail" primitive, not a full-history export.
 const TRANSCRIPT_MAX_LINES_CAP: usize = 500;
 
 #[derive(serde::Deserialize)]
@@ -1487,20 +1295,13 @@ pub(super) struct TranscriptQuery {
     agent: String,
     #[serde(default = "default_transcript_max_lines")]
     max_lines: usize,
-    /// Set ONLY by [`handle_reactive_transcript_cross_channel`] on the
-    /// single forwarded request it ever sends — caps cross-channel
-    /// resolution at exactly one hop. Without this, a stale-but-PID-alive
-    /// shared-registry entry (pointing back at this same instance, or at a
-    /// second instance whose own entry for the same agent points back
-    /// here) would forward indefinitely — the exact failure mode
-    /// `handle_reactive_inject`'s `MAX_FORWARD_HOPS`/`forward_hops` guard
-    /// exists to prevent for jekt delivery (reagent P1, codex P1 on
-    /// PR #2715). A bare bool is sufficient here (unlike inject's integer
-    /// hop counter) because this route is architecturally single-hop by
-    /// design — the owning instance found via `lookup_all_shared` always
-    /// has the agent on ITS OWN host tier, never a further cross-channel
-    /// hop of its own — so "already forwarded once" and "hop limit
-    /// reached" are the same condition.
+    /// Set ONLY by [`handle_reactive_transcript_cross_channel`] on its single forwarded request,
+    /// capping cross-channel resolution at one hop. Without it a stale-but-PID-alive
+    /// shared-registry entry (pointing back at this instance, or at a second whose entry points
+    /// back here) would forward forever, the failure `handle_reactive_inject`'s `MAX_FORWARD_HOPS`
+    /// prevents for jekts (#2715). A bool is enough, unlike inject's counter: the owning instance
+    /// found via `lookup_all_shared` has the agent on its own host tier, never a further hop, so
+    /// "already forwarded once" and "hop limit reached" are the same condition.
     #[serde(default)]
     forwarded: bool,
 }
@@ -1508,18 +1309,14 @@ fn default_transcript_max_lines() -> usize {
     100
 }
 
-/// `GET /agentmux/reactive/transcript?agent=<name>&max_lines=<n>` — read the
-/// tail of a registered agent's session output (the `Agents` tool's
-/// `transcript` action). A pull primitive: nothing is pushed.
+/// `GET /agentmux/reactive/transcript?agent=<name>&max_lines=<n>`: the tail of a registered agent's
+/// session output (the `Agents` tool's `transcript` action). A pull primitive; nothing is pushed.
 ///
-/// As of `SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
-/// Phase A, a miss on this instance's own host-tier registry falls back to
-/// the host-global cross-channel shared registry and forwards a single-hop
-/// HTTP GET to the owning channel's own instance — same auth
-/// (`entry.auth_key` as `X-AuthKey`) and loopback-only pattern
-/// `handle_reactive_inject`'s Tier 2b already uses (see that handler for
-/// the security rationale). Response carries `"tier"` so callers can tell
-/// which tier answered.
+/// As of SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md Phase A, a miss on this
+/// instance's host-tier registry falls back to the host-global cross-channel registry and forwards
+/// a single-hop GET to the owning channel's instance, with the same auth (`entry.auth_key` as
+/// `X-AuthKey`) and loopback-only pattern as `handle_reactive_inject`'s Tier 2b. The response's
+/// `"tier"` says which tier answered.
 pub(super) async fn handle_reactive_transcript(
     State(state): State<AppState>,
     Query(params): Query<TranscriptQuery>,
@@ -1534,9 +1331,9 @@ pub(super) async fn handle_reactive_transcript(
 
     let reg = match state.reactive_handler.lookup_delivery_target(&params.agent) {
         crate::backend::reactive::handler::LookupOutcome::One(reg) => reg,
-        // Identity M2 (spec §4.4.3): a name several live blocks hold is a
-        // purely LOCAL collision — refuse it with the candidates, never
-        // fall through to cross-channel forwarding as if it were unknown.
+        // Identity M2 (spec §4.4.3): a name several live blocks hold is a purely LOCAL collision:
+        // refuse it with the candidates, never fall through to cross-channel forwarding as if it
+        // were unknown.
         crate::backend::reactive::handler::LookupOutcome::Ambiguous(candidates) => {
             let candidates: Vec<serde_json::Value> = candidates
                 .iter()
@@ -1557,10 +1354,9 @@ pub(super) async fn handle_reactive_transcript(
         }
         crate::backend::reactive::handler::LookupOutcome::NotFound => {
             if params.forwarded {
-                // Already one hop in — see TranscriptQuery::forwarded's doc
-                // comment. The owning instance's own host-tier lookup just
-                // missed too, so this agent genuinely isn't registered
-                // anywhere reachable; 404, do not attempt a second forward.
+                // Already one hop in (see `TranscriptQuery::forwarded`): the owning instance's
+                // host-tier lookup missed too, so the agent isn't registered anywhere reachable.
+                // 404, no second forward.
                 return (
                     StatusCode::NOT_FOUND,
                     Json(json!({"error": "agent not found"})),
@@ -1597,12 +1393,10 @@ pub(super) async fn handle_reactive_transcript(
     .into_response()
 }
 
-/// Fallback path for [`handle_reactive_transcript`] when the target agent
-/// isn't on this instance's own host-tier registry — checks the host-global
-/// cross-channel shared registry and, on a hit, forwards to the owning
-/// channel's own instance. A miss here (not found on this channel OR any
-/// other channel on this host) 404s exactly as the host-only lookup always
-/// did — this does not reach LAN or WAN (Phase A scope; see spec Phase B/C).
+/// Fallback for [`handle_reactive_transcript`] when the agent isn't in this instance's host-tier
+/// registry: looks in the host-global cross-channel registry and, on a hit, forwards to the owning
+/// channel's instance. A miss on every channel of this host 404s as the host-only lookup always
+/// did; it does not reach LAN or WAN (Phase A scope).
 async fn handle_reactive_transcript_cross_channel(
     state: &AppState,
     params: &TranscriptQuery,
@@ -1618,17 +1412,12 @@ async fn handle_reactive_transcript_cross_channel(
     let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() else {
         return not_found();
     };
-    // Skip any entry pointing back at THIS instance before picking one —
-    // a stale-but-PID-alive self-registration (the registration race /
-    // incomplete-cleanup case codex flagged on PR #2715) would otherwise
-    // forward a request to ourselves, which re-enters this exact function
-    // and repeats. Filtering here (not just checking the single freshest
-    // pick) also handles a self-entry merely being the FRESHEST of several
-    // candidates — same defense-in-depth `handle_reactive_inject`'s Tier 2b
-    // applies. Combined with `TranscriptQuery::forwarded` above (which
-    // still caps this at one hop even in an exotic multi-instance cycle
-    // this filter alone wouldn't catch — e.g. instance A's entry points to
-    // B and B's own entry for the same agent points back to A).
+    // Skip any entry pointing back at THIS instance before picking one: a stale-but-PID-alive
+    // self-registration (the registration race or incomplete cleanup, #2715) would forward the
+    // request to ourselves and re-enter this function, including when it is merely the FRESHEST of
+    // several candidates (the same defence as `handle_reactive_inject`'s Tier 2b).
+    // `TranscriptQuery::forwarded` still caps it at one hop in a multi-instance cycle this filter
+    // can't catch (A's entry points to B, B's back to A).
     // A former slug's agent is registered, and asked for, under its current one.
     let alias = former_slug::owner(state, &params.agent).map(|o| o.slug);
     let (agent, entries) = former_slug::shared_entries(&shared_dir, &params.agent, alias.as_deref());
@@ -1669,13 +1458,10 @@ async fn handle_reactive_transcript_cross_channel(
 #[path = "tests/reactive/transcript_cross_channel_tests.rs"]
 mod transcript_cross_channel_tests;
 
-/// Default/cap for how many of an agent's sessions a single search may open.
-///
-/// Full-parsing every session of a long-lived agent is not viable: the session
-/// that motivated `SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md` was 14.7 MB /
-/// 6682 records and was one of several. Candidates are taken newest-first, so
-/// the default answers the common "what did I do recently" question without
-/// reading years of history.
+/// Default/cap for how many of an agent's sessions one search may open
+/// (SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md). Full-parsing every session of a long-lived agent
+/// isn't viable (the session that motivated the spec was 14.7 MB / 6682 records, one of several),
+/// so candidates are taken newest-first and the default answers "what did I do recently".
 const HISTORY_SEARCH_DEFAULT_MAX_SESSIONS: usize = 20;
 const HISTORY_SEARCH_MAX_SESSIONS_CAP: usize = 100;
 const HISTORY_SEARCH_DEFAULT_LIMIT: usize = 50;
@@ -1696,14 +1482,12 @@ fn default_history_limit() -> usize {
 
 #[derive(serde::Deserialize)]
 pub(super) struct HistorySearchQuery {
-    /// The caller's name, as the MCP sends it. **Never whose history is
-    /// searched**: that is the row of the caller's per-agent token
-    /// (`X-Agent-Token`, identity M4c-2c,
-    /// SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9), and a
-    /// request without one is refused. A name is self-declared — every local
-    /// agent shares the instance `auth_key` — so resolving the owner from it
-    /// could only guess, and a guess answered "no history" with confidence.
-    /// Kept for the actor counters (M4a-2).
+    /// The caller's name, as the MCP sends it. **Never whose history is searched**: that is the row
+    /// of the caller's per-agent token (`X-Agent-Token`, identity M4c-2c,
+    /// SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9), and a request without one is
+    /// refused. A name is self-declared (every local agent shares the instance `auth_key`), so
+    /// resolving the owner from it could only guess, and a guess answered "no history" with
+    /// confidence. Kept for the actor counters (M4a-2).
     #[serde(default)]
     agent: String,
     query: String,
@@ -1725,15 +1509,11 @@ pub(super) struct HistorySearchQuery {
     include_inferred: bool,
 }
 
-/// `GET /agentmux/reactive/history/search` — search an agent's own past
-/// conversations (`SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md`).
-///
-/// Distinct from `/reactive/transcript`, which returns the tail of the LIVE
-/// session only. This reads sessions already persisted on disk, including
-/// sessions that ended — which is the point: an agent's memory of what it did
-/// is bounded by its context window while its actual actions are not, so after
-/// a compaction or session reset it will answer questions about its own past
-/// confidently and wrongly, with nothing marking the boundary.
+/// `GET /agentmux/reactive/history/search`: search an agent's own past conversations
+/// (SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md). Unlike `/reactive/transcript` (the live session's
+/// tail), it reads sessions persisted on disk, including ended ones: after a compaction or session
+/// reset an agent answers questions about its own past confidently and wrongly, with nothing
+/// marking the boundary.
 pub(super) async fn handle_reactive_history_search(
     State(state): State<AppState>,
     caller: Option<Extension<super::caller::Caller>>,
@@ -1745,9 +1525,8 @@ pub(super) async fn handle_reactive_history_search(
         super::actor::ActorSite::HistorySearch,
         Some(params.agent.as_str()).filter(|a| !a.trim().is_empty()),
     );
-    // An empty query is only meaningful alongside a `tool` filter ("every call
-    // to X"); on its own it would match everything and return a truncated
-    // firehose, which reads as a real answer.
+    // An empty query makes sense only with a `tool` filter ("every call to X"); alone it would
+    // match everything and return a truncated firehose that reads as a real answer.
     if params.query.trim().is_empty() && params.tool.is_none() {
         return (
             StatusCode::BAD_REQUEST,
@@ -1776,11 +1555,10 @@ pub(super) async fn handle_reactive_history_search(
         include_inferred: params.include_inferred,
     };
 
-    // Identity M4c-2c (spec §6.5.9): the owner is the caller's own row, from
-    // its per-agent token — never a name. Every agent AgentMux spawns carries
-    // one; a request without it can't say whose history it is, and resolving
-    // a self-declared name instead could only guess (on 2026-09-24 a guess
-    // answered "no history" for an agent whose sessions were on disk).
+    // Identity M4c-2c (spec §6.5.9): the owner is the caller's own row, from its per-agent token,
+    // never a name. A request without one can't say whose history it is, and resolving a
+    // self-declared name could only guess (on 2026-09-24 a guess answered "no history" for an agent
+    // whose sessions were on disk).
     let Some(uid) = caller.as_deref().and_then(super::caller::Caller::uid) else {
         crate::backend::agent_resolve::record_uid_fallback("history.search_refused_unattributed");
         return (
@@ -1803,8 +1581,7 @@ pub(super) async fn handle_reactive_history_search(
         }
     };
 
-    // Parsing sessions is blocking filesystem work; keep it off the async
-    // runtime's worker threads, same posture as other disk-heavy handlers.
+    // Parsing sessions is blocking filesystem work: keep it off the async workers.
     let history = state.history_service.clone();
     let store = state.identity_store.clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -1838,21 +1615,17 @@ pub(super) async fn handle_reactive_history_search(
 
 // ---- WS RPC: reactive.registrations (issue #2696, Stash UI indicator) ----
 
-/// Whether a host-global shared-registry entry is THIS instance's own
-/// registration (as opposed to a genuinely different instance/channel on
-/// the same host) — every agent unconditionally writes itself into that
-/// same registry, so a "remote"/"elsewhere" listing must exclude its own
-/// entry or it fires on every healthy agent (reagentx P1 on #2698). Same
-/// comparison this file already uses for Tier 2a/2b forwarding.
+/// Whether a host-global shared-registry entry is THIS instance's own registration. Every agent
+/// writes itself into that registry, so a "registered elsewhere" listing must exclude its own entry
+/// or it fires on every healthy agent (#2698). Same comparison as Tier 2a/2b forwarding.
 pub(super) fn is_self_registration(entry_local_url: &str, this_instances_local_url: &str) -> bool {
     entry_local_url == this_instances_local_url
 }
 
 /// One cross-instance/channel entry from the host-global shared registry
-/// (`backend::reactive::registry::AgentEntry`), narrowed to what the
-/// frontend actually needs to render a "registered elsewhere too" badge —
-/// deliberately excludes `local_url`/`auth_key`, which are internal
-/// forwarding plumbing, not UI-relevant.
+/// (`backend::reactive::registry::AgentEntry`), narrowed to what the frontend needs for a
+/// "registered elsewhere too" badge: `local_url`/`auth_key` are internal forwarding plumbing and
+/// stay out.
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub(super) struct RemoteRegistrationEntry {
@@ -1864,9 +1637,8 @@ pub(super) struct RemoteRegistrationEntry {
     updated_at: u64,
 }
 
-/// Summary of the most recent `identity-mismatch` audit entry for this
-/// agent_id, if any (see #2695's `Handler::inject_message_inner` check) —
-/// narrowed from `AuditLogEntry` to what the Stash badge needs.
+/// The most recent `identity-mismatch` audit entry for this agent_id, if any (#2695's
+/// `Handler::inject_message_inner` check), narrowed to what the Stash badge needs.
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub(super) struct MismatchAuditSummary {
@@ -1879,14 +1651,12 @@ pub(super) struct MismatchAuditSummary {
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub(super) struct ReactiveRegistrationsResult {
-    /// This instance's own registration for the agent, if any — same data
-    /// `GET /agentmux/reactive/agent` exposes, reused here so the frontend
-    /// makes one call instead of two.
+    /// This instance's own registration for the agent, if any: the same data as
+    /// `GET /agentmux/reactive/agent`, reused so the frontend makes one call instead of two.
     local: Option<AgentRegistration>,
-    /// Every OTHER instance/channel on this host currently claiming this
-    /// same agent_id, freshest first — a non-empty list here is the actual
-    /// risk signal the Stash badge exists to surface (issue #2694's root
-    /// cause was exactly two panes racing to hold the same agent_id).
+    /// Every OTHER instance/channel on this host claiming this agent_id, freshest first. A
+    /// non-empty list is the risk signal the Stash badge surfaces (#2694's root cause was two
+    /// panes racing to hold one agent_id).
     remote: Vec<RemoteRegistrationEntry>,
     recent_mismatch: Option<MismatchAuditSummary>,
 }
@@ -1897,19 +1667,16 @@ pub(super) struct ReactiveRegistrationsParams {
     pub agent_id: String,
 }
 
-/// Registers `reactive.registrations`, called by the Stash "Registration"
-/// tab (`AgentIdentityLinksPanel`'s sibling — see `frontend/app/store/
-/// rpc-api/reactive.ts`) to answer "is this agent's jekt identity healthy
-/// right now": where it's registered locally, whether any OTHER
-/// instance/channel on this host also claims the same agent_id (the
-/// collision shape #2694 fixed one specific cause of), and whether a
-/// recent delivery hit the #2695 identity-mismatch guard.
+/// Registers `reactive.registrations`, called by the Stash "Registration" tab
+/// (`frontend/app/store/rpc-api/reactive.ts`) to answer "is this agent's jekt identity healthy
+/// right now": where it's registered locally, whether any OTHER instance/channel on this host
+/// also claims the same agent_id (the collision #2694 fixed one cause of), and whether a recent
+/// delivery hit the #2695 identity-mismatch guard.
 pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc::engine::WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    // Typed registration (SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.1): the
-    // params/result structs carry `#[derive(ts_rs::TS)]`, so the frontend
-    // consumes generated bindings instead of four hand-written interfaces
-    // that each said "mirrors agentmux-srv's ...".
+    // Typed registration (SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.1): the params/result
+    // structs derive `ts_rs::TS`, so the frontend consumes generated bindings, not
+    // hand-written interfaces.
     registration_flags::register(engine, state.clone());
     engine.register_typed(
         "reactive.registrations",
@@ -1931,28 +1698,22 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
     );
 }
 
-/// `verify_jekt_signature` unit tests (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
-/// §2.2, reagentx review on PR #2565). Deliberately test the extracted
-/// function directly rather than the full `handle_inject`/websocket
-/// handlers it's now called from: `server::tests::test_state()`'s
-/// `reactive_handler` is a *global* singleton shared across every test in
-/// the binary (`backend_reactive::get_global_handler()`), so exercising it
-/// end-to-end here risks cross-test interference on shared agent
-/// registrations. `verify_jekt_signature` itself only touches `state.mstore`
-/// (key lookup), not the handler, so it's safe to test in isolation with no
-/// such risk — and it's the one piece of logic actually being fixed here;
-/// the two call sites (messagebus.rs, websocket.rs) are a one-line "call
-/// this before inject_message" wiring, visible directly in their diffs.
+/// `verify_jekt_signature` unit tests (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2,
+/// #2565). They test the extracted function directly, not the full `handle_inject` / websocket
+/// handlers: `server::tests::test_state()`'s `reactive_handler` is a global singleton shared by
+/// every test in the binary (`backend_reactive::get_global_handler()`), so exercising it end to
+/// end risks cross-test interference on shared agent registrations. `verify_jekt_signature`
+/// touches only `state.mstore` (key lookup), so it is safe in isolation, and it is the logic
+/// that was fixed; the two call sites (messagebus.rs, websocket.rs) are a one-line "call this
+/// before inject_message" wiring.
 #[cfg(test)]
 #[path = "tests/reactive/verify_jekt_signature_tests.rs"]
 mod verify_jekt_signature_tests;
 
-/// `verify_reagent_signature` unit tests (reagentx P1 on PR #41 —
-/// `InjectionRequest` declared `reagent_sig`/`reagent_key_id` as
-/// deserializable input fields but nothing on the HTTP
-/// `/agentmux/reactive/inject` path ever verified them, so a reagent-signed
-/// notification delivered through `@agentmuxai/muxbus-client`'s
-/// `pollAndDeliverInjections` arrived unsigned in effect).
+/// `verify_reagent_signature` unit tests (#41): `InjectionRequest` declared `reagent_sig` /
+/// `reagent_key_id` as deserializable fields, but nothing on the HTTP
+/// `/agentmux/reactive/inject` path verified them, so a reagent-signed notification delivered
+/// through `@agentmuxai/muxbus-client`'s `pollAndDeliverInjections` arrived unsigned in effect.
 #[cfg(test)]
 #[path = "tests/reactive/verify_reagent_signature_tests.rs"]
 mod verify_reagent_signature_tests;
@@ -1965,12 +1726,11 @@ mod verify_lan_signature_tests;
 #[path = "tests/reactive/registration_flags_tests.rs"]
 mod registration_flags_tests;
 
-/// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §9 — the unit half of the
-/// test plan (items 1–8 and the D5 replay cases 9–10, driven through the
-/// verifier rather than the raw primitives). Entries are written straight to
-/// a temp shared-registry dir with an explicit public key, bypassing the
-/// process-global pubkey resolver (a `OnceLock` another test binary-wide
-/// test owns), so each test is hermetic and order-independent.
+/// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §9, the unit half of the test plan (items 1–8
+/// and the D5 replay cases 9–10, driven through the verifier). Entries are written straight to
+/// a temp shared-registry dir with an explicit public key, bypassing the process-global pubkey
+/// resolver (a `OnceLock` owned by another test), so each test is hermetic and
+/// order-independent.
 #[cfg(test)]
 #[path = "tests/reactive/verify_cross_channel_signature_tests.rs"]
 mod verify_cross_channel_signature_tests;
@@ -1983,18 +1743,14 @@ mod resolve_delivery_tier_tests;
 #[path = "tests/reactive/is_self_registration_tests.rs"]
 mod is_self_registration_tests;
 
-/// `forward_inject_to_peer` unit tests.
+/// `forward_inject_to_peer` unit tests. They exercise the real HTTP path against a throwaway
+/// loopback peer, not a mocked client, because the behaviour under test is the response
+/// classification: which peer answers count as delivery, which as evidence the candidate is
+/// stale, and which must never evict.
 ///
-/// These exercise the real HTTP path against a throwaway loopback peer rather
-/// than mocking the client, because the behaviour under test *is* the
-/// response-classification: which peer answers count as delivery, which count
-/// as evidence the candidate is stale, and which must never evict.
-///
-/// `source_agent` is left `None` throughout so `echo_jekt_to_sender` returns at
-/// its first guard. That keeps these tests off the *global* singleton
-/// `reactive_handler` (`test_state()` shares it across the whole test binary —
-/// see the `verify_jekt_signature_tests` module comment), so nothing here can
-/// interfere with another test's agent registrations.
+/// `source_agent` is `None` throughout so `echo_jekt_to_sender` returns at its first guard,
+/// keeping these tests off the global singleton `reactive_handler` (see the
+/// `verify_jekt_signature_tests` module comment).
 #[cfg(test)]
 #[path = "tests/reactive/forward_inject_tests.rs"]
 mod forward_inject_tests;
@@ -2011,31 +1767,24 @@ mod deliver_tiers_tests;
 #[path = "tests/reactive/absent_route_tests.rs"]
 mod absent_route_tests;
 
-/// Tier-4 (cloud relay) gating tests.
-///
-/// These cover the decisions `try_cloud_relay` makes *before* it would touch
-/// the network — the guards that keep it from firing when it must not. The
-/// wire contract itself (headers, body shape, status handling) is tested
-/// against a stub relay in `crate::muxbus::relay`'s own test module.
-///
-/// A `test_state()` has no muxbus credential, so any path that reaches token
-/// resolution returns `None` and no request is ever made — which is also why
-/// these assert `None` rather than mocking the relay: the point is *which*
-/// guard stopped it, and each test isolates one.
+/// Tier-4 (cloud relay) gating tests: the decisions `try_cloud_relay` makes before it would
+/// touch the network, the guards that keep it from firing when it must not. The wire contract
+/// (headers, body shape, status handling) is tested against a stub relay in
+/// `crate::muxbus::relay`'s own tests. A `test_state()` has no muxbus credential, so any path
+/// that reaches token resolution returns `None` and no request is made; the tests assert `None`
+/// rather than mock the relay, because the point is which guard stopped it, and each test
+/// isolates one.
 #[cfg(test)]
 #[path = "tests/reactive/cloud_relay_gate_tests.rs"]
 mod cloud_relay_gate_tests;
 
-/// Request-shape guard for `reactive.registrations`, added as part of the
-/// typed-registration migration.
-///
-/// `register_typed` deserializes the payload BEFORE the handler runs, so the
-/// Req type has to accept exactly what the frontend stub sends. On
-/// `bookmarks.list` that distinction shipped a P0 — a unit Req compiled fine
-/// and then rejected the stub's `{}` at runtime, because serde accepts `()`
-/// only from `null` (PR #3293). Neither `tsc` nor `check-rpc-bindings.sh`
-/// catches that class: they verify generated-type drift, not runtime payload
-/// shape. So every migrated command gets a test fed the real payload.
+/// Request-shape guard for `reactive.registrations` (typed-registration migration).
+/// `register_typed` deserializes the payload BEFORE the handler runs, so the Req type must
+/// accept exactly what the frontend stub sends. On `bookmarks.list` a unit Req compiled and
+/// then rejected the stub's `{}` at runtime, because serde accepts `()` only from `null`
+/// (#3293). Neither `tsc` nor `check-rpc-bindings.sh` catches that class (they verify
+/// generated-type drift, not runtime payload shape), so every migrated command gets a test fed
+/// the real payload.
 #[cfg(test)]
 #[path = "tests/reactive/reactive_registrations_req_tests.rs"]
 mod reactive_registrations_req_tests;

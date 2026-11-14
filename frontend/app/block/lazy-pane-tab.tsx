@@ -61,6 +61,7 @@ export function lazyPaneTab(spec: LazyPaneTab): PaneTabManifest {
         ));
     return {
         ...manifest,
+        preload: () => void loadOnce().catch(() => {}),
         create: (ctx) =>
             loaded ? buildReal(manifest.view, members, loaded, ctx) : createStandIn(manifest, members, loadOnce, ctx),
     };

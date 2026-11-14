@@ -19,6 +19,12 @@
 //! session on file starts on its first message, and an agent that has only ended its process is
 //! started by the next one. The failure states (limited, signed out, waiting) keep their place.
 //!
+//! An agent between turns whose Browser request is still open reads `waiting_on_user` (`browser_request`,
+//! with the pane the request waits in): its call answered "waiting" and it ended its turn, so nothing else
+//! says the person is asked. Only what a viewer sees: the availability a message asks is unchanged, so a
+//! message still starts a turn. The same fact is kept in the block's `term:awaiting_browser` for the rows
+//! that read block meta (the Swarm's).
+//!
 //! `desired` is the agent's own desired state when its block records one (`agent:desired`, set by an
 //! open, a start and a stop), and otherwise `running` while a process is alive and `stopped` if not.
 
@@ -33,6 +39,7 @@ use crate::backend::obj::Block;
 use crate::server::app_api::agent_attach::{self, DESIRED_RUNNING, DESIRED_STOPPED};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{COMMAND_AGENTRUNTIME_LIST, COMMAND_AGENT_START};
+use crate::backend::runtime_adapter::RuntimeKind;
 use crate::backend::storage::store::Store;
 
 use super::availability_view::{block_of_uid, status_of};
@@ -76,6 +83,42 @@ pub fn wanted_running_is_idle(
     } else {
         (state, detail)
     }
+}
+
+/// Why an agent between turns reads `waiting_on_user`: a Browser request of its is still open.
+pub const BROWSER_REQUEST: &str = "browser_request";
+
+/// Block meta, true while the agent's row waits on a Browser request (the Swarm row reads block meta).
+pub const META_AWAITING_BROWSER: &str = "term:awaiting_browser";
+
+/// An idle agent with an open Browser request is waiting for the person. Only an idle one: an agent that
+/// works is working (a message started another turn), and one that cannot work says that first.
+pub fn waiting_on_browser_request(
+    state: AgentRuntimeState,
+    detail: Option<String>,
+    request_open: bool,
+) -> (AgentRuntimeState, Option<String>) {
+    if request_open && state == AgentRuntimeState::Idle {
+        (AgentRuntimeState::WaitingOnUser, Some(BROWSER_REQUEST.to_string()))
+    } else {
+        (state, detail)
+    }
+}
+
+/// The pane where the open Browser request of the agent bound under `names` waits. A request carries the
+/// name its call used, which is one of the names the agent's block is bound under.
+fn request_pane(names: &[String]) -> Option<String> {
+    names.iter().find_map(|n| super::browser_waiting::pending_for(n))
+}
+
+fn waits_on_browser_request(row: &AgentRuntime) -> bool {
+    row.state == AgentRuntimeState::WaitingOnUser && row.detail.as_deref() == Some(BROWSER_REQUEST)
+}
+
+/// What to write to the block's [`META_AWAITING_BROWSER`] so it says what the row says, if it does not.
+fn browser_flag_fix(row: &AgentRuntime, flag_now: bool) -> Option<bool> {
+    let wanted = waits_on_browser_request(row);
+    (wanted != flag_now).then_some(wanted)
 }
 
 /// The state, its reason and its reset, from what the availability view says.
@@ -145,6 +188,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     let panes = pane_blocks_by_agent(mstore);
     let net = crate::connectivity::status();
     let waiting_for: std::collections::HashSet<String> = mstore.jekt_held_targets().unwrap_or_default().into_iter().collect();
+    let requests_open = super::browser_waiting::any_open();
     defs.into_iter()
         .filter(|d| d.is_seeded != 1 && d.user_hidden == 0)
         .map(|d| {
@@ -158,7 +202,12 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             let color = block.as_ref().and_then(block_color);
             let (runtime_state, detail, resets_at, desired) = runtime_of(&status_of(mstore, live.as_deref(), block.as_ref(), &net, now_ms));
             let blocked = blocked_start(runtime_state, desired, waiting_for.contains(&d.id), || super::agent_lifecycle::start_blocked(state, &d.id));
+            let waiting_in = (requests_open && runtime_state == AgentRuntimeState::Idle)
+                .then(|| live.as_deref().and_then(|b| request_pane(&state.reactive_handler.names_for_block(b))))
+                .flatten();
+            let (runtime_state, detail) = waiting_on_browser_request(runtime_state, detail, waiting_in.is_some());
             AgentRuntime {
+                runtime: runtime_of_agent(block.as_ref(), &d.agent_type),
                 blocked,
                 color,
                 agent_id: d.id,
@@ -166,6 +215,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
                 detail,
                 resets_at,
                 block_id,
+                waiting_in,
                 desired,
                 name: d.name,
                 provider: d.provider,
@@ -173,6 +223,12 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             }
         })
         .collect()
+}
+
+/// Where an agent runs: its pane's mode is the current truth; a definition with no pane says it by its
+/// type, so a stopped agent has an answer too.
+fn runtime_of_agent(block: Option<&Block>, agent_type: &str) -> RuntimeKind {
+    block.map_or_else(|| RuntimeKind::of_agent_type(agent_type), |b| RuntimeKind::of_block_meta(&b.meta))
 }
 
 /// The agent a block belongs to, by the id its meta carries.
@@ -227,9 +283,13 @@ pub fn changed_rows(last: &mut HashMap<String, AgentRuntime>, now: Vec<AgentRunt
 }
 
 /// Whether `row` just began waiting on the user: it is waiting now and was not at the last look. An
-/// agent with no block has nothing to notify about.
+/// agent with no block has nothing to notify about, and a Browser request was announced by its own
+/// banner, on the Browser pane, under the person's setting for it.
 fn begins_waiting(before: Option<AgentRuntimeState>, row: &AgentRuntime) -> bool {
-    row.state == AgentRuntimeState::WaitingOnUser && row.block_id.is_some() && before != Some(AgentRuntimeState::WaitingOnUser)
+    row.state == AgentRuntimeState::WaitingOnUser
+        && row.block_id.is_some()
+        && before != Some(AgentRuntimeState::WaitingOnUser)
+        && !waits_on_browser_request(row)
 }
 
 /// The block an agent was waiting in, when it just stopped waiting (answered, cancelled or ended): the
@@ -260,6 +320,33 @@ fn notify_waiting(state: &AppState, row: &AgentRuntime) {
     router.input_waiting_nonblocking(block_id, None, 0);
 }
 
+/// The blocks of `rows` whose [`META_AWAITING_BROWSER`] does not say what the row says, with what it
+/// should say. Blocking: reads the store.
+fn browser_flag_fixes(mstore: &Store, rows: &[AgentRuntime]) -> Vec<(String, bool)> {
+    rows.iter()
+        .filter_map(|row| {
+            let block_id = row.block_id.as_deref()?;
+            let block = mstore.get::<Block>(block_id).ok().flatten()?;
+            let flag_now = crate::backend::obj::meta_get_bool(&block.meta, META_AWAITING_BROWSER, false);
+            browser_flag_fix(row, flag_now).map(|on| (block_id.to_string(), on))
+        })
+        .collect()
+}
+
+/// Keep each changed row's block meta saying whether it waits on a Browser request. Every row is a change
+/// at the first look after a start, so a flag a stopped srv left behind is taken down then.
+async fn mirror_browser_wait(state: &AppState, changed: &[AgentRuntime]) {
+    let (looked, rows) = (state.clone(), changed.to_vec());
+    let Ok(fixes) = tokio::task::spawn_blocking(move || browser_flag_fixes(&looked.mstore, &rows)).await else { return };
+    for (block_id, on) in fixes {
+        let flag = if on { serde_json::Value::Bool(true) } else { serde_json::Value::Null };
+        let meta = serde_json::json!({ META_AWAITING_BROWSER: flag });
+        if let Err(e) = super::agent_status_handlers::write_block_meta(state, &block_id, meta).await {
+            tracing::warn!(block_id = %block_id, error = %e, "[agent-runtime] couldn't write the block's Browser-request flag; its Swarm row may be out of date");
+        }
+    }
+}
+
 /// Look at the states on a short interval and publish each change to `agentruntime:changed:<id>`.
 pub(crate) fn spawn(state: AppState) {
     super::registry_reconcile::spawn(state.clone()); // a running agent missing from the registry is put back
@@ -270,7 +357,9 @@ pub(crate) fn spawn(state: AppState) {
             if let Ok(rows) = tokio::task::spawn_blocking(move || list(&looked, agentmux_common::time::now_ms_u64())).await {
                 let before: HashMap<String, (AgentRuntimeState, Option<String>)> =
                     last.iter().map(|(id, r)| (id.clone(), (r.state, r.block_id.clone()))).collect();
-                for row in changed_rows(&mut last, rows) {
+                let changed = changed_rows(&mut last, rows);
+                mirror_browser_wait(&state, &changed).await;
+                for row in changed {
                     let was = before.get(&row.agent_id);
                     if begins_waiting(was.map(|w| w.0), &row) {
                         notify_waiting(&state, &row);
@@ -345,13 +434,76 @@ mod tests {
             detail: None,
             resets_at: None,
             block_id: None,
+            waiting_in: None,
             desired: desired_of(state),
             name: id.into(),
             provider: "claude".into(),
             icon: String::new(),
             color: None,
             blocked: None,
+            runtime: RuntimeKind::Host,
         }
+    }
+
+    #[test]
+    fn an_idle_agent_with_an_open_browser_request_waits_for_the_person() {
+        use AgentRuntimeState as S;
+        assert_eq!(waiting_on_browser_request(S::Idle, None, true), (S::WaitingOnUser, Some(BROWSER_REQUEST.to_string())));
+        assert_eq!(
+            waiting_on_browser_request(S::Idle, Some(STARTS_ON_FIRST_MESSAGE.to_string()), true),
+            (S::WaitingOnUser, Some(BROWSER_REQUEST.to_string())),
+            "an agent whose process ended is still asked for"
+        );
+        assert_eq!(waiting_on_browser_request(S::Idle, None, false), (S::Idle, None), "no request, no change");
+        // A message started another turn: it works. And an agent that cannot work says that first.
+        for state in [S::Working, S::WaitingOnUser, S::Limited, S::SignedOut, S::Stopped, S::Error, S::Starting] {
+            let why = Some("usage_limit".to_string());
+            assert_eq!(waiting_on_browser_request(state, why.clone(), true), (state, why), "{state:?} keeps its place");
+        }
+    }
+
+    #[test]
+    fn the_request_is_found_under_any_name_the_agents_block_is_bound_under() {
+        let id = uuid::Uuid::new_v4().to_string();
+        crate::server::browser_waiting::open(&id, "rt-asker", "pane-rt-asker", "approval", "Click Send", std::time::Duration::from_secs(600));
+        assert!(crate::server::browser_waiting::any_open());
+        // The block is bound under its display name and its slug; the call carried the slug, in another case.
+        let names = ["Rt Asker".to_string(), "RT-ASKER".to_string()];
+        assert_eq!(request_pane(&names).as_deref(), Some("pane-rt-asker"));
+        assert_eq!(request_pane(&["someone-else".to_string()]), None);
+        assert!(crate::server::browser_waiting::finish(&id, crate::server::browser_waiting::State::Declined));
+        assert_eq!(request_pane(&names), None, "an answered request is over");
+    }
+
+    #[test]
+    fn a_browser_request_is_not_announced_a_second_time_and_its_flag_follows_the_row() {
+        use AgentRuntimeState as S;
+        let mut asks = row("a", S::WaitingOnUser);
+        asks.block_id = Some("block-a".into());
+        assert!(begins_waiting(Some(S::Working), &asks), "a question in a turn is announced");
+        asks.detail = Some(BROWSER_REQUEST.into());
+        assert!(!begins_waiting(Some(S::Idle), &asks), "its banner on the Browser pane announced it");
+        assert_eq!(ends_waiting(Some(&(S::WaitingOnUser, Some("block-a".into()))), &row("a", S::Idle)).as_deref(), Some("block-a"));
+        assert_eq!(browser_flag_fix(&asks, false), Some(true));
+        assert_eq!(browser_flag_fix(&asks, true), None, "already says so: nothing is written");
+        assert_eq!(browser_flag_fix(&row("a", S::Idle), true), Some(false), "answered, or left by a stopped srv");
+        assert_eq!(browser_flag_fix(&row("a", S::WaitingOnUser), true), Some(false), "a question in a turn is not a Browser request");
+        assert_eq!(browser_flag_fix(&row("a", S::Working), false), None);
+    }
+
+    #[test]
+    fn an_agent_says_where_it_runs_from_its_pane_else_from_its_definition() {
+        let pane = |mode: &str| {
+            let mut meta = crate::backend::obj::MetaMapType::new();
+            meta.insert("agentMode".to_string(), serde_json::json!(mode));
+            Block { meta, ..Default::default() }
+        };
+        assert_eq!(runtime_of_agent(None, "container"), RuntimeKind::Container, "a stopped agent with no pane says it by its type");
+        assert_eq!(runtime_of_agent(None, "host"), RuntimeKind::Host);
+        assert_eq!(runtime_of_agent(Some(&pane("container")), "host"), RuntimeKind::Container, "the pane wins");
+        assert_eq!(runtime_of_agent(Some(&pane("host")), "container"), RuntimeKind::Host, "the pane wins");
+        assert_eq!(runtime_of_agent(None, "something-new"), RuntimeKind::Host, "unknown is the host");
+        assert_eq!(serde_json::to_value(row("a", AgentRuntimeState::Idle)).unwrap()["runtime"], "host");
     }
 
     #[test]
@@ -387,6 +539,64 @@ mod tests {
         assert_eq!(desired_from(None, S::Idle), AgentDesiredState::Running);
         assert_eq!(desired_from(None, S::Stopped), AgentDesiredState::Stopped);
         assert_eq!(desired_from(Some("later"), S::Stopped), AgentDesiredState::Stopped);
+    }
+
+    /// The whole path: a registered agent between turns, a request opened under its slug, the row, what
+    /// the block's flag should say, and both back once the request is answered.
+    #[tokio::test]
+    async fn an_open_browser_request_shows_in_the_agents_row_and_its_blocks_flag_until_it_is_answered() {
+        let state = crate::server::tests::test_state();
+        let uid = uuid::Uuid::new_v4().to_string();
+        let slug = format!("rt-web-{}", &uid[..8]);
+        let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": uid, "slug": slug, "name": "Rt Web", "icon": "robot", "provider": "claude",
+            "description": "", "created_at": 1,
+        }))
+        .unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("agentId".to_string(), serde_json::json!(uid));
+        let mut block = Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        state.mstore.insert(&mut block).unwrap();
+        state.reactive_handler.register_agent_full(&slug, &block.oid, None, 1, Some(&slug), Some(&uid), "test.runtime").unwrap();
+        let row_now = |state: &AppState| list(state, 10_000).into_iter().find(|r| r.agent_id == uid).expect("the agent is listed");
+        // What `mirror_browser_wait` writes through the object service, here straight to the store.
+        let write = |state: &AppState, fixes: Vec<(String, bool)>| {
+            for (block_id, on) in fixes {
+                let mut b = state.mstore.get::<Block>(&block_id).unwrap().unwrap();
+                if on {
+                    b.meta.insert(META_AWAITING_BROWSER.to_string(), serde_json::json!(true));
+                } else {
+                    b.meta.remove(META_AWAITING_BROWSER);
+                }
+                state.mstore.update(&mut b).unwrap();
+            }
+        };
+
+        let before = row_now(&state);
+        assert_eq!((before.state, before.detail.as_deref(), before.waiting_in.as_deref()), (AgentRuntimeState::Idle, None, None));
+
+        // Its Browser call answered "waiting" and it ended its turn. The call carried its slug.
+        let request = uuid::Uuid::new_v4().to_string();
+        let pane = format!("web-{request}");
+        crate::server::browser_waiting::open(&request, &slug.to_uppercase(), &pane, "approval", "Click Send", std::time::Duration::from_secs(600));
+        let asks = row_now(&state);
+        assert_eq!(asks.state, AgentRuntimeState::WaitingOnUser);
+        assert_eq!((asks.detail.as_deref(), asks.waiting_in.as_deref()), (Some(BROWSER_REQUEST), Some(pane.as_str())));
+        assert_eq!(asks.desired, AgentDesiredState::Running);
+        let fixes = browser_flag_fixes(&state.mstore, std::slice::from_ref(&asks));
+        assert_eq!(fixes, vec![(block.oid.clone(), true)], "the Swarm row reads the block's meta");
+        write(&state, fixes);
+        assert_eq!(browser_flag_fixes(&state.mstore, std::slice::from_ref(&asks)), vec![], "it says so now");
+
+        // Answered: idle again, and the flag comes down with the row.
+        assert!(crate::server::browser_waiting::finish(&request, crate::server::browser_waiting::State::Declined));
+        let after = row_now(&state);
+        assert_eq!((after.state, after.detail.as_deref(), after.waiting_in.as_deref()), (AgentRuntimeState::Idle, None, None));
+        let fixes = browser_flag_fixes(&state.mstore, std::slice::from_ref(&after));
+        assert_eq!(fixes, vec![(block.oid.clone(), false)]);
+        write(&state, fixes);
+        assert_eq!(browser_flag_fixes(&state.mstore, std::slice::from_ref(&after)), vec![]);
     }
 
     /// A headless agent whose process ended without a stop: its parked block is in no tab, still records

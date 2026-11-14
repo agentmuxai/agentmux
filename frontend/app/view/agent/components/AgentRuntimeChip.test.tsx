@@ -21,6 +21,11 @@ describe("AgentRuntimeChip", () => {
         const { container } = render(() => <AgentRuntimeChip state="idle" detail="starts_on_first_message" />);
         expect(container.querySelector(".agent-runtime-chip")!.getAttribute("title")).toBe("Runs on its first message");
         cleanup();
+        const asks = render(() => <AgentRuntimeChip state="waiting_on_user" detail="browser_request" />);
+        expect(asks.container.querySelector(".agent-runtime-chip")!.getAttribute("title")).toBe(
+            "Waiting for your answer in a browser pane"
+        );
+        cleanup();
         const other = render(() => <AgentRuntimeChip state="limited" detail="something_new" />);
         expect(other.container.querySelector(".agent-runtime-chip")!.getAttribute("title")).toBe("something_new");
     });

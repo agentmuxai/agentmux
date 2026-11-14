@@ -15,6 +15,13 @@ describe("attentionLook", () => {
         expect(attentionLook(a({ kind: "approval" }))).toMatchObject({ yes: "Approve", answer: "approve" });
     });
 
+    it("shows the host's own line on a local notice, with nothing to go back from", () => {
+        const look = attentionLook(a({ kind: "notice", local: true, message: "Couldn't copy the link." }));
+        expect(look).toMatchObject({ text: "Couldn't copy the link.", no: "Dismiss", agent: false });
+        expect(look.back).toBeFalsy();
+        expect(look.showUrl).toBeFalsy();
+    });
+
     it("asks whether another agent may drive the pane, with Not now as the way out", () => {
         expect(attentionLook(a({ kind: "take" }))).toMatchObject({ yes: "Allow", answer: "approve", no: "Not now", agent: true });
     });
