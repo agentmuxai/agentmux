@@ -70,6 +70,12 @@ impl ExecutionScope {
         Value::String(self.resolve(template))
     }
 
+    /// What one `{{path}}` token names, as the value itself, or none when nothing is there. `value_of` answers a
+    /// missing token with its own text; this tells the two apart.
+    pub fn lookup_ref(&self, path: &str) -> Option<Value> {
+        self.lookup(path.trim())
+    }
+
     /// Declare how writes to `name` combine (`replace` when never declared).
     pub fn declare_var(&mut self, name: &str, reducer: Reducer) -> Result<(), String> {
         self.state.declare(name, reducer).map_err(|e| e.to_string())

@@ -56,9 +56,11 @@ use serde_json::Value;
 
 use super::value::{join, Tv};
 
+mod condition;
 mod expr;
 mod ops;
 
+pub use condition::evaluate_condition;
 use expr::State;
 use ops::apply;
 

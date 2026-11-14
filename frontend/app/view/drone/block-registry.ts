@@ -154,7 +154,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "condition",
         emoji: "🔀",
         label: "Condition",
-        description: "Boolean expression. Output `result` is true / false.",
+        description: "Boolean expression: a == b, or combine with && || ! ( ) and contains, matches, in_set, exists. Output `result` is true / false.",
         color: "#eab308",
         defaultData: {
             expr: "",
