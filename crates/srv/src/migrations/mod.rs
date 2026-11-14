@@ -47,6 +47,7 @@
 //! to the copy — `// frozen copy of <path>::<fn> as of <version>` — so the
 //! next reader can tell a freeze from a drift.
 
+pub(crate) mod carry_forward;
 mod m0002_block_zones_v1;
 mod m0003_template_sessions_v1;
 mod m0007_agents_consolidate;

@@ -43,7 +43,7 @@ pub(crate) struct ImportTrust {
 
 impl ImportTrust {
     fn live() -> Self {
-        let shared = crate::bootstrap::shared_guard::shared_dir();
+        let shared = crate::registry::shared_guard::shared_dir();
         ImportTrust {
             own_instance: crate::backend::storage::wan_identity::global()
                 .and_then(|w| w.instance_ensure(&crate::backend::reactive::registry::local_host_label()).ok())

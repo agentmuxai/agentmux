@@ -5,7 +5,7 @@
 //! before srv opens it, as one step a supervisor runs while srv is stopped.
 //!
 //! In order: copy the newest older version's databases forward when this
-//! version has none yet (`bootstrap/carry_forward.rs`), then the same locked
+//! version has none yet (`migrations/carry_forward.rs`), then the same locked
 //! batch the daemon runs (`runner::apply_pending`), whose backup leaves out
 //! `objects.db` after a copy-forward. Each part is reported on stderr in the
 //! `agentmux_common::srv_stderr` protocol (STEP and MIGRATION lines), so the
@@ -32,7 +32,7 @@ pub(super) fn run_for_version(data_dir: &Path, home: &Path, shared_store_path: &
     // A copy that failed must not turn into a fresh start: that would start
     // the new version without the user's data. Failing leaves this version
     // without an objects.db, so the next start asks for preparation again.
-    if let Err(e) = crate::bootstrap::carry_forward::try_from_previous_version(&data_dir.join("db"), version) {
+    if let Err(e) = crate::migrations::carry_forward::try_from_previous_version(&data_dir.join("db"), version) {
         let msg = format!("copying the previous version's data failed: {e}");
         write_error_log(home, &msg);
         eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&msg));
