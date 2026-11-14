@@ -51,6 +51,9 @@ pub struct Facts {
     pub tools: Vec<(&'static str, bool)>,
     /// The shared libraries the agent tools link that are not on this machine (Linux; empty elsewhere).
     pub missing_libs: Vec<&'static str>,
+    /// Whether the system's certificates are there for the server's https to trust (Linux; `None` elsewhere, where
+    /// the system always has a store).
+    pub certs_found: Option<bool>,
     pub installed_version: &'static str,
     /// The service: whether its file exists, and whether it names this command's program.
     pub service_installed: bool,
@@ -102,6 +105,16 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
             check("tools", Level::Warn, format!("{tool} is not on the PATH"), Some("agent command-line tools are installed through npm: install Node.js and git with your package manager"))
         });
     }
+    match f.certs_found {
+        Some(true) => out.push(check("certificates", Level::Ok, "the system's certificates are found", None)),
+        Some(false) => out.push(check(
+            "certificates",
+            Level::Fail,
+            "no system certificates found: every https request the server makes (models, updates, connected accounts) would fail",
+            Some("install the ca-certificates package (Debian and Ubuntu: `apt install ca-certificates`; Fedora: `dnf install ca-certificates`; Alpine: `apk add ca-certificates`), or point SSL_CERT_FILE at a bundle"),
+        )),
+        None => {}
+    }
     if !f.missing_libs.is_empty() {
         out.push(check(
             "libraries",
@@ -144,6 +157,35 @@ pub fn lines(checks: &[Check]) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// Where the system keeps its certificates on Linux: bundle files and folders of certificate files (the places the
+/// platform verifier reads).
+const CERT_FILES: &[&str] = &[
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/ca-bundle.pem",
+    "/etc/pki/tls/cacert.pem",
+    "/etc/ssl/cert.pem",
+    "/usr/local/share/certs/ca-root-nss.crt",
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    "/etc/certs/ca-certificates.crt",
+];
+const CERT_DIRS: &[&str] = &["/etc/ssl/certs", "/etc/pki/tls/certs", "/usr/local/share/certs", "/etc/pki/ca-trust/extracted/pem/directory-hash", "/var/ssl/certs"];
+
+/// Are there system certificates on this Linux machine? `None` elsewhere.
+pub fn system_certs_found() -> Option<bool> {
+    cfg!(target_os = "linux").then(|| certs_present(std::env::var_os("SSL_CERT_FILE"), std::env::var_os("SSL_CERT_DIR"), CERT_FILES, CERT_DIRS))
+}
+
+/// The environment's bundle or folder counts first, then the usual places; a folder counts when it holds something.
+fn certs_present(env_file: Option<std::ffi::OsString>, env_dir: Option<std::ffi::OsString>, files: &[&str], dirs: &[&str]) -> bool {
+    let is_file = |p: &Path| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.len() > 0);
+    let has_entries = |p: &Path| std::fs::read_dir(p).is_ok_and(|mut d| d.next().is_some());
+    env_file.is_some_and(|f| is_file(Path::new(&f)))
+        || env_dir.is_some_and(|d| std::env::split_paths(&d).any(|p| has_entries(&p)))
+        || files.iter().any(|f| is_file(Path::new(f)))
+        || dirs.iter().any(|d| has_entries(Path::new(d)))
 }
 
 /// The shared libraries `agentmux-mcp` links that cannot be found in the usual library folders (Linux only).
@@ -214,6 +256,7 @@ mod tests {
             port_free: Some(true),
             tools: vec![("node", true), ("npm", true), ("git", true)],
             missing_libs: vec![],
+            certs_found: Some(true),
             installed_version: "0.60.26",
             service_installed: false,
             service_names_exe: None,
@@ -276,6 +319,39 @@ mod tests {
         assert_eq!(level_of(&evaluate(&ours), "port"), vec![Level::Ok], "its own port in use is not a problem");
         let stuck = Facts { running: Some(running("0.60.26")), answering: false, ..good() };
         assert_eq!(level_of(&evaluate(&stuck), "port"), vec![Level::Warn]);
+    }
+
+    #[test]
+    fn a_machine_with_no_certificates_fails_and_names_the_package() {
+        let mut f = good();
+        f.certs_found = Some(false);
+        let checks = evaluate(&f);
+        assert_eq!(level_of(&checks, "certificates"), vec![Level::Fail]);
+        assert!(failed(&checks));
+        assert!(lines(&checks).iter().any(|l| l.contains("ca-certificates") && l.contains("SSL_CERT_FILE")));
+        f.certs_found = None;
+        assert!(level_of(&evaluate(&f), "certificates").is_empty(), "macOS and Windows have their own store: nothing is said");
+    }
+
+    #[test]
+    fn certificates_are_found_by_the_environment_a_bundle_or_a_folder_with_something_in_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("bundle.pem");
+        let empty_bundle = dir.path().join("empty.pem");
+        let folder = dir.path().join("certs");
+        let empty_folder = dir.path().join("none");
+        std::fs::write(&bundle, b"-----BEGIN CERTIFICATE-----").unwrap();
+        std::fs::write(&empty_bundle, b"").unwrap();
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("a.pem"), b"x").unwrap();
+        std::fs::create_dir_all(&empty_folder).unwrap();
+        let (b, e, d, n) = (bundle.to_str().unwrap(), empty_bundle.to_str().unwrap(), folder.to_str().unwrap(), empty_folder.to_str().unwrap());
+        assert!(!certs_present(None, None, &[e, "/nonexistent/x"], &[n, "/nonexistent"]), "an empty bundle and an empty folder are no store");
+        assert!(certs_present(None, None, &[b], &[]));
+        assert!(certs_present(None, None, &[], &[d]));
+        assert!(certs_present(Some(b.into()), None, &[], &[]), "SSL_CERT_FILE");
+        assert!(certs_present(None, Some(d.into()), &[], &[]), "SSL_CERT_DIR");
+        assert!(!certs_present(Some("/nonexistent".into()), None, &[], &[]));
     }
 
     #[test]

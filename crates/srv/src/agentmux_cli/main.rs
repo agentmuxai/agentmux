@@ -331,6 +331,9 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
     let port = args.port.unwrap_or(settings.port);
     let secret_store = args.secret_store.unwrap_or(settings.secret_store);
     let public_origin = args.public_origin.clone().or(settings.public_origin);
+    if doctor::system_certs_found() == Some(false) {
+        warn!("no system certificates found: the server's https requests will fail. Install the ca-certificates package, or run `agentmux doctor`.");
+    }
     if let Err(code) = prepare_data(paths, &srv) {
         return code;
     }
@@ -640,6 +643,7 @@ fn facts(paths: &DataPaths, port: u16, srv_flag: Option<&Path>, web_dir_flag: Op
         running: record,
         tools: ["node", "npm", "git"].into_iter().map(|t| (t, doctor::on_path(t))).collect(),
         missing_libs: doctor::missing_libs(),
+        certs_found: doctor::system_certs_found(),
         installed_version: VERSION,
         service_installed: service_text.is_some(),
         service_names_exe: service_text.zip(exe).map(|(text, exe)| service::file_names_exe(&text, &exe)),

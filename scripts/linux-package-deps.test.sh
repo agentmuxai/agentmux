@@ -33,6 +33,8 @@ echo "$deb" | grep -qx 'libasound2t64 | libasound2' && pass "deb: a renamed pack
 [ "$(echo "$deb" | grep -c 'libglib2.0-0t64')" = 1 ] && pass "deb: libraries of one package are declared once" || fail "deb: libglib2.0-0t64 repeated or missing"
 echo "$rpm" | grep -qx 'libasound.so.2()(64bit)' && pass "rpm: a library is required by soname" || fail "rpm: libasound.so.2()(64bit) missing"
 echo "$rpm" | grep -q ' ' && fail "rpm: an entry has a space" || pass "rpm: no entry has a space"
+echo "$deb" | grep -qx 'ca-certificates' && pass "deb: the system certificates are required" || fail "deb: ca-certificates missing"
+echo "$rpm" | grep -qx 'ca-certificates' && pass "rpm: the system certificates are required" || fail "rpm: ca-certificates missing"
 
 # --- the glibc floor is the highest version the binaries link against, not a constant ---
 want="$(readelf -V "$BIN" | sed -n 's/.*Name: GLIBC_\([0-9][0-9.]*\).*/\1/p' | sort -uV | tail -1)"
