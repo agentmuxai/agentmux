@@ -25,6 +25,30 @@ export function cardAnswerText(card: { number: string; month: string; year: stri
     });
 }
 
+/** The expiry: a month and a year to choose from, side by side. */
+function CardExpiry(props: { month: string; year: string; busy: boolean; onMonth: (m: string) => void; onYear: (y: string) => void }): JSX.Element {
+    return (
+        <Field label="Expiry" layout="stacked">
+            <div class="vault-part vault-card-expiry">
+                <Select
+                    ariaLabel="Expiry month"
+                    value={props.month}
+                    disabled={props.busy}
+                    onChange={props.onMonth}
+                    options={[{ value: "", label: "Month" }, ...MONTHS.map((m) => ({ value: m, label: m }))]}
+                />
+                <Select
+                    ariaLabel="Expiry year"
+                    value={props.year}
+                    disabled={props.busy}
+                    onChange={props.onYear}
+                    options={[{ value: "", label: "Year" }, ...expiryYears().map((y) => ({ value: String(y), label: String(y) }))]}
+                />
+            </div>
+        </Field>
+    );
+}
+
 /** The card form, in the question. `label` is what the agent called the card (already cut for display), `why` what the
  *  person is told about being asked, `keepAs` the label it would be kept under. */
 export function CardTyped(props: {
@@ -87,24 +111,7 @@ export function CardTyped(props: {
                     </div>
                 </Show>
             </Field>
-            <Field label="Expiry" layout="stacked">
-                <div class="vault-part vault-card-expiry">
-                    <Select
-                        ariaLabel="Expiry month"
-                        value={month()}
-                        disabled={props.busy}
-                        onChange={setMonth}
-                        options={[{ value: "", label: "Month" }, ...MONTHS.map((m) => ({ value: m, label: m }))]}
-                    />
-                    <Select
-                        ariaLabel="Expiry year"
-                        value={year()}
-                        disabled={props.busy}
-                        onChange={setYear}
-                        options={[{ value: "", label: "Year" }, ...expiryYears().map((y) => ({ value: String(y), label: String(y) }))]}
-                    />
-                </div>
-            </Field>
+            <CardExpiry month={month()} year={year()} busy={props.busy} onMonth={setMonth} onYear={setYear} />
             <Field label={length() === 4 ? "Security code (CID, 4 digits)" : "Security code (CVC, 3 digits)"} layout="stacked">
                 <TextInput
                     inputmode="numeric"
