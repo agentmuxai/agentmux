@@ -45,6 +45,5 @@ mod tests {
             assert!(script.contains(ATTR), "{script}");
         }
         assert!(rule.contains(ATTR));
-        let _ = Value::Null;
     }
 }

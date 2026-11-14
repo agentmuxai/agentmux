@@ -1365,6 +1365,17 @@ mod tests {
     }
 
     #[test]
+    fn a_log_line_holds_no_secret_shape_the_page_put_in_a_click_name() {
+        // The Log the agent reads: a click's name is page text, and may hold what the page hides.
+        let text = log_text(&json!({
+            "pane": "p1", "count": 1,
+            "entries": [{ "ts": 3_723_000, "agent": "naki", "kind": "click", "target": "\"Copy sk_live_abcdefgh12\"", "detail": "ref e9", "how": "allowed" }],
+        }));
+        assert!(!text.contains("sk_live"), "{text}");
+        assert!(text.contains("naki click") && text.contains("· ref e9 — allowed"), "{text}");
+    }
+
+    #[test]
     fn no_popups_no_line() {
         assert_eq!(popups_note(None), "");
         assert_eq!(popups_note(Some(&json!([]))), "");
