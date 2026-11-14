@@ -89,7 +89,9 @@ pub async fn focused_state(cdp: &mut CdpSession) -> Value {
         None => [facts.local_name.as_str(), facts.attrs.get("id").map(String::as_str).unwrap_or(""), facts.attrs.get("name").map(String::as_str).unwrap_or(""), facts.label.as_str()].join("|"),
     };
     shown.insert("element".to_string(), json!(id));
-    redact_secret(Value::Object(shown), &facts)
+    let mut state = redact_secret(Value::Object(shown), &facts);
+    super::hidden_secrets::scrub_value(&mut state);
+    state
 }
 
 /// What a key did to the focused control, from what had focus before and after it.
