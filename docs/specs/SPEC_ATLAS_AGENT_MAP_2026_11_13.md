@@ -232,8 +232,13 @@ Decision 4's second half and the cloud tier, on the data three srv builds added:
   on it is not drawn.
 - **The container runtime not running** is said after this machine's badge, when the machine uses containers at
   all (an agent of it runs in one, or one is listed).
-- **The review bot and CI** are two pill-shaped nodes in a region of their own, "Pull requests", after the
-  machines; in the By seat layout they stand with the agents that have no lead. Neither is drawn until a notice has
+- **The review bot and CI** are two pill-shaped nodes in a region of their own, "Pull requests", on a row of its
+  own under the machines; in the By seat layout they stand in a row of their own under the agents. Beside the
+  agents, in their row, every line to an agent ran along that row behind the nodes between, and none could be
+  followed (the first look check); from under them a line crosses open map. Of several lines from one of them to
+  the same agent (two pull requests of one agent), each bows further out than the one before. A line's label
+  keeps inside the map, off a region's title and bottom line, and clear of the frame round a container agent as
+  it does of a node. Neither is drawn until a notice has
   come, so a machine with no review bot has a map of agents only. Each node's second line is what needs attention
   ("2 need changes", "1 failing"), else when the last notice came, else that cloud messages are paused (MuxBus needs
   a sign-in, or has been out of reach for longer than the status bar stays quiet about). Its card lists the pull

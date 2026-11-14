@@ -13,7 +13,7 @@ import type { MessageFlowEvent } from "@/types/rpc/MessageFlowEvent";
 import type { TaskFlowEvent } from "@/types/rpc/TaskFlowEvent";
 import type { AtlasAgent, AtlasMachine } from "./atlas-graph";
 import { machineHost } from "./atlas-graph";
-import { NODE_H, NODE_W, type Placed } from "./atlas-layout";
+import { NODE_H, NODE_W, REGION_TITLE_H, type AtlasLayout, type Placed } from "./atlas-layout";
 
 /** How long a message's line stays after it is drawn, and a task's. */
 export const MESSAGE_SHOWN_MS = 12_000;
@@ -208,6 +208,35 @@ export function flowEndResolver(
     };
 }
 
+/**
+ * A node on the map as a line meets it: where it stands, and how far a frame round it reaches past its box
+ * (`pad`). With `w` and `h`, something else a label keeps clear of (`labelKeepOut`).
+ */
+export interface FlowNode extends Placed {
+    pad?: number;
+    w?: number;
+    h?: number;
+}
+
+/** Further than any map reaches. */
+const FAR = 100_000;
+
+/**
+ * What a label keeps clear of besides the nodes: the strip each region's title is written in, the line along the
+ * bottom of each region, and everything outside the map, so that no label hangs over its edge.
+ */
+export function labelKeepOut(layout: Pick<AtlasLayout, "regions" | "width" | "height">): FlowNode[] {
+    const { width, height } = layout;
+    return [
+        ...layout.regions.map((box) => ({ x: box.x, y: box.y, w: box.w, h: REGION_TITLE_H })),
+        ...layout.regions.map((box) => ({ x: box.x, y: box.y + box.h - 1, w: box.w, h: 1 })),
+        { x: -FAR, y: -FAR, w: FAR, h: FAR * 2 + height },
+        { x: width, y: -FAR, w: FAR, h: FAR * 2 + height },
+        { x: -FAR, y: -FAR, w: FAR * 2 + width, h: FAR },
+        { x: -FAR, y: height, w: FAR * 2 + width, h: FAR },
+    ];
+}
+
 /** The curve of a line between two nodes, where it lands, and where its label goes. */
 export interface FlowCurve {
     d: string;
@@ -216,6 +245,9 @@ export interface FlowCurve {
 }
 
 const round = (n: number) => Math.round(n * 10) / 10;
+
+/** How much further each line after the first bows, of several between the same two nodes, as a share of the first's. */
+const LANE_BOW = 0.8;
 
 /** Half the room a label (a task's number) takes round its point. */
 const LABEL_HALF_W = 20;
@@ -250,28 +282,28 @@ function nextToLabel(taken: readonly PlacedLabel[], p: Placed, halfW: number): P
 }
 
 /**
- * Whether a label at `p` would lie on `node`: lines run behind the nodes, so it would be hidden there. A label is
- * taken to be a task number's width at least, and its own (`halfW` each side) when it is longer.
+ * Whether a label at `p` would lie on `node`, or on the frame round it: lines run behind the nodes, so it would be
+ * hidden there (and on a region's title it would be written over the title). A label is taken to be a task
+ * number's width at least, and its own (`halfW` each side) when it is longer.
  */
-function hidesLabel(node: Placed, p: Placed, halfH = LABEL_HALF_H, halfW = LABEL_HALF_W): boolean {
-    const half = Math.max(LABEL_HALF_W, halfW);
-    return (
-        p.x > node.x - half &&
-        p.x < node.x + NODE_W + half &&
-        p.y > node.y - halfH &&
-        p.y < node.y + NODE_H + halfH
-    );
+function hidesLabel(node: FlowNode, p: Placed, halfH = LABEL_HALF_H, halfW = LABEL_HALF_W): boolean {
+    const half = Math.max(LABEL_HALF_W, halfW) + (node.pad ?? 0);
+    const high = halfH + (node.pad ?? 0);
+    const w = node.w ?? NODE_W;
+    const h = node.h ?? NODE_H;
+    return p.x > node.x - half && p.x < node.x + w + half && p.y > node.y - high && p.y < node.y + h + high;
 }
 
 /**
  * Where a label goes when no stretch of its line is clear (agents side by side, the line passing behind the ones
- * between): just under or just over the node the line lands on, at the point it lands, on the side it comes from
- * first. When both are taken (by a node, or by the label of another line that lands there), the same two a label's
- * width further along the node's edge, as far as the node goes. Null when none is free.
+ * between): just under or just over the node the line lands on (its frame, when it has one), at the point it
+ * lands, on the side it comes from first. When both are taken (by a node, or by the label of another line that
+ * lands there), the same two a label's width further along the node's edge, as far as the node goes. Null when
+ * none is free.
  */
-function labelBesideEnd(to: Placed, end: Placed, fromBelow: boolean, free: (p: Placed) => boolean): Placed | null {
-    const under = to.y + NODE_H + LABEL_TIGHT_H;
-    const over = to.y - LABEL_TIGHT_H;
+function labelBesideEnd(to: FlowNode, end: Placed, fromBelow: boolean, free: (p: Placed) => boolean): Placed | null {
+    const under = to.y + NODE_H + (to.pad ?? 0) + LABEL_TIGHT_H;
+    const over = to.y - (to.pad ?? 0) - LABEL_TIGHT_H;
     const inward = end.x >= to.x + NODE_W / 2 ? -1 : 1;
     for (let x = end.x; x > to.x - 1 && x < to.x + NODE_W + 1; x += inward * LABEL_STEP) {
         const spot = (fromBelow ? [under, over] : [over, under]).map((y) => ({ x, y })).find(free);
@@ -286,14 +318,17 @@ function labelBesideEnd(to: Placed, end: Placed, fromBelow: boolean, free: (p: P
  * when every stretch is covered, beside the node it lands on (`labelBesideEnd`), and failing that on its middle.
  * It also keeps clear of the labels in `taken`, as a label `halfW` wide each side of its point: on a clear stretch
  * that another label has (a line and its answer, close together), it goes next to that label.
+ * `lane` is how many lines already run between the same two nodes the same way: each bows further out than the
+ * one before, so two pull requests of one agent are two lines and not one.
  * Null for two nodes on top of each other.
  */
 export function flowCurve(
     from: Placed,
-    to: Placed,
-    nodes: readonly Placed[] = [],
+    to: FlowNode,
+    nodes: readonly FlowNode[] = [],
     taken: readonly PlacedLabel[] = [],
-    halfW = LABEL_HALF_W
+    halfW = LABEL_HALF_W,
+    lane = 0
 ): FlowCurve | null {
     const ax = from.x + NODE_W / 2;
     const ay = from.y + NODE_H / 2;
@@ -309,7 +344,7 @@ export function flowCurve(
     const y1 = ay + dy * reach;
     const x2 = bx - dx * reach;
     const y2 = by - dy * reach;
-    const bow = Math.min(28, length * 0.15);
+    const bow = Math.min(28, length * 0.15) * (1 + lane * LANE_BOW);
     const cx = (x1 + x2) / 2 + (dy / length) * bow;
     const cy = (y1 + y2) / 2 - (dx / length) * bow;
     const at = (t: number): Placed => ({
@@ -331,20 +366,25 @@ export function flowCurve(
 export interface FlowLine {
     id: string;
     from: Placed;
-    to: Placed;
+    to: FlowNode;
     label: string | null;
 }
 
 /**
  * The curve of each line, by its id. A line's label keeps clear of the labels of the lines before it, so two tasks
- * handed to one agent both show their number.
+ * handed to one agent both show their number, and a line bows further than the ones before it between the same
+ * two nodes.
  */
-export function flowCurves(lines: readonly FlowLine[], nodes: readonly Placed[]): Map<string, FlowCurve> {
+export function flowCurves(lines: readonly FlowLine[], nodes: readonly FlowNode[]): Map<string, FlowCurve> {
     const taken: PlacedLabel[] = [];
     const curves = new Map<string, FlowCurve>();
+    const lanes = new Map<string, number>();
     for (const line of lines) {
+        const pair = `${line.from.x},${line.from.y}>${line.to.x},${line.to.y}`;
+        const lane = lanes.get(pair) ?? 0;
+        lanes.set(pair, lane + 1);
         const halfW = line.label ? labelHalfWidth(line.label) : LABEL_HALF_W;
-        const curve = flowCurve(line.from, line.to, nodes, line.label ? taken : [], halfW);
+        const curve = flowCurve(line.from, line.to, nodes, line.label ? taken : [], halfW, lane);
         if (!curve) continue;
         curves.set(line.id, curve);
         if (line.label) taken.push({ ...curve.label, halfW });

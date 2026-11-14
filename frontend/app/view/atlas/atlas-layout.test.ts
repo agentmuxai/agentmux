@@ -122,7 +122,7 @@ describe("what is not an agent", () => {
     const agents = [agent("boss", "a"), agent("w1", "a", "boss"), agent("x", "a"), agent("y", "b")];
     const graph = () => buildAtlasGraph([machine("a"), machine("b")], agents, extras);
 
-    it("stands a container no agent uses with its machine's agents, and the review bot and CI in a region after the machines", () => {
+    it("stands a container no agent uses with its machine's agents, and the review bot and CI in a region under the machines", () => {
         const l = layoutAtlas(graph());
         expect(l.regions.map((r) => r.key)).toEqual(["a", "b", SERVICES_REGION]);
         expect(l.nodes.size).toBe(agents.length + 3);
@@ -134,10 +134,21 @@ describe("what is not an agent", () => {
         expect(inside("container:c1", a)).toBe(true);
         expect(inside("service:review", services)).toBe(true);
         expect(inside("service:checks", services)).toBe(true);
+        // On a row of its own: a line from it to an agent does not run along the agent's row, behind its neighbours.
+        expect(services.x).toBe(0);
+        for (const box of l.regions.slice(0, -1)) expect(services.y).toBeGreaterThan(box.y + box.h);
+        expect(l.height).toBe(services.y + services.h);
         const placed = [...l.nodes.values()];
         for (let i = 0; i < placed.length; i++) {
             for (let j = i + 1; j < placed.length; j++) expect(overlap(placed[i], placed[j])).toBe(false);
         }
+    });
+
+    it("gives the review bot and CI the first row when no agent is drawn", () => {
+        const l = layoutBySeat(buildAtlasGraph([], [], { services: extras.services }));
+        expect([...l.nodes.keys()]).toEqual(["service:review", "service:checks"]);
+        expect(l.nodes.get("service:review")!.y).toBe(l.nodes.get("service:checks")!.y);
+        expect(l.width).toBeGreaterThan(NODE_W * 2);
     });
 
     it("has no region for the review bot and CI when there are none", () => {
@@ -145,10 +156,16 @@ describe("what is not an agent", () => {
         expect(l.regions.map((r) => r.key)).toEqual(["a"]);
     });
 
-    it("stands them with the agents that have no lead in the By seat layout", () => {
+    it("stands them in a row of their own under the agents in the By seat layout", () => {
         const l = layoutBySeat(graph());
         expect(l.regions).toEqual([]);
         expect(l.nodes.size).toBe(agents.length + 3);
+        const review = l.nodes.get("service:review")!;
+        expect(l.nodes.get("service:checks")!.y).toBe(review.y);
+        for (const [key, p] of l.nodes) {
+            if (!key.startsWith("service:")) expect(p.y + NODE_H).toBeLessThan(review.y);
+        }
+        expect(l.height).toBeGreaterThan(review.y + NODE_H);
         const placed = [...l.nodes.values()];
         for (let i = 0; i < placed.length; i++) {
             for (let j = i + 1; j < placed.length; j++) expect(overlap(placed[i], placed[j])).toBe(false);

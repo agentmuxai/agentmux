@@ -23,7 +23,7 @@ import { CardFacts } from "./atlas-card-facts";
 import { inContainer } from "./atlas-containers";
 import { ExtraCard, ExtraNodes, ServicesRegion } from "./atlas-extras";
 import { AtlasFleetBar } from "./atlas-fleet-bar";
-import { flowEndResolver } from "./atlas-flow";
+import { flowEndResolver, labelKeepOut } from "./atlas-flow";
 import { AtlasFlowLayer } from "./atlas-flow-layer";
 import type { AtlasAgent, AtlasRegion, AtlasState } from "./atlas-graph";
 import {
@@ -264,6 +264,8 @@ function AtlasMap(props: {
     const shownAgents = createMemo(() => regions().flatMap((r) => r.shown));
     const machineIndex = (machine: string) => regions().findIndex((r) => r.key === machine);
     const flowEnd = createMemo(() => flowEndResolver(shownAgents(), props.data.machines()));
+    const framed = createMemo(() => new Set(shownAgents().filter(inContainer).map((a) => a.key)));
+    const keepOut = createMemo(() => labelKeepOut(props.layout));
     return (
         <div
             class="atlas-world"
@@ -306,6 +308,8 @@ function AtlasMap(props: {
                 flows={props.data.flows()}
                 resolve={flowEnd()}
                 nodes={props.layout.nodes}
+                framed={framed()}
+                avoid={keepOut()}
                 width={props.layout.width}
                 height={props.layout.height}
             />
