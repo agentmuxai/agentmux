@@ -61,6 +61,7 @@ pub mod desktop_gate;
 pub mod dock_snapshot;
 pub mod fleet_feed;
 pub mod fleet_source;
+pub mod instance_registry;
 pub mod narrated_events;
 pub mod pending_background_pids;
 pub mod mcp_config_file;

@@ -100,6 +100,14 @@ pub fn resolve_shared_lan_instances_dir() -> Option<PathBuf> {
     resolve_global_shared_root().map(|h| h.join("lan").join("instances"))
 }
 
+/// Resolve the GLOBAL `<home>/shared/instances/` directory: one record per running srv on this
+/// machine, agents or not, so one instance can name and reach another
+/// (`backend::instance_registry`). Not the LAN sibling directory above, which lists only
+/// LAN-enabled instances and holds the LAN key instead of the auth key.
+pub fn resolve_shared_instances_dir() -> Option<PathBuf> {
+    resolve_global_shared_root().map(|h| h.join("instances"))
+}
+
 /// Resolve the GLOBAL `<home>/shared/agents/transcripts/` directory.
 ///
 /// Sibling of [`resolve_shared_registry_dir`] / [`resolve_shared_definitions_dir`]:

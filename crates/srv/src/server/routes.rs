@@ -565,46 +565,25 @@ fn agent_api_routes() -> Router<AppState> {
 /// `muxspect`, work facts and the coordination channel.
 fn muxspect_routes() -> Router<AppState> {
     Router::new()
-        // Live-state introspection for the `muxspect` CLI (Phase 1 of
-        // docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md) —
-        // read-only, diagnostic-only, reached the same way agentmux-mcp
-        // reaches every other /api/v1/* route (X-AuthKey from the caller's
-        // own environment, no new IPC).
-        .route("/api/v1/muxspect/list", get(muxspect_handlers::handle_muxspect_list))
-        .route("/api/v1/muxspect/layout", get(muxspect_handlers::handle_muxspect_layout))
-        .route("/api/v1/muxspect/describe", get(muxspect_handlers::handle_muxspect_describe))
+        .merge(forwardable_muxspect_routes())
+        // The live AgentMux instances on this machine, for `muxspect instances` and `--channel`
+        // (SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md, Phase 2a). Read-only.
+        .route("/api/v1/muxspect/instances", get(muxspect_instances::handle_muxspect_instances))
         // Cross-instance lookup — Ext 4 of
         // docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md.
         // Checks this instance first, then every other channel via the shared
         // reactive registry (same mechanism `conversations` below already
         // uses) — see the handler's own doc comment.
         .route("/api/v1/muxspect/find", get(muxspect_handlers::handle_muxspect_find))
-        // Dock diagnosis/remediation extension (2026-08-06 spec) — `dock` is
-        // read-only like the two routes above; `dock/clear` is this module's
-        // first mutating route (narrowly scoped — see the handler's own doc
-        // comment for why).
-        .route("/api/v1/muxspect/dock", get(muxspect_handlers::handle_muxspect_dock))
+        // `dock/clear` is this module's one mutating route (narrowly scoped; see the handler's own
+        // doc comment) and is deliberately not behind the `?channel=` forward.
         .route("/api/v1/muxspect/dock/clear", post(muxspect_handlers::handle_muxspect_dock_clear))
-        // Durable declared-background task registry — see the handler's own
-        // doc comment for why this is a separate, SQLite-backed source of
-        // truth from `dock` above rather than another view over the same
-        // ephemeral cache.
-        .route(
-            "/api/v1/muxspect/background-tasks",
-            get(muxspect_handlers::handle_muxspect_background_tasks),
-        )
         // Migration doctor — `migrate --verify`'s report from inside a live
         // instance (SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md Phase 1c).
         // Read-only; see the handler's own doc comment.
         .route(
             "/api/v1/muxspect/migrations",
             get(muxspect_handlers::handle_muxspect_migrations),
-        )
-        // Sender-liveness verdict for a JEKT's claimed FROM — see the
-        // handler's own doc comment (SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md).
-        .route(
-            "/api/v1/muxspect/verify-sender",
-            get(muxspect_handlers::handle_muxspect_verify_sender),
         )
         // All-tier conversation glance (host/cross-channel previews, LAN/WAN
         // liveness) — see the handler's own doc comment
@@ -628,6 +607,33 @@ fn muxspect_routes() -> Router<AppState> {
         // PostToChannel / ReadChannel: a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md).
         .route("/api/v1/coord/posts", get(coord_channel_handlers::handle_read_channel))
+}
+
+/// The muxspect reads that can be asked of another instance on this machine with `?channel=<name>`
+/// (Phase 2a of SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md §2.4). Every route here
+/// is a read; `dock/clear`, the one write, is deliberately not, and `find` and `conversations`
+/// already look across channels themselves.
+fn forwardable_muxspect_routes() -> Router<AppState> {
+    Router::new()
+        // Live-state introspection for the `muxspect` CLI (Phase 1 of
+        // docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md): read-only, diagnostic-only,
+        // reached like every other /api/v1/* route (X-AuthKey from the caller's own environment).
+        .route("/api/v1/muxspect/list", get(muxspect_handlers::handle_muxspect_list))
+        .route("/api/v1/muxspect/layout", get(muxspect_handlers::handle_muxspect_layout))
+        .route("/api/v1/muxspect/describe", get(muxspect_handlers::handle_muxspect_describe))
+        // Dock: the cached ToolNode status snapshot (2026-08-06 dock diagnosis spec).
+        .route("/api/v1/muxspect/dock", get(muxspect_handlers::handle_muxspect_dock))
+        // Durable declared-background task registry (see the handler for why it is not the dock).
+        .route(
+            "/api/v1/muxspect/background-tasks",
+            get(muxspect_handlers::handle_muxspect_background_tasks),
+        )
+        // Sender-liveness verdict for a jekt's claimed FROM (SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md).
+        .route(
+            "/api/v1/muxspect/verify-sender",
+            get(muxspect_handlers::handle_muxspect_verify_sender),
+        )
+        .route_layer(axum::middleware::from_fn(muxspect_instances::forward_to_channel))
 }
 
 /// MuxAPI memory, Global Memory, presets, identity and skills.

@@ -109,6 +109,7 @@ mod sensitive_handlers;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
+mod muxspect_instances;
 pub(crate) mod transcript_tail;
 mod coord_channel_handlers;
 mod bulletin_handlers;

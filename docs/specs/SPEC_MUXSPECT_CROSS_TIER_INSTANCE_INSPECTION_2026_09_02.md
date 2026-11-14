@@ -1,6 +1,15 @@
 # muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN)
 
-**Status:** proposed
+**Status:** active. Shipped: Phase 2a (same-host, §2) in PR #7287 (Posa@Area54, 2026-11-14). Remaining: Phase 2b (LAN, §3), proposed and waiting for its tier-rule spec and the repo owner's sign-off
+**Phase 2a as built:** the record is `~/.agentmux/shared/instances/<channel>-<hash>.json`
+(`backend::instance_registry`; `<hash>` keeps channels that slug alike apart), beaten every 20 s and
+listed for 60 s; liveness is the pid check that also rejects a recycled pid
+(`pid_alive_since`). The central `?channel=` forward is a route layer
+(`server::muxspect_instances::forward_to_channel`) on `list`, `layout`, `describe`, `dock`,
+`background-tasks` and `verify-sender`, loopback targets only. The registry lives in the shared folder of
+the home an instance runs in, so a `task dev` build with an isolated home is listed only by itself
+(it does not write into the operator's real home); making an isolated build visible from outside is a
+separate decision. Open question 3 (heartbeat interval) is settled at 20 s, the agent registry's own beat.
 **Date:** 2026-09-02
 **Author:** Manoz@Area54
 **Motivating incident:** live-debugging a `task dev` build on branch
