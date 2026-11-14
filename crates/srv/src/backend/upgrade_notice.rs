@@ -279,7 +279,7 @@ pub fn init(store: Arc<crate::backend::storage::store::Store>) {
             // or nothing that version's quit saved (windows, tabs, panes) comes back.
             if upgraded.at_ms == now {
                 let db_dir = paths.data_dir.join("db");
-                if let Some(problem) = crate::bootstrap::carry_forward::continuity_problem(&db_dir, &upgraded.from) {
+                if let Some(problem) = crate::migrations::carry_forward::continuity_problem(&db_dir, &upgraded.from) {
                     tracing::error!(from = %upgraded.from, to = %upgraded.to, "upgrade continuity: {problem}");
                 }
             }

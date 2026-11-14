@@ -186,7 +186,7 @@ fn blocker(my_seq: u64, me: &Writer, others: &[Entry]) -> Option<Writer> {
 
 /// Register `me` in `dir`, then wait up to `wait` for an earlier-registered srv of another version
 /// to exit. A srv that gives the folder up removes its file.
-pub(super) fn claim_in(dir: &Path, me: &Writer, alive: &dyn Fn(&Writer) -> bool, wait: Duration, poll: Duration) -> Claim {
+pub(crate) fn claim_in(dir: &Path, me: &Writer, alive: &dyn Fn(&Writer) -> bool, wait: Duration, poll: Duration) -> Claim {
     let seq = match register(dir, me) {
         Ok(seq) => seq,
         Err(e) => {
@@ -208,7 +208,7 @@ pub(super) fn claim_in(dir: &Path, me: &Writer, alive: &dyn Fn(&Writer) -> bool,
 }
 
 /// The words the person is told when this srv gives the folder up.
-pub(super) fn deferred_incident(me: &Writer, owner: &Writer) -> agentmux_common::incidents::Incident {
+pub(crate) fn deferred_incident(me: &Writer, owner: &Writer) -> agentmux_common::incidents::Incident {
     let mut i = agentmux_common::incidents::Incident::new(
         "shared_stores_in_use",
         format!(
@@ -226,7 +226,7 @@ pub(super) fn deferred_incident(me: &Writer, owner: &Writer) -> agentmux_common:
 }
 
 /// The words the person is told when the shared files are newer than this build.
-pub(super) fn too_new_incident(db: &str, found: i64, expected: i64, me: &Writer) -> agentmux_common::incidents::Incident {
+pub(crate) fn too_new_incident(db: &str, found: i64, expected: i64, me: &Writer) -> agentmux_common::incidents::Incident {
     let mut i = agentmux_common::incidents::Incident::new(
         "shared_store_newer",
         format!("{} is older than your data ({db} is at version {found}; this one reads up to {expected}). Update AgentMux to use it.", me.label()),
@@ -248,7 +248,7 @@ fn record(incident: &agentmux_common::incidents::Incident) {
 }
 
 /// A shared store that did not open: when it is because the files are newer than this build, say so.
-pub(super) fn note_open_failure(e: &StoreError) {
+pub(crate) fn note_open_failure(e: &StoreError) {
     if let StoreError::SchemaTooNew { db, found, expected } = e {
         // Up to three stores fail the same way in one start; one notice says it.
         if TOLD_TOO_NEW.swap(true, Ordering::Relaxed) {
@@ -261,7 +261,7 @@ pub(super) fn note_open_failure(e: &StoreError) {
 
 /// Claim the shared folder for this srv, or give it up to an earlier srv of another version.
 /// Before any shared store is opened. A srv with no shared folder (a bare run) has nothing to claim.
-pub(super) fn claim_at_boot(version: &str) {
+pub(crate) fn claim_at_boot(version: &str) {
     let Some((me, claim)) = claim_this_process(version) else { return };
     match claim {
         Claim::Owner => tracing::info!(version, "shared guard: this srv uses the shared folder"),

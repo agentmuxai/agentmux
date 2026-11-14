@@ -105,7 +105,7 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: b
     }
 
     if prepare || !(list || dry_run) {
-        if let Some(code) = crate::bootstrap::shared_guard::claim_for_migrate(data_dir) {
+        if let Some(code) = crate::registry::shared_guard::claim_for_migrate(data_dir) {
             return code;
         }
     }
