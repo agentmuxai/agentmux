@@ -27,12 +27,21 @@ fn bypass_pane(target: &str) -> String {
     banner_for(target).0
 }
 
+/// Does the committing click `ask` describes pay? The element's text after its name is judged with the
+/// name, so a payment word on any line asks (roadblocks report R7). A control that submits a form (it has an `action`, or
+/// that is why it asks) is judged on its name as it is.
+fn ask_is_payment(ask: &serde_json::Value) -> bool {
+    let text = |k: &str| ask.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    let submits = !text("action").is_empty() || text("why") == "it submits a form";
+    bypass::click_is_payment(text("what"), text("description"), submits)
+}
+
 /// The click `ask` asks although auto-approve is on for its site, because it pays: the words to add to the
 /// banner's "Asked because", so that it doesn't read as auto-approve being broken (#47625).
 pub(crate) fn payment_exception(block_id: &str, agent: &str, ask: &serde_json::Value) -> Option<&'static str> {
     let g = bypass::active_for(&bypass_pane(block_id), agent)?;
     let text = |k: &str| ask.get(k).and_then(|v| v.as_str()).unwrap_or("");
-    (g.covers(text("page")) && bypass::click_is_payment(text("what"), text("description")))
+    (g.covers(text("page")) && ask_is_payment(ask))
         .then_some("auto-approve is on for this site, but a payment always asks")
 }
 
@@ -83,16 +92,13 @@ pub(crate) async fn bypassed_click(
         return Some(log.asked(ask).fail(state, code, e));
     }
     let what = ask.get("what").and_then(|v| v.as_str()).unwrap_or("");
-    // The element's text after its name: shown apart from `what`, but judged
-    // with it, so a payment word on any line asks (roadblocks report R7).
-    let description = ask.get("description").and_then(|v| v.as_str()).unwrap_or("");
     let page = ask.get("page").and_then(|v| v.as_str()).unwrap_or("");
     let origin = agentmux_common::allowed_origins::target_origin(page).unwrap_or_default();
     if !g.covers(page) {
         tracing::info!(agent_id = %agent, block_id = %block_id, origin = %origin, "[browser-bypass] paused: the page is off the granted sites, so the click asks");
         return None;
     }
-    if bypass::click_is_payment(what, description) {
+    if ask_is_payment(ask) {
         tracing::info!(agent_id = %agent, block_id = %block_id, what = %what, "[browser-bypass] a payment still asks");
         return None;
     }

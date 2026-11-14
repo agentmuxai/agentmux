@@ -538,7 +538,11 @@ fn quoted(what: &str) -> &str {
 /// money? [`is_payment`] on both, except that a brand's name ("Kakao Pay") is not one: a payment-methods
 /// page lists dozens, and a click on one opens its settings. Its description still counts when it opens
 /// with a command ("Pay $20.00 now").
-pub(crate) fn click_is_payment(what: &str, description: &str) -> bool {
+pub(crate) fn click_is_payment(what: &str, description: &str, submits: bool) -> bool {
+    // A control that submits a form is judged on its name as it is: a checkout's "Apple Pay" submit pays.
+    if submits {
+        return is_payment(what) || is_payment(description);
+    }
     // A plan's name ("Pay-as-you-go", "Pay-per-use") is taken out as the page's script takes it out, and
     // what is left is judged: "Pay-as-you-go: Pay now" is still a command to pay.
     let name = quoted(what)
@@ -829,8 +833,9 @@ mod tests {
             "Click \"Google Pay\"",
             "Click \"Pay-as-you-go\"",
         ] {
-            assert!(!click_is_payment(what, ""), "{what}");
-            assert!(!click_is_payment(what, "Accept payments from customers in Korea"), "{what} with a description");
+            assert!(!click_is_payment(what, "", false), "{what}");
+            assert!(!click_is_payment(what, "Accept payments from customers in Korea", false), "{what} with a description");
+            assert!(click_is_payment(what, "", true), "{what} as a submit control");
         }
         for (what, description) in [
             ("Click \"Pay\"", ""),
@@ -851,7 +856,7 @@ mod tests {
             ("Click \"Apple Pay\"", "Pay $20.00 now"),
             ("Click \"Continue\"", "Pay now"),
         ] {
-            assert!(click_is_payment(what, description), "{what} / {description}");
+            assert!(click_is_payment(what, description, false), "{what} / {description}");
         }
     }
 
@@ -863,6 +868,8 @@ mod tests {
         let note = Some("auto-approve is on for this site, but a payment always asks");
         assert_eq!(payment_exception("bp-pay-note", "korp", &ask("Click \"Pay now\"")), note);
         assert_eq!(payment_exception("bp-pay-note", "korp", &ask("Click \"Kakao Pay\"")), None);
+        let submit = json!({ "what": "Click \"Apple Pay\"", "page": "https://github.com/a/b", "action": "https://github.com/pay", "why": "it submits a form" });
+        assert_eq!(payment_exception("bp-pay-note", "korp", &submit), note, "a checkout's submit control named Apple Pay pays");
         assert_eq!(payment_exception("bp-pay-note", "other", &ask("Click \"Pay now\"")), None, "another agent holds no grant");
         assert_eq!(payment_exception("bp-no-grant", "korp", &ask("Click \"Pay now\"")), None);
         let elsewhere = json!({ "what": "Click \"Pay now\"", "page": "https://example.org/x" });
