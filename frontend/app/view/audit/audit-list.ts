@@ -21,6 +21,36 @@ const MAX_REACH_PAGES = 20;
 
 const fetchAuditPage = (req: AuditQueryReq): Promise<AuditQueryResult> => RpcApi.AuditQueryCommand(TabRpcClient, req);
 
+/** `load`, remembering the newest call still on its way (`onItsWay`), so `reachBack` can wait for the list it pages from. */
+function trackLatest(load: (quiet?: boolean, refreshing?: boolean) => Promise<void>) {
+    let latest: Promise<void> | undefined;
+    const run = (quiet = false, refreshing = false) => {
+        const mine = load(quiet, refreshing);
+        latest = mine;
+        void mine.finally(() => {
+            if (latest === mine) latest = undefined;
+        });
+        return mine;
+    };
+    return { run, onItsWay: () => latest };
+}
+
+/**
+ * Pages older entries in, once the newest page is shown, until `done()`, the last page, or `MAX_REACH_PAGES`: what
+ * the status bar's "last sound" needs when 50 or more entries were written between the sound and the click.
+ */
+function reachBackOf(onItsWay: () => Promise<void> | undefined, cursor: Accessor<string | undefined>, loadMore: () => Promise<void>) {
+    return async (done: () => boolean) => {
+        for (let pages = 0; pages < MAX_REACH_PAGES; pages++) {
+            for (let load = onItsWay(); load; load = onItsWay()) await load;
+            const next = untrack(cursor);
+            if (!next || done()) return;
+            await loadMore();
+            if (untrack(cursor) === next) return; // nothing was added: an error, or a newer look took over
+        }
+    };
+}
+
 /** What the list shows, and how a page of the newest entries replaces it. */
 function createListState() {
     const [entries, setEntries] = createSignal<AuditEntry[]>([]);
@@ -74,7 +104,7 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
 
     // `refreshing`: the page is only the newest entries again, so if the list was paused while it was on its way,
     // it is kept as the newest page the pill counts, not shown.
-    const loadFirstPage = async (quiet: boolean, refreshing: boolean) => {
+    const loadFirstPage = async (quiet = false, refreshing = false) => {
         const mine = ++seq;
         if (!quiet) setLoading(true);
         try {
@@ -88,16 +118,7 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
             if (mine === seq) setLoading(false);
         }
     };
-    // The newest first-page load on its way, so `reachBack` can wait for the list it would page from.
-    let firstLoad: Promise<void> | undefined;
-    const loadFirst = (quiet = false, refreshing = false) => {
-        const load = loadFirstPage(quiet, refreshing);
-        firstLoad = load;
-        void load.finally(() => {
-            if (firstLoad === load) firstLoad = undefined;
-        });
-        return load;
-    };
+    const { run: loadFirst, onItsWay: firstLoad } = trackLatest(loadFirstPage);
 
     // The list holds still (paused, or scrolled back): look at the newest page without showing it.
     const peek = async () => {
@@ -139,18 +160,6 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
         }
     };
 
-    // Page older entries in, once the newest page is shown, until `done()` or `MAX_REACH_PAGES` or the last page.
-    // What the status bar's "last sound" needs when 50 or more entries were written between the sound and the click.
-    const reachBack = async (done: () => boolean) => {
-        for (let pages = 0; pages < MAX_REACH_PAGES; pages++) {
-            while (firstLoad) await firstLoad;
-            const next = untrack(cursor);
-            if (!next || done()) return;
-            await loadMore();
-            if (untrack(cursor) === next) return; // nothing was added: an error, or a newer look took over
-        }
-    };
-
     // A new filter starts over.
     createEffect(
         on(
@@ -182,5 +191,5 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
     useAuditLive(visible, () => void refresh());
 
     const { totals, notRecorded, loading, paused, newCount, channel } = state;
-    return { channel, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, reachBack, showNewest };
+    return { channel, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, showNewest, reachBack: reachBackOf(firstLoad, cursor, loadMore) };
 }
