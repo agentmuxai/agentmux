@@ -65,15 +65,17 @@
     }
 
     // NewActivityPill (a kit Button): over the transcript's bottom while the reader is scrolled up and content has
-    // arrived below them. Out of flow, so nothing moves when it comes and goes; the fill keeps the text under it
-    // from showing through.
+    // arrived below them. Out of flow, so nothing moves when it comes and goes. Its fill, at rest and on hover, is
+    // the opaque `--elevated-bg-color` (`--main-bg-color` follows the window's opacity, and the kit's hover is a
+    // tint over nothing), so the text under it never shows through. The hover keeps the kit's tint, over that fill.
     .agent-new-activity-pill {
+        --ui-bg-hover: color-mix(in srgb, var(--ui-tone) var(--ui-tint-hover), var(--elevated-bg-color));
         position: absolute;
         bottom: var(--space-3);
         left: 50%;
         transform: translateX(-50%);
         z-index: var(--z-over-content);
-        background: var(--main-bg-color);
+        background: var(--elevated-bg-color);
     }
 
     // A `.agent-view--working-row-visible` rule used to live here, zeroing
