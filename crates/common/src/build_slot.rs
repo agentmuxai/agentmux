@@ -46,7 +46,7 @@ pub fn shim_dir(home: &Path) -> PathBuf {
 const STALE_SECS: u64 = 90;
 
 /// Who holds the build slot right now, read from the lock's owner file.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SlotHolder {
     /// The holder's `AGENTMUX_AGENT_ID` (else its user name), as the script recorded it.
     pub agent: String,
@@ -56,11 +56,30 @@ pub struct SlotHolder {
     pub reason: String,
     /// The command line it runs, cut to 120 characters: a background subagent's build holds the slot under its leader's id, and this says what is really running.
     pub command: String,
+    /// The run's own token: tells this holder's slot from one a later holder made.
+    #[serde(default)]
+    pub token: String,
+    /// The pid the script saw for itself. A real one on Linux and macOS; on Windows a Git Bash
+    /// pid, which no native tool can use (see `winpid`).
+    #[serde(default)]
+    pub pid: Option<u32>,
+    /// The script's Windows process id (Git Bash only): the root of the holder's process tree.
+    #[serde(default)]
+    pub winpid: Option<u32>,
+}
+
+impl SlotHolder {
+    /// The operating system's id for the script's process, the root of the holder's process
+    /// tree: the Windows id on Windows (none for a script older than version 9, which did not
+    /// record it), the pid elsewhere.
+    pub fn process_id(&self) -> Option<u32> {
+        if cfg!(windows) { self.winpid } else { self.pid }.filter(|p| *p > 1)
+    }
 }
 
 /// `~/.agentmux/shared/locks/build`, the lock's own folder, or `AGENTMUX_BUILD_SLOT_DIR` when
 /// that is set (the script honours it too).
-fn lock_dir() -> Option<PathBuf> {
+pub fn lock_dir() -> Option<PathBuf> {
     match std::env::var_os("AGENTMUX_BUILD_SLOT_DIR").filter(|d| !d.is_empty()) {
         Some(dir) => Some(PathBuf::from(dir)),
         None => dirs::home_dir().map(|h| h.join(".agentmux").join("shared").join("locks").join("build")),
@@ -92,7 +111,38 @@ pub fn read_holder(root: &Path, now_secs: u64) -> Option<SlotHolder> {
     let start: u64 = field("start")?.parse().ok()?;
     let reason = field("reason").filter(|r| !r.is_empty()).or_else(|| field("cmd")).unwrap_or_default().to_string();
     let command: String = field("cmd").unwrap_or_default().chars().take(120).collect();
-    Some(SlotHolder { agent, since_ms: start.saturating_mul(1000), reason, command })
+    let number = |key: &str| field(key).and_then(|v| v.parse::<u32>().ok());
+    Some(SlotHolder {
+        agent,
+        since_ms: start.saturating_mul(1000),
+        reason,
+        command,
+        token: field("token").unwrap_or_default().to_string(),
+        pid: number("pid"),
+        winpid: number("winpid"),
+    })
+}
+
+/// The file srv writes into the held slot once the holder's process tree has used no CPU for a
+/// while; `build-slot status` prints it (`idle_note` in the script).
+fn idle_path(root: &Path) -> PathBuf {
+    root.join("slot").join("idle")
+}
+
+/// Records that the holder with `token` has been idle since `since_secs` (epoch seconds). Does
+/// nothing when the slot now belongs to another holder: a note about the last run must never
+/// land on the next one.
+pub fn write_idle(root: &Path, token: &str, since_secs: u64) -> io::Result<()> {
+    let owner = std::fs::read_to_string(root.join("slot").join("owner")).unwrap_or_default();
+    if !owner.lines().any(|l| l.strip_prefix("token=").is_some_and(|t| t.trim() == token)) {
+        return Ok(());
+    }
+    std::fs::write(idle_path(root), format!("token={token}\nidle_since={since_secs}\n"))
+}
+
+/// Removes the idle note: the holder is busy again, or gone.
+pub fn clear_idle(root: &Path) {
+    let _ = std::fs::remove_file(idle_path(root));
 }
 
 /// Environment variables that make a bash started with them define `cargo`, `task`, `npm`, `npx`
@@ -257,8 +307,23 @@ mod tests {
         write_slot(root, "agent=Lazo\npid=1\ntoken=t\nstart=1792830000\ncwd=/x\ncmd=/c/bin/cargo test -p x\nreason=cargo test\n", true);
         assert_eq!(
             read_holder(root, now_secs()),
-            Some(SlotHolder { agent: "Lazo".into(), since_ms: 1_792_830_000_000, reason: "cargo test".into(), command: "/c/bin/cargo test -p x".into() })
+            Some(SlotHolder {
+                agent: "Lazo".into(),
+                since_ms: 1_792_830_000_000,
+                reason: "cargo test".into(),
+                command: "/c/bin/cargo test -p x".into(),
+                token: "t".into(),
+                pid: Some(1),
+                winpid: None,
+            })
         );
+        write_slot(root, "agent=Lazo\npid=77\nwinpid=4242\ntoken=t\nstart=1792830000\ncmd=x\n", true);
+        let holder = read_holder(root, now_secs()).unwrap();
+        assert_eq!((holder.pid, holder.winpid), (Some(77), Some(4242)));
+        let expected = if cfg!(windows) { Some(4242) } else { Some(77) };
+        assert_eq!(holder.process_id(), expected, "the Windows id on Windows, the pid elsewhere");
+        write_slot(root, "agent=Lazo\npid=1\ntoken=t\nstart=1792830000\ncmd=x\n", true);
+        assert_eq!(read_holder(root, now_secs()).unwrap().process_id(), None, "a pid of 1 is no process of ours");
         assert_eq!(read_holder(root, now_secs() + 10 * 60), None, "no heartbeat for minutes: its holder died");
         write_slot(root, "agent=Manoz\nstart=1792830001\ncmd=npm run build\n", true);
         assert_eq!(read_holder(root, now_secs()).unwrap().reason, "npm run build", "no reason: the command line");
@@ -872,6 +937,48 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
         panic!("never saw {what}");
+    }
+
+    /// The owner file carries what srv needs to watch the holder, and `status` says when srv found
+    /// it idle: only for the run that srv named, and never for a run it has not flagged.
+    #[test]
+    fn status_says_a_holder_is_idle_only_when_srv_flagged_that_run() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        let status = || {
+            let out = spawn_slot(&bash, &script, &root, None, &["status"]).wait_with_output().unwrap();
+            String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n")
+        };
+        let mut holder = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "90"]);
+        wait_for("the holder", || read_holder(&root, now_secs()).is_some());
+        let held = read_holder(&root, now_secs()).expect("a live holder");
+        assert!(held.pid.is_some_and(|p| p > 1), "the owner file names the script's pid: {held:?}");
+        if cfg!(windows) {
+            assert!(held.winpid.is_some_and(|p| p > 1), "Git Bash records its Windows process id: {held:?}");
+        }
+        let busy = status();
+        assert!(busy.contains("HELD by") && !busy.contains("idle"), "a holder srv has not flagged is not idle: {busy}");
+
+        write_idle(&root, "some-other-run", now_secs() - 5 * 60).unwrap();
+        assert!(!root.join("slot").join("idle").exists(), "a note for another run is not written onto this one");
+        std::fs::write(root.join("slot").join("idle"), format!("token=an-earlier-run\nidle_since={}\n", now_secs() - 5 * 60)).unwrap();
+        assert!(!status().contains("idle"), "a note an earlier holder left is not this holder's");
+
+        write_idle(&root, &held.token, now_secs() - 12 * 60).unwrap();
+        let idle = status();
+        assert!(
+            idle.contains("idle for 12 min, no CPU") && idle.contains("not stopped"),
+            "got {idle}; owner {:?}; idle file {:?}",
+            std::fs::read_to_string(root.join("slot").join("owner")),
+            std::fs::read_to_string(root.join("slot").join("idle"))
+        );
+        clear_idle(&root);
+        assert!(!status().contains("idle"), "work removes the note");
+        let _ = holder.kill();
+        let _ = holder.wait();
     }
 
     /// A waiter that a loaded host makes slow (more than the ticket limit between two touches of
