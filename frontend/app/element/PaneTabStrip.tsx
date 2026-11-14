@@ -25,7 +25,9 @@
 import { landedTab, markLanded } from "./pane-tab-landing";
 export { LANDING_BOUNCE_MS } from "./pane-tab-landing";
 import { createEffect, For, on, Show, type Accessor, type JSX } from "solid-js";
+import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { isDraggedDocTab, isDraggedPaneTab } from "@/app/drag/pane-tab-drag";
+import { isTabGone } from "@/layout/lib/tabTearOff";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { usePulseWhen } from "@/app/motion/solid";
 import { Tooltip } from "./tooltip";
@@ -504,6 +506,7 @@ interface PillClassState {
     attention: () => boolean;
     closing: () => boolean;
     dragging: () => boolean;
+    gone: () => boolean;
     dropSide: () => "before" | "after" | null;
     landed: () => boolean;
 }
@@ -514,6 +517,7 @@ function pillClassList<T>(props: PaneTabStripItemProps<T>, s: PillClassState): R
         "pane-tab--attention": s.attention(),
         "pane-tab--closing": s.closing(),
         "pane-tab--dragging": s.dragging(),
+        "pane-tab--gone": s.gone(),
         "pane-tab--drop-before": s.dropSide() === "before",
         "pane-tab--drop-after": s.dropSide() === "after",
         "pane-tab--landing": s.landed(),
@@ -609,8 +613,11 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const attention = () => props.getAttention?.(props.tab) ?? false;
     let pillRef: HTMLDivElement | undefined;
     const { landingKey, landed } = usePillLanding(props, id, () => pillRef);
+    // Not while the pane's picture is still being taken: the tab would be dimmed in it.
     const isDragging = () =>
-        props.docDrag ? isDraggedDocTab(props.docDrag.blockId, id()) : isDraggedPaneTab(id(), props.paneKey);
+        (props.docDrag ? isDraggedDocTab(props.docDrag.blockId, id()) : isDraggedPaneTab(id(), props.paneKey)) && !paneCaptureInFlight();
+    // A tab dragged out of its pane has left it for the rest of the drag (layout/lib/tabTearOff.ts).
+    const isGone = () => !props.docDrag && isTabGone(id(), props.paneKey) && !paneCaptureInFlight();
 
     // Activity flash: click this pill on every tone from its own block. Not while its window
     // tab is hidden: nobody sees it, and each flash is a Web Animation of ~65 keyframes (the
@@ -648,7 +655,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         >
             <div
                 class="pane-tab"
-                classList={pillClassList(props, { id, attention, closing, dragging: isDragging, dropSide, landed })}
+                classList={pillClassList(props, { id, attention, closing, dragging: isDragging, gone: isGone, dropSide, landed })}
                 style={colorStyle()}
                 data-tab-id={id()}
                 aria-busy={progressInfo()?.state === "working" ? "true" : undefined}

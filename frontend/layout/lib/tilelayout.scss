@@ -180,7 +180,11 @@
         // transparent, and the words on top. It is over, for the rest of the drag, the first time the layout
         // shows a drop or closes over the place (`tearOffOffered`, futureLayout.ts); from then on the place is
         // the blurred pane above, as before. The words scale with the place: `cq` units of the place itself.
-        &.tear-off-offered {
+        //
+        // A tab dragged out of a pane that keeps others has the same place under the pane's header
+        // (`tab-tear-off-offered`, tabTearOff.ts): the place starts where the tile says (its inline `top`).
+        &.tear-off-offered,
+        &.tab-tear-off-offered {
             filter: none;
 
             .tear-off-place {
@@ -228,6 +232,27 @@
                 $half: calc(var(--gap-size-px) / 2);
                 inset: round(down, $half, 1px) round(up, $half, 1px) round(up, $half, 1px) round(down, $half, 1px);
             }
+        }
+
+        // The pane's body once one of its tabs has left it for the rest of its drag (TearOffPlace.tsx
+        // `TabGonePlace`): nothing in front, as an empty pane is drawn, under the header and the tabs that
+        // stay. It starts where the tile says (its inline `top`).
+        .tab-gone-place {
+            position: absolute;
+            inset: 0;
+            z-index: var(--z-drag-overlay);
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+            // The pane's own colour, with nothing showing through: the block's colour over the window's.
+            background-color: rgb(from var(--main-bg-color) r g b / 100%);
+            background-image: linear-gradient(var(--block-bg-color), var(--block-bg-color));
+            pointer-events: none;
+        }
+
+        &:not(:only-child) .tab-gone-place {
+            $half: calc(var(--gap-size-px) / 2);
+            inset: round(down, $half, 1px) round(up, $half, 1px) round(up, $half, 1px) round(down, $half, 1px);
         }
 
         // A minimized pane is its whole block squeezed to a header-sized chip,
@@ -464,7 +489,9 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background-color: rgb(from var(--block-bg-color) r g b);
+        // The pane's own colour, with nothing showing through: the block's colour over the window's.
+        background-color: rgb(from var(--main-bg-color) r g b / 100%);
+        background-image: linear-gradient(var(--block-bg-color), var(--block-bg-color));
 
         img {
             display: block;

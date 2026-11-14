@@ -3,11 +3,14 @@
 
 /**
  * The picture a dragged tab's landing place shows (PaneLanding.tsx), one per drag. It is taken when the tab's
- * placing first starts (pillPlacement.ts), of the tab as it stands in its own pane then: the picture taken at
- * the press (tearoff-snapshot.ts) can be of a tab the press itself had only just brought to the front, a
- * Files tab still listing nothing. Where the pane cannot be pictured now, the press's picture stands in.
+ * drag starts (app/drag/pane-tab-drag.ts), of the tab as it stands in its own pane then and before the drag
+ * draws anything over it (the tab's tear-off place, tabTearOff.ts); a drag that did not take it there takes
+ * it when the tab's placing first starts (pillPlacement.ts). The picture taken at the press
+ * (tearoff-snapshot.ts) can be of a tab the press itself had only just brought to the front, a Files tab
+ * still listing nothing. Where the pane cannot be pictured now, the press's picture stands in. Either is of
+ * the tab alone, without its pane's other tabs.
  *
- * Asked for once per drag: a placing ends and begins again many times in one drag, and from the second on the
+ * Asked for once per drag: a placing ends and begins again many times in one drag, and from the first on the
  * layout no longer shows the tab as it stood.
  */
 

@@ -30,6 +30,7 @@ import { reflowSettleMs } from "./liveReflow";
 import { landingPictureOf } from "./paneLandingPicture";
 import { pillStandIn, pillZone, placePill, type PillZone, type PillZoneInput } from "./paneBodyDrop";
 import { currentPillDrag, pillDragIn, pillReflowIn, setPillDrag, type PillDrag } from "./pillDragState";
+import { tabTearOffShown } from "./tabTearOff";
 import { clearPlacement, previewPlacement, resetDropIntent, settleDropIntent, sideOfDirection } from "./placementPreview";
 
 type PlaceZone = Extract<PillZone, { kind: "place" }>;
@@ -166,9 +167,12 @@ export function beginPillPlacement(model: LayoutModel, blockId: string, client: 
     const lone = effectiveStack(source.data).length <= 1;
     const standIn = pillStandIn(blockId);
     resetDropIntent(model);
-    // A tab that leaves others behind has no pane to stand in its landing place: its picture does, and it is
-    // taken now, while the tab still stands in its own pane and before the layout shows anything of the drop.
+    // A tab that leaves others behind has no pane to stand in its landing place: its picture does. It was
+    // taken when the drag began (app/drag/pane-tab-drag.ts); a drag that began elsewhere takes it now, while
+    // the tab still stands in its own pane and before the layout shows anything of the drop.
     if (!lone) void landingPictureOf(blockId);
+    // The layout shows a drop for the tab: its own place no longer offers the tear-off.
+    tabTearOffShown();
     batch(() => {
         setPillDrag({ model, blockId, sourceNodeId: source.id, lone, standIn, draggedId: lone ? source.id : standIn.id });
         model.showOverlay._set(true);

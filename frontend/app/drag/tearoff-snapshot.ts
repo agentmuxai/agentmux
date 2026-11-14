@@ -22,10 +22,16 @@
  * screenshot (of its whole page: no clip, so no flicker) drawn into the
  * placeholder, so the pane in hand looks like the pane. Before, it was the
  * page alone: the pane lost its header the moment it was picked up.
+ *
+ * A tab of a pane that has other tabs is pictured alone: the pane as it would stand with that tab only, its
+ * pill first in the header and the others not there (`tabStripIn`). A tab dragged out of its pane leaves the
+ * others behind, and its picture took them all along (the operator, 2026-11-13: "when a pane tab tears off, its
+ * taking all the other pane tabs with it").
  */
 
 import { getApi, MOS } from "@/app/store/global";
 import { Logger } from "@/util/logger";
+import { isWindows } from "@/util/platformutil";
 import { beginPaneCapture } from "./pane-capture-gate";
 
 /** A picture older than this is stale: the pane may have changed since. */
@@ -57,6 +63,78 @@ export interface CssRect {
     top: number;
     width: number;
     height: number;
+}
+
+/** Where the pointer last pressed a pane's drag handle (viewport px): the grab of a picture taken after the press. */
+let lastPress: { x: number; y: number } | undefined;
+
+/**
+ * A pane's tab strip as its picture needs it to show one tab alone, in CSS px from the pane's own corner: the
+ * part of the header the tabs are drawn in, the pictured tab's pill (what is drawn of it), and the header's
+ * colour.
+ */
+export interface TabStripInPane {
+    strip: CssRect;
+    own: CssRect;
+    background: string;
+}
+
+const HEADER_SELECTOR = '[data-role="block-header"]';
+/** The header's scrolling part, which clips the tabs (blockframe.tsx). */
+const HEADER_SCROLL_SELECTOR = ".block-frame-header-scroll";
+
+/** `a` cut to what lies inside `b`; none when nothing does. */
+function within(a: CssRect, b: CssRect): CssRect | undefined {
+    const left = Math.max(a.left, b.left);
+    const top = Math.max(a.top, b.top);
+    const width = Math.min(a.left + a.width, b.left + b.width) - left;
+    const height = Math.min(a.top + a.height, b.top + b.height) - top;
+    return width > 0 && height > 0 ? { left, top, width, height } : undefined;
+}
+
+/** A colour that draws nothing: none, `transparent`, or one whose alpha is 0. */
+const drawsNothing = (colour: string): boolean => !colour || colour === "transparent" || /,\s*0\)$/.test(colour);
+
+/**
+ * The tab strip of pane `el` for a picture of tab `blockId` alone. None when the pane shows no other tab (the
+ * picture is already of the tab alone), when the tab's pill is not drawn, or when the header has no colour of
+ * its own to draw over the others with: the picture then stays as the window shows the pane.
+ */
+export function tabStripIn(el: Element, blockId: string): TabStripInPane | undefined {
+    const header = el.querySelector(HEADER_SELECTOR);
+    if (!header) return undefined;
+    const pills = Array.from(header.querySelectorAll<HTMLElement>(".pane-tab[data-tab-id]"));
+    const pill = pills.find((p) => p.dataset.tabId === blockId);
+    if (!pill || pills.length < 2) return undefined;
+    const background = getComputedStyle(header).backgroundColor;
+    if (drawsNothing(background)) return undefined;
+    const pane = el.getBoundingClientRect();
+    const strip = within((pill.closest(HEADER_SCROLL_SELECTOR) ?? header).getBoundingClientRect(), header.getBoundingClientRect());
+    const own = strip && within(pill.getBoundingClientRect(), strip);
+    if (!strip || !own) return undefined;
+    const inPane = (r: CssRect): CssRect => ({ ...r, left: r.left - pane.left, top: r.top - pane.top });
+    return { strip: inPane(strip), own: inPane(own), background };
+}
+
+/**
+ * Draw the pictured tab alone into the pane's picture: the header's colour over the strip, and the tab's own
+ * pill (from the window's picture `full`, where the pane's corner is at `crop`) at the strip's start.
+ */
+function drawTabAlone(
+    ctx: OffscreenCanvasRenderingContext2D | null | undefined,
+    full: ImageBitmap,
+    crop: { x: number; y: number },
+    solo: TabStripInPane,
+    scale: number
+): void {
+    if (!ctx) return;
+    const px = (v: number) => Math.round(v * scale);
+    const strip = { x: px(solo.strip.left), y: px(solo.strip.top), w: px(solo.strip.width), h: px(solo.strip.height) };
+    ctx.fillStyle = solo.background;
+    ctx.fillRect(strip.x, strip.y, strip.w, strip.h);
+    const [w, h] = [Math.min(px(solo.own.width), strip.w), px(solo.own.height)];
+    if (w <= 0 || h <= 0) return;
+    ctx.drawImage(full, crop.x + px(solo.own.left), crop.y + px(solo.own.top), w, h, strip.x, px(solo.own.top), w, h);
 }
 
 /**
@@ -125,19 +203,21 @@ function ownWindowLabel(): string {
 }
 
 /** The window's viewport, cropped to `rect`, as a base64 JPEG. `shot` is called once the window has been pictured. */
-async function capturePane(rect: CssRect, shot: () => void): Promise<string | null> {
+async function capturePane(rect: CssRect, shot: () => void, solo?: TabStripInPane): Promise<string | null> {
     const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
     shot();
-    return track(cropToPane(jpeg_base64, rect));
+    return track(cropToPane(jpeg_base64, rect, solo));
 }
 
-async function cropToPane(jpeg_base64: string, rect: CssRect): Promise<string | null> {
+async function cropToPane(jpeg_base64: string, rect: CssRect, solo?: TabStripInPane): Promise<string | null> {
     const full = await createImageBitmap(base64ToBlob(jpeg_base64, "image/jpeg"));
     try {
         const crop = cropRectInImage(rect, window.innerWidth, full);
         if (!crop) return null;
         const canvas = new OffscreenCanvas(crop.w, crop.h);
-        canvas.getContext("2d")?.drawImage(full, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(full, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
+        if (solo) drawTabAlone(ctx, full, crop, solo, full.width / window.innerWidth);
         return await blobToBase64(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 }));
     } finally {
         full.close();
@@ -164,7 +244,13 @@ export function pageRectInPicture(
  * picture is the page alone, as it was; without the page's (asleep, not loaded) it is the pane as the window
  * shows it. `shot` is called once the window has been pictured.
  */
-async function captureBrowserPane(blockId: string, rect: CssRect, placeholder: CssRect | null, shot: () => void): Promise<string | null> {
+async function captureBrowserPane(
+    blockId: string,
+    rect: CssRect,
+    placeholder: CssRect | null,
+    shot: () => void,
+    solo?: TabStripInPane
+): Promise<string | null> {
     const page = getApi()
         .browserPanes.screenshot(blockId, { format: "jpeg", quality: 80 })
         .then(
@@ -180,10 +266,16 @@ async function captureBrowserPane(blockId: string, rect: CssRect, placeholder: C
     shot();
     const pageShot = await page;
     if (!frame || !placeholder) return pageShot;
-    return track(composeBrowserPane(frame, rect, pageShot, placeholder));
+    return track(composeBrowserPane(frame, rect, pageShot, placeholder, solo));
 }
 
-async function composeBrowserPane(frame: string, rect: CssRect, pageShot: string | null, placeholder: CssRect): Promise<string | null> {
+async function composeBrowserPane(
+    frame: string,
+    rect: CssRect,
+    pageShot: string | null,
+    placeholder: CssRect,
+    solo?: TabStripInPane
+): Promise<string | null> {
     const full = await createImageBitmap(base64ToBlob(frame, "image/jpeg"));
     // A page's picture that does not decode leaves the pane as the window shows it.
     let page: ImageBitmap | null = null;
@@ -200,6 +292,7 @@ async function composeBrowserPane(frame: string, rect: CssRect, pageShot: string
         ctx?.drawImage(full, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
         const at = page && pageRectInPicture(placeholder, rect, full.width / window.innerWidth, { width: crop.w, height: crop.h });
         if (page && at) ctx?.drawImage(page, 0, 0, page.width, page.height, at.x, at.y, at.w, at.h);
+        if (solo) drawTabAlone(ctx, full, crop, solo, full.width / window.innerWidth);
         return await blobToBase64(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 }));
     } finally {
         full.close();
@@ -335,6 +428,7 @@ async function peekHeld(key: string, waitMs: number) {
  */
 export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y: number }): void {
     const at = Date.now();
+    if (pointer) lastPress = pointer;
     // The rect now, before the drag restyles or moves anything.
     const el = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`);
     if (!el) {
@@ -342,6 +436,7 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
         return;
     }
     const r = el.getBoundingClientRect();
+    const solo = tabStripIn(el, blockId);
     // The block's own view, not the DOM: a pane keeps its inactive tabs
     // mounted, so a background browser tab would match a DOM query.
     const isBrowser = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.view === "browser";
@@ -352,8 +447,8 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
     // The page's own placeholder: the one that is drawn (a pane keeps its other tabs' views mounted, hidden).
     const ph = isBrowser ? Array.from(el.querySelectorAll(".browser-placeholder")).find(isRendered)?.getBoundingClientRect() : undefined;
     const capture = isBrowser
-        ? captureBrowserPane(blockId, paneRect, ph ? { left: ph.left, top: ph.top, width: ph.width, height: ph.height } : null, captured)
-        : capturePane(paneRect, captured);
+        ? captureBrowserPane(blockId, paneRect, ph ? { left: ph.left, top: ph.top, width: ph.width, height: ph.height } : null, captured, solo)
+        : capturePane(paneRect, captured, solo);
     const picture = capture.then(
         (b64) => {
             captured();
@@ -370,9 +465,32 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
         blockId,
         at,
         picture,
-        grab: pointer && { x: pointer.x - r.left, y: pointer.y - r.top },
+        grab: pointer && grabIn(r, pointer, solo),
         size: { width: r.width, height: r.height },
     };
+}
+
+/**
+ * Where the pointer holds the picture of the pane at `r`. In a picture of one tab alone the tab's pill has
+ * moved to the strip's start: a pointer that pressed the pill holds it there too.
+ */
+function grabIn(r: CssRect, pointer: { x: number; y: number }, solo: TabStripInPane | undefined): { x: number; y: number } {
+    const grab = { x: pointer.x - r.left, y: pointer.y - r.top };
+    if (!solo) return grab;
+    const { own, strip } = solo;
+    const onPill = grab.x >= own.left && grab.x <= own.left + own.width && grab.y >= own.top && grab.y <= own.top + own.height;
+    return onPill ? { x: grab.x - (own.left - strip.left), y: grab.y } : grab;
+}
+
+/**
+ * The picture of tab `blockId` for the drag that is starting. The press took one of the pane as it stood then,
+ * under the tab that was in front: a tab pressed while another was in front has none of its own, so it is
+ * taken now, with the press as its grab. Where a press takes pictures (Windows).
+ */
+export function ensureTabPicture(blockId: string): void {
+    if (!isWindows()) return;
+    if (held?.blockId === blockId && Date.now() - held.at <= MAX_AGE_MS) return;
+    prewarmTearOffSnapshot(blockId, lastPress);
 }
 
 /**
@@ -387,13 +505,14 @@ export async function picturePaneNow(blockId: string): Promise<{ picture: string
     const r = el?.getBoundingClientRect();
     if (!el || !r || !(r.width > 0) || !(r.height > 0) || !isRendered(el)) return undefined;
     const isBrowser = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.view === "browser";
+    const solo = tabStripIn(el, blockId);
     const captured = beginPaneCapture();
     const paneRect = { left: r.left, top: r.top, width: r.width, height: r.height };
     const ph = isBrowser ? Array.from(el.querySelectorAll(".browser-placeholder")).find(isRendered)?.getBoundingClientRect() : undefined;
     try {
         const picture = await (isBrowser
-            ? captureBrowserPane(blockId, paneRect, ph ? { left: ph.left, top: ph.top, width: ph.width, height: ph.height } : null, captured)
-            : capturePane(paneRect, captured));
+            ? captureBrowserPane(blockId, paneRect, ph ? { left: ph.left, top: ph.top, width: ph.width, height: ph.height } : null, captured, solo)
+            : capturePane(paneRect, captured, solo));
         return picture ? { picture, size: { width: r.width, height: r.height } } : undefined;
     } catch (e) {
         Logger.debug("dnd:cross", "landing picture failed", { blockId, error: String(e) });
@@ -438,6 +557,7 @@ export function paneDragCandidate(target: EventTarget | null): string | null {
 /** Test hook. */
 export function resetTearOffSnapshotForTests(): void {
     held = null;
+    lastPress = undefined;
 }
 
 /**

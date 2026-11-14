@@ -65,7 +65,8 @@ import {
     Placeholder,
 } from "./tilelayout-shared";
 import { PillCatcher } from "./PillCatcher";
-import { TearOffPlace } from "./TearOffPlace";
+import { tabGoneFrom, tabTearOffOfferedIn } from "./tabTearOff";
+import { TabGonePlace, TearOffPlace } from "./TearOffPlace";
 import { tileItemType } from "@/app/drag/drag-types";
 
 export interface TileLayoutProps {
@@ -672,6 +673,17 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
     const { skipsLayout, tileStyle, entering } = useTileStyle(props, nodeModel);
     // The pane's own place until the layout first shows a drop or the tear-off: a release tears it off.
     const tearOffOffered = () => isDragging() && !paneCaptureInFlight() && props.layoutModel.tearOffOffered();
+    // One of the pane's tabs dragged out of it (tabTearOff.ts): its place under the header offers the
+    // tear-off, then shows that the tab has left. Not while the tab's picture is still being taken.
+    const tabTearOffOffered = () => !paneCaptureInFlight() && tabTearOffOfferedIn(props.layoutModel, props.node.id);
+    const tabGone = () => !paneCaptureInFlight() && tabGoneFrom(props.layoutModel, props.node.id) !== undefined;
+    // Where the pane's body starts under its header, from the tile's top.
+    const bodyTop = createMemo(() => {
+        if (!tabTearOffOffered() && !tabGone()) return 0;
+        const header = tileNodeRef?.querySelector('[data-role="block-header"]');
+        if (!tileNodeRef || !header) return 0;
+        return Math.max(0, header.getBoundingClientRect().bottom - tileNodeRef.getBoundingClientRect().top);
+    });
 
     return (
         <div
@@ -679,6 +691,7 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
                 // Not while the pane's picture is still being taken: the picture would show the blur.
                 dragging: isDragging() && !paneCaptureInFlight(),
                 "tear-off-offered": tearOffOffered(),
+                "tab-tear-off-offered": tabTearOffOffered(),
                 "tile-hidden": magnifyActive(),
                 "tile-minimized": nodeModel.isMinimized(),
                 // On its way to its chip: its content stays drawn under the closing clip until the glide ends.
@@ -699,6 +712,12 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
             {leafContent()}
             <Show when={tearOffOffered()}>
                 <TearOffPlace />
+            </Show>
+            <Show when={tabTearOffOffered()}>
+                <TearOffPlace top={bodyTop()} />
+            </Show>
+            <Show when={tabGone()}>
+                <TabGonePlace top={bodyTop()} />
             </Show>
             {previewElement()}
         </div>
