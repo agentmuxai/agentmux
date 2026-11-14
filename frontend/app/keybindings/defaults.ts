@@ -132,6 +132,7 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     // ── Editor ──
     { command: "editor:save", label: "Save", category: "Editor", pane: "editor", mac: ["meta+s"], other: ["ctrl+s"] },
     { command: "editor:saveAs", label: "Save as (scratch documents)", category: "Editor", pane: "editor", mac: ["meta+shift+s"], other: ["ctrl+shift+s"] },
+    { command: "editor:renameFile", label: "Rename file (an untitled document is saved under the name)", category: "Editor", pane: "editor", mac: ["F2"], other: ["F2"] },
     { command: "editor:find", label: "Find and replace", category: "Editor", pane: "editor", mac: ["meta+f"], other: ["ctrl+f"] },
     { command: "editor:togglePreview", label: "Toggle markdown preview", category: "Editor", pane: "editor", mac: ["meta+shift+v"], other: ["ctrl+shift+v"] },
     // VS Code's "focus the Explorer" key (SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §5.4).

@@ -97,6 +97,7 @@ const REASON_TEXT: Record<string, string> = {
     expired: "agent didn't come back in time",
     overlap: "previous run still going",
     group_busy: "waiting for its group",
+    delay_wait: "waiting out its delay",
     job_cap: "job's daily cap reached",
     account_cap: "account's daily cap reached",
     message_cap: "daily message limit reached",

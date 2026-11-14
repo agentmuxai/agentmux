@@ -6,11 +6,13 @@ subscribe agents:changed
 <div class="kanban-container">
 <div class="warden-manager-body kanban">
 <div class="kanban-toolbar">
+<div class="kanban-toolbar__find">
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
 <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
 </span>
+</div>
 <label class="kanban-toolbar__switch" data-hover-tip="One row of columns per repository" aria-description="One row of columns per repository">
 <button type="button" role="switch" class="ui-switch ui-density-compact" aria-checked="false" aria-label="Lanes by repository">
 <span class="ui-switch-thumb">
@@ -44,11 +46,13 @@ board#1 mounted
 <div class="kanban-container">
 <div class="warden-manager-body kanban">
 <div class="kanban-toolbar">
+<div class="kanban-toolbar__find">
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
 <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
 </span>
+</div>
 <select class="ui-input ui-density-compact" aria-label="Repository">
 <option value="">All repositories</option>
 <option value="a5af/other">a5af/other</option>

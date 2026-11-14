@@ -179,9 +179,6 @@ pub struct RunLedger {
     /// job id. A pending row doesn't occupy a place in the ledger, so until the
     /// delivery lands these count as running.
     pending_claims: std::sync::Mutex<std::collections::HashMap<String, String>>,
-    /// What an event's run reads as `{{trigger.*}}`, held from the fire until the run starts: run id to input
-    /// (`admission/events.rs`). Never written to the ledger.
-    event_inputs: std::sync::Mutex<std::collections::VecDeque<(String, serde_json::Value)>>,
     interrupt: std::sync::OnceLock<BlockHook>,
     worker_stop: std::sync::OnceLock<BlockHook>,
     /// How to ask another channel's instance to stop a run it follows (`remote.rs`).
@@ -221,7 +218,6 @@ impl RunLedger {
             jobs: std::sync::OnceLock::new(),
             admission: std::sync::Mutex::new(()),
             pending_claims: std::sync::Mutex::default(),
-            event_inputs: std::sync::Mutex::default(),
             interrupt: std::sync::OnceLock::new(),
             worker_stop: std::sync::OnceLock::new(),
             remote_stop: std::sync::OnceLock::new(),

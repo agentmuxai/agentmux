@@ -6534,25 +6534,6 @@
     }
   },
   {
-    "command": "renameeditorfile",
-    "request": "agentmux_srv::backend::rpc_types::editor::RenameEditorFileReq",
-    "requestName": "RenameEditorFileReq",
-    "requestTs": {
-      "imports": [
-        "RenameEditorFileReq"
-      ],
-      "name": "RenameEditorFileReq"
-    },
-    "response": "agentmux_srv::backend::rpc_types::editor::RenameEditorFileResult",
-    "responseName": "RenameEditorFileResult",
-    "responseTs": {
-      "imports": [
-        "RenameEditorFileResult"
-      ],
-      "name": "RenameEditorFileResult"
-    }
-  },
-  {
     "command": "reorderglobalbrain",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandReorderGlobalBundlesData",
     "requestName": "CommandReorderGlobalBundlesData",

@@ -6,10 +6,11 @@
 //! into nothing. It sits beside the run ledger, in the identity store every channel and version on this computer
 //! shares, so two instances sharing a job don't both start a run for one event.
 //!
-//! Only the id is kept, never the event's data. A job forgets an id after [`KEEP_MS`]: a source that repeats an id
-//! after that is a new event.
+//! The id table keeps only the id. The event's data is kept apart, per run, in `db_job_event_inputs`, for as long as
+//! the run may still need it: while it waits out a delay or its turn, and across a retry. The run's end (or [`KEEP_MS`])
+//! lets it go. A job forgets an id after [`KEEP_MS`]: a source that repeats an id after that is a new event.
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::store::Store;
 use super::StoreError;
@@ -23,10 +24,20 @@ pub(crate) const SCHEMA: &str = "
         at_ms     INTEGER NOT NULL,
         PRIMARY KEY (job_id, event_id)
     );
-    CREATE INDEX IF NOT EXISTS idx_ids_job_trigger_events_at ON db_job_trigger_events(at_ms);";
+    CREATE INDEX IF NOT EXISTS idx_ids_job_trigger_events_at ON db_job_trigger_events(at_ms);
+    CREATE TABLE IF NOT EXISTS db_job_event_inputs (
+        run_id  TEXT PRIMARY KEY,
+        job_id  TEXT NOT NULL,
+        input   TEXT NOT NULL,
+        at_ms   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ids_job_event_inputs_at ON db_job_event_inputs(at_ms);";
 
 /// How long a job remembers an event id.
 pub const KEEP_MS: i64 = 7 * 24 * 3600 * 1000;
+/// How long a run's input is kept, from the event: a run may be held back by a delay of up to a week and then wait
+/// further for its turn, so its input outlives the id by that week.
+pub const INPUT_KEEP_MS: i64 = 2 * KEEP_MS;
 
 impl Store {
     /// Record that `job_id` heard of `event_id` now, for run `run_id`. `Ok(true)` the first time, `Ok(false)` when it
@@ -44,6 +55,45 @@ impl Store {
     pub fn job_events_forget_before(&self, before_ms: i64) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
         Ok(conn.execute("DELETE FROM db_job_trigger_events WHERE at_ms < ?1", params![before_ms])?)
+    }
+
+    /// Let go of the inputs kept before `before_ms` (event time). How many went. A run still waiting that long after
+    /// its event has lost its input, and says so when it starts.
+    pub fn job_event_inputs_forget_before(&self, before_ms: i64) -> Result<usize, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn.execute("DELETE FROM db_job_event_inputs WHERE at_ms < ?1", params![before_ms])?)
+    }
+
+    /// Keep `input` (what the graph reads as `{{trigger.*}}`) for run `run_id`.
+    pub fn job_event_input_put(&self, run_id: &str, job_id: &str, input: &serde_json::Value, now_ms: i64) -> Result<(), StoreError> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO db_job_event_inputs (run_id, job_id, input, at_ms) VALUES (?1, ?2, ?3, ?4)",
+            params![run_id, job_id, input.to_string(), now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// The input kept for run `run_id`, if any.
+    pub fn job_event_input_get(&self, run_id: &str) -> Result<Option<serde_json::Value>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let text: Option<String> =
+            conn.query_row("SELECT input FROM db_job_event_inputs WHERE run_id = ?1", params![run_id], |r| r.get(0)).optional()?;
+        Ok(text.and_then(|t| serde_json::from_str(&t).ok()))
+    }
+
+    /// Let go of the input of run `run_id`.
+    pub fn job_event_input_drop(&self, run_id: &str) -> Result<(), StoreError> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute("DELETE FROM db_job_event_inputs WHERE run_id = ?1", params![run_id])?;
+        Ok(())
+    }
+
+    /// Hand the input of run `from` to run `to` (a retry takes over the event of the attempt before it).
+    pub fn job_event_input_carry(&self, from: &str, to: &str) -> Result<(), StoreError> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute("UPDATE db_job_event_inputs SET run_id = ?2 WHERE run_id = ?1", params![from, to])?;
+        Ok(())
     }
 
     /// How many events `job_id` has heard of since `since_ms`.
@@ -82,5 +132,27 @@ mod tests {
         assert_eq!(s.job_events_forget_before(250).unwrap(), 2);
         assert_eq!(s.job_events_since("job-a", 0).unwrap(), 1);
         assert!(s.job_event_claim("job-a", "e0", "r", 400).unwrap(), "a forgotten id is a new event");
+    }
+
+    #[test]
+    fn an_input_is_kept_per_run_carried_dropped_and_forgotten_with_age() {
+        let s = store();
+        let input = serde_json::json!({ "outcome": "failed", "n": 3 });
+        s.job_event_input_put("run-1", "job-a", &input, 100).unwrap();
+        assert_eq!(s.job_event_input_get("run-1").unwrap(), Some(input.clone()));
+        assert_eq!(s.job_event_input_get("run-2").unwrap(), None);
+
+        s.job_event_input_carry("run-1", "run-2").unwrap();
+        assert_eq!((s.job_event_input_get("run-1").unwrap(), s.job_event_input_get("run-2").unwrap()), (None, Some(input)));
+
+        s.job_event_input_drop("run-2").unwrap();
+        assert_eq!(s.job_event_input_get("run-2").unwrap(), None);
+
+        s.job_event_input_put("old", "job-a", &serde_json::json!({}), 100).unwrap();
+        s.job_event_input_put("new", "job-a", &serde_json::json!({}), 900).unwrap();
+        s.job_events_forget_before(500).unwrap();
+        assert_eq!(s.job_event_input_get("old").unwrap().is_some(), true, "forgetting ids does not take an input a run may still need");
+        s.job_event_inputs_forget_before(500).unwrap();
+        assert_eq!((s.job_event_input_get("old").unwrap(), s.job_event_input_get("new").unwrap().is_some()), (None, true));
     }
 }
