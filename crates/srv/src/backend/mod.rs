@@ -51,6 +51,7 @@ pub mod bundle_import_skill_text;
 pub mod bundle_use;
 pub mod bundle_widgets;
 pub mod bundle_validate;
+pub mod background_task_exit;
 pub mod background_task_feed;
 pub mod background_task_sweep;
 pub mod desktop_gate;
