@@ -34,7 +34,8 @@ jobs:
   package:
     name: Server package (${{ matrix.os }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 75
+    # The macOS legs link the release profile (full LTO, one codegen unit) on a small runner: 66 minutes cold, so 75 was too tight.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
