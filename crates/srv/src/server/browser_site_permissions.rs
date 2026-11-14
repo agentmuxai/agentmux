@@ -9,7 +9,8 @@
 //! grant (`browser_standing`): those lift the wait for committing clicks, and a camera must not bring that
 //! along, so these rows are a list of their own.
 //!
-//! Only the person writes rows, from the Settings window (`app_api/browser_grants.rs` checks that). With
+//! Only the person writes rows: from the Settings window (`app_api/browser_grants.rs` checks that), or by
+//! answering "Always" on an agent's account prompt (`add_kind`). With
 //! a row, `browser_permission` allows the page's request at once, with no countdown, and writes one Audit
 //! row flagged `standing` for the first use in a pane.
 
@@ -27,8 +28,13 @@ const FILE_NAME: &str = "browser-site-permissions.json";
 /// Most rows kept: a list this long is a mistake, not a use.
 const MAX_ROWS: usize = 200;
 
-/// What a row can carry, in the words `browser_permission` names them.
-pub(crate) const KINDS: [&str; 4] = ["camera", "microphone", "location", "notifications"];
+/// What a row can carry: what a page may use (the words `browser_permission` names them in), and
+/// `accounts`, which is not the page's: the agent may make an account on the site with a password
+/// the Vault makes (`browser_account`), the person's "Always for this agent on this site".
+pub(crate) const KINDS: [&str; 5] = ["camera", "microphone", "location", "notifications", ACCOUNTS];
+
+/// The kind of "may make an account here".
+pub(crate) const ACCOUNTS: &str = "accounts";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Row {
@@ -72,9 +78,12 @@ impl Store {
 
 fn store() -> std::sync::MutexGuard<'static, Store> {
     static S: OnceLock<Mutex<Store>> = OnceLock::new();
-    S.get_or_init(|| Mutex::new(Store::open(crate::backend::base::get_mux_config_dir().join(FILE_NAME))))
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
+    // Tests that go through here keep the rows in memory, never in the real config folder.
+    #[cfg(test)]
+    let open = || Store { path: None, rows: Vec::new() };
+    #[cfg(not(test))]
+    let open = || Store::open(crate::backend::base::get_mux_config_dir().join(FILE_NAME));
+    S.get_or_init(|| Mutex::new(open())).lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// `kinds` checked: at least one, each a known kind, listed once in the fixed order.
@@ -147,6 +156,21 @@ pub(crate) fn upsert(state: &AppState, agent: &str, site: &str, kinds: &[String]
     Ok(row)
 }
 
+/// The person's "Always" on an agent's account prompt: `kind` is added to the row for `agent` on `site`
+/// (made if there is none), keeping what the row already carries. The person answered in the Vault's own
+/// prompt, a window no agent's click reaches, so this is their write as much as one from Settings.
+pub(crate) fn add_kind(state: &AppState, agent: &str, site: &str, kind: &str) -> Result<Row, String> {
+    let site = parse_site(site)?;
+    let mut kinds: Vec<String> = list().into_iter().find(|r| r.agent.eq_ignore_ascii_case(agent.trim()) && r.site == site).map(|r| r.kinds).unwrap_or_default();
+    kinds.push(kind.to_string());
+    upsert(state, agent, &site, &kinds)
+}
+
+/// Whether the person has let `agent` make accounts on `site` (the origin the host found the sign-up form on).
+pub(crate) fn may_make_accounts(agent: &str, site: &str) -> bool {
+    parse_site(site).is_ok_and(|site| allowed(agent, &site, &[ACCOUNTS]))
+}
+
 /// Remove row `id`. Returns whether it was there; an error when the file could not be written, in which
 /// case the row stays (it would be back after a restart anyway). The next request from the page asks again.
 pub(crate) fn revoke(state: &AppState, id: &str) -> Result<bool, String> {
@@ -202,6 +226,33 @@ mod tests {
         assert!(covering(&rows, "lazo", "https://meet.example.com", &["camera"]).is_none(), "another agent");
         assert!(covering(&rows, "posa", "https://other.example.com", &["camera"]).is_none(), "another site");
         assert!(covering(&rows, "posa", "https://meet.example.com:8443", &["camera"]).is_none(), "another port is another site");
+    }
+
+    #[test]
+    fn accounts_is_a_kind_listed_last_and_never_stands_in_for_a_page_permission() {
+        let mut rows = Vec::new();
+        upsert_in(&mut rows, "posa", "https://meet.example.com", &kinds(&["accounts", "camera"]), 1).unwrap();
+        assert_eq!(rows[0].kinds, ["camera", "accounts"]);
+        let only = {
+            let mut r = Vec::new();
+            upsert_in(&mut r, "posa", "https://shop.example.com", &kinds(&["accounts"]), 1).unwrap();
+            r
+        };
+        assert!(covering(&only, "posa", "https://shop.example.com", &[ACCOUNTS]).is_some());
+        assert!(covering(&only, "posa", "https://shop.example.com", &["camera"]).is_none(), "an account grant brings no camera");
+    }
+
+    #[tokio::test]
+    async fn adding_accounts_keeps_the_page_permissions_the_row_already_had() {
+        let state = crate::server::tests::test_state();
+        let (agent, site) = (format!("kept-{}", uuid::Uuid::new_v4().simple()), "https://keep.example.com");
+        upsert(&state, &agent, site, &kinds(&["camera"])).unwrap();
+        let row = add_kind(&state, &agent, site, ACCOUNTS).unwrap();
+        assert_eq!(row.kinds, ["camera", "accounts"]);
+        assert_eq!(list().iter().filter(|r| r.agent == agent).count(), 1, "one row, not two");
+        assert!(may_make_accounts(&agent, "https://keep.example.com"));
+        assert!(!may_make_accounts(&agent, "https://keep.example.com:8443"), "another port is another site");
+        assert!(!may_make_accounts(&agent, "not a site"));
     }
 
     #[test]

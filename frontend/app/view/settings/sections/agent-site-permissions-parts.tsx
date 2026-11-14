@@ -133,6 +133,11 @@ export function PermissionsBody(props: { s: AgentSiteGrantsState; d: Grants }): 
                 countdown each time, until you revoke it. Each is a row of its own: it does not let the agent make committing clicks. Every
                 first use in a pane is in the Audit view. Without a row, the page's request is held and filed for you to veto.
             </div>
+            <div class="setting-devices-description">
+                Make accounts lets the agent create an account on the site with a password the Vault makes, without asking each time. The
+                ten-second countdown with Stop still shows, every account is in the Vault's Activity, and you set it by answering Always
+                when the agent asks.
+            </div>
             <Show
                 when={props.d().permissions.length > 0}
                 fallback={<div class="setting-devices-empty">No site has a standing page permission. Each request is asked in the pane.</div>}
