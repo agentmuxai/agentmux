@@ -208,7 +208,7 @@ mod tests {
     async fn a_card_changed_while_the_person_decides_is_not_filled() {
         use super::super::{create, update, EntryChange, NewEntry};
         seal::use_test_key();
-        let store = crate::server::tests::test_state().identity_store.clone();
+        let store = crate::test_support::core_parts().mstore;
         let parts = |n: &str| seal::Parts([("number".to_string(), n.to_string()), ("exp_month".to_string(), "03".to_string()), ("exp_year".to_string(), "2099".to_string())].into());
         let id = create(&store, NewEntry { kind: "card".into(), label: "Probe".into(), fields: Default::default(), tags: vec![], parts: parts("4111111111111111") }).unwrap();
         let Asked::One(asked) = card_asked(&store, &id, None).unwrap() else { panic!("a card") };
@@ -234,7 +234,7 @@ mod tests {
     async fn card_names_the_default_or_asks_the_person_to_pick_and_lists_the_default_first() {
         use super::super::{create, NewEntry};
         seal::use_test_key();
-        let store = crate::server::tests::test_state().identity_store.clone();
+        let store = crate::test_support::core_parts().mstore;
         assert!(matches!(card_asked(&store, "card", None), Err(e) if e.contains("no card saved")));
         let make = |label: &str, number: &str, default: bool| {
             let fields = if default { [("default".to_string(), "yes".to_string())].into() } else { Default::default() };
@@ -259,7 +259,7 @@ mod tests {
     async fn a_card_that_does_not_open_is_left_out_of_the_choices_and_stops_nothing() {
         use super::super::{create, NewEntry};
         seal::use_test_key();
-        let store = crate::server::tests::test_state().identity_store.clone();
+        let store = crate::test_support::core_parts().mstore;
         let make = |label: &str, number: &str| {
             let parts = seal::Parts([("number", number), ("exp_month", "03"), ("exp_year", "2099")].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
             create(&store, NewEntry { kind: "card".into(), label: label.into(), fields: Default::default(), tags: vec![], parts }).unwrap()
