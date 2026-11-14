@@ -244,12 +244,18 @@ const COMMIT_INFO: &str = concat!(
   }
   // A link fetches unless its name says it commits; a download or a file:
   // link never does (scripts/click_label.js).
+  // A link the page gives a button's role (<a role="button">) acts as a button: its name is judged as a button's.
+  const roleOf = String(this.getAttribute("role") || (this.closest && this.closest("[role=button]") ? "button" : "")).toLowerCase();
+  const buttonLike = ["button", "menuitem", "switch", "checkbox", "radio", "tab"].includes(roleOf);
   const { name, description, committing, why, unreadable } = clickLabel(this.getAttribute("aria-label"), labelledBy, this.innerText || this.value || "", {
     submits,
-    link: !!link,
+    link: !!link && !buttonLike,
     download: !!link && link.hasAttribute("download"),
     fileHref: /^file:/i.test(action),
   }, axName);
+  const fieldChanged = "#,
+    include_str!("scripts/field_changed.js"),
+    r#";
   const fields = [];
   const secret = el => {
     const ty = (el.type || "").toLowerCase();
@@ -299,7 +305,9 @@ const COMMIT_INFO: &str = concat!(
         labelText = c.textContent.replace(/\s+/g, " ").trim();
       }
       const label = labelText || el.getAttribute("aria-label") || el.name || el.id || ty;
-      fields.push([String(label).replace(/\s+/g, " ").slice(0, 80), String(v).slice(0, 200)]);
+      // Whether the value differs from what the page loaded with: the person is shown which fields were
+      // filled and which were already there (a form posts them all).
+      fields.push([String(label).replace(/\s+/g, " ").slice(0, 80), String(v).slice(0, 200), fieldChanged(el, ty)]);
       if (fields.length >= 40) break;
     }
   }

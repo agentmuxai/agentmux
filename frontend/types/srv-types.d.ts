@@ -568,8 +568,9 @@ declare global {
         page?: string;
         /** Approval: where the form is sent. */
         action?: string;
-        /** Approval: the form's values, secrets masked. */
-        fields?: [string, string][];
+        /** Approval: the form's values, secrets masked. The third is false for a value the page already
+         *  had (the agent changed nothing there). */
+        fields?: [string, string, boolean?][];
         /** When the request is about one of this pane's popup windows: its address. */
         window?: string | null;
         /** Navigation: where the page tried to go, and that address's site. */

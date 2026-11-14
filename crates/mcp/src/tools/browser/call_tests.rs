@@ -330,3 +330,13 @@ fn a_grant_with_enter_and_space_says_they_are_clicks_and_one_without_says_refuse
     let without = json!({ "origins": ["https://a.example"], "minutes_left": 55, "powers": ["clicks"], "always": false });
     assert!(granted_text(&without).contains("eval and Enter/Space stay refused"));
 }
+
+#[test]
+fn an_answer_says_when_a_longer_grant_was_cut_to_the_minutes_asked_for() {
+    let cut = json!({ "origins": ["https://a.example"], "minutes": 15, "minutes_left": 15, "powers": ["clicks"], "always": false, "cut_from": 58 });
+    let said = granted_text(&cut);
+    assert!(said.starts_with("Auto-approve on for 15 more min"), "{said}");
+    assert!(said.contains("already on this pane with 58 more min; it was cut to the 15 you asked for"), "{said}");
+    let plain = json!({ "origins": ["https://a.example"], "minutes": 60, "minutes_left": 59, "powers": ["clicks"], "always": false, "cut_from": null });
+    assert!(!granted_text(&plain).contains("was cut"));
+}

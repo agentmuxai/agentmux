@@ -379,6 +379,15 @@ $browser-nav-stack-below: 388px;
             color: var(--secondary-text-color);
             white-space: nowrap;
         }
+
+        // A value the page already had: shown, but quieter than what the agent changed.
+        .browser-attention-field-kept {
+            color: var(--secondary-text-color);
+        }
+
+        .browser-attention-field-note {
+            font-style: italic;
+        }
     }
 
     .browser-attention-target {

@@ -68,7 +68,10 @@ function clickLabel(ariaLabel, labelledBy, text, el, axName) {
     const m = re.exec(s);
     return m ? m[1] : "";
   };
-  const anywhere = new RegExp("\\b(" + VERBS + ")\\b", "i");
+  // A name that saves or changes a setting commits too ("Save", "Update", "Enable"). These words are for names
+  // only: in a sentence ("Terms apply", "Updated 3 days ago") they say nothing of this click.
+  const NAME_VERBS = VERBS + "|save|update|apply|approve|authorize|enable|disable|revoke|reset|upgrade|downgrade";
+  const anywhere = new RegExp("\\b(" + NAME_VERBS + ")\\b", "i");
   let committing = false;
   let why = "";
   if (e.submits) {
@@ -77,7 +80,7 @@ function clickLabel(ariaLabel, labelledBy, text, el, axName) {
   } else if (e.link) {
     if (!e.download && !e.fileHref) {
       const short = fullName.split(" ").filter(Boolean).length <= LINK_WORDS;
-      const word = found(clean(plain(fullName)), new RegExp("^(" + VERBS + ")\\b", "i")) || (short ? found(plain(fullName), anywhere) : "");
+      const word = found(clean(plain(fullName)), new RegExp("^(" + NAME_VERBS + ")\\b", "i")) || (short ? found(plain(fullName), anywhere) : "");
       if (word) {
         committing = true;
         why = "its name says \"" + word + "\"";
