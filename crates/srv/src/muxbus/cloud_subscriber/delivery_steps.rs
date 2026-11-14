@@ -334,7 +334,7 @@ pub(super) fn request(inj: &PendingInj, target: &str, checked: &Checked, mstore:
     // WAN-delivered `transcript_request` would silently skip both the
     // forced-TIER=sensitive rule and the escalate-forcing rule
     // entirely, not just get a weaker version of them.
-    crate::server::reactive::resolve_transcript_request_tier_fields(mstore, &mut req);
+    crate::muxbus::server_hooks::hooks().resolve_transcript_request_tier_fields(mstore, &mut req);
     // Marked only after the verdicts and the transcript-request fields have read the message as sent.
     let created_ms = inj.created_at.as_deref().and_then(delivery_status::notes::parse_created_at);
     let late = delivery_status::notes::delayed_prefix(created_ms, now_ms());
@@ -358,13 +358,13 @@ pub(super) async fn attach_files(
     // can't be reached gives the claim back, for a retry with its files.
     if let Some(files) = inj.files.clone() {
         if let Err(e) =
-            crate::server::jekt_cloud::fetch(base, http, agent_token, agent_id, req, files, inj.wan_msg_id.as_deref()).await
+            crate::muxbus::server_hooks::hooks().fetch_files(base, http, agent_token, agent_id, req, files, inj.wan_msg_id.as_deref()).await
         {
             tracing::warn!(injection_id = %inj.id, error = %e, "cloud_subscriber: files not fetched; releasing for a retry");
             release(base, http, agent_token, agent_id, &inj.id, delivered_at).await;
             return Err(GivenBack);
         }
-        crate::server::jekt_files::prepare(req).await;
+        crate::muxbus::server_hooks::hooks().prepare_files(req).await;
     }
     Ok(())
 }
