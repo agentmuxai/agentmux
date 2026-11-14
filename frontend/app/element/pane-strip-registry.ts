@@ -23,6 +23,11 @@ export const PANE_ROOT_SELECTOR = '[data-role="pane"]';
 
 const registries = new WeakMap<Element, Set<PaneStripHandle>>();
 
+/** A pane takes the focus from a press in it: a focus this soon after an interaction is that interaction's. */
+const FOCUS_FOLLOWS_INTERACTION_MS = 500;
+
+const lastInteraction = new WeakMap<Element, { origin: Node; at: number }>();
+
 /** Registers `handle` with the pane around `strip`. Returns the unregister; a no-op for a strip outside any pane. */
 export function registerPaneStrip(strip: Element, handle: PaneStripHandle): () => void {
     const root = strip.closest(PANE_ROOT_SELECTOR);
@@ -35,10 +40,18 @@ export function registerPaneStrip(strip: Element, handle: PaneStripHandle): () =
     };
 }
 
-/** Asks every strip of the pane to reveal, except those holding `origin`. */
+/**
+ * Asks every strip of the pane to reveal, except those holding `origin`. A focus with no origin of its own takes
+ * the origin of the interaction it follows, so a press on a strip's own box that focuses the pane does not
+ * scroll that box from under the pointer.
+ */
 export function revealPaneStrips(root: Element, reason: StripRevealReason, origin: Node | null = null): void {
     const set = registries.get(root);
     if (!set) return;
+    if (!origin && reason === "focus") {
+        const last = lastInteraction.get(root);
+        if (last && performance.now() - last.at < FOCUS_FOLLOWS_INTERACTION_MS) origin = last.origin;
+    }
     for (const handle of set) if (!origin || !handle.contains(origin)) handle.revealSelected(reason);
 }
 
@@ -54,7 +67,9 @@ const INTERACTIONS = ["pointerdown", "keydown", "beforeinput", "input", "paste",
 export function installPaneInteractionReveal(root: HTMLElement): () => void {
     const onEvent = (e: Event) => {
         if (e.type === "keydown" && MODIFIER_KEYS.has((e as KeyboardEvent).key)) return;
-        revealPaneStrips(root, "interaction", e.target instanceof Node ? e.target : null);
+        const origin = e.target instanceof Node ? e.target : null;
+        if (origin) lastInteraction.set(root, { origin, at: performance.now() });
+        revealPaneStrips(root, "interaction", origin);
     };
     for (const type of INTERACTIONS) root.addEventListener(type, onEvent, { capture: true, passive: true });
     return () => {

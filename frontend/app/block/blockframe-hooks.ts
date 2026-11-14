@@ -6,8 +6,6 @@
 import { createEffect, onCleanup, onMount, type Accessor } from "solid-js";
 import { openMenuAt } from "@/app/element/ui";
 import { useWidthFit } from "@/app/element/width-fit";
-import { createScrollEdges } from "@/app/element/scroll-edges";
-import { stripWheelDelta } from "@/app/element/strip-wheel";
 import { getBlockComponentModel } from "@/app/store/block-component-registry";
 import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -179,76 +177,4 @@ export function useBodyContextMenu(opts: {
         });
     });
     return onBodyContextMenu;
-}
-
-/** The header's one horizontal scroll range (#29325): its element, its edge fades, and the wheel
- *  that scrolls it sideways over the whole header row. A horizontal gesture is the range's own
- *  (its overflow is native); a vertical one over the row must not scroll the page under it.
- *  Called once, in the header's own component. */
-export function useHeaderScrollRange(header: () => HTMLElement | undefined): {
-    setRange: (el: HTMLDivElement) => void;
-    moreLeft: Accessor<boolean>;
-    moreRight: Accessor<boolean>;
-} {
-    let range: HTMLDivElement | undefined;
-    const edges = createScrollEdges(() => range);
-    onMount(() => {
-        const el = header();
-        if (!el) return;
-        // A real listener, not Solid's onWheel: the delegated one is passive, so preventDefault() would be a no-op.
-        const onWheel = (e: WheelEvent) => {
-            if (!range || range.scrollWidth <= range.clientWidth) return;
-            if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
-            e.preventDefault();
-            range.scrollLeft += stripWheelDelta(e.deltaY, e.deltaMode);
-        };
-        el.addEventListener("wheel", onWheel, { passive: false });
-        onCleanup(() => el.removeEventListener("wheel", onWheel));
-    });
-    // The strip no longer scrolls itself inside the range, so its own reveal cannot bring a
-    // newly selected pill into view: do it here, and only when the SELECTED pill changes — a
-    // pill's attention, drag or drop class, or a badge mounting beside it, must never pull a
-    // range the person scrolled away from back to the tabs.
-    onMount(() => {
-        let frame = 0;
-        let shown: HTMLElement | null = null;
-        const activePill = (): HTMLElement | null =>
-            // The active tab wins over a multi-selected one that happens to come first in the DOM.
-            (range?.querySelector<HTMLElement>(".pane-tab--active") ?? range?.querySelector<HTMLElement>(".pane-tab--selected")) || null;
-        const reveal = () => {
-            const active = activePill();
-            if (!active) return;
-            shown = active;
-            active.scrollIntoView({ block: "nearest", inline: "nearest" });
-        };
-        const revealIfSelectionChanged = () => {
-            if (activePill() && activePill() !== shown) reveal();
-        };
-        const schedule = (fn: () => void) => {
-            if (frame) return;
-            frame = requestAnimationFrame(() => {
-                frame = 0;
-                fn();
-            });
-        };
-        const observer = new MutationObserver(() => schedule(revealIfSelectionChanged));
-        // A narrowed pane hides its active tab where main's strip scrolled it into view.
-        const resize = new ResizeObserver(() => schedule(reveal));
-        if (range) {
-            observer.observe(range, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
-            resize.observe(range);
-            // A header that mounts with its selected tab already past the edge gets no mutation to wake it.
-            schedule(reveal);
-        }
-        onCleanup(() => {
-            observer.disconnect();
-            resize.disconnect();
-            if (frame) cancelAnimationFrame(frame);
-        });
-    });
-    return {
-        setRange: (el) => (range = el),
-        moreLeft: edges.moreLeft,
-        moreRight: edges.moreRight,
-    };
 }
