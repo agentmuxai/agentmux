@@ -3,25 +3,16 @@
 
 /**
  * Type definitions for the agent-pane-state reducer (slice #4 in
- * docs/specs/frontend-reducer-architecture-2026-05-03.md).
+ * docs/specs/frontend-reducer-architecture-2026-05-03.md): the per-pane atoms with cohesive
+ * cross-atom invariants (streaming, sessionStats, currentTool, turnTokens, pendingMessages) plus
+ * the init phase, turn phase and stream-watchdog fields (#728).
  *
- * Bundles the per-pane atoms that have cohesive cross-atom invariants:
- *   streaming, sessionStats, currentTool, turnTokens, pendingMessages,
- *   plus init phase, turn phase, and stream-watchdog fields added in
- *   issue #728.
+ * The legacy `turnActive`/`stopping`/`streaming.active` booleans are gone: views read
+ * `isWorking(state)` / `state.turnPhase.kind` / `isDisconnected(state)`, and the reducer's "is the
+ * stream subscribed?" gate is `state.lastEventMs !== null`.
  *
- * PR G (turn-phase cleanup): the legacy `turnActive` / `stopping`
- * booleans and `streaming.active` boolean were dropped — every view
- * now reads `isWorking(state)` / `state.turnPhase.kind` /
- * `isDisconnected(state)` instead. The reducer-internal "is the
- * stream subscribed?" gate (previously `state.streaming.active`)
- * now uses `state.lastEventMs !== null` — both moved in lockstep
- * already (only `StreamSubscribe` / `StreamUnsubscribe` ever set
- * them), so the substitution is mechanical.
- *
- * The agent document (message list) lives in its own slice
- * (`agent-document/`); reducer scope is intentionally separate per the
- * conventions doc §11 ("no god-reducer").
+ * The agent document (message list) is its own slice (`agent-document/`): no god-reducer
+ * (conventions doc §11).
  */
 
 import type { PendingMessage } from "../../agent-model/state";
@@ -79,18 +70,11 @@ import type {
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 /**
- * Init lifecycle — covers the "history still loading" gap (issue #728 gap 1).
- *
- * Discriminated union. The pane starts in `InitPending`; the history
- * load resolves into either `InitReady` (success) or `InitFailed`
- * (error, with diagnostic reason). Transitions are one-way: once a
- * pane has reached a terminal state (`InitReady` / `InitFailed`),
- * `InitStart` is a no-op. Re-mount creates a new pane slot whose state
- * resets to `InitPending`.
- *
- * Each terminal variant carries the wall-clock ms it was entered. The
- * timestamp is intentionally part of the variant payload (not a
- * separate field) so a transition is one atomic write.
+ * Init lifecycle, the "history still loading" gap (#728 gap 1). The pane starts in `InitPending`;
+ * the history load resolves to `InitReady` or `InitFailed` (with a diagnostic reason). One-way:
+ * once terminal, `InitStart` is a no-op, and a re-mount makes a new pane slot back at
+ * `InitPending`. A terminal variant carries the ms it was entered in its payload, so a transition
+ * is one atomic write.
  */
 export type InitPhase =
     | { kind: "InitPending" }
@@ -101,11 +85,9 @@ export type InitPhase =
     | { kind: "InitReady"; at: number; historyDamaged?: true }
     | { kind: "InitFailed"; at: number; reason: string };
 
-// TurnPhase discriminated union — single source of truth for the turn
-// lifecycle (since PR G).
-//
-// SPEC: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5.
-// Consumers project via `isWorking` / `isDisconnected` / `state.turnPhase.kind`.
+// TurnPhase: the single source of truth for the turn lifecycle
+// (docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5). Consumers project via `isWorking` /
+// `isDisconnected` / `state.turnPhase.kind`.
 
 /** Why the turn entered Interrupting. */
 export type InterruptReason =
@@ -132,27 +114,18 @@ export type KindBeforeDisconnect =
     | "Interrupting";
 
 /**
- * Why the stream dropped while a turn was in-flight (PR F).
- *
- *   stream-unsubscribed : the dispatch layer / hook fired a clean
- *                         `StreamUnsubscribe` (component unmount, PTY
- *                         exited, etc.) — the local end tore down.
- *   transport-error     : reserved for an in-flight transport failure
- *                         surface; the dispatcher decides which reason
- *                         to attach. Not yet wired by any caller — the
- *                         union is part of PR F's API contract so the
- *                         dispatcher can adopt it without a follow-up
- *                         type churn.
+ * Why the stream dropped while a turn was in flight. `stream-unsubscribed`: a clean
+ * `StreamUnsubscribe` (unmount, PTY exit) tore down the local end. `transport-error`: reserved for
+ * an in-flight transport failure; no caller wires it yet, but it is part of the API contract so the
+ * dispatcher can adopt it without type churn.
  */
 export type DisconnectReason = "stream-unsubscribed" | "transport-error";
 
 /**
- * Live "compaction in progress" state — set the instant the `PreCompact`
- * hook's `compaction_started` MPS event lands (Tier 1 of
- * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`),
- * cleared when the matching `compact_boundary` frame (a real
- * `CompactionBoundary` command) arrives. `startedAt` drives the live
- * elapsed-time counter (Tier 2) shown near the pane status chip.
+ * Live "compaction in progress" state: set when the `PreCompact` hook's `compaction_started` MPS
+ * event lands (Tier 1, docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md), cleared
+ * when the matching `compact_boundary` frame (a real `CompactionBoundary` command) arrives.
+ * `startedAt` drives the live elapsed-time counter (Tier 2) near the pane status chip.
  */
 export interface CompactionState {
     trigger: "manual" | "auto";
@@ -160,48 +133,37 @@ export interface CompactionState {
 }
 
 /**
- * Live "at least one agent-declared long-running task is attached to this
- * pane" state — independent of `turnPhase`. A sibling axis, not a
- * `TurnPhase` variant: see docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md
- * §2 for why (mirrors `CompactionState`'s own precedent for a concurrent-
- * but-orthogonal concern that must survive independently of the turn
- * lifecycle). Sourced from the dock's aggregated `PinnedActivity` list
- * (shell/subagent/tool adapters), not raw OS process counts — see spec §4.
+ * Live "at least one agent-declared long-running task is attached" state, independent of
+ * `turnPhase`: a sibling axis, not a `TurnPhase` variant, like `CompactionState` a
+ * concurrent-but-orthogonal concern that must outlive the turn lifecycle
+ * (docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md §2). Sourced from the dock's aggregated
+ * `PinnedActivity` list (shell/subagent/tool adapters), not raw OS process counts (§4).
  *
- * `since` is the wall-clock ms the current unbroken "≥1 running" episode
- * began — not reset by a second task starting while one is already live.
+ * `since` is the ms the current unbroken "≥1 running" episode began; a second task starting doesn't
+ * reset it.
  */
 export interface AttachedTaskState {
     since: number;
 }
 
 /**
- * Live "controller is recovering from a stale `--resume` session id" state,
- * or `null` — set the instant the backend's stale-resume retry begins
- * (`mps.EVENT_AGENT_RESUME_RETRY`, `{status:"retrying"}`), cleared once the
- * retry's outcome (Fresh or Resumed) is actually known
- * (`{status:"resolved"}`). Mirrors `AttachedTaskState`'s shape (a single
- * `startedAt`, no staleness/generation gating needed) — unlike
- * `CompactionState`'s completion signal, both ends of this one travel over
- * the SAME reliable MPS channel, so there's no cross-channel race to guard
- * against. See docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
+ * Live "controller is recovering from a stale `--resume` session id" state, or `null`: set when the
+ * backend's stale-resume retry begins (`mps.EVENT_AGENT_RESUME_RETRY`, `{status:"retrying"}`),
+ * cleared once the outcome (Fresh or Resumed) is known (`{status:"resolved"}`). Like
+ * `AttachedTaskState` it needs no staleness gating: both ends travel over the same reliable MPS
+ * channel, unlike `CompactionState`'s completion signal
+ * (docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2).
  */
 export interface ResumeRetryState {
     startedAt: number;
 }
 
 /**
- * A classified backend failure (the `agentfailure` wave event's payload,
- * `AgentFailure` in `frontend/types/srv-types.d.ts`) currently surfaced for
- * this pane. Single source of truth for "is there an active failure" —
- * previously duplicated as a hook-local signal in `useAgentFailure.ts`,
- * with no path back into `turnPhase`. See
- * docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
- *
- * Deliberately does NOT carry the auto-retry countdown/budget or the
- * expanded/retrying view flags — those are pure presentation timing with
- * no correctness coupling to anything else in the reducer, and stay
- * hook-local in `useAgentFailure.ts` exactly as before.
+ * A classified backend failure (the `agentfailure` wave event's payload, `AgentFailure` in
+ * `frontend/types/srv-types.d.ts`) surfaced for this pane: the single source of truth for "is there
+ * an active failure" (docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md). It does
+ * NOT carry the auto-retry countdown/budget or the expanded/retrying view flags: pure presentation
+ * timing, hook-local in `useAgentFailure.ts`.
  */
 export interface PaneFailure {
     /** The classified failure, verbatim from the backend event. */
@@ -209,21 +171,13 @@ export interface PaneFailure {
     /** Wall-clock ms the failure landed. */
     at: number;
     /**
-     * Whether a turn was ever actually attempted before this failure. `true`
-     * for every backend-classified failure (those are, by construction, the
-     * outcome of a turn that ran). `false` only for the synthetic pre-launch
-     * auth failure the pane raises itself when the mount-time launch flow
-     * bails with `auth_failed` — no turn was ever sent, so there is nothing
-     * to re-run after a successful login.
-     *
-     * Load-bearing, not cosmetic: it selects `relogin`'s `retryAfterLogin`
-     * argument. Passing `true` for a never-started agent makes a successful
-     * login silently re-send that agent's last OLD message as a new turn —
-     * the exact bug the (now-deleted) blue "Log in" bar's own call site was
-     * written to avoid. Defaults to `true` when absent, so a failure
-     * persisted before this field existed keeps the pre-existing behaviour.
-     *
-     * See docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md §4.
+     * Whether a turn was ever attempted before this failure: `true` for every backend-classified
+     * failure; `false` only for the synthetic pre-launch auth failure the pane raises when the
+     * mount-time launch bails with `auth_failed`, so there is nothing to re-run after a login.
+     * Load-bearing: it selects `relogin`'s `retryAfterLogin`, and `true` for a never-started agent
+     * makes a successful login silently re-send its last OLD message as a new turn. Defaults to
+     * `true` when absent, so a failure persisted before this field keeps the old behaviour
+     * (docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md §4).
      */
     turnAttempted?: boolean;
     /**
@@ -247,10 +201,8 @@ export function isAuthFailure(failure: Pick<PaneFailure, "data"> | null | undefi
 }
 
 /**
- * Single source of truth for the turn lifecycle. Since PR G this is the
- * only place where "is the agent working", "is a stop in flight", and
- * "did the stream drop" are encoded — the legacy `turnActive` /
- * `stopping` / `streaming.active` booleans have been removed.
+ * The turn lifecycle: the only encoding of "is the agent working", "is a stop in flight" and
+ * "did the stream drop".
  *
  *   Idle          : no turn in flight.
  *   Submitting    : user pressed send; awaiting `StreamSubscribe` / first
@@ -295,18 +247,10 @@ export type TurnPhase =
     | { kind: "Done"; outcome: TurnOutcome; finishedAt: number }
     | {
           /**
-           * Stream dropped while a turn was in flight. PR F fleshes out
-           * the variant payload:
-           *   - `lastKind`     : the working-kind we lost (so the UI can
-           *                      say "was streaming" vs "was submitting").
-           *                      Carried since PR A.
-           *   - `lastConnectedAt` : wall-clock ms at which the disconnect
-           *                      command was processed (= `command.at`
-           *                      from `StreamUnsubscribe`). Drives a
-           *                      "disconnected 5s ago" age label and
-           *                      keeps the variant audit-friendly.
-           *   - `reason`       : a finite literal union (was `string` in
-           *                      PR A) — see {@link DisconnectReason}.
+           * Stream dropped while a turn was in flight. `lastKind`: the working-kind we lost (the UI
+           * says "was streaming" vs "was submitting"). `lastConnectedAt`: ms the disconnect command
+           * was processed (`command.at` of `StreamUnsubscribe`), for a "disconnected 5s ago" label.
+           * `reason`: see {@link DisconnectReason}.
            */
           kind: "Disconnected";
           lastKind: KindBeforeDisconnect;
@@ -324,26 +268,20 @@ export interface TurnCarry {
 }
 
 /**
- * The reducer's state. Each field maps 1:1 to a Solid signal that the
- * agent pane projects from. The reducer enforces invariants ACROSS
- * fields (e.g. a turn can't enter Submitting/Streaming while the
- * stream is unsubscribed — see the `TurnStart` arm).
- *
- * PR G cleanup: `turnActive` / `stopping` (top-level) and `active` (on
- * `streaming`) have all been removed. `state.turnPhase.kind` is the
- * sole working-state encoding; "is the stream subscribed?" is now
- * derived from `state.lastEventMs !== null` (cleared atomically with
- * the stream on `StreamSubscribe` / `StreamUnsubscribe`).
+ * The reducer's state. Each field maps 1:1 to a Solid signal the agent pane projects from; the
+ * reducer enforces invariants ACROSS fields (e.g. no turn enters Submitting/Streaming while the
+ * stream is unsubscribed: the `TurnStart` arm). `state.turnPhase.kind` is the sole working-state
+ * encoding; "is the stream subscribed?" is `state.lastEventMs !== null` (cleared atomically with
+ * the stream on `StreamSubscribe`/`StreamUnsubscribe`).
  */
 export interface AgentPaneState {
     streaming: StreamingState;
     sessionStats: SessionStats | null;
     /**
-     * Cumulative cost/tokens/duration across every completed turn in this
-     * pane's lifetime — unlike `sessionStats` (which is replaced, not
-     * accumulated, on each TurnEnd), this sums into the previous value.
-     * Feeds the composer-strip "totals" display near the input. Cleared
-     * only on TurnReset. See SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md.
+     * Cumulative cost/tokens/duration across every completed turn in this pane's lifetime: unlike
+     * `sessionStats` (replaced on each TurnEnd) it sums into the previous value. Feeds the
+     * composer-strip "totals" display; cleared only on TurnReset
+     * (SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md).
      */
     sessionTotals: SessionStats | null;
     currentTool: string | null;
@@ -351,15 +289,13 @@ export interface AgentPaneState {
      *  Cleared alongside currentTool on ToolEnd / TurnEnd / TurnReset. */
     currentToolArg: string | null;
     /**
-     * The current turn's live usage, from the stream. Its lifetime follows the
-     * stream's own order: set by `TokensIn`, cleared by that turn's `TurnEnd`,
-     * or by `StreamSessionStarted` when the process died before a `result`.
-     * Nothing outside the stream clears it on a normal turn end:
-     * `ReconcileTurnActive`, the liveness recovery and `TurnStart` all leave
-     * it alone, because srv sends the turn-ended push before it forwards the
-     * `result` line, so the turn's `session_end` (and sometimes earlier calls)
-     * still follow, and a queued message or the next turn can start in that
-     * gap. Hard ends (disconnect, failure, timeouts, reset) clear it.
+     * The current turn's live usage, from the stream, in the stream's own order: set by `TokensIn`,
+     * cleared by that turn's `TurnEnd`, or by `StreamSessionStarted` when the process died before a
+     * `result`. Nothing else clears it on a normal turn end: `ReconcileTurnActive`, the liveness
+     * recovery and `TurnStart` leave it alone, because srv sends the turn-ended push before it
+     * forwards the `result` line, so the turn's `session_end` (and sometimes earlier calls) still
+     * follow, and a queued message or the next turn can start in that gap. Hard ends (disconnect,
+     * failure, timeouts, reset) clear it.
      */
     turnTokens: TurnTokens | null;
     /**
@@ -379,66 +315,44 @@ export interface AgentPaneState {
      */
     turnCarry: TurnCarry | null;
     /**
-     * True for the duration of a turn started specifically to send a
-     * manual "/compact" (the composer's "Compact now" button, or a user
-     * typing it) — set on `TurnStart` when `command.content === "/compact"`,
-     * consumed and reset by `CompactionBoundary`. Exists because a manual
-     * `CompactionBoundary.trigger` alone is NOT a safe signal that THIS
-     * pane's currently-working turn is the synthetic one that action
-     * opened: the reducer's own tests deliberately model a manual
-     * boundary landing while an unrelated real turn is already streaming
-     * (compaction_started/compact_boundary travel over independent
-     * transports with no ordering guarantee against the primary NDJSON
-     * stream — see the CompactionStarted race-guard tests). Only end the
-     * turn when we know FOR THIS PANE that its own working turn is the
-     * one the manual compact opened. codex P1 on PR #2659.
+     * True for the duration of a turn started specifically to send a manual "/compact" (the
+     * composer's "Compact now" button, or typed): set on `TurnStart` when `command.content ===
+     * "/compact"`, consumed and reset by `CompactionBoundary`. A manual
+     * `CompactionBoundary.trigger` alone is NOT a safe signal that THIS pane's working turn is the
+     * synthetic one: compaction_started/compact_boundary travel over transports with no ordering
+     * guarantee against the primary NDJSON stream (the reducer's tests model a manual boundary
+     * landing during an unrelated streaming turn), so the turn ends only when we know this pane's
+     * own turn is the one the manual compact opened (#2659).
      */
     pendingCompactTurn: boolean;
     pending: PendingMessage[];
     /**
-     * Init phase — `InitPending` until history fetch resolves (or fails).
-     * Discriminated union; failure reason lives in the `InitFailed`
-     * variant's `reason` payload — no separate `initError` field.
+     * Init phase: `InitPending` until history fetch resolves or fails; the failure reason lives in
+     * `InitFailed`'s payload (no separate `initError`).
      */
     initPhase: InitPhase;
     /**
-     * Wall-clock ms of the last observable stream activity (subscribe,
-     * flush, tool, tokens). Drives the stuck-stream watchdog.
-     *
-     * Doubles as the "is the stream subscribed?" gate since PR G:
-     * `lastEventMs !== null` ⇔ the pane has seen a `StreamSubscribe`
-     * that no subsequent `StreamUnsubscribe` has cleared. Both fields
-     * always moved in lockstep when the legacy `streaming.active`
-     * boolean existed, so the substitution is exact.
+     * Ms of the last observable stream activity (subscribe, flush, tool, tokens); drives the
+     * stuck-stream watchdog. Also the "is the stream subscribed?" gate: `lastEventMs !== null` ⇔ a
+     * `StreamSubscribe` that no later `StreamUnsubscribe` has cleared.
      */
     lastEventMs: number | null;
     /**
-     * Single-source-of-truth turn phase. PR A added it with dual-write
-     * against the legacy `turnActive` / `stopping` / `streaming.active`
-     * booleans; PR B migrated every view consumer onto it via
-     * `isWorking(state)` / `isDisconnected(state)` /
-     * `state.turnPhase.kind`; PR G removed the legacy fields.
+     * Single-source-of-truth turn phase; consumers use `isWorking(state)` / `isDisconnected(state)`
+     * / `state.turnPhase.kind`.
      */
     turnPhase: TurnPhase;
 
     /**
-     * Whether the composer details panel — the Shell drawer, holding the
-     * interactive terminal — is open. Default `false`. Persists across
-     * renders within a pane lifetime; resets to `false` on pane unmount
-     * (because a new pane gets a fresh state via `initialState()`). Not
-     * persisted to backend — a per-session ephemeral preference.
+     * Whether the composer details panel (the Shell drawer holding the interactive terminal) is
+     * open. Default `false`; a per-session ephemeral preference, reset on pane unmount (a new pane
+     * gets `initialState()`) and not persisted to the backend.
      *
-     * It used to host the session banners and the Archive/Export/Restore
-     * actions as well; those moved to `AgentSessionNotices` (above the
-     * composer) and the `AgentSessionStats` popover respectively, and the
-     * runtime dropdowns moved to the strip before that — leaving the drawer
-     * to the shell alone. See
-     * SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3.
-     *
-     * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4. Previously
-     * auto-collapsed on `TurnStart`; removed once the panel started
-     * hosting a live interactive shell (AgentShellSubblock) that needs
-     * to survive sending more messages, not close on every send.
+     * It holds only the shell: the session banners moved to `AgentSessionNotices`,
+     * Archive/Export/Restore to the `AgentSessionStats` popover and the runtime dropdowns to the
+     * strip (SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3). It no longer auto-collapses on
+     * `TurnStart`, because the live shell (AgentShellSubblock) must survive sending more messages
+     * (SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4).
      */
     detailsOpen: boolean;
     /**
@@ -477,21 +391,17 @@ export interface AgentPaneState {
      *  The Runtime menu shows it; the context reading is measured on it. */
     lastContextModel: string | null;
     /**
-     * Active classified failure for this pane, or `null`. Set by
-     * `FailureObserved` (which also force-ends a working turn — see the
-     * command's reducer case), cleared by `FailureCleared` or implicitly
-     * by the next `TurnStart` (a fresh turn always ends the failure
-     * episode). See {@link PaneFailure}.
+     * Active classified failure for this pane, or `null`. Set by `FailureObserved` (which also
+     * force-ends a working turn), cleared by `FailureCleared` or implicitly by the next `TurnStart`
+     * (a fresh turn ends the failure episode). See {@link PaneFailure}.
      */
     failure: PaneFailure | null;
     /** Live "compaction in progress" state, or null. See {@link CompactionState}. */
     compacting: CompactionState | null;
     /**
-     * Live "attached long-running task" state, or null — see
-     * {@link AttachedTaskState}. Deliberately NOT cleared by any `TurnPhase`
-     * transition (TurnEnd/TurnReset/etc.): a task attached in one turn can
-     * legitimately survive into later turns, so only its own two commands
-     * (`AttachedTaskObserved`/`AttachedTaskCleared`) ever touch this field.
+     * Live "attached long-running task" state, or null ({@link AttachedTaskState}). Deliberately
+     * NOT cleared by any `TurnPhase` transition: a task attached in one turn can outlive it, so
+     * only `AttachedTaskObserved`/`AttachedTaskCleared` touch it.
      */
     attachedTask: AttachedTaskState | null;
     /**
@@ -502,51 +412,36 @@ export interface AgentPaneState {
      */
     reconnecting: ResumeRetryState | null;
     /**
-     * Earliest `started_at_ms` among this block's currently-`Running`
-     * `db_background_tasks` rows (Phase A/B of
-     * docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md),
-     * or `null`. A SEPARATE floor signal, not a duplicate of `attachedTask`
-     * above: the durable registry can know about a task the live transcript
-     * has no record of at all (e.g. it survived a session restart under a
-     * fresh controller generation — Phase B). Deliberately owned
-     * EXCLUSIVELY by its own two commands
-     * (`RegistryAttachedTaskObserved`/`RegistryAttachedTaskCleared`,
-     * dispatched only from `useBackgroundTaskRegistry.ts`) — no other
-     * command touches it, specifically so the transcript-derived
-     * `attachedTask` axis's own independent recompute-and-clear effect
-     * (`agent-view.tsx`'s attached-task effect) can never stomp on it. The
-     * effect instead READS this field and combines it with its own
-     * transcript-derived value (registry ∪ transcript, earliest start
-     * wins) rather than treating either source as sole truth. See the
-     * Codex P1 finding on PR #2685 this was written to address.
+     * Earliest `started_at_ms` among this block's currently-`Running` `db_background_tasks` rows
+     * (docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md Phases A/B), or `null`.
+     * A separate floor signal, not a duplicate of `attachedTask`: the durable registry can know a
+     * task the live transcript doesn't (e.g. one that survived a session restart under a fresh
+     * controller generation).
+     *
+     * Owned EXCLUSIVELY by `RegistryAttachedTaskObserved`/`RegistryAttachedTaskCleared` (dispatched
+     * only from `useBackgroundTaskRegistry.ts`), so the transcript-derived `attachedTask` effect
+     * (`agent-view.tsx`) can never stomp on it; that effect READS this field and combines it with
+     * its own value (registry ∪ transcript, earliest start wins) (#2685).
      */
     registryAttachedTaskSince: number | null;
     /**
-     * Wall-clock ms of the most recent REAL `CompactionBoundary` event
-     * (backend-sourced, exact — not the ≥50%-drop heuristic below). The
-     * `TokensIn` heuristic checks this before firing its own synthetic
-     * `context-compacted` event, so a Claude session that just got a
-     * real boundary doesn't also get a duplicate heuristic-sourced one
-     * for the very next turn's token drop. Providers without a
-     * structured signal (codex/gemini/copilot) never set this, so the
-     * heuristic remains their only detection path. See
-     * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3.
+     * Ms of the most recent REAL `CompactionBoundary` event (backend-sourced, exact, unlike the
+     * ≥50%-drop heuristic). The `TokensIn` heuristic checks it before firing its own synthetic
+     * `context-compacted` event, so a session that just got a real boundary doesn't get a duplicate
+     * for the next turn's token drop. Providers without a structured signal (codex/gemini/copilot)
+     * never set it, so the heuristic is their only detection
+     * (docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3).
      */
     lastCompactionBoundaryAt: number | null;
     /**
-     * A `compaction_started` ping the reducer rejected because `turnPhase`
-     * wasn't (yet) working, but which arrived on a phase a LATER
-     * authoritative signal could still legitimately promote for THIS SAME
-     * turn — `ReconcileTurnActive(active: true)` or `StreamFlushObserved`'s
-     * own promotion arm, both of which retroactively apply it into
-     * `compacting` on promotion. Cleared whenever that promotion happens,
-     * whenever an authoritative signal proves the turn is genuinely NOT
-     * running (`ReconcileTurnActive(active: false)`, even when that's a
-     * same-ref no-op for `turnPhase` itself), by a fresh unrelated
-     * `TurnStart` (not the turn this ping was about), or by any of the
-     * other "whatever compaction was in flight is now moot" terminal
-     * transitions `compacting` itself already clears on. See
-     * `docs/specs/SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md`.
+     * A `compaction_started` ping the reducer rejected because `turnPhase` wasn't (yet) working,
+     * but which a LATER authoritative signal could still promote for THIS turn:
+     * `ReconcileTurnActive(active: true)` or `StreamFlushObserved`'s promotion arm, both of which
+     * then apply it into `compacting`. Cleared on that promotion; when an authoritative signal
+     * proves the turn is NOT running (`ReconcileTurnActive(active: false)`, even as a same-ref
+     * no-op for `turnPhase`); by a fresh unrelated `TurnStart`; or by any other terminal transition
+     * that clears `compacting`
+     * (docs/specs/SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md).
      */
     pendingCompactionPing: { trigger: "manual" | "auto"; startedAt: number } | null;
 }
@@ -587,25 +482,17 @@ export function isInitReady(state: AgentPaneState): boolean {
 }
 
 /**
- * Selector — true while the agent is processing a user request.
- *
- * Returns true ⇔ `state.turnPhase.kind ∈ {Submitting, Streaming, Interrupting}`.
- * Idle / Done / Disconnected are all "not working".
- *
- * Spec: SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §7. Since PR G this
- * is the only "working" predicate — the legacy `turnActive || stopping`
- * combination has been removed.
+ * True while the agent is processing a user request: `state.turnPhase.kind ∈ {Submitting,
+ * Streaming, Interrupting}` (Idle/Done/Disconnected are not working). The only "working" predicate
+ * (SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §7).
  */
 export function isWorking(state: AgentPaneState): boolean {
     return workingFromPhase(state.turnPhase);
 }
 
 /**
- * Phase-only variant of {@link isWorking}. The view layer projects
- * `turnPhase` through a dedicated signal (PR B); call sites that only
- * have the phase (not the whole state) use this helper. Same predicate.
- *
- * Returns true ⇔ `phase.kind ∈ {Submitting, Streaming, Interrupting}`.
+ * Phase-only variant of {@link isWorking}, for call sites that have the phase but not the whole
+ * state (the view projects `turnPhase` through its own signal). Same predicate.
  */
 export function workingFromPhase(phase: TurnPhase): boolean {
     const k = phase.kind;
@@ -618,12 +505,9 @@ export function isStopping(phase: TurnPhase): boolean {
 }
 
 /**
- * Selector — `true` iff the pane is in the `Disconnected` phase. PR F:
- * drives the {@link AgentDisconnectedBanner} visibility, replacing any
- * ad-hoc "streaming.active === false but turn was active" checks. Pure
- * projection of `turnPhase.kind` — same SoT as `isWorking`.
- *
- * Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §6.4.
+ * True iff the pane is in the `Disconnected` phase; drives the {@link AgentDisconnectedBanner}. A
+ * pure projection of `turnPhase.kind`, the same source of truth as `isWorking`
+ * (docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §6.4).
  */
 export function isDisconnected(state: AgentPaneState): boolean {
     return state.turnPhase.kind === "Disconnected";
