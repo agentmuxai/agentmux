@@ -12,32 +12,7 @@ use tokio::sync::mpsc;
 
 use crate::drone::types::{BlockState, DroneGraph};
 
-/// Streaming events emitted to the frontend during a run.
-#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RunEvent {
-    RunStarted { run_id: String, drone_id: String },
-    BlockStarted { run_id: String, block_id: String },
-    BlockDone {
-        run_id: String,
-        block_id: String,
-        #[ts(type = "unknown")]
-        output: Value,
-    },
-    BlockError {
-        run_id: String,
-        block_id: String,
-        error: String,
-    },
-    RunDone {
-        run_id: String,
-        #[ts(type = "unknown")]
-        output: Value,
-    },
-    RunFailed { run_id: String, error: String },
-}
-
+pub use crate::backend::drone_run_event::RunEvent;
 pub struct RunHandle {
     pub run_id: String,
     pub events: mpsc::UnboundedReceiver<RunEvent>,

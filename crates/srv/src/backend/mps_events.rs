@@ -194,14 +194,14 @@ events! {
     AgentShutdownPending: crate::backend::shutdown_events::EVENT_SHUTDOWN_PENDING => crate::backend::shutdown_events::PendingView,
     AgentShutdownPendingCleared: crate::backend::shutdown_events::EVENT_SHUTDOWN_PENDING_CLEARED => crate::backend::shutdown_events::PendingClearedEvent,
     /// A sensitive request's countdown, and its end (`sagas::sensitive_window`).
-    SensitivePending: crate::sagas::sensitive_window::EVENT_SENSITIVE_PENDING => crate::sagas::sensitive_window::SensitiveView,
-    SensitiveCleared: crate::sagas::sensitive_window::EVENT_SENSITIVE_CLEARED => crate::sagas::sensitive_window::SensitiveClearedEvent,
+    SensitivePending: crate::backend::prompt_events::EVENT_SENSITIVE_PENDING => crate::backend::prompt_events::SensitiveView,
+    SensitiveCleared: crate::backend::prompt_events::EVENT_SENSITIVE_CLEARED => crate::backend::prompt_events::SensitiveClearedEvent,
     /// An agent's start of an agent (or another act the person may stop): a one-line notice or a countdown card, and its end (`sagas::agent_notice`).
-    AgentNotice: crate::sagas::agent_notice::EVENT_AGENT_NOTICE => crate::sagas::agent_notice::NoticeView,
+    AgentNotice: crate::backend::prompt_events::EVENT_AGENT_NOTICE => crate::backend::prompt_events::NoticeView,
     /// A question srv asks the person in a pane, as a modal over that pane, and its end (`sagas::pane_confirm`).
-    PaneConfirm: crate::sagas::pane_confirm::EVENT_PANE_CONFIRM => crate::sagas::pane_confirm::PaneConfirmView,
+    PaneConfirm: crate::backend::prompt_events::EVENT_PANE_CONFIRM => crate::backend::prompt_events::PaneConfirmView,
     /// The agents the person said "Always" to, after a change (`backend::agent_grants`).
-    AgentGrants: crate::sagas::agent_notice::EVENT_AGENT_GRANTS => crate::sagas::agent_notice::GrantsEvent,
+    AgentGrants: crate::backend::prompt_events::EVENT_AGENT_GRANTS => crate::backend::prompt_events::GrantsEvent,
     /// A provider sign-in link to show as a notice with an Open action (`server::signin_notice`).
     SigninLink: "identity:signinlink" => crate::backend::signin_link_event::SigninLinkEvent,
     /// An OS notification to show, retract or act on (`notify::router`).
@@ -320,7 +320,7 @@ per_id_events! {
     /// An agent's provider login was unlinked (`agentcredentials:revoked:<agent id>`).
     AgentCredentialsRevoked: "agentcredentials:revoked:" => CredentialsRevokedEvent,
     /// One step of a drone run (`dronerun:<run id>`).
-    DroneRun: "dronerun:" => crate::drone::executor::engine::RunEvent,
+    DroneRun: "dronerun:" => crate::backend::drone_run_event::RunEvent,
     /// An agent pane's output, translated (`agent_event:<block id>`).
     AgentEventStream: "agent_event:" => crate::agents::types::AgentEvent,
 }
