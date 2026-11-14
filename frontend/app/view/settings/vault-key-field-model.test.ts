@@ -6,8 +6,13 @@ import { describe, expect, it } from "vitest";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import { entryIdOf, keyChoices, keyState, referenceTo } from "./vault-key-field-model";
 
-const entry = (id: string, kind: string, label: string) => ({ id, kind, label }) as VaultEntryInfo;
-const entries = [entry("b", "api-key", "Work key"), entry("a", "api-key", "Another key"), entry("n", "note", "A note")];
+const SETTING = "voice:groqApiKey";
+const entry = (id: string, kind: string, label: string, grants: string[] = []) => ({ id, kind, label, grants }) as VaultEntryInfo;
+const entries = [
+    entry("b", "api-key", "Work key"),
+    entry("a", "api-key", "Another key", [`setting:${SETTING}`]),
+    entry("n", "note", "A note", [`setting:${SETTING}`]),
+];
 
 describe("a settings key kept in the Vault", () => {
     it("names its entry as vault:<id>, the spelling srv reads", () => {
@@ -24,12 +29,17 @@ describe("a settings key kept in the Vault", () => {
     });
 
     it("tells unset, plain, in place and gone apart, and does not call a reference gone before the Vault loads", () => {
-        expect(keyState(undefined, entries)).toBe("unset");
-        expect(keyState("  ", entries)).toBe("unset");
-        expect(keyState("••••••••", entries)).toBe("plain");
-        expect(keyState("vault:a", entries)).toBe("vault");
-        expect(keyState("vault:n", entries)).toBe("gone");
-        expect(keyState("vault:zzz", entries)).toBe("gone");
-        expect(keyState("vault:zzz", null)).toBe("vault");
+        expect(keyState(undefined, entries, SETTING)).toBe("unset");
+        expect(keyState("  ", entries, SETTING)).toBe("unset");
+        expect(keyState("••••••••", entries, SETTING)).toBe("plain");
+        expect(keyState("vault:a", entries, SETTING)).toBe("vault");
+        expect(keyState("vault:n", entries, SETTING)).toBe("gone");
+        expect(keyState("vault:zzz", entries, SETTING)).toBe("gone");
+        expect(keyState("vault:zzz", null, SETTING)).toBe("vault");
+    });
+
+    it("calls an entry the setting was not allowed to read gone, even though it is an API key in the Vault", () => {
+        expect(keyState("vault:b", entries, SETTING)).toBe("gone");
+        expect(keyState("vault:a", entries, "messaging:discord:token")).toBe("gone");
     });
 });

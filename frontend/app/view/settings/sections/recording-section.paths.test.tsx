@@ -19,8 +19,9 @@ const h = vi.hoisted(() => ({
     meterStop: vi.fn(),
     level: { v: 0 },
     pickMime: vi.fn(() => "audio/webm"),
-    entries: [] as { id: string; kind: string; label: string }[],
+    entries: [] as { id: string; kind: string; label: string; grants: string[] }[],
     vaultOn: { on: true },
+    allow: vi.fn((_entry: string, _setting: string) => Promise.resolve()),
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({
@@ -34,6 +35,7 @@ vi.mock("@/app/view/vault/vault-store", () => ({
     vaultAvailable: () => h.vaultOn.on,
     refreshVault: () => Promise.resolve(),
     vaultEntries: () => h.entries,
+    allowSetting: (entry: string, setting: string) => h.allow(entry, setting),
 }));
 // The Vault's own form, stood in for: its Save reports the entry the person made.
 vi.mock("@/app/view/vault/vault-entry-form", () => ({
@@ -314,9 +316,9 @@ describe("RecordingSection engine picker", () => {
     describe("the Groq key is a Vault entry", () => {
         beforeEach(() => {
             h.entries = [
-                { id: "k-2", kind: "api-key", label: "Work Groq" },
-                { id: "k-1", kind: "api-key", label: "Groq key (voice input)" },
-                { id: "n-1", kind: "note", label: "Not a key" },
+                { id: "k-2", kind: "api-key", label: "Work Groq", grants: [] },
+                { id: "k-1", kind: "api-key", label: "Groq key (voice input)", grants: ["setting:voice:groqApiKey"] },
+                { id: "n-1", kind: "note", label: "Not a key", grants: [] },
             ];
             h.vaultOn.on = true;
         });
@@ -326,6 +328,8 @@ describe("RecordingSection engine picker", () => {
             const picker = within(row("Groq API key")).getByRole("combobox") as HTMLSelectElement;
             expect(Array.from(picker.options).map((o) => o.textContent)).toEqual(["Choose a Groq key from the Vault…", "Groq key (voice input)", "Work Groq"]);
             fireEvent.change(picker, { target: { value: "k-2" } });
+            await flush();
+            expect(h.allow).toHaveBeenCalledWith("k-2", "voice:groqApiKey");
             expect(lastConfig()).toEqual({ "voice:groqApiKey": "vault:k-2" });
             expect(row("Groq API key").querySelector("input[type=password]")).toBeNull();
         });
@@ -343,6 +347,8 @@ describe("RecordingSection engine picker", () => {
             await renderSection();
             fireEvent.click(within(row("Groq API key")).getByRole("button", { name: "Add a key to the Vault…" }));
             fireEvent.click(screen.getByRole("button", { name: "Save to the Vault" }));
+            await flush();
+            expect(h.allow).toHaveBeenCalledWith("made-1", "voice:groqApiKey");
             expect(lastConfig()).toEqual({ "voice:groqApiKey": "vault:made-1" });
         });
 

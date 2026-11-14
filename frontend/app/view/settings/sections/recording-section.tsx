@@ -420,13 +420,13 @@ function EngineRows(p: {
                     id={RECORDING_SETTINGS.groqApiKey.id}
                     label={RECORDING_SETTINGS.groqApiKey.label}
                     control={
-                        <VaultKeyField value={p.s()["voice:groqApiKey"] as string | undefined} onChoose={(ref) => set("voice:groqApiKey", ref)} what="Groq key" />
+                        <VaultKeyField value={p.s()["voice:groqApiKey"] as string | undefined} setting="voice:groqApiKey" onChoose={(ref) => set("voice:groqApiKey", ref)} what="Groq key" />
                     }
                     description={RECORDING_SETTINGS.groqApiKey.description}
                 />
                 <Show when={p.s()["voice:groqApiKeyMoved"]}>
-                    <Notice tone="accent" title="Your Groq key is now in the Vault" onDismiss={() => set("voice:groqApiKeyMoved", null)}>
-                        It was in settings.json as plain text. AgentMux moved it into your Vault and settings.json now only names the entry.
+                    <Notice tone="accent" title={t("settings.recording.groqKeyMoved.title")} onDismiss={() => set("voice:groqApiKeyMoved", null)}>
+                        {t("settings.recording.groqKeyMoved.body")}
                     </Notice>
                 </Show>
             </Show>

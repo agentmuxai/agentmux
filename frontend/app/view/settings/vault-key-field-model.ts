@@ -28,11 +28,14 @@ export function keyChoices(entries: readonly VaultEntryInfo[]): VaultEntryInfo[]
  *  renderer is given a placeholder for it, never the key). */
 export type KeyState = "unset" | "plain" | "vault" | "gone";
 
-export function keyState(value: string | undefined | null, entries: readonly VaultEntryInfo[] | null): KeyState {
+/** `setting` is the settings key: an entry only counts as in place when the Vault has allowed that setting to read
+ *  it (`setting:<key>` among its grants), as srv checks. */
+export function keyState(value: string | undefined | null, entries: readonly VaultEntryInfo[] | null, setting: string): KeyState {
     if (!value?.trim()) return "unset";
     const id = entryIdOf(value);
     if (!id) return "plain";
     // Until the Vault has loaded, a reference is taken as in place rather than flashed as gone.
     if (entries === null) return "vault";
-    return keyChoices(entries).some((e) => e.id === id) ? "vault" : "gone";
+    const entry = keyChoices(entries).find((e) => e.id === id);
+    return entry?.grants.includes(`setting:${setting}`) ? "vault" : "gone";
 }

@@ -34,6 +34,8 @@ use crate::backend::vault;
 
 const GROQ_TRANSCRIBE_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const GROQ_MODEL: &str = "whisper-large-v3-turbo";
+/// The setting that holds the Groq key, or the `vault:<entry id>` that names it.
+const GROQ_SETTING: &str = "voice:groqApiKey";
 
 #[derive(serde::Deserialize)]
 pub(super) struct TranscribeQuery {
@@ -91,7 +93,7 @@ pub(super) async fn handle_voice_transcribe(
 
 const GROQ_NOT_CONFIGURED: &str = "Groq backend not configured — choose a Vault key for it in Settings > Recording \
      (add one to the Vault there), or set the AGENTMUX_GROQ_API_KEY environment variable";
-const GROQ_GONE: &str = "The Vault key chosen for voice input is not there, or is not an API key — choose another in \
+const GROQ_GONE: &str = "The Vault key chosen for voice input is not there, is not an API key, or was not allowed for voice input — choose it again in \
      Settings > Recording, or set the AGENTMUX_GROQ_API_KEY environment variable";
 
 /// `GET /api/v1/voice/status` → `{ "engine": "groq", "ready": false, "missing": "groq-key", "error": "..." }`.
@@ -223,7 +225,7 @@ fn groq_key_with(env: Option<String>, settings: &Option<serde_json::Value>, stor
     }
     let Some(set) = settings_str(settings, "voice:groqApiKey") else { return GroqKey::Unset };
     match (vault::setting_key::entry_of(&set), store) {
-        (Some(id), Some(store)) => match vault::setting_key::read(store, id, "AgentMux voice input", "voice input") {
+        (Some(id), Some(store)) => match vault::setting_key::read(store, GROQ_SETTING, id, "AgentMux voice input", "voice input") {
             Ok(v) => GroqKey::Found(v),
             Err(_) => GroqKey::Gone,
         },
@@ -250,7 +252,7 @@ fn groq_key_state_with(env: Option<String>, settings: &Option<serde_json::Value>
     }
     let Some(set) = settings_str(settings, "voice:groqApiKey") else { return GroqKeyState::Unset };
     match vault::setting_key::entry_of(&set) {
-        Some(id) if store.is_some_and(|s| vault::setting_key::present(s, id)) => GroqKeyState::Ready,
+        Some(id) if store.is_some_and(|s| vault::setting_key::present(s, GROQ_SETTING, id)) => GroqKeyState::Ready,
         Some(_) => GroqKeyState::Gone,
         None => GroqKeyState::Ready,
     }
@@ -560,7 +562,21 @@ mod tests {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
         store.apply_identity_schema_for_tests().unwrap();
         let id = vault::setting_key::keep(&store, "Groq key (voice input)", "gsk_from_the_vault").unwrap();
+        // The setting is allowed to read it, as the Settings picker makes it.
+        vault::setting_key::allow(&store, &id, GROQ_SETTING, vault::PERSON).unwrap();
         (store, id)
+    }
+
+    #[test]
+    fn a_file_that_names_an_entry_the_setting_was_not_allowed_to_read_gets_nothing() {
+        let (store, _mine) = vault_with_key("x");
+        let payment = vault::setting_key::keep(&store, "A payment key", "sk_live_payment_0123").unwrap();
+        // settings.json says so, but the Vault never allowed it: not read, and the mic says the key is gone.
+        let set = setting(&format!("vault:{payment}"));
+        assert!(matches!(groq_key_with(None, &set, Some(&store)), GroqKey::Gone));
+        assert!(matches!(groq_key_state_with(None, &set, Some(&store)), GroqKeyState::Gone));
+        let gap = setup_gap_with(None, &set, "groq", Some(&store)).expect("not allowed is a gap");
+        assert!(gap.error.contains("not there") && !gap.error.contains(&payment), "{}", gap.error);
     }
 
     fn setting(v: &str) -> Option<serde_json::Value> {

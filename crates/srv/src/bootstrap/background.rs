@@ -166,7 +166,11 @@ fn move_voice_key_into_vault(identity_store: &Arc<Store>) {
             .and_then(|text| agentmux_common::settings_jsonc::parse_jsonc(&text))
             .and_then(|v| v.get("voice:groqApiKey").and_then(|k| k.as_str()).map(str::to_string));
         match backend::vault::setting_key::move_setting(&store, "voice:groqApiKey", "Groq key (voice input)", current.as_deref(), backend::config_watcher_fs::merge_settings_to_disk) {
-            Ok(Some(_)) => tracing::info!("the Groq key in settings.json was moved into the Vault"),
+            Ok(Some(_)) => {
+                // The last-good copy of the file held the plain key too: refreshed now, not at the next reload.
+                backend::config_watcher_fs::refresh_last_good();
+                tracing::info!("the Groq key in settings.json was moved into the Vault");
+            }
             Ok(None) => {}
             Err(e) => tracing::warn!(error = %e, "the Groq key in settings.json could not be moved into the Vault; it stays where it is"),
         }
