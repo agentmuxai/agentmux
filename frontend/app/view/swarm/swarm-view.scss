@@ -110,7 +110,9 @@
 }
 
 // A narrow pane: the row's name keeps room by giving up what only decorates it (the age, the
-// Supervisor chip's state word, which its tooltip still says).
+// Supervisor chip's state word, which its tooltip still says). Nothing leaves the card: when the row's parts
+// still do not fit (a question with its seconds, beside a Supervisor mode), the seat badge gives way, then the
+// end of the status chip, its seconds first, cut with an ellipsis.
 @container swarm-tree (max-width: 360px) {
     .swarm-agent-row {
         .swarm-last-active {
@@ -120,9 +122,46 @@
         .swarm-agent-label {
             min-width: 6ch;
         }
+
+        // As wide as their words when the row has a seat badge: far more willing to shrink than the status chip.
+        .swarm-agent-label:has(+ .swarm-seat-badge),
+        .swarm-seat-badge {
+            flex-shrink: 1000;
+        }
+
+        .swarm-status-chip {
+            flex-shrink: 1;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .swarm-status-countdown {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
     }
 
     .swarm-supervisor-chip .swarm-supervisor-detail {
+        display: none;
+    }
+}
+
+// Narrower, where a status chip that reads "question" no longer fits beside a name of 6ch: the context size and
+// the Supervisor chip's mode word go (the chip's colour and tooltip still say the mode), and the name gives way
+// down to 3ch, before the chip is cut. The Supervisor button stays whole.
+@container swarm-tree (max-width: 280px) {
+    .swarm-agent-row {
+        .swarm-ctx-size {
+            display: none;
+        }
+
+        .swarm-agent-label {
+            min-width: 3ch;
+        }
+    }
+
+    .swarm-supervisor-chip .swarm-supervisor-mode {
         display: none;
     }
 }
@@ -133,7 +172,8 @@
     .swarm-agent-row {
         overflow: hidden;
 
-        .swarm-agent-label {
+        .swarm-agent-label,
+        .swarm-agent-label:has(+ .swarm-seat-badge) {
             min-width: 0;
         }
 
