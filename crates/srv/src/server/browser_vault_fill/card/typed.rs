@@ -90,6 +90,11 @@ pub(super) async fn typed_card(state: &AppState, caller: Option<&Caller>, req: &
         Ok(f) => f,
         Err(response) => return response,
     };
+    // The host names the site of the form's frame from its own frame map; without it the person can't be told where the card goes.
+    if form.origin.is_empty() {
+        record(state, block_id, &target, agent, "(an unknown site)", "refused", &req.reason.clone().unwrap_or_default());
+        return err_response(StatusCode::BAD_REQUEST, "AgentMux can't tell which site this form is on, so the person is not asked for a card".to_string());
+    }
     let site = format!("{} (card form)", form.grant_key);
     let agent_reason = req.reason.clone().unwrap_or_default();
     let question = typed_question(agent, crate::server::vault_ask::agent_pane(state, caller, &req.auth), target.label.as_str(), &form, &agent_reason);
