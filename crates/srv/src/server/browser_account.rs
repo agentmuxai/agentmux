@@ -8,7 +8,11 @@
 //! its snapshot. The host finds it and says which site's frame it is in
 //! (`signup_probe`: from its own frame map, never the page). The person is
 //! asked in the Vault's own prompt, a window modal outside every pane, which no
-//! `UI` click reaches: "Allow once" or "Deny". Then the pane shows "<agent> is
+//! `UI` click reaches: "Allow once", "Always for <agent> on <site>" or "Deny". Always is kept
+//! as the `accounts` kind of a site permission (browser_site_permissions.rs), listed in
+//! Settings > Browser, where the person revokes it; with it the question is skipped and
+//! the countdown stays. Silence is still a no, and an Incognito tab never offers Always.
+//! Then the pane shows "<agent> is
 //! creating an account on <site> [Stop]" for 10 seconds, and only then is the
 //! password made, kept in the Vault as an unconfirmed `login` of the tab's
 //! profile, and typed into the field and its confirm field, as for the person's
@@ -110,7 +114,8 @@ fn use_request(agent: &str, agent_pane: String, origin: &str, reason: &str, inco
         entry_label: format!("a new account on {origin}"),
         what: "new account".to_string(),
         origin: origin.to_string(),
-        offer_always: false,
+        // An Incognito tab keeps no sign-ins, and its password goes to Personal: that is asked every time.
+        offer_always: !incognito,
         reason: if incognito {
             "this is an Incognito tab, which keeps no sign-ins: the password is kept in Personal".to_string()
         } else {
@@ -123,12 +128,23 @@ fn use_request(agent: &str, agent_pane: String, origin: &str, reason: &str, inco
     }
 }
 
-/// Ask the person; `Ok(true)` when nobody answered and it went ahead.
+/// Ask the person, unless they have said "Always" for this agent on this site (not in an Incognito tab);
+/// `Ok(true)` when nobody answered and it went ahead.
 async fn approve(state: &AppState, block_id: &str, agent: &str, agent_pane: String, origin: &str, reason: &str, incognito: bool) -> Result<bool, (Ended, StatusCode, How, String)> {
+    if !incognito && super::browser_site_permissions::may_make_accounts(agent, origin) {
+        return Ok(false);
+    }
     let headline = format!("{agent} wants to create an account on {origin}");
     let (ended, _) = super::vault_ask::ask(state, block_id, use_request(agent, agent_pane, origin, reason, incognito), ANSWER_WAIT, &headline).await;
     match ended {
-        Ended::Once | Ended::Always => Ok(false),
+        Ended::Once => Ok(false),
+        Ended::Always => {
+            // Kept only for this agent on this site, and listed in Settings, where the person revokes it.
+            if let Err(e) = super::browser_site_permissions::add_kind(state, agent, origin, super::browser_site_permissions::ACCOUNTS) {
+                tracing::warn!(agent = %agent, origin = %origin, error = %e, "[account] the person's Always could not be kept; this account goes ahead and the next one asks");
+            }
+            Ok(false)
+        }
         Ended::WentAhead => Ok(true),
         ended => {
             let (how, code) = if ended == Ended::NoAnswer { (How::TimedOut, StatusCode::REQUEST_TIMEOUT) } else { (How::Declined, StatusCode::FORBIDDEN) };

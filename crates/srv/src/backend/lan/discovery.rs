@@ -674,7 +674,7 @@ impl LanDiscovery {
     /// staleness is already tracked by `last_seen` and a flapping list is
     /// worse than a slightly-old one.
     async fn agent_names_refresh_loop(self: Arc<Self>, mut cancel: oneshot::Receiver<()>) {
-        let http = match reqwest::Client::builder()
+        let http = match crate::http_client::builder()
             .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
             .build()
         {

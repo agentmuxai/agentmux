@@ -522,7 +522,7 @@ async fn fetch_verified(
     if !asset.url.starts_with(spec.url_prefix) {
         return Err(DownloadError::Fetch("the release file is outside its registered origin".into()));
     }
-    let client = reqwest::Client::builder()
+    let client = crate::http_client::builder()
         .user_agent(format!("AgentMux/{}", env!("CARGO_PKG_VERSION")))
         .connect_timeout(CONNECT_TIMEOUT)
         .build()

@@ -107,7 +107,7 @@ impl WpsClient {
         if endpoint.is_empty() || auth_key.is_empty() {
             return None;
         }
-        let inner = reqwest::Client::builder()
+        let inner = agentmux_common::local_http::builder()
             // Snappy publish — chunks should land within a frame of
             // emission. Long timeouts here cause back-pressure that
             // stalls the PTY reader.

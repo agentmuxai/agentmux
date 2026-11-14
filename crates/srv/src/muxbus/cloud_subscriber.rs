@@ -272,13 +272,13 @@ impl CloudSubscriber {
         let held = super::wan_lease::is_held(&key);
         if !was_subscribed && !held {
             // Wait out a release already in flight; nothing is held here.
-            super::wan_lease::release(base, &key, "", &reqwest::Client::new(), || true).await;
+            super::wan_lease::release(base, &key, "", &crate::http_client::client(), || true).await;
             return RelayRelease::NotSubscribed;
         }
         let token = token.await;
         let still_gone = || !self.agents.lock().unwrap().contains(&key);
         // Re-added meanwhile: then this srv kept the lease.
-        if super::wan_lease::release(base, &key, &token, &reqwest::Client::new(), still_gone).await {
+        if super::wan_lease::release(base, &key, &token, &crate::http_client::client(), still_gone).await {
             RelayRelease::Released
         } else {
             RelayRelease::Kept

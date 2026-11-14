@@ -95,7 +95,7 @@ fn unread(error: FetchError, file: &str) -> Fetched {
 
 /// Fetch the three files of the signed release called `version`.
 async fn fetch(version: &str) -> Fetched {
-    let client = match reqwest::Client::builder()
+    let client = match crate::http_client::builder()
         .user_agent(format!("AgentMux/{CURRENT}"))
         .connect_timeout(Duration::from_secs(6))
         .build()
