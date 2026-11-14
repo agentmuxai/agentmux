@@ -112,52 +112,13 @@
 // A narrow pane: the row's name and its status word keep room by giving up what only decorates them, a step at
 // a time as the pane narrows: the age and the Supervisor chip's state word (360 px), the context size and the
 // chip's mode word (320 px), the seat badge (240 px). The Supervisor chip's colour and tooltip still say the rest.
+// Between the steps the row's parts give way in turn (see `.swarm-agent-row` below).
 //
-// Between the steps nothing leaves the card: when the row's parts still do not fit (a question with its seconds,
-// beside a Supervisor mode), they give way in turn: the seat badge, then the name down to its least width, then
-// the status chip from its end, its seconds first.
-//
-// Flex shares a shortfall by these weights, so each is far enough from the next that the later part loses less
-// than a layout unit, and gets no ellipsis, while the earlier one still shrinks. The name is written both ways
-// so that its rule in swarm-seats.scss, as specific as the row's own, cannot win by coming later.
+// A step that changes what the row's own rules set is written under `.swarm-tree`, so it outranks them although
+// they come later in this file.
 @container swarm-tree (max-width: 360px) {
-    .swarm-agent-row {
-        .swarm-last-active {
-            display: none;
-        }
-
-        .swarm-seat-badge {
-            flex-shrink: 10000000000;
-        }
-
-        // As wide as its words, so it has a width to give up after the badge and before the chip. It still
-        // grows into the room that is left, with a badge too, as it does at every width: the row's `flex: 1`
-        // below comes after swarm-seats.scss in the built stylesheet and wins over its `flex: 0 1 auto`, so
-        // the badge already sits at the row's end. Growing here keeps that; it does not move the badge.
-        .swarm-agent-label,
-        .swarm-agent-label:has(+ .swarm-seat-badge) {
-            flex: 1 100000 auto;
-            min-width: 6ch;
-        }
-
-        .swarm-status-chip {
-            flex-shrink: 1;
-            min-width: 0;
-            overflow: hidden;
-        }
-
-        .swarm-status-countdown {
-            flex-shrink: 100000;
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .swarm-status-label {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+    .swarm-tree .swarm-agent-row .swarm-last-active {
+        display: none;
     }
 
     .swarm-supervisor-chip .swarm-supervisor-detail {
@@ -169,7 +130,7 @@
 // the Supervisor chip's mode word go (the chip's colour and tooltip still say the mode). The Supervisor button
 // stays whole.
 @container swarm-tree (max-width: 320px) {
-    .swarm-agent-row .swarm-ctx-size {
+    .swarm-tree .swarm-agent-row .swarm-ctx-size {
         display: none;
     }
 
@@ -180,19 +141,21 @@
 
 // Narrower: the name gives way down to 5ch, about three letters and the ellipsis, before the chip is cut.
 @container swarm-tree (max-width: 280px) {
-    .swarm-agent-row {
-        .swarm-agent-label,
-        .swarm-agent-label:has(+ .swarm-seat-badge) {
-            min-width: 5ch;
-        }
+    .swarm-tree .swarm-agent-row .swarm-agent-label {
+        min-width: calc-size(max-content, min(size, 5ch));
     }
 }
 
 // Narrower, where the seat badge is down to a stub of its padding and the status word would be cut to keep it:
-// the badge goes, and the word has its room.
+// the badge goes, and the word has its room. The name then takes the room that is left, as a name with no badge
+// does, so the row's other parts stay at its end.
 @container swarm-tree (max-width: 240px) {
     .swarm-agent-row .swarm-seat-badge {
         display: none;
+    }
+
+    .swarm-tree .swarm-agent-row .swarm-agent-label:has(+ .swarm-seat-badge) {
+        flex-grow: 1;
     }
 }
 
@@ -202,17 +165,15 @@
     .swarm-agent-row {
         overflow: hidden;
 
-        .swarm-agent-label,
-        .swarm-agent-label:has(+ .swarm-seat-badge) {
-            min-width: 0;
-        }
-
-        .swarm-status-chip,
         .swarm-supervisor-chip {
             flex-shrink: 1;
             min-width: 0;
             overflow: hidden;
         }
+    }
+
+    .swarm-tree .swarm-agent-row .swarm-agent-label {
+        min-width: 0;
     }
 }
 
@@ -331,28 +292,83 @@
         align-items: center;
     }
 
+    // When the row's parts do not fit, at any width, they give way in turn and nothing leaves the card: what
+    // only decorates the row first (the seat badge, then the age, then the context size), then the name down to
+    // its least width, then the status chip from its end, its seconds first.
+    // Flex shares a shortfall by these weights, so each is far enough from the next that the later part loses
+    // less than a layout unit, and gets no ellipsis, while the earlier one still shrinks.
+    //
+    // The name is as wide as its words, so it has a width to give up, and takes the room that is left, which
+    // keeps the row's other parts at its end. Its least width is 6ch, or its words when they are shorter, so a
+    // short name is not padded out to 6ch before its seat badge.
     .swarm-agent-label {
-        flex: 1;
+        flex: 1 100000 auto;
+        min-width: calc-size(max-content, min(size, 6ch));
         font-size: var(--text-base);
         font-weight: 500;
         @include mixins.truncate;
         color: var(--main-text-color);
+
+        // With a seat badge the name does not grow: the badge sits right after it, and the badge's own margin
+        // (swarm-seats.scss) keeps the row's other parts at its end.
+        &:has(+ .swarm-seat-badge) {
+            flex-grow: 0;
+        }
+    }
+
+    .swarm-seat-badge {
+        flex-shrink: 100000000000000000000;
+    }
+
+    .swarm-status-chip {
+        flex-shrink: 1;
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .swarm-status-countdown {
+        flex-shrink: 100000;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .swarm-status-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .swarm-ctx-size {
-        flex-shrink: 0;
+        flex-shrink: 10000000000;
         font-size: var(--text-2xs);
         color: var(--secondary-text-color);
         opacity: 0.6;
-        white-space: nowrap;
     }
 
     .swarm-last-active {
-        flex-shrink: 0;
+        flex-shrink: 1000000000000000;
         font-size: var(--text-2xs);
         color: var(--secondary-text-color);
         opacity: 0.6;
+    }
+
+    // Shown whole or not at all, never as a cut number: the part is one line high and wraps, and its text comes
+    // after an empty first item as high as the line. When the part is narrower than its text, the text wraps
+    // under that item and is clipped away.
+    .swarm-ctx-size,
+    .swarm-last-active {
+        display: inline-flex;
+        flex-wrap: wrap;
+        min-width: 0;
+        height: 1lh;
+        overflow: hidden;
         white-space: nowrap;
+
+        &::before {
+            content: "";
+            height: 1lh;
+        }
     }
 }
 
