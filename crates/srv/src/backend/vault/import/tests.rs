@@ -93,6 +93,37 @@ fn chrome_edge_and_brave_exports_are_read() {
 }
 
 #[test]
+fn a_chrome_login_names_the_exact_origin_and_an_android_app_has_no_site() {
+    let csv = "name,url,username,password,note
+        Accounts,https://Accounts.Example.com/signin/v2?continue=x#top,alex,pw1,
+        Local,http://localhost:3000/login,bob,pw2,
+        Bank,https://bank.example:8443,carol,pw3,
+        ,android://aGFzaA==@com.example.app/,dana,pw4,
+        Phone,android://c2hh@com.example.phone/,erin,pw5,
+";
+    let i = read_ok(csv, "Chrome Passwords.csv");
+    assert_eq!(i.source, Source::Chrome);
+    let site = |label: &str| find(&i, label).fields.get("site").cloned();
+    assert_eq!(site("Accounts").as_deref(), Some("https://accounts.example.com"), "path, query and case are not part of a site");
+    assert_eq!(site("Local").as_deref(), Some("http://localhost:3000"));
+    assert_eq!(site("Bank").as_deref(), Some("https://bank.example:8443"));
+    let app = find(&i, "com.example.app");
+    assert_eq!((app.fields.get("site"), app.fields["username"].as_str(), app.parts["password"].as_str()), (None, "dana", "pw4"), "kept, with no site, labelled by its package");
+    assert!(app.tags.iter().any(|t| t == super::logins::ANDROID_APP), "{:?}", app.tags);
+    assert!(find(&i, "Phone").fields.get("site").is_none(), "a named Android row has no site either");
+    assert!(i.skipped.is_empty(), "{:?}", i.skipped);
+}
+
+#[test]
+fn only_a_browser_export_has_its_sites_made_origins() {
+    let i = read_ok("url,username,password,httpRealm,formActionOrigin
+https://example.org/login,alex,pw1,,https://example.org
+", "logins.csv");
+    assert_eq!(i.source, Source::Firefox);
+    assert_eq!(find(&i, "example.org").fields["site"], "https://example.org/login", "other sources are as exported");
+}
+
+#[test]
 fn firefox_exports_are_read_and_their_other_columns_ignored() {
     let i = read_ok(
         "url,username,password,httpRealm,formActionOrigin,guid,timeCreated,timeLastUsed,timePasswordChanged\nhttps://example.org,alex,pw1,,https://example.org,{abc},1,2,3\n",

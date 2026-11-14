@@ -113,7 +113,8 @@ fn vault_agents(body: &Value) -> Result<vault::vaults::VaultAgents, String> {
 }
 
 /// `import_commit`: writes what the person previewed. `vault` (a name or an id) is where the new entries go;
-/// Personal when left out.
+/// Personal when left out. `profile` is the browser profile a browser export's logins with a site belong to
+/// (`personal` when left out): they go to its sign-in Vault, which is where the browser offers them from.
 fn import_commit(store: &crate::backend::storage::store::Store, body: &Value) -> Result<(Value, bool), String> {
     let token = body.get("token").and_then(Value::as_str).unwrap_or("");
     let duplicates: vault::transfer::Duplicates = serde_json::from_value(body.get("duplicates").cloned().unwrap_or(json!("skip")))
@@ -122,7 +123,8 @@ fn import_commit(store: &crate::backend::storage::store::Store, body: &Value) ->
         Some(v) => vault::vaults::resolve(store, v, None)?.id,
         None => crate::backend::storage::vault::PERSONAL_VAULT.to_string(),
     };
-    Ok((json!({ "result": vault::transfer::commit(store, token, duplicates, &vault)? }), true))
+    let profile = body.get("profile").and_then(Value::as_str);
+    Ok((json!({ "result": vault::transfer::commit_for(store, token, duplicates, &vault, profile)? }), true))
 }
 
 /// The host ops on Vaults and on an entry's earlier values.
