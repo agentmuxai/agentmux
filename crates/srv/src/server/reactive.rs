@@ -629,7 +629,7 @@ pub(super) async fn handle_reactive_inject(
     caller: Option<Extension<super::caller::Caller>>,
     Json(req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(error) = super::actor::require_actor(&state, caller.as_deref(), super::actor::ActorSite::Inject, req.source_agent.as_deref()).await {
+    if let Err(error) = super::lan_watch::acting(req.source_agent.as_deref(), super::actor::require_actor(&state, caller.as_deref(), super::actor::ActorSite::Inject, req.source_agent.as_deref())).await {
         return Json(serde_json::json!({ "success": false, "error": error }));
     }
     tracing::info!(
@@ -662,7 +662,7 @@ pub(crate) async fn deliver(
     };
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
-    let resp = super::cron::inject_here_following_runs(state, &req).await;
+    let resp = super::lan_watch::during("local delivery", super::cron::inject_here_following_runs(state, &req)).await;
     if resp.success {
         replay.delivered();
         flow_notes::note_delivered(state, &req);
@@ -692,7 +692,7 @@ pub(crate) async fn deliver(
     }
 
     if is_not_found {
-        if let Some(body) = forward_tiers::Tiers::new(state, auth_via, caller_uid, &req, &resp).run(&mut replay).await {
+        if let Some(body) = super::lan_watch::during("forwarding", forward_tiers::Tiers::new(state, auth_via, caller_uid, &req, &resp).run(&mut replay)).await {
             return body;
         }
     }
@@ -721,7 +721,7 @@ async fn admit(
 
     verify_jekt_signature(state, req);
     verify_reagent_signature(req, now_unix_secs());
-    verify_lan_signature(state, req).await;
+    super::lan_watch::during("sender signature check", verify_lan_signature(state, req)).await;
     verify_cross_channel_signature(state, req);
     lan_v2::log_receipt(req);
     let mut replay = replay::reserve(req, now_unix_secs());
@@ -742,7 +742,7 @@ async fn admit(
     // session gone cold should not be woken by a routine one: hold it, or refuse it where it
     // can't be held (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5, SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_
     // 2026_10_25.md). Before `prepare`, which charges inline attachments to the session.
-    if let Some(held) = hold_before_delivery(state, auth_via, req, &mut replay).await {
+    if let Some(held) = super::lan_watch::during("hold check", hold_before_delivery(state, auth_via, req, &mut replay)).await {
         return Err(held);
     }
 
