@@ -27,6 +27,12 @@
  * pill first in the header and the others not there (`tabStripIn`). A tab dragged out of its pane leaves the
  * others behind, and its picture took them all along (the operator, 2026-11-13: "when a pane tab tears off, its
  * taking all the other pane tabs with it").
+ *
+ * Only a tab's own drag pictures it alone. A pane dragged by its header takes all its tabs with it, and its
+ * picture shows them all: the press says which drag it will be (on a tab's pill, or anywhere else on the
+ * header). Pictured alone whatever was pressed, a pane of six tabs was carried as one and got the other five
+ * back at the release (the operator, 2026-11-13: "when tearing a pane off, I see only the selected pane tab
+ * in the follow window ... we need them to show always").
  */
 
 import { getApi, MOS } from "@/app/store/global";
@@ -56,6 +62,8 @@ let held: {
     size?: { width: number; height: number };
     /** The live follow is showing this picture: it is what the user has been looking at, however long the drag. */
     following?: boolean;
+    /** Taken for a tab's own drag: of the tab alone where its pane has others. */
+    tab?: boolean;
 } | null = null;
 
 export interface CssRect {
@@ -424,9 +432,11 @@ async function peekHeld(key: string, waitMs: number) {
 
 /**
  * Start capturing `blockId` (a base64 JPEG), replacing any earlier picture. `pointer` is where the press
- * landed (viewport px): the live follow keeps the pane at that grab.
+ * landed (viewport px): the live follow keeps the pane at that grab. `tab` says the picture is for the drag of
+ * that one tab, which is pictured alone where its pane has others; a pane's own drag pictures the pane as it
+ * stands, with all its tabs.
  */
-export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y: number }): void {
+export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y: number }, tab = false): void {
     const at = Date.now();
     if (pointer) lastPress = pointer;
     // The rect now, before the drag restyles or moves anything.
@@ -436,7 +446,7 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
         return;
     }
     const r = el.getBoundingClientRect();
-    const solo = tabStripIn(el, blockId);
+    const solo = tab ? tabStripIn(el, blockId) : undefined;
     // The block's own view, not the DOM: a pane keeps its inactive tabs
     // mounted, so a background browser tab would match a DOM query.
     const isBrowser = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.view === "browser";
@@ -467,6 +477,7 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
         picture,
         grab: pointer && grabIn(r, pointer, solo),
         size: { width: r.width, height: r.height },
+        tab,
     };
 }
 
@@ -485,12 +496,13 @@ function grabIn(r: CssRect, pointer: { x: number; y: number }, solo: TabStripInP
 /**
  * The picture of tab `blockId` for the drag that is starting. The press took one of the pane as it stood then,
  * under the tab that was in front: a tab pressed while another was in front has none of its own, so it is
- * taken now, with the press as its grab. Where a press takes pictures (Windows).
+ * taken now, with the press as its grab. So is one whose press was not read as a tab's. Where a press takes
+ * pictures (Windows).
  */
 export function ensureTabPicture(blockId: string): void {
     if (!isWindows()) return;
-    if (held?.blockId === blockId && Date.now() - held.at <= MAX_AGE_MS) return;
-    prewarmTearOffSnapshot(blockId, lastPress);
+    if (held?.blockId === blockId && held.tab && Date.now() - held.at <= MAX_AGE_MS) return;
+    prewarmTearOffSnapshot(blockId, lastPress, true);
 }
 
 /**
@@ -552,6 +564,14 @@ export async function takeTearOffSnapshot(blockId: string): Promise<string | und
 export function paneDragCandidate(target: EventTarget | null): string | null {
     if (!(target instanceof Element) || !target.closest('[draggable="true"]')) return null;
     return target.closest("[data-blockid]")?.getAttribute("data-blockid") ?? null;
+}
+
+/**
+ * Whether a pointerdown on a pane's header is on one of its tabs' pills: the drag it may start is that tab's,
+ * not the pane's (a pill has its own drag, and the header's does not start from one).
+ */
+export function pressIsOnTab(target: EventTarget | null): boolean {
+    return target instanceof Element && target.closest(".pane-tab[data-tab-id]") !== null;
 }
 
 /** Test hook. */

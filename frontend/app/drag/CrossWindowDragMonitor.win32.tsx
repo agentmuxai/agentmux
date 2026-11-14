@@ -36,7 +36,7 @@ import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
 import { endDrag, endReleasedSession, session } from "./drag-session";
 import { endedByEscape } from "./native-cancel";
-import { paneDragCandidate, prewarmTearOffSnapshot, takeTearOffSnapshot, takeWindowTabSnapshot } from "./tearoff-snapshot";
+import { paneDragCandidate, pressIsOnTab, prewarmTearOffSnapshot, takeTearOffSnapshot, takeWindowTabSnapshot } from "./tearoff-snapshot";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
 export type DragItemPayload =
@@ -71,7 +71,8 @@ function CrossWindowDragMonitor(): JSX.Element {
         const onPointerDown = (e: PointerEvent) => {
             if (e.button !== 0) return;
             const blockId = paneDragCandidate(e.target);
-            if (blockId) prewarmTearOffSnapshot(blockId, { x: e.clientX, y: e.clientY });
+            // A press on a tab's pill may drag that tab alone; anywhere else on the header, the whole pane.
+            if (blockId) prewarmTearOffSnapshot(blockId, { x: e.clientX, y: e.clientY }, pressIsOnTab(e.target));
         };
         document.addEventListener("pointerdown", onPointerDown, true);
         onCleanup(() => document.removeEventListener("pointerdown", onPointerDown, true));
