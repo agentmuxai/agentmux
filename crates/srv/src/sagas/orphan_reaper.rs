@@ -35,7 +35,6 @@
 // reaped), and whatever `validate_layout_invariants` finds in a stored tree.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::backend::blockcontroller;
@@ -48,27 +47,8 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// How long a block must stay unplaced before it is reaped.
 pub(crate) const MIN_ORPHAN_AGE: Duration = Duration::from_secs(90);
 
-/// Diagnostic-only counters updated at the end of every `sweep()` — for the
-/// periodic `mem_attribution` log (`sysinfo.rs`) to correlate commit/handle
-/// growth against reaper activity. A `reaper_candidates`/`reaper_first_seen`
-/// that climbs sweep over sweep without a matching rise in
-/// `reaper_reaped_cumulative` would mean the reaper keeps finding (but not
-/// managing to close) the same growing set of blocks — worth seeing
-/// directly rather than inferred from commit numbers alone.
-static LAST_CANDIDATES: AtomicUsize = AtomicUsize::new(0);
-static LAST_FIRST_SEEN_LEN: AtomicUsize = AtomicUsize::new(0);
-static REAPED_CUMULATIVE: AtomicU64 = AtomicU64::new(0);
-
-/// `(candidates found this sweep, first_seen entries carried across sweeps,
-/// cumulative blocks reaped since process start)`.
 #[cfg(any(windows, test))]
-pub fn last_sweep_stats() -> (usize, usize, u64) {
-    (
-        LAST_CANDIDATES.load(Ordering::Relaxed),
-        LAST_FIRST_SEEN_LEN.load(Ordering::Relaxed),
-        REAPED_CUMULATIVE.load(Ordering::Relaxed),
-    )
-}
+pub use crate::backend::sweep_stats::last_sweep_stats;
 
 /// Start the periodic sweep. Called once from `main` after `AppState` exists.
 pub fn install(state: &AppState) {
@@ -145,11 +125,7 @@ pub(crate) async fn sweep(state: &AppState, watch: &mut Watch, now: Instant, min
         }
     }
 
-    LAST_CANDIDATES.store(scan.unplaced.iter().filter(|u| u.is_agent()).count(), Ordering::Relaxed);
-    LAST_FIRST_SEEN_LEN.store(watch.first_seen.len(), Ordering::Relaxed);
-    if !reaped.is_empty() {
-        REAPED_CUMULATIVE.fetch_add(reaped.len() as u64, Ordering::Relaxed);
-    }
+    crate::backend::sweep_stats::record(scan.unplaced.iter().filter(|u| u.is_agent()).count(), watch.first_seen.len(), reaped.len());
     reaped
 }
 
