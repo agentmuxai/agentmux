@@ -1,6 +1,6 @@
 # SPEC: Rename a file from its Editor document tab
 
-**Status:** approved 2026-11-14. The operator, on choices A and B with their recommendations and the cancel-on-leaving default, as relayed by AgentY: "looks good, lets do it". So: A is the recommended folder order, B is refused, and leaving the box cancels. Sections 11 (edge cases) and 12 (checked against established tools) were added the same day at the operator's request; they change none of the three.
+**Status:** implemented in #47622 (section 13 says how it was built). Approved 2026-11-14: the operator, on choices A and B with their recommendations and the cancel-on-leaving default, as relayed by AgentY: "looks good, lets do it". So: A is the recommended folder order, B is refused, and leaving the box cancels. Sections 11 (edge cases) and 12 (checked against established tools) were added the same day at the operator's request; they change none of the three.
 **Date:** 2026-11-14
 **Author:** Camper@narko
 **Tasks:** #47621 (this spec), #47622 (the build)
@@ -306,4 +306,5 @@ Built as specified, with these notes.
 - **The tree's old route, `renameeditorfile`, is removed.** The tree renames through `fs.rename` like the tab. Two things change for the tree with it: a change of case only now works, and a symbolic link is renamed itself, not its target.
 - **The whole tree is listed again after a rename,** not one folder: the tree spells paths in the system's own way, which a tab's path may not match.
 - **Not in the command palette** (§6): the palette lists app-wide commands only.
+- **Which places a rename may touch.** A rename from the Editor (a tab or its tree) follows the Files pane's limit, `ProtectedPaths` (drive roots, the home folder itself, AgentMux's data and installation, system folders), plus the read-only refusal of a pane confined to an agent's workspace. It no longer follows the Editor's older home-only limit, which the removed `renameeditorfile` applied and which the Editor's saves, new files and deletes still apply. So a file outside the home folder that the Editor shows but will not save can be renamed from its tab, exactly as it can be from the Files pane in the same window. This is on purpose: one rename, one set of rules, and the same answer in both panes. Raised in review of the PR; if the home-only limit should hold for the Editor's renames too, it is a check in `fs_rename` for a request that comes from an Editor pane.
 - **Found on the way and fixed:** creating a file from the tree checked that the name was free and then wrote it, which empties a file made in between. It is created exclusively now.
