@@ -454,6 +454,24 @@
         box-shadow: none;
     }
 
+    // The landing place of a tab pill that leaves other tabs behind (PaneLanding.tsx): no pane of the layout
+    // stands there until the release, so the place holds the tab's picture, at the pane's own size from its
+    // top left corner and cut to the place, over the pane's own colour (the empty pane where there is no
+    // picture). Under the zone's edge where the zone still draws one (no live reflow).
+    .placeholder .pane-landing {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: rgb(from var(--block-bg-color) r g b);
+
+        img {
+            display: block;
+            max-width: none;
+            user-select: none;
+        }
+    }
+
     // NOTE — no reduced treatment here by design. The drag-rearrange glide
     // (`.placeholder-sizer`) is ESSENTIAL spatial motion: it shows where a
     // drop lands, so it stays outside the motion policy and is never reduced

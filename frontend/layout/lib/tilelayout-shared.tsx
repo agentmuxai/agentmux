@@ -34,6 +34,8 @@ import {
 import { ELEMENT_DRAG_KINDS, isAnyUnderway } from "@/app/drag/drag-session";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { shouldReduceMotion } from "@/app/motion/motion";
+import { PaneLanding } from "./PaneLanding";
+import { pillDragIn } from "./pillDragState";
 import { clearPlacement, leavePlacement, previewPlacement, showStay, ZONE_EXIT_MS, type PlacementInput } from "./placementPreview";
 import { commitTearOff, leaveOwnPane, restOverOwnPane } from "./tearOffPreview";
 import {
@@ -568,6 +570,13 @@ export const Placeholder = (props: PlaceholderProps) => {
         false
     );
 
+    // A tab pill that leaves other tabs behind has no pane in the layout to stand in its landing place: the
+    // place holds its picture (PaneLanding.tsx). A pane's only tab moves the pane itself.
+    const landingTab = () => {
+        const pill = pillDragIn(props.layoutModel);
+        return pill && !pill.lone ? pill.blockId : undefined;
+    };
+
     return (
         <div class={clsx("placeholder-container", reflowing() && "live-reflow")} style={props.style}>
             <Show when={visible()}>
@@ -579,7 +588,9 @@ export const Placeholder = (props: PlaceholderProps) => {
                     the tracker re-measures on its tagged element's own style
                     changes. */}
                 <div class="placeholder-sizer" style={lastTransform() ?? {}} data-pane-overlay>
-                    <div class={clsx("placeholder", exiting() && "exiting")} />
+                    <div class={clsx("placeholder", exiting() && "exiting")}>
+                        <Show when={landingTab()}>{(blockId) => <PaneLanding blockId={blockId()} />}</Show>
+                    </div>
                 </div>
                 {/* Every other pane's rect once the drop has happened. Not tagged `data-pane-overlay`: that
                     cuts the rect out of a browser page, and an outline must not take the page's pane away. */}
