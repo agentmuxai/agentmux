@@ -146,6 +146,9 @@ fn browse_says_what_is_installed_and_whether_the_catalog_is_ahead() {
     c.skill_upsert_unique_global(&skill_row(&b)).unwrap();
     install_checked(&c, "x", &b, 1).unwrap();
     let here = c.skill_app_map().unwrap();
+    assert_eq!(items(vec![entry.clone()], &here)[0].state, "changed", "the same files added another way are not as the catalog lists them");
+    install_download(&c, &zip, &entry, 2).unwrap();
+    let here = c.skill_app_map().unwrap();
     assert_eq!(items(vec![entry.clone()], &here)[0].state, "current");
     let newer = CatalogEntry { version: "1.1.0".into(), hash: "f".repeat(64), ..entry.clone() };
     let item = &items(vec![newer], &here)[0].clone();
@@ -259,11 +262,14 @@ fn a_skill_is_from_the_catalog_only_while_it_is_still_what_the_catalog_listed() 
 My own note.");
     c.skill_upsert_unique_global(&edited).unwrap();
     assert!(!c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog);
+    let entry = entry_for(&v1, &zip1, 1);
+    assert_eq!(items(vec![entry.clone()], &c.skill_app_map().unwrap())[0].state, "changed", "Browse offers the catalog's version back");
 
     // Installing the catalog's version again puts it back.
     let again = install_download(&c, &zip1, &entry_for(&v1, &zip1, 1), 11).unwrap();
     assert_eq!(again.skill_id, first.skill_id);
     assert!(c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog);
+    assert_eq!(items(vec![entry], &c.skill_app_map().unwrap())[0].state, "current");
 
     // Different files than the catalog listed, or another key, are not: the record holds what the catalog said.
     c.skill_catalog_source_set(&first.skill_id, &"f".repeat(64), &entry_for(&v1, &zip1, 1).publisher_key).unwrap();

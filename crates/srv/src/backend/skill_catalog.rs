@@ -124,8 +124,9 @@ pub struct AppSkillCatalogItem {
     pub fingerprint: String,
     /// `agentmux` when the AgentMux catalog key signed it, else `community`.
     pub badge: String,
-    /// `not_installed`, `current` (the same files), `update` (installed here is older), `newer_here` (installed here is
-    /// newer than the catalog's), or `changed` (the same version, other files).
+    /// `not_installed`, `current` (exactly what the catalog lists), `update` (installed here is older), `newer_here`
+    /// (installed here is newer than the catalog's), or `changed` (the same version, but not as the catalog lists it:
+    /// other files, an edited text, or added another way).
     pub state: String,
     pub installed_version: Option<String>,
     pub skill_id: Option<String>,
@@ -210,7 +211,9 @@ pub fn items(entries: Vec<CatalogEntry>, installed: &BTreeMap<String, SkillApp>)
             let here = installed.iter().find(|(_, a)| format!("{}.{}", a.info.publisher, a.info.id) == entry.id);
             let state = match here {
                 None => "not_installed",
-                Some((_, a)) if a.content_hash == entry.hash => "current",
+                Some((_, a)) if a.content_hash == entry.hash && a.from_catalog => "current",
+                // The same files, but not as the catalog lists them: edited in Memory, or added another way.
+                Some((_, a)) if a.content_hash == entry.hash => "changed",
                 Some((_, a)) => match version_cmp(&entry.version, &a.info.version) {
                     std::cmp::Ordering::Greater => "update",
                     std::cmp::Ordering::Less => "newer_here",
