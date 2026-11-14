@@ -20,27 +20,8 @@ pub struct OpenInShellReq {
     pub path: String,
 }
 
-/// Request for `renameeditorfile`. `new_name` is a plain filename, not a path
-/// — the handler rejects anything containing a separator, so a rename cannot
-/// move a file out of its directory.
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct RenameEditorFileReq {
-    pub old_path: String,
-    pub new_name: String,
-}
-
-/// Response for `renameeditorfile`. The resolved absolute path, which is not
-/// simply `old_path`'s parent joined with `new_name`: `old_path` is
-/// canonicalized first, so symlinks are already resolved here.
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct RenameEditorFileResult {
-    pub new_path: String,
-}
-
-/// Request for `createeditorfile`. `name` is a plain filename (see
-/// `RenameEditorFileReq`).
+/// Request for `createeditorfile`. `name` is a plain filename, not a path: the handler refuses anything
+/// containing a separator, so a new file cannot land outside `parent_path`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CreateEditorFileReq {

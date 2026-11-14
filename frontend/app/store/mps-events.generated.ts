@@ -41,6 +41,7 @@ import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { EndpointNoticeEvent } from "@/types/rpc/EndpointNoticeEvent";
 import type { EventsDroppedEvent } from "@/types/rpc/EventsDroppedEvent";
+import type { FileRenamedEvent } from "@/types/rpc/FileRenamedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { GoogleNoticeEvent } from "@/types/rpc/GoogleNoticeEvent";
@@ -171,6 +172,7 @@ export type MuxEventPayloads = {
   "editor:file_changed": PathChangedEvent;
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
+  "fs:renamed": FileRenamedEvent;
   "google:notice": GoogleNoticeEvent;
   "history:sessions:changed": null;
   "identity:no-direct-links": NoDirectLinksEvent;
@@ -306,6 +308,7 @@ export const TYPED_MUX_EVENTS = [
   "editor:file_changed",
   "files:changed",
   "files:op",
+  "fs:renamed",
   "google:notice",
   "history:sessions:changed",
   "identity:no-direct-links",

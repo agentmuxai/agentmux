@@ -19,8 +19,6 @@ export type { DeleteEditorFileReq } from "@/types/rpc/DeleteEditorFileReq";
 export type { MoveScratchFileReq } from "@/types/rpc/MoveScratchFileReq";
 export type { MoveScratchFileResult } from "@/types/rpc/MoveScratchFileResult";
 export type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
-export type { RenameEditorFileReq } from "@/types/rpc/RenameEditorFileReq";
-export type { RenameEditorFileResult } from "@/types/rpc/RenameEditorFileResult";
 
 // The LSP wire shapes are GENERATED from their Rust definitions by ts-rs.
 // They used to be function-local `Cmd` structs inside each handler, which is

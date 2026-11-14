@@ -12,6 +12,7 @@ import { bodyFocusTarget } from "./editor-body-focus";
 import type { CmHandle } from "./editor-cm-handle";
 import type { EditorBuffer } from "@/app/store/editor-pane-state-store";
 import { trackSave } from "./editor-doc-tabs";
+import { createTabRename, noteSavedTo, type TabRename } from "./editor-tab-rename";
 import type { EditorViewModel } from "./editor-model";
 
 type Root = () => HTMLDivElement | undefined;
@@ -34,9 +35,50 @@ export function createSaveAs(model: EditorViewModel) {
     const handleSaveAsConfirm = async (path: string) => {
         const tabId = saveAsTabId();
         setSaveAsTabId(null);
-        if (path) await trackSave(model, tabId, model.saveFileAs(path));
+        if (!path) return;
+        await trackSave(
+            model,
+            tabId,
+            model.saveFileAs(path).then((problem) => {
+                // The next Untitled document named in its tab goes to the same folder.
+                const saved = model.tabsAtom().find((t) => t.id === tabId);
+                if (problem === null && saved && !saved.isScratch) noteSavedTo(saved.filePath);
+            })
+        );
     };
     return { saveAsTabId, setSaveAsTabId, triggerSaveAs, handleSaveAsConfirm };
+}
+
+/** A tab's two name boxes: Save As (a path, for an Untitled document) and its name (a rename, or a save under the name). */
+export interface NameBoxes {
+    saveAs: ReturnType<typeof createSaveAs>;
+    rename: TabRename;
+    /** Open the name box on `tabId` (default: the tab in front); false when it has no file to rename. */
+    startRename: (tabId?: string) => boolean;
+    /** A double-click on tab `tabId`: the same, unless it only followed a tab closing. */
+    renameOnDoubleClick: (tabId: string) => void;
+    triggerSaveAs: () => void;
+}
+
+/** The name boxes of a pane's tabs. One is open at a time: opening either closes the other. */
+export function createNameBoxes(model: EditorViewModel, focusDocument: () => void): NameBoxes {
+    const saveAs = createSaveAs(model);
+    const rename = createTabRename(model, { focusDocument });
+    return {
+        saveAs,
+        rename,
+        startRename: (tabId) => {
+            saveAs.setSaveAsTabId(null);
+            return rename.start(tabId);
+        },
+        renameOnDoubleClick: (tabId) => {
+            if (rename.startFromDoubleClick(tabId)) saveAs.setSaveAsTabId(null);
+        },
+        triggerSaveAs: () => {
+            rename.cancel();
+            saveAs.triggerSaveAs();
+        },
+    };
 }
 
 /**
@@ -75,6 +117,8 @@ interface CommandDeps extends EditorShows {
     docTabs: DocTabsModel<EditorBuffer>;
     focusRegion: Accessor<"tree" | "body" | null>;
     triggerSaveAs: () => void;
+    /** Open the name box on the tab in front; false when it has no file to rename. */
+    startRename: () => boolean;
 }
 
 /**
@@ -114,6 +158,9 @@ export function useEditorCommands(d: CommandDeps): (command: string) => boolean 
                 if (!model.activeTabAtom()?.isScratch) return false;
                 d.triggerSaveAs();
                 return true;
+            // The name box on the tab in front: a file is renamed, an Untitled document saved under the name.
+            case "editor:renameFile":
+                return d.startRename();
             // From the editor body to the tree, showing it if it's hidden, and back. A remote editor has no tree.
             case "editor:focusTree":
                 if (model.connection()) return false;
@@ -143,7 +190,19 @@ export function useEditorKeys(root: Root, docTabs: DocTabsModel<EditorBuffer>, r
 
         const handleEditorKeys = (ev: KeyboardEvent) => {
             const mod = ev.ctrlKey || ev.metaKey;
-            if (!mod) return;
+            if (!mod) {
+                // A plain character is typing, never a command.
+                if (ev.key.length === 1) return;
+                // Rename file (F2 by default) has no modifier. The tree renames its own row with
+                // that key, and a text box (the name box itself) keeps it.
+                const target = ev.target as Element | null;
+                const elsewhere = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || !!target?.closest?.(".editor-tree-column");
+                if (!elsewhere && paneCommandFor(ev, "editor") === "editor:renameFile" && runEditorCommand("editor:renameFile")) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                }
+                return;
+            }
             // Document-tab keys (SPEC_DOCUMENT_TABS §4.3), before CodeMirror
             // sees them. A text box (Save As, a tree rename) keeps its own.
             const tabKey = docTabKeyAction(ev);

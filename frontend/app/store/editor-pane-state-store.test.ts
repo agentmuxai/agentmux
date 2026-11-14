@@ -586,6 +586,66 @@ describe("editor-pane-state-store (slice #10, Phase 1A)", () => {
         expect(r2.state).toBe(r.state);
     });
 
+    // docs/specs/SPEC_EDITOR_TAB_RENAME_2026_11_14.md §11.3, §11.4.
+    it("RenameFile keeps the tab's id, unsaved mark, kept state and viewer, and gives it the new key and title", () => {
+        let s = initialState();
+        s = update(s, { type: "OpenFile", path: "C:/repo/old.png", mode: "preview" }).state;
+        const [t] = s.tabs;
+        s = update(s, { type: "PinTab", tabId: t.id }).state;
+        s = update(s, { type: "SetTabViewer", tabId: t.id, viewer: "text", override: true }).state;
+        s = update(s, { type: "MarkDirty", tabId: t.id }).state;
+
+        const r = update(s, { type: "RenameFile", oldPath: "C:\\repo\\old.png", newPath: "C:\\repo\\new.png" }).state;
+        expect(r.tabs[0]).toMatchObject({ id: t.id, filePath: "c:/repo/new.png", dirty: true, isPreview: false, viewerOverride: "text" });
+        expect(r.doc.tabs[0]).toMatchObject({ key: "c:/repo/new.png", title: "new.png" });
+        expect(r.activeTabId).toBe(t.id);
+        assertActiveInvariant(r);
+    });
+
+    it("RenameFile gives the tab a language when one comes with it, and keeps its own otherwise", () => {
+        let s = initialState();
+        s = update(s, { type: "OpenFile", path: "C:/repo/a.ts", language: "typescript" }).state;
+        s = update(s, { type: "RenameFile", oldPath: "C:/repo/a.ts", newPath: "C:/repo/b.ts" }).state;
+        expect(s.tabs[0].language).toBe("typescript");
+        s = update(s, { type: "RenameFile", oldPath: "C:/repo/b.ts", newPath: "C:/repo/b.md", language: "markdown" }).state;
+        expect(s.tabs[0]).toMatchObject({ filePath: "c:/repo/b.md", language: "markdown" });
+    });
+
+    it("RenameFile to a change of case only still changes the key and the title", () => {
+        let s = initialState();
+        s = update(s, { type: "OpenFile", path: "C:/repo/readme.md" }).state;
+        s = update(s, { type: "RenameFile", oldPath: "C:/repo/readme.md", newPath: "C:/repo/README.md" }).state;
+        expect(s.doc.tabs[0]).toMatchObject({ key: "c:/repo/README.md", title: "README.md" });
+    });
+
+    it("RenameFile leaves a tab where it is when another tab already has the new path", () => {
+        let s = initialState();
+        s = update(s, { type: "OpenFile", path: "C:/repo/a.ts" }).state;
+        s = update(s, { type: "OpenFile", path: "C:/repo/b.ts" }).state;
+        const r = update(s, { type: "RenameFile", oldPath: "C:/repo/a.ts", newPath: "C:/repo/b.ts" });
+        expect(r.state).toBe(s);
+        expect(new Set(r.state.doc.tabs.map((t) => t.key)).size).toBe(2);
+    });
+
+    it("RenameFile moves a closed tab too, so reopening it finds the file", () => {
+        let s = initialState();
+        s = update(s, { type: "OpenFile", path: "C:/repo/a.ts" }).state;
+        s = update(s, { type: "OpenFile", path: "C:/repo/b.ts" }).state;
+        s = update(s, { type: "CloseTab", tabId: s.tabs[0].id }).state;
+        s = update(s, { type: "RenameFile", oldPath: "C:/repo/a.ts", newPath: "C:/repo/renamed.ts" }).state;
+        expect(s.doc.closed[0]).toMatchObject({ key: "c:/repo/renamed.ts", title: "renamed.ts" });
+        s = update(s, { type: "ReopenLastClosed" }).state;
+        expect(s.tabs.map((t) => t.filePath)).toContain("c:/repo/renamed.ts");
+    });
+
+    it("RenameFile is what a restart restores", () => {
+        let s = initialState();
+        s = update(s, { type: "OpenFile", path: "C:/repo/a.ts" }).state;
+        s = update(s, { type: "RenameFile", oldPath: "C:/repo/a.ts", newPath: "C:/repo/renamed.ts" }).state;
+        const restored = hydrateDocTabs(persistDocTabs(s.doc, serializeEditorBuffer), deserializeEditorBuffer);
+        expect(restored?.tabs[0]).toMatchObject({ key: "c:/repo/renamed.ts", title: "renamed.ts" });
+    });
+
     it("canonicalizePath normalizes slashes, drive case, doubled slashes", () => {
         expect(canonicalizePath("C:\\Repo\\Foo.ts")).toBe("c:/Repo/Foo.ts");
         expect(canonicalizePath("C:/a//b/c")).toBe("c:/a/b/c");

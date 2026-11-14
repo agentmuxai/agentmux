@@ -161,9 +161,30 @@ pub(crate) async fn fs_rename(state: &AppState, cmd: FsRenameReq) -> Result<FsRe
     if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
         let r = remote_of(conn, cmd.block_id.as_deref(), &state.auth_key);
         let new_path = fs_remote::rename(r, &cmd.path, &cmd.new_name).await?;
+        publish_renamed(&state.broker, cmd.path.clone(), new_path.clone(), Some(conn.to_string()));
         return Ok(FsRenameResult { new_path });
     }
-    blocking(move || fs_ops::rename(&cmd)).await?
+    let broker = state.broker.clone();
+    blocking(move || {
+        let old_path = fs_ops::entry_display_path(&cmd.path).unwrap_or_else(|| cmd.path.clone());
+        let renamed = fs_ops::rename(&cmd)?;
+        publish_renamed(&broker, old_path, renamed.new_path.clone(), None);
+        Ok(renamed)
+    })
+    .await?
+}
+
+/// Tells every window that `old_path` is now `new_path`, so documents open on it follow (the Editor's tabs).
+/// Nothing is sent for a name that didn't change.
+fn publish_renamed(broker: &crate::backend::mps::Broker, old_path: String, new_path: String, connection: Option<String>) {
+    if old_path == new_path {
+        return;
+    }
+    broker.publish_event::<crate::backend::mps_events::FileRenamed>(
+        &crate::backend::mps_events::FileRenamedEvent { old_path, new_path, connection },
+        vec![],
+        0,
+    );
 }
 
 /// `fs.create`.
@@ -526,5 +547,41 @@ mod tests {
         let status = super::fs_git_status(&state, req(serde_json::json!({ "path": dir.path().to_string_lossy() }))).await.unwrap();
         assert!(!status.in_repo, "a temp folder is not a repository");
         assert!(status.entries.is_empty());
+    }
+
+    /// A rename tells every window once, with both paths; a refused rename and an unchanged name tell nobody.
+    #[tokio::test]
+    async fn a_rename_is_published_once_and_a_refusal_is_not() {
+        let state = crate::server::tests::test_state();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        state.broker.add_observer(std::sync::Arc::new(move |e: &crate::backend::mps::MuxEvent| {
+            if e.event == "fs:renamed" {
+                sink.lock().unwrap().push((e.scopes.clone(), e.data.clone().unwrap_or_default()));
+            }
+        }));
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        std::fs::write(dir.path().join("taken.txt"), "t").unwrap();
+        let req = |name: &str| crate::backend::rpc_types::FsRenameReq {
+            path: dir.path().join("a.txt").to_string_lossy().into_owned(),
+            new_name: name.to_string(),
+            connection: None,
+            block_id: None,
+        };
+
+        assert!(super::fs_rename(&state, req("taken.txt")).await.unwrap_err().contains("already exists"));
+        super::fs_rename(&state, req("a.txt")).await.unwrap();
+        assert!(seen.lock().unwrap().is_empty(), "nothing was renamed yet");
+
+        let out = super::fs_rename(&state, req("b.txt")).await.unwrap();
+        let events = seen.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        let (scopes, data) = &events[0];
+        assert!(scopes.is_empty(), "to every window, not one pane");
+        assert_eq!(data["new_path"], out.new_path);
+        assert!(data["old_path"].as_str().unwrap().ends_with("a.txt"));
+        assert!(!data["old_path"].as_str().unwrap().starts_with(r"\\?\"), "as the panes show paths");
+        assert!(data["connection"].is_null());
     }
 }

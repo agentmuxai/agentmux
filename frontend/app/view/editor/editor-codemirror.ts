@@ -85,6 +85,10 @@ export class CodeMirrorSession {
     private readonly saveKeysCompartment = new Compartment();
     /** CodeMirror's light/dark base styles follow the app theme's polarity, which can change while tabs are open. */
     private readonly themeCompartment = new Compartment();
+    /** A tab's language can change under its live state: a rename with another extension swaps it in place. */
+    private readonly languageCompartment = new Compartment();
+    /** The language each tab's state was last given. */
+    private readonly builtLanguage = new Map<string, string>();
     readonly lsp: LspSession;
     /** Per-tab CodeMirror state: cursor, selection, scroll and undo history across tab switches. */
     private readonly cmStates = new Map<string, EditorState>();
@@ -213,7 +217,7 @@ export class CodeMirrorSession {
 
         // Load language extension
         const langExt = await loadLanguage(language);
-        if (langExt) extensions.push(langExt);
+        extensions.push(this.languageCompartment.of(langExt ?? []));
 
         // A later setup() started while we awaited loadLanguage(): it owns the view.
         if (gen !== this.setupGeneration) return;
@@ -225,6 +229,7 @@ export class CodeMirrorSession {
             state: state ?? EditorState.create({ doc: content, extensions }),
             parent,
         });
+        if (tabId) this.builtLanguage.set(tabId, language);
         // The extensions were built before the language loaded; the theme may have changed polarity since.
         cm.view.dispatch({ effects: this.themeCompartment.reconfigure(this.themeExtension()) });
         setLiveDoc(content); // seed preview from the freshly-built doc
@@ -259,6 +264,7 @@ export class CodeMirrorSession {
     useLiveEffects(): void {
         const { model, cm } = this.d;
         createEffect(() => this.onTabChange());
+        this.watchRename();
 
         // Live-toggle word wrap (right-click menu → model.toggleWordWrap()) on
         // whichever tab is currently showing, without rebuilding CodeMirror.
@@ -347,6 +353,8 @@ export class CodeMirrorSession {
                 ],
             });
             setLiveDoc(saved.doc.toString()); // seed preview from restored doc
+            // Renamed while it was in the background: its saved state has the old language.
+            void this.applyLanguage(activeId, lang);
             // Re-wire LSP for the now-active file's content.
             void this.lsp.startIfSupported(path, lang, content);
             return;
@@ -357,12 +365,46 @@ export class CodeMirrorSession {
         });
     }
 
+    /** Gives the tab in front `language` without rebuilding its view, so its undo history and selection stay. */
+    private async applyLanguage(tabId: string, language: string): Promise<void> {
+        if (this.builtLanguage.get(tabId) === language) return;
+        const ext = await loadLanguage(language);
+        const view = this.d.cm.view;
+        if (!view || this.activeTabIdForCm !== tabId) return;
+        this.builtLanguage.set(tabId, language);
+        view.dispatch({ effects: this.languageCompartment.reconfigure(ext ?? []) });
+    }
+
+    /**
+     * The file behind the tab in front was renamed: same tab, same text, another path and maybe another
+     * language. Nothing is rebuilt (that would drop the undo history): the language is swapped in place, and
+     * the language server closes the old document and opens the new one. A preview tab retargeted to
+     * another file also keeps its id, but its content is read again, and the rebuild that follows does both.
+     */
+    private watchRename(): void {
+        const { model, cm } = this.d;
+        createEffect(
+            on(
+                () => [model.activeIdAtom(), model.filePathAtom(), model.languageAtom()] as const,
+                ([id, path, lang], before) => {
+                    if (!before || !id || before[0] !== id || before[1] === path) return;
+                    const tab = untrack(model.activeTabAtom);
+                    if (!cm.view || this.activeTabIdForCm !== id || !tab?.contentLoaded || untrack(model.loadingAtom)) return;
+                    void this.applyLanguage(id, lang);
+                    void this.lsp.startIfSupported(path, lang, cm.view.state.doc.toString());
+                },
+                { defer: true }
+            )
+        );
+    }
+
     /** Clears a closed tab's cached state (so reopening the file starts fresh), and everything when the pane goes. */
     watchTabClose(): void {
         const { model, cm } = this.d;
         const unsubSliceEvents = model.onSliceEvent((event) => {
             if (event.type === "TabClosed") {
                 this.cmStates.delete(event.tabId);
+                this.builtLanguage.delete(event.tabId);
                 // The tab in front left. It isn't the outgoing tab to snapshot when the next one
                 // shows: a tab moved to another pane keeps its id, and a snapshot taken now would
                 // come back over its newer text if it is moved back.

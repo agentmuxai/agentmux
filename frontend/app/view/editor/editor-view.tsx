@@ -6,10 +6,11 @@
 // tree's toolbar, shown again by the button leading the document bar.
 // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
-import { createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { createSignal, createUniqueId, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { ContextMenu } from "@/app/components/context-menu";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
+import type { DocTab } from "@/app/doc-tabs/doc-tabs";
 import type { DocTabsModel } from "@/app/doc-tabs/doc-tabs-controller";
 import type { EditorBuffer } from "@/app/store/editor-pane-state-store";
 import { IconButton } from "@/app/element/ui";
@@ -17,6 +18,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { TextViewerSwitch, ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
+import { TabNameInput, TabRenameLine } from "./editor-tab-name-input";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { editorDocTabs } from "./editor-doc-tabs";
 import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
 import { FileTree } from "./file-tree";
@@ -32,12 +35,13 @@ import type { LspState } from "./lsp/lsp-client";
 import type { CmHandle } from "./editor-cm-handle";
 import { CodeMirrorSession } from "./editor-codemirror";
 import {
-    createSaveAs,
+    createNameBoxes,
     focusEditorBody,
     useEditorCommands,
     useEditorKeys,
     useFocusRegion,
     type EditorShows,
+    type NameBoxes,
 } from "./editor-commands";
 import { copyToClipboard, useLspBanner, useTreeMenu, type TreeMenu } from "./editor-tree-state";
 import { previewResizeHandler, treeResizeHandler, useEditorZoom } from "./editor-zoom-resize";
@@ -97,9 +101,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
 
     // The pane's tabs on the shared strip and keys (PLAN_EDITOR_ON_SHARED_DOC_TABS).
     const docTabs = editorDocTabs(model);
-    const saveAs = createSaveAs(model);
+    const names = createNameBoxes(model, () => focusEditorBody(model, cm, root, shows));
     const focus = useFocusRegion(root);
-    const runEditorCommand = useEditorCommands({ model, cm, root, docTabs, ...shows, focusRegion: focus.focusRegion, triggerSaveAs: saveAs.triggerSaveAs });
+    const runEditorCommand = useEditorCommands({ model, cm, root, docTabs, ...shows, focusRegion: focus.focusRegion, triggerSaveAs: names.triggerSaveAs, startRename: () => names.startRename() });
     const { contentZoomed, rootZoom } = useEditorZoom(model, cm, root);
     useEditorKeys(root, docTabs, runEditorCommand);
 
@@ -151,7 +155,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             <EditorMainColumn
                 model={model}
                 docTabs={docTabs}
-                saveAs={saveAs}
+                names={names}
                 shows={shows}
                 focusRegion={focus.focusRegion}
                 lspState={session.lsp.lspState}
@@ -218,7 +222,7 @@ function EditorTreeColumn(props: {
 function EditorMainColumn(props: {
     model: EditorViewModel;
     docTabs: DocTabsModel<EditorBuffer>;
-    saveAs: ReturnType<typeof createSaveAs>;
+    names: NameBoxes;
     shows: EditorShows;
     focusRegion: Accessor<"tree" | "body" | null>;
     lspState: Accessor<LspState | null>;
@@ -229,7 +233,7 @@ function EditorMainColumn(props: {
     showTreeButton: () => boolean;
     onPreviewResize: (e: MouseEvent) => void;
 }): JSX.Element {
-    const { model, docTabs, saveAs, banner } = props;
+    const { model, docTabs, banner } = props;
     const { showsText, isMarkdown } = props.shows;
     const lspState = props.lspState;
     const statusChipText = (): string => lspStatusChipText(lspState(), model.languageAtom());
@@ -247,7 +251,7 @@ function EditorMainColumn(props: {
                     "editor-region--focused": model.treeExpandedAtom() && props.focusRegion() === "body",
                 }}
             >
-                <EditorTabBar model={model} docTabs={docTabs} saveAs={saveAs} showTreeButton={props.showTreeButton} />
+                <EditorTabBar model={model} docTabs={docTabs} names={props.names} showTreeButton={props.showTreeButton} />
 
                 <Show when={isMarkdown() && model.tabsAtom().length > 0}>
                     <EditorModeToolbar model={model} />
@@ -295,46 +299,76 @@ function EditorMainColumn(props: {
     );
 }
 
-/** The document tab bar; while the tree is hidden, the button that shows it leads the bar. */
+/**
+ * The document tab bar; while the tree is hidden, the button that shows it leads the bar. A
+ * double-click on a tab, its menu or F2 opens the tab's name box: a file is renamed, an Untitled
+ * document saved under the name (SPEC_EDITOR_TAB_RENAME). The line under the bar belongs to that box.
+ */
 function EditorTabBar(props: {
     model: EditorViewModel;
     docTabs: DocTabsModel<EditorBuffer>;
-    saveAs: ReturnType<typeof createSaveAs>;
+    names: NameBoxes;
     showTreeButton: () => boolean;
 }): JSX.Element {
-    const { model, docTabs, saveAs } = props;
+    const { model, docTabs } = props;
+    const { saveAs, rename, startRename, renameOnDoubleClick } = props.names;
+    const lineId = createUniqueId();
+    const [lineLeft, setLineLeft] = createSignal(0);
+    const naming = (tabId: string): boolean => rename.tabId() === tabId;
+    const menuItems = (tab: DocTab<EditorBuffer>): ContextMenuItem[] => {
+        const why = rename.refusal(tab.payload);
+        return [
+            {
+                label: tab.payload.isScratch ? "Save As…" : "Rename…",
+                icon: tab.payload.isScratch ? MENU_ICON.saveAs : MENU_ICON.rename,
+                enabled: !why,
+                sublabel: why ?? undefined,
+                // Once the menu has closed: it must not take the keyboard back from the box.
+                click: () => void setTimeout(() => startRename(tab.id), 0),
+            },
+        ];
+    };
     return (
-        <DocTabStrip
-            ctl={docTabs}
-            docType="editor"
-            blockId={model.blockId}
-            show={() => props.showTreeButton() || docTabs.tabs().length > 0}
-            leading={
-                // While the tree is hidden, the button that shows it
-                // leads the document bar (the tree's own toolbar hides
-                // it). An editor on a remote host has no tree.
-                <Show when={props.showTreeButton()}>
-                    <IconButton
-                        icon="folder-tree"
-                        label="Show file tree"
-                        density="compact"
-                        class="editor-tree-toggle"
-                        onClick={() => void model.toggleTreeExpanded()}
-                    />
-                </Show>
-            }
-            tooltipOf={(t) => t.payload.filePath}
-            addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}
-            // Not while its Save As box is open: the drag would take
-            // the box's text selection.
-            canDrag={(t) => saveAs.saveAsTabId() !== t.id}
-            tabClass={(t) => ({ "editor-tab--saveas": saveAs.saveAsTabId() === t.id })}
-            renderLabel={(t) =>
-                saveAs.saveAsTabId() === t.id ? (
-                    <SaveAsInput onConfirm={(path) => void saveAs.handleSaveAsConfirm(path)} onCancel={() => saveAs.setSaveAsTabId(null)} />
-                ) : undefined
-            }
-        />
+        <>
+            <DocTabStrip
+                ctl={docTabs}
+                docType="editor"
+                blockId={model.blockId}
+                show={() => props.showTreeButton() || docTabs.tabs().length > 0}
+                leading={
+                    // While the tree is hidden, the button that shows it
+                    // leads the document bar (the tree's own toolbar hides
+                    // it). An editor on a remote host has no tree.
+                    <Show when={props.showTreeButton()}>
+                        <IconButton
+                            icon="folder-tree"
+                            label="Show file tree"
+                            density="compact"
+                            class="editor-tree-toggle"
+                            onClick={() => void model.toggleTreeExpanded()}
+                        />
+                    </Show>
+                }
+                tooltipOf={(t) => t.payload.filePath}
+                // Not while one of its boxes is open: the path would sit on the line under the box.
+                tooltipOff={(t) => saveAs.saveAsTabId() === t.id || naming(t.id)}
+                addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}
+                // Not while one of its boxes is open: the drag would take
+                // the box's text selection.
+                canDrag={(t) => saveAs.saveAsTabId() !== t.id && !naming(t.id)}
+                tabClass={(t) => ({ "editor-tab--saveas": saveAs.saveAsTabId() === t.id || naming(t.id) })}
+                renderLabel={(t) =>
+                    saveAs.saveAsTabId() === t.id ? (
+                        <SaveAsInput onConfirm={(path) => void saveAs.handleSaveAsConfirm(path)} onCancel={() => saveAs.setSaveAsTabId(null)} />
+                    ) : naming(t.id) ? (
+                        <TabNameInput rename={rename} lineId={lineId} onPlaced={setLineLeft} />
+                    ) : undefined
+                }
+                onRename={(t) => renameOnDoubleClick(t.id)}
+                menuItems={menuItems}
+            />
+            <TabRenameLine rename={rename} id={lineId} left={lineLeft} />
+        </>
     );
 }
 

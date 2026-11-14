@@ -57,6 +57,14 @@ vi.mock("@/app/store/rpc-api", () => {
         FileProbeCommand: async (_c, req) => ({ size: 0, mtime: 0, kind: "text", mime: "text/plain", text: { encoding: "utf-8", bom: "none" }, read_only: h.readOnly.has(req.path) }),
         ReadEditorFileCommand: (_c, req) => track(Promise.resolve({ content: h.files.get(req.path) ?? "", mtime: 1, size: 1, read_only: h.readOnly.has(req.path) })),
         CreateScratchFileCommand: async () => ({ file_path: "/tmp/scratch-1.md", scratch_id: "scratch-1", display_name: "Untitled-1" }),
+        // As srv's `fs.rename`: a new name in the same folder, and a taken one refused in words.
+        FsRenameCommand: async (_c, req) => {
+            const to = req.path.slice(0, req.path.lastIndexOf("/") + 1) + req.new_name;
+            if (h.files.has(to)) throw new Error(`Something named “${req.new_name}” already exists here.`);
+            h.files.set(to, h.files.get(req.path) ?? "");
+            h.files.delete(req.path);
+            return { new_path: to };
+        },
     };
     const quiet = new Set(["GetEditorRootsCommand", "ListEditorDirCommand", "FileProbeCommand"]);
     return {
@@ -156,6 +164,7 @@ vi.mock("./lsp/lsp-extensions", () => ({
 }));
 
 import { EditorViewComponent } from "./editor-view";
+import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { EditorViewModel } from "./editor-model";
 import { undo } from "@codemirror/commands";
 import { language } from "@codemirror/language";
@@ -886,6 +895,167 @@ describe("the tree, the tab bar and the dialogs", () => {
         }
         h.log.push(`save-as input shown: ${v.container.querySelector(".editor-tab--saveas input") != null}`);
         await expect(out()).toMatchFileSnapshot(snap("keys-save-as"));
+    });
+});
+
+// docs/specs/SPEC_EDITOR_TAB_RENAME_2026_11_14.md §3, §4, §6.
+describe("renaming a file from its tab", () => {
+    type View = Awaited<ReturnType<typeof mountView>>;
+    const tabEl = (v: View, id: string) => v.container.querySelector(`[data-tab-id="${id}"]`) as HTMLElement;
+    const box = (v: View) => v.container.querySelector<HTMLInputElement>(".editor-tab-name-input");
+    const line = (v: View) => v.container.querySelector(".editor-tab-rename-line");
+    const commit = async (v: View, name: string) => {
+        fireEvent.input(box(v)!, { target: { value: name } });
+        fireEvent.keyDown(box(v)!, { key: "Enter" });
+        await settle();
+    };
+
+    it("a double-click on a kept tab opens its name box; on a preview tab it keeps the tab, as before", async () => {
+        const v = await mountView();
+        await v.model.openFilePreview("/home/u/a.ts");
+        await settle();
+        const id = v.model.activeIdAtom()!;
+        fireEvent.dblClick(tabEl(v, id));
+        expect(v.model.activeTabAtom()?.isPreview).toBe(false);
+        expect(box(v)).toBeNull();
+
+        fireEvent.dblClick(tabEl(v, id));
+        expect(box(v)?.value).toBe("a.ts");
+        expect(document.activeElement).toBe(box(v));
+        expect([box(v)!.selectionStart, box(v)!.selectionEnd]).toEqual([0, 1]);
+        // The tab makes room for the box and can't be dragged by it.
+        expect(tabEl(v, id).classList.contains("editor-tab--saveas")).toBe(true);
+    });
+
+    it("the tab's path tooltip is put away while its name box is open, so it can't sit on the line under the box", async () => {
+        const v = await mountView();
+        const id = await open(v.model, "/home/u/a.ts");
+        const tip = () => document.body.querySelector("[data-pane-overlay]");
+        // The pointer is on the tab, as it is after a double-click (a menu test above left the button held).
+        fireEvent.pointerUp(window);
+        fireEvent.mouseEnter(tabEl(v, id).closest(".pane-tab-tip")!);
+        expect(tip()?.textContent).toBe("/home/u/a.ts");
+        fireEvent.dblClick(tabEl(v, id));
+        await settle();
+        expect(box(v)).not.toBeNull();
+        expect(tip()).toBeNull();
+        // It is back when the box closes with the pointer still there.
+        fireEvent.keyDown(box(v)!, { key: "Escape" });
+        await settle();
+        expect(box(v)).toBeNull();
+        expect(tip()?.textContent).toBe("/home/u/a.ts");
+    });
+
+    it("Enter renames the file under the same view: the text, the unsaved mark and the undo history stay, the language and the language server follow", async () => {
+        const v = await mountView();
+        const id = await open(v.model, "/home/u/a.ts");
+        await type(v.model, 0, "// edit\n");
+        const view = cm(v.model);
+        h.log.length = 0;
+
+        // The same language: the language server closes the old document and opens the new one.
+        expect(run(v.model, "editor:renameFile")).toBe(true);
+        await commit(v, "z.ts");
+        expect(v.model.filePathAtom()).toBe("/home/u/z.ts");
+        expect(cm(v.model)).toBe(view);
+        expect(cm(v.model)!.state.facet(language)?.name).toBe("typescript");
+
+        // Another extension: the language is swapped in place.
+        h.log.push("-- to another language");
+        expect(run(v.model, "editor:renameFile")).toBe(true);
+        await commit(v, "z.py");
+
+        expect(box(v)).toBeNull();
+        expect(v.model.activeIdAtom()).toBe(id);
+        expect(v.model.filePathAtom()).toBe("/home/u/z.py");
+        expect(v.container.querySelectorAll(".cm-editor").length).toBe(1);
+        expect(cm(v.model)).toBe(view);
+        expect(cm(v.model)!.state.doc.toString()).toBe("// edit\nexport const a = 1;\n");
+        expect(v.model.dirtyAtom()).toBe(true);
+        expect(cm(v.model)!.state.facet(language)?.name).toBe("python");
+        // The keyboard is back in the text.
+        expect(cm(v.model)!.hasFocus).toBe(true);
+        expect(undo(cm(v.model)!)).toBe(true);
+        expect(cm(v.model)!.state.doc.toString()).toBe("export const a = 1;\n");
+        await expect(out()).toMatchFileSnapshot(snap("rename"));
+    });
+
+    it("a refused name stays in the box, with the reason on the line under the tab bar", async () => {
+        const v = await mountView();
+        const id = await open(v.model, "/home/u/a.ts");
+        fireEvent.dblClick(tabEl(v, id));
+        expect(line(v)).toBeNull();
+        await commit(v, "b.ts");
+
+        expect(box(v)?.value).toBe("b.ts");
+        expect(line(v)?.textContent).toBe("Something named “b.ts” already exists here.");
+        expect(line(v)?.getAttribute("role")).toBe("alert");
+        expect(box(v)!.getAttribute("aria-describedby")).toBe(line(v)!.id);
+        expect(v.model.filePathAtom()).toBe("/home/u/a.ts");
+
+        // Typing clears it; Escape closes the box and gives the keyboard back to the text.
+        fireEvent.input(box(v)!, { target: { value: "c.ts" } });
+        expect(line(v)).toBeNull();
+        fireEvent.keyDown(box(v)!, { key: "Escape" });
+        expect(box(v)).toBeNull();
+        expect(cm(v.model)!.hasFocus).toBe(true);
+        expect(v.model.filePathAtom()).toBe("/home/u/a.ts");
+    });
+
+    it("F2 in the text opens the box; F2 in the tree and in a text box stays theirs", async () => {
+        const v = await mountView();
+        await open(v.model, "/home/u/a.ts");
+        const treeRow = v.container.querySelector('.file-tree [role="treeitem"]') as HTMLElement;
+        fireEvent.keyDown(treeRow, { key: "F2", code: "F2" });
+        expect(box(v)).toBeNull();
+
+        fireEvent.keyDown(cm(v.model)!.contentDOM, { key: "F2", code: "F2" });
+        expect(box(v)?.value).toBe("a.ts");
+        // In the box, F2 moves its selection on: it doesn't start over.
+        fireEvent.keyDown(box(v)!, { key: "F2", code: "F2" });
+        expect([box(v)!.selectionStart, box(v)!.selectionEnd]).toEqual([0, 4]);
+    });
+
+    it("the tab's menu offers Rename for a file and Save As for an Untitled document, and one name box is open at a time", async () => {
+        const v = await mountView();
+        const fileTab = await open(v.model, "/home/u/a.ts");
+        await v.model.openScratch();
+        await settle();
+        const scratchTab = v.model.activeIdAtom()!;
+        const menuOf = (id: string) => {
+            fireEvent.contextMenu(tabEl(v, id));
+            return resolveContextMenuRegion(tabEl(v, id))!.items!();
+        };
+        expect(menuOf(fileTab).map((i) => i.label)).toEqual(["Rename…", "Move to New Pane", "Close Tab"]);
+        expect(menuOf(scratchTab).map((i) => i.label)).toEqual(["Save As…", "Move to New Pane", "Close Tab"]);
+
+        // Ctrl+S on the Untitled tab opens its Save As box; Rename on the other tab closes it.
+        run(v.model, "editor:save");
+        await settle();
+        expect(v.container.querySelector(".editor-tab-saveas-input:not(.editor-tab-name-input)")).not.toBeNull();
+        menuOf(fileTab)[0].click!();
+        await settle();
+        expect(v.container.querySelector(".editor-tab-saveas-input:not(.editor-tab-name-input)")).toBeNull();
+        expect(v.model.activeIdAtom()).toBe(fileTab);
+        expect(box(v)?.value).toBe("a.ts");
+    });
+
+    it("an Untitled document shows where it will be saved, and Enter saves it there", async () => {
+        const v = await mountView();
+        await open(v.model, "/home/u/src/a.ts");
+        await v.model.openScratch();
+        await settle();
+        expect(run(v.model, "editor:renameFile")).toBe(true);
+        expect(box(v)?.value).toBe("Untitled-1");
+        fireEvent.input(box(v)!, { target: { value: "notes.md" } });
+        expect(line(v)?.textContent).toBe("Saves to /home/u/src/notes.md");
+        expect(line(v)?.getAttribute("role")).toBeNull();
+        h.log.length = 0;
+        fireEvent.keyDown(box(v)!, { key: "Enter" });
+        await settle();
+        expect(h.log.filter((l) => l.startsWith("rpc MoveScratchFile"))).toEqual([
+            'rpc MoveScratchFile {"scratch_id":"scratch-1","destination_path":"/home/u/src/notes.md"}',
+        ]);
     });
 });
 

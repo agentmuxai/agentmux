@@ -10,7 +10,7 @@ use crate::backend::base::expand_home_dir_safe;
 use crate::backend::rpc_types::{
     CommandReadEditorFileData, CommandWriteEditorFileData, CreateEditorDirReq, CreateEditorFileReq,
     CreateScratchFileReq, DeleteEditorFileReq, EditorDrive, EditorRootsReq, GetEditorHomeResult, GetEditorRootsResult,
-    ListEditorDirReq, MoveScratchFileReq, OpenInShellReq, RenameEditorFileReq, UnwatchMediaDirReq, WatchEditorFileReq,
+    ListEditorDirReq, MoveScratchFileReq, OpenInShellReq, UnwatchMediaDirReq, WatchEditorFileReq,
     WatchMediaDirReq,
 };
 use crate::backend::storage::store::Store;
@@ -254,9 +254,6 @@ fn register_file_io(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn register_tree_mutations(engine: &Arc<WshRpcEngine>) {
     engine.register_typed("openinshell", |cmd: OpenInShellReq, _ctx| async move {
         file_io::reveal_in_shell(&home_or("openinshell: cannot determine home directory")?, &cmd)
-    });
-    engine.register_typed("renameeditorfile", |cmd: RenameEditorFileReq, _ctx| async move {
-        file_io::rename_file(&home_or("renameeditorfile: cannot determine home")?, &cmd)
     });
     engine.register_typed("createeditorfile", |cmd: CreateEditorFileReq, _ctx| async move {
         file_io::create_file(&home_or("createeditorfile: cannot determine home")?, &cmd)
@@ -549,7 +546,6 @@ mod tests {
 
         for (cmd, req, resp) in [
             ("openinshell", "OpenInShellReq", "()"),
-            ("renameeditorfile", "RenameEditorFileReq", "RenameEditorFileResult"),
             ("createeditorfile", "CreateEditorFileReq", "CreateEditorFileResult"),
             ("createeditordir", "CreateEditorDirReq", "CreateEditorDirResult"),
             ("deleteeditorfile", "DeleteEditorFileReq", "()"),

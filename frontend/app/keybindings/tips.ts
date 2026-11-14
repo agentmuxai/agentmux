@@ -182,6 +182,15 @@ export const TIPS: TipRow[] = [
         label: "Keep it open instead of letting the next preview replace it",
         source: { file: "frontend/app/doc-tabs/DocTabStrip.tsx", anchor: "(preview, double-click to keep)" },
     },
+    {
+        // SPEC_EDITOR_TAB_RENAME_2026_11_14.md §3.
+        id: "editor:tab:rename",
+        area: "Editor",
+        gesture: "dblclick",
+        where: "on a document tab in the editor",
+        label: "Rename its file in place; an untitled document is saved under the name (Enter renames, Esc or a click elsewhere cancels)",
+        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: "onRename={(t) => renameOnDoubleClick(t.id)}" },
+    },
 
     // ── Terminal ──
     {

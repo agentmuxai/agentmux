@@ -73,6 +73,18 @@ describe("PaneTabStrip — what each pill is given", () => {
         expect(overlay.textContent).toBe("beta (full name)");
     });
 
+    it("shows no tooltip for a pill getTooltipOff names, and the others keep theirs", () => {
+        const { container } = render(() => (
+            <PaneTabStrip tabs={TABS} activeId="a" {...common} getTooltipOff={(t: T) => t.id === "b"} />
+        ));
+        const tips = container.querySelectorAll<HTMLElement>(".pane-tab-tip");
+        fireEvent.mouseEnter(tips[1]);
+        expect(document.body.querySelector("[data-pane-overlay]")).toBeNull();
+        fireEvent.mouseLeave(tips[1]);
+        fireEvent.mouseEnter(tips[0]);
+        expect(document.body.querySelector("[data-pane-overlay]")!.textContent).toBe("alpha");
+    });
+
     it("hands a right-click to onTabContextMenu with that pill's tab and the event", () => {
         const onTabContextMenu = vi.fn();
         const { container } = render(() => (
