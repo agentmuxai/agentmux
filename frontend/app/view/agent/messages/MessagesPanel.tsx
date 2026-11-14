@@ -27,10 +27,13 @@ import { Button } from "@/app/element/ui/Button";
 import { Select } from "@/app/element/ui/inputs";
 import { Pill } from "@/app/element/ui/Pill";
 import { SidePanel } from "@/app/element/ui/SidePanel";
+import { publishMessagesUnread } from "@/app/store/messages-unread";
+import { openAuditAtMessage } from "@/app/view/audit/open-audit";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 import { JektMeta, JektTags } from "../components/JektParts";
 import { PreviewLines } from "../components/PreviewLines";
 import { awaitingYou, dismissAwaiting } from "../hooks/useJektsAwaitingYou";
+import { deliveredAt } from "../jekts-awaiting-you";
 import { proseDoc, rawDoc } from "../preview-text/docs";
 import { scrollMessagesTo } from "../scroll/one-way-flow";
 import { MESSAGES_TOGGLE_CLASS, publishHeaderButton } from "./messages-header";
@@ -99,6 +102,9 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
         );
     };
     publishHeaderButton(props.blockId, controls, model.unread, () => model.waiting().length > 0);
+    // The Swarm row and the pane's tab show the same count (MessagesUnreadChip); they read it from here.
+    createEffect(() => publishMessagesUnread(props.blockId, { unread: model.unread(), needsYou: model.waiting().length > 0 }));
+    onCleanup(() => publishMessagesUnread(props.blockId, null));
     // Opened, the panel takes the keyboard: Esc then shuts it instead of reaching the pane. Not from under a text
     // field: a search that finds its match in a held message opens the panel while the person is still typing.
     // Keyed on the boolean: `state()` is a new object whenever the stored meta changes (`seen` moves while it is open).
@@ -388,15 +394,23 @@ function MessageRow(props: {
                         <PreviewLines doc={rawPayload()} />
                     </div>
                 </details>
-                <Show when={props.onShow}>
-                    {(show) => (
-                        <div class="messages-row__actions">
+                <div class="messages-row__actions">
+                    <Show when={props.onShow}>
+                        {(show) => (
                             <Button variant="link" onClick={show()}>
                                 Show in conversation
                             </Button>
-                        </div>
-                    )}
-                </Show>
+                        )}
+                    </Show>
+                    {/* The Audit's row of this message is found by the marker's MSGID, so a message without one has none. */}
+                    <Show when={props.node.msgId}>
+                        {(msgId) => (
+                            <Button variant="link" onClick={() => void openAuditAtMessage(msgId(), deliveredAt(props.node))}>
+                                Open in Audit
+                            </Button>
+                        )}
+                    </Show>
+                </div>
             </Show>
         </li>
     );
