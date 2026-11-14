@@ -32,6 +32,9 @@ pub use source::DockerSource;
 pub const NAME_PREFIX: &str = "agentmux-";
 /// The label a new agent container carries: its agent's id.
 pub const AGENT_LABEL: &str = "ai.agentmux.agent";
+/// How long a container srv is bringing up stays `starting` while Docker does not list it as running: long
+/// enough for a large image to download, short enough that a start that failed does not stay for good.
+const STARTING_GRACE_MS: u64 = 10 * 60_000;
 
 /// Where a container is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
@@ -80,7 +83,7 @@ pub struct ContainerRuntimeStatus {
 impl ContainerRuntimeStatus {
     /// Before anything has been looked at: there is no runtime.
     pub fn absent() -> Self {
-        Self { available: false, runtime: None, detail: None, at_ms: agentmux_common::time::now_ms() as u64 }
+        Self { available: false, runtime: None, detail: None, at_ms: agentmux_common::time::now_ms_u64() }
     }
 }
 
@@ -158,15 +161,21 @@ impl Registry {
     }
 
     /// The whole list from Docker: what it names replaces what was known, and a container it does not
-    /// name is gone.
+    /// name is gone, except one srv is still bringing up (its image may be downloading, so Docker does not
+    /// have it yet, or has made it and not started it), which stays `starting` for [`STARTING_GRACE_MS`].
     pub fn replace(&mut self, listed: Vec<Listed>, now_ms: u64) {
         let names: std::collections::HashSet<&str> = listed.iter().map(|l| l.name.as_str()).collect();
-        self.raw.retain(|name, _| names.contains(name.as_str()));
+        let coming_up = |r: &Raw| r.state == ContainerState::Starting && now_ms.saturating_sub(r.since_ms) < STARTING_GRACE_MS;
+        self.raw.retain(|name, r| names.contains(name.as_str()) || coming_up(r));
         for l in &listed {
-            if agent_id_of(&l.name).is_some() {
-                let state = if l.running { ContainerState::Running } else { ContainerState::Stopped };
-                self.set(&l.name, state, &l.image, l.labelled, now_ms);
+            if agent_id_of(&l.name).is_none() {
+                continue;
             }
+            if !l.running && self.raw.get(&l.name).is_some_and(coming_up) {
+                continue;
+            }
+            let state = if l.running { ContainerState::Running } else { ContainerState::Stopped };
+            self.set(&l.name, state, &l.image, l.labelled, now_ms);
         }
     }
 
@@ -257,10 +266,6 @@ impl Hub {
         Self { registry: Default::default(), agents: Box::new(agents), sink: Box::new(sink), wake: tokio::sync::Notify::new() }
     }
 
-    fn now_ms() -> u64 {
-        agentmux_common::time::now_ms() as u64
-    }
-
     fn lock(&self) -> std::sync::MutexGuard<'_, Registry> {
         self.registry.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -268,7 +273,7 @@ impl Hub {
     /// Publishes what `change` made different.
     fn publish_after(&self, change: impl FnOnce(&mut Registry, u64)) {
         let agents = (self.agents)();
-        let now = Self::now_ms();
+        let now = agentmux_common::time::now_ms_u64();
         let changed = {
             let mut registry = self.lock();
             change(&mut registry, now);
@@ -294,7 +299,7 @@ impl Hub {
     }
 
     pub fn on_runtime(&self, probe: Probe) {
-        let changed = self.lock().set_runtime(probe, Self::now_ms());
+        let changed = self.lock().set_runtime(probe, agentmux_common::time::now_ms_u64());
         if let Some(status) = changed {
             (self.sink)(Published::Runtime(status));
         }
@@ -303,7 +308,7 @@ impl Hub {
     /// What is there now, for the route.
     pub fn list(&self) -> ContainersList {
         let registry = self.lock();
-        ContainersList { runtime: registry.runtime(Self::now_ms()), containers: registry.containers() }
+        ContainersList { runtime: registry.runtime(agentmux_common::time::now_ms_u64()), containers: registry.containers() }
     }
 
     pub fn is_dormant(&self) -> bool {

@@ -170,3 +170,28 @@ fn an_event_for_another_container_is_ignored() {
     hub.on_event(DockerEvent { action: Action::Start, name: "postgres".into(), image: "postgres:16".into(), labelled: false });
     assert!(states(&seen).is_empty());
 }
+
+#[test]
+fn a_container_srv_is_bringing_up_survives_a_list_that_does_not_name_it_for_a_while() {
+    let mut registry = Registry::default();
+    let agents = HashMap::from([(ANN.to_string(), "Ann".to_string())]);
+    registry.starting(&name_of(ANN), "agentmux-agent:1", 1_000);
+    // Docker has not made it yet (the image is downloading): not gone, and nothing new to say.
+    registry.replace(Vec::new(), 61_000);
+    let first = registry.changes(&agents, 61_000);
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].state, ContainerState::Starting);
+    registry.replace(Vec::new(), 121_000);
+    assert!(registry.changes(&agents, 121_000).is_empty(), "the same state says nothing again");
+    // Made and not started: still starting, with the time it started.
+    registry.replace(vec![listed(ANN, false)], 181_000);
+    assert!(registry.changes(&agents, 181_000).is_empty());
+    assert_eq!(registry.containers()[0].since_ms, 1_000);
+    // A start that never came is not kept for good.
+    registry.replace(vec![listed(ANN, false)], 1_000 + STARTING_GRACE_MS);
+    assert_eq!(registry.changes(&agents, 1_000 + STARTING_GRACE_MS)[0].state, ContainerState::Stopped);
+    registry.starting(&name_of(ORPHAN), "", 2_000_000);
+    registry.replace(Vec::new(), 2_000_000 + STARTING_GRACE_MS);
+    let gone = registry.changes(&agents, 2_000_000 + STARTING_GRACE_MS);
+    assert!(gone.iter().any(|c| c.state == ContainerState::Gone), "{gone:?}");
+}
