@@ -124,25 +124,8 @@ wrap_task! {
                     return;
                 }
 
-                // [pane-trace] CONFIRM the parent window. `find_own_top_level_window`
-                // returns the process's FIRST visible top-level, NOT necessarily
-                // `window_label`'s window. Under redock churn the dying floater can
-                // be that first window, so the freshly-redocked pane gets parented
-                // to it and is cascade-destroyed when the floater's HWND dies
-                // (child-before-parent) → black render. If `actual_parent_label`
-                // here is a `floating-*` while `requested_window` is `main`, that's
-                // the bug. DO NOT REMOVE (see browser_pane::trace).
-                {
-                    let actual_parent_label = self.state.label_for_hwnd(parent_hwnd_raw as _);
-                    crate::browser_pane::trace::pane_trace(
-                        &self.block_id,
-                        "create-parent",
-                        &format!(
-                            "requested_window={} parent_hwnd={:?} actual_parent_label={:?}",
-                            self.window_label, parent_hwnd_raw, actual_parent_label
-                        ),
-                    );
-                }
+                // The parent the pane actually got, for `pane-trace` (see `trace_create_parent`).
+                trace_create_parent(&self.state, &self.block_id, &self.window_label, parent_hwnd_raw as _);
 
                 // Phase B.5 (window_meta step d) — pre-create handoff.
                 // Browser panes are not top-level windows; the kind value here
@@ -258,4 +241,23 @@ wrap_task! {
             }
         }
     }
+}
+
+
+/// [pane-trace] CONFIRM the parent window. `find_own_top_level_window`
+/// returns the process's FIRST visible top-level, NOT necessarily
+/// `window_label`'s window. Under redock churn the dying floater can
+/// be that first window, so the freshly-redocked pane gets parented
+/// to it and is cascade-destroyed when the floater's HWND dies
+/// (child-before-parent) → black render. If `actual_parent_label`
+/// here is a `floating-*` while `requested_window` is `main`, that's
+/// the bug. DO NOT REMOVE (see browser_pane::trace).
+#[cfg(target_os = "windows")]
+fn trace_create_parent(state: &AppState, block_id: &str, window_label: &str, parent_hwnd: isize) {
+    let actual_parent_label = state.label_for_hwnd(parent_hwnd as _);
+    crate::browser_pane::trace::pane_trace(
+        block_id,
+        "create-parent",
+        &format!("requested_window={window_label} parent_hwnd={parent_hwnd:?} actual_parent_label={actual_parent_label:?}"),
+    );
 }

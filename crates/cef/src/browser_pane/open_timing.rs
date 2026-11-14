@@ -13,7 +13,7 @@
 //!
 //! | mark        | where                                                                          | gap named |
 //! |-------------|--------------------------------------------------------------------------------|-----------|
-//! | `Requested` | the request arrived (`ipc.rs`) / the navigation began (`on_before_browse`)     |           |
+//! | `Requested` | the create was accepted (`post_creation`) / the navigation began (`on_before_browse`) |    |
 //! | `Started`   | the create task began on the UI thread (`CreateBrowserPaneTask`)               | `queue`   |
 //! | `Handed`    | the engine was asked for the browser (jar, parent window, `browser_host_create_browser` / the overlay) | `create` |
 //! | `Committed` | the main frame's document started (`on_load_start`)                            | `engine` (an open), `response` (a navigation) |

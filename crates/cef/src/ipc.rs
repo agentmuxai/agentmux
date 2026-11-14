@@ -512,7 +512,6 @@ async fn route_command(
             let w = args.get("width").and_then(|v| v.as_i64()).unwrap_or(800) as i32;
             let h = args.get("height").and_then(|v| v.as_i64()).unwrap_or(600) as i32;
             let rect = cef::Rect { x, y, width: w, height: h };
-            crate::browser_pane::open_timing::begin_open(block_id);
             // window_label: which window the pane should be attached to
             // (Linux/macOS Views path looks this up in state.windows). Default
             // to "main" for backward compat with frontends that don't send it.

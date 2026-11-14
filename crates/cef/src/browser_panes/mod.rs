@@ -218,8 +218,6 @@ impl BrowserPaneManager {
                     rect = ?(rect.x, rect.y, rect.width, rect.height),
                     "browser pane create hit AlreadyLive — re-navigating existing browser (NOT creating in requested window)"
                 );
-                // No load follows a re-attach of the same page: nothing to time.
-                crate::browser_pane::open_timing::forget(block_id);
                 crate::browser_pane::trace::pane_trace(
                     block_id,
                     "create-already-live",
@@ -314,6 +312,7 @@ impl BrowserPaneManager {
 /// task has run (a focus, a resize, a close) is answered as the task will build it.
 fn post_creation(state: &Arc<AppState>, block_id: &str, label: String, url: &str, rect: Rect, window_label: &str) {
     crate::pane_backend::note_pane_created(state, &label, window_label);
+    crate::browser_pane::open_timing::begin_open(block_id);
     let mut task = CreateBrowserPaneTask::new(
         state.clone(),
         block_id.to_string(),
