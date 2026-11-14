@@ -5,7 +5,7 @@
 //! (docs/specs/SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md §3.2, §3.2.1).
 //!
 //! An observer on the broker reads each published event and keeps only the few it names (a turn that ended, an
-//! agent that failed); it does nothing else under the broker's locks but queue. A task then gives the event its
+//! agent that failed); AgentMux's own start is the one more, said once; it does nothing else under the broker's locks but queue. A task then gives the event its
 //! typed fields, finds the enabled jobs whose filter it matches and starts each one's run through
 //! [`CronScheduler::fire_event`], which records it, applies policy, caps, the delay and the rate limit, and drops
 //! an event the job already heard. The run reads the fields as `{{trigger.*}}`.
@@ -31,7 +31,9 @@ pub mod name {
     pub const AGENT_TURN_ENDED: &str = "agent.turn_ended";
     /// An agent's process failed (a limit, a sign-in, a crash).
     pub const AGENT_CRASHED: &str = "agent.crashed";
-    pub const ALL: [&str; 2] = [AGENT_TURN_ENDED, AGENT_CRASHED];
+    /// AgentMux (srv) has started; `upgraded` says whether this start made an upgrade.
+    pub const APP_STARTED: &str = "app.started";
+    pub const ALL: [&str; 3] = [AGENT_TURN_ENDED, AGENT_CRASHED, APP_STARTED];
 }
 
 /// The fields an event carries besides its name: what a filter may name, and all a run reads of it.
@@ -39,6 +41,7 @@ pub fn fields_of(event: &str) -> Option<&'static [&'static str]> {
     match event {
         name::AGENT_TURN_ENDED => Some(&["agent", "outcome", "cost_usd"]),
         name::AGENT_CRASHED => Some(&["agent", "reason"]),
+        name::APP_STARTED => Some(&["version", "upgraded", "upgraded_from"]),
         _ => None,
     }
 }
@@ -64,6 +67,7 @@ pub fn validate_filter(filter: &Map<String, Value>) -> Result<(), String> {
 pub enum Raw {
     TurnEnded { block_id: String, turn_id: u64, ended_at_ms: u64, outcome: &'static str, cost_usd: f64 },
     Crashed { block_id: String, reason: String },
+    Started { version: String, upgraded_from: String, at_ms: i64 },
 }
 
 /// The fields of a published ledger that matter here.
@@ -146,6 +150,13 @@ pub fn event_of(raw: &Raw, store: &Store, now_ms: i64) -> AppEvent {
             input.insert("reason".into(), json!(reason));
             AppEvent { id: format!("crash:{block_id}:{reason}:{now_ms}"), name: name::AGENT_CRASHED, input }
         }
+        Raw::Started { version, upgraded_from, at_ms } => {
+            input.insert("event".into(), json!(name::APP_STARTED));
+            input.insert("version".into(), json!(version));
+            input.insert("upgraded".into(), json!(!upgraded_from.is_empty()));
+            input.insert("upgraded_from".into(), json!(upgraded_from));
+            AppEvent { id: format!("started:{version}:{at_ms}"), name: name::APP_STARTED, input }
+        }
     }
 }
 
@@ -195,6 +206,10 @@ pub fn spawn(broker: &Arc<Broker>, mstore: Arc<Store>, jobs: Arc<Store>, schedul
         return;
     }
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Raw>(QUEUE);
+    // This start is the first event: a job that names `app.started` runs once for it, whatever else follows.
+    if let Some(start) = crate::backend::upgrade_notice::this_start() {
+        let _ = tx.try_send(Raw::Started { version: start.version, upgraded_from: start.upgraded_from.unwrap_or_default(), at_ms: start.at_ms });
+    }
     // The observer runs inside `Broker::publish`, under its locks: it only parses and queues.
     broker.add_observer(Arc::new(move |ev: &MuxEvent| {
         if let Some(raw) = raw_of(ev) {
