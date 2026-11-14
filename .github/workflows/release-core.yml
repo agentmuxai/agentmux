@@ -608,7 +608,7 @@ jobs:
             fi
             assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.assets[] | "\(.name) \(.digest)"')"
             for f in dist-flat/*; do
-              if ! echo "$assets" | grep -qxF "$(basename "$f") sha256:$(sha256sum "$f" | cut -d' ' -f1)"; then
+              if ! echo "$assets" | grep -qxF "$(basename "$f") sha256:$(sha256sum < "$f" | cut -d' ' -f1)"; then
                 echo "Not the same as the published file: $(basename "$f")"
                 same=no
               fi
