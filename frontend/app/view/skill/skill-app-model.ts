@@ -23,6 +23,9 @@ export interface AppStatus {
     label: string;
 }
 
+/** What an installed skill says when it is exactly what the AgentMux catalog listed (the widget catalog's line, for skills). */
+export const FROM_CATALOG_LINE = "From the AgentMux catalog: its files and its publisher's key are the ones the catalog lists.";
+
 /** The manifest's platform name for this machine. */
 export function appPlatform(): "windows" | "macos" | "linux" {
     const p = getPlatform();
