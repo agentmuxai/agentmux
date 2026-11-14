@@ -95,14 +95,16 @@ jobs:
           bash scripts/ci-apt.sh update
           bash scripts/ci-apt.sh install -y pkg-config libdbus-1-dev libxcb1-dev
 
+      # release builds use their own cache
       - uses: Swatinem/rust-cache@v2
+        if: github.ref_type != 'tag'
         with:
           key: server-package-${{ matrix.os }}-${{ matrix.arch }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
+          cache: ${{ github.ref_type != 'tag' && 'npm' || '' }}
       - run: npm ci
 
       - name: Build the web UI
