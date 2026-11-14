@@ -32,8 +32,8 @@ Stamped after `run_object_schema`. The flat schema reset the counter to 1 (the p
 - **v5** — db_agents.last_block_id (Phase 3c; the latest launch's block, so the consolidated read finds the session snapshot without joining db_agent_instances)
 - **v6** — container_image / container_volumes / container_name on db_agent_definitions and db_agents (SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md Phase 0; host agents default to '' / '[]' / '')
 - **v7** — db_muxbus_credentials: global singleton for MuxBus cloud Cognito PKCE tokens (access, refresh, id) + expiry + user email
-- **v8** — db_memory_bundles.is_global: global-tier flag for Armory bundles injected into every agent's CLAUDE.md at launch
-- **v9** — db_memory_bundles.sort_order: explicit order of the Armory global bundles (the CLAUDE.md injection order); existing rows default to 0, the Armory Global section assigns positions via reorder
+- **v8** — db_memory_bundles.is_global: global-tier flag for Armory bundles injected into every agent's own CLAUDE.md at launch
+- **v9** — db_memory_bundles.sort_order: explicit order of the Armory global bundles (the per-agent CLAUDE.md injection order); existing rows default to 0, the Armory Global section assigns positions via reorder
 - **v10** — db_skills, db_mcp_servers, db_agent_skills_ref, db_agent_mcp_ref: standalone MCP Server and Skill primitives with per-agent ref tables (SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md)
 - **v11** — rename db_identity_accounts -> db_accounts, db_memory_bundles -> db_bundles (SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md Phase 4a, SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md)
 - **v12** — use_ambient_login on db_agent_definitions and db_agents: per-agent opt-in to the CLI's global (ambient) login when no oauth-class account resolves at spawn (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3, layer 3). Defaults to 0 (fail by default); a since-retired data migration set it to 1 for pre-existing linkless agents
