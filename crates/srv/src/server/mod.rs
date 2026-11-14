@@ -214,6 +214,9 @@ pub(crate) mod route_scan;
 #[path = "tests/http_action_tests.rs"]
 mod http_action_tests;
 #[cfg(test)]
+#[path = "tests/route_audience_tests.rs"]
+mod route_audience_tests;
+#[cfg(test)]
 mod rpc_schema_export;
 
 use std::sync::Arc;

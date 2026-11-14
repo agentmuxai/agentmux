@@ -17,6 +17,7 @@ pub mod cli_native_audit;
 mod turn_audit;
 pub mod handler;
 pub mod held_notes;
+pub mod held_request;
 pub mod progress_watcher;
 pub mod poller;
 mod rate_limiter;

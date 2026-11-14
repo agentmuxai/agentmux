@@ -4,6 +4,7 @@
 
 pub mod agent_admission;
 pub(crate) mod agent_route;
+pub(crate) mod session_snapshot;
 pub mod agent_grants;
 pub mod agent_line;
 pub mod agent_seat;

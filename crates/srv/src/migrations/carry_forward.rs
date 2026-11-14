@@ -347,7 +347,7 @@ mod tests {
     fn the_layout_a_quit_saved_crosses_the_upgrade() {
         use crate::backend::obj::Client;
         use crate::backend::storage::store::Store;
-        use crate::server::service::session_restore::{load_last_session_snapshot, save_last_session_snapshot};
+        use crate::backend::session_snapshot::{load_last_session_snapshot, save_last_session_snapshot};
 
         let root = tempfile::tempdir().unwrap();
         let _legacy = seed_dir(&pre_versioning(root.path()), "legacy");

@@ -3881,13 +3881,13 @@ async fn a_held_delivery_keeps_its_verdict_and_shows_it_was_held() {
         transcript_request_escalate_forced: true,
         ..row.clone()
     };
-    let resp = handler.inject_held(crate::server::jekt_held::request_from_held(&forced));
+    let resp = handler.inject_held(crate::backend::reactive::held_request::request_from_held(&forced));
     assert!(resp.success, "{:?}", resp.error);
     let text = delivered.lock().unwrap().join("");
     assert!(text.contains("TRUST=host-verified") && text.contains("ESCALATE=required"), "{text}");
     delivered.lock().unwrap().clear();
 
-    let req = crate::server::jekt_held::request_from_held(&row);
+    let req = crate::backend::reactive::held_request::request_from_held(&row);
     assert_eq!(req.target_agent, "uid-heldz", "the replay still routes by UID");
     assert_eq!(req.marker_target.as_deref(), Some("heldz"), "but the marker is addressed as the sender wrote it");
     let resp = handler.inject_held(req);
@@ -3917,10 +3917,10 @@ async fn a_held_delivery_keeps_its_verdict_and_shows_it_was_held() {
         files_json: serde_json::to_string(&files).unwrap(),
         ..row.clone()
     };
-    assert_eq!(crate::server::jekt_held::request_from_held(&with_files).files, Some(files));
-    assert_eq!(crate::server::jekt_held::request_from_held(&row).files, None);
+    assert_eq!(crate::backend::reactive::held_request::request_from_held(&with_files).files, Some(files));
+    assert_eq!(crate::backend::reactive::held_request::request_from_held(&row).files, None);
 
-    let req = crate::server::jekt_held::request_from_held(&with_reagent);
+    let req = crate::backend::reactive::held_request::request_from_held(&with_reagent);
     assert_eq!(req.reagent_verified, None);
     let resp = handler.inject_held(req);
     assert!(resp.success, "{:?}", resp.error);
