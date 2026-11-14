@@ -90,8 +90,9 @@ pub(crate) async fn run_action(state: &AppState, job: CronJob, run_id: &str) -> 
 /// started (`schedule`, `manual`, `retry`, `event`), the job, and the slot it was due.
 ///
 /// For an event's run it is the event's own fields (`jobs::RunLedger::event_input`) with those keys set on top, so a
-/// source's field never stands in for `kind`, `job`, `run_id` or `fired_at_ms`. The event's data is held in memory from the
-/// fire to here: a run that waited through a restart has lost it, and fails saying so, not running on an empty input.
+/// source's field never stands in for `kind`, `job`, `run_id` or `fired_at_ms`. The event's data is kept with the run
+/// (`db_job_event_inputs`) from the fire to here, through a delay, a wait for its turn, a retry and a restart. A run
+/// whose data is no longer there (it aged out, or could not be read) fails saying so, not running on an empty input.
 fn drone_trigger(state: &AppState, job: &CronJob, run_id: &str) -> Result<serde_json::Value, String> {
     let ledger = state.cron_scheduler.runs();
     let run = ledger.and_then(|l| l.store().job_run_get(run_id).ok().flatten());
@@ -105,7 +106,7 @@ fn drone_trigger(state: &AppState, job: &CronJob, run_id: &str) -> Result<serde_
             Some(other) => {
                 fields.insert("value".to_string(), other);
             }
-            None => return Err("the event's data was lost when AgentMux restarted, so this run didn't start".to_string()),
+            None => return Err("the event's data is no longer available, so this run didn't start".to_string()),
         }
     }
     fields.insert("kind".to_string(), serde_json::json!(kind));
