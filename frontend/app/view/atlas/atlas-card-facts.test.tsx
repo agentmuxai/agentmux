@@ -99,6 +99,8 @@ describe("CardFacts", () => {
         const items = getByTestId("atlas-card-tasks").querySelectorAll("li");
         expect(items).toHaveLength(2);
         expect(items[0].textContent).toContain("#7 Fix the map");
+        // The title is cut after two lines by its style, so the whole of it is its hover label.
+        expect(items[0].querySelector(".atlas-card__task")!.getAttribute("data-hover-tip")).toBe("Fix the map");
         expect(items[1].querySelector("button")).toBeNull();
         fireEvent.click(getByText("#70"));
         expect(openLink).toHaveBeenCalledWith(url);

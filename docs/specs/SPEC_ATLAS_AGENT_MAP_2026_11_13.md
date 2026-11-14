@@ -206,7 +206,8 @@ does not change.
 - **Branch.** The repository and branch of the agent's clone, from srv's work facts (`GET /api/v1/work-facts`),
   else the branch its newest held task was filed with.
 - **Tasks.** The Kanban tasks it holds (claimed, waiting on a question, or in review), the three touched last,
-  each with its pull request as a button that opens it.
+  each with its pull request as a button that opens it. A title is cut after two lines, and the whole of it is
+  its hover label (the Linux look check had one title fill four lines of the card).
 
 Branch and tasks are this instance's facts, so they show for its own agents only. They are read while a card is
 open and not otherwise: the work facts once and then every 20 seconds, the board through the Kanban's own model.

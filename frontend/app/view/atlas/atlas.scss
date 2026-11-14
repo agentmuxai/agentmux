@@ -513,6 +513,12 @@
     }
 }
 
+// A task's title: two lines at most, so three long ones do not push the card's other rows out of sight.
+.atlas-card__task {
+    @include mixins.truncate-lines(2);
+    min-width: 0;
+}
+
 .atlas-card__actions {
     display: flex;
     gap: var(--space-2);

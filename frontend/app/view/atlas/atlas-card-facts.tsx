@@ -7,6 +7,7 @@
  * holds with their pull requests. Each row shows only when its fact is known.
  */
 
+import { tip } from "@/app/element/tip";
 import { Button } from "@/app/element/ui";
 import { openLink } from "@/app/store/misc-utils";
 import { RuntimeBadge } from "@/app/view/agent/components/RuntimeBadge";
@@ -60,14 +61,14 @@ function WorkRows(props: { work: AtlasWork }): JSX.Element {
                         <For each={props.work.tasks}>
                             {(task) => (
                                 <li>
-                                    <span>
+                                    {/* Two lines at most: the whole title is its hover label. */}
+                                    <span class="atlas-card__task" {...tip(task.title)}>
                                         #{task.num} {task.title}
                                     </span>
                                     <Show when={task.pr}>
                                         {(pr) => (
                                             <Button
                                                 density="compact"
-                                                tone="quiet"
                                                 icon="code-pull-request"
                                                 onClick={() => void openLink(pr().url)}
                                             >
