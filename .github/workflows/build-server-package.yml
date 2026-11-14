@@ -61,8 +61,8 @@ jobs:
           LEGS: ${{ inputs.legs }}
         run: |
           # timeout: the leg's limit in minutes, about three times what it takes cold (a release builds with no cache).
-          release='[{"os":"linux","arch":"x64","runner":"ubuntu-22.04","timeout":60},{"os":"macos","arch":"arm64","runner":"macos-latest","timeout":120}]'
-          late='[{"os":"linux","arch":"arm64","runner":"ubuntu-22.04-arm","timeout":60},{"os":"macos","arch":"x64","runner":"macos-15-intel","timeout":120}]'
+          release='[{"os":"linux","arch":"x64","runner":"ubuntu-22.04","timeout":50},{"os":"macos","arch":"arm64","runner":"macos-latest","timeout":140}]'
+          late='[{"os":"linux","arch":"arm64","runner":"ubuntu-22.04-arm","timeout":50},{"os":"macos","arch":"x64","runner":"macos-15-intel","timeout":160}]'
           if [ "$LEGS" = release ]; then
             legs="$release"
           else
@@ -131,8 +131,8 @@ jobs:
         env:
           CI_STEP_NAME: server package build
           CI_ATTEMPT_CMD: cargo build --profile fast-release --locked -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap
-          CI_ATTEMPT1_SECONDS: 2400
-          CI_ATTEMPT2_SECONDS: 1200
+          CI_ATTEMPT1_SECONDS: 2100
+          CI_ATTEMPT2_SECONDS: 600
           CI_TRACE_FILE: ${{ runner.temp }}/package-trace.log
           CI_BUILD_LOG: ${{ runner.temp }}/package-build.log
         run: bash scripts/ci-nextest-run.sh
