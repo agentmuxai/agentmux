@@ -12,6 +12,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Time each phase and print the table on exit (and into the job summary in CI).
+PHASE_NAME="package-portable.sh"
+. "$REPO_ROOT/scripts/phase-times.sh"
+
 # VERSION is the semver core (from package.json) — drives binary
 # filenames, the in-binary version, and the verification grep below.
 # LABEL is the ephemeral, traceable build label set by scripts/package.sh
@@ -185,11 +189,13 @@ cp target/release/agentmux-mcp.exe "$PORTABLE/runtime/tools/bin/"
 # AgentMux may connect to any host; srv uploads the matching one to a host for
 # file browsing and durable sessions. tools/remote/<target>/agentmux-remote.
 # See docs/specs/SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §9.1.
+phase_done "stage the portable"
 bash scripts/build-remote-helpers.sh dist/remote
 if [ -d dist/remote ]; then
     mkdir -p "$PORTABLE/runtime/tools/remote"
     cp -R dist/remote/. "$PORTABLE/runtime/tools/remote/"
 fi
+phase_done "remote helpers"
 
 # wsh has been retired — see docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md. No binary
 # to ship anymore; AGENTMUX env var is now a plain "1" sentinel.
@@ -301,6 +307,7 @@ fi
 
 # Size
 DIR_SIZE=$(du -sh "$PORTABLE" | cut -f1)
+phase_done "stage the runtime, tools and checks"
 
 # Archive: a solid LZMA2 .7z (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
 # On 0.59.19 that is 127 MiB, against 205 MiB for the Deflate .zip it replaced.
@@ -347,6 +354,7 @@ if ! "$SEVENZIP" t "$ARCHIVE_NAME" >/dev/null; then
     echo "ERROR: $ARCHIVE_NAME failed 7-Zip's integrity test" >&2
     exit 1
 fi
+phase_done "7z archive and test"
 
 ARCHIVE_SIZE=$(du -sh "$ARCHIVE_NAME" 2>/dev/null | cut -f1 || echo "N/A")
 
