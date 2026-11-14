@@ -14,8 +14,9 @@
 //! - hidden text inside or beside a small row, control or label named like a secret (whole words: secret,
 //!   key, token, password, passcode, signing, credential, and compounds such as apikey), is replaced the
 //!   same way, whatever its shape; and
-//! - the same text is taken out of every other name, value and description that repeats it: a visible cell
-//!   or button is named from its contents, and its name would carry the text its child no longer shows.
+//! - the same text is taken out of the names, values and descriptions above it (a visible cell or button is
+//!   named from its contents, and its name would carry the text its child no longer shows), and, when it has
+//!   a secret's shape or is one odd token, out of every other node that repeats it.
 //!
 //! The element stays listed, with its role, name and reference, so it can still be targeted: only its text
 //! is withheld. A withheld text node gets a reference, as a secret a page shows once does, so `Browser`
@@ -23,7 +24,8 @@
 //! matches on, so `find` can't count a secret out a piece at a time.
 //!
 //! When the page's layout can't be read, nothing is known to be hidden, so every text node counts as
-//! hidden: a secret's shape is withheld wherever it is, rather than shown for want of an answer.
+//! hidden and the shape rule alone applies: a secret's shape is withheld wherever it is, rather than shown
+//! for want of an answer (the row rule needs to know what is hidden, and is not applied).
 //!
 //! [`scrub`] is the shape rule alone, for the strings read from a page's own script (the state an action
 //! reports, a name read for one element): there is no tree to climb, and a secret shape is withheld
@@ -71,16 +73,31 @@ const ECHO_BELOW: usize = 3;
 const ECHO_ANYWHERE: usize = 6;
 
 /// Prefixes of keys, tokens and signing secrets that are short enough to miss the one-time shape.
-const KEY_PREFIXES: &[&str] = &[
-    "sk_", "rk_", "pk_", "whsec_", "ghp_", "gho_", "ghs_", "github_pat_", "xoxb-", "xoxp-", "xoxa-", "akia", "asia", "-----begin", "eyj",
-];
+const KEY_PREFIXES: &[&str] = &["sk_", "rk_", "pk_", "whsec_", "ghp_", "gho_", "ghs_", "github_pat_", "xoxb-", "xoxp-", "xoxa-", "eyj"];
+
+/// A cloud access key id: four capital letters and sixteen capitals or digits, as one word.
+fn is_access_key_id(t: &str) -> bool {
+    t.len() == 20 && (t.starts_with("AKIA") || t.starts_with("ASIA")) && t.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+}
 
 fn has_key_shape(text: &str) -> bool {
     agentmux_common::shown_once::has_shown_once(text)
+        || text.to_ascii_lowercase().contains("-----begin")
         || text.split_whitespace().any(|t| {
             let lower = t.to_ascii_lowercase();
-            t.len() >= 12 && KEY_PREFIXES.iter().any(|p| lower.starts_with(p))
+            is_access_key_id(t) || (t.len() >= 12 && KEY_PREFIXES.iter().any(|p| lower.starts_with(p)))
         })
+}
+
+/// One long word with a digit and a letter in it, which words are not: an odd-shaped value (an id, a key a
+/// page makes up) that is safe to take out of unrelated nodes' names.
+fn token_like(text: &str) -> bool {
+    let t = text.trim();
+    t.chars().count() >= 12
+        && !t.chars().any(char::is_whitespace)
+        && t.chars().any(|c| c.is_ascii_digit())
+        && t.chars().any(char::is_alphabetic)
+        && t.chars().all(|c| c.is_alphanumeric() || "-_=+/.:".contains(c))
 }
 
 /// The words of a name, lowercased, split on anything that is not a letter or digit and on a lower-to-upper
@@ -222,7 +239,8 @@ pub(super) fn withhold(nodes: &mut [Value], hidden: &HashSet<i64>, unknown: bool
             }
             let shaped = FIELDS.iter().any(|f| has_key_shape(str_of(node, f)));
             let holds_text = FIELDS.iter().any(|f| !str_of(node, f).trim().is_empty());
-            if shaped || (is_text(node) && holds_text && tree.in_secret_row(i)) {
+            // Without a layout nothing is known of rows: the shape rule alone.
+            if shaped || (!unknown && is_text(node) && holds_text && tree.in_secret_row(i)) {
                 chosen.push(i);
             }
         }
@@ -251,7 +269,9 @@ pub(super) fn withhold(nodes: &mut [Value], hidden: &HashSet<i64>, unknown: bool
                     above.entry(a).or_default().push(p.clone());
                 }
             }
-            if p.chars().count() >= ECHO_ANYWHERE {
+            // Out of unrelated nodes: only what has a secret's shape or is one odd token. A phrase a row rule
+            // withheld ("Roll key", "Reveal") is also the name of visible controls, which keep it.
+            if p.chars().count() >= ECHO_ANYWHERE && (has_key_shape(p) || token_like(p)) {
                 anywhere.push(p.clone());
             }
         }

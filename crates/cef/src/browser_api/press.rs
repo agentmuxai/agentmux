@@ -123,10 +123,13 @@ async fn facts_of(cdp: &mut super::cdp::CdpSession, object_id: &str) -> Option<D
 /// token number hidden, on the facts from before and after (the page's handlers may have changed the field).
 async fn read_back(cdp: &mut super::cdp::CdpSession, object_id: &str, before: &DomFacts) -> Value {
     let after = redact_secret(call_on(cdp, object_id, READ_BACK, vec![]).await.unwrap_or(Value::Null), before);
-    match facts_of(cdp, object_id).await {
+    let mut after = match facts_of(cdp, object_id).await {
         Some(now) => redact_secret(after, &now),
         None => after,
-    }
+    };
+    // No secret-shaped text the page's own script read (a value, a text) goes back to the agent.
+    super::hidden_secrets::scrub_value(&mut after);
+    after
 }
 
 fn refused(key: &str, why: &str) -> String {

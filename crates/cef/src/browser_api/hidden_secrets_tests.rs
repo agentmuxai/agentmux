@@ -111,7 +111,7 @@ fn a_hidden_element_with_a_key_in_its_name_stays_listed_without_the_key() {
 
 #[test]
 fn known_key_prefixes_count_even_when_short() {
-    for key in ["sk_live_abcdefgh12", "whsec_abcdefgh12", "ghp_abcdefghij12", "AKIAABCDEFGHIJ12"] {
+    for key in ["sk_live_abcdefgh12", "whsec_abcdefgh12", "ghp_abcdefghij12", "AKIAABCDEFGHIJKLMN12"] {
         assert!(has_key_shape(key), "{key}");
     }
     for word in ["Account settings", "skip to content", "keyboard", "2026-11-14"] {
@@ -265,4 +265,58 @@ fn what_a_page_script_read_is_scrubbed_of_secret_shapes() {
     assert_eq!(state["checked"], json!(true));
     assert_eq!(state["options"][0], json!("a"));
     assert!(!state.to_string().contains("xK9fQ2"));
+}
+
+#[test]
+fn a_pem_header_and_an_access_key_id_are_shaped_and_ordinary_words_are_not() {
+    // The header is put together here so no file holds a whole one.
+    let pem_header = format!("{}BEGIN {} KEY{}", "-".repeat(5), "PRIVATE", "-".repeat(5));
+    for key in [pem_header.as_str(), "AKIAIOSFODNN7EXAMPLE", "ASIAIOSFODNN7EXAMPLE"] {
+        assert!(has_key_shape(key), "{key}");
+    }
+    for word in ["Asia/Kolkata", "Asiatic", "akiakiakiakia", "Australia/Sydney"] {
+        assert!(!has_key_shape(word), "{word}");
+    }
+}
+
+#[test]
+fn an_unreadable_layout_withholds_a_shape_only_and_leaves_help_text_near_a_password_field() {
+    let mut nodes = vec![
+        n("1", None, "RootWebArea", "Sign in", 1, &["2"]),
+        n("2", Some("1"), "generic", "", 2, &["3", "4", "5"]),
+        n("3", Some("2"), "textbox", "Password", 3, &[]),
+        n("4", Some("2"), "StaticText", "At least eight characters", 4, &[]),
+        n("5", Some("2"), "StaticText", SECRET, 5, &[]),
+    ];
+    visibility::apply(&mut nodes, &Layout { unknown: true, ..Layout::default() }, true);
+    let out = shown(&nodes, None);
+    assert!(out.text.contains("At least eight characters"), "{}", out.text);
+    assert!(!out.text.contains(SECRET), "{}", out.text);
+}
+
+#[test]
+fn a_phrase_a_row_withheld_is_not_taken_out_of_the_pages_visible_controls() {
+    // A hidden menu item in a secret row ("Roll key"), and a visible button elsewhere with the same name.
+    let mut nodes = vec![
+        n("1", None, "RootWebArea", "Settings", 1, &["2", "6"]),
+        n("2", Some("1"), "generic", "", 2, &["3", "4", "5"]),
+        n("3", Some("2"), "StaticText", "Signing key", 3, &[]),
+        n("4", Some("2"), "StaticText", "Roll key", 9, &[]),
+        n("5", Some("2"), "StaticText", "Reveal", 10, &[]),
+        n("6", Some("1"), "button", "Roll key", 6, &[]),
+    ];
+    visibility::apply(&mut nodes, &layout(&[9, 10]), true);
+    let out = shown(&nodes, None);
+    assert!(out.text.contains(r#"button "Roll key""#), "the visible control keeps its name: {}", out.text);
+    assert_eq!(out.text.matches(WITHHELD).count(), 2, "the two hidden menu items are withheld: {}", out.text);
+}
+
+#[test]
+fn an_odd_shaped_value_a_row_withheld_is_still_taken_out_of_a_siblings_description() {
+    let mut nodes = row("Signing key", "q7Zp-93xaLm2Rt");
+    nodes[5]["description"] = json!({ "type": "computedString", "value": "Copies q7Zp-93xaLm2Rt to the clipboard" });
+    visibility::apply(&mut nodes, &layout(&[9]), true);
+    let said = nodes[5]["description"]["value"].as_str().unwrap_or("");
+    assert!(!said.contains("q7Zp") && said.contains("to the clipboard"), "{said}");
+    assert!(!shown(&nodes, None).text.contains("q7Zp"));
 }
