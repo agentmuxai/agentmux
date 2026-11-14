@@ -116,6 +116,10 @@ mod tests {
         let (acts, args) = route(&json!({ "action": "rename", "target": "tab", "name": "x" })).unwrap();
         assert_eq!(acts[0].tool, "SetName");
         assert_eq!(args, json!({ "target": "tab", "name": "x" }));
+        // A file's rename carries its path to the same handler.
+        let (acts, args) = route(&json!({ "action": "rename", "target": "file", "path": "/w/a.rs", "name": "b.rs" })).unwrap();
+        assert_eq!(acts[0].tool, "SetName");
+        assert_eq!(args, json!({ "target": "file", "path": "/w/a.rs", "name": "b.rs" }));
         assert_eq!(route(&json!({ "action": "whoami" })).unwrap().0[0].tool, "WhoAmI");
         let e = route(&json!({ "action": "close" })).unwrap_err().to_string();
         assert_eq!(e, format!("Pane: unknown action \"close\": use one of {}", ACTIONS.join(", ")));
