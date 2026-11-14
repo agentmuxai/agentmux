@@ -43,6 +43,19 @@ fn a_glob_stays_in_a_folder_level_with_a_star_and_crosses_levels_with_two() {
     }
 }
 
+/// The pattern a backtracking matcher chokes on: many stars against a long name that cannot match. It costs a pass or two.
+#[test]
+fn a_glob_with_many_stars_does_not_take_exponential_time() {
+    let started = std::time::Instant::now();
+    let long = "a".repeat(5_000);
+    assert!(!glob_matches("*a*a*a*a*a*a*a*a*a*a*b", &long));
+    assert!(glob_matches("*a*a*a*a*a*a*a*a*a*a*", &long));
+    let deep = vec!["d"; 40].join("/");
+    assert!(!glob_matches("**/**/**/**/**/**/**/**/x", &deep));
+    assert!(glob_matches("**/**/**/**/**/**/**/**/d", &deep));
+    assert!(started.elapsed() < std::time::Duration::from_secs(2), "took {:?}", started.elapsed());
+}
+
 #[test]
 fn a_filter_names_a_project_folder_and_only_the_keys_a_file_watch_reads() {
     let dir = tempfile::tempdir().unwrap();
@@ -62,6 +75,11 @@ fn a_filter_names_a_project_folder_and_only_the_keys_a_file_watch_reads() {
         assert!(file_watch::validate_filter(&filter(json!({ "path": ok, "glob": glob }))).is_err());
     }
     assert!(file_watch::validate_filter(&filter(json!({ "path": ok, "change": "renamed" }))).unwrap_err().contains("created, modified, removed"));
+    let stars = "*a".repeat(13);
+    let e = file_watch::validate_filter(&filter(json!({ "path": ok, "glob": stars }))).unwrap_err();
+    assert!(e.contains("at most 12 levels and 12 wildcards"), "{e}");
+    let levels = vec!["x"; 13].join("/");
+    assert!(file_watch::validate_filter(&filter(json!({ "path": ok, "glob": levels }))).is_err());
 }
 
 #[test]
@@ -171,4 +189,30 @@ async fn changes_in_a_watched_folder_start_one_run_with_names_only() {
     // Jobs gone, folders let go.
     watch.reconcile(vec![]);
     assert_eq!(pool.health().active_watches, 0);
+}
+
+/// A folder that is gone is let go, and watched again when it is back; and two folders are told apart.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_that_goes_missing_and_comes_back_is_watched_again() {
+    let rig = rig();
+    let dir = tempfile::tempdir().unwrap();
+    let root = project(dir.path());
+    let pool = FsWatchPool::new();
+    let watch = FileWatch::new(pool.clone());
+    let job = watch_job(&rig, "j-back", json!({ "path": root }), |_| {});
+    watch.reconcile(vec![job.clone()]);
+    assert_eq!(pool.health().active_watches, 1);
+    std::fs::remove_dir_all(&root).unwrap();
+    watch.reconcile(vec![job.clone()]);
+    assert_eq!(pool.health().active_watches, 0, "gone: not watched");
+    std::fs::create_dir_all(&root).unwrap();
+    watch.reconcile(vec![job]);
+    assert_eq!(pool.health().active_watches, 1, "back: watched afresh");
+
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    assert_eq!(file_watch::identity_of(&a), file_watch::identity_of(&a));
+    assert_ne!(file_watch::identity_of(&a), file_watch::identity_of(&b), "two folders are two");
+    assert_eq!(file_watch::identity_of(&dir.path().join("nope")), None);
 }

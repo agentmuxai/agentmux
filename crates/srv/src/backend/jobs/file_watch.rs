@@ -38,6 +38,9 @@ const MAX_WAIT_MS: i64 = 30_000;
 /// The most names one event carries (the rest are only counted), and the longest a name is.
 const MAX_NAMES: usize = 20;
 const MAX_NAME_CHARS: usize = 200;
+/// A glob stays small: it is matched against every change under the folder.
+const MAX_GLOB_LEVELS: usize = 12;
+const MAX_GLOB_WILDCARDS: usize = 12;
 /// How many distinct files a batch tells apart: past it more are only counted, so a flood cannot grow it without bound.
 const MAX_SEEN: usize = 10_000;
 /// How often the jobs are read again, how often a batch is looked at.
@@ -58,7 +61,11 @@ pub fn validate_filter(filter: &Map<String, Value>) -> Result<(), String> {
     }
     if let Some(glob) = filter.get("glob") {
         match glob.as_str() {
-            Some(g) if !g.is_empty() && !g.contains('\0') && !g.starts_with('/') && !g.split('/').any(|s| s == "..") => {}
+            Some(g) if !g.is_empty() && !g.contains('\0') && !g.starts_with('/') && !g.split('/').any(|s| s == "..") => {
+                if g.split('/').count() > MAX_GLOB_LEVELS || g.chars().filter(|c| matches!(c, '*' | '?')).count() > MAX_GLOB_WILDCARDS {
+                    return Err(format!("trigger: file_watch glob has at most {MAX_GLOB_LEVELS} levels and {MAX_GLOB_WILDCARDS} wildcards"));
+                }
+            }
             _ => return Err("trigger: file_watch glob is a pattern like \"**/*.rs\", relative to the folder".to_string()),
         }
     }
@@ -84,30 +91,45 @@ fn folder_ok(path: &str) -> Result<(), String> {
 }
 
 /// Whether `name` (folder levels joined by `/`) matches the glob: `*` and `?` stay in one level, `**` crosses any number.
+/// Table-driven, so the work is the pattern's length times the name's and never more, whatever the pattern.
 pub fn glob_matches(pattern: &str, name: &str) -> bool {
     let (pat, parts): (Vec<&str>, Vec<&str>) = (pattern.split('/').collect(), name.split('/').collect());
-    levels(&pat, &parts)
-}
-
-fn levels(pat: &[&str], parts: &[&str]) -> bool {
-    match pat.split_first() {
-        None => parts.is_empty(),
-        Some((&"**", rest)) => (0..=parts.len()).any(|skip| levels(rest, &parts[skip..])),
-        Some((first, rest)) => parts.split_first().is_some_and(|(part, more)| level(first, part) && levels(rest, more)),
-    }
-}
-
-/// One level: `*` any run of characters, `?` one character.
-fn level(pattern: &str, text: &str) -> bool {
-    fn go(p: &[char], t: &[char]) -> bool {
-        match p.split_first() {
-            None => t.is_empty(),
-            Some(('*', rest)) => (0..=t.len()).any(|n| go(rest, &t[n..])),
-            Some(('?', rest)) => t.split_first().is_some_and(|(_, more)| go(rest, more)),
-            Some((c, rest)) => t.split_first().is_some_and(|(x, more)| x == c && go(rest, more)),
+    // ok[i][j]: the pattern's levels from i match the name's levels from j.
+    let mut ok = vec![vec![false; parts.len() + 1]; pat.len() + 1];
+    ok[pat.len()][parts.len()] = true;
+    for i in (0..pat.len()).rev() {
+        for j in (0..=parts.len()).rev() {
+            ok[i][j] = if pat[i] == "**" {
+                ok[i + 1][j] || (j < parts.len() && ok[i][j + 1])
+            } else {
+                j < parts.len() && ok[i + 1][j + 1] && level(pat[i], parts[j])
+            };
         }
     }
-    go(&pattern.chars().collect::<Vec<_>>(), &text.chars().collect::<Vec<_>>())
+    ok[0][0]
+}
+
+/// One level: `*` any run of characters, `?` one character. One place to fall back to, so a star never costs more than a pass over the text.
+fn level(pattern: &str, text: &str) -> bool {
+    let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
+    let (mut pi, mut ti) = (0, 0);
+    let mut back: Option<(usize, usize)> = None;
+    while ti < t.len() {
+        if pi < p.len() && p[pi] == '*' {
+            back = Some((pi, ti));
+            pi += 1;
+        } else if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if let Some((star, at)) = back {
+            pi = star + 1;
+            ti = at + 1;
+            back = Some((star, at + 1));
+        } else {
+            return false;
+        }
+    }
+    p[pi..].iter().all(|c| *c == '*')
 }
 
 /// A job's file watch: the folder, the glob and the kind of change it wants.
@@ -219,8 +241,27 @@ struct Watching {
 #[derive(Default)]
 struct Live {
     jobs: HashMap<String, Watching>,
-    subs: HashMap<PathBuf, Subscription>,
+    /// Each watched folder, and which folder it was when it was watched: a folder deleted and made again is another one,
+    /// and the watch on the old one no longer hears it.
+    subs: HashMap<PathBuf, (Subscription, Option<Identity>)>,
     batches: Batches,
+}
+
+/// What tells one folder from another of the same path: the device and inode where there are such, and when it was made.
+pub type Identity = (u64, u64, Option<std::time::SystemTime>);
+
+pub fn identity_of(path: &Path) -> Option<Identity> {
+    let meta = std::fs::metadata(path).ok()?;
+    let made = meta.created().ok();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((meta.dev(), meta.ino(), made))
+    }
+    #[cfg(not(unix))]
+    {
+        Some((0, 0, made))
+    }
 }
 
 pub struct FileWatch {
@@ -247,16 +288,19 @@ impl FileWatch {
             now.insert(job.id.clone(), Watching { job, spec, root });
         }
         let wanted: HashSet<PathBuf> = now.values().map(|w| w.root.clone()).collect();
+        // A folder no job names now, or one that is not the folder it was (deleted and made again), is let go;
+        // the second kind is then watched afresh below.
+        let stale: Vec<PathBuf> =
+            live.subs.iter().filter(|(root, (_, was))| !wanted.contains(*root) || *was != identity_of(root)).map(|(root, _)| root.clone()).collect();
+        for root in stale {
+            if let Some((sub, _)) = live.subs.remove(&root) {
+                self.pool.unsubscribe(sub);
+            }
+        }
         let fresh: Vec<&PathBuf> = wanted.iter().filter(|r| !live.subs.contains_key(*r)).collect();
         for root in fresh {
             let sub = self.pool.subscribe_dir_recursive(root);
-            live.subs.insert(root.clone(), sub);
-        }
-        let gone: Vec<PathBuf> = live.subs.keys().filter(|r| !wanted.contains(*r)).cloned().collect();
-        for root in gone {
-            if let Some(sub) = live.subs.remove(&root) {
-                self.pool.unsubscribe(sub);
-            }
+            live.subs.insert(root.clone(), (sub, identity_of(root)));
         }
         let ids: HashSet<&str> = now.keys().map(String::as_str).collect();
         live.batches.keep_only(&ids);
@@ -323,12 +367,18 @@ pub fn spawn(broker: &Arc<Broker>, pool: Arc<FsWatchPool>, jobs: Arc<Store>, sch
             tokio::select! {
                 ev = events.recv() => match ev {
                     Ok(ev) => watch.on_event(&ev, agentmux_common::time::now_ms()),
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                        tracing::warn!(missed, "jobs: file_watch fell behind the watcher and missed changes");
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                 },
                 _ = tick.tick() => {
+                    // Each in its own task: admitting a run writes the ledger, and the loop must keep draining the watcher meanwhile.
                     for (job, event) in watch.due(agentmux_common::time::now_ms()) {
-                        let _ = scheduler.fire_event(&job, event).await;
+                        let scheduler = scheduler.clone();
+                        tokio::spawn(async move {
+                            let _ = scheduler.fire_event(&job, event).await;
+                        });
                     }
                     if since.elapsed() >= RECONCILE {
                         since = std::time::Instant::now();
