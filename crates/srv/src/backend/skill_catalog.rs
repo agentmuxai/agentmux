@@ -328,6 +328,7 @@ pub fn install_download(catalog: &Store, zip: &[u8], entry: &CatalogEntry, now_m
         catalog.skill_set_reach(&skill.id, false, false, now_ms).map_err(|e| e.to_string())?;
     }
     install(catalog, &skill.id, &bundle, Some(&signer), now_ms).map_err(|e| e.to_string())?;
+    catalog.skill_catalog_source_set(&skill.id, &entry.hash, &entry.publisher_key).map_err(|e| e.to_string())?;
     Ok(Installed { skill_id: skill.id, name: skill.name, version: bundle.info.version, updated: current.is_some() })
 }
 

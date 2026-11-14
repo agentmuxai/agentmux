@@ -67,6 +67,7 @@ function app(over: Record<string, unknown> = {}) {
         ],
         verified: [record()],
         content_hash: "c".repeat(64),
+        from_catalog: false,
         publisher: "acme",
         id: "word",
         name: "Word",
@@ -232,6 +233,23 @@ describe("Signature and script approval", () => {
     it("shows the signature line in the detail", async () => {
         const detail = await openDetail();
         expect(within(detail).getByText(/Signed by acme · AAAA-BBBB/)).toBeTruthy();
+    });
+
+    it("says it is from the AgentMux catalog, in the detail and in the script's review, only when it is exactly what the catalog listed", async () => {
+        const line = "From the AgentMux catalog: its files and its publisher's key are the ones the catalog lists.";
+        rpc.SkillCatalogAppFileCommand.mockResolvedValue({ path: "scripts/run.py", text: "print('toc')" });
+        let detail = await openDetail();
+        expect(detail.textContent).not.toContain("From the AgentMux catalog");
+        fireEvent.click(within(detail).getByRole("button", { name: "Review" }));
+        expect((await within(detail).findByRole("group", { name: "Script scripts/run.py" })).textContent).not.toContain("From the AgentMux catalog");
+        cleanup();
+
+        rpc.SkillCatalogListCommand.mockResolvedValue([skill({ app: app({ from_catalog: true }) }), plain()]);
+        detail = await openDetail();
+        expect(within(detail).getAllByText(line)).toHaveLength(1);
+        fireEvent.click(within(detail).getByRole("button", { name: "Review" }));
+        const panel = await within(detail).findByRole("group", { name: "Script scripts/run.py" });
+        expect(panel.textContent).toContain(line);
     });
 
     it("reviewing a script shows its purpose, needs, hash and text, and Approve sends the approval", async () => {

@@ -21,7 +21,12 @@ signature: WidgetSignatureInfo, files: Array<SkillFileInfo>, verified: Array<Ver
 /**
  * The SHA-256 the publisher's signature covers (empty for a skill that came without one).
  */
-content_hash: string, publisher: string, id: string, name: string, version: string, vendor: string, 
+content_hash: string, 
+/**
+ * Installed from the public catalog, and still exactly what the catalog listed then: the same files (content
+ * hash) signed by the same publisher key. An edited skill, or one replaced from another source, is not.
+ */
+from_catalog: boolean, publisher: string, id: string, name: string, version: string, vendor: string, 
 /**
  * Executable names per platform (`windows`, `macos`, `linux`).
  */

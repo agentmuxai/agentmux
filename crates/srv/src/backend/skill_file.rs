@@ -47,7 +47,7 @@ fn rebuilt_skill_md(folder: &str, skill: &Skill) -> String {
 }
 
 /// Whether the `SKILL.md` kept from the install still says what the catalog skill says now.
-fn original_still_applies(folder: &str, original: &str, skill: &Skill) -> bool {
+pub(crate) fn original_still_applies(folder: &str, original: &str, skill: &Skill) -> bool {
     let (name, description, content) = parse_skill_md(original, folder);
     name == folder && description == skill.description && content == skill.content
 }
