@@ -10,6 +10,7 @@ import { createEffect, createSignal, onCleanup, Show, type Accessor, type Compon
 import { tip } from "@/app/element/tip";
 import { Button, Field, Select, TextInput, type SelectOption } from "@/app/element/ui";
 import type { UseRequest } from "@/types/rpc/UseRequest";
+import { CardTyped } from "./vault-use-card";
 import { answerUse, holdUse, vaultUses, type UseDecision } from "./vault-store";
 // The question's styles, loaded with it: a card in an agent's pane is drawn
 // whether or not a Vault pane was opened.
@@ -269,6 +270,8 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const [busy, setBusy] = createSignal(false);
     const [typed, setTyped] = createSignal("");
     const [save, setSave] = createSignal(false);
+    // Set once the answer is sent: what the person typed is cleared from the form itself, not only from the answer.
+    const [answered, setAnswered] = createSignal(false);
     // The card the person picks for a whole-card fill: the agent's own, or the default, to begin with; none otherwise.
     const [card, setCard] = createSignal(u.choices?.some((c) => c.id === u.entry_id) ? u.entry_id : "");
     createEffect(() => {
@@ -280,6 +283,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
             await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined);
             // The typed value doesn't outlive the answer.
             setTyped("");
+            setAnswered(true);
             done();
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
@@ -292,7 +296,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
             setBusy(false);
         }
     };
-    return { decide, busy, error, typed, setTyped, save, setSave, card, setCard };
+    return { decide, busy, error, typed, setTyped, save, setSave, card, setCard, answered };
 }
 
 export type UseAnswerState = ReturnType<typeof createUseAnswer>;
@@ -301,6 +305,24 @@ export type UseAnswerState = ReturnType<typeof createUseAnswer>;
 function TypedValue(props: { use: UseRequest; answer: UseAnswerState; focus: boolean }): JSX.Element {
     const u = props.use;
     const a = props.answer;
+    // A card is typed whole, in the person's own form: number, expiry, code, name and ZIP.
+    if (u.kind === "card") {
+        return (
+            <CardTyped
+                label={clip(u.entry_label, CLIP.label)}
+                why={`You're asked because ${clip(u.reason, CLIP.reason)}.`}
+                busy={a.busy()}
+                answered={a.answered()}
+                focus={props.focus}
+                save={a.save()}
+                onSave={a.setSave}
+                onText={a.setTyped}
+                onSubmit={() => {
+                    if (a.typed()) void a.decide("once");
+                }}
+            />
+        );
+    }
     return (
         <form
             onSubmit={(e) => {
