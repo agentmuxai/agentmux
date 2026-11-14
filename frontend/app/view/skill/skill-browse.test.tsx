@@ -131,6 +131,7 @@ describe("Browse the catalog", () => {
                 item({ app_found: true, app_version: "16.0.18227.20162" }, { id: "a.word", name: "Word", verification: [] }),
                 item({ app_found: true, app_version: "17.1.2" }, { id: "a.excel", name: "Excel", verification: tested("16.0") }),
                 item({ app_found: true, app_version: "16.0.1" }, { id: "a.ppt", name: "PowerPoint", verification: tested("16.0") }),
+                item({ app_found: true, app_version: "16" }, { id: "a.short", name: "Short", verification: tested("16.0") }),
                 item({ app_found: true, app_version: "160.0.1" }, { id: "a.prefix", name: "Prefix", verification: tested("16.0") }),
                 item({ app_found: true, app_version: null }, { id: "a.noversion", name: "NoVersion" }),
                 item({}, { id: "a.absent", name: "Absent" }),
@@ -143,6 +144,7 @@ describe("Browse the catalog", () => {
         expect(line("Word")).toContain("Word on this computer: version 16.0.18227.20162.");
         expect(line("Excel")).toContain("Excel on this computer: version 17.1.2. The last test passed on 16.0: check before trusting it.");
         expect(line("PowerPoint")).toContain("PowerPoint on this computer: version 16.0.1, the version it was tested on.");
+        expect(line("Short")).toContain("Short on this computer: version 16, the version it was tested on.");
         expect(line("Prefix")).toContain("The last test passed on 16.0: check before trusting it.");
         expect(line("NoVersion")).toContain("NoVersion is on this computer; its version could not be read.");
         expect(line("Absent")).toContain("Absent is not found on this computer.");

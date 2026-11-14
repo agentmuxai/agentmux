@@ -159,10 +159,10 @@ export function catalogStatus(entry: AppSkillCatalogEntry, platform: string): Ap
     return { tone: "idle", label: elsewhere ? `tested on ${osNames([elsewhere.platform])} only` : "not tested yet" };
 }
 
-/** Whether `found` ("16.0.18227.20162") is the tested version `tested` ("16.0") or a build of it: whole parts only. */
+/** Whether `found` ("16.0.18227.20162") is the tested version `tested` ("16.0") or a build of it: whole parts only, a missing trailing part of `found` counting as 0 ("16" is a build of "16.0"). */
 function isBuildOf(found: string, tested: string): boolean {
     const f = found.split(".");
-    return tested.split(".").every((part, i) => f[i] === part);
+    return tested.split(".").every((part, i) => (f[i] ?? "0") === part);
 }
 
 /**
