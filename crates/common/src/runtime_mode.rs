@@ -1114,11 +1114,8 @@ mod tests {
         });
     }
 
-    /// Regression for "DEV badge on every build": a packaged build launched as
-    /// a descendant of a `task dev` AgentMux inherits
-    /// `AGENTMUX_RUNTIME_MODE=dev:main`. Build identity (badge, menu name,
-    /// dev-frontend fallback) goes through `current_path_only` / `is_dev_self`,
-    /// which must ignore that env and classify purely by the binary's path.
+    /// The host asks this on its UI thread at every page load (task #47585): it
+    /// must come from the path alone, where building the mode starts `git`.
     #[test]
     fn asking_whether_a_build_is_dev_starts_no_process() {
         let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -1149,6 +1146,11 @@ mod tests {
         });
     }
 
+    /// Regression for "DEV badge on every build": a packaged build launched as
+    /// a descendant of a `task dev` AgentMux inherits
+    /// `AGENTMUX_RUNTIME_MODE=dev:main`. Build identity (badge, menu name,
+    /// dev-frontend fallback) goes through `current_path_only` / `is_dev_self`,
+    /// which must ignore that env and classify purely by the binary's path.
     #[test]
     fn current_path_only_ignores_leaked_dev_env() {
         let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
