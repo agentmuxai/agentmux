@@ -9,6 +9,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use agentmux_common::win32::NoWindow;
+
 use crate::DEFAULT_CHANNEL;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,7 +138,7 @@ pub fn installed(user_home: &Path, channel: &str) -> bool {
 }
 
 fn run_quiet(program: &str, args: &[&str]) -> Result<(), String> {
-    let out = Command::new(program).args(args).stdin(Stdio::null()).output().map_err(|e| format!("cannot run {program}: {e}"))?;
+    let out = Command::new(program).args(args).stdin(Stdio::null()).no_window().output().map_err(|e| format!("cannot run {program}: {e}"))?;
     if out.status.success() {
         return Ok(());
     }
