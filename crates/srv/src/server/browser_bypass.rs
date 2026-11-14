@@ -502,6 +502,80 @@ pub(crate) fn is_payment(what: &str) -> bool {
         || words.windows(2).any(|p| PAIRS.iter().any(|q| p == q))
 }
 
+/// A description that opens with one of these tells the person to pay.
+const COMMANDS: [&str; 6] = ["pay", "buy", "confirm", "complete", "place", "make"];
+
+/// The wallets and pay apps whose name ends in "Pay". A page of payment methods lists a row, tab or link for
+/// each, and opening one pays nothing. Only these: any other name with "Pay" in it (an unknown brand, "Quick
+/// Pay", "Approve Kakao Pay") asks, as it always did. Keep in step with `BRANDS` in `click_label.js`.
+const BRANDS: [&str; 14] = [
+    "apple pay", "google pay", "samsung pay", "amazon pay", "kakao pay", "naver pay", "toss pay", "cash app pay",
+    "shop pay", "meta pay", "microsoft pay", "venmo pay", "link pay", "alipay",
+];
+
+/// Is `name`, whole, one of the [`BRANDS`]?
+pub(crate) fn is_brand_pay(name: &str) -> bool {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+    BRANDS.contains(&name.trim_end_matches(['.', '!']))
+}
+
+/// `name` without its plan names ("Pay-as-you-go", "Pay-per-use"): a `pay-as-` or `pay-per-` at the start
+/// of a word and the letters, digits, `_` and `-` after it. Done as `click_label.js` does it, so both judge
+/// the same text.
+fn without_plans(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    let (bytes, mut out, mut i) = (lower.as_bytes(), String::new(), 0);
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    while i < name.len() {
+        let at_word_start = i == 0 || !word(bytes[i - 1]);
+        if at_word_start && (lower[i..].starts_with("pay-as-") || lower[i..].starts_with("pay-per-")) {
+            let skip = lower[i..].bytes().take_while(|&b| word(b) || b == b'-').count();
+            out.push(' ');
+            i += skip;
+        } else {
+            let ch = name[i..].chars().next().unwrap_or(' ');
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
+}
+
+/// The name in a click's `what` (`Click "Kakao Pay"`): what is between the first and the last quote.
+fn quoted(what: &str) -> &str {
+    match (what.find('"'), what.rfind('"')) {
+        (Some(a), Some(b)) if b > a => &what[a + 1..b],
+        _ => what,
+    }
+}
+
+/// Does the committing click `what` (with the element's `description` under its name) spend or move
+/// money? [`is_payment`] on both, except that a brand's name ("Kakao Pay") is not one: a payment-methods
+/// page lists dozens, and a click on one opens its settings. Its description still counts when it opens
+/// with a command ("Pay $20.00 now").
+pub(crate) fn click_is_payment(what: &str, description: &str, submits: bool) -> bool {
+    // A control that submits a form is judged on its name as it is: a checkout's "Apple Pay" submit pays.
+    if submits {
+        return is_payment(what) || is_payment(description);
+    }
+    // A plan's name ("Pay-as-you-go", "Pay-per-use") is taken out as the page's script takes it out, and
+    // what is left is judged: "Pay-as-you-go: Pay now" is still a command to pay.
+    let name = without_plans(quoted(what)).split_whitespace().collect::<Vec<_>>().join(" ");
+    if name.is_empty() || is_brand_pay(&name) {
+        let first = description.split(|c: char| !c.is_ascii_alphanumeric()).find(|w| !w.is_empty()).unwrap_or("");
+        return (COMMANDS.contains(&first.to_ascii_lowercase().as_str()) && is_payment(description))
+            || outside_of(what).as_deref().is_some_and(is_payment);
+    }
+    // What `what` says outside the name (a frame from a payment site) is judged as it always was.
+    is_payment(&name) || is_payment(description) || outside_of(what).as_deref().is_some_and(is_payment)
+}
+
+/// What `what` says around the quoted name: ` (in a frame from https://pay.example.com)`.
+fn outside_of(what: &str) -> Option<String> {
+    let (a, b) = (what.find('"')?, what.rfind('"')?);
+    (b > a).then(|| format!("{} {}", &what[..a], &what[b + 1..]))
+}
+
 /// The sites a grant on `pane` binds to: the origin of the page it shows
 /// (`url`, as the host reports it), and its site list if it has one.
 pub(crate) fn origins_for(pane: &str, url: &str) -> Result<Vec<String>, String> {
@@ -767,6 +841,69 @@ mod tests {
         ] {
             assert!(!is_payment(what), "{what}");
         }
+    }
+
+    #[test]
+    fn a_brand_with_pay_in_its_name_is_not_a_payment_but_a_command_is() {
+        for what in [
+            "Click \"Kakao Pay\"",
+            "Click \"Cash App Pay\"",
+            "Click \"Apple Pay\"",
+            "Click \"Google Pay\"",
+            "Click \"Pay-as-you-go\"",
+        ] {
+            assert!(!click_is_payment(what, "", false), "{what}");
+            assert!(!click_is_payment(what, "Accept payments from customers in Korea", false), "{what} with a description");
+            assert!(click_is_payment(what, "", true), "{what} as a submit control");
+        }
+        for (what, description) in [
+            ("Click \"Pay\"", ""),
+            ("Click \"Pay now\"", ""),
+            ("Click \"Pay $5.46\"", ""),
+            ("Click \"Place order\"", ""),
+            ("Click \"Confirm and Pay\"", ""),
+            ("Click \"Click to Pay\"", ""),
+            ("Click \"Pay with Apple Pay\"", ""),
+            ("Click \"Kakao Pay\" (in a frame from https://pay.example.com)", ""),
+            ("Click \"Confirm\" (in a frame from https://checkout.example.com)", ""),
+            ("Click \"Unsubscribe Apple Pay\"", ""),
+            ("Click \"Post Kakao Pay\"", ""),
+            ("Click \"Publish Kakao Pay\"", ""),
+            ("Click \"Kakao Pay $20\"", ""),
+            ("Click \"Quick Pay\"", ""),
+            ("Click \"Approve Kakao Pay\"", ""),
+            ("Click \"Charge Apple Pay\"", ""),
+            ("Click \"Bill Pay\"", ""),
+            ("Click \"Pay-as-you-go:Pay now\"", ""),
+            ("Click \"Pay-as-you-go: Pay now\"", ""),
+            ("Click \"Pay-per-use - Pay $20\"", ""),
+            ("Click \"Pay-as-you-go\"", "Pay now"),
+            ("Click \"Confirm And Pay\"", ""),
+            ("Click \"Proceed To Pay\"", ""),
+            ("Click \"CLICK TO PAY\"", ""),
+            ("Click \"Confirm Apple Pay\"", ""),
+            ("Click \"Place Order And Pay\"", ""),
+            ("Click \"Apple Pay\"", "Pay $20.00 now"),
+            ("Click \"Continue\"", "Pay now"),
+        ] {
+            assert!(click_is_payment(what, description, false), "{what} / {description}");
+        }
+    }
+
+    #[test]
+    fn a_payment_under_a_grant_says_so_in_its_banner() {
+        use crate::server::browser_bypass_routes::payment_exception;
+        put("bp-pay-note", "korp", &["https://github.com"], 60);
+        let ask = |what: &str| json!({ "what": what, "page": "https://github.com/a/b", "why": "its name says \"Pay\"" });
+        let note = Some("auto-approve is on for this site, but a payment always asks");
+        assert_eq!(payment_exception("bp-pay-note", "korp", &ask("Click \"Pay now\"")), note);
+        assert_eq!(payment_exception("bp-pay-note", "korp", &ask("Click \"Kakao Pay\"")), None);
+        let submit = json!({ "what": "Click \"Apple Pay\"", "page": "https://github.com/a/b", "action": "https://github.com/pay", "why": "it submits a form" });
+        assert_eq!(payment_exception("bp-pay-note", "korp", &submit), note, "a checkout's submit control named Apple Pay pays");
+        assert_eq!(payment_exception("bp-pay-note", "other", &ask("Click \"Pay now\"")), None, "another agent holds no grant");
+        assert_eq!(payment_exception("bp-no-grant", "korp", &ask("Click \"Pay now\"")), None);
+        let elsewhere = json!({ "what": "Click \"Pay now\"", "page": "https://example.org/x" });
+        assert_eq!(payment_exception("bp-pay-note", "korp", &elsewhere), None, "off the granted sites auto-approve says nothing");
     }
 
     #[test]
