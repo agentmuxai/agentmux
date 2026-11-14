@@ -420,3 +420,12 @@ async fn a_name_that_is_not_a_tasks_tool_is_not_in_the_family() {
     assert!(call("WorkNope", &json!({}), &fx.cx()).await.is_err());
     assert!(srv.seen.lock().unwrap().is_empty());
 }
+
+#[test]
+fn a_board_names_where_the_id_is_for_every_move_and_is_not_refused() {
+    for tool in ["WorkEdit", "WorkMove", "WorkStart", "WorkAnswer", "WorkCancel", "WorkReopen", "WorkRetry", "WorkTakeBack", "WorkReassign"] {
+        assert!(refuse_unused_fields(tool, &json!({ "id": "12", "board": "work" })).is_ok(), "{tool} with a board");
+    }
+    assert!(refuse_unused_fields("WorkEdit", &json!({ "id": "12", "title": "T" })).is_ok());
+    assert!(refuse_unused_fields("WorkEdit", &json!({ "id": "12", "hold": null })).is_ok(), "a null field is no field");
+}

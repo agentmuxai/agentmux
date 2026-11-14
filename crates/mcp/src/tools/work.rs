@@ -470,7 +470,8 @@ async fn run_work_accept(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     Ok(decision_text(id, accept, &v))
 }
 
-/// The fields each of the Kanban's moves takes, as the tool's description lists them. A field that only
+/// The fields each of the Kanban's moves takes, as the tool's description lists them (not `board`: with a
+/// bare `id` it says which board the id is on, for every move). A field that only
 /// other moves take is refused by name: answered "done", it would be dropped and the task left as it was.
 const MOVE_FIELDS: &[(&str, &[&str])] = &[
     ("title", &["edit"]),
@@ -483,7 +484,6 @@ const MOVE_FIELDS: &[(&str, &[&str])] = &[
     ("target_agent", &["move", "start", "reassign"]),
     ("hold", &["move"]),
     ("rank", &["move"]),
-    ("board", &["move"]),
     ("drop_deps", &["move"]),
     ("confirm", &["take_back", "reassign"]),
     ("followers", &["cancel"]),
