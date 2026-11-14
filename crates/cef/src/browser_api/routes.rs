@@ -863,14 +863,8 @@ pub async fn dispatch_key(
         None => None,
     };
     let _ = cdp.close().await;
-    let effect = match (&before, &after) {
-        (Some(b), Some(a)) => super::page_state::key_effect(b, a),
-        _ => None,
-    };
-    let (changed, focus_moved, was) = match effect {
-        Some(e) => (Some(e.changed), Some(e.focus_moved), e.was),
-        None => (None, None, None),
-    };
+    let effect = before.as_ref().zip(after.as_ref()).and_then(|(b, a)| super::page_state::key_effect(b, a));
+    let (changed, focus_moved, was) = effect.map_or((None, None, None), |e| (Some(e.changed), Some(e.focus_moved), e.was));
     ok_body(ApiResponse::ok(DispatchKeyData { ok: true, after, changed, focus_moved, was }))
 }
 
