@@ -156,6 +156,13 @@ function syncWhenReleased(held: Accessor<boolean>, syncPosition: () => void): vo
     );
 }
 
+/** The mount that owns a block's native page closes it: its unsent rectangle goes, and the model is told it has no page. */
+function closeOwnedPage(model: BrowserViewModel, windowLabel: string, rects: { forget(blockId: string): void }): void {
+    rects.forget(model.blockId);
+    model.setPageLive(false);
+    getApi().browserPanes.close(model.blockId, windowLabel).catch(() => {});
+}
+
 /**
  * Syncs the native browser-pane HWND's position/size to this pane's
  * placeholder div, and owns pane creation. A native browser-pane HWND
@@ -322,6 +329,7 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
                 return;
             }
             setPaneCreated(true);
+            model.setPageLive(true);
             diag(`paneCreated=true`);
             // The HWND is now live — open a fresh settle window in case the
             // layout changed while the async create was in-flight.
@@ -330,10 +338,11 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
             if (visibility() === "active") setPageRectCss(paneRectCss());
             // The page exists now, so it can take the keyboard: if this pane
             // is the selected one (opened with focus, e.g. `muxsh web`), move
-            // the caret into it, as terminal/editor panes do on mount. A
-            // giveFocus() attempted earlier (at layout insert) found no page
-            // yet. claimFocusOnMount skips a background tab's pane and a
-            // caret the user already put in this pane's own URL bar.
+            // the caret into it, as terminal/editor panes do on mount. This is
+            // the one request for a new pane's keyboard: a giveFocus() before
+            // this point asks the host for nothing (BrowserViewModel.giveFocus).
+            // claimFocusOnMount skips a background tab's pane and a caret the
+            // user already put in this pane's own URL bar.
             focusManager.claimFocusOnMount(model.blockId, () => model.giveFocus());
             // NOTE: does NOT call model.onLoad() here. Real load-finished
             // comes from the browser-pane-nav-state listener in
@@ -380,10 +389,7 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
         diag(`close-native why=${why}`);
         unregisterPaneRect(model.blockId);
         discarded = false;
-        if (releaseNativePane(model.blockId, ownerToken)) {
-            rects.forget(model.blockId);
-            getApi().browserPanes.close(model.blockId, windowLabel).catch(() => {});
-        }
+        if (releaseNativePane(model.blockId, ownerToken)) closeOwnedPage(model, windowLabel, rects);
         ownerToken = null;
         lastSentRect = null;
         setPageRectCss(undefined);
@@ -516,8 +522,7 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
         if (paneCreated() && releaseNativePane(model.blockId, ownerToken)) {
             // Only the owner drops the unsent rect: a newer mount of this
             // block shares the key and may have queued its own.
-            rects.forget(model.blockId);
-            getApi().browserPanes.close(model.blockId, windowLabel).catch(() => {});
+            closeOwnedPage(model, windowLabel, rects);
         } else if (paneCreated()) {
             diag(`view-unmount — a newer mount owns the page, leaving it open`);
         }

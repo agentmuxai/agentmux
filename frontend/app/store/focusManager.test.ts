@@ -211,6 +211,30 @@ describe("focusManager", () => {
             focusManager.claimFocusOnMount("block-1", localGiveFocus);
             expect(localGiveFocus).not.toHaveBeenCalled();
         });
+
+        // A browser pane has no page until the host has created it: its view says no until then, and the
+        // one request is the claim made when the page exists (the pane open path audit, finding 6).
+        it("ends the frames still trying the pane once its claim took the focus", () => {
+            let pageLive = false;
+            giveFocus.mockImplementation(() => pageLive);
+            focusManager.refocusNode();
+            runFrames(2);
+            expect(giveFocus).toHaveBeenCalledTimes(3);
+            pageLive = true;
+            focusManager.claimFocusOnMount("block-1", giveFocus);
+            expect(giveFocus).toHaveBeenCalledTimes(4);
+            runFrames(5);
+            expect(giveFocus).toHaveBeenCalledTimes(4);
+        });
+
+        it("leaves the frames trying when the claim found nothing to focus yet", () => {
+            giveFocus.mockImplementation(() => false);
+            focusManager.refocusNode();
+            focusManager.claimFocusOnMount("block-1", giveFocus);
+            const before = giveFocus.mock.calls.length;
+            runFrames(1);
+            expect(giveFocus.mock.calls.length).toBe(before + 1);
+        });
     });
 
     // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1: one reconciler behind

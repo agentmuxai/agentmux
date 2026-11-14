@@ -68,6 +68,16 @@ Ranked by what a person feels first, then by wasted work.
 | 12 | **A load-time sample can be recorded for a load that was never seen starting.** | A wrong estimate for a site's load time. Read from the code, not seen in a log. | Arises mainly when the window is stalled. |
 | 13 | **Steady-state work per open pane.** A 200 ms rectangle poll and a 250 ms sign-in-offer clock run for every pane; each host event runs every pane's listeners; about 20 diagnostic lines per open. | Not on the open path. Grows with the number of panes. | Outside this task. |
 
+**Finding 6, done after this report (task #47593).** A browser pane's view now answers "no" to a focus request
+until the host has created its page, so the layout insert, the selection effect, the block's mount and the stand-in
+ask the host for nothing: the keys stay in the pane's own frame, as they do for any pane whose input is not there
+yet. The one request for the page's keyboard is the claim made when the page exists (`use-pane-rect-sync.ts`), and a
+claim that took the focus ends the frames that were still trying on the pane's behalf. One open is now two requests
+(the app while there is no page, then the pane), down from up to six. A page-side "same as the last one sent" skip
+was left out on purpose: the page learns who has the keyboard from a report that can sit behind an input event, so a
+skip could leave the keys where the person just left; the host already drops a request older than one it applied,
+and a repeat of the current owner moves no focus there (it only schedules the check that focus is where it should be).
+
 ### 4.3 The same thing written more than once
 
 - The pane label parse (`browser-pane-<block>-<n>` to a block id) is written out in several places in `crates/cef/src`, two of them identical lines in `input_owner/native_click.rs` and `input_owner/views.rs`. One helper should own it.
