@@ -55,7 +55,11 @@ pub fn settings_path(channel_dir: &Path) -> PathBuf {
 pub fn read(channel_dir: &Path) -> Result<Settings, String> {
     let path = settings_path(channel_dir);
     match std::fs::read_to_string(&path) {
-        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{} does not read ({e}); fix it or run `agentmux setup`", path.display())),
+        Ok(text) => {
+            let settings: Settings = serde_json::from_str(&text).map_err(|e| format!("{} does not read ({e}); fix it or run `agentmux setup`", path.display()))?;
+            check_port(settings.port).map_err(|e| format!("{}: {e}; fix it or run `agentmux setup`", path.display()))?;
+            Ok(settings)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
         Err(e) => Err(format!("cannot read {}: {e}", path.display())),
     }
@@ -77,6 +81,16 @@ pub fn check_port(port: u16) -> Result<u16, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kept_port_that_cannot_be_used_is_refused_where_it_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        for bad in [0u16, 80, 65535] {
+            std::fs::write(settings_path(dir.path()), format!("{{\"port\": {bad}, \"secret_store\": \"file\"}}")).unwrap();
+            let err = read(dir.path()).unwrap_err();
+            assert!(err.contains("agentmux setup"), "{err}");
+        }
+    }
 
     #[test]
     fn no_file_is_the_defaults_and_a_written_file_is_read_back() {

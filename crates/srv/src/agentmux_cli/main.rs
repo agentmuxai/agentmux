@@ -187,11 +187,11 @@ fn dispatch(cli: Cli) -> i32 {
     }
 }
 
-/// A restart keeps what the running server was started with (its port and program) unless a flag says otherwise.
+/// A restart keeps the port the running server was started on unless a flag says otherwise. The program is not kept:
+/// a restart runs the installed one, which is the point of restarting after an install.
 fn restart_args(was: Option<ServerState>, mut args: ServerArgs) -> ServerArgs {
     if let Some(was) = was {
         args.port = args.port.or(Some(was.web_port));
-        args.srv_bin = args.srv_bin.or_else(|| Some(was.srv.clone()).filter(|p| p.is_file()));
     }
     args
 }
@@ -873,10 +873,11 @@ mod tests {
     }
 
     #[test]
-    fn a_restart_keeps_the_port_and_program_the_server_was_started_with() {
+    fn a_restart_keeps_the_port_the_server_was_started_on_and_runs_the_installed_program() {
         let args = ServerArgs::default;
         let kept = restart_args(Some(record(1)), args());
         assert_eq!(kept.port, Some(record(1).web_port));
+        assert!(kept.srv_bin.is_none(), "the program is the installed one, not the old version's folder");
         assert_eq!(restart_args(None, args()).port, None, "nothing running: the saved settings decide");
         let flagged = restart_args(Some(record(1)), ServerArgs { port: Some(7500), ..args() });
         assert_eq!(flagged.port, Some(7500), "a flag wins");

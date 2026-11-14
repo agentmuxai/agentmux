@@ -178,7 +178,8 @@ else
     }
     run_server_install() { # <release dir> [extra args...]; the home is $W/hs, left in place for the checks
         rel="$1"; shift
-        rm -rf "$W/hs" && mkdir -p "$W/hs"
+        if [ -z "${KEEP_HS:-}" ]; then rm -rf "$W/hs"; fi
+        mkdir -p "$W/hs"
         HOME="$W/hs" PATH="${SERVER_TEST_PATH:-$PATH}" AGENTMUX_INSTALL_ROOT="$W/none" AGENTMUX_INSTALL_OS=Linux AGENTMUX_INSTALL_ARCH=x86_64 \
             AGENTMUX_INSTALL_TEST_KEYS="$TESTKEYS" AGENTMUX_INSTALL_RELEASE_BASE="$rel" sh "$SCRIPT" --server --version "$VER" "$@"
     }
@@ -189,7 +190,16 @@ else
     if [ "$(readlink "$W/hs/.agentmux/server/current")" = "$W/hs/.agentmux/server/$VER" ]; then pass "current points at the new version"; else fail "current points at the new version"; fi
     if [ -L "$W/hs/.local/bin/agentmux-server" ] && [ -L "$W/hs/.local/bin/agentmux" ]; then pass "both names are linked when agentmux is free"; else fail "both names are linked when agentmux is free"; fi
     expect "the linked program runs from the install" 0 "the server program" "$W/hs/.local/bin/agentmux-server" status
-    expect "a second install over the first works and keeps both links" 0 "matches the signed manifest" run_server_install "$W/sgood"
+    KEEP_HS=1 expect "a second install over the first works" 0 "matches the signed manifest" run_server_install "$W/sgood"
+    if [ -L "$W/hs/.local/bin/agentmux-server" ] && [ -L "$W/hs/.local/bin/agentmux" ]; then pass "a reinstall keeps both links"; else fail "a reinstall keeps both links"; fi
+    KEEP_HS=1 expect "a reinstall does not call its own agentmux link another program" 0 "next: run  agentmux setup" run_server_install "$W/sgood"
+
+    # A launcher already at ~/.local/bin/agentmux (the desktop's) is left alone even when that folder is not on the PATH.
+    rm -rf "$W/hs"; mkdir -p "$W/hs/.local/bin"; printf '#!/bin/sh\necho desktop-launcher\n' > "$W/hs/.local/bin/agentmux"; chmod +x "$W/hs/.local/bin/agentmux"
+    KEEP_HS=1 expect "a launcher at the link's path is named in the note" 0 "run this one as  agentmux-server" run_server_install "$W/sgood"
+    expect "the launcher at the link's path is untouched" 0 "desktop-launcher" "$W/hs/.local/bin/agentmux"
+    if [ -L "$W/hs/.local/bin/agentmux-server" ]; then pass "agentmux-server is linked beside it"; else fail "agentmux-server is linked beside it"; fi
+    unset KEEP_HS
 
     # Something else named agentmux (the desktop app's launcher) is left alone.
     mkdir -p "$W/fakebin"; printf '#!/bin/sh\necho desktop\n' > "$W/fakebin/agentmux"; chmod +x "$W/fakebin/agentmux"

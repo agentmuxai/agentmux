@@ -357,9 +357,14 @@ launch_macos() {
 
 # ---- the server package ----
 # Is the name `agentmux` free for the server's program? The desktop app's launcher has that name, and is not replaced.
-agentmux_name_is_free() { # <the link this install owns>
+agentmux_name_is_free() { # <the program the link points at>
+    link="$HOME/.local/bin/agentmux"
+    # Whatever is at the link's path that is not this install's own link (the desktop's launcher, say) is not replaced.
+    if [ -e "$link" ] || [ -L "$link" ]; then
+        [ "$(readlink "$link" 2> /dev/null || true)" = "$1" ] || return 1
+    fi
     found="$(command -v agentmux 2> /dev/null || true)"
-    [ -z "$found" ] || [ "$(readlink "$found" 2> /dev/null || true)" = "$1" ]
+    [ -z "$found" ] || [ "$found" = "$link" ] || [ "$(readlink "$found" 2> /dev/null || true)" = "$1" ]
 }
 
 install_server() {
@@ -376,7 +381,7 @@ install_server() {
         printf '+ tar -xzf %s.tar.gz into %s\n' "$sname" "$dest"
         printf '+ ln -sfn %s %s/current\n' "$dest" "$base"
         printf '+ ln -sf %s %s/.local/bin/agentmux-server\n' "$target" "$HOME"
-        if agentmux_name_is_free "$HOME/.local/bin/agentmux"; then printf '+ ln -sf %s %s/.local/bin/agentmux\n' "$target" "$HOME"; fi
+        if agentmux_name_is_free "$target"; then printf '+ ln -sf %s %s/.local/bin/agentmux\n' "$target" "$HOME"; fi
         if [ "$SETUP" = 1 ]; then printf '+ agentmux-server setup --yes --no-open\n'; fi
         return
     fi
@@ -397,7 +402,7 @@ install_server() {
     # `agentmux-server` is always this program's name on the PATH; `agentmux` too when nothing else has it.
     cmd=agentmux-server
     ln -sf "$target" "$HOME/.local/bin/agentmux-server"
-    if agentmux_name_is_free "$HOME/.local/bin/agentmux"; then
+    if agentmux_name_is_free "$target"; then
         ln -sf "$target" "$HOME/.local/bin/agentmux"
         cmd=agentmux
     else
