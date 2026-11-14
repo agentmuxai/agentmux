@@ -1600,6 +1600,11 @@ async fn a_handoff_waits_for_the_users_answer_through_the_host_only() {
     let (s, body) = waiting.await.unwrap();
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["answer"], "done");
+    // How long the banner was up is in the answer, and the Log says what the person did and how soon.
+    assert!(body["data"]["open_secs"].is_u64(), "{body}");
+    let (_, log) = crate::server::browser_actions::entries(&pane);
+    let detail = log.iter().rev().find(|e| e.kind == crate::server::browser_actions::Kind::Handoff).and_then(|e| e.detail.clone());
+    assert!(detail.is_some_and(|d| d.starts_with("the person clicked Done after ")), "the hand-off's Log line names the person's Done");
 
     // The banner is gone, the pane is the agent's again, and the answer was single use.
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();

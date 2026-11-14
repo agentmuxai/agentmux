@@ -53,7 +53,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     const set = (patch: Partial<AuditFilter>) => setFilter({ ...filter(), ...patch });
     const sounds = createAuditSoundsAt(list.entries, now, () => props.sound, {
         showKind: revealSoundRow(filter, setFilter, () => (setAgentText(""), setSearchText("")), list.showNewest),
-        body: () => body,
+        body: () => body, reachBack: list.reachBack,
     });
     const typed = () => {
         if (typing !== undefined) clearTimeout(typing);
