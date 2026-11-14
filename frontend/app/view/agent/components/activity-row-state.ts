@@ -75,6 +75,7 @@ function createFigures(props: ActivityRowProps, tick: () => number) {
         if (!a) return "";
         switch (a.status) {
             case "running": return KIND_SIGIL[a.kind];
+            case "unknown": return "?";
             case "done": return "✓";
             case "error": return "✗";
             case "stopped": return "■";

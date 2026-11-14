@@ -19,8 +19,8 @@ import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
 const MAX_INLINE = 3;
 
-// D3 — running first, then error, stopped, done.
-const STATUS_RANK: Record<ActivityStatus, number> = { running: 0, error: 1, stopped: 2, done: 3 };
+// D3 — running first, then unknown, error, stopped, done.
+const STATUS_RANK: Record<ActivityStatus, number> = { running: 0, unknown: 1, error: 2, stopped: 3, done: 4 };
 
 export interface ActivityDockProps {
     /** Reactive accessor for this pane document nodes (`model.document`). */

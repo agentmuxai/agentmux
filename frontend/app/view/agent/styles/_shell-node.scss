@@ -200,6 +200,7 @@
     &.done     { border-left-color: var(--accent-color); opacity: 0.75; }
     &.error    { border-left-color: var(--error-color); }
     &.stopped  { border-left-color: var(--secondary-text-color); opacity: 0.6; }
+    &.unknown  { border-left-color: var(--secondary-text-color); opacity: 0.85; }
 
     & + & { border-top: 1px solid var(--border-color); }
 
@@ -242,6 +243,7 @@
     .done &     { color: var(--accent-color); }
     .error &    { color: var(--error-text-color); }
     .stopped &  { color: var(--secondary-text-color); }
+    .unknown &  { color: var(--secondary-text-color); }
 }
 
 // A running row's mark is its kind of work's 3-cell animation (ActivitySigil), so its slot is 3 cells
