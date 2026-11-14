@@ -10,6 +10,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
     microphone: "Microphone",
     location: "Location",
     notifications: "Notifications",
+    accounts: "Make accounts (the Vault makes the password)",
 };
 
 /** `kinds` with `kind` on or off, each listed once and in the order srv lists them. */

@@ -62,6 +62,16 @@ describe("Page permissions", () => {
         expect(within(li).getByRole("checkbox", { name: /Location/ })).not.toBeChecked();
     });
 
+    it("lists making accounts as a kind beside the page's own, and switching it off keeps the rest", async () => {
+        list.mockResolvedValue({ ...result([permission({ kinds: ["camera", "accounts"] })]), permission_kinds: ["camera", "microphone", "location", "notifications", "accounts"] });
+        permissionSet.mockResolvedValue(result());
+        render(() => <AgentSiteGrants />);
+        const li = (await screen.findByText("meet.example.com")).closest("li")!;
+        expect(within(li).getByRole("checkbox", { name: /Make accounts/ })).toBeChecked();
+        fireEvent.click(within(li).getByRole("checkbox", { name: /Make accounts/ }));
+        await waitFor(() => expect(permissionSet).toHaveBeenCalledWith({}, { agent: "naki-2", site: "https://meet.example.com", kinds: ["camera"] }));
+    });
+
     it("says there is none when the list is empty", async () => {
         list.mockResolvedValue(result([]));
         render(() => <AgentSiteGrants />);

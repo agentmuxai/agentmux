@@ -126,7 +126,7 @@ async fn the_person_is_asked_then_the_vault_keeps_the_password_before_the_site_s
     let (status, body) = generate(&s).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let asked = ask.await.unwrap();
-    assert!(asked.account && !asked.signin && !asked.offer_always, "no Always for an account");
+    assert!(asked.account && !asked.signin && asked.offer_always, "Always is offered for an account, which is not a sign-in");
     assert_eq!((asked.origin.as_str(), asked.entry_id.as_str(), asked.kind.as_str()), (s.site.as_str(), "", "login"));
     assert_eq!(asked.agent_reason, "sign up for the test shop's sandbox");
 
@@ -263,6 +263,74 @@ async fn an_incognito_tab_keeps_the_password_in_personal_tagged() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].4, "personal");
     assert!(entries[0].1.contains(&signups::FROM_INCOGNITO.to_string()) && entries[0].1.contains(&signups::UNCONFIRMED.to_string()), "{:?}", entries[0].1);
+}
+
+#[tokio::test]
+async fn always_is_kept_for_this_agent_on_this_site_and_the_next_account_asks_nobody() {
+    use crate::server::browser_site_permissions as perms;
+    let s = setup(None).await;
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Always));
+    let (status, body) = generate(&s).await;
+    ask.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(perms::may_make_accounts(&s.auth.agent_id, &s.site), "the person's Always is kept");
+    assert!(!perms::may_make_accounts("someone-else", &s.site), "for this agent only");
+    assert!(!perms::may_make_accounts(&s.auth.agent_id, "https://other.example.com"), "and this site only");
+
+    // The second account: no prompt, but the countdown still shows before the password is typed.
+    let (state, block) = (s.state.clone(), s.block.clone());
+    let watcher = tokio::spawn(async move {
+        for _ in 0..400 {
+            let shown = state.mstore.get::<Block>(&block).unwrap().unwrap().meta.get(super::super::browser_signin::PENDING_META_KEY).cloned().unwrap_or(Value::Null);
+            if !shown.is_null() {
+                return shown;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        Value::Null
+    });
+    let (status, body) = generate(&s).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id), "nobody was asked the second time");
+    assert_eq!(watcher.await.unwrap()["kind"].as_str(), Some("account"), "the countdown still showed");
+    assert_eq!(asked_of(&s, "signup_fill").len(), 2);
+    assert!(body["data"].get("approval").is_none(), "an Always is not a went-ahead");
+}
+
+#[tokio::test]
+async fn revoking_the_row_makes_the_next_account_ask_again() {
+    use crate::server::browser_site_permissions as perms;
+    let s = setup(None).await;
+    let row = perms::add_kind(&s.state, &s.auth.agent_id, &s.site, perms::ACCOUNTS).unwrap();
+    assert!(perms::may_make_accounts(&s.auth.agent_id, &s.site));
+    assert!(perms::revoke(&s.state, &row.id).unwrap());
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
+    let (status, body) = generate(&s).await;
+    ask.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(asked_of(&s, "signup_fill").is_empty());
+}
+
+#[tokio::test]
+async fn an_incognito_tab_offers_no_always_and_a_row_does_not_skip_its_question() {
+    use crate::server::browser_site_permissions as perms;
+    let s = setup(Some("incognito:jar-2")).await;
+    perms::add_kind(&s.state, &s.auth.agent_id, &s.site, perms::ACCOUNTS).unwrap();
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let (status, body) = generate(&s).await;
+    let asked = ask.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!asked.offer_always, "no Always in Incognito");
+}
+
+#[tokio::test]
+async fn a_no_keeps_no_row() {
+    let s = setup(None).await;
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
+    let (status, _) = generate(&s).await;
+    ask.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(!crate::server::browser_site_permissions::may_make_accounts(&s.auth.agent_id, &s.site), "a no keeps nothing");
 }
 
 #[tokio::test]

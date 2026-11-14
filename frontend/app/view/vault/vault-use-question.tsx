@@ -95,7 +95,7 @@ function promptNote(u: UseRequest): string {
 /** The "Always" button: for the agent, on the site, or both for a sign-in. */
 function alwaysLabel(u: UseRequest): string {
     const agent = clip(u.agent, CLIP.name);
-    if (u.signin) return `Always for ${agent} on ${siteOf(u.origin)}`;
+    if (u.signin || u.account) return `Always for ${agent} on ${siteOf(u.origin)}`;
     // A field in another site's frame is granted as that frame on that page.
     if (u.page) return `Always on ${siteOf(u.page)} (${siteOf(u.origin)} fields)`;
     return u.command ? `Always for ${agent}` : `Always on ${siteOf(u.origin)}`;

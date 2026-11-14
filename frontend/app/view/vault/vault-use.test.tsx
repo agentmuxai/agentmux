@@ -229,6 +229,26 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(within(dialog).queryByRole("button", { name: /^Always/ })).toBeNull();
     });
 
+    it("offers Always for that agent on that site for a new account, and sends it", async () => {
+        uses = [
+            use({
+                account: true,
+                what: "new account",
+                kind: "login",
+                entry_id: "",
+                entry_label: "a new account on https://shop.example.com",
+                origin: "https://shop.example.com",
+                field: "",
+                offer_always: true,
+            }),
+        ];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const dialog = await screen.findByRole("group");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Always for Agent1 on shop.example.com" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
+    });
+
     it("says a command's output will replace the entry's value, that the old one is kept, and offers no Always", async () => {
         uses = [use({ origin: "", field: "", what: "value", entry_label: "GitHub token", kind: "", command: "gh auth token", cwd: "C:/work", offer_always: false, replaces: true, reason: "what the command prints replaces the value" })];
         await refreshVault();
