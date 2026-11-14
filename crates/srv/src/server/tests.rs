@@ -32,7 +32,7 @@ pub(crate) fn test_state() -> AppState {
     // The store, file store, event bus and broker come from the core fixture, which core tests use
     // by themselves. This one store backs mstore/id_store/identity_store below and carries both
     // schemas (see `core_parts`).
-    let crate::test_support::CoreParts { mstore, filestore, event_bus, broker } = crate::test_support::core_parts();
+    let crate::test_support::CoreParts { mstore, filestore, event_bus, broker, srv_state } = crate::test_support::core_parts();
     let reactive_handler = backend_reactive::get_global_handler();
     let poller = Arc::new(Poller::new(
         backend_reactive::PollerConfig {
@@ -104,7 +104,7 @@ pub(crate) fn test_state() -> AppState {
         narrated_events: Arc::new(crate::backend::narrated_events::NarratedEvents::new()),
         // Phase E.2c.2 — workspace RPC dispatches through reducer.
         // Tests get fresh state + a dummy broadcast bus.
-        srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
+        srv_state,
         srv_events_tx: tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(64).0,
         saga_id_alloc: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         // Saga durability (PR 1) — in-memory log so tests stay
