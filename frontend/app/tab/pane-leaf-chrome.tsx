@@ -3,6 +3,7 @@
 
 import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import type { NodeModel } from "@/layout/index";
+import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { Show, type JSX } from "solid-js";
 import { renderPaneMembers } from "./pane-leaf-members";
 import {
@@ -56,7 +57,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const shownBlockId = useShownBlockId(nodeModel);
     const draggedTab = useDraggedTab(nodeModel);
 
-    const { hoisted, keepAlive } = usePaneKinds(activeBlockId, () => draggedTab() !== undefined);
+    const { hoisted, keepAlive } = usePaneKinds(activeBlockId, () => paneStackIds(nodeModel).length > 1);
     const scopes = createViewModelScopes(nodeModel, hoisted);
     const scopedNodeModel = useScopedNodeModel(nodeModel, activeBlockId, hoisted, scopes);
     const members = useStackMembers(nodeModel, shownBlockId, scopes, draggedTab);

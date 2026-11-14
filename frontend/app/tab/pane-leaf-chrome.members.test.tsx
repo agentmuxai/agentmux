@@ -393,21 +393,35 @@ describe("a tab dragged out of the pane", () => {
         expect(members()).toBe("[a1] a2");
     });
 
-    it("keeps a pane of tabs that are not kept alive showing both through the drag", async () => {
+    it("mounts nothing again when a tab's drag starts in a pane none of whose tabs is kept alive", async () => {
         setView("h1", "help");
         setView("h2", "help");
         setStack(["h1", "h2"]);
         await mount("h1");
-        // One tab mounted, and no slots: nothing in this pane is kept alive.
-        expect(members()).toBe("");
-        expect(document.querySelectorAll('[data-testid^="block-"]').length).toBe(1);
+        // Only the tab in front is mounted, as before, but in a slot of its own from the start: a pane with
+        // several tabs is laid out for a tab's drag before one begins.
+        expect(members()).toBe("[h1]");
+        const block = document.querySelector('[data-testid^="block-"]');
 
+        // The drag's start changes nothing. Mounted again here, the tab gave the chrome a new view model and
+        // so a new header, and the pill being dragged was in the old one.
         beginTabTearOff(fakeLayoutModel, "h1", "node-1");
         expect(members()).toBe("[h1]");
+        expect(document.querySelector('[data-testid^="block-"]')).toBe(block);
         tabTearOffShown();
         expect(members()).toBe("h1 [h2]");
+        expect(document.querySelector('[data-testid^="block-"]')).toBe(block);
         endTabTearOff();
         expect(members()).toBe("[h1]");
+        expect(document.querySelector('[data-testid^="block-"]')).toBe(block);
+    });
+
+    it("leaves a pane with one tab that is not kept alive without slots", async () => {
+        setView("h1", "help");
+        setStack(["h1"]);
+        await mount("h1");
+        expect(members()).toBe("");
+        expect(document.querySelectorAll('[data-testid^="block-"]').length).toBe(1);
     });
 
     it("sizes the dragged tab's content for its landing place while it stands there, and for its pane otherwise", async () => {

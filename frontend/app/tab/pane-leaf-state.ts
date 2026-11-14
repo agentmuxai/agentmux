@@ -98,7 +98,7 @@ export interface PaneKinds {
  * agent or terminal tab kept every tab of its pane mounted, which is what let
  * Help's content ghost over the next tab.)
  */
-export function usePaneKinds(activeBlockId: () => string, tabDragged: Accessor<boolean> = () => false): PaneKinds {
+export function usePaneKinds(activeBlockId: () => string, severalTabs: Accessor<boolean> = () => false): PaneKinds {
     // Effective view type of the ACTIVE member, reactive — getMuxObjectAtom
     // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
     // PR #3134 established for BlockFrame_Header (frontend/app/store/mos.ts's
@@ -137,13 +137,17 @@ export function usePaneKinds(activeBlockId: () => string, tabDragged: Accessor<b
     // Same latch shape as `hoisted` above, over the narrower keep-alive view types
     // set — see `usePaneKinds`' own doc comment for what this changes and why.
     //
-    // A pane one of whose tabs is dragged out of it latches too (`tabDragged`): the dragged tab stays
-    // mounted while the pane shows the tab that takes its place (`useShownBlockId`, `useStackMembers`), and
-    // only this branch mounts more than one member. For a pane that was not keeping tabs alive the switch
-    // remounts the dragged tab once, under its tear-off place.
+    // A pane with more than one tab latches too (`severalTabs`), whatever its tabs are: a tab dragged out
+    // of it stays mounted while the pane shows the tab that takes its place (`useShownBlockId`,
+    // `useStackMembers`), and only this branch mounts more than one member. Which members are mounted is
+    // still each tab's own matter (`useStackMembers`): one that does not keep its state unmounts when it is
+    // not in front, as before. From the second tab on, not from the drag's start: the change of branch
+    // mounts the tab in front again, which gives the chrome a new view model and so a new header, and the
+    // pill in the old header was the drag's source (the release was lost, and the tab dropped on another
+    // window tab did not land).
     let latchedKeepAlive = false;
     const keepAlive = createMemo(() => {
-        if (!latchedKeepAlive && (isKeepAliveView(effectiveViewType()) || tabDragged())) {
+        if (!latchedKeepAlive && (isKeepAliveView(effectiveViewType()) || severalTabs())) {
             latchedKeepAlive = true;
         }
         return latchedKeepAlive;
