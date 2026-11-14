@@ -479,10 +479,13 @@ export function useChromeNodeModel(
     nodeModel: NodeModel,
     activeBlockId: () => string,
     scopes: ViewModelScopes,
+    shownBlockId: Accessor<string> = activeBlockId,
 ): Accessor<NodeModel> {
     return createMemo<NodeModel>(() => ({
         ...nodeModel,
         activeViewModel: () => scopes.viewModelSlotFor(activeBlockId()).get(),
+        // The tab whose content is in front (`useShownBlockId`), for the strip to mark.
+        shownBlockId,
     }));
 }
 

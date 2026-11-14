@@ -156,15 +156,19 @@ function zoneAt(pill: PillDrag, client: { x: number; y: number }): { hit: Hit; z
 }
 
 /**
- * The first sample of a single tab over a pane's placing zone: the layout takes the drag from here. False
- * when the tab is not in this layout (it comes from another window tab): the pane shows its own ghost.
+ * The first sample of a single tab over a pane's placing zone: the layout takes the drag from here. A tab
+ * from another window tab is in no pane of this layout: it is placed as a tab that leaves others behind is,
+ * by its stand-in, so the panes reflow for it as they do for a pane dragged in from another tab (it had the
+ * old landing zone alone; the operator, 2026-11-13: "we still have the blue highlight landing sites, not the
+ * reflow"). Its release is the hovered pane's own `place`, the one cross-tab move. False for a layout with
+ * no pane.
  */
 export function beginPillPlacement(model: LayoutModel, blockId: string, client: { x: number; y: number }): boolean {
     if (pillDragIn(model)) return true;
     const root = model.treeState.rootNode;
-    const source = root && findNodeByBlockId(root, blockId);
-    if (!source?.data) return false;
-    const lone = effectiveStack(source.data).length <= 1;
+    if (!root) return false;
+    const source = findNodeByBlockId(root, blockId);
+    const lone = !!source?.data && effectiveStack(source.data).length <= 1;
     const standIn = pillStandIn(blockId);
     resetDropIntent(model);
     // A tab that leaves others behind has no pane to stand in its landing place: its picture does. It was
@@ -174,7 +178,7 @@ export function beginPillPlacement(model: LayoutModel, blockId: string, client: 
     // The layout shows a drop for the tab: its own place no longer offers the tear-off.
     tabTearOffShown();
     batch(() => {
-        setPillDrag({ model, blockId, sourceNodeId: source.id, lone, standIn, draggedId: lone ? source.id : standIn.id });
+        setPillDrag({ model, blockId, sourceNodeId: source?.id ?? "", lone, standIn, draggedId: lone && source ? source.id : standIn.id });
         model.showOverlay._set(true);
     });
     followPill(model, client);

@@ -360,10 +360,29 @@ describe("a pane reading the pointer itself", () => {
     });
 });
 
-describe("a tab that is not in this layout", () => {
-    it("is not taken: the pane shows its own ghost for a tab from another window tab", () => {
+describe("a tab that is not in this layout (it comes from another window tab)", () => {
+    it("is shown as a tab that leaves others behind is: the hovered pane in half, the panes reflowed for it", () => {
         const m = layout();
-        expect(beginPillPlacement(m, "elsewhere", LEFT_OF_B)).toBe(false);
-        expect(pillDragIn(m)).toBeUndefined();
+        expect(beginPillPlacement(m, "elsewhere", LEFT_OF_B)).toBe(true);
+        expect(pillDragIn(m)).toMatchObject({ blockId: "elsewhere", lone: false, draggedId: "pill:elsewhere" });
+        const future = m.futureLayout()!;
+        expect(future.movedId).toBe("pill:elsewhere");
+        expect(shownPx(future.rects["pill:elsewhere"])).toEqual({ left: 600, top: 0, width: 300, height: 400 });
+        expect(m.liveReflowActive()).toBe(true);
+        expect(m.reflowFor("b")).toMatchObject({ rect: { left: 900, top: 0, width: 300, height: 400 } });
+    });
+
+    it("is released through the hovered pane's own strip, which makes the move from the other window tab", () => {
+        vi.useFakeTimers();
+        const m = layout();
+        const place = vi.fn(() => false as const);
+        registerPillPane(m, "b", { headerEl: { getBoundingClientRect: () => ({ height: 33 }) } as HTMLElement, hasBody: () => true, place, release: () => {} });
+        beginPillPlacement(m, "elsewhere", LEFT_OF_B);
+        expect(dropPill(m, LEFT_OF_B)).toBe(true);
+        vi.advanceTimersByTime(CLEARED_MS);
+        expect(place).toHaveBeenCalledWith("elsewhere", expect.objectContaining({ kind: "place", side: "left" }));
+        // Nothing stays shown: the pane arrives with the layout's own update.
+        expect(pillPlacingIn(m)).toBe(false);
+        expect(m.futureLayout()).toBeUndefined();
     });
 });

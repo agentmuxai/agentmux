@@ -46,26 +46,29 @@ import {
  */
 
 export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
-    // The tab in front is the one the pane shows, which is not the layout's active tab while that one is
-    // dragged out of the pane (`useShownBlockId`). Everything under the leaf reads it from here: the chrome,
-    // the members and each Block's own node model.
-    const activeBlockId = useShownBlockId(props.nodeModel);
-    const draggedTab = useDraggedTab(props.nodeModel);
-    const nodeModel: NodeModel = { ...props.nodeModel, activeBlockId };
+    const nodeModel = props.nodeModel;
+    const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
+    // The tab whose content is in front is not the layout's active tab while that one is dragged out of the
+    // pane (`useShownBlockId`). Only the members follow it, and the strip's mark of the tab in front. The
+    // chrome stays on the layout's active tab: its header is built again whenever its view model changes,
+    // and the pill in it is the live drag source, which must outlive the drag (a header rebuilt mid-drag
+    // lost the release: the tab dropped on another window tab did not land).
+    const shownBlockId = useShownBlockId(nodeModel);
+    const draggedTab = useDraggedTab(nodeModel);
 
     const { hoisted, keepAlive } = usePaneKinds(activeBlockId, () => draggedTab() !== undefined);
     const scopes = createViewModelScopes(nodeModel, hoisted);
     const scopedNodeModel = useScopedNodeModel(nodeModel, activeBlockId, hoisted, scopes);
-    const members = useStackMembers(nodeModel, activeBlockId, scopes, draggedTab);
-    useAgentMountWatch(nodeModel, activeBlockId, members);
+    const members = useStackMembers(nodeModel, shownBlockId, scopes, draggedTab);
+    useAgentMountWatch(nodeModel, shownBlockId, members);
     useMinimizedMembers(nodeModel, members.stackBlockIds);
-    const chromeNodeModel = useChromeNodeModel(nodeModel, activeBlockId, scopes);
+    const chromeNodeModel = useChromeNodeModel(nodeModel, activeBlockId, scopes, shownBlockId);
 
     const content = renderPaneMembers({
         keepAlive,
         scopedNodeModel,
         mountedBlockIds: members.mountedBlockIds,
-        activeBlockId,
+        activeBlockId: shownBlockId,
         keepAliveNodeModelFor: scopes.keepAliveNodeModelFor,
         lands: members.lands,
     });

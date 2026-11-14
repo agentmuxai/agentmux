@@ -367,12 +367,14 @@ describe("a tab dragged out of the pane", () => {
         // It has left: its right-hand neighbour is in front, for the chrome too, and it stays mounted.
         tabTearOffShown();
         expect(members()).toBe("a1 h1 [h2]");
-        expect(chromeNodeModel?.activeBlockId?.()).toBe("h2");
+        expect(chromeNodeModel?.shownBlockId?.()).toBe("h2");
+        // The chrome itself stays on the layout's active tab: its header holds the pill being dragged.
+        expect(chromeNodeModel?.activeBlockId?.()).toBe("h1");
 
         // The drag ends with the tab still in the pane.
         endTabTearOff();
         expect(members()).toBe("a1 [h1]");
-        expect(chromeNodeModel?.activeBlockId?.()).toBe("h1");
+        expect(chromeNodeModel?.shownBlockId?.()).toBe("h1");
     });
 
     it("shows the last tab when the dragged one was rightmost, and leaves a pane alone whose dragged tab was not in front", async () => {
