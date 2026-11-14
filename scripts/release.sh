@@ -81,10 +81,40 @@ for f in "${CHANGESETS[@]}"; do
 done
 echo >&2
 
+# Read every changeset in ONE awk process, not one (or two) per file: a process
+# start costs far more than the parse, most of all on Windows. It emits three
+# lines per file, in file order: the name, its frontmatter type (first `type:`
+# between the first pair of `---` lines, whitespace stripped, empty if none)
+# and its title (first non-empty line after the second `---`, empty if none).
+# getline (not the main loop) so an empty file still gets its record.
+TYPES=()
+TITLES=()
+while IFS= read -r _name && IFS= read -r _type && IFS= read -r _title; do
+    TYPES+=("$_type")
+    TITLES+=("$_title")
+done < <(awk '
+    BEGIN {
+        for (i = 1; i < ARGC; i++) {
+            f = ARGV[i]; n = 0; type = ""; got_type = 0; title = ""; got_title = 0
+            while ((getline line < f) > 0) {
+                $0 = line
+                if (line ~ /^---$/) { n++; continue }
+                if (n == 1 && !got_type && line ~ /^type:/) {
+                    type = $2; gsub(/[[:space:]]/, "", type); got_type = 1
+                } else if (n == 2 && !got_title && NF) {
+                    title = line; got_title = 1
+                }
+            }
+            close(f)
+            print f; print type; print title
+        }
+    }' "${CHANGESETS[@]}")
+
 # Determine highest bump type. Order: major > minor > patch.
 RELEASE_TYPE="patch"
-for f in "${CHANGESETS[@]}"; do
-    TYPE="$(awk '/^---$/{n++;next} n==1 && /^type:/{print $2; exit}' "$f" | tr -d '[:space:]')"
+for i in "${!CHANGESETS[@]}"; do
+    f="${CHANGESETS[$i]}"
+    TYPE="${TYPES[$i]:-}"
     case "$TYPE" in
         major) RELEASE_TYPE="major"; break ;;
         minor) [[ "$RELEASE_TYPE" != "major" ]] && RELEASE_TYPE="minor" ;;
@@ -117,8 +147,8 @@ echo "Release type: $RELEASE_TYPE" >&2
 # changeset title). A changeset body may carry extra prose lines for reviewer
 # context; those must NOT each become their own changelog bullet (issue #1200).
 DESCRIPTIONS=()
-for f in "${CHANGESETS[@]}"; do
-    TITLE="$(awk '/^---$/{n++;next} n==2 && NF {print; exit}' "$f")"
+for i in "${!CHANGESETS[@]}"; do
+    TITLE="${TITLES[$i]:-}"
     [[ -n "$TITLE" ]] && DESCRIPTIONS+=("$TITLE")
 done
 
