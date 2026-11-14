@@ -372,7 +372,7 @@ mod platform {
             .iter()
             .filter(|(_, (w, _))| w == window)
             .filter_map(|(label, (_, controller))| {
-                let block = label.strip_prefix("browser-pane-")?.rsplit_once('-')?.0.to_string();
+                let block = crate::browser_pane::label::pane_block_id(label)?.to_string();
                 Some((block, controller.contents_view()?))
             })
             .collect()

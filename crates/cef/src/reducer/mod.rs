@@ -271,7 +271,7 @@ impl HostState {
 pub(super) fn next_browser_pane_label(state: &mut HostState, block_id: &str) -> String {
     let seq = state.next_browser_pane_label_seq;
     state.next_browser_pane_label_seq = seq.saturating_add(1);
-    format!("browser-pane-{}-{}", block_id, seq)
+    crate::browser_pane::label::pane_label(block_id, seq)
 }
 
 /// Outcome of `TryRegisterBrowserPaneLive`. Returned via

@@ -1299,7 +1299,7 @@ fn focus_app(state: &Arc<AppState>, window_label: &str) {
     let target = state
         .get_browser(window_label)
         .map(|_| window_label.to_string())
-        .or_else(|| state.list_browsers().into_iter().map(|(k, _)| k).find(|k| !k.starts_with("browser-pane-")));
+        .or_else(|| state.list_browsers().into_iter().map(|(k, _)| k).find(|k| !crate::browser_pane::label::is_pane_label(k)));
     let Some(label) = target else {
         tracing::warn!("[ipc] focus_app: no browser found for label={}", window_label);
         return;

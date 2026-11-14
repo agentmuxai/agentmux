@@ -146,7 +146,7 @@ impl Place for Real<'_> {
             .into_iter()
             .filter_map(|(label, shown)| {
                 let rect = *rects.get(&label)?;
-                let block = label.strip_prefix("browser-pane-")?.rsplit_once('-')?.0.to_string();
+                let block = crate::browser_pane::label::pane_block_id(&label)?.to_string();
                 Some(PaneBox { block, rect, shown })
             })
             .collect()
