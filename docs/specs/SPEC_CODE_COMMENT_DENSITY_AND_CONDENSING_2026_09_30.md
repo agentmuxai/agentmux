@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-30
 **Author:** Maricon (charlie)
-**Status:** active — Phase 0 (the gate, `--code-equal`, the `CONTRIBUTING.md` rules) is built in #4246, described in §9; rule C7 (dead file references) in #4251, §9.1. Phase 1+ (condensing files) is not started.
+**Status:** active — Phase 0 (the gate, `--code-equal`, the `CONTRIBUTING.md` rules) is built in #4246, described in §9; rule C7 (dead file references) in #4251, §9.1. Phase 1+ (condensing files) has started, in the order of §7.1a.
 **Baseline:** `main` @ `cee674b6f`. Every `path:line` below was read on that commit.
 **Related:** [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) §7 ("Keep the prose", revisited in §3 here), [`SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18`](SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md) (why this repo has no agent-instructions file).
 
@@ -616,6 +616,18 @@ The churn column is bent by the recent split: `useAgentCommands.ts` shows 15 com
 - `store/agent-pane-state/reducer.ts`
 - `store/agent-pane-state/types.ts`
 - `components/AgentComposerStrip.tsx`
+
+### 7.1a Order on `e7ff6280d` (2026-11-13)
+
+The splits and renames since §7.1 was ranked moved most of its files (`agentmux-srv/` is `crates/srv/`; `agents.rs`, `bootstrap.rs`, `server/mod.rs` and `agent-view.tsx` no longer hold their comments). Same rank (comment tokens x commits since 2026-08-01) from `check-comment-hygiene.mjs --report`; the top five:
+
+| # | File | Comment tok | Commits | Status |
+|---|---|---:|---:|---|
+| 1 | `crates/srv/src/server/reactive.rs` | 11,374 | 74 | in progress: lines 1-700 first, then the rest |
+| 2 | `frontend/app/view/swarm/swarm-model.ts` | 13,958 | 51 | |
+| 3 | `frontend/app/store/agent-pane-state/types.ts` | 12,320 | 42 | |
+| 4 | `crates/srv/src/backend/storage/migrations.rs` | 13,143 | 37 | comments only, never code |
+| 5 | `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | 8,727 | 54 | |
 
 ### 7.2 PR shape
 

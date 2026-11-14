@@ -14,13 +14,9 @@ use crate::backend::{base, subagent_watcher};
 
 use super::AppState;
 
-/// Max cross-instance HTTP forwards a single inject request may go through
-/// (Tier 2a/2b/3 each increment before forwarding). A legitimate delivery
-/// is always exactly one hop (caller's instance → the owning instance);
-/// this only exists to bound a pathological cycle — two channels each
-/// holding a stale-but-PID-alive shared-registry entry pointing at the
-/// other for the same agent name would otherwise forward back and forth
-/// indefinitely, hanging the original request (reagent P1 on PR #2350).
+/// Max cross-instance forwards one inject may take (Tiers 2a/2b/3 each add one). A real delivery is
+/// one hop; the cap only stops two channels that hold stale-but-alive registry entries for the same
+/// agent from forwarding it back and forth forever (#2350).
 const MAX_FORWARD_HOPS: u8 = 3;
 
 pub(super) use super::jekt_echo::{echo_jekt_to_sender, EchoTrust};
@@ -66,25 +62,15 @@ pub(super) enum ForwardOutcome {
     NoAnswer,
 }
 
-/// The single implementation of "POST this injection to a peer srv and echo it
-/// to the sender if it lands", shared by every forwarding tier.
+/// POSTs `forwarded_req` to a peer srv and echoes it to the sender if it lands: the one
+/// implementation every forwarding tier shares. As three copies, a tier that forgot the echo or
+/// passed `delivery_tier` wrong failed silently and differently from its siblings
+/// (`docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md` §4).
 ///
-/// This existed as three hand-maintained copies (same-host same-channel,
-/// same-host cross-channel, LAN peer) differing only in how the URL and key
-/// were resolved and what they did on failure. That is the shape that has
-/// already produced drift bugs elsewhere in this repo: a tier that forgets the
-/// echo, or passes `delivery_tier` wrong, fails silently and differently from
-/// its siblings. See
-/// `docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md` §4.
-///
-/// **One behaviour was unified rather than preserved:** the LAN tier used to
-/// treat "anything but `success: false`" as delivered, while both host tiers
-/// required `success: true`. A 200 response whose body omits `success`
-/// entirely therefore counted as a successful LAN delivery — echoing a
-/// delivery confirmation to the sender for a message that may never have
-/// arrived. All three now require `success: true`. No real peer is affected:
-/// `InjectionResponse::success` is a plain `bool` with no
-/// `skip_serializing_if`, so a genuine AgentMux srv always sends it.
+/// Delivered means `success: true` in the body, in every tier. The LAN tier used to accept a body
+/// that omitted `success`, which echoed a delivery confirmation for a message that may never have
+/// arrived. A real peer always sends it (`InjectionResponse::success` has no
+/// `skip_serializing_if`).
 pub(super) async fn forward_inject_to_peer(
     state: &AppState,
     req: &InjectionRequest,
@@ -173,52 +159,29 @@ pub(super) async fn forward_inject_to_peer(
     }
 }
 
-/// Max age (seconds) a signed jekt's `ts_secs` may be from "now" and still
-/// verify (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2, anti-replay
-/// — reagentx P1 on PR #2565: `ts_secs` was bound into the signed material
-/// specifically for this purpose per `jekt_sign.rs`'s own doc comments, but
-/// nothing actually checked it, so a captured valid signature verified
-/// forever). Generous enough for normal host-tier delivery latency and
-/// modest clock skew between the signing agent process and this srv
-/// instance (same machine, but not guaranteed same clock read down to the
-/// second); tight enough to bound replay to a narrow window instead of
-/// indefinite reuse.
+/// Max age (seconds) of a signed jekt's `ts_secs` for it to verify
+/// (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2, anti-replay, #2565). Without the check a
+/// captured valid signature verified forever. Wide enough for same-machine latency and clock skew,
+/// narrow enough to bound replay.
 const JEKT_SIG_MAX_AGE_SECS: i64 = 300;
 
 use agentmux_common::{time::now_secs as now_unix_secs, AUTH_KEY_HEADER};
 
-/// Host-tier jekt sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
-/// §2.2). Mutates `req.sig_verified` in place based on whether the claimed
-/// `source_agent`'s stored signing key (if any) verifies `req.jekt_sig`,
-/// within the anti-replay freshness window.
+/// Host-tier jekt sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2): sets
+/// `req.sig_verified` by checking `req.jekt_sig` against the claimed `source_agent`'s stored
+/// signing key, inside the freshness window.
 ///
-/// **Every entry point that can build a host-tier `InjectionRequest` from
-/// client-supplied fields MUST call this before handing it to
-/// `Handler::inject_message`** — reagentx P0 on PR #2565 found two call
-/// sites (`messagebus.rs::handle_inject`, `websocket.rs`'s `bus:inject`
-/// message handling) that built `InjectionRequest` with a fully
-/// client-controlled `source_agent` and called `inject_message` directly,
-/// bypassing this entirely — those messages rendered `TRUST=self-declared`
-/// (unescalated) exactly as if this feature didn't exist. Both now call
-/// this too.
+/// **Every entry point that builds a host-tier `InjectionRequest` from client-supplied fields MUST
+/// call this before `Handler::inject_message`** (#2565): `messagebus.rs::handle_inject` and
+/// `websocket.rs`'s `bus:inject` once skipped it and rendered `TRUST=self-declared` for an
+/// impersonated sender.
 ///
-/// **Deliberately NOT gated on `delivery_tier == "host"`** (reagentx P0 on
-/// the LAN signing PR — this WAS gated that way originally, and it was the
-/// bug): `delivery_tier` is a value this instance largely trusts as
-/// self-declared by whoever authenticated with the full local `auth_key`
-/// (needed so legitimate same-host forwarding can carry an already-`"lan"`
-/// jekt through unmolested — see `resolve_delivery_tier`'s doc comment).
-/// That means a request claiming `delivery_tier: "lan"` (or `"wan"`) was
-/// otherwise a way to dodge THIS check entirely — impersonate a real,
-/// locally-known agent by simply not calling it "host," since
-/// `verify_lan_signature`/`verify_reagent_signature` only fire for their
-/// own tiers and leave an unsigned claim unforced by design. Running this
-/// check unconditionally closes that: it only ever does anything when
-/// `agent_jekt_key_load` finds a LOCAL key for the claimed `source_agent` —
-/// which is `None` for any genuinely-remote LAN/WAN sender this instance
-/// never spawned (no behavior change for real network traffic), but
-/// catches an unsigned/wrong-signature impersonation of an agent THIS
-/// instance actually knows, regardless of what tier the request claims.
+/// **Deliberately not gated on `delivery_tier == "host"`** (#2588). `delivery_tier` is
+/// self-declared by any caller holding the full local `auth_key` (see `resolve_delivery_tier`), so
+/// gating on it let a request claiming `"lan"` or `"wan"` dodge this check and impersonate a
+/// locally known agent. Ungated, it acts only when `agent_jekt_key_load` finds a LOCAL key for the
+/// claimed sender: never for a genuine remote LAN/WAN sender, always for an impersonation of an
+/// agent this instance knows.
 pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest) {
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
@@ -248,42 +211,23 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
     req.sig_verified = Some(verified);
 }
 
-/// Anti-replay window for `req.reagent_ts_secs`, same purpose as
-/// `JEKT_SIG_MAX_AGE_SECS` above but WAN-scoped: wider than host-tier's
-/// 300s because this covers real network delivery latency, not a
-/// same-machine call — matches `cloud_subscriber::REAGENT_SIG_MAX_AGE_SECS`
-/// (the WS delivery path's own constant of the same value) and the review
-/// notifications' own delivery window.
+/// Anti-replay window for `req.reagent_ts_secs`: WAN-scoped, so wider than host-tier's 300 s
+/// because it covers real network latency. Same value as
+/// `cloud_subscriber::REAGENT_SIG_MAX_AGE_SECS`.
 const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 
-/// WAN-tier reagent-signature verification for the HTTP
-/// `/agentmux/reactive/inject` path — mirrors
-/// `cloud_subscriber::sync_agent_reactive`'s in-process verification of the
-/// same four fields for the desktop app's WS delivery path, but for callers
-/// that deliver over HTTP instead (`@agentmuxai/muxbus-client`'s
-/// `pollAndDeliverInjections`, and any future standalone poller). Before
-/// this, `InjectionRequest` declared `reagent_sig`/`reagent_key_id` as
-/// deserializable input fields but nothing on the HTTP path ever read them
-/// — a reagent-signed notification delivered through this path arrived
-/// unsigned in effect, `reagent_verified` always `None`, and could never
-/// render `SIG=verified` (reagentx P1 on PR #41).
+/// WAN-tier reagent-signature check for the HTTP `/agentmux/reactive/inject` path, mirroring
+/// `cloud_subscriber::sync_agent_reactive` for the WS path. Before it, nothing on this path read
+/// `reagent_sig`/`reagent_key_id`, so a signed notification arrived effectively unsigned and never
+/// rendered `SIG=verified` (#41).
 ///
-/// Only meaningful for `delivery_tier == "wan"` — same scoping as
-/// `reagent_verified`'s doc comment ("meaningless off the WAN tier"). A
-/// partial set of the four fields (e.g. a sig but no key_id) is treated the
-/// same as "not signed" (`reagent_verified` stays `None`), not "signed but
-/// broken" — matches `cloud_subscriber.rs`'s identical policy: a legitimate
-/// sender always sends all four together, and a stripped signature reads
-/// exactly like an absent one (no `SIG=`, nothing forced), so it can't buy
-/// an attacker anything a fully-absent one couldn't already.
+/// Only for `delivery_tier == "wan"`. A partial set of the four fields reads as "not signed"
+/// (`reagent_verified` stays `None`), as in `cloud_subscriber.rs`: a legitimate sender sends all
+/// four, and a stripped signature looks exactly like an absent one, so it buys an attacker nothing.
 ///
-/// Takes `now` explicitly (rather than calling `now_unix_secs()` itself),
-/// same reasoning as `cloud_subscriber::reagent_sig_is_fresh`: the pinned
-/// Ed25519 key's matching private half isn't in this repo (it lives only in
-/// the cloud service), so tests can't mint a fresh signature
-/// on demand the way the host-tier HMAC tests below do — only a fixed
-/// offline-signed fixture at a fixed `ts_secs`. Injecting `now` lets a test
-/// hold that fixture inside the freshness window without mocking the clock.
+/// Takes `now` so a test can hold its fixed offline-signed fixture inside the window: the private
+/// half of the pinned Ed25519 key isn't in this repo (same as
+/// `cloud_subscriber::reagent_sig_is_fresh`).
 pub(super) fn verify_reagent_signature(req: &mut InjectionRequest, now: i64) {
     if req.delivery_tier.as_deref() != Some("wan") {
         return;
@@ -307,33 +251,22 @@ pub(super) fn verify_reagent_signature(req: &mut InjectionRequest, now: i64) {
     req.reagent_verified = Some(verified);
 }
 
-/// Anti-replay window for LAN `lan_sig` — reuses the WAN reasoning
-/// (`REAGENT_SIG_MAX_AGE_SECS`) rather than host-tier's tighter
-/// `JEKT_SIG_MAX_AGE_SECS`: LAN crosses an actual network hop (mDNS
-/// discovery + an HTTP round trip through a peer instance), not a
-/// same-process call, so it needs the wider real-network-delivery-latency
-/// margin WAN already established rather than host-tier's same-machine one.
+/// Anti-replay window for `lan_sig`: the WAN value, since LAN crosses a real network hop (mDNS plus
+/// an HTTP round trip), not a same-machine call.
 const LAN_SIG_MAX_AGE_SECS: i64 = REAGENT_SIG_MAX_AGE_SECS;
 
-/// LAN-tier per-agent Ed25519 signature verification —
-/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.4. Async, unlike
-/// `verify_jekt_signature`'s synchronous local-only key lookup: the claimed
-/// sender's public key lives on WHICHEVER peer instance actually hosts that
-/// agent, so finding it costs a LAN round trip
-/// (`LanDiscoveryController::find_agent_lan_pubkey`).
+/// LAN-tier per-agent Ed25519 signature check (docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md
+/// §2.4). Async because the claimed sender's public key lives on whichever peer hosts that agent: a
+/// LAN round trip (`LanDiscoveryController::find_agent_lan_pubkey`), unlike
+/// `verify_jekt_signature`'s local lookup.
 ///
-/// Only meaningful for `delivery_tier == "lan"` — by this point
-/// `req.delivery_tier` has already been through the server-side override in
-/// `handle_reactive_inject` (§3 of the spec), so this is never reachable
-/// off a genuinely `lan_key`-authenticated request.
+/// Only for `delivery_tier == "lan"`; `handle_reactive_inject` has already overridden the tier
+/// server-side (spec §3), so this never runs off a request that wasn't `lan_key`-authenticated.
 ///
-/// No `lan_sig` at all, or a claimed sender whose public key no peer has on
-/// file → `lan_verified` stays `None` — "nothing to check against," not a
-/// red flag on its own, same semantics as `sig_verified`/`reagent_verified`'s
-/// `None` case. A `lan_sig` present with a public key found but the
-/// signature doesn't verify → `Some(false)`, forced `TIER=sensitive`
-/// unconditionally in `handler.rs` — an active attempt to forge a specific
-/// agent's identity.
+/// No `lan_sig`, or no peer has the sender's public key: `lan_verified` stays `None` ("nothing to
+/// check against", as for `sig_verified`/`reagent_verified`). A `lan_sig` with a key found that
+/// doesn't verify: `Some(false)`, which `handler.rs` forces to `TIER=sensitive`, an active attempt
+/// to forge an agent's identity.
 pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRequest) {
     if req.delivery_tier.as_deref() != Some("lan") {
         return;
@@ -383,46 +316,33 @@ pub(crate) mod lan_continuity;
 pub(crate) mod lan_refusals;
 pub(super) mod replay;
 
-/// Anti-replay window for cross-channel `channel_sig` —
-/// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6: host-tier's tighter
-/// `JEKT_SIG_MAX_AGE_SECS`, NOT LAN/WAN's wider one. A cross-channel forward
-/// is a same-machine HTTP call to `127.0.0.1`; it has no real-network
-/// latency budget to accommodate, for the same reason host-tier doesn't.
+/// Anti-replay window for `channel_sig` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6):
+/// host-tier's tight one, since a cross-channel forward is a same-machine call to `127.0.0.1`.
 const CHANNEL_SIG_MAX_AGE_SECS: i64 = JEKT_SIG_MAX_AGE_SECS;
 
-/// Cross-channel (same machine, different AgentMux instance) per-agent
-/// Ed25519 signature verification —
-/// docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D2, Phase B.
+/// Cross-channel (same machine, other AgentMux instance) per-agent Ed25519 signature check
+/// (docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D2, Phase B). Like
+/// `verify_lan_signature`, but the sender's public key comes from the host-global shared registry
+/// (`AgentEntry::jekt_public_key`, published at registration, §D1): a local file read, so it is
+/// synchronous and has no LAN rate-limiter `Skipped` hazard.
 ///
-/// Mirrors `verify_lan_signature`'s structure but resolves the claimed
-/// sender's public key from the host-global shared registry
-/// (`AgentEntry::jekt_public_key`, published at registration by whichever
-/// instance actually spawned that agent — §D1) instead of a LAN round trip.
-/// A local file read, so this is synchronous and has none of the LAN
-/// lookup's rate-limiter `Skipped` hazard.
+/// Only for `delivery_tier == "channel"`, the label a same-host forward carries (§D4, set in
+/// `handle_reactive_inject`'s Tier 2a/2b); `channel_verified` stays `None` otherwise.
 ///
-/// Only meaningful for `delivery_tier == "channel"` — the label a same-host
-/// forward now carries (§D4, set by the forwarding instance in
-/// `handle_reactive_inject`'s Tier 2a/2b). Off that tier the field stays
-/// `None`, same scoping as `lan_verified`.
+/// Ordering (§D2 step 2): a sender this instance holds an HMAC key for is a same-instance agent
+/// that `verify_jekt_signature` owns entirely, so this returns without touching `channel_verified`
+/// and the two verifiers can never disagree.
 ///
-/// Ordering guarantee (§D2 step 2): a claimed sender THIS instance holds an
-/// HMAC key for is a same-instance agent, and `verify_jekt_signature` owns
-/// it entirely — this function returns without touching `channel_verified`,
-/// so the two verifiers can never disagree about one message.
+/// Outcomes:
 ///
-/// Outcomes, all three-state like its siblings:
-/// - `None` — no shared-registry entry for the claimed sender anywhere (a
-///   genuine bridge, or an agent that never registered), OR every entry
-///   found has an empty `jekt_public_key` (written before Phase A shipped —
-///   "cannot check," never "failed the check," §6). Nothing to verify
-///   against; not a red flag on its own.
-/// - `Some(true)` — `channel_sig` present, fresh, and verified against the
-///   published key of ANY of that agent's entries (one agent name can
-///   legitimately be live in several channels at once — §D2 step 5).
-/// - `Some(false)` — a published key WAS found but the signature was
-///   missing, stale, or wrong. The §D3 red flag; **not escalated in Phase
-///   B** (see `InjectionRequest::channel_verified`'s doc comment).
+/// - `None`: no shared-registry entry for the sender, or every entry has an empty `jekt_public_key`
+///   (written before Phase A: "cannot check", never "failed", §6).
+///
+/// - `Some(true)`: `channel_sig` is present, fresh and verifies against the published key of ANY of
+///   the agent's entries (one name can be live in several channels, §D2 step 5).
+///
+/// - `Some(false)`: a published key was found but the signature was missing, stale or wrong. The
+///   §D3 red flag; not escalated in Phase B (see `InjectionRequest::channel_verified`).
 pub(super) fn verify_cross_channel_signature(state: &AppState, req: &mut InjectionRequest) {
     let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() else {
         return;
@@ -430,9 +350,8 @@ pub(super) fn verify_cross_channel_signature(state: &AppState, req: &mut Injecti
     verify_cross_channel_signature_in(state, req, &shared_dir, now_unix_secs());
 }
 
-/// [`verify_cross_channel_signature`] with the shared registry dir and clock
-/// injected — the testable core; the wrapper above only resolves the real
-/// dir. Keeps tests off the process-global `AGENTMUX_SHARED_DIR` env var.
+/// [`verify_cross_channel_signature`] with the shared registry dir and clock injected: the testable
+/// core, which keeps tests off the process-global `AGENTMUX_SHARED_DIR`.
 pub(super) fn verify_cross_channel_signature_in(
     state: &AppState,
     req: &mut InjectionRequest,
@@ -445,11 +364,9 @@ pub(super) fn verify_cross_channel_signature_in(
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
-    // Identity M4d-6: a v2 signature proves which agent sent it, by UID. When
-    // that is the agent this instance knows by the claimed name, the name's
-    // checks are settled, including a failed HMAC check against a key it kept
-    // from when that agent ran here (a key outlives a move between
-    // instances). A different agent of the same name is not the name's.
+    // Identity M4d-6: a v2 signature proves the sender's UID. When it is the agent this instance
+    // knows by the claimed name, the name's checks are settled, even a failed HMAC against a key
+    // kept from when that agent ran here; a different agent of the same name is not the name's.
     if channel_v2::settle_by_uid(state, req, &claimed, shared_dir, now_secs) {
         return;
     }
@@ -457,9 +374,8 @@ pub(super) fn verify_cross_channel_signature_in(
     if matches!(state.mstore.agent_jekt_key_load(&claimed), Ok(Some(_))) {
         return;
     }
-    // Only entries that actually published a key count — a pre-Phase-A
-    // entry (empty key) is "cannot check," and must not turn a missing
-    // signature into `Some(false)` on a mixed-version machine (§6).
+    // Only entries that published a key count: an empty one (pre-Phase-A) is "cannot check", and
+    // must not turn a missing signature into `Some(false)` on a mixed-version machine (§6).
     let published_keys: Vec<Vec<u8>> = agent_registry::lookup_all_shared(shared_dir, &claimed)
         .into_iter()
         .filter(|e| !e.jekt_public_key.is_empty())
@@ -500,40 +416,22 @@ pub(super) fn verify_cross_channel_signature_in(
     req.channel_verified = Some(verified);
 }
 
-/// Server-derived `delivery_tier` for the LAN-key case only —
-/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3, revised after
-/// reagentx P0 on the implementing PR: an earlier version of this override
-/// also force-downgraded a "lan" claim to "host" whenever auth was via the
-/// full `auth_key`, reasoning that "nothing authenticated via the full key
-/// could have genuinely crossed the LAN boundary." That's false once
-/// same-host forwarding (Tier 2a/2b below in `handle_reactive_inject`) is
-/// considered: a jekt legitimately authenticated via `lan_key` at its FIRST
-/// hop, then relayed to a sibling channel/instance on this same machine,
-/// authenticates that SECOND hop with the sibling's own full `auth_key`
-/// (not `lan_key` — that credential is peer-to-peer between distinct
-/// machines, never shared across same-host channels). Downgrading there
-/// silently discarded an already-detected LAN signature failure's
-/// forced-sensitive escalation (`lan_verified`/`reagent_verified` are
-/// `#[serde(skip_deserializing)]`, so they reset to `None` on every hop and
-/// must be free to re-derive from whatever `delivery_tier` the forward
-/// legitimately carries).
+/// Server-derived `delivery_tier` for the LAN-key case only
+/// (docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3): a `lan_key` caller is forced to
+/// `"lan"` whatever the body says, so claiming `"host"` can't dodge LAN scrutiny. Any other
+/// caller's claim (host/wan/lan/channel) is kept.
 ///
-/// The actual gap this closes is narrower than "full auth_key can never
-/// claim lan": a `lan_key` holder is the ONLY credential that can FORCE
-/// `delivery_tier = "lan"` regardless of what the body says (closing the
-/// original bypass — claim "host" instead to dodge LAN scrutiny entirely).
-/// A full-`auth_key` caller's own claim (host/wan/lan) is otherwise trusted
-/// as-is: holding the full local key already grants complete control over
-/// this instance, so which tier it self-labels a request as grants nothing
-/// extra — at worst it triggers MORE verification
-/// (`verify_lan_signature` running), never less.
+/// A full-`auth_key` caller is not downgraded from `"lan"`: a jekt that arrived by `lan_key` and
+/// was relayed to a sibling instance on this machine authenticates that second hop with the
+/// sibling's full `auth_key` (`lan_key` is peer-to-peer between machines only). Downgrading
+/// discarded an already-detected LAN signature failure's forced-sensitive escalation
+/// (`lan_verified`/`reagent_verified` are `#[serde(skip_deserializing)]`, so they re-derive on
+/// every hop). Honouring the claim costs nothing: the full key already grants full control, and a
+/// self-labelled tier only adds verification, never removes it.
 ///
-/// `"channel"` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4) rides the
-/// same rule: it's set by the FORWARDING instance on a same-host Tier 2a/2b
-/// hop and authenticates here with this instance's full `auth_key`, so a
-/// full-key caller's own `"channel"` claim is honoured as-is. Claiming it
-/// gains nothing — it only adds `verify_cross_channel_signature` on top of
-/// the unconditional `verify_jekt_signature`, never removes a check.
+/// `"channel"` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4) follows the same rule: the
+/// forwarding instance sets it on a same-host Tier 2a/2b hop, and it only adds
+/// `verify_cross_channel_signature`.
 pub(super) fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: Option<&str>) -> String {
     if auth_via == super::ReactiveAuthVia::LanKey {
         "lan".to_string()
@@ -542,12 +440,9 @@ pub(super) fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: O
     }
 }
 
-/// The `delivery_tier` a same-host Tier 2a/2b forward carries to the peer
-/// instance — SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4. See the call
-/// site in `handle_reactive_inject` for the full reasoning; in short: a
-/// `host`-tier (or unlabelled) request becomes `channel` on the hop, and
-/// anything already carrying a network tier keeps it so the peer re-derives
-/// that tier's own verification.
+/// The `delivery_tier` a same-host Tier 2a/2b forward carries
+/// (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4): `host` or unlabelled becomes `channel`; a
+/// network tier is kept so the peer re-derives that tier's verification.
 fn same_host_forward_tier(current: Option<&str>) -> &str {
     match current {
         None | Some("host") => "channel",
@@ -556,27 +451,15 @@ fn same_host_forward_tier(current: Option<&str>) -> &str {
 }
 
 /// Server-side resolution of `InjectionRequest::is_transcript_request` /
-/// `transcript_request_escalate_forced` — see both fields' own doc comments
-/// (`backend/reactive/types.rs`) and
-/// `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`. Lives here (not
-/// `Handler::inject_message_inner`) because it needs `Store` access —
-/// `Handler` has no `Store` access "by design," same reason
-/// `sig_verified`/`lan_verified` are resolved by this same caller before
-/// the request reaches the handler.
+/// `transcript_request_escalate_forced` (fields documented in `backend/reactive/types.rs`;
+/// SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md). Here, not in
+/// `Handler::inject_message_inner`, because it needs `Store`, which `Handler` lacks by design.
 ///
-/// Takes `mstore: &Arc<Store>` directly (not `&AppState`) so
-/// `muxbus::cloud_subscriber::sync_agent_reactive` — the WAN delivery path,
-/// which calls `Handler::inject_message` directly and never goes through
-/// `handle_reactive_inject`/HTTP at all — can call this exact same
-/// resolution too (`pub(crate)`). Phase C (WAN) needs the identical rule 1/
-/// rule 2 computation this function already does; without also wiring it
-/// in there, a WAN-delivered `transcript_request` would silently skip both
-/// rules entirely, not just get weaker ones.
+/// Takes `&Arc<Store>` so `muxbus::cloud_subscriber::sync_agent_reactive`, the WAN path that calls
+/// `Handler::inject_message` directly, applies the same rules; without it a WAN
+/// `transcript_request` would skip both.
 ///
-/// Always re-parses `req.message` itself — never trusts anything the
-/// client might have set on these two fields (impossible anyway, since
-/// both are `#[serde(skip_deserializing)]`, but this function is the one
-/// place that actually computes their real value from scratch).
+/// Always recomputes from `req.message`, never from anything the client set on the two fields.
 pub(crate) fn resolve_transcript_request_tier_fields(mstore: &std::sync::Arc<crate::backend::storage::store::Store>, req: &mut InjectionRequest) {
     let Some(transcript_req) = crate::backend::reactive::transcript_request::parse_transcript_request(&req.message) else {
         return;
@@ -605,16 +488,11 @@ pub(crate) fn resolve_transcript_request_tier_fields(mstore: &std::sync::Arc<cra
                 .unwrap_or(false);
             !granted
         }
-        // "private" and any unrecognized value: fail-closed on the
-        // ESCALATE-forcing question too — an agent def loaded from a
-        // channel/registry state older than this feature (or IS
-        // genuinely "private") never had a chance to opt into
-        // relaxation, so it gets none. Rule 1's forced TIER=sensitive
-        // still applies regardless (set above) — only this ADDITIONAL
-        // escalate-forcing rule reads "private" as "no need to force it
-        // beyond the ordinary verified-sender relaxation," since a
-        // "private" agent auto-denies (once the responder auto-resolve
-        // is built) and was never going to disclose anything either way.
+        // "private" and any unrecognized value fail closed on the ESCALATE-forcing question too: a
+        // def from a state older than this feature never opted into relaxation. Rule 1's forced
+        // TIER=sensitive still applies; only this extra rule reads "private" as "no need to force
+        // more", since a "private" agent auto-denies (once the responder auto-resolve is built) and
+        // discloses nothing either way.
         _ => false,
     };
 }
