@@ -262,7 +262,6 @@
 123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
 109 crates/srv/src/server/app_api/memory.rs::memory_write_impl
-102 crates/srv/src/server/app_api/pane.rs::build_pane_meta
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
 116 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 118 crates/srv/src/server/browser_capture.rs::handle_browser_capture
