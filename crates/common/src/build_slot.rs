@@ -357,8 +357,31 @@ mod tests {
 
     /// What the `tool` shim ran, given `args`, for a home with or without the lock script.
     fn run_tool_env(tool: &str, with_slot: bool, off: bool, args: &[&str], env: &[(&str, &str)]) -> Option<String> {
+        // In a project with a package.json beside a Cargo.toml: what npm and npx are queued for.
+        run_tool_in(tool, with_slot, off, args, env, &["proj/package.json", "proj/Cargo.toml"], "proj").map(|(out, _)| out)
+    }
+
+    /// [`run_tool_env`] with the files of a project laid out under the home (`files`, paths from
+    /// it) and the shim run from `cwd` (a folder in it). Also returns the home, so a test can
+    /// read what the shim wrote there.
+    fn run_tool_in(
+        tool: &str,
+        with_slot: bool,
+        off: bool,
+        args: &[&str],
+        env: &[(&str, &str)],
+        files: &[&str],
+        cwd: &str,
+    ) -> Option<(String, tempfile::TempDir)> {
         let bash = bash()?;
         let h = home();
+        for f in files {
+            let path = h.path().join(f);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "{}").unwrap();
+        }
+        let cwd = h.path().join(cwd);
+        std::fs::create_dir_all(&cwd).unwrap();
         let real_dir = h.path().join("real");
         let shim = shim_dir(h.path());
         std::fs::create_dir_all(&real_dir).unwrap();
@@ -378,7 +401,7 @@ mod tests {
         let sep = if cfg!(windows) { ";" } else { ":" };
         let path = format!("{}{sep}{}{sep}{}", shim.display(), real_dir.display(), std::env::var("PATH").unwrap_or_default());
         let mut cmd = std::process::Command::new(bash);
-        cmd.arg(shim.join(tool)).args(args).env("PATH", path).env("HOME", h.path());
+        cmd.arg(shim.join(tool)).args(args).env("PATH", path).env("HOME", h.path()).env_remove("AGENTMUX_BUILD_SLOT_DIR").current_dir(&cwd);
         if off {
             cmd.env("AGENTMUX_BUILD_SLOT_OFF", "1");
         }
@@ -389,7 +412,7 @@ mod tests {
             cmd.no_window();
         }
         let out = cmd.output().unwrap();
-        Some(String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n").trim().to_string())
+        Some((String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n").trim().to_string(), h))
     }
 
     fn run_tool(tool: &str, with_slot: bool, off: bool, args: &[&str]) -> Option<String> {
@@ -520,6 +543,59 @@ mod tests {
         ] {
             assert_eq!(with_tty(tool, args), Some(false), "{tool} {args:?} watches with a terminal, so it is not slotted");
         }
+    }
+
+    /// What npm and npx do in a folder laid out as `files` (paths under the home), run from `cwd`:
+    /// whether the command went through the slot, and the text of the lock folder's unqueued.log.
+    fn npm_in(files: &[&str], cwd: &str, tool: &str, args: &[&str]) -> Option<(bool, String)> {
+        let (out, home) = run_tool_in(tool, true, false, args, &[], files, cwd)?;
+        let log = std::fs::read_to_string(home.path().join(".agentmux/shared/locks/build/unqueued.log")).unwrap_or_default();
+        Some((out.starts_with("SLOT "), log))
+    }
+
+    /// The slot is for Rust and agentmux-frontend builds: an npm or npx build in a site-style repo
+    /// (a package.json with no Cargo.toml above it) runs at once, and says so in the lock folder's
+    /// log. A package in or below a Rust tree is still queued.
+    #[test]
+    fn npm_and_npx_queue_only_in_a_tree_with_a_cargo_toml() {
+        if bash().is_none() {
+            return;
+        }
+        let rust = &["agentmux/package.json", "agentmux/Cargo.toml"][..];
+        let site = &["site/package.json"][..];
+        for (tool, args) in [("npm", &["run", "build"][..]), ("npx", &["vite", "build"][..]), ("npm", &["test"][..])] {
+            let (slotted, log) = npm_in(rust, "agentmux", tool, args).unwrap();
+            assert!(slotted && log.is_empty(), "{tool} {args:?} beside a Cargo.toml queues, and says nothing: {log:?}");
+            let (slotted, log) = npm_in(site, "site", tool, args).unwrap();
+            assert!(!slotted, "{tool} {args:?} in a site repo runs at once");
+            assert!(log.trim_end().ends_with("not queued: no Cargo.toml") && log.contains(&format!("{tool}")), "one line for it: {log:?}");
+            assert_eq!(log.lines().count(), 1, "{log:?}");
+        }
+        // The line carries epoch, agent, command and folder, tab-separated.
+        let (_, log) = npm_in(site, "site", "npm", &["run", "build"]).unwrap();
+        let fields: Vec<&str> = log.trim_end().split('\t').collect();
+        assert_eq!(fields.len(), 5, "{log:?}");
+        assert!(fields[0].parse::<u64>().is_ok() && fields[2] == "npm run build" && fields[3].ends_with("/site"), "{fields:?}");
+        // A package nested in a Rust tree: the nearest package.json has no Cargo.toml beside it, but
+        // one sits above it, so it builds in that tree and is queued.
+        let nested = &["agentmux/Cargo.toml", "agentmux/widgets/clock/package.json"][..];
+        assert_eq!(npm_in(nested, "agentmux/widgets/clock", "npm", &["run", "build"]).unwrap().0, true, "nested in the tree: queued");
+        // A folder inside a site, below its package.json, is the site's.
+        assert_eq!(npm_in(site, "site", "npm", &["run", "build"]).unwrap().0, false);
+        let deep = &["site/package.json", "site/src/deep/x.ts"][..];
+        assert_eq!(npm_in(deep, "site/src/deep", "npm", &["run", "build"]).unwrap().0, false, "the nearest package.json is found from a subfolder");
+        // `--prefix` names the project, wherever the command is run from.
+        let both = &["agentmux/package.json", "agentmux/Cargo.toml", "site/package.json"][..];
+        assert_eq!(npm_in(both, "agentmux", "npm", &["run", "build", "--prefix", "../site"]).unwrap().0, false, "--prefix to a site");
+        assert_eq!(npm_in(both, "site", "npm", &["--prefix=../agentmux", "run", "build"]).unwrap().0, true, "--prefix=dir to the Rust tree");
+        // No package.json anywhere: not known to be a site, so it queues as before.
+        assert_eq!(npm_in(&[], "nowhere", "npx", &["vite", "build"]).unwrap().0, true);
+        // Light commands are never queued and never noted; cargo is unchanged.
+        let (slotted, log) = npm_in(site, "site", "npm", &["install"]).unwrap();
+        assert!(!slotted && log.is_empty(), "a light command is not a skipped queue: {log:?}");
+        let (out, home) = run_tool_in("cargo", true, false, &["test"], &[], site, "site").unwrap();
+        assert!(out.starts_with("SLOT "), "cargo queues wherever it is run: {out}");
+        assert!(!home.path().join(".agentmux/shared/locks/build/unqueued.log").exists());
     }
 
     /// Runs the lock script under bash with its slot directory at `root`, as a fresh top-level call.
