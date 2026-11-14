@@ -35,7 +35,7 @@ static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn http_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
+        crate::http_client::builder()
             // Re-run SSRF validation on every redirect target —
             // otherwise a public attacker-controlled URL can return
             // `302 Location: http://169.254.169.254/...` and bypass

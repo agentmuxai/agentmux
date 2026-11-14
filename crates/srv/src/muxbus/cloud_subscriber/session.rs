@@ -18,7 +18,7 @@ use crate::backend::storage::store::Store;
 /// The client of the subscriber's REST calls and token refreshes. A connection that
 /// cannot be made in 10 s is a failure to retry, not a wait.
 pub(super) fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
+    crate::http_client::builder()
         .user_agent(crate::muxbus::relay::USER_AGENT)
         .connect_timeout(Duration::from_secs(10))
         .build()

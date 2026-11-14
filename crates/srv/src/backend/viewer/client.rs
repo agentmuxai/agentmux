@@ -73,7 +73,7 @@ pub fn pinned_client(fingerprint: &str, timeout: Duration) -> Result<reqwest::Cl
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(Pinned(fingerprint.to_string())))
         .with_no_client_auth();
-    reqwest::Client::builder()
+    crate::http_client::builder()
         .use_preconfigured_tls(config)
         // Only ever a LAN address: straight there, never through a configured
         // proxy (which usually can't reach it).

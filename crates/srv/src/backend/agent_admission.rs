@@ -433,7 +433,7 @@ pub async fn check_before_spawn(
 }
 
 static PROBE_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-    reqwest::Client::builder()
+    crate::http_client::builder()
         .timeout(std::time::Duration::from_millis(1_500))
         .build()
         .unwrap_or_default()

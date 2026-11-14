@@ -419,7 +419,7 @@ struct WebReturn {
 
 fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
+    CLIENT.get_or_init(agentmux_common::local_http::client)
 }
 
 /// POST `{"service": "credential", "method": ..., "args": [args0, secret]}`

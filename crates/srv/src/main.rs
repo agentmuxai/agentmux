@@ -18,7 +18,7 @@ mod open_cli;
 #[cfg(windows)]
 mod crash_monitor;
 
-use agentmux_srv::{adoption, agents, ambient, backend, boot_timing, broker, connectivity, event_log, identity, migrations, muxbus, persist, persist_subscriber, reducer, registry, srv_info, state, util};
+use agentmux_srv::{adoption, agents, ambient, backend, boot_timing, broker, connectivity, event_log, http_client, identity, migrations, muxbus, persist, persist_subscriber, reducer, registry, srv_info, state, util};
 use server::build_routers;
 
 #[cfg(test)]
@@ -137,6 +137,10 @@ async fn app_main() {
 
     // 1. Init tracing (stderr + rolling file)
     let _log_guard = bootstrap::init_logging();
+
+    // 1a'. What the machine's certificates allow: with none, https requests fail and the log says so here, once
+    //      (http_client.rs); the server starts and runs either way.
+    http_client::no_system_certs();
 
     // 1a. Start the boot-path stopwatch. Logged as one summary line at
     //     ESTART below — see `boot_timing`'s module doc for why these numbers

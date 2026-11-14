@@ -31,7 +31,7 @@ const FRAMING: &[&str] = &["content-length", "transfer-encoding", "connection", 
 fn gateway_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
+        crate::http_client::builder()
             .connect_timeout(Duration::from_secs(15))
             .read_timeout(Duration::from_secs(300))
             .build()

@@ -19,6 +19,7 @@ pub mod boot_timing;
 pub mod broker;
 pub mod connectivity;
 pub mod event_log;
+pub mod http_client;
 pub mod identity;
 pub mod migrations;
 pub mod muxbus;

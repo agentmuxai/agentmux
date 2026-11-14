@@ -57,7 +57,7 @@ pub fn masked_tail(secret: &str) -> String {
 pub(crate) fn client() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     C.get_or_init(|| {
-        reqwest::Client::builder()
+        crate::http_client::builder()
             .timeout(Duration::from_secs(15))
             .user_agent("AgentMux")
             .build()
