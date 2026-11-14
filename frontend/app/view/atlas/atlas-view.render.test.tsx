@@ -394,6 +394,13 @@ describe("messages and tasks on the map", () => {
         expect(mark.querySelector(".atlas-flow__line")!.hasAttribute("pathLength")).toBe(false);
     });
 
+    it("runs the lines behind the nodes, so a line that passes a node does not cross its name", () => {
+        const { container } = rig(fleet(), {}, [flow({})]);
+        const layer = container.querySelector(".atlas-flows")!;
+        const node = container.querySelector(".atlas-node")!;
+        expect(layer.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it("marks a line in its last second as leaving", () => {
         const { container } = rig(fleet(), {}, [flow({ leaving: true })]);
         expect(marks(container)[0].classList.contains("atlas-flow--leaving")).toBe(true);

@@ -179,7 +179,13 @@ Both carry ids, hosts and times only, so the map shows that something passed bet
   host. This instance's agents carry that name in their pane (it differs from the display name for a renamed
   agent); another instance's agent is matched by its name on its machine. An end that matches no node, or two, is
   not drawn: no line rather than a wrong one.
-- **Motion.** With animations reduced or off, a line appears whole and goes after its time; nothing travels.
+- **Lines run behind the nodes.** A line between two agents that are not neighbours passes behind the nodes in
+  between, so it never crosses a name; its ends show at the two nodes' edges. A task's number sits on the stretch
+  of its line nearest the middle that no node covers, in the text colour (the look checks on macOS and Linux both
+  found a number landing on another node's name, and dim on the dark theme, with the lines in front).
+- **Motion.** With the Animations setting on Off, a line appears whole and goes after its time; nothing travels.
+  The operating system's own "reduce motion" preference alone does not change it, as everywhere in the app
+  (the motion policy's 2026-10-15 decision).
 
 ## 7. Risks and notes
 

@@ -246,8 +246,9 @@
     }
 }
 
+// In the text colour, not the line's: a small number in the line's green is dim on the dark theme.
 .atlas-flow__label {
-    fill: currentColor;
+    fill: var(--main-text-color);
     stroke: var(--main-bg-color);
     stroke-width: 3px;
     paint-order: stroke;

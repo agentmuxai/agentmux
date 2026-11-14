@@ -31,7 +31,7 @@ function FlowMark(props: {
         const from = at(props.flow.from);
         const to = at(props.flow.to);
         if (from && to) {
-            const curve = flowCurve(from, to);
+            const curve = flowCurve(from, to, [...props.nodes.values()]);
             return curve && { curve, ring: null };
         }
         const one = to ?? from;
@@ -52,7 +52,7 @@ function FlowMark(props: {
                                 <path class="atlas-flow__line" d={curve().d} pathLength={props.flow.kind === "message" ? 1 : undefined} />
                                 <circle class="atlas-flow__end" cx={curve().end.x} cy={curve().end.y} r="3.5" />
                                 <Show when={props.flow.label}>
-                                    <text class="atlas-flow__label" x={curve().mid.x} y={curve().mid.y}>
+                                    <text class="atlas-flow__label" x={curve().label.x} y={curve().label.y}>
                                         {props.flow.label}
                                     </text>
                                 </Show>

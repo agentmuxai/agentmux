@@ -280,6 +280,13 @@ function AtlasMap(props: {
                     }}
                 </For>
             </svg>
+            <AtlasFlowLayer
+                flows={props.data.flows()}
+                resolve={flowEnd()}
+                nodes={props.layout.nodes}
+                width={props.layout.width}
+                height={props.layout.height}
+            />
             <For each={shownAgents()}>
                 {(agent) => (
                     <Show when={props.layout.nodes.get(agent.key)}>
@@ -297,13 +304,6 @@ function AtlasMap(props: {
                     </Show>
                 )}
             </For>
-            <AtlasFlowLayer
-                flows={props.data.flows()}
-                resolve={flowEnd()}
-                nodes={props.layout.nodes}
-                width={props.layout.width}
-                height={props.layout.height}
-            />
         </div>
     );
 }

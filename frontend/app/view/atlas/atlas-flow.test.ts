@@ -182,8 +182,27 @@ describe("flowCurve", () => {
     it("bows a line and its answer to opposite sides", () => {
         const there = flowCurve({ x: 0, y: 0 }, { x: 400, y: 0 })!;
         const back = flowCurve({ x: 400, y: 0 }, { x: 0, y: 0 })!;
-        expect(there.mid.y).toBeLessThan(NODE_H / 2);
-        expect(back.mid.y).toBeGreaterThan(NODE_H / 2);
+        expect(there.label.y).toBeLessThan(NODE_H / 2);
+        expect(back.label.y).toBeGreaterThan(NODE_H / 2);
+    });
+
+    it("puts its label on a stretch no node covers", () => {
+        const from = { x: 0, y: 0 };
+        const to = { x: 600, y: 0 };
+        const between = { x: 300, y: 0 };
+        const middle = flowCurve(from, to)!.label;
+        const moved = flowCurve(from, to, [from, between, to])!.label;
+        expect(middle.x).toBe(370);
+        // The node in the middle covers the line's middle: the label goes to the nearest stretch that is clear.
+        expect(moved.x).toBeLessThan(between.x);
+        expect(moved.x).toBeGreaterThan(from.x + NODE_W);
+    });
+
+    it("keeps the middle for its label when every stretch is covered", () => {
+        const from = { x: 0, y: 0 };
+        const to = { x: 600, y: 0 };
+        const wall = [0, 100, 200, 300, 400, 500, 600].map((x) => ({ x, y: 0 }));
+        expect(flowCurve(from, to, wall)!.label).toEqual(flowCurve(from, to)!.label);
     });
 
     it("is nothing for two nodes on top of each other, or touching", () => {

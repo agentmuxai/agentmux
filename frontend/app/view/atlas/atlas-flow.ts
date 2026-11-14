@@ -159,20 +159,37 @@ export function flowEndResolver(
     };
 }
 
-/** The curve of a line between two nodes, where it lands, and its middle (for a label). */
+/** The curve of a line between two nodes, where it lands, and where its label goes. */
 export interface FlowCurve {
     d: string;
     end: Placed;
-    mid: Placed;
+    label: Placed;
 }
 
 const round = (n: number) => Math.round(n * 10) / 10;
 
+/** Half the room a label (a task's number) takes round its point. */
+const LABEL_HALF_W = 20;
+const LABEL_HALF_H = 9;
+/** Where along a line its label is tried: the middle first, then further out on either side. */
+const LABEL_STOPS = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8];
+
+/** Whether a label at `p` would lie on `node`: lines run behind the nodes, so it would be hidden there. */
+function hidesLabel(node: Placed, p: Placed): boolean {
+    return (
+        p.x > node.x - LABEL_HALF_W &&
+        p.x < node.x + NODE_W + LABEL_HALF_W &&
+        p.y > node.y - LABEL_HALF_H &&
+        p.y < node.y + NODE_H + LABEL_HALF_H
+    );
+}
+
 /**
  * The curve from one node's edge to another's, bowed a little to the left of its direction, so a line and its
- * answer do not lie on each other. Null for two nodes on top of each other.
+ * answer do not lie on each other. Its label goes on the stretch nearest its middle that no node of `nodes` covers
+ * (the middle itself when every stretch is covered). Null for two nodes on top of each other.
  */
-export function flowCurve(from: Placed, to: Placed): FlowCurve | null {
+export function flowCurve(from: Placed, to: Placed, nodes: readonly Placed[] = []): FlowCurve | null {
     const ax = from.x + NODE_W / 2;
     const ay = from.y + NODE_H / 2;
     const bx = to.x + NODE_W / 2;
@@ -190,9 +207,14 @@ export function flowCurve(from: Placed, to: Placed): FlowCurve | null {
     const bow = Math.min(28, length * 0.15);
     const cx = (x1 + x2) / 2 + (dy / length) * bow;
     const cy = (y1 + y2) / 2 - (dx / length) * bow;
+    const at = (t: number): Placed => ({
+        x: round((1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t ** 2 * x2),
+        y: round((1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t ** 2 * y2),
+    });
+    const clear = LABEL_STOPS.map(at).find((p) => !nodes.some((node) => hidesLabel(node, p)));
     return {
         d: `M${round(x1)},${round(y1)} Q${round(cx)},${round(cy)} ${round(x2)},${round(y2)}`,
         end: { x: round(x2), y: round(y2) },
-        mid: { x: round(x1 / 4 + cx / 2 + x2 / 4), y: round(y1 / 4 + cy / 2 + y2 / 4) },
+        label: clear ?? at(0.5),
     };
 }
