@@ -105,6 +105,24 @@ jobs:
           curl -fsS http://127.0.0.1:17380/ | grep -qi '<html'
           "$bin/agentmux" status
 
+      # The server's https trusts the system's certificates, and a minimal Linux image has none. The packaged command must
+      # say so plainly there (and not once the package that holds them is installed).
+      - name: Run the package in an image with no certificates (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          set -eu
+          top=$(ls unpacked)
+          dir="$PWD/unpacked/$top"
+          # `doctor` exits 1 when a check fails: the missing certificates are the failure expected here.
+          out=$(docker run --rm -v "$dir:/pkg:ro" -e AGENTMUX_HOME_OVERRIDE=/tmp/h debian:bookworm-slim /pkg/bin/agentmux doctor || true)
+          echo "$out"
+          echo "$out" | grep -q "no system certificates found"
+          echo "$out" | grep -q "apt install ca-certificates"
+          out=$(docker run --rm -v "$dir:/pkg:ro" -e AGENTMUX_HOME_OVERRIDE=/tmp/h debian:bookworm-slim sh -c 'apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends ca-certificates >/dev/null && /pkg/bin/agentmux doctor || true')
+          echo "$out"
+          echo "$out" | grep -q "certificates: the system's certificates are found"
+          if echo "$out" | grep -q "no system certificates found"; then exit 1; fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: server-package-${{ matrix.os }}-${{ matrix.arch }}
