@@ -15,9 +15,9 @@ use std::path::PathBuf;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::backend::computer_use_skill::{check_signature, install, read_folder, Bundle};
+use crate::backend::memory::record::sha256_hex;
 use crate::backend::skill_file;
 use crate::backend::storage::skill_app::SkillApp;
 use crate::backend::storage::store::Store;
@@ -227,7 +227,7 @@ pub fn items(entries: Vec<CatalogEntry>, installed: &BTreeMap<String, SkillApp>)
 /// another key than the one this publisher is pinned to here). Returns the skill and the key that signed it.
 pub fn check_download(catalog: &Store, zip: &[u8], entry: &CatalogEntry) -> Result<(Bundle, String), String> {
     let id = &entry.id;
-    if hex_sha256(zip) != entry.zip_sha256 {
+    if sha256_hex(zip) != entry.zip_sha256 {
         return Err(format!("{id}'s download doesn't match the catalog"));
     }
     let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -253,10 +253,6 @@ pub fn check_download(catalog: &Store, zip: &[u8], entry: &CatalogEntry) -> Resu
         Some(key) if key == entry.publisher_key => Ok((bundle, key)),
         _ => Err(format!("{id} isn't signed by the author the catalog lists")),
     }
-}
-
-fn hex_sha256(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// What `install_download` did.
