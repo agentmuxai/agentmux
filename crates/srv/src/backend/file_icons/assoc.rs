@@ -36,7 +36,7 @@ pub fn fingerprint(req: &IconRequest) -> String {
 
 /// A string value (the default value when `value` is empty), or `None` when it isn't there.
 #[cfg(windows)]
-fn registry_string(root: windows::Win32::System::Registry::HKEY, path: &str, value: &str) -> Option<String> {
+pub(crate) fn registry_string(root: windows::Win32::System::Registry::HKEY, path: &str, value: &str) -> Option<String> {
     use windows::core::PCWSTR;
     use windows::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ};
     let wide = |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };

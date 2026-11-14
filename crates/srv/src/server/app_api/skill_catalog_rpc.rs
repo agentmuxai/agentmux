@@ -22,7 +22,15 @@ fn register_catalog(engine: &Arc<WshRpcEngine>, state: &AppState) {
             const E: &str = "app_skills.catalog";
             let entries = skill_catalog::fetch(skill_catalog::CATALOG_URL).await.map_err(|e| format!("{E}: {e}"))?;
             let installed = identity_store.skill_app_map().map_err(|e| format!("{E}: {e}"))?;
-            Ok(AppSkillsCatalog { items: skill_catalog::items(entries, &installed) })
+            let mut items = skill_catalog::items(entries, &installed);
+            // Registry and file reads: off the async threads.
+            let items = tokio::task::spawn_blocking(move || {
+                skill_catalog::add_app_versions(&mut items, skill_catalog::this_platform(), crate::backend::app_version::find);
+                items
+            })
+            .await
+            .map_err(|e| format!("{E}: {e}"))?;
+            Ok(AppSkillsCatalog { items })
         }
     });
 }
