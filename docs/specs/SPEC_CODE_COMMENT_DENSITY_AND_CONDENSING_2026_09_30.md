@@ -625,7 +625,7 @@ The splits and renames since §7.1 was ranked moved most of its files (`agentmux
 |---|---|---:|---:|---|
 | 1 | `crates/srv/src/server/reactive.rs` | 11,374 | 74 | in progress: lines 1-700 first, then the rest |
 | 2 | `frontend/app/view/swarm/swarm-model.ts` | 13,958 | 51 | |
-| 3 | `frontend/app/store/agent-pane-state/types.ts` | 12,320 | 42 | |
+| 3 | `frontend/app/store/agent-pane-state/types.ts` | 12,320 | 42 | in progress: lines 1-630 first |
 | 4 | `crates/srv/src/backend/storage/migrations.rs` | 13,143 | 37 | comments only, never code |
 | 5 | `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | 8,727 | 54 | |
 
