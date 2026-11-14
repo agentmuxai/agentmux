@@ -18,6 +18,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock } from "@/store/block-layout-actions";
 import { openOrFocusPaneByView } from "@/store/block-component-registry";
 import { isSingletonView } from "@/app/store/widget-singleton";
+import { getPaneTab } from "@/app/store/pane-tab-registry";
 import { fireAndForget } from "@/util/util";
 import { isLightThemeActive, widgetRoleColor } from "@/app/block/pane-identity";
 import { movedMeta, sectionKeysIn } from "@/app/store/pane-sections";
@@ -342,6 +343,12 @@ export function buildPaneWidgetMenuItems(
  * the pane it brings back to that section. A magnified entry asked for a full-size pane, so it
  * always opens one.
  */
+/** A pointer is over a widget: load the code of the pane it opens, so a click finds it loaded. */
+export function preloadWidget(widget: WidgetConfigType) {
+    const view = movedMeta(widget.blockdef?.meta as Record<string, unknown> | undefined)?.["view"];
+    if (typeof view === "string") getPaneTab(view)?.preload?.();
+}
+
 export async function openWidget(widget: WidgetConfigType, opts: { forceNew?: boolean } = {}) {
     // An entry that still names a section that moved (the Kanban, of Warden or the Swarm) opens where it lives now.
     const meta = movedMeta(widget.blockdef?.meta as Record<string, unknown> | undefined);

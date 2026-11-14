@@ -15,7 +15,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ScriptInfo } from "@/types/rpc/ScriptInfo";
 import type { SkillFileInfo } from "@/types/rpc/SkillFileInfo";
 import type { SkillApp } from "@/types/rpc/SkillApp";
-import { describeSignature, scriptState } from "./skill-app-model";
+import { describeSignature, FROM_CATALOG_LINE, scriptState } from "./skill-app-model";
 import "./skill-app.scss";
 
 /** `open` and `onToggle` belong to the caller: approving refreshes the file list, which rebuilds each row, and the panel must stay as it was. */
@@ -23,6 +23,8 @@ export function ScriptReview(p: {
     skillId: string;
     file: SkillFileInfo;
     info: ScriptInfo | undefined;
+    /** The skill is exactly what the AgentMux catalog listed. */
+    fromCatalog?: boolean;
     open: boolean;
     onToggle: () => void;
 }): JSX.Element {
@@ -63,6 +65,9 @@ export function ScriptReview(p: {
                     <p class="skill-app-line skill-app-muted">
                         Needs: {p.info && p.info.needs.length > 0 ? p.info.needs.join(", ") : "nothing listed"}
                     </p>
+                    <Show when={p.fromCatalog}>
+                        <p class="skill-app-line skill-app-muted">{FROM_CATALOG_LINE}</p>
+                    </Show>
                     <p class="skill-app-line skill-app-muted">SHA-256 {p.file.sha256}</p>
                     <pre class="skill-app-source" tabIndex={0}>
                         {source.loading ? "Loading…" : source.error ? "Could not read the script." : source()}

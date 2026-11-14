@@ -1306,7 +1306,19 @@ wrap_permission_handler! {
             }
             // A location or notification prompt in a pane an agent drives goes through the countdown.
             let origin = requesting_origin.map(|s| s.to_string()).unwrap_or_default();
-            ::std::os::raw::c_int::from(super::agent_permission::hold_prompt(&self.state, cb, &block_id, &origin, requested_permissions))
+            if super::agent_permission::hold_prompt(&self.state, cb, &block_id, &origin, requested_permissions) {
+                return 1;
+            }
+            // The person's own pane: there is no prompt for a location request here, and under Alloy the
+            // default answer is IGNORE, which leaves the page's request pending until its own timeout
+            // (20 s on a page that sets one, forever on one that doesn't). Say no at once instead: the
+            // page's error callback gets PERMISSION_DENIED, which it can read and act on.
+            if super::agent_permission::is_location_or_notifications(requested_permissions) {
+                tracing::info!(target: "pane-media", %block_id, %origin, requested = requested_permissions, "refusing the page's location request at once: this pane has no prompt for it");
+                cb.cont(PermissionRequestResult::DENY);
+                return 1;
+            }
+            0
         }
     }
 }

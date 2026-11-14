@@ -3,25 +3,19 @@
 
 /**
  * Type definitions for the agent-pane-state reducer (slice #4 in
- * docs/specs/frontend-reducer-architecture-2026-05-03.md).
+ * docs/specs/frontend-reducer-architecture-2026-05-03.md): the per-pane atoms with cohesive
+ * cross-atom invariants (streaming, sessionStats, currentTool, turnTokens, pendingMessages) plus
+ * the init phase, turn phase and stream-watchdog fields (#728).
  *
- * Bundles the per-pane atoms that have cohesive cross-atom invariants:
- *   streaming, sessionStats, currentTool, turnTokens, pendingMessages,
- *   plus init phase, turn phase, and stream-watchdog fields added in
- *   issue #728.
+ * The legacy `turnActive`/`stopping`/`streaming.active` booleans are gone: views read
+ * `isWorking(state)` / `state.turnPhase.kind` / `isDisconnected(state)`, and the reducer's "is the
+ * stream subscribed?" gate is `state.lastEventMs !== null`.
  *
- * PR G (turn-phase cleanup): the legacy `turnActive` / `stopping`
- * booleans and `streaming.active` boolean were dropped — every view
- * now reads `isWorking(state)` / `state.turnPhase.kind` /
- * `isDisconnected(state)` instead. The reducer-internal "is the
- * stream subscribed?" gate (previously `state.streaming.active`)
- * now uses `state.lastEventMs !== null` — both moved in lockstep
- * already (only `StreamSubscribe` / `StreamUnsubscribe` ever set
- * them), so the substitution is mechanical.
+ * The agent document (message list) is its own slice (`agent-document/`): no god-reducer
+ * (conventions doc §11).
  *
- * The agent document (message list) lives in its own slice
- * (`agent-document/`); reducer scope is intentionally separate per the
- * conventions doc §11 ("no god-reducer").
+ * Why each field, command and event is the way it is: docs/architecture/AGENT_PANE_STATE_NOTES.md,
+ * one entry per member, headed by its name.
  */
 
 import type { PendingMessage } from "../../agent-model/state";
@@ -79,18 +73,9 @@ import type {
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 /**
- * Init lifecycle — covers the "history still loading" gap (issue #728 gap 1).
- *
- * Discriminated union. The pane starts in `InitPending`; the history
- * load resolves into either `InitReady` (success) or `InitFailed`
- * (error, with diagnostic reason). Transitions are one-way: once a
- * pane has reached a terminal state (`InitReady` / `InitFailed`),
- * `InitStart` is a no-op. Re-mount creates a new pane slot whose state
- * resets to `InitPending`.
- *
- * Each terminal variant carries the wall-clock ms it was entered. The
- * timestamp is intentionally part of the variant payload (not a
- * separate field) so a transition is one atomic write.
+ * Init lifecycle, the "history still loading" gap (#728 gap 1): `InitPending` → `InitReady` or
+ * `InitFailed`. One-way: once terminal, `InitStart` is a no-op, and a re-mount makes a new pane
+ * slot back at `InitPending`.
  */
 export type InitPhase =
     | { kind: "InitPending" }
@@ -101,11 +86,9 @@ export type InitPhase =
     | { kind: "InitReady"; at: number; historyDamaged?: true }
     | { kind: "InitFailed"; at: number; reason: string };
 
-// TurnPhase discriminated union — single source of truth for the turn
-// lifecycle (since PR G).
-//
-// SPEC: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5.
-// Consumers project via `isWorking` / `isDisconnected` / `state.turnPhase.kind`.
+// TurnPhase: the single source of truth for the turn lifecycle
+// (docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5). Consumers project via `isWorking` /
+// `isDisconnected` / `state.turnPhase.kind`.
 
 /** Why the turn entered Interrupting. */
 export type InterruptReason =
@@ -132,27 +115,15 @@ export type KindBeforeDisconnect =
     | "Interrupting";
 
 /**
- * Why the stream dropped while a turn was in-flight (PR F).
- *
- *   stream-unsubscribed : the dispatch layer / hook fired a clean
- *                         `StreamUnsubscribe` (component unmount, PTY
- *                         exited, etc.) — the local end tore down.
- *   transport-error     : reserved for an in-flight transport failure
- *                         surface; the dispatcher decides which reason
- *                         to attach. Not yet wired by any caller — the
- *                         union is part of PR F's API contract so the
- *                         dispatcher can adopt it without a follow-up
- *                         type churn.
+ * Why the stream dropped mid-turn. `stream-unsubscribed`: a clean `StreamUnsubscribe` (unmount, PTY
+ * exit). `transport-error`: reserved, no caller wires it yet.
  */
 export type DisconnectReason = "stream-unsubscribed" | "transport-error";
 
 /**
- * Live "compaction in progress" state — set the instant the `PreCompact`
- * hook's `compaction_started` MPS event lands (Tier 1 of
- * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`),
- * cleared when the matching `compact_boundary` frame (a real
- * `CompactionBoundary` command) arrives. `startedAt` drives the live
- * elapsed-time counter (Tier 2) shown near the pane status chip.
+ * Live "compaction in progress" state: set when the `PreCompact` hook's `compaction_started` lands,
+ * cleared by the matching `compact_boundary` (a real `CompactionBoundary`). `startedAt` drives the
+ * live elapsed counter.
  */
 export interface CompactionState {
     trigger: "manual" | "auto";
@@ -160,48 +131,28 @@ export interface CompactionState {
 }
 
 /**
- * Live "at least one agent-declared long-running task is attached to this
- * pane" state — independent of `turnPhase`. A sibling axis, not a
- * `TurnPhase` variant: see docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md
- * §2 for why (mirrors `CompactionState`'s own precedent for a concurrent-
- * but-orthogonal concern that must survive independently of the turn
- * lifecycle). Sourced from the dock's aggregated `PinnedActivity` list
- * (shell/subagent/tool adapters), not raw OS process counts — see spec §4.
- *
- * `since` is the wall-clock ms the current unbroken "≥1 running" episode
- * began — not reset by a second task starting while one is already live.
+ * Live "≥1 agent-declared long-running task is attached" state, a sibling axis independent of
+ * `turnPhase` (it must outlive the turn lifecycle). Sourced from the dock's aggregated
+ * `PinnedActivity` list, not OS process counts. `since` is the start of the current unbroken "≥1
+ * running" episode; a second task starting doesn't reset it.
  */
 export interface AttachedTaskState {
     since: number;
 }
 
 /**
- * Live "controller is recovering from a stale `--resume` session id" state,
- * or `null` — set the instant the backend's stale-resume retry begins
- * (`mps.EVENT_AGENT_RESUME_RETRY`, `{status:"retrying"}`), cleared once the
- * retry's outcome (Fresh or Resumed) is actually known
- * (`{status:"resolved"}`). Mirrors `AttachedTaskState`'s shape (a single
- * `startedAt`, no staleness/generation gating needed) — unlike
- * `CompactionState`'s completion signal, both ends of this one travel over
- * the SAME reliable MPS channel, so there's no cross-channel race to guard
- * against. See docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
+ * Live "controller is recovering from a stale `--resume` session id" state, or `null`: set when the
+ * stale-resume retry begins (`{status:"retrying"}`), cleared once the outcome is known
+ * (`{status:"resolved"}`).
  */
 export interface ResumeRetryState {
     startedAt: number;
 }
 
 /**
- * A classified backend failure (the `agentfailure` wave event's payload,
- * `AgentFailure` in `frontend/types/srv-types.d.ts`) currently surfaced for
- * this pane. Single source of truth for "is there an active failure" —
- * previously duplicated as a hook-local signal in `useAgentFailure.ts`,
- * with no path back into `turnPhase`. See
- * docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
- *
- * Deliberately does NOT carry the auto-retry countdown/budget or the
- * expanded/retrying view flags — those are pure presentation timing with
- * no correctness coupling to anything else in the reducer, and stay
- * hook-local in `useAgentFailure.ts` exactly as before.
+ * A classified backend failure (the `agentfailure` event's `AgentFailure`) for this pane: the
+ * single source of truth for "is there an active failure". It does NOT carry the auto-retry
+ * countdown/budget or the expanded/retrying view flags (hook-local in `useAgentFailure.ts`).
  */
 export interface PaneFailure {
     /** The classified failure, verbatim from the backend event. */
@@ -209,21 +160,10 @@ export interface PaneFailure {
     /** Wall-clock ms the failure landed. */
     at: number;
     /**
-     * Whether a turn was ever actually attempted before this failure. `true`
-     * for every backend-classified failure (those are, by construction, the
-     * outcome of a turn that ran). `false` only for the synthetic pre-launch
-     * auth failure the pane raises itself when the mount-time launch flow
-     * bails with `auth_failed` — no turn was ever sent, so there is nothing
-     * to re-run after a successful login.
-     *
-     * Load-bearing, not cosmetic: it selects `relogin`'s `retryAfterLogin`
-     * argument. Passing `true` for a never-started agent makes a successful
-     * login silently re-send that agent's last OLD message as a new turn —
-     * the exact bug the (now-deleted) blue "Log in" bar's own call site was
-     * written to avoid. Defaults to `true` when absent, so a failure
-     * persisted before this field existed keeps the pre-existing behaviour.
-     *
-     * See docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md §4.
+     * Whether a turn was attempted before this failure: `true` for every backend-classified
+     * failure, `false` only for the synthetic pre-launch auth failure. Load-bearing: it selects
+     * `relogin`'s `retryAfterLogin`, and `true` for a never-started agent would re-send its last
+     * OLD message after login. Defaults to `true` when absent.
      */
     turnAttempted?: boolean;
     /**
@@ -247,10 +187,8 @@ export function isAuthFailure(failure: Pick<PaneFailure, "data"> | null | undefi
 }
 
 /**
- * Single source of truth for the turn lifecycle. Since PR G this is the
- * only place where "is the agent working", "is a stop in flight", and
- * "did the stream drop" are encoded — the legacy `turnActive` /
- * `stopping` / `streaming.active` booleans have been removed.
+ * The turn lifecycle: the only encoding of "is the agent working", "is a stop in flight" and
+ * "did the stream drop".
  *
  *   Idle          : no turn in flight.
  *   Submitting    : user pressed send; awaiting `StreamSubscribe` / first
@@ -278,12 +216,10 @@ export type TurnPhase =
            *  is a fixed duration and never counts down. */
           retryAtMs?: number | null;
           /**
-           * The model has ended its turn (`stop_reason: end_turn`) but the turn
-           * is still open. Absent/false means the model is still working:
-           * generating, or waiting on a tool result. Set by `ModelEndedTurn`,
-           * cleared by `ModelMessageStarted`; a new turn starts without it.
-           * The busy predicate's background-work carve-out applies only when
-           * this is true (working-indicator.ts `turnHeldOnlyByBackgroundWork`).
+           * The model ended its turn (`stop_reason: end_turn`) but the turn is still open;
+           * absent/false means it is still working. Set by `ModelEndedTurn`, cleared by
+           * `ModelMessageStarted`; a new turn starts without it. The busy predicate's
+           * background-work carve-out applies only when this is true.
            */
           modelEndedTurn?: boolean;
       }
@@ -295,18 +231,9 @@ export type TurnPhase =
     | { kind: "Done"; outcome: TurnOutcome; finishedAt: number }
     | {
           /**
-           * Stream dropped while a turn was in flight. PR F fleshes out
-           * the variant payload:
-           *   - `lastKind`     : the working-kind we lost (so the UI can
-           *                      say "was streaming" vs "was submitting").
-           *                      Carried since PR A.
-           *   - `lastConnectedAt` : wall-clock ms at which the disconnect
-           *                      command was processed (= `command.at`
-           *                      from `StreamUnsubscribe`). Drives a
-           *                      "disconnected 5s ago" age label and
-           *                      keeps the variant audit-friendly.
-           *   - `reason`       : a finite literal union (was `string` in
-           *                      PR A) — see {@link DisconnectReason}.
+           * Stream dropped while a turn was in flight. `lastKind`: the working-kind we lost;
+           * `lastConnectedAt`: ms the disconnect command was processed; `reason`: see {@link
+           * DisconnectReason}.
            */
           kind: "Disconnected";
           lastKind: KindBeforeDisconnect;
@@ -324,26 +251,20 @@ export interface TurnCarry {
 }
 
 /**
- * The reducer's state. Each field maps 1:1 to a Solid signal that the
- * agent pane projects from. The reducer enforces invariants ACROSS
- * fields (e.g. a turn can't enter Submitting/Streaming while the
- * stream is unsubscribed — see the `TurnStart` arm).
- *
- * PR G cleanup: `turnActive` / `stopping` (top-level) and `active` (on
- * `streaming`) have all been removed. `state.turnPhase.kind` is the
- * sole working-state encoding; "is the stream subscribed?" is now
- * derived from `state.lastEventMs !== null` (cleared atomically with
- * the stream on `StreamSubscribe` / `StreamUnsubscribe`).
+ * The reducer's state. Each field maps 1:1 to a Solid signal the agent pane projects from; the
+ * reducer enforces invariants ACROSS fields (e.g. no turn enters Submitting/Streaming while the
+ * stream is unsubscribed: the `TurnStart` arm). `state.turnPhase.kind` is the sole working-state
+ * encoding; "is the stream subscribed?" is `state.lastEventMs !== null` (cleared atomically with
+ * the stream on `StreamSubscribe`/`StreamUnsubscribe`).
  */
 export interface AgentPaneState {
     streaming: StreamingState;
     sessionStats: SessionStats | null;
     /**
-     * Cumulative cost/tokens/duration across every completed turn in this
-     * pane's lifetime — unlike `sessionStats` (which is replaced, not
-     * accumulated, on each TurnEnd), this sums into the previous value.
-     * Feeds the composer-strip "totals" display near the input. Cleared
-     * only on TurnReset. See SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md.
+     * Cumulative cost/tokens/duration across every completed turn in this pane's lifetime: unlike
+     * `sessionStats` (replaced on each TurnEnd) it sums into the previous value. Feeds the
+     * composer-strip "totals" display; cleared only on TurnReset
+     * (SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md).
      */
     sessionTotals: SessionStats | null;
     currentTool: string | null;
@@ -351,105 +272,63 @@ export interface AgentPaneState {
      *  Cleared alongside currentTool on ToolEnd / TurnEnd / TurnReset. */
     currentToolArg: string | null;
     /**
-     * The current turn's live usage, from the stream. Its lifetime follows the
-     * stream's own order: set by `TokensIn`, cleared by that turn's `TurnEnd`,
-     * or by `StreamSessionStarted` when the process died before a `result`.
-     * Nothing outside the stream clears it on a normal turn end:
-     * `ReconcileTurnActive`, the liveness recovery and `TurnStart` all leave
-     * it alone, because srv sends the turn-ended push before it forwards the
-     * `result` line, so the turn's `session_end` (and sometimes earlier calls)
-     * still follow, and a queued message or the next turn can start in that
-     * gap. Hard ends (disconnect, failure, timeouts, reset) clear it.
+     * The current turn's live usage: set by `TokensIn`; cleared by that turn's `TurnEnd`, by
+     * `StreamSessionStarted` (the process died before a `result`) and by hard ends (disconnect,
+     * failure, timeouts, reset). Nothing else clears it on a normal turn end: srv sends the
+     * turn-ended push before the `result` line, so `session_end` (and sometimes earlier calls)
+     * still follow, and a queued turn can start in that gap.
      */
     turnTokens: TurnTokens | null;
     /**
-     * The turn as the user sees it, over however many CLI passes: srv's
-     * `agentturn` event, verbatim (turn-ledger.ts). Null until srv has
-     * published one for this block. The working row runs its clock and counter
-     * from it; `turnPhase` and `turnTokens` stay per pass.
+     * The turn as the user sees it over however many CLI passes: srv's `agentturn` event, verbatim
+     * (turn-ledger.ts); null until srv has published one. `turnPhase` and `turnTokens` stay per
+     * pass.
      */
     turnLedger: TurnLedger | null;
     /** What the agent is doing right now (see `ActivityState`). */
     activity: ActivityState;
     /**
-     * Each pass's own figures (its `TurnEnd` stats), summed over the turn srv
-     * reported it in. For providers whose passes srv doesn't count (ACP, App
-     * Server, one-shot subprocess: no `result` usage reaches the ledger), the
-     * Worked line reports the turn from this.
+     * Each pass's own figures (its `TurnEnd` stats), summed over the turn srv reported it in; the
+     * Worked line reports from this for providers whose passes srv doesn't count (ACP, App Server,
+     * one-shot subprocess).
      */
     turnCarry: TurnCarry | null;
     /**
-     * True for the duration of a turn started specifically to send a
-     * manual "/compact" (the composer's "Compact now" button, or a user
-     * typing it) — set on `TurnStart` when `command.content === "/compact"`,
-     * consumed and reset by `CompactionBoundary`. Exists because a manual
-     * `CompactionBoundary.trigger` alone is NOT a safe signal that THIS
-     * pane's currently-working turn is the synthetic one that action
-     * opened: the reducer's own tests deliberately model a manual
-     * boundary landing while an unrelated real turn is already streaming
-     * (compaction_started/compact_boundary travel over independent
-     * transports with no ordering guarantee against the primary NDJSON
-     * stream — see the CompactionStarted race-guard tests). Only end the
-     * turn when we know FOR THIS PANE that its own working turn is the
-     * one the manual compact opened. codex P1 on PR #2659.
+     * True for a turn started to send a manual "/compact": set on `TurnStart` when `command.content
+     * === "/compact"`, consumed by `CompactionBoundary`. A manual boundary's `trigger` alone is NOT
+     * a safe signal that this pane's turn is the synthetic one (the events have no ordering
+     * guarantee against the NDJSON stream) (#2659).
      */
     pendingCompactTurn: boolean;
     pending: PendingMessage[];
     /**
-     * Init phase — `InitPending` until history fetch resolves (or fails).
-     * Discriminated union; failure reason lives in the `InitFailed`
-     * variant's `reason` payload — no separate `initError` field.
+     * Init phase: `InitPending` until history fetch resolves or fails; the failure reason lives in
+     * `InitFailed`'s payload (no separate `initError`).
      */
     initPhase: InitPhase;
     /**
-     * Wall-clock ms of the last observable stream activity (subscribe,
-     * flush, tool, tokens). Drives the stuck-stream watchdog.
-     *
-     * Doubles as the "is the stream subscribed?" gate since PR G:
-     * `lastEventMs !== null` ⇔ the pane has seen a `StreamSubscribe`
-     * that no subsequent `StreamUnsubscribe` has cleared. Both fields
-     * always moved in lockstep when the legacy `streaming.active`
-     * boolean existed, so the substitution is exact.
+     * Ms of the last observable stream activity (subscribe, flush, tool, tokens); drives the
+     * stuck-stream watchdog. Also the "is the stream subscribed?" gate: `lastEventMs !== null` ⇔ a
+     * `StreamSubscribe` that no later `StreamUnsubscribe` has cleared.
      */
     lastEventMs: number | null;
     /**
-     * Single-source-of-truth turn phase. PR A added it with dual-write
-     * against the legacy `turnActive` / `stopping` / `streaming.active`
-     * booleans; PR B migrated every view consumer onto it via
-     * `isWorking(state)` / `isDisconnected(state)` /
-     * `state.turnPhase.kind`; PR G removed the legacy fields.
+     * Single-source-of-truth turn phase; consumers use `isWorking(state)` / `isDisconnected(state)`
+     * / `state.turnPhase.kind`.
      */
     turnPhase: TurnPhase;
 
     /**
-     * Whether the composer details panel — the Shell drawer, holding the
-     * interactive terminal — is open. Default `false`. Persists across
-     * renders within a pane lifetime; resets to `false` on pane unmount
-     * (because a new pane gets a fresh state via `initialState()`). Not
-     * persisted to backend — a per-session ephemeral preference.
-     *
-     * It used to host the session banners and the Archive/Export/Restore
-     * actions as well; those moved to `AgentSessionNotices` (above the
-     * composer) and the `AgentSessionStats` popover respectively, and the
-     * runtime dropdowns moved to the strip before that — leaving the drawer
-     * to the shell alone. See
-     * SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3.
-     *
-     * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4. Previously
-     * auto-collapsed on `TurnStart`; removed once the panel started
-     * hosting a live interactive shell (AgentShellSubblock) that needs
-     * to survive sending more messages, not close on every send.
+     * Whether the composer details panel (the Shell drawer with the interactive terminal) is open.
+     * Default `false`, per session, reset on pane unmount, not persisted. It must NOT auto-collapse
+     * on `TurnStart`: the live shell (AgentShellSubblock) has to survive sending more messages.
      */
     detailsOpen: boolean;
     /**
-     * The context meter's reading: tokens in context, the model's window, and
-     * where each came from — see store/agent-pane-state/context-reading.ts.
-     * Set by `TokensIn` (live) and `ReconcileContextFromHistory` (the
-     * restored transcript, only while `contextSeedable`). Unlike `turnTokens`
-     * it is NOT cleared at TurnEnd, so the meter shows the last known fill
-     * between turns. Cleared on TurnReset (session wipe), ContextInvalidated
-     * (the conversation was replaced) and CompactionBoundary (it no longer
-     * measures anything until the next call). Displays read it through
+     * The context meter's reading: tokens, the model's window and where each came from
+     * (context-reading.ts). Set by `TokensIn` and, only while `contextSeedable`, by
+     * `ReconcileContextFromHistory`. Unlike `turnTokens` it is NOT cleared at TurnEnd; it is
+     * cleared on TurnReset, ContextInvalidated and CompactionBoundary. Displays read it through
      * `plausibleReading`, never directly.
      */
     context: ContextReading | null;
@@ -477,21 +356,17 @@ export interface AgentPaneState {
      *  The Runtime menu shows it; the context reading is measured on it. */
     lastContextModel: string | null;
     /**
-     * Active classified failure for this pane, or `null`. Set by
-     * `FailureObserved` (which also force-ends a working turn — see the
-     * command's reducer case), cleared by `FailureCleared` or implicitly
-     * by the next `TurnStart` (a fresh turn always ends the failure
-     * episode). See {@link PaneFailure}.
+     * Active classified failure for this pane, or `null`. Set by `FailureObserved` (which also
+     * force-ends a working turn), cleared by `FailureCleared` or implicitly by the next `TurnStart`
+     * (a fresh turn ends the failure episode). See {@link PaneFailure}.
      */
     failure: PaneFailure | null;
     /** Live "compaction in progress" state, or null. See {@link CompactionState}. */
     compacting: CompactionState | null;
     /**
-     * Live "attached long-running task" state, or null — see
-     * {@link AttachedTaskState}. Deliberately NOT cleared by any `TurnPhase`
-     * transition (TurnEnd/TurnReset/etc.): a task attached in one turn can
-     * legitimately survive into later turns, so only its own two commands
-     * (`AttachedTaskObserved`/`AttachedTaskCleared`) ever touch this field.
+     * Live "attached long-running task" state, or null ({@link AttachedTaskState}). Deliberately
+     * NOT cleared by any `TurnPhase` transition: a task attached in one turn can outlive it, so
+     * only `AttachedTaskObserved`/`AttachedTaskCleared` touch it.
      */
     attachedTask: AttachedTaskState | null;
     /**
@@ -502,51 +377,25 @@ export interface AgentPaneState {
      */
     reconnecting: ResumeRetryState | null;
     /**
-     * Earliest `started_at_ms` among this block's currently-`Running`
-     * `db_background_tasks` rows (Phase A/B of
-     * docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md),
-     * or `null`. A SEPARATE floor signal, not a duplicate of `attachedTask`
-     * above: the durable registry can know about a task the live transcript
-     * has no record of at all (e.g. it survived a session restart under a
-     * fresh controller generation — Phase B). Deliberately owned
-     * EXCLUSIVELY by its own two commands
-     * (`RegistryAttachedTaskObserved`/`RegistryAttachedTaskCleared`,
-     * dispatched only from `useBackgroundTaskRegistry.ts`) — no other
-     * command touches it, specifically so the transcript-derived
-     * `attachedTask` axis's own independent recompute-and-clear effect
-     * (`agent-view.tsx`'s attached-task effect) can never stomp on it. The
-     * effect instead READS this field and combines it with its own
-     * transcript-derived value (registry ∪ transcript, earliest start
-     * wins) rather than treating either source as sole truth. See the
-     * Codex P1 finding on PR #2685 this was written to address.
+     * Earliest `started_at_ms` among this block's `Running` `db_background_tasks` rows, or `null`:
+     * a separate floor signal from `attachedTask` (the durable registry can know a task the live
+     * transcript doesn't). Owned EXCLUSIVELY by `RegistryAttachedTaskObserved`/`Cleared`
+     * (dispatched only from `useBackgroundTaskRegistry.ts`); the transcript-derived `attachedTask`
+     * effect (`agent-view.tsx`) only READS it and combines both, earliest start winning (#2685).
      */
     registryAttachedTaskSince: number | null;
     /**
-     * Wall-clock ms of the most recent REAL `CompactionBoundary` event
-     * (backend-sourced, exact — not the ≥50%-drop heuristic below). The
-     * `TokensIn` heuristic checks this before firing its own synthetic
-     * `context-compacted` event, so a Claude session that just got a
-     * real boundary doesn't also get a duplicate heuristic-sourced one
-     * for the very next turn's token drop. Providers without a
-     * structured signal (codex/gemini/copilot) never set this, so the
-     * heuristic remains their only detection path. See
-     * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3.
+     * Ms of the most recent REAL `CompactionBoundary` event. The `TokensIn` ≥50%-drop heuristic
+     * checks it before firing its own synthetic `context-compacted`, so a session that just got a
+     * real boundary gets no duplicate. Providers without a structured signal never set it.
      */
     lastCompactionBoundaryAt: number | null;
     /**
-     * A `compaction_started` ping the reducer rejected because `turnPhase`
-     * wasn't (yet) working, but which arrived on a phase a LATER
-     * authoritative signal could still legitimately promote for THIS SAME
-     * turn — `ReconcileTurnActive(active: true)` or `StreamFlushObserved`'s
-     * own promotion arm, both of which retroactively apply it into
-     * `compacting` on promotion. Cleared whenever that promotion happens,
-     * whenever an authoritative signal proves the turn is genuinely NOT
-     * running (`ReconcileTurnActive(active: false)`, even when that's a
-     * same-ref no-op for `turnPhase` itself), by a fresh unrelated
-     * `TurnStart` (not the turn this ping was about), or by any of the
-     * other "whatever compaction was in flight is now moot" terminal
-     * transitions `compacting` itself already clears on. See
-     * `docs/specs/SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md`.
+     * A `compaction_started` ping rejected because `turnPhase` wasn't (yet) working, which a later
+     * authoritative signal can still promote for THIS turn (`ReconcileTurnActive(active: true)` or
+     * `StreamFlushObserved`'s promotion arm). Cleared on that promotion, when a signal proves the
+     * turn isn't running, by a fresh unrelated `TurnStart`, or by any terminal transition that
+     * clears `compacting`.
      */
     pendingCompactionPing: { trigger: "manual" | "auto"; startedAt: number } | null;
 }
@@ -587,25 +436,17 @@ export function isInitReady(state: AgentPaneState): boolean {
 }
 
 /**
- * Selector — true while the agent is processing a user request.
- *
- * Returns true ⇔ `state.turnPhase.kind ∈ {Submitting, Streaming, Interrupting}`.
- * Idle / Done / Disconnected are all "not working".
- *
- * Spec: SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §7. Since PR G this
- * is the only "working" predicate — the legacy `turnActive || stopping`
- * combination has been removed.
+ * True while the agent is processing a user request: `state.turnPhase.kind ∈ {Submitting,
+ * Streaming, Interrupting}` (Idle/Done/Disconnected are not working). The only "working" predicate
+ * (SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §7).
  */
 export function isWorking(state: AgentPaneState): boolean {
     return workingFromPhase(state.turnPhase);
 }
 
 /**
- * Phase-only variant of {@link isWorking}. The view layer projects
- * `turnPhase` through a dedicated signal (PR B); call sites that only
- * have the phase (not the whole state) use this helper. Same predicate.
- *
- * Returns true ⇔ `phase.kind ∈ {Submitting, Streaming, Interrupting}`.
+ * Phase-only variant of {@link isWorking}, for call sites that have the phase but not the whole
+ * state (the view projects `turnPhase` through its own signal). Same predicate.
  */
 export function workingFromPhase(phase: TurnPhase): boolean {
     const k = phase.kind;
@@ -618,12 +459,9 @@ export function isStopping(phase: TurnPhase): boolean {
 }
 
 /**
- * Selector — `true` iff the pane is in the `Disconnected` phase. PR F:
- * drives the {@link AgentDisconnectedBanner} visibility, replacing any
- * ad-hoc "streaming.active === false but turn was active" checks. Pure
- * projection of `turnPhase.kind` — same SoT as `isWorking`.
- *
- * Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §6.4.
+ * True iff the pane is in the `Disconnected` phase; drives the {@link AgentDisconnectedBanner}. A
+ * pure projection of `turnPhase.kind`, the same source of truth as `isWorking`
+ * (docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §6.4).
  */
 export function isDisconnected(state: AgentPaneState): boolean {
     return state.turnPhase.kind === "Disconnected";
@@ -654,71 +492,37 @@ export type AgentPaneCommand =
           addedCount: number;
           at: number;
           /**
-           * Did this flush carry anything that is evidence the TURN is alive —
-           * document nodes, node updates, tool chunks, or a new shell node?
-           *
-           * `false` means the flush was shell OUTPUT only. That is a live
-           * BACKGROUND process writing to its dock row; it says nothing about
-           * whether the model is doing anything, so it must not refresh the
-           * turn idle clock or resurrect a finished turn. Omitted is treated as
-           * `true` — only the flush queue knows the difference, and only it
-           * sets this.
-           *
-           * See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md.
+           * Did this flush carry evidence the TURN is alive: document nodes, node updates, tool
+           * chunks or a new shell node? `false` means shell OUTPUT only, a live BACKGROUND process
+           * writing to its dock row, which says nothing about the model, so it must not refresh the
+           * turn idle clock or resurrect a finished turn. Omitted counts as `true`; only the flush
+           * queue knows the difference and sets this
+           * (docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md).
            */
           turnRelevant?: boolean;
       }
     /**
-     * Periodic tick from useAgentStream's watchdog interval. Emits a
-     * `stream-stuck` diagnostic past `STUCK_THRESHOLD_MS`, and — past the
-     * longer `LIVENESS_RECOVERY_MS` — force-recovers a hung `Streaming` turn
-     * (no tool active, not rate-limited) to `Idle`, clearing a stuck
-     * "Working" that never received its terminal `session_end`. See
-     * SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md.
+     * Periodic tick from useAgentStream's watchdog interval. Emits a `stream-stuck` diagnostic past
+     * `STUCK_THRESHOLD_MS` and, past the longer `LIVENESS_RECOVERY_MS`, force-recovers a hung
+     * `Streaming` turn (no tool active, not rate-limited) to `Idle`, clearing a stuck "Working"
+     * that never got its `session_end` (SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md).
      */
     | { type: "StreamWatchdogTick"; nowMs: number }
 
     /**
-     * Reconciliation from `BlockControllerRuntimeStatus.turn_active`
-     * (backend-verified, from the health monitor wired to the NDJSON
-     * stream — see `crates/srv/src/backend/blockcontroller/health.rs`),
-     * fetched via `GetControllerStatus` at mount AND dispatched on every
-     * live `controllerstatus` MPS event thereafter (useControllerStatusEvents).
-     * Bidirectional:
-     *   - `active: true`  — promote the mount-default `Idle` to `Streaming`
-     *     when the backend reports a turn already in flight. Corrects ONLY
-     *     an `Idle` phase; never overrides a phase a real stream/user event
-     *     already produced (TurnStart, StreamFlushObserved, etc. win if they
-     *     got there first). #2005 Finding 1.
-     *   - `active: false` — demote a stuck `Streaming` phase to `Idle`. The
-     *     backend flips `turn_active` false only on the CLI's `result` event
-     *     (genuine turn-end), so this is authoritative. Normally the frontend
-     *     reaches `Done` on its own via `session_end`; this covers the case
-     *     where it MISSED that event (pane backgrounded/unmounted across the
-     *     transition, or a dropped MPS event) and would otherwise stay
-     *     `Streaming` forever — the Agent1 stuck-"Working" / Agent2
-     *     stuck-"Queued" class. Only `Streaming` is demoted: `Submitting` is
-     *     covered by `SUBMIT_TIMEOUT` (and is where the send-race lives — a
-     *     just-dispatched local `TurnStart` racing a backend that hasn't yet
-     *     marked the turn active), `Interrupting` by `INTERRUPT_TIMEOUT`,
-     *     `Done`/`Idle`/`Disconnected` are already correct.
-     * See docs/retro/retro-agent2-stuck-queued-message-2026-07-16.md.
+     * Reconciliation from the backend's `turn_active` (health monitor on the NDJSON stream),
+     * fetched at mount and on every `controllerstatus` MPS event. `active: true` promotes only an
+     * `Idle` phase to `Streaming`; a phase a real stream or user event already produced wins.
+     * `active: false` demotes only a stuck `Streaming` to `Idle` (the backend flips it only on the
+     * CLI's `result`, so it is authoritative); `Submitting` and `Interrupting` have their own
+     * timeouts.
      */
     | { type: "ReconcileTurnActive"; at: number; active: boolean }
     /**
-     * Mount-time reconciliation: history replay found the main agent's last
-     * API call from before this pane went live (`HistoryParser.lastContext`
-     * — that call's whole prompt and model, never a `result`'s turn total).
-     * Seeds `context` so the meter shows a real number immediately instead of
-     * sitting blank until the first live `TokensIn`. Seeds only while
-     * `contextSeedable` (no live reading, invalidation, compaction or reset
-     * yet) — a historical snapshot must never clobber real-time data. An
-     * implausible seed is refused (`context-reading-rejected`). `tokens` is
-     * absent when the restored window holds no main-agent call.
-     * `reportedWindows` (the history's own `result.modelUsage` windows) merge
-     * UNDER any reported live, either way.
-     * See docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md
-     * and docs/reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md.
+     * Mount-time seed of `context` from the history's last main-agent API call. Seeds only while
+     * `contextSeedable`: a historical snapshot must never clobber real-time data. An implausible
+     * seed is refused (`context-reading-rejected`); `tokens` is absent when the window holds no
+     * main-agent call; `reportedWindows` merge UNDER any reported live.
      */
     | {
           type: "ReconcileContextFromHistory";
@@ -741,64 +545,39 @@ export type AgentPaneCommand =
      */
     | { type: "ContextReported"; tokens: number; model?: string; window?: number }
     /**
-     * The conversation the reading measured is gone — a `fresh` session
-     * replaced it, or the transcript was archived or restored. Clears
-     * `context` (and ends `contextSeedable`), so the next call's reading isn't
-     * read as a compaction by the `TokensIn` heuristic and a late history
-     * seed can't bring the old conversation back.
+     * The conversation the reading measured is gone (a `fresh` session, or the transcript
+     * archived/restored). Clears `context` and ends `contextSeedable`, so the next reading isn't
+     * read as a compaction and a late history seed can't bring the old conversation back.
      */
     | { type: "ContextInvalidated"; reason: "fresh_session" | "transcript_replaced" }
     /**
-     * The pane's model setting changed (`/model`, the model menu). The
-     * conversation, and so the reading's tokens, carry over; the window is
-     * the new model's, known only when its first reply reports it, so the
-     * reading's window becomes unknown until then. `model` is the setting's
-     * value (often a family alias, e.g. `sonnet`, which doesn't say its
-     * window).
+     * The pane's model setting changed (`/model`, the model menu). The conversation, and so the
+     * reading's tokens, carry over; the window becomes unknown until the new model's first reply
+     * reports it (`model` is often a family alias such as `sonnet`, which doesn't say its window).
      */
     | { type: "ContextModelSwitched"; model: string }
     /**
-     * User pressed send — turn becomes active. Also clears stale
-     * sessionStats from the previous turn.
-     *
-     * `content` — the literal text just submitted, threaded through into
-     * `TurnPhase.Submitting.pendingContent` (optional so the ~90 existing
-     * reducer/hook test call sites that construct this action without it
-     * keep compiling — the reducer defaults to `""` when absent). Used by
-     * `useAgentActivitySummary.ts` to derive the session-title Haiku call
-     * without a separate FileStore read. See
-     * docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
+     * User pressed send: the turn becomes active and the previous turn's stale `sessionStats` are
+     * cleared. `content` is the submitted text, threaded into `TurnPhase.Submitting.pendingContent`
+     * (optional so test call sites compile; the reducer defaults to `""`).
      */
     | {
           type: "TurnStart";
           at: number;
           content?: string;
           /**
-           * True for a hidden memory-reinjection turn
-           * (`memory-reinjection-controller.ts`) — never set by any
-           * ordinary send. Propagated onto `TurnPhase.Submitting.hidden`
-           * so every ambient side-effect hook keyed off `turnPhase`
-           * (`useAgentActivitySummary.ts`, `useNextPromptSuggestion.ts`,
-           * and any future one) can skip its own LLM call for this turn
-           * without needing separate wiring — `turnPhase` already reaches
-           * them as their effect dependency. Found necessary the hard way:
-           * `useAgentActivitySummary.ts` forwarded `pendingContent`
-           * (unconditionally, regardless of source) to an ambient
-           * summarization call whose result became the human-visible pane
-           * title — reagentx P0 on PR #3502. Defense-in-depth, not the
-           * only fix: `content` for a hidden turn is ALSO never the real
-           * message (see memory-reinjection-controller.ts) — a consumer
-           * that forgets to check `hidden` still never sees real content,
-           * only a safe placeholder.
+           * True for a hidden memory-reinjection turn, never set by an ordinary send. Propagated
+           * onto `TurnPhase.Submitting.hidden` so every ambient hook keyed off `turnPhase` skips
+           * its own LLM call for the turn (an ambient summary of the injected text once became the
+           * visible pane title, #3502). `content` for a hidden turn is also never the real message.
            */
           hidden?: boolean;
       }
     /**
-     * Stream produced session_end (or fallback timer fired). Final
-     * stats merged with current turn-tokens, which are still there when
-     * the backend's turn-ended push already moved the phase to Idle.
-     * Clears currentTool and turnTokens, and transitions the phase to
-     * Done (interrupting → Done.stopped, otherwise Done.completed).
+     * Stream produced session_end (or the fallback timer fired). Final stats merge with the current
+     * turn tokens, which are still there when the backend's turn-ended push already moved the phase
+     * to Idle. Clears currentTool and turnTokens; the phase becomes Done (Interrupting →
+     * Done.stopped, otherwise Done.completed).
      */
     | {
           type: "TurnEnd";
@@ -814,17 +593,10 @@ export type AgentPaneCommand =
      *  or an older state of this one, landing late is ignored. */
     | { type: "TurnObserved"; ledger: TurnLedger }
     /**
-     * Revert an OPTIMISTIC `TurnStart` when the turn never actually began —
-     * the initiating send's own RPC call failed synchronously (no
-     * controller registered, the identity spawn gate blocked it, a plain
-     * network rejection), or the input was a slash/bang command handled
-     * locally. Phase-only: unlike `TurnReset`, this must NOT
-     * touch `sessionStats`/`sessionTotals`/`context` — those
-     * accumulate across a pane's whole lifetime, and a transient send
-     * failure on an agent with prior completed turns must not wipe that
-     * history (reagent/codex P2 on PR #2318 — `TurnReset` was reused here
-     * first and incorrectly cleared them). See
-     * `useAgentCommands.ts`'s `deliverToBackend`.
+     * Revert an OPTIMISTIC `TurnStart` when the turn never began (the send's RPC failed
+     * synchronously, or a slash/bang command was handled locally). Phase only: unlike `TurnReset`
+     * it must NOT touch `sessionStats` / `sessionTotals` / `context`, which accumulate over the
+     * pane's lifetime (#2318).
      */
     | { type: "TurnStartFailed" }
 
@@ -867,25 +639,14 @@ export type AgentPaneCommand =
     /** Stop RPC failed — bail on the stopping state. */
     | { type: "StopFailed" }
     /**
-     * Interrupt timeout watchdog fired (caller-scheduled setTimeout — see
-     * `schedule-interrupt-timeout` event). Bounded `Interrupting → Done`
-     * force-transition: if the agent never acks the SIGINT (backend died,
-     * stream dropped, etc.) the pane was previously stuck in Interrupting
-     * forever and the working animation would never settle. This command
-     * is a no-op if the phase has already moved off Interrupting
-     * (e.g. agent acked first, user already resumed). Spec §8.
+     * Interrupt timeout watchdog fired: bounded `Interrupting → Done` force transition when the
+     * agent never acks the SIGINT. A no-op once the phase has left Interrupting. Spec §8.
      */
     | { type: "InterruptTimeoutElapsed"; at: number }
     /**
-     * Submit timeout watchdog fired (caller-scheduled setTimeout — see
-     * `schedule-submit-timeout` event). PR D — bounded
-     * `Submitting → Done.errored` force-transition: if the backend never
-     * acks a TurnStart with a chunk / token / tool event within
-     * `SUBMIT_TIMEOUT_MS`, the pane was previously stuck in Submitting
-     * forever (no `isWorking → false` signal) and the working animation
-     * would never settle. No-op if the phase has already moved off
-     * Submitting (e.g. promotion to Streaming via flush / bumpEvent,
-     * user already stopped, stream dropped). Spec §8 / issue #728 gap 2.
+     * Submit timeout watchdog fired: bounded `Submitting → Done.errored` force transition when the
+     * backend never acks a TurnStart within `SUBMIT_TIMEOUT_MS` (#728 gap 2). A no-op once the
+     * phase has left Submitting. Spec §8.
      */
     | { type: "SubmitTimeoutElapsed"; at: number }
 
@@ -899,25 +660,17 @@ export type AgentPaneCommand =
           /** The pane sends it on AgentMux's behalf (the start-up document): a retry sends it so again. */
           system?: boolean;
           /**
-           * True when the user sent this message while a turn was already
-           * in-flight (isWorking was true before TurnStart). False for
-           * idle sends. Stored on the PendingMessage entry and used by
-           * PendingMessagesPanel to gate visibility — idle-send messages
-           * must never flash in the amber queued zone.
-           * See ANALYSIS_IDLE_SEND_RACE_2026_06_11 (never committed to this repo).
+           * True when the user sent this while a turn was in flight (isWorking was true before
+           * TurnStart); false for idle sends. Stored on the PendingMessage entry;
+           * PendingMessagesPanel uses it so an idle-send message never flashes in the amber queued
+           * zone.
            */
           enqueuedWhileBusy: boolean;
       }
     /**
-     * flushHeldMessages (useAgentCommands.ts) is about to actually deliver
-     * this held message — dispatched right before the `deliverToBackend`
-     * call, i.e. the moment sending genuinely begins, not merely "the turn
-     * it was queued behind has ended" (those can be far apart when a
-     * controller refresh is deferred — see the `PendingMessageFlushStarted`
-     * reducer arm's own doc comment). Marks the entry `flushing` so
-     * PendingMessagesPanel can stop claiming "sends at the agent's next
-     * step" once that's no longer true. See
-     * docs/specs/SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1.
+     * A held message is about to be delivered (dispatched right before `deliverToBackend`: the
+     * moment sending actually begins). Marks the entry `flushing` so PendingMessagesPanel stops
+     * claiming "sends at the agent's next step".
      */
     | { type: "PendingMessageFlushStarted"; id: string }
     /** Backend acknowledged the message — remove from pending. */
@@ -925,31 +678,24 @@ export type AgentPaneCommand =
     /** RPC failed — remove the entry so user doesn't see a ghost row. */
     | { type: "PendingMessageRejected"; id: string }
     /**
-     * Pending entry ageing watchdog fired (caller-scheduled setTimeout).
-     * Removes the entry by id; idempotent no-op if already accepted/rejected.
-     * Issue #728 gap 2 — prevents zombie pending rows when the backend
-     * never acknowledges a queued message (e.g. RPC hang post-send).
+     * Pending entry ageing watchdog fired (caller-scheduled setTimeout). Removes the entry by id;
+     * idempotent. Prevents zombie pending rows when the backend never acknowledges a queued message
+     * (RPC hang post-send; #728 gap 2).
      */
     | { type: "PendingMessageExpired"; id: string }
 
     /**
-     * Provider is rate-limited (429) and waiting to retry. Updates
-     * `lastEventMs` (keeps the stuck-stream watchdog quiet) and sets
-     * `waitingReason` on `Streaming` so the working row can show
-     * "Rate limited — retrying…" instead of the thinking phrase.
-     * Cleared automatically on the next real activity (bumpEvent).
+     * Provider is rate-limited (429) and waiting to retry. Updates `lastEventMs` (keeps the
+     * stuck-stream watchdog quiet) and sets `waitingReason` on `Streaming` so the working row can
+     * say "Rate limited — retrying…". Cleared by the next real activity (bumpEvent).
      */
     | { type: "ProviderWaiting"; reason: "rate_limited"; retryAfterMs: number | null; at: number }
 
     // ── Failure recovery ──────────────────────────────────────────
     /**
-     * Backend classified a failure for this pane (the `agentfailure` wave
-     * event). Unconditionally force-ends a working turn (Submitting /
-     * Streaming / Interrupting → Done.errored) — this is what closes the
-     * "stuck Waiting after a rate-limit interruption" bug: an authoritative
-     * failure classification no longer depends on the CLI process actually
-     * exiting (persistent-mode agents never do between turns) to clear the
-     * turn phase. See SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
+     * Backend classified a failure for this pane (the `agentfailure` event). Force-ends a working
+     * turn unconditionally (→ Done.errored): an authoritative failure doesn't depend on the CLI
+     * process exiting, which persistent-mode agents never do between turns.
      */
     | {
           type: "FailureObserved";
@@ -989,24 +735,14 @@ export type AgentPaneCommand =
 
     // ── Compaction (SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md) ──
     /**
-     * The `PreCompact` hook fired — compaction has begun. Sourced from
-     * the `compaction_started` MPS event (`agentmux-bashwrap precompact`
-     * → `useCompactionStream.ts`). Sets `compacting` so the view can
-     * show a live "Compacting…" status chip + elapsed counter (Tier
-     * 1/2). Also bumps `lastEventMs` like `ProviderWaiting` does, so
-     * the stuck-stream watchdog doesn't misfire during a long
-     * compaction that produces no other stream activity.
+     * The `PreCompact` hook fired: compaction has begun (the `compaction_started` MPS event). Sets
+     * `compacting` and bumps `lastEventMs` so the stuck-stream watchdog doesn't misfire during a
+     * long compaction.
      */
     | { type: "CompactionStarted"; trigger: "manual" | "auto"; at: number }
     /**
-     * The real `compact_boundary` frame arrived — compaction finished.
-     * Sourced from the backend's `AgentEvent::CompactionBoundary`
-     * (translated 1:1 from Claude Code's stream-json `system` frame —
-     * exact data, not inferred). Clears `compacting`, records
-     * `lastCompactionBoundaryAt` (dedup guard for the `TokensIn`
-     * heuristic), and reconciles `context` to `postTokens` so
-     * the context-fill bar reflects the real post-compaction size
-     * immediately rather than waiting for the next `TokensIn`.
+     * The real `compact_boundary` frame arrived: compaction finished (exact, not inferred). Clears
+     * `compacting`, records `lastCompactionBoundaryAt`, and reconciles `context` to `postTokens`.
      */
     | {
           type: "CompactionBoundary";
@@ -1016,14 +752,9 @@ export type AgentPaneCommand =
           durationMs: number;
           at: number;
           /**
-           * The `compact_boundary` frame's own `timestamp` field, raw
-           * (not parsed/reformatted) — absent/`null` if the frame didn't
-           * have one (or the caller doesn't have a raw frame at all, e.g.
-           * a test constructing this command directly). A time value
-           * only: the boundary's completion time for the stale-boundary
-           * checks and the node's time, falling back to `at` / receipt
-           * time when absent (the CLI's stdout frame has none). Never an
-           * id — see `boundaryUuid`.
+           * The frame's own `timestamp`, raw; absent/`null` when the frame has none or the caller
+           * has no raw frame. A time value only (the stale-boundary checks and the node's time,
+           * falling back to `at`); never an id: see `boundaryUuid`.
            */
           frameTimestamp?: string | null;
           /**
@@ -1036,10 +767,8 @@ export type AgentPaneCommand =
 
     // ── Attached task axis (SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) ──
     /**
-     * Fires on the 0→1 transition of "≥1 PinnedActivity is `running` for
-     * this block." No-op (idempotent) if an episode is already in
-     * progress — must NOT reset `since` when a second task starts running
-     * alongside an already-running one.
+     * Fires on the 0→1 transition of "≥1 PinnedActivity is `running` for this block". Idempotent:
+     * it must NOT reset `since` when a second task starts running alongside.
      */
     | { type: "AttachedTaskObserved"; at: number }
     /**
@@ -1051,11 +780,9 @@ export type AgentPaneCommand =
     // ── Stale-`--resume` reconnect axis
     // (STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2) ──
     /**
-     * `mps.EVENT_AGENT_RESUME_RETRY`'s `{status:"retrying"}` landed — a
-     * stale `--resume` was just detected and a retry/recovery attempt is
-     * about to fire. No-op (idempotent) if already reconnecting, mirroring
-     * `AttachedTaskObserved` — a cascaded second retry must not reset
-     * `startedAt` back to a later time.
+     * `mps.EVENT_AGENT_RESUME_RETRY`'s `{status:"retrying"}` landed: a stale `--resume` was
+     * detected and a retry is about to fire. Idempotent: a cascaded second retry must not push
+     * `startedAt` later.
      */
     | { type: "ResumeRetryStarted"; at: number }
     /**
@@ -1065,9 +792,8 @@ export type AgentPaneCommand =
     | { type: "ResumeRetryResolved" }
 
     // ── Registry-derived attached-task floor (Phase C of
-    // SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md) — see
-    // `registryAttachedTaskSince`'s doc comment above for why this is a
-    // separate axis rather than reusing AttachedTaskObserved/Cleared. ──
+    // SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md): see `registryAttachedTaskSince`'s
+    // doc for why it is a separate axis rather than AttachedTaskObserved/Cleared. ──
     /** Sets `registryAttachedTaskSince` verbatim (idempotent set, not an
      * edge-triggered toggle like AttachedTaskObserved — the registry's own
      * earliest-running-task computation already handles the "already
@@ -1083,12 +809,9 @@ export type AgentPaneEvent =
     | { type: "stream-subscribed"; at: number }
     | { type: "stream-unsubscribed"; at: number }
     /**
-     * PR F: the stream tore down while a turn was in flight
-     * (Submitting / Streaming / Interrupting). Surfaced alongside the
-     * generic `stream-unsubscribed` so the view can drive a dedicated
-     * "Disconnected — reconnecting…" banner without re-deriving from
-     * `turnPhase.kind`. Emitted ONLY on the working-set → Disconnected
-     * transition; idle-state unsubscribes do not emit it.
+     * The stream tore down while a turn was in flight; emitted alongside `stream-unsubscribed`,
+     * only on the working-set → Disconnected transition (not on idle unsubscribes), so the view can
+     * drive a "Disconnected — reconnecting…" banner.
      */
     | {
           type: "stream-disconnected";
@@ -1107,22 +830,16 @@ export type AgentPaneEvent =
           /** The WARNING bar (STUCK_THRESHOLD_MS). Crossing it is cosmetic. */
           thresholdMs: number;
           /**
-           * The bar that would actually force this turn back to Idle. Always
-           * larger than `thresholdMs`, and larger still under a rate-limit
-           * backoff. Reported because a diagnostic that shows only the warning
-           * bar reads as "past the threshold and still stuck", which is how a
-           * real 5h stall was misread while it was in progress.
+           * The bar that would force this turn back to Idle: always larger than `thresholdMs`, and
+           * larger still under a rate-limit backoff.
            */
           recoverThresholdMs: number;
       }
     | {
           /**
-           * The watchdog force-recovered a hung `Streaming` turn to `Idle`
-           * after `idleSinceMs` ≥ `LIVENESS_RECOVERY_MS` with no tool active
-           * and no rate-limit wait — i.e. a turn whose terminal `session_end`
-           * was never observed (the persistent-mode stuck-"Working" class).
-           * Surfaced for telemetry; the phase change is the real effect.
-           * See SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md.
+           * The watchdog force-recovered a hung `Streaming` turn to `Idle` after `idleSinceMs` ≥
+           * `LIVENESS_RECOVERY_MS` (its `session_end` was never observed). For telemetry; the phase
+           * change is the real effect.
            */
           type: "working-recovered";
           idleSinceMs: number;
@@ -1130,24 +847,15 @@ export type AgentPaneEvent =
       }
     | { type: "turn-started"; at: number }
     /**
-     * `ReconcileTurnActive` promoted the phase to `Streaming` because the
-     * backend reported a turn already in flight — either the mount-default
-     * `Idle` (the original case) or a settled `Done.completed` episode (the
-     * focus-triggered reconcile's missed-live-turn-start case). Surfaced
-     * for diagnostics — distinguishes this from a normal user-initiated
-     * `turn-started`. Not "-at-mount" anymore since it can now fire well
-     * after mount.
+     * `ReconcileTurnActive` promoted the phase to `Streaming` (from the mount-default `Idle` or a
+     * settled `Done.completed` episode). For diagnostics: distinguishes this from a user-initiated
+     * `turn-started`.
      */
     | { type: "turn-active-reconciled" }
     /**
-     * `ReconcileTurnActive` demoted a stuck `Streaming` phase to `Idle`
-     * because the backend's authoritative `turn_active` reported the turn
-     * has ended (the `result` event fired) but the frontend never observed
-     * the terminal `session_end` — the class behind the Agent1 stuck-"Working"
-     * and Agent2 stuck-"Queued" incidents. Completes #2005's reconciliation
-     * symmetry (which only promoted Idle→Streaming). Surfaced for telemetry;
-     * the phase change is the real effect. See
-     * docs/retro/retro-agent2-stuck-queued-message-2026-07-16.md.
+     * `ReconcileTurnActive` demoted a stuck `Streaming` phase to `Idle`: the backend reported the
+     * turn over while the frontend never saw `session_end`. For telemetry; the phase change is the
+     * real effect.
      */
     | { type: "turn-inactive-reconciled"; at: number }
     /**
@@ -1170,22 +878,16 @@ export type AgentPaneEvent =
           reason: string;
       }
     /**
-     * An accepted prompt was larger than the window Claude Code reported for
-     * its model, so the reported window can't be right; the meter uses the
-     * next known tier above the prompt instead. Logged once per model by the
-     * pane store. context-reading.ts `refutedReportedWindow`.
+     * An accepted prompt was larger than the window Claude Code reported for its model, so the
+     * reported window can't be right; the meter uses the next known tier above the prompt. Logged
+     * once per model by the pane store (context-reading.ts `refutedReportedWindow`).
      */
     | { type: "context-window-refuted"; model: string; reported: number; tokens: number; window: number }
     | {
           /**
-           * A turn finished and the phase transitioned to `Done`. Since
-           * the sound-notifications subsystem (SPEC_SOUND_NOTIFICATIONS_
-           * 2026_06_05.md §3.2), the event carries the outcome directly
-           * so downstream consumers (notification sounds, telemetry,
-           * future UI affordances) don't have to snapshot the slot to
-           * read it back from `state.turnPhase.outcome`. The reducer
-           * already computes `outcome` two lines earlier — this is a
-           * pure forwarding of an existing value.
+           * A turn finished and the phase became `Done`. Carries `outcome` directly so consumers
+           * (notification sounds, telemetry) needn't snapshot the slot
+           * (SPEC_SOUND_NOTIFICATIONS_2026_06_05.md §3.2).
            */
           type: "turn-ended";
           outcome: TurnOutcome;
@@ -1206,11 +908,8 @@ export type AgentPaneEvent =
     | { type: "tool-ended" }
     | { type: "tokens-updated"; input: number | null; output: number | null }
     /**
-     * `source: "real"` — sourced from an authoritative `CompactionBoundary`
-     * event (`trigger`/`durationMs` present). `source: "heuristic"` —
-     * inferred from a ≥50%-drop in `TokensIn` (the pre-existing
-     * cross-provider fallback; `trigger`/`durationMs` absent). See
-     * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3.
+     * `source: "real"`: an authoritative `CompactionBoundary` event (`trigger` / `durationMs`
+     * present). `source: "heuristic"`: inferred from a ≥50% drop in `TokensIn` (both absent).
      */
     | {
           type: "context-compacted";
@@ -1234,11 +933,9 @@ export type AgentPaneEvent =
     | { type: "compaction-started-buffered"; trigger: "manual" | "auto" }
     | { type: "provider-waiting"; reason: "rate_limited" }
     /**
-     * A failure was observed and recorded on `state.failure`. `turnWasEnded`
-     * is true iff the pane's turn was actually working (Submitting /
-     * Streaming / Interrupting) at the time — surfaced for diagnostics
-     * (e.g. distinguishing a genuine mid-turn failure from a stray late
-     * event arriving after the pane was already idle).
+     * A failure was observed and recorded on `state.failure`. `turnWasEnded` is true iff the turn
+     * was actually working at the time (for diagnostics: a genuine mid-turn failure vs a stray late
+     * event after idle).
      */
     | { type: "failure-observed"; code: AgentFailure["code"]; turnWasEnded: boolean }
     /** `state.failure` was cleared (explicit dismiss, or implicitly by TurnStart). */
@@ -1246,13 +943,10 @@ export type AgentPaneEvent =
     | { type: "stop-requested"; at: number }
     | { type: "stop-failed" }
     /**
-     * Reducer signal: a turn has just entered Interrupting. The
-     * dispatch layer (view / saga) is expected to start a setTimeout
-     * for `INTERRUPT_TIMEOUT_MS` and fire `InterruptTimeoutElapsed`
-     * when it expires — gated by a shared cancel flag (analogous to
-     * `Arc<AtomicBool>`) so a later `RequestStop` doesn't double-fire.
-     * `deadlineMs` is `at + INTERRUPT_TIMEOUT_MS` so the caller can
-     * compute the remaining slice deterministically. Spec §8.
+     * Reducer signal: a turn has just entered Interrupting. The dispatch layer starts the
+     * `INTERRUPT_TIMEOUT_MS` timer and fires `InterruptTimeoutElapsed` on expiry, gated by a shared
+     * cancel flag so a later `RequestStop` doesn't double-fire. `deadlineMs` is `at +
+     * INTERRUPT_TIMEOUT_MS`.
      */
     | {
           type: "schedule-interrupt-timeout";
@@ -1266,24 +960,19 @@ export type AgentPaneEvent =
      */
     | { type: "interrupt-timed-out"; at: number }
     /**
-     * Reducer signal: a turn has just entered Submitting. The dispatch
-     * layer is expected to start a setTimeout for `SUBMIT_TIMEOUT_MS`
-     * and fire `SubmitTimeoutElapsed` when it expires — gated by a
-     * shared cancel flag so a graceful promotion to Streaming (via
-     * `StreamFlushObserved` or `bumpEvent` from tool / token activity)
-     * cancels the timer before it fires. `deadlineMs` is
-     * `at + SUBMIT_TIMEOUT_MS` so the caller can compute the remaining
-     * slice deterministically. PR D — spec §8 / issue #728 gap 2.
+     * Reducer signal: a turn has just entered Submitting. The dispatch layer starts the
+     * `SUBMIT_TIMEOUT_MS` timer and fires `SubmitTimeoutElapsed` on expiry, gated by a shared
+     * cancel flag so a promotion to Streaming cancels it first. `deadlineMs` is `at +
+     * SUBMIT_TIMEOUT_MS`.
      */
     | {
           type: "schedule-submit-timeout";
           deadlineMs: number;
       }
     /**
-     * Reducer signal: the bounded `Submitting → Done.{errored}`
-     * force-transition fired because no stream activity arrived within
-     * `SUBMIT_TIMEOUT_MS`. Carries the firing wall-clock for audit.
-     * PR D — spec §8 / issue #728 gap 2.
+     * Reducer signal: the bounded `Submitting → Done.{errored}` force transition fired because no
+     * stream activity arrived within `SUBMIT_TIMEOUT_MS`. Carries the firing wall-clock for audit
+     * (spec §8, #728 gap 2).
      */
     | { type: "submit-timed-out"; at: number }
     | { type: "pending-flush-started"; id: string }
@@ -1299,10 +988,9 @@ export type AgentPaneEvent =
           wasPresent: boolean;
       }
     /**
-     * Emitted when the pane enters the waiting-for-input state: turn
-     * completed with a question, composer empty. The sound service
-     * starts the looping ambient tone on this event.
-     * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §6.3.
+     * Emitted when the pane enters the waiting-for-input state (turn completed with a question,
+     * composer empty); the sound service starts the looping ambient tone on it
+     * (SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §6.3).
      */
     | {
           type: "waiting-for-input";
@@ -1338,40 +1026,23 @@ export interface ReducerResult {
 }
 
 /**
- * Stuck-stream threshold. A subscribed stream that hasn't received any
- * observable event (subscribe, flush, tool, tokens) for this many ms is
- * flagged. 45s covers the typical Claude/Codex idle window between
- * thinking and tool calls during long reasoning runs without false
- * positives. Issue #728 gap 3.
+ * Stuck-stream threshold (#728 gap 3): a subscribed stream with no observable event (subscribe,
+ * flush, tool, tokens) for this many ms is flagged. 45s covers the typical Claude/Codex idle window
+ * between thinking and tool calls in long reasoning runs without false positives.
  */
 export const STUCK_THRESHOLD_MS = 45_000;
 
 /**
- * Liveness-recovery threshold. A `Streaming` turn that has produced no
- * observable activity for this many ms — with no tool running and not
- * rate-limited — is treated as hung: its terminal `session_end` was never
- * observed and no other signal will arrive to clear it. For persistent-mode
- * agents the process never exits between turns, so `ControllerStatus: done`
- * never fires and the process-exit grace timer can't recover the phase; the
- * watchdog itself must transition out of "Working" (→ `Idle`). 3 min is well
- * past `STUCK_THRESHOLD_MS` (45s) so a merely-quiet reasoning run is never
- * mistaken for a hang. See SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md.
+ * Liveness-recovery threshold: a `Streaming` turn with no observable activity, no tool running and
+ * not rate-limited for this long is treated as hung (its `session_end` was never observed). 3 min
+ * is well past `STUCK_THRESHOLD_MS` (45s), so a quiet reasoning run is never mistaken for a hang.
  */
 export const LIVENESS_RECOVERY_MS = 180_000;
 
 /**
- * Bounded `Interrupting → Done.{interrupted}` window. After `RequestStop`
- * fires SIGINT, if neither `TurnEnd` nor `StreamUnsubscribe` lands within
- * this many ms the reducer force-transitions to Done.interrupted on
- * receipt of `InterruptTimeoutElapsed`. 5 s is generous compared to the
- * typical sub-second SIGINT-ack on a healthy agent but tight enough that
- * a dead agent doesn't keep the working animation pinned forever.
- *
- * Spec: SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §8 — the spec doc
- * suggests 3_000 but the implementation lands at 5_000 to leave more
- * headroom for slow Windows PTY teardowns and remote agents on flaky
- * networks. Tune in a follow-up if telemetry shows the watchdog firing
- * on live agents.
+ * Bounded `Interrupting → Done.{interrupted}` window: after `RequestStop` fires SIGINT, if neither
+ * `TurnEnd` nor `StreamUnsubscribe` lands within this many ms the reducer force-transitions on
+ * `InterruptTimeoutElapsed`.
  */
 export const INTERRUPT_TIMEOUT_MS = 5_000;
 
@@ -1380,34 +1051,17 @@ export const INTERRUPT_TIMEOUT_MS = 5_000;
 export const NO_RATE_LIMIT_WAIT = { waitingReason: undefined, retryAfterMs: undefined, retryAtMs: undefined } as const;
 
 /**
- * Bounded `Submitting → Done.{errored}` window. After `TurnStart` puts a
- * turn into Submitting, if no stream activity (flush / bumpEvent from
- * tool / token) lands within this many ms the reducer force-transitions
- * to Done.errored on receipt of `SubmitTimeoutElapsed`. 30 s is the
- * generous outer bound for a backend ack — network handshakes, agent
- * spawn, and the first model token round-trip on a fresh session. Any
- * longer and the working animation has been pinned past the user's
- * patience window; PR E's streaming watchdog covers the longer "agent
- * is thinking" idle case once we're in Streaming.
- *
- * PR D — spec §8 / issue #728 gap 2. The dispatcher arms this via the
- * `schedule-submit-timeout` event emitted when `TurnStart` promotes the
- * phase into Submitting; the standard cancel-flag pattern (the same
- * `Arc<AtomicBool>` analogue used for the interrupt timeout) gates a
- * stale fire against a graceful promotion to Streaming.
+ * Bounded `Submitting → Done.{errored}` window: with no stream activity within this many ms of
+ * `TurnStart`, the reducer force-transitions on `SubmitTimeoutElapsed`. 30 s is the outer bound for
+ * a backend ack (handshake, agent spawn, first token); the streaming watchdog covers the longer
+ * thinking idle case.
  */
 export const SUBMIT_TIMEOUT_MS = 30_000;
 
 /**
- * Suppression window for the `TokensIn` ≥50%-drop compaction heuristic
- * after a REAL `CompactionBoundary` event landed. Claude Code's
- * `compact_boundary` frame precedes the next turn's `message_start` in
- * the same stream, so `context` is normally already
- * reconciled to `postTokens` before the heuristic's next check runs —
- * this window is a defensive backstop against any ordering surprise or
- * a `postTokens` that doesn't closely match the next observed
- * `TokensIn.input`. 2 minutes comfortably covers one turn's round trip
- * without risking suppressing a LATER, genuinely new compaction. See
- * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3.
+ * Suppression window for the `TokensIn` ≥50%-drop compaction heuristic after a REAL
+ * `CompactionBoundary`: a backstop against an ordering surprise or a `postTokens` that doesn't
+ * match the next `TokensIn.input`. 2 minutes covers one turn's round trip without suppressing a
+ * LATER genuine compaction.
  */
 export const COMPACTION_HEURISTIC_SUPPRESS_MS = 120_000;

@@ -1410,6 +1410,11 @@
             "method": "AppSkillsCatalogInstallCommand"
         },
         {
+            "command": "app_skills.here",
+            "method": "AppSkillsHereCommand",
+            "send": "data ?? {}"
+        },
+        {
             "command": "skill.catalog.app_file",
             "method": "SkillCatalogAppFileCommand"
         },

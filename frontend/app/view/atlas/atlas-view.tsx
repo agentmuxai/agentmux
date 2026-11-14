@@ -5,16 +5,23 @@
  * The Atlas pane: the Swarm's agents as a map (docs/specs/SPEC_ATLAS_AGENT_MAP_2026_11_13.md). Machines are regions,
  * agents are nodes, a line runs from a lead to the agent that reports to it. The wheel zooms, a drag on the
  * background pans, Fit shows it all. A node opens a card; the card's Open and Start are the Swarm row's own actions.
+ * A box dragged with Shift held (or with Select on) selects the agents it touches, for the Swarm's own Broadcast,
+ * Stop and Supervisor mode (atlas-fleet-bar.tsx). A message between two agents draws a line from its sender to its
+ * receiver as it happens, and a task one agent hands another a dotted one (atlas-flow-layer.tsx).
  */
 
 import { seatBadgeText, seatTooltipLine } from "@/app/agent-model/seat-format";
 import { tip } from "@/app/element/tip";
-import { Button, IconButton, SegmentedControl } from "@/app/element/ui";
+import { Button, CloseButton, IconButton, SegmentedControl } from "@/app/element/ui";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { openAgentInActiveTab, startAgent } from "@/app/store/agent-runtime-live";
 import { revealBlock } from "@/app/util/reveal-block";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { SwarmFilterBar } from "../swarm/swarm-filter-bar";
+import { CardFacts } from "./atlas-card-facts";
+import { AtlasFleetBar } from "./atlas-fleet-bar";
+import { flowEndResolver } from "./atlas-flow";
+import { AtlasFlowLayer } from "./atlas-flow-layer";
 import type { AtlasAgent, AtlasRegion, AtlasState } from "./atlas-graph";
 import {
     FOLD_CHIP,
@@ -27,8 +34,12 @@ import {
 } from "./atlas-layout";
 import type { AtlasData } from "./atlas-model";
 import { ATLAS_LAYOUT_META, readAtlasLayout, type AtlasLayoutMode } from "./atlas-layout-mode";
-import { useAtlasPanZoom, type AtlasPanZoom } from "./atlas-pan-zoom";
+import { useAtlasLasso } from "./atlas-lasso";
+import { NOT_BACKGROUND, useAtlasPanZoom, type AtlasPanZoom } from "./atlas-pan-zoom";
+import { selectionKeyOf } from "./atlas-select";
 import { clampZoom, type Viewport } from "./atlas-viewport";
+import type { AtlasWork } from "./atlas-work";
+import { useAtlasWork } from "./atlas-work-store";
 import "./atlas.scss";
 
 const STATE_LABELS: Record<AtlasState, string> = {
@@ -57,7 +68,9 @@ function Node(props: {
     y: number;
     tint: number | null;
     selected: boolean;
-    onSelect: (key: string) => void;
+    /** In the selection a fleet action reaches, or inside the box being dragged. */
+    picked: boolean;
+    onSelect: (key: string, e: MouseEvent | KeyboardEvent) => void;
 }): JSX.Element {
     const a = () => props.agent;
     return (
@@ -65,23 +78,30 @@ function Node(props: {
             role="button"
             tabindex="0"
             class={`atlas-node atlas-node--${a().state}`}
-            classList={{ "atlas-node--selected": props.selected, "atlas-node--stale": a().stale }}
+            classList={{
+                "atlas-node--selected": props.selected,
+                "atlas-node--picked": props.picked,
+                "atlas-node--stale": a().stale,
+            }}
             data-tint={props.tint ?? undefined}
             data-testid="atlas-node"
             style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${NODE_W}px`, height: `${NODE_H}px` }}
             aria-pressed={props.selected}
-            aria-label={`${a().name}, ${STATE_LABELS[a().state]}`}
+            aria-label={`${a().name}, ${STATE_LABELS[a().state]}${props.picked ? ", selected" : ""}`}
             {...tip(a().line ?? STATE_LABELS[a().state])}
-            onClick={() => props.onSelect(a().key)}
+            onClick={(e) => props.onSelect(a().key, e)}
             onKeyDown={(e) => {
                 if (e.key !== "Enter" && e.key !== " ") return;
                 e.preventDefault();
-                props.onSelect(a().key);
+                props.onSelect(a().key, e);
             }}
         >
             <span class="atlas-node__top">
                 <span class="atlas-node__dot" />
                 <span class="atlas-node__name">{a().name}</span>
+                <Show when={props.picked}>
+                    <i class="fa-solid fa-check atlas-node__check" aria-hidden="true" />
+                </Show>
             </span>
             <span class="atlas-node__sub">
                 {a().seat ? seatBadgeText(a().seat!) : STATE_LABELS[a().state]}
@@ -136,14 +156,20 @@ function FoldedChip(props: {
     );
 }
 
-function Card(props: { agent: AtlasAgent; machineTitle: string; onClose: () => void }): JSX.Element {
+function Card(props: {
+    agent: AtlasAgent;
+    machineTitle: string;
+    agents: ReadonlyMap<string, AtlasAgent>;
+    work: AtlasWork | null;
+    onClose: () => void;
+}): JSX.Element {
     const a = () => props.agent;
     return (
         <aside class="atlas-card" data-testid="atlas-card" aria-label={`${a().name} details`}>
             <header class="atlas-card__head">
                 <span class={`atlas-node__dot atlas-node--${a().state}`} />
                 <strong class="atlas-card__name">{a().name}</strong>
-                <IconButton icon="xmark" label="Close" density="compact" onClick={props.onClose} />
+                <CloseButton size="sm" onClick={props.onClose} />
             </header>
             <dl class="atlas-card__rows">
                 <dt>State</dt>
@@ -169,6 +195,7 @@ function Card(props: { agent: AtlasAgent; machineTitle: string; onClose: () => v
                     <dt>Provider</dt>
                     <dd>{a().provider}</dd>
                 </Show>
+                <CardFacts agent={a()} agents={props.agents} work={props.work} />
                 <Show when={a().contextTokens}>
                     <dt>Context</dt>
                     <dd>{tokensText(a().contextTokens!)} tokens</dd>
@@ -214,7 +241,8 @@ function AtlasMap(props: {
     view: Viewport;
     mode: AtlasLayoutMode;
     selected: string | null;
-    onSelect: (key: string) => void;
+    picked: (agent: AtlasAgent) => boolean;
+    onSelect: (key: string, e: MouseEvent | KeyboardEvent) => void;
 }): JSX.Element {
     const [openFolds, setOpenFolds] = createSignal<ReadonlySet<string>>(new Set());
     const toggleFold = (key: string) =>
@@ -226,6 +254,7 @@ function AtlasMap(props: {
     const regions = () => props.data.graph().regions;
     const shownAgents = createMemo(() => regions().flatMap((r) => r.shown));
     const machineIndex = (machine: string) => regions().findIndex((r) => r.key === machine);
+    const flowEnd = createMemo(() => flowEndResolver(shownAgents(), props.data.machines()));
     return (
         <div
             class="atlas-world"
@@ -261,6 +290,13 @@ function AtlasMap(props: {
                     }}
                 </For>
             </svg>
+            <AtlasFlowLayer
+                flows={props.data.flows()}
+                resolve={flowEnd()}
+                nodes={props.layout.nodes}
+                width={props.layout.width}
+                height={props.layout.height}
+            />
             <For each={shownAgents()}>
                 {(agent) => (
                     <Show when={props.layout.nodes.get(agent.key)}>
@@ -271,6 +307,7 @@ function AtlasMap(props: {
                                 y={p().y}
                                 tint={props.mode === "seat" ? machineIndex(agent.machine) % 6 : null}
                                 selected={props.selected === agent.key}
+                                picked={props.picked(agent)}
                                 onSelect={props.onSelect}
                             />
                         )}
@@ -309,8 +346,15 @@ function RegionBox(props: { box: RegionBoxLayout; region: AtlasRegion; open: boo
     );
 }
 
-/** The bar over the map: the Swarm filter, the layout toggle, zoom and fit. */
-function AtlasBar(props: { data: AtlasData; ctx: PaneTabHostContext; mode: AtlasLayoutMode; zoom: AtlasPanZoom }): JSX.Element {
+/** The bar over the map: the Swarm filter, the layout toggle, Select, zoom and fit. */
+function AtlasBar(props: {
+    data: AtlasData;
+    ctx: PaneTabHostContext;
+    mode: AtlasLayoutMode;
+    zoom: AtlasPanZoom;
+    selecting: boolean;
+    onSelecting: (on: boolean) => void;
+}): JSX.Element {
     return (
         <div class="atlas-bar">
             <SwarmFilterBar filter={props.data.swarm.filter} />
@@ -321,11 +365,54 @@ function AtlasBar(props: { data: AtlasData; ctx: PaneTabHostContext; mode: Atlas
                 value={props.mode}
                 onChange={(v) => void props.ctx.setMeta({ [ATLAS_LAYOUT_META]: v === "seat" ? "seat" : null })}
             />
+            <IconButton
+                icon="object-group"
+                label={props.selecting ? "Selecting: a drag selects agents, Shift and drag moves the map" : "Select agents (or hold Shift and drag)"}
+                density="compact"
+                pressed={props.selecting}
+                onClick={() => props.onSelecting(!props.selecting)}
+            />
             <IconButton icon="magnifying-glass-minus" label="Zoom out" density="compact" onClick={() => props.zoom.zoomBy(1 / 1.25)} />
             <IconButton icon="magnifying-glass-plus" label="Zoom in" density="compact" onClick={() => props.zoom.zoomBy(1.25)} />
             <IconButton icon="expand" label="Fit all" density="compact" onClick={props.zoom.fit} />
         </div>
     );
+}
+
+/** The map's selection: which nodes are in the Swarm's selection, and the box and the clicks that put them there. */
+function useAtlasSelection(data: AtlasData, zoom: AtlasPanZoom, layout: () => AtlasLayout) {
+    const model = data.model;
+    const [selecting, setSelecting] = createSignal(false);
+    /** The Swarm's selection key of each node drawn that it can select, by the node's own key. */
+    const keys = createMemo(() => {
+        const map = new Map<string, string>();
+        for (const region of data.graph().regions) {
+            for (const agent of region.shown) {
+                const key = selectionKeyOf(agent);
+                if (key) map.set(agent.key, key);
+            }
+        }
+        return map;
+    });
+    const nodeKeys = createMemo(() => [...keys().values()]);
+    const lasso = useAtlasLasso({
+        selecting,
+        view: zoom.view,
+        nodes: () => layout().nodes,
+        onPick: (touched) => model.setManySelected(touched.flatMap((k) => keys().get(k) ?? []), true),
+    });
+    const picked = (agent: AtlasAgent) => {
+        const key = keys().get(agent.key);
+        return !!key && (model.selectedBlockIdsAtom().has(key) || lasso.touched().has(agent.key));
+    };
+    /** A click that selects rather than opens the card: with Select on, or with Shift, Ctrl or Cmd held. */
+    const toggleFor = (agentKey: string, e: MouseEvent | KeyboardEvent): boolean => {
+        const key = keys().get(agentKey);
+        if (!key || !(selecting() || e.shiftKey || e.ctrlKey || e.metaKey)) return false;
+        model.toggleSelected(key);
+        return true;
+    };
+    return { selecting, setSelecting, nodeKeys, lasso, picked, toggleFor };
 }
 
 export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): JSX.Element {
@@ -334,27 +421,64 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
     const layout = createMemo<AtlasLayout>(() => (mode() === "seat" ? layoutBySeat(data.graph()) : layoutAtlas(data.graph())));
     const [selected, setSelected] = createSignal<string | null>(null);
     const zoom = useAtlasPanZoom(() => layout(), mode, () => setSelected(null));
+    const sel = useAtlasSelection(data, zoom, layout);
     const shownCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.shown.length, 0));
     const stoppedCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.folded.length, 0));
     const selectedAgent = () => {
         const key = selected();
         return key ? data.agents().get(key) : undefined;
     };
+    const onPointerDown = (e: PointerEvent & { currentTarget: HTMLDivElement }) => {
+        if (!sel.lasso.wants(e) || (e.target as HTMLElement).closest(NOT_BACKGROUND)) return zoom.onPointerDown(e);
+        setSelected(null);
+        sel.lasso.start(e, e.currentTarget);
+    };
+    const onPointerUp = (e: PointerEvent) => {
+        sel.lasso.onPointerUp(e);
+        zoom.onPointerUp(e);
+    };
+    // Branch and tasks are this instance's facts: an agent of another instance has no pane here to ask about.
+    const work = useAtlasWork(() => {
+        const agent = selectedAgent();
+        return agent && !agent.remote ? agent.blockId : null;
+    });
+    const onEscape = () => (sel.lasso.rect() ? sel.lasso.cancel() : setSelected(null));
     return (
-        <div class="atlas" data-testid="atlas" onKeyDown={(e) => e.key === "Escape" && setSelected(null)}>
-            <AtlasBar data={data} ctx={ctx} mode={mode()} zoom={zoom} />
+        <div class="atlas" data-testid="atlas" onKeyDown={(e) => e.key === "Escape" && onEscape()}>
+            <AtlasBar data={data} ctx={ctx} mode={mode()} zoom={zoom} selecting={sel.selecting()} onSelecting={sel.setSelecting} />
             <div
                 class="atlas-viewport"
+                classList={{ "atlas-viewport--selecting": sel.selecting() }}
                 ref={zoom.setViewport}
                 data-testid="atlas-viewport"
                 onWheel={zoom.onWheel}
-                onPointerDown={zoom.onPointerDown}
-                onPointerMove={zoom.onPointerMove}
-                onPointerUp={zoom.onPointerUp}
-                onPointerCancel={zoom.onPointerUp}
+                onPointerDown={onPointerDown}
+                onPointerMove={(e) => {
+                    sel.lasso.onPointerMove(e);
+                    zoom.onPointerMove(e);
+                }}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
             >
                 <Show when={shownCount() > 0 || stoppedCount() > 0} fallback={<div class="atlas-empty">No agents to show yet.</div>}>
-                    <AtlasMap data={data} layout={layout()} view={zoom.view()} mode={mode()} selected={selected()} onSelect={setSelected} />
+                    <AtlasMap
+                        data={data}
+                        layout={layout()}
+                        view={zoom.view()}
+                        mode={mode()}
+                        selected={selected()}
+                        picked={sel.picked}
+                        onSelect={(key, e) => sel.toggleFor(key, e) || setSelected(key)}
+                    />
+                </Show>
+                <Show when={sel.lasso.rect()}>
+                    {(r) => (
+                        <div
+                            class="atlas-lasso"
+                            data-testid="atlas-lasso"
+                            style={{ left: `${r().x}px`, top: `${r().y}px`, width: `${r().w}px`, height: `${r().h}px` }}
+                        />
+                    )}
                 </Show>
                 <Show when={mode() === "seat" && stoppedCount() > 0}>
                     <div class="atlas-stopped-count">{stoppedCount()} stopped, not drawn</div>
@@ -364,11 +488,15 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
                         <Card
                             agent={agent()}
                             machineTitle={data.machines().get(agent().machine)?.title ?? ""}
+                            agents={data.agents()}
+                            work={work()}
                             onClose={() => setSelected(null)}
                         />
                     )}
                 </Show>
             </div>
+            {/* Under the map, not over it: the map's top left stays put when the first agent is selected and this appears. */}
+            <AtlasFleetBar model={data.model} swarm={data.swarm} selecting={sel.selecting()} nodeKeys={sel.nodeKeys} />
         </div>
     );
 }

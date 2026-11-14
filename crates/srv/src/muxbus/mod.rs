@@ -12,6 +12,7 @@ pub mod wan_lease;
 pub mod pkce;
 pub mod relay;
 pub mod relay_watch;
+pub(crate) mod server_hooks;
 pub mod wan_presence;
 pub mod wan_publish;
 pub mod wan_key_revocation;

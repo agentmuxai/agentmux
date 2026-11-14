@@ -288,8 +288,8 @@ export async function deleteImportFile(pickId: string): Promise<void> {
     await relay({ pick_id: pickId });
 }
 
-export const commitImport = (token: string, duplicates: Duplicates, vault?: string) =>
-    call<{ result: ImportResult }>("import_commit", { token, duplicates, ...(vault ? { vault } : {}) }).then((r) => r.result);
+export const commitImport = (token: string, duplicates: Duplicates, vault?: string, profile?: string) =>
+    call<{ result: ImportResult }>("import_commit", { token, duplicates, ...(vault ? { vault } : {}), ...(profile ? { profile } : {}) }).then((r) => r.result);
 export const cancelImport = (token: string) => call<unknown>("import_cancel", { token }).catch(() => {});
 export const suggestPassphrase = () => call<{ passphrase: string }>("suggest_passphrase").then((r) => r.passphrase);
 

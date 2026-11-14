@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn the_build_slot_is_shown_on_the_holder_by_slug_or_name_and_only_while_held() {
         use agentmux_common::build_slot::SlotHolder;
-        let holder = SlotHolder { agent: "naki-naki-2".into(), since_ms: 5, reason: "cargo test".into(), command: "cargo test -p x".into() };
+        let holder = SlotHolder { agent: "naki-naki-2".into(), since_ms: 5, reason: "cargo test".into(), command: "cargo test -p x".into(), ..Default::default() };
         let hold = BuildSlotHold { since_ms: 5, reason: "cargo test".into(), command: "cargo test -p x".into() };
         // By slug: the registry's name is the display name.
         assert_eq!(build_slot_of(Some(&holder), "Naki-2", || Some("Naki-Naki-2".into())), Some(hold.clone()));

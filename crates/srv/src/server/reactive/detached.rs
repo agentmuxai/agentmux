@@ -20,7 +20,8 @@ pub(super) async fn deliver_to_completion(
     req: InjectionRequest,
 ) -> serde_json::Value {
     let (state, caller_uid, target) = (state.clone(), caller_uid.to_string(), req.target_agent.clone());
-    match tokio::spawn(async move { deliver(&state, auth_via, &caller_uid, req).await }).await {
+    // Carried into the task, so the stages it passes are seen by the request's watch (`lan_watch`).
+    match tokio::spawn(crate::server::lan_watch::carry(async move { deliver(&state, auth_via, &caller_uid, req).await })).await {
         Ok(answer) => answer,
         Err(e) => {
             tracing::error!(target = %target, error = %e, "reactive inject: the delivery task failed");

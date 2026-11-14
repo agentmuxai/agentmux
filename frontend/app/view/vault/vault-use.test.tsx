@@ -31,6 +31,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     cwd: "",
     replaces: false,
     signin: false,
+    account: false,
     requested_ms: 1,
     block_id: "pane-1",
     deadline_ms: 1,
@@ -49,6 +50,7 @@ vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
 import { VaultUseItem as UsePrompt } from "./vault-requests-list";
 import { clipMiddle, clock, siteOf } from "./vault-use-question";
+import { cardAnswerText } from "./vault-use-card";
 import { VaultEntries } from "./vault-entries";
 import { refreshVault } from "./vault-store";
 
@@ -203,6 +205,30 @@ describe("the prompt for an agent's use of an entry", () => {
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
     });
 
+    it("asks for an agent's new account by site, says the Vault makes the password, and offers no Always", async () => {
+        uses = [
+            use({
+                account: true,
+                what: "new account",
+                kind: "login",
+                entry_id: "",
+                entry_label: "a new account on https://shop.example.com",
+                origin: "https://shop.example.com",
+                field: "",
+                offer_always: false,
+                reason: "Agent1 hasn't made an account on this site with you before",
+            }),
+        ];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const dialog = await screen.findByRole("group");
+        expect(dialog.textContent).toContain("Agent1 wants to create an account on shop.example.com");
+        expect(dialog.textContent).toContain("sign-up form on shop.example.com");
+        expect(dialog.textContent).toContain("The agent never sees it");
+        expect(dialog.textContent).not.toContain("Into");
+        expect(within(dialog).queryByRole("button", { name: /^Always/ })).toBeNull();
+    });
+
     it("says a command's output will replace the entry's value, that the old one is kept, and offers no Always", async () => {
         uses = [use({ origin: "", field: "", what: "value", entry_label: "GitHub token", kind: "", command: "gh auth token", cwd: "C:/work", offer_always: false, replaces: true, reason: "what the command prints replaces the value" })];
         await refreshVault();
@@ -282,6 +308,44 @@ describe("the prompt for an agent's use of an entry", () => {
         fireEvent.click(within(dialog).getByRole("button", { name: "Deny" }));
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));
         expect(JSON.stringify(vault.mock.calls)).not.toContain("987-65");
+    });
+
+    it("asks for a whole card when the agent asks for a card, and sends it as one text, kept only if they say so", async () => {
+        uses = [use({ needs_value: true, offer_always: false, kind: "card", what: "card", entry_label: "Alex's card", field: "the card fields: number, expiry, cvc", reason: "there is no card saved for this, so you type it here" })];
+        await refreshVault();
+        const close = vi.fn();
+        render(() => <UsePrompt use={uses[0]} close={close} />);
+        const dialog = await screen.findByRole("group");
+        expect(dialog.textContent).toContain("Agent1 needs your card");
+        expect(dialog.querySelector('input[type="password"]')).toBeNull();
+        expect(within(dialog).queryByRole("button", { name: /Always/ })).toBeNull();
+        for (const label of ["Card number", "Expiry", "Name on card", "Billing ZIP"]) expect(dialog.textContent).toContain(label);
+        // Nothing to fill until the number is typed.
+        expect(within(dialog).getByRole("button", { name: "Fill it in" })).toBeDisabled();
+        const number = within(dialog).getByLabelText("Card number") as HTMLInputElement;
+        fireEvent.input(number, { target: { value: "4242424242424242" } });
+        expect(number.value).toBe("4242 4242 4242 4242");
+        expect(dialog.textContent).toContain("Visa");
+        fireEvent.input(within(dialog).getByLabelText(/Security code/), { target: { value: "123" } });
+        fireEvent.input(within(dialog).getByLabelText("Name on card"), { target: { value: "Alex Doe" } });
+        fireEvent.input(within(dialog).getByLabelText("Billing ZIP"), { target: { value: "94107" } });
+        fireEvent.click(within(dialog).getByLabelText(/Save to the Vault as "Alex's card"/));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Fill it in" }));
+        await waitFor(() => expect(calls("answer_use")).toHaveLength(1));
+        const sent = calls("answer_use")[0] as { id: string; decision: string; value: string; save: boolean };
+        expect(sent).toMatchObject({ id: "use-1", decision: "once", save: true });
+        expect(JSON.parse(sent.value)).toEqual({ number: "4242 4242 4242 4242", exp: "", cvc: "123", name: "Alex Doe", zip: "94107" });
+        await waitFor(() => expect(close).toHaveBeenCalled());
+        // The question stays in the list here (nothing removed it), yet the boxes no longer hold what was typed.
+        expect([number.value, (within(dialog).getByLabelText(/Security code/) as HTMLInputElement).value, (within(dialog).getByLabelText("Name on card") as HTMLInputElement).value, (within(dialog).getByLabelText("Billing ZIP") as HTMLInputElement).value]).toEqual(["", "", "", ""]);
+        expect(document.body.innerHTML).not.toContain("4242 4242");
+    });
+
+    it("makes the card's text only once there is a number, and an expiry only when both its month and year are chosen", () => {
+        const card = { number: "", month: "03", year: "2030", cvc: "123", name: "", zip: "" };
+        expect(cardAnswerText(card)).toBe("");
+        expect(JSON.parse(cardAnswerText({ ...card, number: "4242 4242 4242 4242" })).exp).toBe("03/2030");
+        expect(JSON.parse(cardAnswerText({ ...card, number: "4242 4242 4242 4242", year: "" })).exp).toBe("");
     });
 
     it("shows a site by its host", () => {

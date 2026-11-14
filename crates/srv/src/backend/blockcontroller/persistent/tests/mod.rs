@@ -20,6 +20,7 @@ mod reopen_guard;
 mod eager_resume;
 mod immediate_delivery;
 mod single_live_instance;
+mod lease_hooks;
 mod resume_gate;
 mod cli_native;
 mod turn_ledger;

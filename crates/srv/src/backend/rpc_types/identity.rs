@@ -92,3 +92,55 @@ pub struct AccountOAuthCancelResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandListAllAgentIdentitiesData {}
+
+#[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct StartProviderAuthReq {
+    pub provider_id: String,
+    /// Vestigial — bundle mode (a successful auth adding the account to
+    /// a named group of accounts) was retired in Phase 4c of
+    /// SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md. Kept on the wire
+    /// shape only; no frontend caller sends it.
+    #[serde(default)]
+    #[ts(optional)]
+    pub into_bundle_id: Option<String>,
+    /// When `true`, srv mints or reuses the account and a successful auth
+    /// persists a standalone `IdentityAccount`; the agent<->account link is
+    /// written later, once the agent exists. No frontend caller sets it
+    /// since the launch modal (whose `AuthFlowController` sent `true`) was
+    /// removed: the agent pane's login (`flows/login-backend.ts`) leaves it
+    /// `false` and persists the account itself.
+    #[serde(default)]
+    pub direct_account: bool,
+    /// Direct-account reconnect: non-empty to refresh an already-
+    /// linked account's tokens in place (same isolation dir, same
+    /// account row updated). Empty mints a fresh account id. Ignored
+    /// unless `direct_account` is set.
+    #[serde(default)]
+    pub existing_account_id: String,
+    /// Resolved CLI path. The frontend calls `resolvecli` first to
+    /// install / locate the provider's CLI; the resulting path is
+    /// passed here. Keeps the provider table single-sourced in the
+    /// frontend.
+    pub cli_path: String,
+    /// e.g. `["auth", "login"]` from the provider definition's
+    /// `authLoginCommand` field.
+    pub auth_login_args: Vec<String>,
+    /// e.g. `["auth", "status", "--json"]` — used to confirm
+    /// authentication after the CLI emits its success line.
+    pub auth_check_args: Vec<String>,
+    /// Env vars to inject at spawn time. Per-provider auth
+    /// isolation env vars come here (CLAUDE_CONFIG_DIR, CODEX_HOME,
+    /// GEMINI_CLI_HOME, etc.).
+    #[serde(default)]
+    pub auth_env: std::collections::HashMap<String, String>,
+    /// Spawn the auth login subprocess under a PTY (instead of plain
+    /// piped stdio). Required by providers whose auth subcommand
+    /// checks `isatty()` and refuses to run otherwise (currently
+    /// OpenClaw's `models auth login --provider <id>`). The flag is
+    /// forwarded down to the CEF host's `run_cli_login` which picks
+    /// the PTY branch when set.
+    #[serde(default)]
+    pub requires_tty: bool,
+}

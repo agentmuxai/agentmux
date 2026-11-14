@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 
 use crate::splash_core::{
     format_ms, format_running, hold_duration, reconcile, tally_label, trunc, visible_rows,
-    RowKind, StageEntry, StageTimeline,
+    DetailLayout, RowKind, StageEntry, StageTimeline,
 };
 use crate::startup_events::{StartupEvent, StartupStatus};
 
@@ -114,6 +114,10 @@ const STAGE_NAME_FRAC: f64 = 0.60;
 const STAGE_LABEL_MAX_CHARS: usize = crate::splash_core::STAGE_LABEL_MAX_CHARS;
 const SUB_LABEL_MAX_CHARS: usize = 13;
 const STAGE_INDENT: f64 = 14.0;
+/// A finished row's end detail runs the card's width (the time column is empty
+/// on its row), in the 11 pt fixed-pitch stage font: about 6.6 pt a character,
+/// so 27 fit between the margins and the indent. At most two lines.
+const DETAIL_LAYOUT: DetailLayout = DetailLayout { width: 27, max_lines: 2 };
 
 // Colors — same values as splash.rs (Windows) for visual consistency.
 const STAGE_R: f64 = 0xC0 as f64 / 255.0;
@@ -149,6 +153,17 @@ struct FlatRow {
     time_color: (f64, f64, f64),
 }
 
+/// One line of why the row above warned or failed, in that row's colour, on a
+/// line of its own: the label field spans the row, the time is empty.
+fn detail_row(text: String, status: StartupStatus) -> FlatRow {
+    let color = match status {
+        StartupStatus::Ok => (SUB_R, SUB_G, SUB_B),
+        StartupStatus::Warn => (STATUS_WARN_R, STATUS_WARN_G, STATUS_WARN_B),
+        StartupStatus::Error => (STATUS_ERR_R, STATUS_ERR_G, STATUS_ERR_B),
+    };
+    FlatRow { indented: true, label: text, time_text: String::new(), label_color: color, time_color: color }
+}
+
 fn flatten_rows(stages: &[StageEntry], total_ms: Option<u64>) -> Vec<FlatRow> {
     let mut out = Vec::new();
     // Reserve the trailing "other"/"total" rows up front, so an overfull
@@ -159,7 +174,7 @@ fn flatten_rows(stages: &[StageEntry], total_ms: Option<u64>) -> Vec<FlatRow> {
     // Row selection (detail vs. tally, and which rows survive an overflow)
     // is shared with the Windows and Linux renderers; this file owns only
     // the NSTextField-shaped formatting.
-    for entry in visible_rows(stages, budget) {
+    for entry in visible_rows(stages, budget, Some(DETAIL_LAYOUT)) {
         match entry.kind {
             RowKind::Stage(stage) => {
                 // Colored by status, not unconditionally "done" green — a
@@ -196,6 +211,7 @@ fn flatten_rows(stages: &[StageEntry], total_ms: Option<u64>) -> Vec<FlatRow> {
                     time_color: (SUB_R, SUB_G, SUB_B),
                 });
             }
+            RowKind::Detail { text, status, .. } => out.push(detail_row(text, status)),
             RowKind::Sub(sub) => {
                 // NSTextField is one color per field — combine the status glyph
                 // into the time text and color the whole thing by status once
@@ -611,29 +627,26 @@ impl Splash {
         for (i, (name_field, time_field)) in self.stage_fields.iter().enumerate() {
             match rows.get(i) {
                 Some(row) => {
-                    if row.indented {
-                        let cur: CGRect = {
-                            let f: extern "C" fn(id, SEL) -> CGRect =
-                                std::mem::transmute(objc_msgSend as *const ());
-                            f(*name_field, sel(b"frame\0"))
-                        };
-                        let indented = CGRect {
-                            origin: CGPoint { x: STAGE_MARGIN_L + STAGE_INDENT, y: cur.origin.y },
-                            size: cur.size,
-                        };
-                        send_void_rect(*name_field, sel(b"setFrame:\0"), indented);
+                    // Where the label field sits and how wide it is, set on every
+                    // refresh: a field is reused by whichever row lands on it, so
+                    // it can't keep the last row's width.
+                    let cur: CGRect = {
+                        let f: extern "C" fn(id, SEL) -> CGRect =
+                            std::mem::transmute(objc_msgSend as *const ());
+                        f(*name_field, sel(b"frame\0"))
+                    };
+                    let x = if row.indented { STAGE_MARGIN_L + STAGE_INDENT } else { STAGE_MARGIN_L };
+                    // A row with no time (a detail line, the tally) has the whole row to itself.
+                    let width = if row.time_text.is_empty() {
+                        SPLASH_W - STAGE_MARGIN_R - x
                     } else {
-                        let cur: CGRect = {
-                            let f: extern "C" fn(id, SEL) -> CGRect =
-                                std::mem::transmute(objc_msgSend as *const ());
-                            f(*name_field, sel(b"frame\0"))
-                        };
-                        let flush = CGRect {
-                            origin: CGPoint { x: STAGE_MARGIN_L, y: cur.origin.y },
-                            size: cur.size,
-                        };
-                        send_void_rect(*name_field, sel(b"setFrame:\0"), flush);
-                    }
+                        SPLASH_W * STAGE_NAME_FRAC - STAGE_MARGIN_L
+                    };
+                    let frame = CGRect {
+                        origin: CGPoint { x, y: cur.origin.y },
+                        size: CGSize { width, height: cur.size.height },
+                    };
+                    send_void_rect(*name_field, sel(b"setFrame:\0"), frame);
                     send_void_id(*name_field, sel(b"setStringValue:\0"), nsstring(&row.label));
                     let (lr, lg, lb) = row.label_color;
                     send_void_id(*name_field, sel(b"setTextColor:\0"), color(lr, lg, lb));

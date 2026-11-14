@@ -279,7 +279,7 @@ pub fn init(store: Arc<crate::backend::storage::store::Store>) {
             // or nothing that version's quit saved (windows, tabs, panes) comes back.
             if upgraded.at_ms == now {
                 let db_dir = paths.data_dir.join("db");
-                if let Some(problem) = crate::bootstrap::carry_forward::continuity_problem(&db_dir, &upgraded.from) {
+                if let Some(problem) = crate::migrations::carry_forward::continuity_problem(&db_dir, &upgraded.from) {
                     tracing::error!(from = %upgraded.from, to = %upgraded.to, "upgrade continuity: {problem}");
                 }
             }
@@ -490,7 +490,7 @@ mod tests {
     #[tokio::test]
     async fn a_pane_restored_after_the_start_is_a_resumed_one_when_its_block_has_a_session() {
         use crate::backend::obj::Block;
-        let state = crate::server::tests::test_state();
+        let state = crate::test_support::core_parts();
         let block = |oid: &str, session: Option<&str>| {
             let mut b = Block { oid: oid.into(), ..Default::default() };
             if let Some(id) = session {
@@ -611,7 +611,7 @@ mod tests {
     #[tokio::test]
     async fn the_agent_a_pane_runs_is_read_from_its_block() {
         use crate::backend::obj::Block;
-        let state = crate::server::tests::test_state();
+        let state = crate::test_support::core_parts();
         let mut agent = Block { oid: "with-agent".into(), ..Default::default() };
         agent.meta.insert("agentId".into(), serde_json::json!(" def-1 "));
         state.mstore.insert(&mut agent).unwrap();

@@ -47,6 +47,7 @@ mod tower;
 mod viewer;
 mod input_history;
 mod websocket;
+mod widget;
 #[cfg(test)]
 mod optional_fields_tests;
 
@@ -85,6 +86,7 @@ pub use tower::*;
 pub use viewer::*;
 pub use input_history::*;
 pub use websocket::*;
+pub use widget::*;
 
 // ---- RpcMessage wire format ----
 

@@ -10,6 +10,9 @@
  * The order is what collapses first. Never hidden, in any form: the runtime trigger (mode, model, effort), the
  * context reading, the CPU and memory readout, and Shell (the strip's one action).
  *
+ * Once the account is collapsed, `chooseForms` gives it the widest middle form that collapsing the later slots makes room
+ * for, so it is never shorter in a wider strip.
+ *
  * How far it goes is decided by rows, not by one row: the fewest rows the strip can have is what it gets with every
  * compact form (one row when they fit, else two, ...); the fewest slots then collapse that reach that many rows
  * (of equal counts, the earliest in the order), so a pane keeps whatever full forms it has room for.
@@ -37,6 +40,18 @@ export function chooseCompactKeys(
 ): Set<string> {
     const candidates = order.filter((k) => (full[k] ?? 0) > 0 && compact[k] !== undefined && compact[k] < full[k]);
     const target = rowCount({ ...full, ...Object.fromEntries(candidates.map((k) => [k, compact[k]])) });
+    return searchKeys(order, full, compact, rowCount, target);
+}
+
+/** The fewest slots, earliest in `order` among equal numbers, whose compact forms bring the layout down to `target` rows. */
+function searchKeys(
+    order: readonly string[],
+    full: Record<string, number>,
+    compact: Record<string, number>,
+    rowCount: (widths: Record<string, number>) => number,
+    target: number
+): Set<string> {
+    const candidates = order.filter((k) => (full[k] ?? 0) > 0 && compact[k] !== undefined && compact[k] < full[k]);
     let best: string[] = candidates;
     let bestCost = [candidates.length, Infinity];
     for (let mask = 0; mask < 1 << candidates.length; mask++) {
@@ -49,6 +64,47 @@ export function chooseCompactKeys(
         bestCost = cost;
     }
     return new Set(best);
+}
+
+/** A slot whose compact form has middle forms (the account): its budgets, widest first, and the width it measured at each. */
+export interface RankedSlot {
+    key: string;
+    budgets: readonly number[];
+    middle: Readonly<Record<number, number | undefined>>;
+}
+
+/**
+ * The slots that show their compact form, and the budget of the ranked slot's middle form (none: its one letter).
+ * Whether the ranked slot is compact at all is `chooseCompactKeys`' answer, so the order above holds and the rows are
+ * the same. With it compact, its form comes before the later collapses: it gets the widest middle form that any
+ * collapse of the other slots makes room for, and those collapse only as far as that takes (the fewest, then the
+ * earliest in `order`). So at the same rows the slot never shows a shorter form in a wider strip, as it did when a
+ * narrower strip had to collapse the view chip, which freed room for a form that the wider one, collapsing only the
+ * slot, did not have.
+ */
+export function chooseForms(
+    order: readonly string[],
+    full: Record<string, number>,
+    compact: Record<string, number>,
+    rowCount: (widths: Record<string, number>) => number,
+    ranked?: RankedSlot
+): { keys: Set<string>; budget: number | undefined } {
+    const keys = chooseCompactKeys(order, full, compact, rowCount);
+    if (!ranked || !keys.has(ranked.key)) return { keys, budget: undefined };
+    const candidates = order.filter((k) => (full[k] ?? 0) > 0 && compact[k] !== undefined && compact[k] < full[k]);
+    const target = rowCount({ ...full, ...Object.fromEntries(candidates.map((k) => [k, compact[k]])) });
+    const others = order.filter((k) => k !== ranked.key);
+    const everyOther = Object.fromEntries(others.filter((k) => candidates.includes(k)).map((k) => [k, compact[k]]));
+    for (const budget of ranked.budgets) {
+        const width = ranked.middle[budget];
+        // A form that was not measured, or is no narrower than the full one, is no step down.
+        if (width === undefined || width >= (full[ranked.key] ?? 0)) continue;
+        const widths = { ...full, [ranked.key]: width };
+        if (rowCount({ ...widths, ...everyOther }) > target + 1e-9) continue;
+        const rest = searchKeys(others, widths, compact, rowCount, target);
+        return { keys: new Set([ranked.key, ...rest]), budget };
+    }
+    return { keys, budget: undefined };
 }
 
 /** The context reading short: "392k / 1.0m" is "392k/1m". Anything else is left as it is. */

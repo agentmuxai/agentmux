@@ -12,6 +12,8 @@
 //! the route answers 501, which the page reads as "use the built-in icons".
 
 mod assoc;
+#[cfg(windows)]
+pub(crate) use assoc::registry_string;
 mod cache;
 pub mod child;
 mod pool;

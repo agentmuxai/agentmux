@@ -51,6 +51,31 @@ Ordered by benefit ÷ risk. Size: S ≈ under a day, M ≈ 1–2 days, L ≈ mul
 
 Found along the way and fixed: `sanitizeLogTextForTerminal` let the text of an OSC sequence with a space (or an ST terminator) through into the shell drawer (#4045); the progress ring's flicker and orphaned background-task rows (retro in [`docs/retro/`](../retro), #4035, #4040).
 
+
+### 0.2 §5 rows re-checked on main (2026-11-14, Opaz@charlie, kanban #19)
+
+§5 had not been looked at since this spec was written, and the code moved a lot. Each row was checked against `origin/main`; what changes no behaviour was done, and the rest is listed with why it waits.
+
+| Row | State | Why |
+|---|---|---|
+| §5.1 #6 Rust and TS config builders | Gone: the TS builder no longer exists (the window's Launch has srv render an agent's files, `43892ad26`) | nothing left to keep in step |
+| §5.1 #3 controller rule | srv side is one function (`steps::open_controller_type`); the bare-provider `launchAgent` in `agent-model.ts` still inlines `controllerType === "persistent"` | open: routing it through `launch-args.ts` could change the argv of a path that might reach a container agent |
+| §5.1 #5 other hand-built `~/.agentmux` paths | `launcher/src/logging.rs` and `bashwrap/src/main.rs` still build the log path from the home folder | open: calling `agentmux_root()` moves their log under `AGENTMUX_HOME_OVERRIDE`, which is a behaviour change |
+| §5.1 #7 two scans of `objects.db` | both still exist (`registry/migrate.rs`, `registry/def_migrate.rs`) | open: sharing `migrate.rs`'s scan makes `def_migrate.rs` start tracking unreadable folders |
+| §5.2 #2 Ctrl+Wheel handlers | open | changes the step from 0.1 to 0.05; needs the operator's OK (as in §0.1 item 11) |
+| §5.2 #5, #7 | done by others: `activity/promotion-clock.ts` exists; no statusbar popover hand-rolls the floating position any more | |
+| §5.2 #8 Armory and Warden scaffold | stale: the Armory pane is gone and Warden is renamed away | |
+| §5.2 #9 double-rAF | done: `afterTwoFrames` in `app/util/after-two-frames.ts`, three call sites (#7237) | |
+| §5.2 #10 mcp and skill UI pair | open | a refactor of two component pairs, not a small step |
+| §5.3 #1 untyped handlers | open: 5 `register_handler` against 452 `register_typed` | moving them changes error wording where they had drifted |
+| §5.3 #2 table DDL per database | open; the schemas now live in `storage/migrations/*_schema.rs` | a migration-adjacent change |
+| §5.3 #3 | is §4.2 (b) | changes some error wording |
+| §5.3 #4, #5 launcher IPC loop and frame write | open | the Windows copies sit under `cfg(windows)` and cannot be built or run from a Linux host; needs a Windows check |
+| §5.3 #7 small helpers | done: the SHA-256 hex copies in srv now call `memory::record::sha256_hex` (#7232); `random_seed_bytes`, `cleanup_old_logs`, `is_zero_i64` and `shell_quote` already had one copy each | |
+| §5.3 #8 error classifier | one classifier left (`server/http_app_api.rs`); not re-measured for disagreement elsewhere | |
+| §5.3 #9 ANSI stripping, #10 secret lists | open | the copies serve different inputs on purpose; unifying changes what is stripped or hidden |
+| §5.4 SCSS repeats and colour literals | open | visual: needs a look check, and the same-file repeats change the cascade |
+
 ---
 
 ## 1. Method
@@ -282,7 +307,7 @@ These come first because the drift is not hypothetical.
 | Location | Rule | Used for |
 |---|---|---|
 | `agentmux-srv/src/backend/storage/agents.rs:231-254` `derive_slug` | lowercase, ASCII alnum/`-`/`_`, else `-`, collapse dashes, cap 64, `"agent"` fallback | definition slug |
-| [`frontend/app/view/agent/agent-config-builder.ts:173-180`](../../frontend/app/view/agent/agent-config-builder.ts) `deriveSlug` | TS mirror of the above ("keep the two in sync", `:168-170`) | SKILL.md preview paths |
+| `frontend/app/view/agent/agent-config-builder.ts:173-180` `deriveSlug` | TS mirror of the above ("keep the two in sync", `:168-170`) | SKILL.md preview paths |
 | `agents.rs:218-225` `default_agent_working_dir` | lowercase, **Unicode** alnum/`-`/`_`, else `-`, no collapse | default work dir |
 | `agentmux-srv/src/server/app_api/agent_open.rs:534-536` | inline copy of the Unicode rule (`agent_slug`) | `agent.open` |
 | `agents.rs:2858-2863` `agent_open_fallback_id` | Unicode rule again | signing-key names |
@@ -299,7 +324,7 @@ History: PR #2901 — work dir derived two ways, "Personal Bundle broke for the 
 
 **#5 — AgentMux root path in `agentmux-mcp` (live divergence).** `agentmux-mcp/src/window_capture.rs:25-43` "replicates [srv's] exact logic" — `AGENTMUX_DATA_HOME`, else `~/.agentmux`, else `/.agentmux`. The canonical resolver, `agentmux_common::data_paths::agentmux_root()` (`data_paths.rs:1019-1030`), also honours `AGENTMUX_HOME_OVERRIDE` first and errors instead of falling back to `/`. `402a1cc34` (#3372, "one resolver for the AgentMux root") removed exactly this behaviour from srv; the mcp copy was missed. `agentmux-mcp` already depends on `agentmux-common`. Other hand-built `~/.agentmux` paths that ignore both override variables, per the Rust sweep (not each re-read): `agentmux-launcher/src/logging.rs:16`, `agentmux-bashwrap/src/main.rs:112`, `agentmux-bashwrap/src/bash_wrap.rs:193`, `agentmux-cef/src/app/window_settings.rs:195-196`. **Fix:** call `agentmux_root()` at each.
 
-**#6 — Claude settings/skill builder, Rust and TS.** `agentmux-srv/src/backend/agent_config.rs` and [`frontend/app/view/agent/agent-config-builder.ts`](../../frontend/app/view/agent/agent-config-builder.ts) implement the same eight functions: `build_settings_with_hooks` :439 / `buildSettingsWithHooks` :326, `prepend_user_hook_array` :387 / `prependUserHookArray` :299, `expand_template` :648 / `expandTemplate` :158, `render_skill_md` :727 / `renderSkillMd` :204, `sanitize_trigger` :753 / `sanitizeTrigger` :221, `skill_name_slug` :769 / `skillNameSlug` :240, `unique_skill_slug` :796 / `uniqueSkillSlug` :261, `build_mcp_config` :212 / `buildMcpConfig` :462 (pairs from the Rust/TS sweep; spot-checked `deriveSlug`). History: `07846c989` (#2378) — Codex P1, the TS builder "still only injected" PreToolUse after Rust gained PreCompact; a UTF-16 vs byte truncation mismatch from #2322 is recorded at `agent_config.rs:691`. Guard: only `SESSION_START_HOOK_PARTS` is pinned across languages (`agent-config-builder.test.ts:326-330`). **Proposal:** decide which side owns config materialisation for UI launches (srv already does it for `agent.open`); until then, a shared JSON fixture of inputs → expected `settings.json`/`SKILL.md` read by both test suites, the pattern [`docs/specs/fixtures/redaction-vectors.json`](fixtures/redaction-vectors.json) already uses for redaction.
+**#6 — Claude settings/skill builder, Rust and TS.** `agentmux-srv/src/backend/agent_config.rs` and `frontend/app/view/agent/agent-config-builder.ts` implement the same eight functions: `build_settings_with_hooks` :439 / `buildSettingsWithHooks` :326, `prepend_user_hook_array` :387 / `prependUserHookArray` :299, `expand_template` :648 / `expandTemplate` :158, `render_skill_md` :727 / `renderSkillMd` :204, `sanitize_trigger` :753 / `sanitizeTrigger` :221, `skill_name_slug` :769 / `skillNameSlug` :240, `unique_skill_slug` :796 / `uniqueSkillSlug` :261, `build_mcp_config` :212 / `buildMcpConfig` :462 (pairs from the Rust/TS sweep; spot-checked `deriveSlug`). History: `07846c989` (#2378) — Codex P1, the TS builder "still only injected" PreToolUse after Rust gained PreCompact; a UTF-16 vs byte truncation mismatch from #2322 is recorded at `agent_config.rs:691`. Guard: only `SESSION_START_HOOK_PARTS` is pinned across languages (`agent-config-builder.test.ts:326-330`). **Proposal:** decide which side owns config materialisation for UI launches (srv already does it for `agent.open`); until then, a shared JSON fixture of inputs → expected `settings.json`/`SKILL.md` read by both test suites, the pattern [`docs/specs/fixtures/redaction-vectors.json`](fixtures/redaction-vectors.json) already uses for redaction.
 
 **#7 — Two scans of every `objects.db`.** `agentmux-srv/src/registry/migrate.rs:385` `enumerate_sources` and `registry/def_migrate.rs:212` `collect_scan_dbs`, whose own doc comment says it must scan the same places. They differ: only `migrate.rs` tracks unreadable directories (`read_dir_tracking`, `incomplete`), and `def_migrate.rs:339` `is_missing_table` misses the `SqlInputError` shape that `migrate.rs:551` `is_missing_column_or_table` handles. `migrate.rs` already exports `enumerate_objects_dbs` (`:369`). **Home:** `migrate.rs`.
 

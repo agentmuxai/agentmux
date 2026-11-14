@@ -13,34 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::drone::types::{BlockState, DroneGraph};
 
-/// Streaming events emitted to the frontend during a run.
-#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RunEvent {
-    RunStarted { run_id: String, drone_id: String },
-    BlockStarted { run_id: String, block_id: String },
-    BlockDone {
-        run_id: String,
-        block_id: String,
-        #[ts(type = "unknown")]
-        output: Value,
-    },
-    BlockError {
-        run_id: String,
-        block_id: String,
-        error: String,
-    },
-    RunDone {
-        run_id: String,
-        #[ts(type = "unknown")]
-        output: Value,
-    },
-    RunFailed { run_id: String, error: String },
-    /// The run was stopped on purpose (`cancel_run`): a person, an agent, the
-    /// job's timeout or the job's next run. `reason` says which, in plain words.
-    RunCancelled { run_id: String, reason: String },
-}
+pub use crate::backend::drone_run_event::RunEvent;
 
 /// How a run is stopped: a flag the scheduler looks at before each block and
 /// that ends the block in flight, with the reason it was set for.

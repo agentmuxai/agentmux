@@ -86,6 +86,9 @@ mod pane_open_steps;
 #[cfg(test)]
 #[path = "tests/pane_open_steps_tests.rs"]
 mod pane_open_steps_tests;
+#[cfg(test)]
+#[path = "tests/pane_meta_tests.rs"]
+mod pane_meta_tests;
 mod pane_singleton;
 // pub(crate): `server/mod.rs`'s `POST /api/v1/agent/dev_server/register`
 // handler (the `RegisterDevServer` MCP tool's backing route) calls

@@ -147,10 +147,19 @@ fn cases() -> Vec<Case> {
         c(
             "WorkList",
             json!({ "state": "open", "limit": 5 }),
-            json!({ "items": [{ "num": 3, "state": "claimed", "claimed_by": "x", "title": "Tt", "result": "R" }] }),
+            json!({ "items": [{ "num": 3, "state": "open", "title": "Tt", "result": "R" }] }),
             "/agentmux/work?state=open&limit=5",
             json!({}),
-            &["1 work item(s):", "#3  claimed [x]  Tt", "-> R"],
+            &["1 work item(s):", "#3  open  Tt", "-> R"],
+        ),
+        // A claimed task's result is why the previous holder handed it back: not shown as the holder's verdict.
+        c(
+            "WorkList",
+            json!({ "state": "claimed", "limit": 5 }),
+            json!({ "items": [{ "num": 4, "state": "claimed", "claimed_by": "deephar", "title": "Tt", "result": "agent stopped" }] }),
+            "/agentmux/work?state=claimed&limit=5",
+            json!({}),
+            &["#4  claimed [deephar]  Tt", "(handed back earlier: agent stopped)"],
         ),
         c("WorkList", json!({}), json!({ "items": [] }), "/agentmux/work?state=&limit=50", json!({}), &["Queue is empty."]),
         // Several boards.

@@ -93,9 +93,8 @@ onStop
       <span class="agent-activity-stats">
         <span class="agent-activity-elapsed">
           "1m 5s"
-      <span data-cb="onClick" data-stand="IconButton:Dismiss" data-props="{\"icon\":\"xmark\",\"density\":\"compact\",\"class\":\"agent-activity-dismiss\",\"tooltip\":false}">
-        "Dismiss"
-IconButton:Dismiss.onClick
+      <span data-cb="onClick" data-stand="CloseButton:Dismiss" data-props="{\"size\":\"sm\",\"class\":\"agent-activity-dismiss\",\"tooltip\":false}">
+CloseButton:Dismiss.onClick
 stopPropagation
 onDismiss
 -- stopped

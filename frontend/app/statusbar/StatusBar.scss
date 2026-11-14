@@ -111,6 +111,12 @@
         .stat-separator:has(+ .stat-commit) {
             display: none;
         }
+
+        // The token count goes at this tier, but while AgentMux's own model calls fail its slot stays (slotDropAt):
+        // the counts go and the red dot is left, so the signal is still there.
+        .token-usage-indicator--failing .token-usage-indicator-counts {
+            display: none;
+        }
     }
 
     &[data-fit="3"],

@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { applyRegistryOutcomes, backgroundTaskActivities, backgroundTaskToActivity } from "./background-adapter";
+import {
+    applyRegistryOutcomes,
+    backgroundTaskActivities,
+    backgroundTaskToActivity,
+    isStaleRegistryRow,
+    STALE_AFTER_MS,
+} from "./background-adapter";
 import type { PinnedActivity } from "../../../agent-model/activity-types";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
@@ -50,6 +56,40 @@ describe("backgroundTaskToActivity", () => {
     it("maps a null ended_at_ms to undefined, not null", () => {
         const a = backgroundTaskToActivity(task({ status: "done", ended_at_ms: null }));
         expect(a.endedAt).toBeUndefined();
+    });
+});
+
+describe("a stale registry row", () => {
+    const NOW = 100 * 60 * 60 * 1000;
+    const stale = (over: Partial<BackgroundTaskView> = {}) =>
+        task({ pid: null, started_at_ms: NOW - 20 * 60 * 60 * 1000, last_seen_ms: NOW - STALE_AFTER_MS - 1, ...over });
+
+    it("is a running row with no pid not seen for more than the ceiling", () => {
+        expect(isStaleRegistryRow(stale(), NOW)).toBe(true);
+        expect(isStaleRegistryRow(stale({ last_seen_ms: NOW - STALE_AFTER_MS }), NOW)).toBe(false);
+    });
+
+    it("is never a row with a pid (it can be checked), nor one that has ended", () => {
+        expect(isStaleRegistryRow(stale({ pid: 4242 }), NOW)).toBe(false);
+        expect(isStaleRegistryRow(stale({ status: "stopped", ended_at_ms: NOW - 1 }), NOW)).toBe(false);
+    });
+
+    it("shows as unknown, with its clock stopped at the last sighting", () => {
+        const a = backgroundTaskToActivity(stale(), NOW);
+        expect(a.status).toBe("unknown");
+        expect(a.endedAt).toBe(NOW - STALE_AFTER_MS - 1);
+        expect(a.canStop).toBe(false);
+    });
+
+    it("leaves a recently seen row without a pid running", () => {
+        const a = backgroundTaskToActivity(stale({ last_seen_ms: NOW - 60_000 }), NOW);
+        expect(a.status).toBe("running");
+        expect(a.endedAt).toBeUndefined();
+    });
+
+    it("is judged by the time the list is built at", () => {
+        const out = backgroundTaskActivities([stale({ last_seen_ms: NOW - 60_000 })], new Set(), NOW + STALE_AFTER_MS);
+        expect(out[0].status).toBe("unknown");
     });
 });
 

@@ -75,7 +75,11 @@ use tool_schemas::*;
 mod window_capture;
 use window_capture::*;
 
+#[cfg(test)]
+mod tls_test_init;
+
 fn main() {
+    agentmux_common::tls_provider::install_ring_provider(); // reqwest 0.13 builds no client without it
     // More workers than cores: a tool call stuck in blocking code (a window
     // call into an app that stopped answering) holds a worker until it
     // returns, and a few of those must not starve the rest (#2614).

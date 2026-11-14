@@ -3,7 +3,7 @@
 **Date:** 2026-10-16
 **Author:** Maricon@charlie
 **Type:** Spec (the app window's title-bar buttons on Linux)
-**Status:** proposed
+**Status:** implemented — PR #5039.
 **Decisions applied (operator: "proceed with best recommendations", 2026-10-16):** D1 yes, D2 one GNOME style, D3 not now, D4 no, D5 later, D6 match a native app on charlie.
 **Requested by:** the operator: *"we want to get linux-like window controls ...currently it adopts the windows, but for linux we want something that looks linux, should also be theme aware if applicable ... this is the overall app window, different from the floaters, but still related"*
 **Related:** `SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16.md` (the floater's controls, written the same day; it shares the "show Restore when maximized" need, §3.3 here).

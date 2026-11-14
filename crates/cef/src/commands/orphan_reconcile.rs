@@ -265,7 +265,7 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
     // need to be reaped just like pool zombies do.
     let label_to_browser: HashMap<String, Browser> = browser_pairs
         .iter()
-        .filter(|(l, _)| !l.starts_with("browser-pane-"))
+        .filter(|(l, _)| !crate::browser_pane::label::is_pane_label(l))
         .map(|(l, b)| (l.clone(), b.clone()))
         .collect();
     let browser_status: HashMap<String, HwndStatus> = label_to_browser
@@ -294,7 +294,7 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         .iter()
         .any(|p| {
             !p.label.starts_with("window-pool-")
-                && !p.label.starts_with("browser-pane-")
+                && !crate::browser_pane::label::is_pane_label(&p.label)
                 && !p.label.starts_with("floating-")
         });
     let plan = plan_reconcile(

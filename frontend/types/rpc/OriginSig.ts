@@ -4,4 +4,4 @@
  * Whether the sender's signature checked out (the marker's `SIG=`); absent
  * when the message carried none.
  */
-export type OriginSig = "verified" | "invalid";
+export type OriginSig = "verified" | "invalid" | "expired";

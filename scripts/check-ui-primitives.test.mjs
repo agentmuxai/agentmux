@@ -4,6 +4,7 @@
 // Unit tests for check-ui-primitives.mjs.
 // Spec: docs/specs/SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §7.
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
     badRadii,
@@ -18,6 +19,9 @@ import {
     followRenames,
     countButtons,
     countMenus,
+    closeHoverOverrides,
+    countCloseControls,
+    CLOSE_CONTROLS_ALLOWLIST,
     deadFallbacks,
     declarations,
     handFocusRings,
@@ -671,6 +675,87 @@ describe("rule 15: hand-written text fields", () => {
         const now = collect(files);
         expect(now.rawFieldProblems).toEqual({ "frontend/app/view/x/x.tsx": 1 });
         expect(hardZeroViolations(now)).toContain("rawFieldProblems: frontend/app/view/x/x.tsx has 1, allowed 0");
+    });
+});
+
+describe("closeControls (rule 17)", () => {
+    it("counts a ✕ drawn by hand: an xmark icon, a Font Awesome class, a glyph; not the kit control, a comment or a ×", () => {
+        const source = [
+            '<IconButton icon="xmark" label="Dismiss" />',
+            '<i class="fa-solid fa-xmark" />',
+            '<button>✕</button>',
+            '<CloseButton label="Dismiss" onClick={x} />',
+            '// icon="xmark" in a comment',
+            '/* fa-xmark too */',
+            '<span>{w}×{h}</span>',
+        ].join("\n");
+        // The IconButton counts for its icon and for its Dismiss label; both say it is a hand-built close.
+        expect(countCloseControls(source)).toBe(4);
+    });
+
+    it("counts the other names of a ✕ (icon props, data rows, Font Awesome classes), a stand-alone × or ⨯, and an entity", () => {
+        expect(countCloseControls('<IconButton icon="times" />')).toBe(1);
+        expect(countCloseControls('{ icon: "circle-xmark", label: "x" }')).toBe(1);
+        expect(countCloseControls("const row = { icon: 'xmark' };")).toBe(1);
+        expect(countCloseControls('<i class="fa-solid fa-square-xmark" />')).toBe(1);
+        expect(countCloseControls('<i class="fa-solid fa-x" />')).toBe(1);
+        expect(countCloseControls('makeIconClass("times")')).toBe(1);
+        expect(countCloseControls("<button>×</button>")).toBe(1);
+        expect(countCloseControls('const mark = "⨯";')).toBe(1);
+        expect(countCloseControls("<button>&#215;</button>")).toBe(1);
+        expect(countCloseControls("<button>&#10005;</button>")).toBe(1);
+    });
+
+    it("leaves what only looks like one: a size, a count, a failed-state ✗, an icon that merely starts with x", () => {
+        expect(countCloseControls("<span>{w}×{h}</span>")).toBe(0);
+        expect(countCloseControls("<span>1.5×</span>")).toBe(0);
+        expect(countCloseControls('const c = "rustc.exe ×3";')).toBe(0);
+        expect(countCloseControls('const failed = "✗";')).toBe(0);
+        expect(countCloseControls('<i class="fa-solid fa-x-ray" />')).toBe(0);
+        expect(countCloseControls('<IconButton icon="xray" />')).toBe(0);
+    });
+
+    it("counts a control that only says Close or Dismiss in its label, but not the kit's CloseButton", () => {
+        expect(countCloseControls('<IconButton icon="angles-left" label="Close panel" />')).toBe(1);
+        expect(countCloseControls('<button aria-label="Dismiss notice" />')).toBe(1);
+        expect(countCloseControls('<CloseButton label="Dismiss" onClick={() => go()} />')).toBe(0);
+        expect(countCloseControls('<IconButton label="Open" />')).toBe(0);
+    });
+
+    it("is a hard zero except for the status ✕s and the rows' pictures named, each with a reason", () => {
+        expect(Object.keys(CLOSE_CONTROLS_ALLOWLIST).sort()).toEqual([
+            "frontend/app/element/quicktips-state.ts",
+            "frontend/app/modals/conntypeahead-items.ts",
+            "frontend/app/statusbar/UpdateStatus.tsx",
+            "frontend/app/store/command-registry.ts",
+            "frontend/app/view/agent/defaults/cli-catalog.ts",
+            "frontend/app/view/browser/browser-reload-button.ts",
+            "frontend/app/view/settings/sections/recording-section.tsx",
+            "frontend/app/view/term/termViewModel.ts",
+            "frontend/app/window/window-controls.darwin.tsx",
+            "frontend/app/window/window-controls.win32.tsx",
+        ]);
+        for (const entry of Object.values(CLOSE_CONTROLS_ALLOWLIST)) expect(entry.reason.length).toBeGreaterThan(30);
+        expect(hardZeroViolations({ closeControls: { "frontend/app/view/x/x.tsx": 1 } }, { closeControls: {} })).toEqual([
+            "closeControls: frontend/app/view/x/x.tsx has 1, allowed 0",
+        ]);
+    });
+});
+
+describe("closeControls (rule 17): the kit's red hover stays the kit's", () => {
+    it("counts a host stylesheet that sets the hover or press of .ui-close, not one that places it or reveals it from a parent", () => {
+        expect(closeHoverOverrides(".panel .ui-close:hover { background: blue; }")).toBe(1);
+        expect(closeHoverOverrides(".ui-close:active:not(:disabled) { color: blue; }")).toBe(1);
+        expect(closeHoverOverrides(".tab:hover .ui-close { opacity: 1; }")).toBe(0);
+        expect(closeHoverOverrides(".panel .ui-close { margin-left: auto; }")).toBe(0);
+        expect(closeHoverOverrides("/* .ui-close:hover { x } */ .a { b: c; }")).toBe(0);
+    });
+
+    it("gives a widget the same control: am-widget.css has a close class that goes red on hover and press", () => {
+        const css = readFileSync(new URL("../sdk/widget-sdk/am-widget.css", import.meta.url), "utf8");
+        expect(css).toMatch(/button\.am-close:hover\s*\{[^}]*background:\s*var\(--am-error\)/);
+        expect(css).toMatch(/button\.am-close:active\s*\{[^}]*background:/);
+        expect(css).toMatch(/button\.am-close:focus-visible/);
     });
 });
 

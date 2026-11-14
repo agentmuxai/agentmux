@@ -8,14 +8,20 @@ export type DropAt = 0 | 1 | 2 | 3 | 4;
 
 /** The agent entry's id in the status bar registry. */
 export const AGENT_COUNTS_ID = "agentmux:agent-counts";
+/** The token count's id: the item that carries the dot for AgentMux's own failing model calls. */
+export const TOKEN_USAGE_ID = "agentmux:token-usage";
 
 /**
  * The fit tier at which a status bar slot goes in a narrow bar. The agent entry is where a request that waits on the
  * person is kept once its toast has gone, so while anything waits it is never dropped (every other item that can go
- * has gone before the last tier); the others keep their own.
+ * has gone before the last tier); the others keep their own. The token count is kept in the same way while AgentMux's
+ * own model calls are failing, because its red dot is the only place that says so: from the tier it would go at, it
+ * shrinks to the dot (StatusBar.scss).
  */
-export function slotDropAt(id: string, base: DropAt | undefined, waiting: boolean): DropAt | undefined {
-    return id === AGENT_COUNTS_ID && waiting ? undefined : base;
+export function slotDropAt(id: string, base: DropAt | undefined, waiting: boolean, failing = false): DropAt | undefined {
+    if (id === AGENT_COUNTS_ID && waiting) return undefined;
+    if (id === TOKEN_USAGE_ID && failing) return undefined;
+    return base;
 }
 
 /** What a narrow bar sheds, tier by tier, until it fits on one line. Tier 0 hides only the slots that drop at 0. */

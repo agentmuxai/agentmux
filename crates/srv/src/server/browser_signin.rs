@@ -41,7 +41,7 @@ const ANSWER_WAIT: Duration = Duration::from_secs(10 * 60);
 /// How long the notice shows before a sign-in under a grant is typed.
 const NOTICE: Duration = Duration::from_secs(5);
 /// What the agent is told when another sign-in's notice shows on the pane.
-const BUSY: &str = "another sign-in is showing its notice on this pane: nothing was typed; try again when it is done";
+pub(crate) const BUSY: &str = "another sign-in is showing its notice on this pane: nothing was typed; try again when it is done";
 
 /// The notices showing, by id: the pane and what stops the sign-in.
 static PENDING: LazyLock<Mutex<HashMap<String, (String, oneshot::Sender<()>)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -112,11 +112,12 @@ impl Drop for Showing<'_> {
     }
 }
 
-/// Show "<agent> is signing in" for [`NOTICE`]: `Some(true)` when nobody stopped
-/// it, `None` when another sign-in's notice already shows on the pane. One at a
-/// time per pane, so the sign-in waiting to be typed is always the one the pane
+/// Show "<agent> is signing in" for [`NOTICE`] (`kind` `signin`, or `account`
+/// for an agent making a new account, for as long as `wait` says): `Some(true)`
+/// when nobody stopped it, `None` when another notice already shows on the pane.
+/// One at a time per pane, so what waits to be typed is always what the pane
 /// shows and its Stop stops.
-async fn notice(state: &AppState, block_id: &str, agent: &str, origin: &str, user: &str) -> Option<bool> {
+pub(crate) async fn notice(state: &AppState, block_id: &str, agent: &str, origin: &str, user: &str, kind: &str, wait: Duration) -> Option<bool> {
     let id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel();
     {
@@ -127,10 +128,10 @@ async fn notice(state: &AppState, block_id: &str, agent: &str, origin: &str, use
         pending.insert(id.clone(), (block_id.to_string(), tx));
     }
     let _showing = Showing { state, block_id, id: id.clone() };
-    let deadline = agentmux_common::time::now_ms() + NOTICE.as_millis() as i64;
-    set_notice(state, block_id, json!({ "id": id, "agent": agent, "origin": origin, "user": signins::mask(user), "deadline_ms": deadline }));
+    let deadline = agentmux_common::time::now_ms() + wait.as_millis() as i64;
+    set_notice(state, block_id, json!({ "id": id, "agent": agent, "origin": origin, "user": signins::mask(user), "kind": kind, "deadline_ms": deadline }));
     Some(tokio::select! {
-        _ = tokio::time::sleep(NOTICE) => true,
+        _ = tokio::time::sleep(wait) => true,
         _ = rx => false,
     })
 }
@@ -141,6 +142,12 @@ async fn notice(state: &AppState, block_id: &str, agent: &str, origin: &str, use
 pub(crate) fn reset_notices(state: &AppState) {
     let live: std::collections::BTreeSet<String> = PENDING.lock().values().map(|(b, _)| b.clone()).collect();
     super::browser_signin_offer::clear_stale(state, PENDING_META_KEY, &live, "[signin]");
+}
+
+/// The id of the notice showing on pane `block_id`, for the tests' stand-in for the person's Stop.
+#[cfg(test)]
+pub(crate) fn pending_id(block_id: &str) -> Option<String> {
+    PENDING.lock().iter().find(|(_, (b, _))| b == block_id).map(|(id, _)| id.clone())
 }
 
 /// The person pressed [Stop] on notice `id` of pane `block_id`.
@@ -179,7 +186,7 @@ struct Refusal {
 
 /// The tab's profile, and whether it is Incognito, which keeps no sign-ins of
 /// its own: it may use Personal's, asked each time.
-fn profile_of(block: &crate::backend::obj::Block) -> (String, bool) {
+pub(crate) fn profile_of(block: &crate::backend::obj::Block) -> (String, bool) {
     let identity = block.meta.get(super::browser_identity::IDENTITY_META_KEY).and_then(Value::as_str);
     match signins::profile_for_tab(identity) {
         Some(p) => (p, false),
@@ -220,7 +227,7 @@ async fn approve(state: &AppState, block_id: &str, agent: &str, agent_pane: Stri
     if !granted {
         return ask(state, block_id, agent, agent_pane, c, incognito, key, reason).await;
     }
-    match notice(state, block_id, agent, &c.origin, &c.user).await {
+    match notice(state, block_id, agent, &c.origin, &c.user, "signin", NOTICE).await {
         Some(true) => Ok(false),
         Some(false) => Err(Refusal { outcome: "stopped", how: How::Declined, code: StatusCode::FORBIDDEN, why: "the person stopped the sign-in: nothing was typed".to_string() }),
         None => Err(Refusal { outcome: "another was showing", how: How::Refused(BUSY.to_string()), code: StatusCode::CONFLICT, why: BUSY.to_string() }),
@@ -230,8 +237,8 @@ async fn approve(state: &AppState, block_id: &str, agent: &str, agent_pane: Stri
 /// The agent may still act on the pane after the wait: the person had time to
 /// pause it or take it over, and nothing is typed then. The call's auth was
 /// checked when it came; the wait can outlast its freshness window.
-fn still_allowed(state: &AppState, req: &SigninRequest, block_id: &str) -> Result<(), (StatusCode, String)> {
-    match super::ui_handlers::target_for(state, block_id, &req.auth.agent_id, req.pane.as_deref()) {
+pub(crate) fn still_allowed(state: &AppState, agent_id: &str, pane: Option<&str>, block_id: &str) -> Result<(), (StatusCode, String)> {
+    match super::ui_handlers::target_for(state, block_id, agent_id, pane) {
         Ok(b) if b == block_id => Ok(()),
         Ok(_) => Err((StatusCode::CONFLICT, "the pane changed while the sign-in waited: nothing was typed".to_string())),
         Err((code, e)) => Err((code, format!("{e}; nothing was typed"))),
@@ -320,7 +327,7 @@ pub(crate) async fn handle_signin(
             return err_response(r.code, r.why);
         }
     };
-    if let Err((code, e)) = still_allowed(&state, &req, &block_id) {
+    if let Err((code, e)) = still_allowed(&state, &req.auth.agent_id, req.pane.as_deref(), &block_id) {
         noted(&state, &block_id, &agent, How::Refused(e.clone()));
         return err_response(code, e);
     }

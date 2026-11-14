@@ -13,7 +13,19 @@
 // parser silently misbehaved depending on which side they landed on.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { checkSpawnerTier, logSrvVersion, parseArgs, renderLayout, renderMigrations, renderWork } from "./muxspect.mjs";
+import {
+    channelProblem,
+    checkSpawnerTier,
+    logSrvVersion,
+    parseArgs,
+    renderInstances,
+    renderLayout,
+    renderMigrations,
+    renderWork,
+    splitChannelFlag,
+    uptimeString,
+    withChannel,
+} from "./muxspect.mjs";
 
 describe("muxspect renderMigrations", () => {
     let logSpy;
@@ -545,5 +557,89 @@ describe("muxspect renderWork", () => {
         const items = [{ id: "w0", title: "only one", state: "open", attempts: 0, max_attempts: 3 }];
         renderWork({ items }, "", 500);
         expect(printed()).not.toContain("there may be MORE");
+    });
+});
+
+describe("muxspect --channel (Phase 2a)", () => {
+    it("takes the channel from either spelling, anywhere in argv, and keeps it out of the positionals", () => {
+        for (const argv of [
+            ["--channel", "posa-dev", "describe", "b1"],
+            ["describe", "--channel", "posa-dev", "b1"],
+            ["describe", "b1", "--channel=posa-dev"],
+        ]) {
+            const r = parseArgs(argv);
+            expect(r.channel, argv.join(" ")).toBe("posa-dev");
+            expect(r.cmd).toBe("describe");
+            expect(r.blockId).toBe("b1");
+        }
+    });
+
+    it("no flag means no channel, and a bare flag is an empty one the caller reports", () => {
+        expect(parseArgs(["list"]).channel).toBeUndefined();
+        expect(splitChannelFlag(["list", "--channel"]).channel).toBe("");
+        expect(splitChannelFlag(["--channel", "--json", "list"])).toEqual({ channel: "", rest: ["--json", "list"] });
+    });
+
+    it("bare --channel <name> with no command lists that instance", () => {
+        const r = parseArgs(["--channel", "posa-dev"]);
+        expect(r.cmd).toBe("list");
+        expect(r.channel).toBe("posa-dev");
+    });
+
+    it("adds the channel to a path, with the right separator and escaping", () => {
+        expect(withChannel("/api/v1/muxspect/list", undefined)).toBe("/api/v1/muxspect/list");
+        expect(withChannel("/api/v1/muxspect/list", "dev")).toBe("/api/v1/muxspect/list?channel=dev");
+        expect(withChannel("/api/v1/muxspect/describe?block_id=b", "a b/c")).toBe(
+            "/api/v1/muxspect/describe?block_id=b&channel=a%20b%2Fc",
+        );
+    });
+
+    it("accepts the forwarded reads and refuses everything else", () => {
+        for (const cmd of ["list", "describe", "watch", "dock", "layout", "verify-sender"]) {
+            expect(channelProblem(cmd, undefined, "dev"), cmd).toBeNull();
+        }
+        expect(channelProblem("list", undefined, undefined)).toBeNull();
+        expect(channelProblem("list", undefined, "")).toMatch(/needs a name/);
+        expect(channelProblem("dock", "clear", "dev")).toMatch(/never takes --channel/);
+        for (const cmd of ["find", "conversations", "conversation", "work", "migrations", "instances"]) {
+            expect(channelProblem(cmd, undefined, "dev"), cmd).toMatch(/does not take --channel/);
+        }
+    });
+});
+
+describe("muxspect instances", () => {
+    let logSpy;
+    beforeEach(() => {
+        logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    });
+    afterEach(() => {
+        logSpy.mockRestore();
+    });
+    const printed = () => logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+
+    it("prints a table with the caller marked", () => {
+        renderInstances({
+            instances: [
+                { channel: "stable", version: "0.60.27", pid: 100, agent_count: 7, uptime_ms: 90_000_000, self: true },
+                { channel: "dev-posa", version: "0.60.28", pid: 200, agent_count: 0, uptime_ms: 125_000, self: false },
+            ],
+        });
+        const out = printed();
+        expect(out).toMatch(/\* stable\s+0\.60\.27\s+100\s+7\s+1d 1h/);
+        expect(out).toMatch(/ {2}dev-posa\s+0\.60\.28\s+200\s+0\s+2m/);
+        expect(out).toContain("* = the instance you are in");
+    });
+
+    it("says so when none are listed, and shows the note the server gave", () => {
+        renderInstances({ instances: [], error: "no shared folder" });
+        expect(printed()).toContain("note: no shared folder");
+        expect(printed()).toContain("no live AgentMux instances");
+    });
+
+    it("formats uptimes as days, hours, minutes or seconds", () => {
+        expect(uptimeString(40_000)).toBe("40s");
+        expect(uptimeString(5 * 3_600_000 + 12 * 60_000)).toBe("5h 12m");
+        expect(uptimeString(2 * 86_400_000 + 3 * 3_600_000)).toBe("2d 3h");
+        expect(uptimeString(undefined)).toBe("?");
     });
 });

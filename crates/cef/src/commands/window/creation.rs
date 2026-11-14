@@ -91,7 +91,24 @@ impl std::error::Error for FrontendUrlError {
 ///   the error into a built-in static error page via
 ///   `assets_missing_data_url` rather than navigating to a network
 ///   URL.
+///
+/// Asked on the UI thread at every page load and every pane navigation (the
+/// client's `frontend_origins`), so an answer is kept per port: the binary, its
+/// assets and the dev server's port do not change under a running process. A
+/// failure is not kept, so missing assets are looked for again.
 pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> Result<String, FrontendUrlError> {
+    static RESOLVED: parking_lot::Mutex<Option<(u16, String)>> = parking_lot::Mutex::new(None);
+    if let Some((port, base)) = RESOLVED.lock().as_ref() {
+        if *port == ipc_port {
+            return Ok(base.clone());
+        }
+    }
+    let base = resolve_frontend_base_url_uncached(ipc_port)?;
+    *RESOLVED.lock() = Some((ipc_port, base.clone()));
+    Ok(base)
+}
+
+fn resolve_frontend_base_url_uncached(ipc_port: u16) -> Result<String, FrontendUrlError> {
     // Detect dev mode by the host exe PATH (`is_dev_self`), NOT
     // `AGENTMUX_RUNTIME_MODE`. A running `task dev` AgentMux leaks that env
     // into descendants, so an env-first check would route a *packaged*
@@ -1262,5 +1279,21 @@ mod approval_view_tests {
         assert!(!is_approval_view(Some("some-future-view")));
         assert!(!is_approval_view(Some("")));
         assert!(!is_approval_view(None));
+    }
+}
+
+#[cfg(test)]
+mod frontend_url_tests {
+    /// The page-load and pane-navigation handlers ask for the frontend's address on the UI
+    /// thread. A test binary runs from `target/`, so it is a source-tree build, where the
+    /// answer used to start `git` and wait for it on every call (task #47585).
+    #[test]
+    fn resolving_the_frontend_address_starts_no_process() {
+        let before = agentmux_common::runtime_mode::git_branch_lookups();
+        for _ in 0..3 {
+            let _ = super::resolve_frontend_base_url(4321);
+            let _ = super::resolve_frontend_base_url_uncached(4321);
+        }
+        assert_eq!(agentmux_common::runtime_mode::git_branch_lookups(), before);
     }
 }

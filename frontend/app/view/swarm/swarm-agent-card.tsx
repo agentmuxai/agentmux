@@ -9,7 +9,7 @@ import { Tag } from "@/app/element/ui/Tag";
 import { tip } from "@/app/element/tip";
 import { HeldTaskChip } from "@/app/view/kanban/kanban-held";
 import { formatCompactNumber } from "@/util/format-count";
-import { formatLineAge, isAwaitingUser, isMutedLine, lineAt, swarmLineTooltip, type SwarmLine } from "@/app/store/swarm-line";
+import { awaitsBrowserAnswer, formatLineAge, isAwaitingUser, isMutedLine, lineAt, swarmLineTooltip, type SwarmLine } from "@/app/store/swarm-line";
 import { unavailableLineText, unavailableTitle, type AgentUnavailable } from "@/app/store/agent-unavailable";
 import type { AgentDisplayStatus } from "./swarm-display-status";
 import { Highlight } from "./swarm-filter-bar";
@@ -128,6 +128,7 @@ export function AgentCardHead(props: AgentCardHeadProps): JSX.Element {
                     <AgentStatusChip
                         status={props.displayStatus()}
                         awaitingUser={isAwaitingUser(blockMeta(), node().agentStatus)}
+                        browserRequest={awaitsBrowserAnswer(blockMeta(), node().agentStatus)}
                         blockId={node().blockId}
                     />
                 }

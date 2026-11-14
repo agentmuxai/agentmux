@@ -71,16 +71,27 @@ fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
+/// This machine's label for each account signed in on it, by the account's stable
+/// id. An account with no stable id (an API key, say) is left out.
+fn account_labels(id_store: &crate::backend::storage::store::Store) -> crate::backend::swarm_remote::AccountLabels {
+    let all = id_store.identity_list(None).unwrap_or_default();
+    all.iter()
+        .filter_map(|a| Some((crate::identity::stable_account::stable_account_id(a)?, super::agent_spawn::account_label_in(a, &all))))
+        .collect()
+}
+
 /// `swarm.other-instances`: this machine's other channels (the host-global shared
 /// registry) and the LAN hosts (the LAN discovery peer list), with their agents'
 /// names (Phases 1 and 2 of SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md)
 /// and, where their instance reports it, their state (Phase 4). No content, no
-/// credentials and no addresses.
+/// credentials and no addresses. A peer's agent's account is named only when the
+/// same account is signed in here, and then by this machine's own label for it.
 fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let hostname = state.hostname.clone();
     let own_url = state.local_web_url.clone();
     let lan_discovery = state.lan_discovery.clone();
     let http = state.http_client.clone();
+    let id_store = state.id_store.clone();
     // The response stays `Value`: the frontend models the snapshot with its own
     // types (swarm-remote.ts), which the stub keeps (generated-manifest.json `returns`).
     engine.register_typed(COMMAND_SWARM_OTHER_INSTANCES, move |_data: serde_json::Value, _ctx| {
@@ -88,16 +99,18 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
         let own_url = own_url.clone();
         let lan_peers = lan_discovery.get_instances();
         let http = http.clone();
+        let id_store = id_store.clone();
         async move {
-                // Directory and file reads; off the async runtime's worker
+                // Directory, file and store reads; off the async runtime's worker
                 // threads. The definitions give an older channel's agents their
-                // provider (REPORT_SWARM_REMOTE_PROVIDER_ICON_RCA_2026_10_18.md §6.1).
-                let (entries, defined) = tokio::task::spawn_blocking(|| {
+                // provider (REPORT_SWARM_REMOTE_PROVIDER_ICON_RCA_2026_10_18.md §6.1);
+                // this machine's accounts name the ones a peer's agents run on.
+                let (entries, defined, account_labels) = tokio::task::spawn_blocking(move || {
                     let entries = crate::registry::resolve_shared_reactive_dir()
                         .map(|dir| crate::backend::reactive::registry::list_all_shared(&dir))
                         .unwrap_or_default();
                     let defined = crate::backend::swarm_remote::defined_providers(&entries);
-                    (entries, defined)
+                    (entries, defined, account_labels(&id_store))
                 })
                 .await
                 .unwrap_or_default();
@@ -117,6 +130,7 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     now_ms,
                 );
                 crate::backend::swarm_remote::fill_defined_providers(&mut snapshot, &entries, &defined);
+                crate::backend::swarm_remote::fill_account_labels(&mut snapshot, &account_labels);
                 serde_json::to_value(&snapshot).map_err(|e| format!("swarm.other-instances: {e}"))
         }
     });

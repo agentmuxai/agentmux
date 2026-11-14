@@ -14,6 +14,8 @@ pub mod agent_lan_keys;
 pub mod agent_uid_keys;
 pub mod agent_wan_keys;
 pub mod db_copy;
+pub mod drone_store;
+pub mod drone_types;
 pub mod wan_identity;
 pub mod agent_native_memory;
 pub mod agent_native_memory_versions;

@@ -2,9 +2,8 @@
 
 /**
  * One cross-instance/channel entry from the host-global shared registry
- * (`backend::reactive::registry::AgentEntry`), narrowed to what the
- * frontend actually needs to render a "registered elsewhere too" badge —
- * deliberately excludes `local_url`/`auth_key`, which are internal
- * forwarding plumbing, not UI-relevant.
+ * (`backend::reactive::registry::AgentEntry`), narrowed to what the frontend needs for a
+ * "registered elsewhere too" badge: `local_url`/`auth_key` are internal forwarding plumbing and
+ * stay out.
  */
 export type RemoteRegistrationEntry = { channel: string, pid: number, updated_at: number, };

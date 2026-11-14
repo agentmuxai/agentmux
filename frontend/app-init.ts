@@ -989,6 +989,7 @@ function installVoiceInputErrorListener(): void {
                 title = "No microphone detected";
                 message = "Connect a microphone and click the mic again.";
                 break;
+            case "not-configured":
             case "service-not-allowed":
                 title = "Voice transcription unavailable";
                 message =

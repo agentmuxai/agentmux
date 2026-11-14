@@ -325,7 +325,7 @@ impl Store {
 
     /// Crate-internal accessor for sibling modules that maintain their
     /// own per-table CRUD via the `DroneStore` extension trait
-    /// pattern (see `crates/srv/src/drone/storage.rs`). Outside
+    /// pattern (see `crates/srv/src/backend/storage/drone_store.rs`). Outside
     /// callers must use the typed methods on this impl.
     pub(crate) fn conn(&self) -> &Mutex<Connection> {
         &self.conn

@@ -47,6 +47,11 @@ export const WpsEvent = {
     MessageFlow: "message-flow",
     // A task filed, reassigned, started or handed back: names and numbers only (Atlas lines). Payload TaskFlowEvent.
     TaskFlow: "task-flow",
+    // A review of a PR, the checks of its head commit, its end: ids, states and times only (Atlas review bot and CI nodes).
+    // Payloads ReviewFlowEvent, ChecksFlowEvent, MergeFlowEvent.
+    ReviewFlow: "review-flow",
+    ChecksFlow: "checks-flow",
+    MergeFlow: "merge-flow",
     // Image attachment processing, scoped `block:<id>` of the pane that
     // started the batch. Payloads in frontend/types/rpc/Attachment*Event.ts;
     // see docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.5.

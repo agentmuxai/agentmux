@@ -41,7 +41,7 @@ use super::browser_click_approval::{approve_click, ClickRefused};
 use super::ui_handlers::{err_response, proxy_value, target_block_id};
 use super::AppState;
 
-const HOST_WAIT: Duration = Duration::from_secs(30);
+pub(super) const HOST_WAIT: Duration = Duration::from_secs(30);
 /// How long the person has to allow a capture that replaces a value.
 const ANSWER_WAIT: Duration = Duration::from_secs(120);
 /// The longest the host waits for a download after its click (2 minutes), and
@@ -50,38 +50,42 @@ const DOWNLOAD_WAIT: Duration = Duration::from_secs(150);
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct CaptureRequest {
-    auth: UiAutomationAuth,
+    pub(super) auth: UiAutomationAuth,
     #[serde(default)]
-    pane: Option<String>,
+    pub(super) pane: Option<String>,
     #[serde(rename = "ref", default)]
-    ref_: Option<String>,
+    pub(super) ref_: Option<String>,
+    /// A card shown on the page: each part's key (`number`, `exp`, `exp_month`, `exp_year`, `cvc`, `name`, `zip`) and the
+    /// ref of the element that shows it. Saved whole as a new card (`as`), instead of `ref`.
+    #[serde(default)]
+    pub(super) card: Option<BTreeMap<String, String>>,
     /// A new entry: its kind (`api-key` by default), label, and plain fields.
     #[serde(rename = "as", default)]
-    into: Option<CaptureAs>,
+    pub(super) into: Option<CaptureAs>,
     /// Or an existing entry, whose value this replaces.
     #[serde(default)]
-    entry: Option<String>,
+    pub(super) entry: Option<String>,
     /// The file the element downloads, instead of the element's text.
     #[serde(default)]
-    download: bool,
+    pub(super) download: bool,
     /// How long to wait for the download after the click (at most 2 minutes).
     #[serde(default)]
     timeout_ms: Option<u64>,
     /// Why the agent keeps what the page shows: one line of 8 to 300 characters, required.
     #[serde(default)]
-    reason: Option<String>,
+    pub(super) reason: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct CaptureAs {
     #[serde(default)]
-    kind: Option<String>,
+    pub(super) kind: Option<String>,
     #[serde(default)]
-    label: String,
+    pub(super) label: String,
     #[serde(default)]
-    fields: BTreeMap<String, String>,
+    pub(super) fields: BTreeMap<String, String>,
     #[serde(default)]
-    expires: Option<String>,
+    pub(super) expires: Option<String>,
 }
 
 /// The plain field a kind keeps a page's origin in.
@@ -154,7 +158,19 @@ async fn ask_to_replace(who: &Asking<'_>, entry: &(String, String, &'static str,
 }
 
 /// `POST /api/v1/ui/browser/capture`.
-pub(crate) async fn handle_browser_capture(
+/// `POST /api/v1/ui/browser/capture`: a card the page shows is saved whole, anything else is one value.
+pub(crate) async fn handle_capture(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<CaptureRequest>,
+) -> Response {
+    if req.card.is_some() {
+        return super::browser_capture_card::capture_card(state, caller, req).await;
+    }
+    handle_browser_capture(State(state), caller, Json(req)).await
+}
+
+async fn handle_browser_capture(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<CaptureRequest>,
@@ -278,7 +294,7 @@ const DOWNLOADED_NOTE: &str = "Saved in the Vault; you never see the file. It wa
 
 /// What the agent is told about the page once the value is saved: what keeps
 /// hiding it there depends on whether the element could be marked.
-fn captured_note(marked: bool) -> &'static str {
+pub(super) fn captured_note(marked: bool) -> &'static str {
     if marked {
         "Saved in the Vault; you never see the value. While it is on the page, screenshots black it out and eval is refused on this tab; snapshots keep hiding it while it shows as a secret, and always in a field."
     } else {
@@ -316,7 +332,7 @@ pub(crate) fn store_captured(
 
 /// The value and origin from the host's answer, the value moved out of the JSON
 /// into memory that is wiped when dropped.
-fn take_read(mut v: Value) -> Result<(Zeroizing<String>, String), String> {
+pub(super) fn take_read(mut v: Value) -> Result<(Zeroizing<String>, String), String> {
     let origin = v.get("origin").and_then(Value::as_str).unwrap_or("").to_string();
     match v.get_mut("value").map(Value::take) {
         Some(Value::String(s)) => Ok((Zeroizing::new(s), origin)),

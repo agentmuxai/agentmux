@@ -172,6 +172,7 @@ fn row_in(state: AgentRuntimeState, desired: agent_runtime::AgentDesiredState) -
         detail: None,
         resets_at: None,
         block_id: None,
+        waiting_in: None,
         desired,
         name: "a".into(),
         provider: "claude".into(),

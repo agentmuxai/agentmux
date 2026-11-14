@@ -142,6 +142,80 @@ One PR, in this order, each behind the pane existing:
 Out of v1, filed as follow-ups: the message-flow event and pulses; PR and branch on the card; review bot, CI and
 container nodes; lasso select to Broadcast or Bulk stop; the cloud tier (typed, never sent).
 
+### 6.1 After v1: selecting on the map (#47554)
+
+Built as decision 6 foresaw. The map selects into **the Swarm's own selection** (the pane's `SwarmViewModel`), and the
+actions are the Swarm's own components, so nothing about reach, approval or reporting is decided twice:
+
+- **Selecting.** A drag on the background still pans. With **Shift** held it draws a box, and the agents the box
+  touches join the selection when it is let go (Escape drops it). **Select**, a toggle in the bar, swaps the two for
+  a trackpad or a touch screen: a drag selects and Shift pans. A Shift, Ctrl or Cmd click on a node (any click with
+  Select on) adds or removes that one agent. A box only adds; "Select none" clears.
+- **What can be selected** is what the Swarm can tick: this instance's agents that have a pane, and the agents of
+  other instances whose machine is not stale. A stopped agent is not a node and is not selected from the map.
+- **Acting.** While anything is selected (or Select is on), a strip under the map holds the Swarm's Select all and
+  count, **Stop** (with the Swarm's confirmation, which lists every agent and what it cannot reach), the Supervisor
+  **Mode** menu, and the **Broadcast** composer; the per-agent result panel follows. It is under the map, not over
+  it, so the map's top left stays where it is when the strip appears. An agent on a LAN peer gets a broadcast and
+  cannot be stopped from here, exactly as in the Swarm.
+
+### 6.2 After v1: messages and task hand-overs on the map (#47554)
+
+Decision 3's second half, on the two srv events that were filed for it: `message-flow` (#7173) and `task-flow` (#7192).
+Both carry ids, hosts and times only, so the map shows that something passed between two agents and never what.
+
+- **A message** draws a line from its sender's node to its receiver's as srv handles it: the line draws itself in that
+  direction, lands on a dot, stays about 12 seconds and fades. Its colour says what became of it: the accent for
+  delivered, muted for held or queued for later, the warning colour for refused. A repeat between the same two
+  agents draws the line again; a message and its answer bow to opposite sides, so both show.
+- **One end off the map** (the other agent is stopped, filtered out, or not an agent of a machine listed, such as
+  the review bot until it has a node): a ring round the end that is, which fades.
+- **A task one agent hands another** (filed for, moved to or started on it) is a dotted line with the task's
+  number, for five minutes; at most twelve show, the oldest going first. A task the operator filed, or one for
+  anyone, has one end and draws nothing.
+- **When the pane opens** it reads srv's recent lists (`GET /api/v1/message-flow`, `/api/v1/task-flow`), so the last
+  seconds of messages and the last minutes of hand-overs are already there.
+- **Which node an end is.** srv names an end by the name messages reach the agent by and, when it knows it, its
+  host. This instance's agents carry that name in their pane (it differs from the display name for a renamed
+  agent); another instance's agent is matched by its name on its machine. An end that matches no node, or two, is
+  not drawn: no line rather than a wrong one.
+- **Lines run behind the nodes.** A line between two agents that are not neighbours passes behind the nodes in
+  between, so it never crosses a name; its ends show at the two nodes' edges. A task's number sits on the stretch
+  of its line nearest the middle that no node covers, in the text colour (the look checks on macOS and Linux both
+  found a number landing on another node's name, and dim on the dark theme, with the lines in front). Agents side
+  by side in a row leave no such stretch (the gap between two is narrower than a number, and the line is behind
+  the ones in between), so there the number goes just under or just over the node the line lands on, at the corner
+  it lands on (the Linux re-look found the number hidden behind the node in between). A number also keeps clear of
+  the numbers placed before it. Two tasks handed to one agent in a row land on the same corner, so the second
+  number takes the other side of the node, and a third goes a number's width along the node's edge (the same
+  re-look found one number drawn on top of the other). A task and one handed back between two agents close
+  together bow apart by less than a number's width, so the second number goes next to the first.
+- **Motion.** With the Animations setting on Off, a line appears whole and goes after its time; nothing travels.
+  The operating system's own "reduce motion" preference alone does not change it, as everywhere in the app
+  (the motion policy's 2026-10-15 decision).
+
+### 6.3 After v1: more on the card (#47553)
+
+Decision 5's three additions. Each is a row on the card that shows only when its fact is known; the node at rest
+does not change.
+
+- **Runtime.** Host or container, with the badge the agent pane uses, for this instance's agents (from the pane's
+  own meta). Another instance's agents say nothing about it yet; that comes with the container status work
+  (#47595).
+- **Account**, for an agent of another machine. Its machine reports the account as an id every machine agrees on
+  (a provider and a hash, never an email). srv now adds this computer's own label for it when the same account is
+  signed in here (`swarm.other-instances`, `account_label`), so the row reads "Work"; otherwise it reads "Not
+  signed in on this computer". Under it, the other agents on the map that run on the same account, since they
+  use up the same quota. Nothing about an account leaves the machine that did not already.
+- **Branch.** The repository and branch of the agent's clone, from srv's work facts (`GET /api/v1/work-facts`),
+  else the branch its newest held task was filed with.
+- **Tasks.** The Kanban tasks it holds (claimed, waiting on a question, or in review), the three touched last,
+  each with its pull request as a button that opens it. A title is cut after two lines, and the whole of it is
+  its hover label (the Linux look check had one title fill four lines of the card).
+
+Branch and tasks are this instance's facts, so they show for its own agents only. They are read while a card is
+open and not otherwise: the work facts once and then every 20 seconds, the board through the Kanban's own model.
+
 ## 7. Risks and notes
 
 - **"Steward" is not a stored seat role** (`ROLES` is leader, worker, specialist, platform_tester, analyst, super), so a

@@ -15,9 +15,9 @@ use std::path::PathBuf;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::backend::computer_use_skill::{check_signature, install, read_folder, Bundle};
+use crate::backend::memory::record::sha256_hex;
 use crate::backend::skill_file;
 use crate::backend::storage::skill_app::SkillApp;
 use crate::backend::storage::store::Store;
@@ -56,6 +56,9 @@ pub struct CatalogVersions {
 pub struct CatalogApp {
     #[serde(default)]
     pub vendor: String,
+    /// Per platform, the executable names the app runs as: how its version is found on this computer.
+    #[serde(default)]
+    pub executables: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub versions: CatalogVersions,
 }
@@ -121,11 +124,16 @@ pub struct AppSkillCatalogItem {
     pub fingerprint: String,
     /// `agentmux` when the AgentMux catalog key signed it, else `community`.
     pub badge: String,
-    /// `not_installed`, `current` (the same files), `update` (installed here is older), `newer_here` (installed here is
-    /// newer than the catalog's), or `changed` (the same version, other files).
+    /// `not_installed`, `current` (exactly what the catalog lists), `update` (installed here is older), `newer_here`
+    /// (installed here is newer than the catalog's), or `changed` (the same version, but not as the catalog lists it:
+    /// other files, an edited text, or added another way).
     pub state: String,
     pub installed_version: Option<String>,
     pub skill_id: Option<String>,
+    /// The application itself is on this computer (found by the executable names the entry lists for this platform).
+    pub app_found: bool,
+    /// The application's version here, when it is found and says one.
+    pub app_version: Option<String>,
 }
 
 fn is_part(s: &str) -> bool {
@@ -203,7 +211,9 @@ pub fn items(entries: Vec<CatalogEntry>, installed: &BTreeMap<String, SkillApp>)
             let here = installed.iter().find(|(_, a)| format!("{}.{}", a.info.publisher, a.info.id) == entry.id);
             let state = match here {
                 None => "not_installed",
-                Some((_, a)) if a.content_hash == entry.hash => "current",
+                Some((_, a)) if a.content_hash == entry.hash && a.from_catalog => "current",
+                // The same files, but not as the catalog lists them: edited in Memory, or added another way.
+                Some((_, a)) if a.content_hash == entry.hash => "changed",
                 Some((_, a)) => match version_cmp(&entry.version, &a.info.version) {
                     std::cmp::Ordering::Greater => "update",
                     std::cmp::Ordering::Less => "newer_here",
@@ -216,10 +226,63 @@ pub fn items(entries: Vec<CatalogEntry>, installed: &BTreeMap<String, SkillApp>)
                 state: state.to_string(),
                 installed_version: here.map(|(_, a)| a.info.version.clone()),
                 skill_id: here.map(|(id, _)| id.clone()),
+                app_found: false,
+                app_version: None,
                 entry,
             }
         })
         .collect()
+}
+
+/// Says for each entry whether its application is on this computer, and which version, by the executable names it lists
+/// for `platform` (`find` is `app_version::find`). An entry that lists none for this platform is left as it is.
+pub fn add_app_versions(items: &mut [AppSkillCatalogItem], platform: &str, find: impl Fn(&[String]) -> Option<crate::backend::app_version::Found>) {
+    for item in items {
+        let Some(names) = item.entry.app.executables.get(platform).filter(|n| !n.is_empty()) else { continue };
+        if let Some(found) = find(names) {
+            item.app_found = true;
+            item.app_version = found.version;
+        }
+    }
+}
+
+/// An installed skill's application on this computer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AppSkillHere {
+    pub skill_id: String,
+    /// The application is on this computer (found by the executable names the skill lists for this platform).
+    pub found: bool,
+    /// Its version, when it is found and says one.
+    pub version: Option<String>,
+}
+
+/// For each installed skill that lists an executable for `platform`: whether its application is here, and which
+/// version (`find` is `app_version::find`). A skill that lists none for this platform is left out: there is nothing to look for.
+pub fn installed_here(
+    installed: &BTreeMap<String, SkillApp>,
+    platform: &str,
+    find: impl Fn(&[String]) -> Option<crate::backend::app_version::Found>,
+) -> Vec<AppSkillHere> {
+    installed
+        .iter()
+        .filter_map(|(id, app)| {
+            let names = app.info.executables.get(platform).filter(|n| !n.is_empty())?;
+            let found = find(names);
+            Some(AppSkillHere { skill_id: id.clone(), found: found.is_some(), version: found.and_then(|f| f.version) })
+        })
+        .collect()
+}
+
+/// The platform name skills use for the computer this runs on.
+pub fn this_platform() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
 }
 
 /// Checks a downloaded zip against its entry: the zip's SHA-256, then, unpacked and read like any skill folder, the
@@ -227,7 +290,7 @@ pub fn items(entries: Vec<CatalogEntry>, installed: &BTreeMap<String, SkillApp>)
 /// another key than the one this publisher is pinned to here). Returns the skill and the key that signed it.
 pub fn check_download(catalog: &Store, zip: &[u8], entry: &CatalogEntry) -> Result<(Bundle, String), String> {
     let id = &entry.id;
-    if hex_sha256(zip) != entry.zip_sha256 {
+    if sha256_hex(zip) != entry.zip_sha256 {
         return Err(format!("{id}'s download doesn't match the catalog"));
     }
     let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -253,10 +316,6 @@ pub fn check_download(catalog: &Store, zip: &[u8], entry: &CatalogEntry) -> Resu
         Some(key) if key == entry.publisher_key => Ok((bundle, key)),
         _ => Err(format!("{id} isn't signed by the author the catalog lists")),
     }
-}
-
-fn hex_sha256(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// What `install_download` did.
@@ -300,6 +359,7 @@ pub fn install_download(catalog: &Store, zip: &[u8], entry: &CatalogEntry, now_m
         catalog.skill_set_reach(&skill.id, false, false, now_ms).map_err(|e| e.to_string())?;
     }
     install(catalog, &skill.id, &bundle, Some(&signer), now_ms).map_err(|e| e.to_string())?;
+    catalog.skill_catalog_source_set(&skill.id, &entry.hash, &entry.publisher_key).map_err(|e| e.to_string())?;
     Ok(Installed { skill_id: skill.id, name: skill.name, version: bundle.info.version, updated: current.is_some() })
 }
 

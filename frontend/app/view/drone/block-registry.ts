@@ -34,7 +34,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "variables",
         emoji: "🔢",
         label: "Variables",
-        description: "Declare drone-scope variables. Read via {{var.name}}.",
+        description: "Declare drone-scope variables. Read via {{var.name}}; any {{reference}} takes filters: {{a.log | tail:20 | lower}} (tail, head, json:path, lower, trunc, default).",
         color: "#a855f7",
         defaultData: {
             entries: [{ name: "example", value: "hello" }],
@@ -120,6 +120,21 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],
     },
+    spawn: {
+        kind: "spawn",
+        emoji: "🚀",
+        label: "Spawn",
+        description: "Start a worker of an agent with a brief. The leader is fixed; every {{...}} value in the brief is put in as quoted data. The person is told first unless their settings allow it.",
+        color: "#8b5cf6", // colour: fixed (the block's identity colour)
+        defaultData: {
+            leader: "",
+            brief: "",
+            model: "",
+            account: "",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     api: {
         kind: "api",
         emoji: "🌐",
@@ -139,7 +154,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "condition",
         emoji: "🔀",
         label: "Condition",
-        description: "Boolean expression. Output `result` is true / false.",
+        description: "Boolean expression: a == b, or combine with && || ! ( ) and contains, matches, in_set, exists. Output `result` is true / false.",
         color: "#eab308",
         defaultData: {
             expr: "",
@@ -200,6 +215,7 @@ export const BLOCK_KINDS: BlockKind[] = [
     "task",
     "notify",
     "app_query",
+    "spawn",
     "api",
     "condition",
     "response",

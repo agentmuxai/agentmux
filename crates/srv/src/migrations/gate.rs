@@ -19,7 +19,7 @@ use super::{MigrationScope, REGISTRY};
 /// Why `data_dir` needs preparing, or `None` when srv can open it as it is.
 pub fn data_needs_preparing(data_dir: &Path, version: &str) -> Option<String> {
     let db_dir = data_dir.join("db");
-    if let Some(source) = crate::bootstrap::carry_forward::source_for(&db_dir, version) {
+    if let Some(source) = crate::migrations::carry_forward::source_for(&db_dir, version) {
         return Some(format!("this version has no data yet; {} has data to copy forward", source.display()));
     }
     // No shared root (CI, a bare cargo run): nothing to migrate, as for

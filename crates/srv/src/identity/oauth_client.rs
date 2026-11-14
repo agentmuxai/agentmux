@@ -843,7 +843,7 @@ async fn complete(ctx: &FlowCtx, json: &serde_json::Value) -> OAuthStatus {
     // A completed sign-in proves the account works, so its agents stop being
     // signed out (#2237).
     if let OAuthStatus::Success { account_id, .. } = &status {
-        crate::server::account_episodes::after_sign_in(account_id);
+        crate::identity::sign_in_hook::after_sign_in(account_id);
     }
     if ctx.save_client && ctx.client.mode != ClientMode::Builtin {
         let provider = ctx.cfg.provider;

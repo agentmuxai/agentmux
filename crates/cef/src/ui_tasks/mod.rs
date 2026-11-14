@@ -37,6 +37,8 @@ mod snap_preview;
 #[cfg(target_os = "macos")]
 pub mod pane_hole_mask;
 mod platform_macos;
+#[cfg(target_os = "windows")]
+pub(crate) mod stall_watch;
 
 pub use window::*;
 #[cfg(not(target_os = "windows"))]

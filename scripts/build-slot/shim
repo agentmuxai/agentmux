@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agentmux-build-slot-shim v3: written by AgentMux; edits here are overwritten.
+# agentmux-build-slot-shim v4: written by AgentMux; edits here are overwritten.
 #
 # The same file is installed as `cargo`, `task`, `npm`, `npx` and `docker`; it acts for the
 # tool whose name it carries. A heavy subcommand (`cargo test`, `task package`, `npm run build`,
@@ -50,6 +50,49 @@ has_word() {
   shift
   for w in "$@"; do [ "$w" = "$want" ] && return 0; done
   return 1
+}
+
+# The folder an npm or npx command runs in: the one `--prefix` / `-C` names (`--prefix=dir` too),
+# else the current one.
+project_dir() {
+  local d="$PWD" arg prev=""
+  for arg in "$@"; do
+    case "$prev" in --prefix|-C) d="$arg" ;; esac
+    case "$arg" in --prefix=*) d="${arg#--prefix=}" ;; esac
+    prev="$arg"
+  done
+  printf '%s' "$d"
+}
+
+# Whether the project in folder $1 is part of a Rust tree, which is what the slot exists for: its
+# nearest package.json (looking from $1 upwards) sits in a folder with a Cargo.toml, or in one below
+# a folder that has one (a package nested in the agentmux tree builds there, beside its cargo jobs).
+# A site-style repo (a package.json and no Cargo.toml above it) is not. A folder that can't be
+# entered, or has no package.json above it, counts as part of one: those queue, as before.
+in_cargo_tree() {
+  local d parent found=0
+  d="$(cd "$1" 2>/dev/null && pwd)" || return 0
+  while :; do
+    [ -f "$d/package.json" ] && found=1
+    [ "$found" = 1 ] && [ -f "$d/Cargo.toml" ] && return 0
+    parent="$(dirname "$d")"
+    [ "$parent" = "$d" ] && break
+    d="$parent"
+  done
+  [ "$found" = 0 ]
+}
+
+# One line to <lock folder>/unqueued.log for a heavy npm or npx command that skipped the queue, so
+# a heavy build that ran unqueued can be found afterwards: epoch, agent, command, folder, why.
+# Past 200 KB the file is renamed to unqueued.log.1, replacing the older one.
+note_unqueued() {
+  local root="${AGENTMUX_BUILD_SLOT_DIR:-$HOME/.agentmux/shared/locks/build}" log cmdline
+  log="$root/unqueued.log"
+  [ -d "$root" ] || mkdir -p "$root" 2>/dev/null || return 0
+  [ "$({ wc -c < "$log"; } 2>/dev/null || echo 0)" -gt 200000 ] && mv -f "$log" "$log.1" 2>/dev/null
+  cmdline=$(printf '%s' "$tool $*" | tr '\t\n' '  ' | cut -c1-160)
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "${AGENTMUX_AGENT_ID:-${USER:-unknown}}" "$cmdline" "$PWD" "not queued: no Cargo.toml" >> "$log" 2>/dev/null
+  return 0
 }
 
 # Whether stdin is a terminal (BUILD_SLOT_ASSUME_TTY=1 says so for tests, which have none).
@@ -146,6 +189,14 @@ case "$tool" in
     esac
     ;;
 esac
+
+# A site-style repo's build (a package.json with no Cargo.toml above it: asafebgi, agentmux-docs,
+# a widget folder) is not what the slot protects the machine from, so npm and npx skip the queue
+# there. The skip is noted in the lock folder's unqueued.log.
+if [ "$heavy" = 1 ] && { [ "$tool" = npm ] || [ "$tool" = npx ]; } && ! in_cargo_tree "$(project_dir "$@")"; then
+  heavy=0
+  [ -z "${AGENTMUX_BUILD_SLOT_OFF:-}" ] && note_unqueued "$@"
+fi
 
 # What the tool starts (task -> cargo, npm run build -> cargo, a build script -> cargo) finds
 # this directory first again, whatever order the shell's profile left the PATH in: a profile

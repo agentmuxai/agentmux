@@ -100,6 +100,14 @@ pub fn resolve_shared_lan_instances_dir() -> Option<PathBuf> {
     resolve_global_shared_root().map(|h| h.join("lan").join("instances"))
 }
 
+/// Resolve the GLOBAL `<home>/shared/instances/` directory: one record per running srv on this
+/// machine, agents or not, so one instance can name and reach another
+/// (`backend::instance_registry`). Not the LAN sibling directory above, which lists only
+/// LAN-enabled instances and holds the LAN key instead of the auth key.
+pub fn resolve_shared_instances_dir() -> Option<PathBuf> {
+    resolve_global_shared_root().map(|h| h.join("instances"))
+}
+
 /// Resolve the GLOBAL `<home>/shared/agents/transcripts/` directory.
 ///
 /// Sibling of [`resolve_shared_registry_dir`] / [`resolve_shared_definitions_dir`]:
@@ -160,7 +168,7 @@ pub fn resolve_isolated_work_store_path(fallback_dir: &std::path::Path) -> Optio
 /// `resolve_shared_store_path()`, which DOES vary with isolation.
 pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
     // A srv that gave the folder up to an earlier srv of another version runs as if there were none.
-    if crate::bootstrap::shared_guard::deferred() {
+    if crate::registry::shared_guard::deferred() {
         return None;
     }
     shared_root_ignoring_deferral()

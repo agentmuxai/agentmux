@@ -76,7 +76,7 @@ fn is_plain_version(label: &str) -> bool {
 
 /// The kind of the build whose binary sits in `exe_dir`.
 pub fn build_kind_in(exe_dir: &Path) -> BuildKind {
-    let dev = matches!(crate::RuntimeMode::current_path_only(exe_dir), crate::RuntimeMode::Dev { .. });
+    let dev = crate::runtime_mode::exe_dir_is_dev(exe_dir);
     let label = crate::runtime_mode::portable_build_label(exe_dir);
     build_kind_of(dev, label.as_deref(), crate::data_paths::build_channel_default())
 }

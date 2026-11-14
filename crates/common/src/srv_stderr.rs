@@ -14,7 +14,7 @@
 //! - `AGENTMUXSRV-MIGRATING migrations:<n>` — in-process migrations are about
 //!   to run; supervisors extend their ESTART deadline. A new version's first
 //!   start prints `AGENTMUXSRV-MIGRATING copying-previous-version:<v>` before
-//!   copying the previous version's databases (`bootstrap/carry_forward.rs`);
+//!   copying the previous version's databases (`migrations/carry_forward.rs`);
 //!   supervisors match the prefix only ([`migrating_line`],
 //!   [`is_migrating_line`]).
 //! - `AGENTMUXSRV-MIGRATION-BEGIN id:<id> description:<text>` /

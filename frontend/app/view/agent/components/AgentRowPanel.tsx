@@ -9,7 +9,7 @@
  * panel's bottom in view when it opens or changes.
  */
 
-import { IconButton } from "@/app/element/ui";
+import { CloseButton, IconButton } from "@/app/element/ui";
 import "@/app/element/ui/card.scss";
 import { revealDetail } from "@/app/element/ui/detail-reveal";
 import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -116,10 +116,8 @@ export const AgentRowPanel = (props: AgentRowPanelProps): JSX.Element => {
                                 />
                             )}
                         </Show>
-                        <IconButton
-                            icon="xmark"
-                            label="Close"
-                            density="compact"
+                        <CloseButton
+                            size="sm"
                             onClick={() => props.onClose()}
                             data-testid="agent-row-panel-close"
                         />

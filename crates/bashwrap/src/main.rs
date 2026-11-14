@@ -170,7 +170,11 @@ enum Command {
     },
 }
 
+#[cfg(test)]
+mod tls_test_init;
+
 fn main() -> Result<()> {
+    agentmux_common::tls_provider::install_ring_provider(); // reqwest 0.13 builds no client without it
     init_tracing();
     // Before any bash is started, by the prefix or exec path alike (shim_functions.rs).
     shim_functions::export();

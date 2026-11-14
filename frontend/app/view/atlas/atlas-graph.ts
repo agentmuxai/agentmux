@@ -10,6 +10,7 @@
  */
 
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
+import type { RuntimeKind } from "@/util/runtime-kind";
 
 /** What an agent is doing, in Atlas's own words: the Swarm's local and remote states folded into one set. */
 export type AtlasState = "working" | "waiting" | "idle" | "error" | "limited" | "signed_out" | "stopped";
@@ -27,6 +28,8 @@ export interface AtlasAgent {
     machine: string;
     /** What a lead's id names: its uid, or a synthetic one for an agent of another instance. */
     agentId: string | null;
+    /** The name messages reach it by, when that is not its name (a renamed agent keeps its first one). */
+    route?: string | null;
     seat: SeatSummary | null;
     contextTokens: number | null;
     currentTool: string | null;
@@ -39,6 +42,19 @@ export interface AtlasAgent {
     stale: boolean;
     /** Spent today against its daily cap, for an agent on a model route with one (this instance's only). */
     spend?: { spent: number; cap: number } | null;
+    /** Where it runs: on its machine or in a container. Absent for an agent of another instance, which does not say. */
+    runtime?: RuntimeKind | null;
+    /** The account an agent of another machine runs on, when its machine reported one. `label` is this
+     *  computer's name for it, null when the account is not signed in here. */
+    account?: { id: string; label: string | null } | null;
+}
+
+/** The other agents that run on `agent`'s account, by name: they use up the same quota. */
+export function accountSharers(agent: AtlasAgent, agents: Iterable<AtlasAgent>): string[] {
+    const id = agent.account?.id;
+    if (!id) return [];
+    const names = [...agents].filter((other) => other.key !== agent.key && other.account?.id === id).map((other) => other.name);
+    return names.sort((a, b) => a.localeCompare(b));
 }
 
 /** One machine, or one channel of one. */
@@ -50,6 +66,8 @@ export interface AtlasMachine {
     platform: string | null;
     stale: boolean;
     seenAtMs: number | null;
+    /** This computer, before its host name is known: its title is a placeholder, not a name. */
+    unnamed?: boolean;
 }
 
 /** A line from a lead to the agent that reports to it. */
@@ -81,11 +99,16 @@ function splitLeadName(name: string): { name: string; host: string | null } {
 
 const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" }) === 0;
 
-/** Whether a machine's title is the host a lead names ("narko", or "narko · dev" for one of its channels). */
+/** The computer a machine is, lowercased ("narko" for "narko", and for "narko · dev", one of its channels); null when not known. */
+export function machineHost(machine: AtlasMachine | undefined): string | null {
+    if (!machine || machine.unnamed) return null;
+    return machine.title.split("·")[0].trim().toLowerCase() || null;
+}
+
+/** Whether a machine is the host a lead names. */
 function onHost(machine: AtlasMachine | undefined, host: string): boolean {
-    if (!machine) return false;
-    const first = machine.title.split("·")[0].trim();
-    return same(first, host);
+    const name = machineHost(machine);
+    return name !== null && same(name, host);
 }
 
 /**

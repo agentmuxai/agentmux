@@ -325,18 +325,33 @@ async fn the_browser_is_opened_only_at_an_address_the_server_proved() {
     assert!(HttpServer::connect(&target(bare, Some("http://127.0.0.1:9191"))).await.is_err(), "nothing declared");
 }
 
+/// What srv does on a proof-only route: admit the request or refuse it, and sign the answer.
+fn admit_and_answer(channels: &Mutex<Channels>, path: &str, headers: &axum::http::HeaderMap, body: &axum::body::Bytes, answer: serde_json::Value) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let get = |n: &str| headers.get(n).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+    let seq = get(crate::server::local_proof::SEQ_HEADER).parse::<u64>().unwrap_or(0);
+    let admitted = channels.lock().unwrap().admit(&get(crate::server::local_proof::CHANNEL_HEADER), seq, "POST", path, body, &get(crate::server::local_proof::PROOF_HEADER), Instant::now());
+    match admitted {
+        None => axum::http::StatusCode::FORBIDDEN.into_response(),
+        Some(a) => {
+            let answer = serde_json::to_vec(&answer).unwrap();
+            let proof = crate::server::local_proof::response_proof(&a.key, a.seq, 200, &answer);
+            ([(crate::server::local_proof::PROOF_HEADER, proof)], answer).into_response()
+        }
+    }
+}
+
 /// A server whose first `lose` channels are replaced before their first request arrives (other
 /// callers' hellos filled its table in between). Counts the hellos it answered.
 async fn flooded_srv(lose: usize) -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
     use axum::body::Bytes;
     use axum::http::{HeaderMap, StatusCode};
-    use axum::response::IntoResponse;
     use std::sync::atomic::{AtomicUsize, Ordering};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let channels = std::sync::Arc::new(Mutex::new(Channels::default()));
     let hellos = std::sync::Arc::new(AtomicUsize::new(0));
-    let (c1, h1, c2) = (channels.clone(), hellos.clone(), channels.clone());
+    let (c1, h1, c2, c3) = (channels.clone(), hellos.clone(), channels.clone(), channels.clone());
     let app = axum::Router::new()
         .route(
             "/auth/hello",
@@ -353,25 +368,14 @@ async fn flooded_srv(lose: usize) -> (u16, std::sync::Arc<std::sync::atomic::Ato
                 }
             }),
         )
-        .route(
-            "/auth/code",
-            axum::routing::post(move |headers: HeaderMap, body: Bytes| {
-                let channels = c2.clone();
-                async move {
-                    let get = |n: &str| headers.get(n).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
-                    let seq = get(crate::server::local_proof::SEQ_HEADER).parse::<u64>().unwrap_or(0);
-                    let admitted = channels.lock().unwrap().admit(&get(crate::server::local_proof::CHANNEL_HEADER), seq, "POST", "/auth/code", &body, &get(crate::server::local_proof::PROOF_HEADER), Instant::now());
-                    match admitted {
-                        None => StatusCode::FORBIDDEN.into_response(),
-                        Some(a) => {
-                            let answer = serde_json::to_vec(&serde_json::json!({ "code": "abc" })).unwrap();
-                            let proof = crate::server::local_proof::response_proof(&a.key, a.seq, 200, &answer);
-                            ([(crate::server::local_proof::PROOF_HEADER, proof)], answer).into_response()
-                        }
-                    }
-                }
-            }),
-        );
+        .route("/auth/code", axum::routing::post(move |headers: HeaderMap, body: Bytes| {
+            let channels = c2.clone();
+            async move { admit_and_answer(&channels, "/auth/code", &headers, &body, serde_json::json!({ "code": "abc" })) }
+        }))
+        .route("/auth/logout", axum::routing::post(move |headers: HeaderMap, body: Bytes| {
+            let channels = c3.clone();
+            async move { admit_and_answer(&channels, "/auth/logout", &headers, &body, serde_json::json!({ "revoked": 3 })) }
+        }));
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (port, hellos)
 }
@@ -389,4 +393,16 @@ async fn open_begins_again_once_when_its_first_request_is_refused() {
     let err = server.mint_code().await.unwrap_err();
     assert!(err.contains("did not accept"), "{err}");
     assert_eq!(hellos.load(std::sync::atomic::Ordering::SeqCst), 2, "one more hello, no more");
+}
+
+/// `logout` proves the key like `open` and reports how many sessions the server ended.
+#[tokio::test]
+async fn logout_signs_every_browser_out_and_says_how_many() {
+    let (port, _) = flooded_srv(0).await;
+    let server = HttpServer::connect(&target(port, None)).await.unwrap();
+    assert_eq!(logout(&server).await, 0);
+    let v = server.post("/auth/logout", serde_json::json!({})).await.unwrap();
+    assert_eq!(v["revoked"], 3);
+    let (gone, _) = (std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(), ());
+    assert!(HttpServer::connect(&target(gone, None)).await.is_err(), "nothing to log out of");
 }

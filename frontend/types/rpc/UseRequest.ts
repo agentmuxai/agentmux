@@ -71,7 +71,12 @@ replaces: boolean,
  * An agent's sign-in with a saved `login` (`Browser` `signin`): `field` is
  * then the masked user name, and "Always" is for this agent on this site.
  */
-signin: boolean, requested_ms: number, 
+signin: boolean, 
+/**
+ * An agent's new account on a sign-up form (`Browser` `generate_password`): the
+ * Vault makes the password. There is no entry yet; `origin` is the site.
+ */
+account: boolean, requested_ms: number, 
 /**
  * When silence decides: it goes ahead then if `goes_ahead`, else it is
  * denied. Set by [`Uses::ask`]; a hold moves it.

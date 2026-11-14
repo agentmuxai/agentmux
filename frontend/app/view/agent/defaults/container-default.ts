@@ -38,6 +38,18 @@ export interface PreselectInput {
     image: ContainerImageState;
     /** The runtime the person last chose explicitly in the new-agent form, if any. */
     lastChoice?: "host" | "container" | null;
+    /** `agents:defaultruntime` leaves a new agent in a container ([`defaultsToContainer`]); absent counts as no. */
+    defaultContainer?: boolean;
+}
+
+/**
+ * Whether the setting `agents:defaultruntime` leaves a new agent in a container: everything but `native` (or `host`)
+ * does, and so does no setting at all. The same rule srv applies to a spawn that does not say where it runs
+ * (`default_is_container`, agent_spawn/container.rs).
+ */
+export function defaultsToContainer(setting: unknown): boolean {
+    const s = typeof setting === "string" ? setting.trim().toLowerCase() : "";
+    return s !== "native" && s !== "host";
 }
 
 /**
@@ -46,7 +58,9 @@ export interface PreselectInput {
  */
 export function shouldPreselectContainer(input: PreselectInput): boolean {
     if (input.lastChoice === "host") return false;
-    if (!isContainerAgentMode(input.lastChoice) && !isContainerAgentType(input.templateType)) return false;
+    // What the person chose, or the template suggests, or, with neither, what the setting says.
+    const asked = isContainerAgentMode(input.lastChoice) || isContainerAgentType(input.templateType);
+    if (!asked && !(input.lastChoice == null && input.defaultContainer === true)) return false;
     if (!input.containerSupported || !input.dockerAvailable) return false;
     if (input.image === undefined) return false;
     return !imageBlocksContainer(input.image);

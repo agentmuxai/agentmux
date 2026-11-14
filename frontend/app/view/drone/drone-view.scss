@@ -324,9 +324,7 @@
 
 // White on the node's colour, like the rest of its header.
 .drone-node-header .drone-node-close {
-    --ui-fg: currentColor;
-    --ui-fg-hover: currentColor;
-    --ui-tone: currentColor;
+    --ui-close-fg: currentColor;
 }
 
 // Summary line shown when the node is unselected.
@@ -469,4 +467,9 @@
 .drone-runpanel-output {
     font-family: var(--font-mono);
     @include mixins.truncate;
+}
+
+.drone-node-field-note {
+    font-size: var(--text-xs);
+    color: var(--error-text-color);
 }

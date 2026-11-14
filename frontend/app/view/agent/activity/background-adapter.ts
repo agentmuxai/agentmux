@@ -28,20 +28,33 @@ import { dockTitle } from "../../../agent-model/dock-label";
 import type { PinnedActivity } from "../../../agent-model/activity-types";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
+/** How long a `running` row with no pid may go unconfirmed before nothing claims it is alive. A pid can be
+ *  checked for liveness; without one the row only has the CLI's word, and the CLI has dropped tasks without
+ *  ending them (2026-09-30 retro, "Any running state without a pid needs a lifetime"). */
+export const STALE_AFTER_MS = 2 * 60 * 60 * 1000;
+
+/** Pure: a `running` row with no pid whose last sighting is older than [`STALE_AFTER_MS`]. It is not known to be
+ *  running (it no longer counts as attached work) and not known to have ended (the dock shows it as `unknown`). */
+export function isStaleRegistryRow(task: BackgroundTaskView, now: number): boolean {
+    return task.status === "running" && task.pid == null && now - task.last_seen_ms > STALE_AFTER_MS;
+}
+
 /** Pure: one registry row as a dock row. No `tool`/`shell`/`subagent` source
  *  field is populated — a registry-only row has no live transcript log to
  *  show, so `ActivityRow`'s expand panel renders nothing for it (same as
  *  any other kind's `Show` gate failing). `canStop: false` mirrors
  *  `tool-adapter.ts`'s own reasoning for an accepted background launch: no
- *  stop path exists for a single detached task today. */
-export function backgroundTaskToActivity(task: BackgroundTaskView): PinnedActivity {
+ *  stop path exists for a single detached task today. A stale row reads
+ *  `unknown`, its clock stopped at the last sighting. */
+export function backgroundTaskToActivity(task: BackgroundTaskView, now: number = Date.now()): PinnedActivity {
+    const stale = isStaleRegistryRow(task, now);
     return {
         id: task.id,
         kind: "tool",
         ...dockTitle(task.label),
-        status: task.status,
+        status: stale ? "unknown" : task.status,
         startedAt: task.started_at_ms,
-        endedAt: task.ended_at_ms ?? undefined,
+        endedAt: stale ? task.last_seen_ms : (task.ended_at_ms ?? undefined),
         canStop: false,
     };
 }
@@ -52,9 +65,10 @@ export function backgroundTaskToActivity(task: BackgroundTaskView): PinnedActivi
  *  dedup rule is independently testable from the row-shape mapping. */
 export function backgroundTaskActivities(
     tasks: readonly BackgroundTaskView[],
-    knownIds: ReadonlySet<string>
+    knownIds: ReadonlySet<string>,
+    now: number = Date.now()
 ): PinnedActivity[] {
-    return tasks.filter((t) => !knownIds.has(t.id)).map(backgroundTaskToActivity);
+    return tasks.filter((t) => !knownIds.has(t.id)).map((t) => backgroundTaskToActivity(t, now));
 }
 
 /** A transcript-derived row still showing `running` takes the registry's

@@ -219,6 +219,11 @@ pub struct InjectionRequest {
     /// of the above.
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub reagent_verified: Option<bool>,
+    /// With `reagent_verified == Some(false)`: the signature is genuine under the trusted key and failed only the
+    /// age rules, so the marker says `SIG=expired`, not `SIG=invalid`. It changes only that word: the tier and the
+    /// stop are those of `Some(false)`. Set by the cloud subscriber only, never read from a body.
+    #[serde(skip)]
+    pub reagent_expired: bool,
     /// Base64 Ed25519 signature over the same signed material as `jekt_sig`/
     /// `reagent_sig`, produced by the claimed `source_agent`'s own LAN
     /// signing key (`AGENTMUX_LAN_KEY`, read client-side in `agentmux-mcp` —

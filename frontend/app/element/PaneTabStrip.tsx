@@ -29,6 +29,8 @@ import { isDraggedDocTab, isDraggedPaneTab } from "@/app/drag/pane-tab-drag";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { usePulseWhen } from "@/app/motion/solid";
 import { Tooltip } from "./tooltip";
+import { CloseButton } from "./ui/CloseButton";
+import { tip } from "./tip";
 import "./PaneTabStrip.scss";
 import { createScrollEdges } from "./scroll-edges";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
@@ -576,18 +578,17 @@ function PillContent<T>(p: PillContentProps<T>): JSX.Element {
                 <span class="pane-tab-label">{item.getLabel(item.tab)}</span>
             )}
             <Show when={item.onClose}>
-                <button
+                {/* Always in the DOM for attention tabs (closing those may need confirmation); hover-shown
+                    otherwise, purely via CSS opacity. */}
+                <CloseButton
+                    size="tab"
                     class="pane-tab-close"
+                    tooltip={false}
+                    {...tip(p.closing() ? "Closing…" : p.attention() ? "Close (unsaved changes)" : "Close")}
+                    label={p.closing() ? "Closing tab" : "Close tab"}
+                    busy={p.closing()}
                     onClick={p.onCloseClick}
-                    title={p.closing() ? "Closing…" : p.attention() ? "Close (unsaved changes)" : "Close"}
-                    aria-label={p.closing() ? "Closing tab" : "Close tab"}
-                    disabled={p.closing()}
-                >
-                    {/* Always in the DOM for attention tabs (closing
-                        those may need confirmation); hover-shown
-                        otherwise, purely via CSS opacity. */}
-                    <i class={p.closing() ? "fa-solid fa-spinner fa-spin" : "fa-solid fa-xmark"} aria-hidden="true" />
-                </button>
+                />
             </Show>
         </>
     );

@@ -50,7 +50,7 @@ fn finish(reply: Reply) -> Option<Generated> {
 /// an unknown provider or a CLI that isn't already available either way;
 /// the caller treats that the same as any other unresolvable case.
 pub async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<String> {
-    crate::server::cli_handlers::locate_provider_cli(provider_id).await.map(|l| l.path)
+    super::cli_locator::locate(provider_id).await
 }
 
 /// How a recovery call ended, for the sweep that decides when to try again.

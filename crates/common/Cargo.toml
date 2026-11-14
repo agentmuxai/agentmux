@@ -44,8 +44,13 @@ ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] 
 # (which turns the feature on). Same pin and features as agentmux-srv.
 ts-rs = { version = "12", features = ["serde-compat", "serde-json-impl"], optional = true }
 
+# tls_provider.rs: the ring crypto provider reqwest 0.13 needs installed before any client is built.
+# Optional: only the crates that build a reqwest client turn it on.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"], optional = true }
+
 [features]
 ts = ["dep:ts-rs"]
+tls-provider = ["dep:rustls"]
 
 # `process::kill_pid` / `kill_process_group` — SIGTERM/SIGKILL by pid and
 # process group. Same pin as agentmux-srv.

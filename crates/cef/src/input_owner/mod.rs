@@ -16,6 +16,8 @@ pub mod registry;
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 pub mod views;
 #[cfg(target_os = "windows")]
+pub mod native_click;
+#[cfg(target_os = "windows")]
 pub mod watch;
 #[cfg(target_os = "windows")]
 pub mod windows;

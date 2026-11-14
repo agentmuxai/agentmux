@@ -15,6 +15,14 @@ async fn call(state: &AppState, command: &str, data: Value) -> Result<Value, Str
 
 const SCRIPT: &str = "print('hi')\n";
 
+#[test]
+fn a_crop_is_shown_only_when_its_bytes_are_a_png() {
+    let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+    assert_eq!(super::png_data_url(&png).as_deref(), Some("data:image/png;base64,iVBORw0KGgoBAgM="));
+    assert_eq!(super::png_data_url(b"<svg onload=alert(1)>"), None, "other bytes are never turned into an image");
+    assert_eq!(super::png_data_url(&[]), None);
+}
+
 fn sha(text: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
@@ -61,7 +69,7 @@ async fn a_script_is_read_then_approved_and_revoked_and_nothing_else_can_be() {
 
     let approved = |state: &AppState| state.identity_store.skill_files(&id).unwrap().into_iter().find(|f| f.path == "scripts/run.py").unwrap().approved;
     assert!(!approved(&state), "an imported script starts unapproved");
-    let sha = crate::backend::computer_use_skill::sha256_hex(SCRIPT.as_bytes());
+    let sha = crate::backend::memory::record::sha256_hex(SCRIPT.as_bytes());
     // Only the text that was read can be approved.
     let e = call(&state, COMMAND_SKILL_CATALOG_APP_SCRIPT, json!({"skill_id": id, "path": "scripts/run.py", "approved": true, "sha256": "0".repeat(64)})).await.unwrap_err();
     assert!(e.contains("not the text you reviewed"), "{e}");

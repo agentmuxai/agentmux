@@ -665,10 +665,7 @@ wrap_task! {
                                 // (click-to-select — see PANE_OVERLAY_WIN_TO_BLOCK
                                 // doc comment in platform_macos.rs).
                                 if !task_overlay_win.is_null() {
-                                    if let Some(block_id) = self.label
-                                        .strip_prefix("browser-pane-")
-                                        .and_then(|rest| rest.rfind('-').map(|dash| rest[..dash].to_string()))
-                                    {
+                                    if let Some(block_id) = crate::browser_pane::label::pane_block_id(&self.label).map(str::to_string) {
                                         if let Ok(mut om) = crate::ui_tasks::PANE_OVERLAY_WIN_TO_BLOCK.try_lock() {
                                             om.insert(
                                                 task_overlay_win as usize,
@@ -725,10 +722,7 @@ wrap_task! {
             // Not yet on screen: a later run of this task (the reaffirm pass, a
             // re-show) reports it.
             #[cfg(target_os = "macos")]
-            if let Some(block_id) = self.label
-                .strip_prefix("browser-pane-")
-                .and_then(|rest| rest.rfind('-').map(|dash| &rest[..dash]))
-            {
+            if let Some(block_id) = crate::browser_pane::label::pane_block_id(&self.label) {
                 if crate::ui_tasks::pane_overlay_on_screen(block_id) {
                     crate::input_owner::views::pane_live(&self.state, block_id);
                 }

@@ -54,6 +54,16 @@ describe("OriginContainer", () => {
         expect(label(node({ source: "earlier" }))).toContain("Earlier message");
     });
 
+    it("says a genuine signature outside its window is expired, still as a warning", () => {
+        const { container } = render(() => (
+            <OriginContainer node={node({ origin: { kind: "service", from: "x", trust: "network-claimed", sig: "expired" } })} />
+        ));
+        const tags = [...container.querySelectorAll(".ui-tag")];
+        expect(tags.map((t) => t.textContent)).toEqual(["network-claimed", "signature expired"]);
+        expect(tags.every((t) => t.classList.contains("ui-tag--warn"))).toBe(true);
+        cleanup();
+    });
+
     it("shows a trust tag and the signature state, warning when nothing proved the sender", () => {
         const { container } = render(() => (
             <OriginContainer node={node({ origin: { kind: "service", from: "x", trust: "network-claimed", sig: "invalid" } })} />

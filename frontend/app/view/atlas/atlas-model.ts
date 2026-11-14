@@ -11,9 +11,12 @@ import { readSeatMeta } from "@/app/agent-model/seat-format";
 import { unavailableOfMeta } from "@/app/store/agent-unavailable";
 import { MOS } from "@/app/store/global";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
-import { isAwaitingUser } from "@/app/store/swarm-line";
+import { awaitsBrowserAnswer, isAwaitingUser } from "@/app/store/swarm-line";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
+import { runtimeKindOfBlockMeta } from "@/util/runtime-kind";
 import { createMemo, type Accessor } from "solid-js";
+import type { AtlasFlow } from "./atlas-flow";
+import { useAtlasFlows } from "./atlas-flow-store";
 import { buildAtlasGraph, type AtlasAgent, type AtlasGraph, type AtlasMachine, type AtlasState } from "./atlas-graph";
 import { useSwarmAgents, type SwarmAgents } from "../swarm/swarm-agent-list";
 import { phaseToDisplayStatus } from "../swarm/swarm-display-status";
@@ -63,6 +66,12 @@ function spendOf(meta: Meta): AtlasAgent["spend"] {
     return typeof s?.spent === "number" && typeof s.cap === "number" && s.cap > 0 ? { spent: s.spent, cap: s.cap } : null;
 }
 
+/** The name messages reach an agent by, as its launch put it in its pane's environment. */
+function routeOf(meta: Meta): string | null {
+    const id = (meta?.["cmd:env"] as Record<string, unknown> | undefined)?.["AGENTMUX_AGENT_ID"];
+    return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
 /** One of this instance's agents, from its Swarm row and its pane's meta. */
 function localAgent(key: string, node: AgentTreeNode, agentId: string | null, seat: AtlasAgent["seat"]): AtlasAgent {
     const meta: Meta = node.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", node.blockId))()?.meta : undefined;
@@ -71,7 +80,7 @@ function localAgent(key: string, node: AgentTreeNode, agentId: string | null, se
         : node.agentStatus === "running"
           ? "working"
           : "idle";
-    const chip = chipStatus(display, isAwaitingUser(meta, node.agentStatus));
+    const chip = chipStatus(display, isAwaitingUser(meta, node.agentStatus), awaitsBrowserAnswer(meta, node.agentStatus));
     const live = chip !== "idle";
     const unavailable = unavailableOfMeta(meta, live, Date.now());
     const state: AtlasState =
@@ -90,6 +99,7 @@ function localAgent(key: string, node: AgentTreeNode, agentId: string | null, se
         line: node.line.text || null,
         machine: LOCAL_MACHINE,
         agentId,
+        route: routeOf(meta),
         seat,
         contextTokens: node.contextTokens,
         currentTool: node.currentTool,
@@ -98,6 +108,7 @@ function localAgent(key: string, node: AgentTreeNode, agentId: string | null, se
         remote: false,
         stale: false,
         spend: spendOf(meta),
+        runtime: node.blockId ? runtimeKindOfBlockMeta(meta) : null,
     };
 }
 
@@ -138,16 +149,21 @@ function remoteAgent(row: RemoteRow, key: string, agentId: string | null, seat: 
         runtimeId: null,
         remote: true,
         stale: section.stale,
+        account: agent.account ? { id: agent.account, label: agent.account_label?.trim() || null } : null,
     };
 }
 
 export interface AtlasData {
     graph: Accessor<AtlasGraph>;
+    /** The Swarm's model: its selection and fleet actions are the map's too. */
+    model: SwarmViewModel;
     /** The Swarm's list, for its filter bar. */
     swarm: SwarmAgents;
     /** Every agent, by key, for the card. */
     agents: Accessor<Map<string, AtlasAgent>>;
     machines: Accessor<Map<string, AtlasMachine>>;
+    /** The messages and task hand-overs on show now, as srv reports them. */
+    flows: Accessor<readonly AtlasFlow[]>;
 }
 
 /** The Swarm's agents as Atlas's graph, following the Swarm's own stores and its filter. */
@@ -164,6 +180,7 @@ export function useAtlasData(model: SwarmViewModel, ctx: PaneTabHostContext): At
             platform: null,
             stale: false,
             seenAtMs: null,
+            unnamed: !other?.hostname,
         };
         const sections = remoteSections(other).map<AtlasMachine>((s) => ({
             key: s.key,
@@ -199,5 +216,5 @@ export function useAtlasData(model: SwarmViewModel, ctx: PaneTabHostContext): At
     const graph = createMemo(() => buildAtlasGraph(machines(), agentList()));
     const agents = createMemo(() => new Map(agentList().map((a) => [a.key, a] as const)));
     const machineMap = createMemo(() => new Map(machines().map((m) => [m.key, m] as const)));
-    return { graph, swarm, agents, machines: machineMap };
+    return { graph, model, swarm, agents, machines: machineMap, flows: useAtlasFlows() };
 }

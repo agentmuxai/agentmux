@@ -3,7 +3,7 @@
 
 import { isLightThemeActive } from "@/app/block/pane-identity";
 import { tip } from "@/app/element/tip";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, CloseButton, IconButton } from "@/app/element/ui";
 import { Tag } from "@/app/element/ui/Tag";
 import { useTick } from "@/app/hook/useTick";
 import { subagentStatus } from "@/app/store/agent-status";
@@ -924,12 +924,11 @@ function WorkflowDispatchRow({ group, model }: { group: WorkflowDispatch; model:
                     <span class="swarm-subagent-countdown">disappearing in {countdownSeconds()}s</span>
                 </Show>
                 <Show when={group.status === "retired"}>
-                    <IconButton
-                        icon="xmark"
+                    <CloseButton
+                        size="sm"
                         label="Retire"
                         tooltip={false}
                         title="Retire"
-                        density="compact"
                         class="swarm-subagent-retire"
                         onClick={handleRetire}
                     />
@@ -1206,12 +1205,11 @@ function SubagentRow({
                     <span class="swarm-subagent-countdown">disappearing in {countdownSeconds()}s</span>
                 </Show>
                 <Show when={canRetire()}>
-                    <IconButton
-                        icon="xmark"
+                    <CloseButton
+                        size="sm"
                         label="Retire"
                         tooltip={false}
                         title="Retire"
-                        density="compact"
                         class="swarm-subagent-retire"
                         onClick={handleRetire}
                     />

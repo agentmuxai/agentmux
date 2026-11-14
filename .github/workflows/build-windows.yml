@@ -160,7 +160,9 @@ jobs:
           7z i > /dev/null
           echo "7-Zip found at $(command -v 7z)"
 
+      # A release (a tag run) keeps no build cache and takes none: it builds from what it downloads.
       - uses: Swatinem/rust-cache@v2
+        if: github.ref_type != 'tag'
 
       # ── Codec-enabled CEF runtime ────────────────────────────────────────
       # Same three-step pattern as build-linux.yml/build-macos.yml: resolve
@@ -172,8 +174,10 @@ jobs:
           platform: windows
           tag: ${{ steps.in.outputs.cef_tag }}
 
+      # Skipped on a release: with no cache step its `cache-hit` output is empty, so the download below runs.
       - name: Cache codec-enabled CEF runtime
         id: cef-cache
+        if: github.ref_type != 'tag'
         uses: actions/cache@v4
         with:
           path: ${{ env.CEF_RUNTIME_DIR_WINDOWS }}

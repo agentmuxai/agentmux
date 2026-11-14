@@ -12,19 +12,23 @@ import { createSignal, For, onCleanup, onMount, Show, type Accessor, type JSX, t
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button, Field, SegmentedControl, Select, TextInput } from "@/app/element/ui";
+import { ensureBrowserProfiles } from "@/app/view/browser/browser-profiles";
 import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
 import { SECTION_LABELS, VAULT_KINDS, vaultKind } from "./vault-kinds";
+import { profileRows } from "./vault-signin-vaults";
 import {
     cancelImport,
     commitImport,
     deleteImportFile,
     pickImport,
+    signinVaultOf,
+    vaultList,
     type CsvMapping,
     type Duplicates,
     type ImportStep,
 } from "./vault-store";
-import { VaultField } from "./vault-vaults";
+import { vaultChoices, VaultField } from "./vault-vaults";
 
 /** Files that are encrypted but can't be a KeePass database, which is the only kind with a key file. The
  *  host recognises a database by its contents, so a renamed one (`backup.bin`) still gets the key-file row. */
@@ -76,6 +80,9 @@ interface ImportState {
     setDuplicates: Setter<Duplicates>;
     into: Accessor<string>;
     setInto: Setter<string>;
+    /** The browser profile a browser export's logins belong to. */
+    profile: Accessor<string>;
+    setProfile: Setter<string>;
     busy: Accessor<boolean>;
     setBusy: Setter<boolean>;
     error: Accessor<string | null>;
@@ -102,6 +109,7 @@ function createImportState(props: { onClose: () => void; into?: string }): Impor
     const [pass, setPass] = createSignal("");
     const [duplicates, setDuplicates] = createSignal<Duplicates>("skip");
     const [into, setInto] = createSignal(props.into || "personal");
+    const [profile, setProfile] = createSignal("personal");
     const [busy, setBusy] = createSignal(true);
     const [error, setError] = createSignal<string | null>(null);
     const [result, setResult] = createSignal<ImportResult | null>(null);
@@ -122,6 +130,8 @@ function createImportState(props: { onClose: () => void; into?: string }): Impor
         setDuplicates,
         into,
         setInto,
+        profile,
+        setProfile,
         busy,
         setBusy,
         error,
@@ -214,7 +224,14 @@ async function commit(s: ImportState, preview: ImportPreview) {
     s.setBusy(true);
     s.setError(null);
     try {
-        s.setResult(await commitImport(preview.token, s.duplicates(), s.into()));
+        s.setResult(
+            await commitImport(
+                preview.token,
+                s.duplicates(),
+                s.into(),
+                preview.browser_signins > 0 ? s.profile() : undefined
+            )
+        );
     } catch (e) {
         s.setError(errorText(e));
     } finally {
@@ -294,6 +311,12 @@ function ImportedView(props: { s: ImportState; r: Accessor<ImportResult> }): JSX
                         "That file holds every secret in it unencrypted, so anything that can read your disk can read it. Delete it once you've checked the import."
                     }
                 </p>
+                <Show when={previewStep()?.preview.source === "chrome"}>
+                    <p class="warden-manager-dim">
+                        The passwords are also still saved in the browser, and in Google Password Manager if you sync
+                        them. Remove them there too if you want the Vault to be their only copy.
+                    </p>
+                </Show>
                 <Show when={previewStep()?.syncedFolder}>
                     <p class="warden-manager-error" role="alert">
                         It is in your {previewStep()!.syncedFolder} folder: a copy may already be in the cloud, and in
@@ -439,11 +462,42 @@ function PreviewStep(props: { s: ImportState; preview: Accessor<ImportPreview> }
                 onChange={s.setInto}
                 description="New entries go to this Vault. One you replace stays in the Vault it is in."
             />
+            <Show when={preview().browser_signins > 0}>
+                <BrowserProfileField s={s} count={preview().browser_signins} />
+            </Show>
             <DuplicatesChoice count={preview().duplicates} value={s.duplicates()} onChange={s.setDuplicates} />
             <Show when={preview().skipped.length > 0}>
                 <SkippedList skipped={preview().skipped} />
             </Show>
         </div>
+    );
+}
+
+/** Where a browser export's logins go: one browser profile, in that profile's sign-in Vault. */
+function BrowserProfileField(props: { s: ImportState; count: number }): JSX.Element {
+    const s = props.s;
+    ensureBrowserProfiles();
+    const vaultName = () => {
+        const id = signinVaultOf()[s.profile()] ?? "personal";
+        return vaultChoices().find((v) => v.value === id)?.label ?? "Personal";
+    };
+    // "Above" points at the Import-into field, which is hidden while there is only one Vault.
+    const description = () => {
+        const logins = `${props.count} ${props.count === 1 ? "login" : "logins"}`;
+        const where = `go to this profile's sign-in Vault (${vaultName()}), where its browser offers them`;
+        return vaultList().length > 1
+            ? `${logins} with a site ${where}, whatever Vault is chosen above. The rest go to the Vault above.`
+            : `${logins} with a site ${where}.`;
+    };
+    return (
+        <Field label="Browser profile for the sign-ins" layout="stacked" description={description()}>
+            <Select
+                value={s.profile()}
+                onChange={s.setProfile}
+                options={profileRows().map((p) => ({ value: p.key, label: p.label }))}
+                ariaLabel="Browser profile for the sign-ins"
+            />
+        </Field>
     );
 }
 

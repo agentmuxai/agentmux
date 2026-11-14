@@ -108,7 +108,7 @@ pub fn root_beside(isolated_work_store: Option<PathBuf>, shared_dir: Option<Path
 pub fn default_root() -> Option<PathBuf> {
     root_beside(
         crate::registry::resolve_isolated_work_store_path(&super::base::get_mux_db_dir()),
-        crate::bootstrap::shared_guard::shared_dir(),
+        crate::registry::shared_guard::shared_dir(),
     )
 }
 

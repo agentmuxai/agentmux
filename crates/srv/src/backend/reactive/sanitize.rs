@@ -290,7 +290,11 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 ///     key, tampered content, or unrecognized key id), or was valid only
 ///     under an untrusted key such as `reagent-v1-dev`. Renders
 ///     `SIG=invalid` — a real red flag, same spirit as host-tier's
-///     `TRUST=unverified`.
+///     `TRUST=unverified`. With `reagent_expired`, the signature is
+///     genuine under the trusted key and failed only the age rules:
+///     `SIG=expired`. The tier and the stop are those of `Some(false)`
+///     either way; only the word differs, so a reader does not take a
+///     late genuine notice for a forgery.
 ///   - `None` — no signature was attempted (the overwhelming majority of
 ///     WAN traffic, and all host/lan traffic). No `SIG=` field is rendered
 ///     at all, so existing marker parsing/tests are unaffected.
@@ -387,6 +391,7 @@ pub fn wrap_jekt_message(
         delivery_tier,
         sig_verified,
         reagent_verified,
+        false,
         lan_verified,
         channel_verified,
         wan_instance,
@@ -468,6 +473,7 @@ pub fn jekt_origin(
     };
     origin.sig = match req.reagent_verified {
         Some(true) => Some(OriginSig::Verified),
+        Some(false) if req.reagent_expired => Some(OriginSig::Expired),
         Some(false) => Some(OriginSig::Invalid),
         None => None,
     };
@@ -493,6 +499,7 @@ pub fn wrap_jekt_message_with_files(
     delivery_tier: &str,
     sig_verified: Option<bool>,
     reagent_verified: Option<bool>,
+    reagent_expired: bool,
     lan_verified: Option<bool>,
     channel_verified: Option<bool>,
     wan_instance: Option<&super::types::WanInstanceInfo>,
@@ -531,6 +538,7 @@ pub fn wrap_jekt_message_with_files(
 
     let sig_field = match reagent_verified {
         Some(true) => " SIG=verified",
+        Some(false) if reagent_expired => " SIG=expired",
         Some(false) => " SIG=invalid",
         None => "",
     };

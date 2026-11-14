@@ -1470,6 +1470,25 @@
     }
   },
   {
+    "command": "app_skills.here",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandAppSkillsHereData",
+    "requestName": "CommandAppSkillsHereData",
+    "requestTs": {
+      "imports": [
+        "CommandAppSkillsHereData"
+      ],
+      "name": "CommandAppSkillsHereData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::AppSkillsHere",
+    "responseName": "AppSkillsHere",
+    "responseTs": {
+      "imports": [
+        "AppSkillsHere"
+      ],
+      "name": "AppSkillsHere"
+    }
+  },
+  {
     "command": "appendagenthistory",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAppendAgentHistoryData",
     "requestName": "CommandAppendAgentHistoryData",
@@ -1642,7 +1661,7 @@
   },
   {
     "command": "auth.start",
-    "request": "agentmux_srv::server::identity_handlers::StartProviderAuthReq",
+    "request": "agentmux_srv::backend::rpc_types::identity::StartProviderAuthReq",
     "requestName": "StartProviderAuthReq",
     "requestTs": {
       "imports": [
@@ -3732,8 +3751,8 @@
       ],
       "name": "GetDroneReq"
     },
-    "response": "core::option::Option<agentmux_srv::drone::types::DroneDefinition>",
-    "responseName": "core::option::Option<agentmux_srv::drone::types::DroneDefinition>",
+    "response": "core::option::Option<agentmux_srv::backend::storage::drone_types::DroneDefinition>",
+    "responseName": "core::option::Option<agentmux_srv::backend::storage::drone_types::DroneDefinition>",
     "responseTs": {
       "imports": [
         "DroneDefinition"
@@ -5193,8 +5212,8 @@
       ],
       "name": "ListRunsReq"
     },
-    "response": "alloc::vec::Vec<agentmux_srv::drone::types::DroneRun>",
-    "responseName": "alloc::vec::Vec<agentmux_srv::drone::types::DroneRun>",
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::drone_types::DroneRun>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::drone_types::DroneRun>",
     "responseTs": {
       "imports": [
         "DroneRun"
@@ -5212,8 +5231,8 @@
       ],
       "name": "ListDronesReq | null"
     },
-    "response": "alloc::vec::Vec<agentmux_srv::drone::types::DroneDefinition>",
-    "responseName": "alloc::vec::Vec<agentmux_srv::drone::types::DroneDefinition>",
+    "response": "alloc::vec::Vec<agentmux_srv::backend::storage::drone_types::DroneDefinition>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::storage::drone_types::DroneDefinition>",
     "responseTs": {
       "imports": [
         "DroneDefinition"
@@ -7845,7 +7864,7 @@
   },
   {
     "command": "upsertdrone",
-    "request": "agentmux_srv::drone::types::DroneDefinition",
+    "request": "agentmux_srv::backend::storage::drone_types::DroneDefinition",
     "requestName": "DroneDefinition",
     "requestTs": {
       "imports": [
@@ -7853,7 +7872,7 @@
       ],
       "name": "DroneDefinition"
     },
-    "response": "agentmux_srv::drone::types::DroneDefinition",
+    "response": "agentmux_srv::backend::storage::drone_types::DroneDefinition",
     "responseName": "DroneDefinition",
     "responseTs": {
       "imports": [
@@ -8202,7 +8221,7 @@
   },
   {
     "command": "widgets.install",
-    "request": "agentmux_srv::server::widget_handlers::WidgetInstallReq",
+    "request": "agentmux_srv::backend::rpc_types::widget::WidgetInstallReq",
     "requestName": "WidgetInstallReq",
     "requestTs": {
       "imports": [

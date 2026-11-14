@@ -17,12 +17,17 @@
 import { Show, type JSX } from "solid-js";
 import { FooterMic, FooterOverlays, FooterTextarea } from "./agent-footer-parts";
 import { createAgentFooter, type AgentFooterProps } from "./agent-footer-state";
+import { VoiceSetupNotice } from "./VoiceSetupNotice";
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     const s = createAgentFooter(props);
 
     return (
         <div class="agent-footer">
+            {/* Outside the input's box, which the mic is centred on. */}
+            <Show when={props.viewModel?.voiceHandle}>
+                <VoiceSetupNotice blockId={props.viewModel!.blockId} />
+            </Show>
             <div class="agent-input-container">
                 <FooterOverlays s={s} />
                 <FooterTextarea s={s} />

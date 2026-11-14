@@ -587,7 +587,14 @@ async fn run_work_list(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         // tool (Codex P2 on PR #2902).
         let result = it.get("result").and_then(|x| x.as_str()).unwrap_or("");
         if !result.is_empty() {
-            out.push_str(&format!("      -> {result}\n"));
+            // A task with a holder (claimed, or blocked on a question) is not finished: what it carries
+            // is why a PREVIOUS holder handed it back ("agent stopped", "agent quit"), which its current
+            // holder was told when it claimed. Printed as a verdict, it reads as if this holder stopped.
+            if matches!(st, "claimed" | "blocked") {
+                out.push_str(&format!("      (handed back earlier: {result})\n"));
+            } else {
+                out.push_str(&format!("      -> {result}\n"));
+            }
         }
     }
     out.push_str(note.trim_start_matches('\n'));

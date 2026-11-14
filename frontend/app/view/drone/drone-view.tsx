@@ -13,7 +13,7 @@ import type { DroneViewModel } from "./drone-model";
 import type { BlockKind, FlowEdge, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
-import { Button, IconButton, TextArea, TextInput } from "@/app/element/ui";
+import { Button, CloseButton, TextArea, TextInput } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
 import { isModKey } from "@/util/platformutil";
 import { tip } from "@/app/element/tip";
@@ -606,10 +606,9 @@ const CanvasNode = (p: { s: CanvasState; n: FlowNode }): JSX.Element => {
             <header class="drone-node-header">
                 <span class="drone-node-emoji">{meta.emoji}</span>
                 <span class="drone-node-label">{meta.label}</span>
-                <IconButton
-                    icon="xmark"
+                <CloseButton
+                    size="sm"
                     label="Remove block"
-                    density="compact"
                     class="drone-node-close"
                     onClick={(e) => {
                         e.stopPropagation();
@@ -693,6 +692,8 @@ function nodeSummary(n: FlowNode): string {
             return truncate((n.data["title"] as string) || "<no title>");
         case "notify":
             return truncate((n.data["title"] as string) || "<no title>");
+        case "spawn":
+            return `of ${(n.data["leader"] as string) || "<no one>"} · ${truncate((n.data["brief"] as string) ?? "")}`;
         case "app_query": {
             const query = (n.data["query"] as string) || "muxbus";
             if (query === "agent") return `agent ${(n.data["agent"] as string) || "<no one>"}`;
@@ -746,6 +747,9 @@ export function nodeCopyEntries(n: FlowNode): CopyMenuEntry[] {
             break;
         case "app_query":
             entries.push({ label: "Copy query", value: str("query") });
+            break;
+        case "spawn":
+            entries.push({ label: "Copy brief", value: str("brief") });
             break;
         case "api":
             entries.push({ label: "Copy URL", value: str("url") }, { label: "Copy request body", value: str("body") });
@@ -840,6 +844,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                         onContextMenu={showTextInputContextMenu}
                     />
                 </NodeField>
+                <AgentOutputField node={p.node} update={update} />
                 <AgentResultPanel model={p.model} blockId={p.node.id} />
             </Show>
             <Show when={p.node.data.kind === "message"}>
@@ -851,46 +856,14 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
             <Show when={p.node.data.kind === "notify"}>
                 <NotifyFields node={p.node} update={update} />
             </Show>
+            <Show when={p.node.data.kind === "spawn"}>
+                <SpawnFields node={p.node} update={update} />
+            </Show>
             <Show when={p.node.data.kind === "app_query"}>
                 <AppQueryFields node={p.node} update={update} />
             </Show>
             <Show when={p.node.data.kind === "api"}>
-                <NodeField label="Method">
-                    <select
-                        class="drone-input nodrag"
-                        value={(p.node.data["method"] as string) ?? "GET"}
-                        onChange={(e) => update({ method: e.currentTarget.value })}
-                    >
-                        <option>GET</option>
-                        <option>POST</option>
-                        <option>PUT</option>
-                        <option>PATCH</option>
-                        <option>DELETE</option>
-                    </select>
-                </NodeField>
-                <NodeField label="URL">
-                    <TextInput
-                        variant="plain" class="drone-input nodrag"
-                        value={(p.node.data["url"] as string) ?? ""}
-                        onInput={(e) => update({ url: e.currentTarget.value })}
-                        onContextMenu={showTextInputContextMenu}
-                        placeholder="https://…/{{var.path}}"
-                    />
-                </NodeField>
-                <NodeField label="Body">
-                    <TextArea
-                        variant="plain" class="drone-input drone-input--grow nodrag nowheel"
-                        ref={(el) => autoGrow(el)}
-                        value={(p.node.data["body"] as string) ?? ""}
-                        placeholder='{"key": "{{var.x}}"}'
-                        onInput={(e) => {
-                            update({ body: e.currentTarget.value });
-                            autoGrow(e.currentTarget);
-                        }}
-                        onFocus={(e) => autoGrow(e.currentTarget)}
-                        onContextMenu={showTextInputContextMenu}
-                    />
-                </NodeField>
+                <ApiFields node={p.node} update={update} />
             </Show>
             <Show when={p.node.data.kind === "condition"}>
                 <NodeField label="if">
@@ -915,6 +888,51 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                 />
             </Show>
         </div>
+    );
+};
+
+/** The API block's fields: the method, the URL and the request body. */
+const ApiFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => {
+    const update = p.update;
+    return (
+        <>
+            <NodeField label="Method">
+                <select
+                    class="drone-input nodrag"
+                    value={(p.node.data["method"] as string) ?? "GET"}
+                    onChange={(e) => update({ method: e.currentTarget.value })}
+                >
+                    <option>GET</option>
+                    <option>POST</option>
+                    <option>PUT</option>
+                    <option>PATCH</option>
+                    <option>DELETE</option>
+                </select>
+            </NodeField>
+            <NodeField label="URL">
+                <TextInput
+                    variant="plain" class="drone-input nodrag"
+                    value={(p.node.data["url"] as string) ?? ""}
+                    onInput={(e) => update({ url: e.currentTarget.value })}
+                    onContextMenu={showTextInputContextMenu}
+                    placeholder="https://…/{{var.path}}"
+                />
+            </NodeField>
+            <NodeField label="Body">
+                <TextArea
+                    variant="plain" class="drone-input drone-input--grow nodrag nowheel"
+                    ref={(el) => autoGrow(el)}
+                    value={(p.node.data["body"] as string) ?? ""}
+                    placeholder='{"key": "{{var.x}}"}'
+                    onInput={(e) => {
+                        update({ body: e.currentTarget.value });
+                        autoGrow(e.currentTarget);
+                    }}
+                    onFocus={(e) => autoGrow(e.currentTarget)}
+                    onContextMenu={showTextInputContextMenu}
+                />
+            </NodeField>
+        </>
     );
 };
 
@@ -964,6 +982,16 @@ const TaskFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>
         <NodeLongText node={p.node} update={p.update} label="Text" key="body" placeholder="What to look at" />
         <NodeText node={p.node} update={p.update} label="For" key="target" placeholder="an agent's id; empty is the backlog" />
         <NodeText node={p.node} update={p.update} label="Key" key="dedupe" placeholder="one task per key, e.g. {{a.workflow}}" />
+    </>
+);
+
+/** The Spawn block's fields: whose worker it is, the brief, and the model and account it runs on. */
+const SpawnFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => (
+    <>
+        <NodeText node={p.node} update={p.update} label="Leader" key="leader" placeholder="an agent's name or id (not a {{reference}})" />
+        <NodeLongText node={p.node} update={p.update} label="Brief" key="brief" placeholder="Find out why {{trigger.run}} failed" />
+        <NodeText node={p.node} update={p.update} label="Model" key="model" placeholder="empty is the leader's own (not a {{reference}})" />
+        <NodeText node={p.node} update={p.update} label="Account" key="account" placeholder="empty is the leader's own (not a {{reference}})" />
     </>
 );
 
@@ -1049,10 +1077,9 @@ const VariablesEditor = (p: {
                             onContextMenu={showTextInputContextMenu}
                             placeholder="value"
                         />
-                        <IconButton
-                            icon="xmark"
+                        <CloseButton
+                            size="sm"
                             label="Remove variable"
-                            density="compact"
                             class="drone-btn drone-btn--small nodrag"
                             onClick={() => p.onChange(p.entries.filter((_, idx) => idx !== i()))}
                         />
@@ -1116,6 +1143,55 @@ function readAgentRef(n: FlowNode): AgentRefShape {
     }
     return { identityId: "", memoryId: "", instanceName: "", workingDirectory: "" };
 }
+
+/**
+ * The Agent block's reply fields (`output_schema`): the few short fields the reply must carry, so the next node reads
+ * `{{<id>.output.<field>}}`. Typed as JSON; it is kept on the node only while it parses to an object, and left empty it
+ * clears it. The text is the person's own until they leave, so it is not rewritten as they type.
+ */
+const AgentOutputField = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => {
+    const declared = p.node.data["output_schema"];
+    const [text, setText] = createSignal(declared && typeof declared === "object" ? JSON.stringify(declared) : "");
+    const [problem, setProblem] = createSignal("");
+    const onText = (value: string) => {
+        setText(value);
+        if (!value.trim()) {
+            setProblem("");
+            p.update({ output_schema: null });
+            return;
+        }
+        try {
+            const parsed: unknown = JSON.parse(value);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                setProblem("");
+                p.update({ output_schema: parsed });
+            } else {
+                setProblem("An object of field: type");
+            }
+        } catch {
+            setProblem("Not valid JSON yet");
+        }
+    };
+    return (
+        <NodeField label="Reply fields">
+            <TextArea
+                variant="plain" class="drone-input drone-input--grow nodrag nowheel"
+                ref={(el) => autoGrow(el)}
+                value={text()}
+                placeholder='{"verdict": {"enum": ["ok", "findings"]}, "cause": "string"}'
+                onInput={(e) => {
+                    onText(e.currentTarget.value);
+                    autoGrow(e.currentTarget);
+                }}
+                onFocus={(e) => autoGrow(e.currentTarget)}
+                onContextMenu={showTextInputContextMenu}
+            />
+            <Show when={problem()}>
+                <span class="drone-node-field-note">{problem()}</span>
+            </Show>
+        </NodeField>
+    );
+};
 
 const AgentRefEditor = (p: {
     node: FlowNode;

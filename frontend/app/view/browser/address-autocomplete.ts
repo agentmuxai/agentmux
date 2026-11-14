@@ -153,3 +153,14 @@ export function inlineCompletion(
     if (!top?.allowed_to_be_default || !top.inline_autocompletion) return "";
     return top.inline_autocompletion;
 }
+
+/** What is left of the completion shown after `prevTyped` once the user has typed on to `value`:
+ *  with "g[oogle.com]" shown, typing "o" leaves "ogle.com". Empty when the new text does not follow
+ *  the completion. The address bar keeps it selected until the engine answers for the new text, as
+ *  Chrome does: without it the selection went away at every key and came back with the answer. */
+export function carriedCompletion(shown: string, prevTyped: string, value: string): string {
+    if (value.length <= prevTyped.length || value.length >= shown.length) return "";
+    if (!shown.startsWith(prevTyped) || !value.startsWith(prevTyped)) return "";
+    if (shown.slice(0, value.length).toLowerCase() !== value.toLowerCase()) return "";
+    return shown.slice(value.length);
+}

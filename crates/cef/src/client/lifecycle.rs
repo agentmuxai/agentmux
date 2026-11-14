@@ -277,7 +277,7 @@ impl AgentMuxHandler {
         );
         dlog(&format!("on_after_created: registered label={} total={}", label, total));
 
-        let is_top_level_window = !label.starts_with("browser-pane-");
+        let is_top_level_window = !crate::browser_pane::label::is_pane_label(&label);
 
         // Determine BrowserKind from the LABEL prefix, not the
         // AgentMuxClient `is_browser_pane` flag. Smoke test on 0.33.586 found
@@ -307,11 +307,8 @@ impl AgentMuxHandler {
             // Transient OAuth sign-in popup — CEF owns its window; excluded
             // from the last-window quit gate by type.
             crate::state::BrowserKind::Popup
-        } else if let Some(rest) = label.strip_prefix("browser-pane-") {
-            let block_id = rest
-                .rfind('-')
-                .map(|i| rest[..i].to_string())
-                .unwrap_or_default();
+        } else if crate::browser_pane::label::is_pane_label(&label) {
+            let block_id = crate::browser_pane::label::pane_block_id(&label).unwrap_or_default().to_string();
             crate::state::BrowserKind::Pane { block_id }
         } else if label.starts_with("floating-") {
             let is_pool = label.starts_with("floating-pool-")
@@ -1442,7 +1439,7 @@ impl AgentMuxHandler {
         // Pane-specific on_before_close work (drain lifecycle entry) lives
         // in `crate::browser_pane::callbacks` after Phase 4.
         if let Some(ref lbl) = label {
-            if lbl.starts_with("browser-pane-") {
+            if crate::browser_pane::label::is_pane_label(lbl) {
                 crate::browser_pane::callbacks::on_before_close_browser_pane(&self.state, lbl, browser.identifier());
             }
             // Pool-window cleanup — release the respawn semaphore +
@@ -1464,7 +1461,7 @@ impl AgentMuxHandler {
             // — no host-side guard needed. Pool inventory updates
             // travel via `ReportPoolWindowRemoved` from
             // `on_pool_window_destroyed` and `promote_pool_window`.
-            if !lbl.starts_with("browser-pane-") {
+            if !crate::browser_pane::label::is_pane_label(lbl) {
                 crate::launcher_ipc::report_window_closed(lbl.clone());
                 // Phase B.4 follow-up — drift check after the close.
                 crate::launcher_ipc::compute_and_report_host_counts(&self.state);
@@ -1557,7 +1554,7 @@ impl AgentMuxHandler {
         // events for unpromoted-pool drains are emitted but harmless
         // — no F.6 saga is in flight to consume them.
         if let Some(ref lbl) = label {
-            if !lbl.starts_with("browser-pane-") {
+            if !crate::browser_pane::label::is_pane_label(lbl) {
                 crate::launcher_ipc::report_panes_reaped(lbl.clone());
             }
         }
@@ -1643,7 +1640,7 @@ impl AgentMuxHandler {
             // Same gate as report_panes_reaped above: skip
             // browser-pane-* only. window-pool-* labels (promoted)
             // are tracked windows and need their cleanup events.
-            if !lbl.starts_with("browser-pane-") {
+            if !crate::browser_pane::label::is_pane_label(lbl) {
                 // Pillar 2 Stage 2 — mirrors the actual cascade gate below
                 // (`request_drain.is_some()`), not the raw `user_browser_count`
                 // reading, so this report and the real decision can't drift

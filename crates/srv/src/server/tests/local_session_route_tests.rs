@@ -529,6 +529,13 @@ async fn the_sign_in_page_and_its_files_carry_the_policy_and_cannot_be_framed() 
     // The code never leaves the fragment: the entry is replaced before anything is posted.
     assert!(js.find("history.replaceState").unwrap() < js.find("post(\"/auth/enter\"").unwrap());
     assert!(js.contains("sessionStorage.setItem(\"amx-session\"") && !js.contains("localStorage"));
+    // A visit with no code (a visitor with no session, a browser that signed itself out) is told how
+    // to sign in, and is not shown the refusal a failed attempt gets.
+    let no_code = js.find("if (!code) {").expect("a visit with no code is handled apart");
+    let no_code_end = js[no_code..].find("return;").unwrap() + no_code;
+    let block = &js[no_code..no_code_end];
+    assert!(block.contains("not signed in") && block.contains("agentmux open") && !block.contains("fail()") && !block.contains("not accepted"), "{block}");
+    assert_eq!(js.matches("not accepted").count(), 1, "one refusal text, for every failed attempt");
 }
 
 #[test]

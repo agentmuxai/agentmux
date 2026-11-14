@@ -156,7 +156,9 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - uses: dtolnay/rust-toolchain@1.99.1
+      # A release (a tag run) keeps no build cache and takes none: it builds from what it downloads.
       - uses: Swatinem/rust-cache@v2
+        if: github.ref_type != 'tag'
         with:
           # Isolate this cache from ubuntu-latest (glibc 2.39) runs — the runner
           # OS key is just "Linux" for both, so without a prefix a cache entry
@@ -203,8 +205,10 @@ jobs:
           platform: linux
           tag: ${{ steps.in.outputs.cef_tag }}
 
+      # Skipped on a release: with no cache step its `cache-hit` output is empty, so the download below runs.
       - name: Cache patched libcef.so
         id: cef-cache
+        if: github.ref_type != 'tag'
         uses: actions/cache@v4
         with:
           path: ${{ env.CEF_RUNTIME_DIR }}

@@ -35,10 +35,6 @@ pub mod image;
 pub mod listener;
 pub mod routes;
 pub mod runtime;
-#[cfg(test)]
-mod listener_itest;
-#[cfg(test)]
-mod turn_itest;
 pub use self::pull::{StartEvent, StartObserver};
 
 use std::collections::HashMap;

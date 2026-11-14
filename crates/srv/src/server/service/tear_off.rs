@@ -984,4 +984,199 @@ mod tests {
         assert_eq!(ret.data.unwrap()["placed"], "fallback");
         assert_eq!(leaf_blocks(&state, &other_tab).await, vec![c], "it went where it was dropped");
     }
+
+    // A pane dragged to another tab keeps its display state: a chip stays a chip, unless it would be
+    // the only pane showing content there. SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 C. These run the
+    // whole redock (the saga, the source delete, the target placement, the minimize) on one AppState.
+
+    /// One workspace with two tabs. Each tab's layout is a row of single-block panes, one per entry of
+    /// `src` / `dst` (`true`: that pane is minimized, a chip; no entries: an empty tab). Returns (ws_id, src_tab, src_blocks,
+    /// dst_tab, dst_blocks).
+    async fn two_tabs(state: &AppState, src: &[bool], dst: &[bool]) -> (String, String, Vec<String>, String, Vec<String>) {
+        let ws_id = dispatch_apply(state, Command::CreateWorkspace { name: "w".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let mut tabs = Vec::new();
+        for (name, panes) in [("src", src), ("dst", dst)] {
+            let tab_id = new_tab(state, &ws_id).await;
+            let mut blocks = Vec::new();
+            for _ in panes {
+                let ev = dispatch_apply(state, Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null }).await;
+                blocks.push(
+                    ev.iter()
+                        .find_map(|e| match e {
+                            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                            _ => None,
+                        })
+                        .unwrap(),
+                );
+            }
+            let pane = |i: usize| agentmux_common::LayoutNode {
+                id: format!("{name}-{i}"),
+                data: Some(agentmux_common::LayoutNodeData { block_id: blocks[i].clone(), ..Default::default() }),
+                minimized: panes[i],
+                ..Default::default()
+            };
+            let tree = match panes.len() {
+                0 => None,
+                1 => Some(pane(0)),
+                n => Some(agentmux_common::LayoutNode { id: format!("{name}-root"), children: (0..n).map(pane).collect(), ..Default::default() }),
+            };
+            dispatch_apply(
+                state,
+                Command::LayoutSetTree { tab_id: tab_id.clone(), new_tree: tree, correlation_id: String::new(), slices: None },
+            )
+            .await;
+            tabs.push((tab_id, blocks));
+        }
+        let (dst_tab, dst_blocks) = tabs.pop().unwrap();
+        let (src_tab, src_blocks) = tabs.pop().unwrap();
+        (ws_id, src_tab, src_blocks, dst_tab, dst_blocks)
+    }
+
+    /// The tab-to-tab redock the drag makes, with the optional drop-onto-a-pane hint: `onto` is the
+    /// pane's block, and the block lands as a tab of that pane.
+    async fn redock_dragged(state: &AppState, block: &str, src_tab: &str, dst_tab: &str, ws_id: &str, onto: Option<&str>) -> WebReturnType {
+        let mut args: Vec<serde_json::Value> =
+            vec![block.into(), src_tab.into(), ws_id.into(), dst_tab.into(), ws_id.into()];
+        if let Some(target) = onto {
+            args.extend([target.into(), serde_json::Value::Null, true.into()]);
+        }
+        handle_redock_floating_pane(state, &call("RedockFloatingPane", args)).await
+    }
+
+    /// Whether `block`'s pane in `tab_id` is a chip in srv's tree, and None when it is in no pane there.
+    async fn is_chip(state: &AppState, tab_id: &str, block: &str) -> Option<bool> {
+        let srv = state.srv_state.lock().await;
+        let root = srv.tabs[tab_id].rootnode.as_ref()?;
+        crate::backend::layout::find_leaf_containing_block(root, block).map(|leaf| leaf.minimized)
+    }
+
+    /// The `minimize` actions queued for the window showing `tab_id`, as the blocks they name.
+    fn queued_minimize_actions(state: &AppState, tab_id: &str) -> Vec<String> {
+        let tab = state.mstore.must_get::<Tab>(tab_id).unwrap();
+        let layout = state.mstore.must_get::<LayoutState>(&tab.layoutstate).unwrap();
+        layout
+            .pendingbackendactions
+            .unwrap_or_default()
+            .iter()
+            .filter(|a| a.actiontype == "minimize")
+            .map(|a| a.blockid.clone())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_chip_redocked_into_a_tab_with_an_expanded_pane_stays_a_chip() {
+        let state = test_state();
+        let (ws_id, src_tab, src, dst_tab, dst) = two_tabs(&state, &[true, false], &[false]).await;
+        let chip = src[0].clone();
+        assert_eq!(is_chip(&state, &src_tab, &chip).await, Some(true));
+
+        let ret = redock_dragged(&state, &chip, &src_tab, &dst_tab, &ws_id, None).await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        assert_eq!(is_chip(&state, &dst_tab, &chip).await, Some(true), "it arrives as a chip");
+        assert_eq!(is_chip(&state, &dst_tab, &dst[0]).await, Some(false), "the pane already there still shows");
+        assert_eq!(is_chip(&state, &src_tab, &chip).await, None, "the source tab no longer shows it");
+        assert_eq!(state.srv_state.lock().await.blocks[&chip].tab_id, dst_tab, "and the target tab owns it");
+        assert_eq!(queued_minimize_actions(&state, &dst_tab), vec![chip], "the window showing the target is told too");
+    }
+
+    #[tokio::test]
+    async fn a_chip_redocked_into_an_empty_tab_arrives_expanded() {
+        let state = test_state();
+        let (ws_id, src_tab, src, dst_tab, _dst) = two_tabs(&state, &[true, false], &[]).await;
+        let chip = src[0].clone();
+
+        let ret = redock_dragged(&state, &chip, &src_tab, &dst_tab, &ws_id, None).await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        // A tab always shows one pane with content: the moved pane is the only one there, so the
+        // minimize is refused and it stays restored.
+        assert_eq!(is_chip(&state, &dst_tab, &chip).await, Some(false), "it arrives expanded");
+        assert!(queued_minimize_actions(&state, &dst_tab).is_empty(), "nothing tells the window to minimize it");
+        assert_eq!(is_chip(&state, &src_tab, &chip).await, None, "the source tab no longer shows it");
+    }
+
+    #[tokio::test]
+    async fn a_chip_redocked_into_a_tab_of_nothing_but_chips_arrives_expanded() {
+        // No chip is a place to insert at, so the pane goes in at the root of the target tree; it is
+        // then the only pane showing content there, so the minimize is refused and it stays restored.
+        let state = test_state();
+        let (ws_id, src_tab, src, dst_tab, dst) = two_tabs(&state, &[true, false], &[true, true]).await;
+        let chip = src[0].clone();
+
+        let ret = redock_dragged(&state, &chip, &src_tab, &dst_tab, &ws_id, None).await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        assert_eq!(is_chip(&state, &dst_tab, &chip).await, Some(false), "it arrives expanded");
+        assert_eq!(is_chip(&state, &dst_tab, &dst[0]).await, Some(true), "the chips there are untouched");
+        assert_eq!(is_chip(&state, &dst_tab, &dst[1]).await, Some(true));
+        assert!(queued_minimize_actions(&state, &dst_tab).is_empty(), "nothing tells the window to minimize it");
+        assert_eq!(is_chip(&state, &src_tab, &chip).await, None, "the source tab no longer shows it");
+        assert_eq!(state.srv_state.lock().await.blocks[&chip].tab_id, dst_tab, "and the target tab owns it");
+    }
+
+    #[tokio::test]
+    async fn an_expanded_pane_redocked_into_a_tab_of_nothing_but_chips_stays_expanded() {
+        let state = test_state();
+        let (ws_id, src_tab, src, dst_tab, dst) = two_tabs(&state, &[false, false], &[true]).await;
+        let pane = src[0].clone();
+
+        let ret = redock_dragged(&state, &pane, &src_tab, &dst_tab, &ws_id, None).await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        assert_eq!(is_chip(&state, &dst_tab, &pane).await, Some(false));
+        assert_eq!(is_chip(&state, &dst_tab, &dst[0]).await, Some(true), "the chip there is still a chip");
+    }
+
+    #[tokio::test]
+    async fn an_expanded_pane_redocked_to_another_tab_stays_expanded() {
+        let state = test_state();
+        let (ws_id, src_tab, src, dst_tab, dst) = two_tabs(&state, &[false, false], &[false]).await;
+        let pane = src[0].clone();
+
+        let ret = redock_dragged(&state, &pane, &src_tab, &dst_tab, &ws_id, None).await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        assert_eq!(is_chip(&state, &dst_tab, &pane).await, Some(false));
+        assert_eq!(is_chip(&state, &dst_tab, &dst[0]).await, Some(false));
+        assert!(queued_minimize_actions(&state, &dst_tab).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_chip_dropped_as_a_tab_of_an_expanded_pane_takes_that_panes_state() {
+        let state = test_state();
+        let (ws_id, src_tab, src, dst_tab, dst) = two_tabs(&state, &[true, false], &[false, true]).await;
+        let chip = src[0].clone();
+
+        let ret = redock_dragged(&state, &chip, &src_tab, &dst_tab, &ws_id, Some(&dst[0])).await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        // It joined the expanded pane's stack, so it shows with that pane. The chip beside it is untouched.
+        assert_eq!(is_chip(&state, &dst_tab, &chip).await, Some(false), "shown with the pane it joined");
+        assert_eq!(is_chip(&state, &dst_tab, &dst[0]).await, Some(false), "that pane is still expanded");
+        assert_eq!(is_chip(&state, &dst_tab, &dst[1]).await, Some(true), "the other chip is still a chip");
+        assert!(queued_minimize_actions(&state, &dst_tab).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_pane_dropped_as_a_tab_of_a_chip_takes_the_chips_state() {
+        let state = test_state();
+        let (ws_id, src_tab, src, dst_tab, dst) = two_tabs(&state, &[false, false], &[true, false]).await;
+        let pane = src[0].clone();
+
+        let ret = redock_dragged(&state, &pane, &src_tab, &dst_tab, &ws_id, Some(&dst[0])).await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        assert_eq!(is_chip(&state, &dst_tab, &pane).await, Some(true), "it is a tab of the chip, so it is shown as one");
+        assert_eq!(is_chip(&state, &dst_tab, &dst[0]).await, Some(true), "the chip is still a chip");
+        assert_eq!(is_chip(&state, &dst_tab, &dst[1]).await, Some(false));
+        assert!(queued_minimize_actions(&state, &dst_tab).is_empty(), "no minimize of its own was sent");
+    }
 }

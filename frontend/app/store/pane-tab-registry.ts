@@ -148,6 +148,9 @@ export interface PaneTabInstance {
 
 export interface PaneTabManifest {
     apiVersion: 1;
+    /** Load this type's code ahead of its first pane, when one is about to be opened (a pointer over
+     *  its widget). Only a type whose code loads on demand has it; calling it again does nothing. */
+    preload?(): void;
     /** The block's `meta.view` value. */
     view: string;
     /** Old `meta.view` values still found in persisted blocks, redirected here. */

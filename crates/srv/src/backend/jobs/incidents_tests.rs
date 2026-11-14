@@ -364,7 +364,7 @@ fn the_task_goes_to_the_owners_leader_or_to_anyone() {
     rig.mstore
         .agent_content_set(&AgentContent {
             agent_id: "uid-owner".into(),
-            content_type: crate::server::app_api::agent_spawn::WORKER_OF_CONTENT.into(),
+            content_type: crate::backend::agent_seat::WORKER_OF_CONTENT.into(),
             content: json!({ "agent": "Lead", "id": "uid-lead" }).to_string(),
             updated_at: 1,
         })

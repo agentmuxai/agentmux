@@ -22,7 +22,7 @@
 
 import { createEffect, createRoot, createSignal } from "solid-js";
 import { fireEvent as firePaneEvent } from "@/app/store/agent-pane-state-store";
-import { getSettingsKeyAtom, MOS } from "@/app/store/global";
+import { MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { onMuxEvent } from "@/app/store/mps";
@@ -30,6 +30,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { windowId } from "@/app/store/window-identity";
 
 import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
+import { BROWSER_WHAT, browserWaitsShown } from "./browser-waits";
 import { APP_KEY_PREFIX } from "./waiting-keys";
 
 
@@ -170,7 +171,7 @@ const AGENT_SOURCE = "srv:agent:";
 function whatForKind(kind: string): string {
     switch (kind) {
         case "browser":
-            return "needs you in the browser";
+            return BROWSER_WHAT;
         case "consent":
             return "asks for your consent";
         case "confirm":
@@ -196,7 +197,7 @@ export function applyUserAttention(a: UserAttention, thisWindow: string): void {
     const blockId = a.block_id || `${APP_KEY_PREFIX}${a.key}`;
     // Browser hand-offs and approvals can be left out (Settings → Sounds);
     // an end is always applied.
-    if (a.active && a.kind === "browser" && getSettingsKeyAtom("notify:waiting:browser")() === false) return;
+    if (a.active && a.kind === "browser" && !browserWaitsShown()) return;
     const agentWaits = AGENT_WAITS.has(a.kind);
     const source = agentWaits ? `${AGENT_SOURCE}${a.key}` : `srv:${a.key}`;
     if (a.active) startWaitingForYou(blockId, source, a.text, { what: whatForKind(a.kind) });
