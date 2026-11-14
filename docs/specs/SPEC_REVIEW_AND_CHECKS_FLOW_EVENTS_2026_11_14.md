@@ -1,6 +1,6 @@
 # Spec: review and checks flow, two events and a recent list (for the Atlas review bot and CI nodes)
 
-**Status:** agreed by Camper as the map's owner on 2026-11-14 (answers in section 9); the spec's approval itself is the operator's,
+**Status:** implemented by this change; agreed by Camper as the map's owner on 2026-11-14 (answers in section 9); the spec's approval itself is the operator's,
 through a leader. Task narko #47597 (spec) and #47598 (build, after this). Written 2026-11-14 from origin/main 25a8a2ea7. Owner: Lazo
 (events, merge queue). Requester: Camper (Atlas, spec `SPEC_ATLAS_AGENT_MAP_2026_11_13.md` section 5.4). The cloud half of this work
 is separate work; this spec describes only what srv and the frontend do.
