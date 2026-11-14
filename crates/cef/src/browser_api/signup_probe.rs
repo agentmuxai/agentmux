@@ -62,7 +62,7 @@ fn probe_js() -> String {
   const signupWords = /create (an |your )?account|sign ?up|register|join/i;
   const described = (el) => [...(el.labels || [])].map((l) => l.textContent).join(" ") + ` ${{el.name}} ${{el.id}} ${{ac(el)}} ${{el.placeholder || ""}}`;
   if (!(this instanceof HTMLInputElement) || this.type !== "password") return {{ error: "that element isn't a password field" }};
-  if (!visible(this)) return {{ error: "that password field isn't visible, enabled and on top, so no password was made" }};
+  if (!visible(this)) return {{ error: "that password field isn't visible and enabled, so no password was made" }};
   const group = this.form || this.closest("form");
   const passwords = [...(group || document).querySelectorAll("input[type=password]")].filter(shown);
   if (passwords.some((i) => ac(i).includes("current-password"))) return {{ change: true }};
@@ -99,6 +99,10 @@ pub async fn signup_probe_route(State(state): State<Arc<AppState>>, headers: Hea
 
 async fn probe(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &SignupProbeReq) -> Result<SignupProbeData, String> {
     let (located, backend, frame) = locate(state, &req.block_id, &req.ref_, root).await?;
+    // Before the script marks the field: an answer that fails leaves no token behind.
+    if located.origin.is_empty() {
+        return Err("the field's site couldn't be told, so no password was made".to_string());
+    }
     let mut in_frame = root.in_session(frame.as_ref().and_then(|f| f.session.as_deref()));
     let cdp = &mut in_frame;
     let ctx = isolated_context(cdp, frame.as_ref().map(|f| f.frame_id.as_str())).await?;
@@ -106,9 +110,6 @@ async fn probe(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &S
     let found = call_on(cdp, &obj, &probe_js(), vec![]).await?;
     if let Some(e) = found.get("error").and_then(serde_json::Value::as_str) {
         return Err(format!("{}: {e}", req.ref_));
-    }
-    if located.origin.is_empty() {
-        return Err("the field's site couldn't be told, so no password was made".to_string());
     }
     if found.get("change").and_then(serde_json::Value::as_bool) == Some(true) {
         return Ok(SignupProbeData { origin: located.origin, change: true, ..Default::default() });

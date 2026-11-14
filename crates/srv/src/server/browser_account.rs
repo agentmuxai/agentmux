@@ -132,7 +132,11 @@ async fn approve(state: &AppState, block_id: &str, agent: &str, agent_pane: Stri
         Ended::WentAhead => Ok(true),
         ended => {
             let (how, code) = if ended == Ended::NoAnswer { (How::TimedOut, StatusCode::REQUEST_TIMEOUT) } else { (How::Declined, StatusCode::FORBIDDEN) };
-            let why = ended.refusal("no password was made");
+            let why = if ended == Ended::Expired {
+                "nobody said yes, and an agent makes an account only on the person's yes: no password was made; ask the person".to_string()
+            } else {
+                ended.refusal("no password was made")
+            };
             Err((ended, code, how, why))
         }
     }

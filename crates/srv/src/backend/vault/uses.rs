@@ -139,9 +139,10 @@ pub fn goes_ahead_on_silence(kind: &str, needs_value: bool) -> bool {
     !needs_value && matches!(kind, "api-key" | "login" | "note")
 }
 
-/// Whether `req` goes ahead when nobody answers: [`goes_ahead_on_silence`], and never a copy of a secret from elsewhere.
+/// Whether `req` goes ahead when nobody answers: [`goes_ahead_on_silence`], and never a copy of a secret from elsewhere,
+/// nor a new account (an agent makes one only on the person's yes).
 pub fn goes_ahead(req: &UseRequest) -> bool {
-    req.import.is_none() && goes_ahead_on_silence(&req.kind, req.needs_value)
+    req.import.is_none() && !req.account && goes_ahead_on_silence(&req.kind, req.needs_value)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
