@@ -74,14 +74,53 @@ fn defaults_fill_what_a_definition_leaves_out() {
     assert!(def.enabled);
 }
 
-/// The kinds reserved for later phases validate as kinds and are refused
-/// with "available in a later version" (§6).
+/// An event trigger is a typed source and a small plain filter, and it starts a drone run, so the action is a drone.
+/// Approvals other than `none` are still for later (§6).
 #[test]
-fn event_triggers_and_approvals_are_for_later() {
-    let e = refused(with(example(), "/trigger", json!({ "kind": "event", "source": "github", "filter": {} })));
-    assert_eq!(e, "trigger kind event is available in a later version");
+fn an_event_trigger_is_a_source_and_a_plain_filter_on_a_drone_job() {
+    let mut ok = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" }));
+    ok["policy"] = json!({ "overlap": "skip" });
+    let with_trigger = |trigger: Value| with(ok.clone(), "/trigger", trigger);
+    let def = JobDefinition::parse(&with_trigger(json!({ "kind": "event", "source": "app_event", "filter": { "event": "job.finished", "outcome": "failed" } })), create()).unwrap();
+    let Trigger::Event(event) = &def.trigger else { panic!("{:?}", def.trigger) };
+    assert_eq!((event.source.as_str(), event.filter.len()), ("app_event", 2));
+    assert_eq!(def.trigger.kind(), trigger_kind::EVENT);
+    // A filter is optional, and every source this build has is accepted.
+    for source in event_source::ALL {
+        assert!(JobDefinition::parse(&with_trigger(json!({ "kind": "event", "source": source })), create()).is_ok(), "{source}");
+    }
+    let bad = |trigger: Value| refused(with_trigger(trigger));
+    assert!(bad(json!({ "kind": "event" })).contains("source"), "a source is required");
+    assert!(bad(json!({ "kind": "event", "source": "github" })).contains("not one of"));
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "extra": 1 })).contains("unknown field trigger.extra"));
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "filter": { "a": [1] } })).contains("event filter \"a\""), "a list is not a plain value");
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "filter": { "a": { "b": 1 } } })).contains("event filter"), "nor is an object");
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "filter": { "a": "x".repeat(MAX_EVENT_FILTER_TEXT + 1) } })).contains("event filter"));
+    let many: serde_json::Map<String, Value> = (0..=MAX_EVENT_FILTER).map(|i| (format!("k{i}"), json!(i))).collect();
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "filter": many })).contains("at most"));
+    // Only a drone is handed an event.
+    let e = refused(with(example(), "/trigger", json!({ "kind": "event", "source": "app_event" })));
+    assert!(e.contains("the action is a drone"), "{e}");
     let e = refused(with(example(), "/policy/approval", json!("operator")));
     assert!(e.contains("policy.approval") && e.contains(LATER), "{e}");
+}
+
+/// An event job keeps its source and filter in the stored row, and reads back the same.
+#[test]
+fn an_event_trigger_survives_the_stored_row() {
+    let mut ok = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" }));
+    ok["policy"] = json!({ "overlap": "skip" });
+    let def = JobDefinition::parse(&with(ok, "/trigger", json!({ "kind": "event", "source": "file_watch", "filter": { "glob": "*.log" } })), create()).unwrap();
+    let mut job = CronJob::default();
+    def.apply_to(&mut job, &|to| (to.to_string(), String::new()));
+    assert_eq!(job.trigger_kind, trigger_kind::EVENT);
+    assert_eq!(job.trigger_event, json!({ "source": "file_watch", "filter": { "glob": "*.log" } }));
+    assert_eq!(JobDefinition::from_job(&job).trigger, def.trigger);
+    // Edited to a timer, the event is gone from the row.
+    let mut timer = def.clone();
+    timer.trigger = Trigger::Every { seconds: 3600 };
+    timer.apply_to(&mut job, &|to| (to.to_string(), String::new()));
+    assert_eq!((job.trigger_kind.as_str(), job.trigger_event.clone()), (trigger_kind::EVERY, Value::Null));
 }
 
 /// A `drone` action names its drone, and runs on any trigger.

@@ -80,9 +80,19 @@
           "additionalProperties": false
         },
         {
-          "description": "Reserved for a later version; refused.",
-          "properties": { "kind": { "const": "event" } },
-          "required": ["kind"]
+          "description": "Something that happened on this computer starts a drone run with the event as its input, so the action must be a drone.",
+          "properties": {
+            "kind": { "const": "event" },
+            "source": { "enum": ["app_event", "file_watch", "webhook_local"] },
+            "filter": {
+              "type": "object",
+              "maxProperties": 8,
+              "additionalProperties": { "type": ["string", "number", "boolean"], "maxLength": 200 },
+              "description": "Plain values the source matches an event against; each source says which keys it reads. Never an expression."
+            }
+          },
+          "required": ["kind", "source"],
+          "additionalProperties": false
         }
       ],
       "description": "A job whose action starts an agent (message, spawn) runs at most every 15 minutes."
