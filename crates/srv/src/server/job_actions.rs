@@ -89,7 +89,7 @@ pub(crate) async fn run_action(state: &AppState, job: CronJob, run_id: &str) -> 
 /// What a job hands the drone it runs, read as `{{trigger.*}}`: how the run
 /// started (`schedule`, `manual`, `retry`, `event`), the job, and the slot it was due.
 ///
-/// For an event's run it is the event's own fields (`jobs::RunLedger::take_event_input`) with those keys set on top, so a
+/// For an event's run it is the event's own fields (`jobs::RunLedger::event_input`) with those keys set on top, so a
 /// source's field never stands in for `kind`, `job`, `run_id` or `fired_at_ms`. The event's data is held in memory from the
 /// fire to here: a run that waited through a restart has lost it, and fails saying so, not running on an empty input.
 fn drone_trigger(state: &AppState, job: &CronJob, run_id: &str) -> Result<serde_json::Value, String> {
@@ -97,8 +97,10 @@ fn drone_trigger(state: &AppState, job: &CronJob, run_id: &str) -> Result<serde_
     let run = ledger.and_then(|l| l.store().job_run_get(run_id).ok().flatten());
     let kind = run.as_ref().map_or(jobs::TRIGGER_MANUAL, |r| r.trigger.as_str());
     let mut fields = serde_json::Map::new();
-    if kind == jobs::TRIGGER_EVENT {
-        match ledger.and_then(|l| l.take_event_input(run_id)) {
+    // An event's run, and a retry of it, read the event: never start one on an empty input.
+    let of_event = kind == jobs::TRIGGER_EVENT || run.as_ref().is_some_and(|r| r.links["from_event"] == serde_json::json!(true));
+    if of_event {
+        match ledger.and_then(|l| l.event_input(run_id)) {
             Some(serde_json::Value::Object(input)) => fields = input,
             Some(other) => {
                 fields.insert("value".to_string(), other);

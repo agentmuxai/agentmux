@@ -11,7 +11,8 @@
 //! - **Pause all** skips it the same way (`paused_all`).
 //!
 //! The event's data is not in the ledger. It waits in memory for the run that starts ([`RunLedger::put_event_input`]):
-//! the Drone run keeps it as its input, and the ledger row keeps only what every run's row does.
+//! the Drone run keeps it as its input, a retry of the run takes it over, and the ledger row keeps only what every
+//! run's row does.
 
 use agentmux_common::time::now_ms;
 use serde_json::Value;
@@ -20,27 +21,41 @@ use super::Admission;
 use crate::backend::jobs::policy::Decision;
 use crate::backend::jobs::{Begin, RunLedger, BY_EVENT, SOURCE_CRON, TRIGGER_EVENT};
 use crate::backend::storage::cron::CronJob;
+use crate::backend::storage::job_events::KEEP_MS;
 use crate::backend::storage::job_runs::{reason, state, JobRun};
 
-/// The most event inputs held for runs that have not started. A run that never starts (its job was deleted while it
+/// The most event inputs held for runs that have not started. A run that never ends cleanly (its job was deleted while it
 /// waited) leaves its input here until the process ends; the bound keeps a flood from growing it.
-const MAX_HELD_INPUTS: usize = 1000;
+pub(in crate::backend::jobs) const MAX_HELD_INPUTS: usize = 1000;
 
 impl RunLedger {
-    /// Hold `input` (what the graph reads as `{{trigger.*}}`) for run `run_id`, until it starts.
+    /// Hold `input` (what the graph reads as `{{trigger.*}}`) for run `run_id`. The oldest is dropped when the bound is
+    /// reached, so a flood costs the runs that have waited longest, not a newer one.
     pub fn put_event_input(&self, run_id: &str, input: Value) {
         let mut held = self.event_inputs.lock().unwrap_or_else(|e| e.into_inner());
         if held.len() >= MAX_HELD_INPUTS {
-            if let Some(oldest) = held.keys().next().cloned() {
-                held.remove(&oldest);
-            }
+            held.pop_front();
         }
-        held.insert(run_id.to_string(), input);
+        held.push_back((run_id.to_string(), input));
     }
 
-    /// The input held for run `run_id`, taken: a run starts once.
-    pub fn take_event_input(&self, run_id: &str) -> Option<Value> {
-        self.event_inputs.lock().unwrap_or_else(|e| e.into_inner()).remove(run_id)
+    /// The input held for run `run_id`. It stays held while the run lives, so a retry of the run can carry it on.
+    pub fn event_input(&self, run_id: &str) -> Option<Value> {
+        let held = self.event_inputs.lock().unwrap_or_else(|e| e.into_inner());
+        held.iter().find(|(id, _)| id == run_id).map(|(_, input)| input.clone())
+    }
+
+    /// The run is over for good (it was not retried): its input is no longer needed.
+    pub(in crate::backend::jobs) fn drop_event_input(&self, run_id: &str) {
+        self.event_inputs.lock().unwrap_or_else(|e| e.into_inner()).retain(|(id, _)| id != run_id);
+    }
+
+    /// A retry `to` takes over what `from` held, so the next attempt reads the same event.
+    pub(in crate::backend::jobs) fn carry_event_input(&self, from: &str, to: &str) {
+        let mut held = self.event_inputs.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = held.iter_mut().find(|(id, _)| id == from) {
+            entry.0 = to.to_string();
+        }
     }
 
     /// Record the event `event_id` for `job` and decide whether its run starts. `Taken` is an event the job already
@@ -50,7 +65,11 @@ impl RunLedger {
         let now = now_ms();
         let id = uuid::Uuid::new_v4().to_string();
         match self.store.job_event_claim(&job.id, event_id, &id, now) {
-            Ok(true) => {}
+            Ok(true) => {
+                if let Err(e) = self.store.job_events_forget_before(now - KEEP_MS) {
+                    tracing::warn!(error = %e, "jobs: couldn't forget old event ids");
+                }
+            }
             Ok(false) => return Admission::Taken,
             Err(e) => {
                 tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record an event; firing it unrecorded");

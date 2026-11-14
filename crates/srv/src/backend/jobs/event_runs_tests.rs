@@ -9,7 +9,8 @@ use super::*;
 use crate::backend::cron::{ActionOutcome, JobEvent};
 use crate::backend::jobs::definition::{trigger_kind, Overlap};
 use crate::backend::storage::cron::CronJob;
-use crate::backend::storage::job_runs::reason;
+use crate::backend::jobs::admission::events::MAX_HELD_INPUTS as MAX_HELD;
+use crate::backend::storage::job_runs::{infra, reason};
 
 /// An event job (a drone on the `app_event` source) stored with `edit` applied.
 fn event_job(rig: &Rig, id: &str, edit: impl FnOnce(&mut CronJob)) -> CronJob {
@@ -58,8 +59,9 @@ async fn an_event_starts_one_drone_run_and_a_repeat_of_it_starts_none() {
     assert_eq!((row.trigger.as_str(), row.triggered_by.as_str(), row.state.as_str()), ("event", "event:app_event", state::RUNNING));
     assert_eq!(row.scheduled_for_ms, None, "an event has no slot");
     assert_eq!(*started.lock().unwrap(), [run_id.clone()]);
-    assert_eq!(rig.ledger.take_event_input(&run_id), Some(json!({ "outcome": "failed" })), "held for the run until it starts");
-    assert_eq!(rig.ledger.take_event_input(&run_id), None, "and taken once");
+    assert_eq!(rig.ledger.event_input(&run_id), Some(json!({ "outcome": "failed" })), "held for the run");
+    rig.ledger.drone_finished(&run_id, true, &Default::default(), "");
+    assert_eq!(rig.ledger.event_input(&run_id), None, "and let go when the run is over for good");
 
     let again = rig.sched.fire_event(&job, event("e1", json!({ "outcome": "failed" }))).await;
     assert_eq!((again.run_id, again.outcome, again.waiting), (None, None, None));
@@ -104,7 +106,7 @@ async fn a_buffered_event_waits_with_its_input_and_starts_when_the_run_ends() {
     rig.ledger.drone_finished(&first, true, &Default::default(), "");
     assert_eq!(rig.sched.run_policy_pass().await, 1);
     assert_eq!(*started.lock().unwrap(), [first.clone(), second.clone()]);
-    assert_eq!(rig.ledger.take_event_input(&second), Some(json!({ "n": 2 })), "its own input, not the first's");
+    assert_eq!(rig.ledger.event_input(&second), Some(json!({ "n": 2 })), "its own input, not the first's");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -127,4 +129,45 @@ async fn pause_all_skips_an_event_and_a_paused_or_non_event_job_ignores_it() {
     assert!(started.lock().unwrap().is_empty());
     assert_eq!(rig.runs("j-pause").len(), 1, "an ignored event leaves no row, and is not remembered");
     assert!(rig.sched.fire_event(&job, event("e2", json!({}))).await.run_id.is_some(), "the event the paused job ignored is new to it");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retry_of_an_events_run_reads_the_same_event() {
+    let rig = rig();
+    let job = event_job(&rig, "j-retry", |j| j.policy.retries = 2);
+    drone_runner(&rig);
+    let first = rig.sched.fire_event(&job, event("e1", json!({ "n": 7 }))).await.run_id.unwrap();
+
+    rig.ledger.turn_finished(&first, infra::INTERRUPTED, None, "interrupted");
+    let retry = rig.runs("j-retry").into_iter().find(|r| r.trigger == "retry").expect("a retry row");
+    assert_eq!(retry.links["from_event"], json!(true), "the retry knows it must have the event");
+    assert_eq!(rig.ledger.event_input(&retry.id), Some(json!({ "n": 7 })), "the retry took the event over");
+    assert_eq!(rig.ledger.event_input(&first), None, "and the first attempt no longer holds it");
+
+    // Its own retry is an event retry too.
+    rig.ledger.turn_finished(&retry.id, infra::INTERRUPTED, None, "interrupted");
+    let again = rig.runs("j-retry").into_iter().find(|r| r.links["retry_of"] == json!(retry.id)).expect("a second retry");
+    assert_eq!((again.links["from_event"].clone(), rig.ledger.event_input(&again.id)), (json!(true), Some(json!({ "n": 7 }))));
+}
+
+#[test]
+fn held_inputs_drop_the_oldest_first() {
+    let rig = rig();
+    for i in 0..=MAX_HELD {
+        rig.ledger.put_event_input(&format!("r{i}"), json!({ "i": i }));
+    }
+    assert_eq!(rig.ledger.event_input("r0"), None, "the oldest went");
+    assert!(rig.ledger.event_input("r1").is_some());
+    assert!(rig.ledger.event_input(&format!("r{}", MAX_HELD)).is_some(), "the newest stays");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_event_id_older_than_the_retention_is_forgotten_when_the_next_event_is_heard() {
+    let rig = rig();
+    let job = event_job(&rig, "j-prune", |_| {});
+    drone_runner(&rig);
+    assert!(rig.store.job_event_claim(&job.id, "ancient", "", 1).unwrap());
+    assert!(rig.sched.fire_event(&job, event("fresh", json!({}))).await.run_id.is_some());
+    assert!(rig.store.job_event_claim(&job.id, "ancient", "", 1).unwrap(), "its id was pruned, so it is new again");
+    assert!(!rig.store.job_event_claim(&job.id, "fresh", "", 2).unwrap(), "a recent id is kept");
 }

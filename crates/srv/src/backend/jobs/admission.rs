@@ -13,7 +13,7 @@
 //! can still both see room for one more for an instant; the limits are for
 //! the providers' rate limits and for tidiness, not safety.
 
-mod events;
+pub(super) mod events;
 
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ use serde_json::json;
 use super::caps::Refusal;
 use super::definition::Overlap;
 use super::policy::{self, Decision, Occupancy};
-use super::{Begin, RunLedger, BY_SCHEDULER, SOURCE_CRON, TRIGGER_RETRY};
+use super::{Begin, RunLedger, BY_SCHEDULER, SOURCE_CRON, TRIGGER_EVENT, TRIGGER_RETRY};
 use crate::backend::storage::cron::CronJob;
 use crate::backend::storage::job_runs::{infra, reason, state, JobRun};
 use crate::backend::storage::store::Store;
@@ -387,13 +387,22 @@ impl RunLedger {
     /// then 15 minutes). The failed run is marked `retried_by`, so it isn't
     /// an incident of its own; the last attempt decides.
     pub(super) fn maybe_retry(&self, run_id: &str) {
-        let Some(run) = self.store.job_run_get(run_id).ok().flatten() else { return };
-        if run.job_source != SOURCE_CRON || !policy::infra_retryable(&run) || !run.links["retried_by"].is_null() {
-            return;
+        match self.file_retry(run_id) {
+            // The next attempt reads the same event the first one did; a run that is over for good has no more use for it.
+            Some(next) => self.carry_event_input(run_id, &next),
+            None => self.drop_event_input(run_id),
         }
-        let Some(job) = self.job(&run.job_id) else { return };
+    }
+
+    /// The retry of `run_id`, filed if it has one coming: its id.
+    fn file_retry(&self, run_id: &str) -> Option<String> {
+        let run = self.store.job_run_get(run_id).ok().flatten()?;
+        if run.job_source != SOURCE_CRON || !policy::infra_retryable(&run) || !run.links["retried_by"].is_null() {
+            return None;
+        }
+        let job = self.job(&run.job_id)?;
         if run.attempt > i64::from(job.policy.retries) {
-            return;
+            return None;
         }
         let now = now_ms();
         let mut next = self.row(&job.id, SOURCE_CRON, &job.name, TRIGGER_RETRY, now);
@@ -403,13 +412,21 @@ impl RunLedger {
         next.triggered_by = BY_SCHEDULER.to_string();
         next.target_agent_uid = run.target_agent_uid.clone();
         next.links = json!({ "retry_of": run.id, "retry_at_ms": now + policy::retry_delay_ms(run.attempt) });
+        // A retry of an event's run reads the event too, and must not start without it.
+        if run.trigger == TRIGGER_EVENT || run.links["from_event"] == json!(true) {
+            next.links["from_event"] = json!(true);
+        }
         match self.store.job_run_insert(&next) {
             Ok(true) => {
                 let _ = self.store.job_run_add_links(&run.id, &json!({ "retried_by": next.id }));
                 tracing::info!(job_id = %job.id, attempt = next.attempt, "jobs: an infrastructure failure will be retried");
+                Some(next.id)
             }
-            Ok(false) => {}
-            Err(e) => tracing::warn!(run_id, error = %e, "jobs: couldn't file a retry"),
+            Ok(false) => None,
+            Err(e) => {
+                tracing::warn!(run_id, error = %e, "jobs: couldn't file a retry");
+                None
+            }
         }
     }
 
