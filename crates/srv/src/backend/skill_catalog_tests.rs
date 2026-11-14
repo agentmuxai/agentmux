@@ -98,6 +98,40 @@ fn the_pinned_key_is_a_real_key() {
 }
 
 #[test]
+fn browse_adds_the_version_of_the_app_found_here_by_the_executables_listed_for_this_platform() {
+    use crate::backend::app_version::Found;
+    let b = signed_with_script(1, "1.0.0");
+    let zip = zip_of(&b);
+    let with = |exes: &[(&str, &[&str])]| {
+        let mut e = entry_for(&b, &zip, 1);
+        e.app.executables = exes.iter().map(|(p, l)| (p.to_string(), l.iter().map(|x| x.to_string()).collect())).collect();
+        e
+    };
+    let mut listed = items(
+        vec![with(&[("windows", &["Live.exe"]), ("macos", &["Live"])]), with(&[("windows", &[])]), with(&[("macos", &["Live"])]), with(&[])],
+        &BTreeMap::new(),
+    );
+    assert!(listed.iter().all(|i| !i.app_found && i.app_version.is_none()), "nothing is looked up by items()");
+    let asked = std::cell::RefCell::new(Vec::new());
+    add_app_versions(&mut listed, "windows", |names| {
+        asked.borrow_mut().push(names.to_vec());
+        Some(Found { version: Some("12.2".into()) })
+    });
+    assert_eq!(*asked.borrow(), vec![vec!["Live.exe".to_string()]], "only the entry that lists a Windows executable is looked up, with those names");
+    assert_eq!((listed[0].app_found, listed[0].app_version.as_deref()), (true, Some("12.2")));
+    assert!(listed[1..].iter().all(|i| !i.app_found && i.app_version.is_none()));
+
+    // Found but saying no version, and not found at all.
+    let mut one = items(vec![with(&[("linux", &["blender"])])], &BTreeMap::new());
+    add_app_versions(&mut one, "linux", |_| Some(Found { version: None }));
+    assert_eq!((one[0].app_found, one[0].app_version.clone()), (true, None));
+    let mut none = items(vec![with(&[("linux", &["blender"])])], &BTreeMap::new());
+    add_app_versions(&mut none, "linux", |_| None);
+    assert_eq!((none[0].app_found, none[0].app_version.clone()), (false, None));
+    assert!(["windows", "macos", "linux"].contains(&this_platform()));
+}
+
+#[test]
 fn browse_says_what_is_installed_and_whether_the_catalog_is_ahead() {
     let b = signed_with_script(1, "1.0.0");
     let zip = zip_of(&b);

@@ -141,6 +141,8 @@ pub mod continuity_state;
 pub mod builtin_skills;
 /// Reading a skill from a folder, a git repository or a URL, for import.
 pub mod computer_use_skill;
+/// The version of an application on this computer, found from the executable names a computer-use skill lists.
+pub mod app_version;
 pub mod skill_catalog;
 pub mod skill_file;
 pub mod skill_import;

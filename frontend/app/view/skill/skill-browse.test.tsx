@@ -30,7 +30,7 @@ function entry(over: Record<string, unknown> = {}) {
         version: "1.0.0",
         description: "Use when driving Word.",
         publisher: "agentmux",
-        app: { vendor: "Microsoft", versions: { supported: ">=16", tested: ["16.0"] } },
+        app: { vendor: "Microsoft", executables: { windows: ["WINWORD.EXE"], macos: ["Microsoft Word"], linux: [] }, versions: { supported: ">=16", tested: ["16.0"] } },
         platforms: ["windows", "macos"],
         routes: ["api", "desktop"],
         hasScripts: false,
@@ -52,6 +52,8 @@ function item(over: Record<string, unknown> = {}, entryOver: Record<string, unkn
         state: "not_installed",
         installed_version: null,
         skill_id: null,
+        app_found: false,
+        app_version: null,
         ...over,
     };
 }
@@ -120,6 +122,33 @@ describe("Browse the catalog", () => {
         const wavelab = within(list).getByRole("listitem", { name: "WaveLab" });
         expect(wavelab.textContent).toContain("newer than the catalog's 1.0.0");
         expect(within(wavelab).queryByRole("button")).toBeNull();
+    });
+
+    it("says whether the app is on this computer, and which version, against the version it was tested on", async () => {
+        const tested = (appVersion: string) => [{ skillVersion: "1.0.0", appVersion, platform: "windows", date: "2026-11-06", result: "pass" }];
+        rpc.AppSkillsCatalogCommand.mockResolvedValue({
+            items: [
+                item({ app_found: true, app_version: "16.0.18227.20162" }, { id: "a.word", name: "Word", verification: [] }),
+                item({ app_found: true, app_version: "17.1.2" }, { id: "a.excel", name: "Excel", verification: tested("16.0") }),
+                item({ app_found: true, app_version: "16.0.1" }, { id: "a.ppt", name: "PowerPoint", verification: tested("16.0") }),
+                item({ app_found: true, app_version: "160.0.1" }, { id: "a.prefix", name: "Prefix", verification: tested("16.0") }),
+                item({ app_found: true, app_version: null }, { id: "a.noversion", name: "NoVersion" }),
+                item({}, { id: "a.absent", name: "Absent" }),
+                item({}, { id: "a.noexe", name: "NoExe", app: { vendor: "Acme", executables: { windows: [], macos: ["x"] }, versions: { supported: null, tested: [] } } }),
+                item({}, { id: "a.mac", name: "MacOnly", platforms: ["macos"] }),
+            ],
+        });
+        const list = await openBrowse();
+        const line = (name: string) => within(list).getByRole("listitem", { name }).textContent ?? "";
+        expect(line("Word")).toContain("Word on this computer: version 16.0.18227.20162.");
+        expect(line("Excel")).toContain("Excel on this computer: version 17.1.2. The last test passed on 16.0: check before trusting it.");
+        expect(line("PowerPoint")).toContain("PowerPoint on this computer: version 16.0.1, the version it was tested on.");
+        expect(line("Prefix")).toContain("The last test passed on 16.0: check before trusting it.");
+        expect(line("NoVersion")).toContain("NoVersion is on this computer; its version could not be read.");
+        expect(line("Absent")).toContain("Absent is not found on this computer.");
+        expect(line("NoExe")).not.toContain("this computer.");
+        expect(line("MacOnly")).not.toContain("on this computer");
+        expect(line("MacOnly")).not.toContain("not found");
     });
 
     it("offers no Install for a skill that is for another OS, and says which OS it needs", async () => {
