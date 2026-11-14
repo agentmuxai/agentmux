@@ -45,7 +45,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::splash_core::{
     format_ms, format_running, hold_duration, reconcile, tally_label, trunc, visible_rows,
-    RowKind, StageEntry, StageTimeline,
+    DetailLayout, RowKind, StageEntry, StageTimeline,
 };
 use crate::startup_events::{StartupEvent, StartupStatus};
 
@@ -100,6 +100,12 @@ const STAGE_AREA_H: i32 =
 // unaffected, this only raises the truncation threshold.
 const LABEL_MAX_CHARS: usize = crate::splash_core::STAGE_LABEL_MAX_CHARS;
 const SUB_LABEL_MAX_CHARS: usize = 28;
+/// A finished row's end detail starts under its label's indent (two glyphs in)
+/// and runs to the time column's right edge; at most two lines of it are drawn.
+const DETAIL_LAYOUT: DetailLayout = DetailLayout {
+    width: ((SPLASH_W - STAGE_MARGIN_R - STAGE_MARGIN_L) / crate::splash_font::GLYPH_W as i32) as usize - 2,
+    max_lines: 2,
+};
 
 // Colors
 const STAGE_COLOR: [u8; 3] = [0xC0, 0xC0, 0xCC];
@@ -531,6 +537,18 @@ fn draw_border(dib: &mut [u8]) {
     }
 }
 
+/// One line of why the row above warned or failed, in that row's colour,
+/// under its label (two glyphs further in under a sub-item).
+fn draw_detail_line(dib: &mut [u8], sub_x: i32, y: i32, text: &str, status: StartupStatus, indented: bool) {
+    let color = match status {
+        StartupStatus::Ok => SUB_COLOR,
+        StartupStatus::Warn => STATUS_WARN_COLOR,
+        StartupStatus::Error => STATUS_ERR_COLOR,
+    };
+    let x = sub_x + if indented { 2 * crate::splash_font::GLYPH_W as i32 } else { 0 };
+    crate::splash_text::draw_text(dib, SPLASH_W, SPLASH_H, x, y, text, color, 1.0, true);
+}
+
 fn draw_stages(dib: &mut [u8], stages: &[StageEntry], total_ms: Option<u64>, restoring: bool) {
     use crate::splash_text::{draw_text, text_width};
 
@@ -560,7 +578,7 @@ fn draw_stages(dib: &mut [u8], stages: &[StageEntry], total_ms: Option<u64>, res
     let reserved = if total_ms.is_some() { 2 } else { 0 };
     let budget = MAX_STAGE_ROWS.saturating_sub(row + reserved);
 
-    for entry in visible_rows(stages, budget) {
+    for entry in visible_rows(stages, budget, Some(DETAIL_LAYOUT)) {
         let y = y0 + row as i32 * STAGE_ROW_H;
         let sub_x = x_label + 2 * crate::splash_font::GLYPH_W as i32;
         match entry.kind {
@@ -594,6 +612,7 @@ fn draw_stages(dib: &mut [u8], stages: &[StageEntry], total_ms: Option<u64>, res
                 let lbl = trunc(&tally_label(done, total), SUB_LABEL_MAX_CHARS);
                 draw_text(dib, SPLASH_W, SPLASH_H, sub_x, y, &lbl, SUB_COLOR, 1.0, true);
             }
+            RowKind::Detail { text, status, indented } => draw_detail_line(dib, sub_x, y, &text, status, indented),
             RowKind::Sub(sub) => {
                 let lbl = trunc(&sub.label, SUB_LABEL_MAX_CHARS);
                 draw_text(dib, SPLASH_W, SPLASH_H, sub_x, y, &lbl, SUB_COLOR, 1.0, true);

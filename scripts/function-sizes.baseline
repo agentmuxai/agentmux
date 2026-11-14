@@ -113,12 +113,12 @@
 126 crates/launcher/src/saga/mod.rs::SagaCoordinator::spawn_saga
 185 crates/launcher/src/saga/mod.rs::run_coordinator
 183 crates/launcher/src/second_instance.rs::bind_socket_with_recovery
-119 crates/launcher/src/splash.rs::draw_stages
+120 crates/launcher/src/splash.rs::draw_stages
 182 crates/launcher/src/splash.rs::run_splash
 163 crates/launcher/src/splash_linux/x11.rs::run
 105 crates/launcher/src/splash_mac.rs::Splash::run_until_dismissed
 233 crates/launcher/src/splash_mac.rs::build_window
-108 crates/launcher/src/splash_mac.rs::flatten_rows
+109 crates/launcher/src/splash_mac.rs::flatten_rows
 238 crates/launcher/src/srv_spawner.rs::spawn_srv_once
 858 crates/launcher/src/supervisor/unix.rs::run_unix
 1290 crates/launcher/src/supervisor/windows.rs::run_windows

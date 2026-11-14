@@ -325,10 +325,86 @@ pub enum RowKind<'a> {
     /// Stands in for sub-items collapsed out of the detail list.
     /// `done` of `total` sub-items in this stage have completed.
     SubTally { done: usize, total: usize },
+    /// One line of the end detail of the row above it: why a finished stage
+    /// or sub-item warned or failed (for example "Can't reach the app page:
+    /// ERR_CONNECTION_REFUSED, retrying"). `status` is that row's status, so
+    /// the line is coloured like its time. `indented` is true under a sub-item.
+    Detail { text: String, status: StartupStatus, indented: bool },
 }
 
 pub struct Row<'a> {
     pub kind: RowKind<'a>,
+}
+
+/// How much room a renderer has for a finished row's end detail: the
+/// characters one line holds, and the most lines one detail may take.
+#[derive(Clone, Copy)]
+pub struct DetailLayout {
+    pub width: usize,
+    pub max_lines: usize,
+}
+
+/// Break `text` into at most `max_lines` lines of at most `width` characters,
+/// at spaces. A word wider than a line is split. When the text does not fit,
+/// the last line ends in ".." (never wider than `width`).
+pub fn wrap_detail(text: &str, width: usize, max_lines: usize) -> Vec<String> {
+    if width < 3 || max_lines == 0 {
+        return Vec::new();
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_len = 0usize;
+    for word in text.split_whitespace() {
+        let mut word: Vec<char> = word.chars().collect();
+        // A word wider than a line fills whole lines until the rest fits.
+        while word.len() > width {
+            if cur_len > 0 {
+                lines.push(std::mem::take(&mut cur));
+                cur_len = 0;
+            }
+            lines.push(word.drain(..width).collect());
+        }
+        if word.is_empty() {
+            continue;
+        }
+        let need = if cur_len == 0 { word.len() } else { cur_len + 1 + word.len() };
+        if need > width {
+            lines.push(std::mem::take(&mut cur));
+            cur_len = 0;
+        }
+        if cur_len > 0 {
+            cur.push(' ');
+            cur_len += 1;
+        }
+        cur.extend(word.iter());
+        cur_len += word.len();
+    }
+    if cur_len > 0 {
+        lines.push(cur);
+    }
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+        let last = lines.pop().unwrap_or_default();
+        let last = last.trim_end_matches([',', ';', ':', ' ']);
+        let keep: String = last.chars().take(width - 2).collect();
+        lines.push(format!("{}..", keep.trim_end_matches([',', ';', ':', ' '])));
+    }
+    lines
+}
+
+/// The detail lines to show under a row that ended: only a warn or error
+/// outcome with a detail says anything the time column does not.
+fn detail_rows<'a>(done: &Option<Outcome>, indented: bool, layout: Option<DetailLayout>) -> Vec<Row<'a>> {
+    let (Some(layout), Some((_, status, Some(detail)))) = (layout, done) else { return Vec::new() };
+    if *status == StartupStatus::Ok {
+        return Vec::new();
+    }
+    // Indented rows start two glyphs further right, and have that much less room.
+    let width = if indented { layout.width.saturating_sub(2) } else { layout.width };
+    wrap_detail(detail, width, layout.max_lines)
+        .into_iter()
+        .map(|text| Row { kind: RowKind::Detail { text, status: *status, indented } })
+        .collect()
 }
 
 /// The label for a collapsed-sub-items row. Shared so all three platforms
@@ -347,52 +423,69 @@ pub fn tally_label(done: usize, total: usize) -> String {
 /// panel with the *earliest* entries and never showed the one currently
 /// running — the opposite of what a progress display is for, and the reason a
 /// slow startup looked frozen rather than busy. See the report above.
-pub fn visible_rows(stages: &[StageEntry], budget: usize) -> Vec<Row<'_>> {
-    // One block per stage: its own row first, then its (summarized) sub rows.
-    // Trimming happens block-wise below — an indented row must never outlive
-    // the stage row it belongs under.
-    let mut blocks: Vec<Vec<Row<'_>>> = Vec::new();
+pub fn visible_rows(stages: &[StageEntry], budget: usize, detail: Option<DetailLayout>) -> Vec<Row<'_>> {
+    // One block per stage: its own rows first (the stage row and the lines of
+    // its end detail), then its (summarized) sub rows, each with its own
+    // detail lines. Trimming happens block-wise below — an indented row must
+    // never outlive the stage row it belongs under, nor a detail line the row
+    // it explains.
+    struct Block<'a> {
+        head: Vec<Row<'a>>,
+        units: Vec<Vec<Row<'a>>>,
+    }
+    let mut blocks: Vec<Block<'_>> = Vec::new();
     for stage in stages {
-        let mut block = vec![Row { kind: RowKind::Stage(stage) }];
+        let mut head = vec![Row { kind: RowKind::Stage(stage) }];
+        head.extend(detail_rows(&stage.done, false, detail));
+        let mut units: Vec<Vec<Row<'_>>> = Vec::new();
         let subs = &stage.subs;
-        if subs.len() > SUB_DETAIL_MAX {
+        let shown = if subs.len() > SUB_DETAIL_MAX {
             // Counted over ALL of the stage's sub-items, not just the hidden
             // ones: this is the stage's progress ratio, so it has to keep
             // rising as the two always-shown items finish too.
             let done = subs.iter().filter(|s| s.done.is_some()).count();
-            block.push(Row { kind: RowKind::SubTally { done, total: subs.len() } });
-            for sub in &subs[subs.len() - SUB_DETAIL_MAX..] {
-                block.push(Row { kind: RowKind::Sub(sub) });
-            }
+            units.push(vec![Row { kind: RowKind::SubTally { done, total: subs.len() } }]);
+            &subs[subs.len() - SUB_DETAIL_MAX..]
         } else {
-            for sub in subs {
-                block.push(Row { kind: RowKind::Sub(sub) });
-            }
+            &subs[..]
+        };
+        for sub in shown {
+            let mut unit = vec![Row { kind: RowKind::Sub(sub) }];
+            unit.extend(detail_rows(&sub.done, true, detail));
+            units.push(unit);
         }
-        blocks.push(block);
+        blocks.push(Block { head, units });
     }
 
     // Fill from the newest block backwards. A block that only partially fits
-    // keeps its stage row plus as many of its newest sub rows as are left —
-    // never the children alone, which would render as indented rows dangling
-    // under whatever stage happened to precede them.
+    // keeps its stage row (and its detail, as far as it fits) plus as many of
+    // its newest sub rows as are left — never the children alone, which would
+    // render as indented rows dangling under whatever stage happened to
+    // precede them.
     let mut out: Vec<Row<'_>> = Vec::new();
     let mut remaining = budget;
     for block in blocks.into_iter().rev() {
         if remaining == 0 {
             break;
         }
-        let mut chunk: Vec<Row<'_>> = if block.len() <= remaining {
-            block
+        let total = block.head.len() + block.units.iter().map(Vec::len).sum::<usize>();
+        let mut chunk: Vec<Row<'_>> = if total <= remaining {
+            let mut chunk = block.head;
+            chunk.extend(block.units.into_iter().flatten());
+            chunk
         } else {
-            let mut it = block.into_iter();
-            let header = it.next().expect("every block starts with its stage row");
-            let subs: Vec<Row<'_>> = it.collect();
-            let keep = remaining - 1;
-            let skip = subs.len() - keep;
-            let mut chunk = Vec::with_capacity(remaining);
-            chunk.push(header);
-            chunk.extend(subs.into_iter().skip(skip));
+            let mut chunk = block.head;
+            chunk.truncate(remaining);
+            let mut room = remaining - chunk.len();
+            let mut kept: Vec<Vec<Row<'_>>> = Vec::new();
+            for unit in block.units.into_iter().rev() {
+                if unit.len() > room {
+                    break;
+                }
+                room -= unit.len();
+                kept.push(unit);
+            }
+            chunk.extend(kept.into_iter().rev().flatten());
             chunk
         };
         remaining -= chunk.len();
@@ -760,6 +853,7 @@ mod tests {
                 RowKind::Stage(s) => s.label.to_string(),
                 RowKind::Sub(s) => s.label.clone(),
                 RowKind::SubTally { done, total } => tally_label(*done, *total),
+                RowKind::Detail { text, .. } => format!("detail: {text}"),
             })
             .collect()
     }
@@ -767,7 +861,7 @@ mod tests {
     #[test]
     fn a_short_sub_list_is_shown_in_full_with_no_tally() {
         let tl = timeline_with_subs(2);
-        let rows = visible_rows(&tl.stages, 12);
+        let rows = visible_rows(&tl.stages, 12, None);
         assert_eq!(labels(&rows), vec!["backend", "migration 0", "migration 1"]);
     }
 
@@ -776,7 +870,7 @@ mod tests {
         // 9 subs: 8 completed + 1 running. Detail keeps the newest two; the
         // tally reports the stage's whole ratio, so 8 of 9 are done.
         let tl = timeline_with_subs(9);
-        let rows = visible_rows(&tl.stages, 12);
+        let rows = visible_rows(&tl.stages, 12, None);
         assert_eq!(
             labels(&rows),
             vec!["backend", "8/9 done", "migration 7", "migration 8"],
@@ -789,7 +883,7 @@ mod tests {
         // The whole point of the display: whatever is happening right now
         // must be on screen.
         let tl = timeline_with_subs(20);
-        let rows = visible_rows(&tl.stages, 12);
+        let rows = visible_rows(&tl.stages, 12, None);
         let running = rows
             .iter()
             .filter_map(|r| match &r.kind {
@@ -810,7 +904,7 @@ mod tests {
             tl.apply_tick(vec![begin(stage)]);
             tl.apply_tick(vec![]);
         }
-        let rows = visible_rows(&tl.stages, 3);
+        let rows = visible_rows(&tl.stages, 3, None);
         assert_eq!(labels(&rows), vec!["host", "cef_init", "paint"]);
     }
 
@@ -825,7 +919,7 @@ mod tests {
         let mut tl = timeline_with_subs(5); // "backend" + 5 subs
         tl.apply_tick(vec![begin("host")]);
         tl.apply_tick(vec![]);
-        let rows = visible_rows(&tl.stages, 4);
+        let rows = visible_rows(&tl.stages, 4, None);
 
         assert!(
             matches!(rows[0].kind, RowKind::Stage(_)),
@@ -846,14 +940,14 @@ mod tests {
         // When only part of a block fits, the stage row is mandatory and the
         // rows given up are its oldest (the tally first, then older detail).
         let tl = timeline_with_subs(5);
-        let rows = visible_rows(&tl.stages, 2);
+        let rows = visible_rows(&tl.stages, 2, None);
         assert_eq!(labels(&rows), vec!["backend", "migration 4"]);
     }
 
     #[test]
     fn a_zero_budget_yields_no_rows_rather_than_panicking() {
         let tl = timeline_with_subs(5);
-        assert!(visible_rows(&tl.stages, 0).is_empty());
+        assert!(visible_rows(&tl.stages, 0, None).is_empty());
     }
 
     #[test]
@@ -900,5 +994,101 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].done.as_ref().unwrap().0, 9300, "the page loaded: the row reports the real total");
         assert!(rows[0].done.as_ref().unwrap().2.is_none());
+    }
+
+    const RETRY: &str = "Can't reach the app page: ERR_CONNECTION_REFUSED, retrying";
+
+    #[test]
+    fn a_detail_that_fits_stays_on_one_line() {
+        assert_eq!(wrap_detail("Failed to start", 40, 2), vec!["Failed to start"]);
+        assert!(wrap_detail("", 40, 2).is_empty());
+        assert!(wrap_detail("text", 40, 0).is_empty());
+    }
+
+    #[test]
+    fn a_detail_wraps_at_spaces_and_the_reason_survives() {
+        assert_eq!(wrap_detail(RETRY, 41, 2), vec!["Can't reach the app page:", "ERR_CONNECTION_REFUSED, retrying"]);
+        // The narrowest splash (Linux): the second line is cut, still showing the error name.
+        assert_eq!(wrap_detail(RETRY, 25, 2), vec!["Can't reach the app page:", "ERR_CONNECTION_REFUSED.."]);
+    }
+
+    #[test]
+    fn a_detail_line_is_never_wider_than_the_splash() {
+        for width in [8, 14, 25, 41, 60] {
+            for max_lines in 1..=3 {
+                for text in [RETRY, "x", "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz", "a b c d e f g h i j k l m n o p"] {
+                    let lines = wrap_detail(text, width, max_lines);
+                    assert!(lines.len() <= max_lines, "{text:?} at {width}x{max_lines}: {lines:?}");
+                    assert!(lines.iter().all(|l| l.chars().count() <= width), "{text:?} at {width}x{max_lines}: {lines:?}");
+                }
+            }
+        }
+    }
+
+    /// A paint row that ended `status` with `detail`, then (optionally) a sub-item with its own.
+    fn timeline_ending(status: StartupStatus, detail: Option<&str>) -> StageTimeline {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("paint")]);
+        tl.apply_tick(vec![StartupEvent::StageEnd {
+            stage: "paint",
+            duration_ms: 800,
+            status,
+            detail: detail.map(str::to_string),
+        }]);
+        tl
+    }
+
+    const LAYOUT: Option<DetailLayout> = Some(DetailLayout { width: 41, max_lines: 2 });
+
+    #[test]
+    fn a_warn_or_error_row_shows_its_detail_right_under_it() {
+        for status in [StartupStatus::Warn, StartupStatus::Error] {
+            let tl = timeline_ending(status, Some(RETRY));
+            let rows = visible_rows(&tl.stages, 12, LAYOUT);
+            assert_eq!(
+                labels(&rows),
+                vec!["paint", "detail: Can't reach the app page:", "detail: ERR_CONNECTION_REFUSED, retrying"]
+            );
+            assert!(matches!(rows[1].kind, RowKind::Detail { status: s, indented: false, .. } if s == status));
+        }
+    }
+
+    #[test]
+    fn an_ok_row_a_row_without_a_detail_and_a_renderer_without_room_show_none() {
+        let ok = timeline_ending(StartupStatus::Ok, Some("signal"));
+        assert_eq!(labels(&visible_rows(&ok.stages, 12, LAYOUT)), vec!["paint"]);
+        let bare = timeline_ending(StartupStatus::Warn, None);
+        assert_eq!(labels(&visible_rows(&bare.stages, 12, LAYOUT)), vec!["paint"]);
+        let warn = timeline_ending(StartupStatus::Warn, Some(RETRY));
+        assert_eq!(labels(&visible_rows(&warn.stages, 12, None)), vec!["paint"]);
+    }
+
+    #[test]
+    fn a_detail_takes_rows_from_the_budget_and_the_stage_row_stays() {
+        let tl = timeline_ending(StartupStatus::Warn, Some(RETRY));
+        assert_eq!(labels(&visible_rows(&tl.stages, 2, LAYOUT)), vec!["paint", "detail: Can't reach the app page:"]);
+        assert_eq!(labels(&visible_rows(&tl.stages, 1, LAYOUT)), vec!["paint"]);
+    }
+
+    #[test]
+    fn a_sub_item_keeps_its_detail_or_loses_it_with_it() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("backend")]);
+        tl.apply_tick(vec![
+            StartupEvent::SubBegin { stage: "backend", id: "a".into(), label: "first".into() },
+            StartupEvent::SubBegin { stage: "backend", id: "b".into(), label: "second".into() },
+        ]);
+        tl.apply_tick(vec![
+            StartupEvent::SubEnd { stage: "backend", id: "a".into(), duration_ms: 5, status: StartupStatus::Error, detail: Some("disk full".into()) },
+            StartupEvent::SubEnd { stage: "backend", id: "b".into(), duration_ms: 5, status: StartupStatus::Ok, detail: None },
+        ]);
+        assert_eq!(
+            labels(&visible_rows(&tl.stages, 12, LAYOUT)),
+            vec!["backend", "first", "detail: disk full", "second"]
+        );
+        let rows = visible_rows(&tl.stages, 12, LAYOUT);
+        assert!(matches!(rows[2].kind, RowKind::Detail { indented: true, .. }));
+        // No room for first + its detail + second: the older sub-item goes whole, never its detail alone.
+        assert_eq!(labels(&visible_rows(&tl.stages, 3, LAYOUT)), vec!["backend", "second"]);
     }
 }
