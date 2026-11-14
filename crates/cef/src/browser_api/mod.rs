@@ -46,6 +46,7 @@ pub mod hidden_choices;
 pub mod key_typing;
 pub mod last_input;
 pub mod nav_settle;
+mod orphan_labels;
 pub mod page_state;
 pub mod page_url;
 pub mod press;

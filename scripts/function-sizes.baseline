@@ -128,7 +128,7 @@
 153 crates/launcher/src/wrr/mod.rs::apply_hwnd_position_changed
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
-162 crates/remote/src/serve.rs::handle
+159 crates/remote/src/serve.rs::handle
 116 crates/srv/src/agents/runner.rs::run_agent_with_bin
 104 crates/srv/src/ambient/cli.rs::invoke_haiku
 124 crates/srv/src/ambient/digest.rs::extract_digest_parts

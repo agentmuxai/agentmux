@@ -205,7 +205,7 @@ impl HttpServer {
     /// any other; a listener that is not this key's server sees one random nonce.
     pub(crate) async fn connect(target: &Target) -> Result<HttpServer, String> {
         // No proxy for a loopback address; the Host header is the address, as srv requires.
-        let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(10)).build().expect("a plain http client");
+        let client = crate::http_client::builder().no_proxy().timeout(Duration::from_secs(10)).build().map_err(|e| format!("could not build an http client: {e}"))?;
         let bound = format!("127.0.0.1:{}", target.port);
         let base = format!("http://{bound}");
         let channel = Self::hello(&client, &base, &bound, &target.key, &target.origin).await?;

@@ -133,7 +133,7 @@ pub(crate) fn origin_of(url: &str) -> Option<String> {
 }
 
 fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
+    crate::http_client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .redirect(reqwest::redirect::Policy::none())
         .build()
