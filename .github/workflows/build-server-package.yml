@@ -1,0 +1,113 @@
+name: build-server-package
+
+# The AgentMux server package: the server, the `agentmux` command, the two helper programs agents run, and the built
+# web UI, as one tarball per platform (docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md section 4).
+# Linux x64 and arm64, macOS arm64 and x64. release-core.yml calls this and publishes the tarballs with the release;
+# `scripts/install/install.sh --server` installs one after checking it against the release's signed manifest.
+#
+# Each leg builds natively, packs with scripts/package-server.sh, then unpacks the tarball it made and runs it: the
+# command answers, and a server started from the package serves /health and the web UI. Linux legs build on the
+# oldest runner image so the programs run on older distributions.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "agentmux ref to build (tag / branch / SHA)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "agentmux ref to build (tag / branch / SHA)"
+        required: true
+        default: main
+  pull_request:
+    paths:
+      - '.github/workflows/build-server-package.yml'
+      - 'scripts/package-server.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Server package (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: x64, runner: ubuntu-22.04 }
+          - { os: linux, arch: arm64, runner: ubuntu-22.04-arm }
+          - { os: macos, arch: arm64, runner: macos-latest }
+          - { os: macos, arch: x64, runner: macos-15-intel }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: dtolnay/rust-toolchain@1.99.1
+
+      # agentmux-mcp links libdbus and libxcb (its screen capture); the Linux package needs them at run time too.
+      - name: System libraries (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          bash scripts/ci-apt.sh update
+          bash scripts/ci-apt.sh install -y pkg-config libdbus-1-dev libxcb1-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server-package-${{ matrix.os }}-${{ matrix.arch }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+
+      - name: Build the web UI
+        run: node scripts/build-web.mjs --out dist/web
+
+      # The fast-release profile (thin LTO, optimised for speed) rather than release (full LTO, one codegen unit, optimised
+      # for size): the full-LTO link of the server did not finish in two hours on a 7 GB macOS runner, and the desktop
+      # apps keep the release profile.
+      - name: Build the programs
+        run: cargo build --profile fast-release --locked -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap
+
+      - name: Pack
+        run: |
+          bash scripts/package-server.sh --os "${{ matrix.os }}" --arch "${{ matrix.arch }}" \
+            --bin-dir target/fast-release --web-dir dist/web --out dist-server
+          ls -l dist-server
+
+      # What was packed, not what was built: unpack it and run it as a user would.
+      - name: Run the package
+        run: |
+          set -eu
+          tarball=$(ls dist-server/agentmux-server-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz)
+          test "$(ls dist-server/*.tar.gz | wc -l | tr -d ' ')" = 1
+          mkdir unpacked
+          tar -xzf "$tarball" -C unpacked
+          top=$(ls unpacked)
+          bin="$PWD/unpacked/$top/bin"
+          test -f "unpacked/$top/web/index.html"
+          test -f "unpacked/$top/VERSION"
+          "$bin/agentmux" version --json
+          export AGENTMUX_HOME_OVERRIDE="$RUNNER_TEMP/server-home"
+          mkdir -p "$AGENTMUX_HOME_OVERRIDE"
+          "$bin/agentmux" start --port 17380
+          trap '"$bin/agentmux" stop || true' EXIT
+          curl -fsS http://127.0.0.1:17380/health
+          echo
+          curl -fsS http://127.0.0.1:17380/ | grep -qi '<html'
+          "$bin/agentmux" status
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-package-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist-server/agentmux-server-*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
