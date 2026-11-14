@@ -121,7 +121,7 @@ mod tests {
     //    doc comment — not a mutex local to this module; a per-file mutex
     //    only serializes within that one file, and several OTHER files
     //    (registry/paths.rs, server/app_api/mod.rs,
-    //    server/identity_auth_dirs.rs) already correctly use this same
+    //    identity/auth_dirs.rs) already correctly use this same
     //    shared lock for the identical class of env-var race. Confirmed
     //    live, 2026-08-15: this module's tests raced
     //    m0021_backfill_agent_bundles's before switching both to the

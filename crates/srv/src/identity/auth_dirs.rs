@@ -50,7 +50,7 @@ pub(crate) fn link_history_if_isolated(
     // reagentx P2 / chatgpt-codex-connector on PR #2605: `identity_dir`'s
     // safe-path-segment rejection (empty / `.` / `..` / a segment with
     // `/`, `\`, a drive-letter colon, …) is validated HERE, once, for
-    // every caller — `identity_auth_dirs.rs`'s own two call sites happen
+    // every caller — `identity/auth_dirs.rs`'s own two call sites happen
     // to already validate `entity_id` earlier in their own function body
     // (via this same check) before ever reaching this point, but
     // `inject.rs`'s ordinary-spawn call site reads `entity_id` straight

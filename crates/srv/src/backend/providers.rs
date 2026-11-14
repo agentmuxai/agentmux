@@ -101,7 +101,7 @@ pub struct ProviderConfig {
     /// through the live protocol stream instead, not a fixed on-disk
     /// path). Per-provider, filesystem-verified table:
     /// `docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` §2.1.
-    /// Used by `identity_auth_dirs.rs` to redirect an isolated identity's
+    /// Used by `identity/auth_dirs.rs` to redirect an isolated identity's
     /// history to the always-global
     /// `DataPaths::identity_history_dir` — reagentx P1 on PR #2605 caught
     /// that hardcoding `"projects"` there only worked for `claude`,

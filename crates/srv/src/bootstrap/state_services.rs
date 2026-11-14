@@ -16,6 +16,8 @@ pub fn install_state_hooks(state: &AppState) {
     crate::server::muxbus_hooks::install();
     // The controller code reaches the agent teardown through this, before any controller runs.
     crate::sagas::teardown_hooks::install();
+    // The ambient calls find a provider's CLI through the server's lookup.
+    crate::ambient::cli_locator::set_locator(crate::server::cli_handlers::locate_for_ambient);
     // Upgrade reactive message delivery now that AppState exists, so agents on a
     // SubprocessController (every container agent, plus codex/gemini/qwen/kimi/
     // muxcode/antigravity on the host) can actually receive inter-agent

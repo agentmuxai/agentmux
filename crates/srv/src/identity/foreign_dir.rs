@@ -77,7 +77,7 @@ pub fn heal_block_config_dir_env(mstore: &Store, block: Option<&Block>, bound: O
     };
     let mut update = MetaMapType::new();
     update.insert("cmd:env".to_string(), serde_json::json!(healed));
-    match crate::server::service::update_object_meta(mstore, &format!("block:{}", block.oid), &update) {
+    match crate::backend::wcore::object_meta::update_object_meta(mstore, &format!("block:{}", block.oid), &update) {
         Ok(()) => tracing::info!(block_id = %block.oid, dir = %bound.display(), "healed a pane's config dir that named another channel's identities folder"),
         Err(e) => tracing::warn!(block_id = %block.oid, error = %e, "could not heal a pane's config dir"),
     }

@@ -22,7 +22,8 @@ mod agent_config_guard;
 mod editor_handlers;
 mod picker_config;
 mod fs_handlers;
-pub(crate) mod identity_auth_dirs;
+// Moved down to `identity/auth_dirs.rs` so the core does not reach up into `server`; the old path resolves.
+pub(crate) use crate::identity::auth_dirs as identity_auth_dirs;
 mod identity_auth_persist;
 mod identity_auth_spawn;
 pub(crate) mod held_input;
