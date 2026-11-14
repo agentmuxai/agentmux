@@ -844,6 +844,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                         onContextMenu={showTextInputContextMenu}
                     />
                 </NodeField>
+                <AgentOutputField node={p.node} update={update} />
                 <AgentResultPanel model={p.model} blockId={p.node.id} />
             </Show>
             <Show when={p.node.data.kind === "message"}>
@@ -1142,6 +1143,55 @@ function readAgentRef(n: FlowNode): AgentRefShape {
     }
     return { identityId: "", memoryId: "", instanceName: "", workingDirectory: "" };
 }
+
+/**
+ * The Agent block's reply fields (`output_schema`): the few short fields the reply must carry, so the next node reads
+ * `{{<id>.output.<field>}}`. Typed as JSON; it is kept on the node only while it parses to an object, and left empty it
+ * clears it. The text is the person's own until they leave, so it is not rewritten as they type.
+ */
+const AgentOutputField = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => {
+    const declared = p.node.data["output_schema"];
+    const [text, setText] = createSignal(declared && typeof declared === "object" ? JSON.stringify(declared) : "");
+    const [problem, setProblem] = createSignal("");
+    const onText = (value: string) => {
+        setText(value);
+        if (!value.trim()) {
+            setProblem("");
+            p.update({ output_schema: null });
+            return;
+        }
+        try {
+            const parsed: unknown = JSON.parse(value);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                setProblem("");
+                p.update({ output_schema: parsed });
+            } else {
+                setProblem("An object of field: type");
+            }
+        } catch {
+            setProblem("Not valid JSON yet");
+        }
+    };
+    return (
+        <NodeField label="Reply fields">
+            <TextArea
+                variant="plain" class="drone-input drone-input--grow nodrag nowheel"
+                ref={(el) => autoGrow(el)}
+                value={text()}
+                placeholder='{"verdict": {"enum": ["ok", "findings"]}, "cause": "string"}'
+                onInput={(e) => {
+                    onText(e.currentTarget.value);
+                    autoGrow(e.currentTarget);
+                }}
+                onFocus={(e) => autoGrow(e.currentTarget)}
+                onContextMenu={showTextInputContextMenu}
+            />
+            <Show when={problem()}>
+                <span class="drone-node-field-note">{problem()}</span>
+            </Show>
+        </NodeField>
+    );
+};
 
 const AgentRefEditor = (p: {
     node: FlowNode;
