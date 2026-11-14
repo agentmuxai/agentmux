@@ -270,6 +270,8 @@ pub fn spawn_state_services(state: &AppState) {
     );
     // The version folders and unpacked portables an upgrade leaves behind are listed daily, and cleared on a host that turns it on.
     backend::old_versions_service::install(Arc::clone(&state.config_watcher));
+    // A build-slot holder that has used no CPU for 10 minutes is shown as idle and told once.
+    backend::build_slot_idle::install();
     // A leader hears from its workers (SPEC_AGENT_WORKERS_2026_10_15.md §3.3).
     backend::worker_notes::install(
         Arc::clone(&state.broker),
