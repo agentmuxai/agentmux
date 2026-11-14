@@ -108,7 +108,7 @@ pub(crate) fn start(health: Arc<Health>, local_url: String, auth_key: String) {
             };
             // Everything, the client included, inside this runtime's own context.
             rt.block_on(async move {
-                let Ok(client) = reqwest::Client::builder()
+                let Ok(client) = agentmux_common::local_http::builder()
                     .timeout(Duration::from_secs(10))
                     .build()
                 else {
