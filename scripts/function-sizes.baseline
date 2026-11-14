@@ -346,7 +346,7 @@
 103 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionStarted
 122 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onReconcileTurnActive
 112 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onStreamFlushObserved
-301 frontend/app/tab/droppable-tab.tsx::DroppableTab
+299 frontend/app/tab/droppable-tab.tsx::DroppableTab
 111 frontend/app/tab/tab-reorder.ts::onDrop
 335 frontend/app/tab/tab-reorder.ts::useTabDragAndDrop
 351 frontend/app/tab/tab-tearoff-events.ts::useTabTearOffEvents
