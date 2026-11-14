@@ -172,3 +172,49 @@ async fn the_broker_reporting_a_turn_starts_the_run_of_the_job_that_names_it() {
     );
     let _ = (mine, other, any);
 }
+
+#[test]
+fn srv_starting_is_an_event_that_says_whether_it_made_an_upgrade() {
+    assert!(app_events::validate_filter(&filter(json!({ "event": "app.started", "upgraded": true }))).is_ok());
+    let stray = app_events::validate_filter(&filter(json!({ "event": "app.started", "agent": "a" }))).unwrap_err();
+    assert!(stray.contains("has no field \"agent\"") && stray.contains("version, upgraded, upgraded_from"), "{stray}");
+
+    let dir = tempfile::tempdir().unwrap();
+    let mstore = Store::open(&dir.path().join("mstore.db")).unwrap();
+    let up = app_events::event_of(&Raw::Started { version: "0.60.29".into(), upgraded_from: "0.60.28".into(), at_ms: 7 }, &mstore, 9);
+    assert_eq!(up.id, "started:0.60.29:7");
+    assert_eq!(up.input, filter(json!({ "event": "app.started", "version": "0.60.29", "upgraded": true, "upgraded_from": "0.60.28" })));
+    let plain = app_events::event_of(&Raw::Started { version: "0.60.29".into(), upgraded_from: String::new(), at_ms: 8 }, &mstore, 9);
+    assert_eq!(plain.input["upgraded"], json!(false));
+
+    let rig = rig();
+    let hears = |f: serde_json::Value, e: &AppEvent| app_events::listens(&app_job(&rig, &format!("j{}", rand_id()), f, |_| {}), e);
+    assert!(hears(json!({ "event": "app.started", "upgraded": true }), &up), "an upgrade");
+    assert!(!hears(json!({ "event": "app.started", "upgraded": true }), &plain), "a plain restart is not one");
+    assert!(hears(json!({ "event": "app.started" }), &plain), "any start");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upgrade_starts_the_job_that_names_it_once_with_the_versions() {
+    let rig = rig();
+    let dir = tempfile::tempdir().unwrap();
+    let mstore = Store::open(&dir.path().join("mstore.db")).unwrap();
+    let job = app_job(&rig, "j-up", json!({ "event": "app.started", "upgraded": true }), |j| j.trigger_event["delay"] = json!(0));
+    let ledger_for_runs = rig.ledger.clone();
+    rig.sched.install_actions(Arc::new(move |_, run_id| {
+        ledger_for_runs.drone_attached(&run_id, &format!("dr-{run_id}"), &Value::Null, agentmux_common::time::now_ms());
+        Box::pin(async { ActionOutcome::Drone })
+    }));
+    let event = app_events::event_of(&Raw::Started { version: "0.60.29".into(), upgraded_from: "0.60.28".into(), at_ms: 7 }, &mstore, 9);
+    assert_eq!(app_events::fire_matching(&rig.sched, &rig.store, &event).await, 1);
+    assert_eq!(app_events::fire_matching(&rig.sched, &rig.store, &event).await, 1, "offered again");
+    until("the run", || rig.runs("j-up").len() == 1).await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(rig.runs("j-up").len(), 1, "the same start is one run");
+    let run = rig.runs("j-up").remove(0);
+    assert_eq!(
+        rig.ledger.event_input(&run.id),
+        Some(json!({ "event": "app.started", "version": "0.60.29", "upgraded": true, "upgraded_from": "0.60.28" }))
+    );
+    let _ = job;
+}
