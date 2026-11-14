@@ -242,8 +242,10 @@ fn insert_node(root: &mut Option<LayoutNode>, node: LayoutNode, ids: &mut NodeId
         *root = Some(node);
         return Ok(());
     };
-    let (loc_id, index) = next_insert_location(tree)
-        .ok_or_else(|| LayoutError::Refused("insert: no unlocked insert location".into()))?;
+    // No slot is unlocked only when every pane is minimized. The new pane then goes in at the root, after the
+    // chips, and shows: a tab always shows one pane (SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 C, item 8).
+    // `insertNode` (layoutTree.ts) does the same.
+    let (loc_id, index) = next_insert_location(tree).unwrap_or_else(|| (tree.id.clone(), tree.children.len().max(1)));
     let loc = find_node_by_id_mut(tree, &loc_id).ok_or_else(|| not_found(&loc_id))?;
     add_child_at(loc, index as i64, node, ids);
     Ok(())
