@@ -479,6 +479,7 @@ partial list.
 | [`SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03`](SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md) | SPEC: resize through collapsed panes — every edge of a collapsed run resizes the expanded panes either side |
 | [`SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24`](SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md) | SPEC: Move the narrow-width responsive tab bar to the top (from the bottom) |
 | [`SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05`](SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md) | SPEC: Retire the Armory — two panes, Connectors and Knowledge |
+| [`SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14`](SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14.md) | Spec: review and checks flow, two events and a recent list (for the Atlas review bot and CI nodes) |
 | [`SPEC_SAGA_DURABILITY_2026-05-01`](SPEC_SAGA_DURABILITY_2026-05-01.md) | SPEC: Saga durability — durable saga log |
 | [`SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) | Spec: Make `settings.json` isolated-by-default for every non-`stable` channel |
 | [`SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22`](SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md) | SPEC — Settings commit on blur, not on change; plus the remaining terminal live-apply gaps |
