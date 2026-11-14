@@ -25,11 +25,11 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::backend::prompt_events::{PaneConfirmView, EVENT_PANE_CONFIRM};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::server::AppState;
 use agentmux_common::time::now_ms;
 
-pub const EVENT_PANE_CONFIRM: &str = "pane:confirm";
 /// The person's answer to a question.
 pub const COMMAND_PANE_CONFIRM_DECIDE: &str = "pane.confirm.decide";
 /// How long the person has to answer.
@@ -76,26 +76,6 @@ pub struct Answer {
     pub answered: bool,
     pub approve: bool,
     pub checkbox: bool,
-}
-
-/// A question as the pane draws it: `pending`, or its end (`cleared`).
-#[derive(Clone, Debug, Serialize, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct PaneConfirmView {
-    pub id: String,
-    pub block_id: String,
-    pub title: String,
-    pub message: String,
-    pub ok_label: String,
-    pub cancel_label: String,
-    pub destructive: bool,
-    /// The tick box's words; empty when there is none.
-    pub checkbox: String,
-    /// When srv stops waiting for the answer.
-    #[ts(type = "number")]
-    pub deadline_ms: i64,
-    #[ts(type = r#""pending" | "cleared""#)]
-    pub status: &'static str,
 }
 
 /// Data for `pane.confirm.decide`: the question's `id` (from `pane:confirm`).

@@ -51,6 +51,7 @@ pub mod bundle_import_skill_text;
 pub mod bundle_use;
 pub mod bundle_widgets;
 pub mod bundle_validate;
+pub mod background_task_exit;
 pub mod background_task_feed;
 pub mod background_task_sweep;
 pub mod desktop_gate;
@@ -223,6 +224,8 @@ pub mod sensitive_ops;
 /// The requests for those operations and what became of them.
 pub mod sensitive_requests;
 pub mod shutdown_events;
+pub mod prompt_events;
+pub mod drone_run_event;
 /// Replies that say nothing are not sent (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).
 pub mod ack_policy;
 pub mod jekt_seal;

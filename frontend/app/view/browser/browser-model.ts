@@ -1120,7 +1120,7 @@ export class BrowserViewModel {
         const imageUrl = browserCtx?.imageUrl;
         if (linkUrl) {
             items.push(
-                { label: "Copy Link Address", icon: MENU_ICON.copyLink, click: () => { void clipboardWriteText(linkUrl); } },
+                { label: "Copy Link Address", icon: MENU_ICON.copyLink, click: () => { this.copyLink(linkUrl); } },
                 { label: "Save link as…", icon: MENU_ICON.saveAs, click: () => { this.saveAs(linkUrl); } },
             );
         }
@@ -1128,6 +1128,19 @@ export class BrowserViewModel {
             items.push({ label: "Save image as…", icon: MENU_ICON.saveAs, click: () => { this.saveAs(imageUrl); } });
         }
         return items.length ? [{ type: "separator" }, ...items] : [];
+    }
+
+    /** Put a link's address on the clipboard; when nothing can take it (a Linux machine with no clipboard
+     *  tool and no page clipboard), the pane says so instead of leaving the person to paste an old value. */
+    copyLink(url: string): void {
+        clipboardWriteText(url).catch(() => {
+            this._localNotice[1]({
+                id: `local-${Date.now()}`,
+                kind: "notice",
+                local: true,
+                message: "Couldn't copy the link: this computer has no clipboard tool. Install wl-clipboard (Wayland) or xclip or xsel (X11).",
+            });
+        });
     }
 
     /** Save a link or an image of the page: the host starts the download, and its Save As dialog and the strip take over. */
