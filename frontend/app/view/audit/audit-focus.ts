@@ -8,7 +8,7 @@ import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Ac
 
 import type { PlayedSound } from "@/app/notification/sound/sound-history";
 import type { AuditEntry } from "@/types/rpc/AuditEntry";
-import { createAuditSounds, kindOfSound, rowOf, type SoundRef } from "./audit-sound";
+import { createAuditSounds, kindOfSound, MATCH_MS, rowOf, type SoundRef } from "./audit-sound";
 
 /** How long the row stays lit once found. */
 export const FOCUS_MS = 4000;
@@ -36,16 +36,20 @@ export function createSoundFocus(opts: {
     /** Show rows of this kind (it was filtered out). */
     showKind: (kind: string) => void;
     scrollTo: (rowId: string) => void;
+    /** Page older entries in until `done()` (the row is in the list, or the list reaches back past the sound). */
+    reachBack?: (done: () => boolean) => Promise<void>;
 }): Accessor<string | undefined> {
     const [focused, setFocused] = createSignal<string | undefined>();
     let awaiting: { sound: PlayedSound; until: number } | undefined;
+    let reaching = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const look = () => {
         if (!awaiting) return;
         const row = rowOf(untrack(opts.entries), awaiting.sound);
         if (!row) {
-            if (Date.now() > awaiting.until) awaiting = undefined;
+            // Paging older entries in takes as long as it takes.
+            if (Date.now() > awaiting.until && !reaching) awaiting = undefined;
             return;
         }
         awaiting = undefined;
@@ -56,6 +60,19 @@ export function createSoundFocus(opts: {
         queueMicrotask(() => opts.scrollTo(row.id));
     };
 
+    // More than a page of entries can have been written since the sound: page back to it.
+    const reach = (sound: PlayedSound) => {
+        reaching++;
+        const done = () => {
+            const entries = untrack(opts.entries);
+            return rowOf(entries, sound) !== undefined || entries.some((e) => e.ts_ms < sound.at - MATCH_MS);
+        };
+        void opts.reachBack!(done).finally(() => {
+            reaching--;
+            look();
+        });
+    };
+
     createEffect(
         on(opts.request, (ask) => {
             if (!ask) return;
@@ -63,6 +80,8 @@ export function createSoundFocus(opts: {
             const kind = kindOfSound(ask.event);
             if (kind) opts.showKind(kind);
             look();
+            // After this flush, so the list the page-ins start from is the newest page of the filter just set.
+            if (opts.reachBack) queueMicrotask(() => reach(ask));
         })
     );
     createEffect(on(opts.entries, look, { defer: true }));
@@ -76,12 +95,17 @@ export function createAuditSoundsAt(
     entries: Accessor<readonly AuditEntry[]>,
     now: Accessor<number>,
     ask: Accessor<SoundRef | undefined>,
-    pane: { showKind: (kind: string) => void; body: () => HTMLElement | undefined }
+    pane: {
+        showKind: (kind: string) => void;
+        body: () => HTMLElement | undefined;
+        reachBack?: (done: () => boolean) => Promise<void>;
+    }
 ) {
     const focused = createSoundFocus({
         request: askedSound(ask),
         entries,
         showKind: pane.showKind,
+        reachBack: pane.reachBack,
         scrollTo: (id) => pane.body()?.querySelector(`[data-row-id="${id}"]`)?.scrollIntoView?.({ block: "center" }),
     });
     return createAuditSounds(entries, now, focused);
