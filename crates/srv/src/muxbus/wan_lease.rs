@@ -600,7 +600,7 @@ mod tests {
                     async move {
                         let get = |k: &str| headers.get(k).and_then(|v| v.to_str().ok()).map(str::to_string);
                         sink.lock().unwrap().push((agent, get("authorization"), get("x-agent-id"), get("x-agent-instance")));
-                        axum::Json(serde_json::json!({ "state": "other", "held_by": { "host": "area54-holder-test", "channel": "stable" } }))
+                        axum::Json(serde_json::json!({ "state": "other", "held_by": { "host": "desk-holder-test", "channel": "stable" } }))
                     }
                 },
             ),
@@ -615,7 +615,7 @@ mod tests {
         let agent = format!("HolderTest-{}", &uuid::Uuid::new_v4().to_string()[..8]);
 
         let first = holder(&base, &agent, "lark", "tok", &http).await;
-        assert!(matches!(&first, Holder::Other(h) if h.desc.contains("area54-holder-test")), "{first:?}");
+        assert!(matches!(&first, Holder::Other(h) if h.desc.contains("desk-holder-test")), "{first:?}");
         let again = holder(&base, &agent, "lark", "tok", &http).await;
         assert_eq!(again, first);
         let seen = hits.lock().unwrap().clone();
@@ -643,6 +643,21 @@ mod tests {
         assert_ne!(holder_key("agenty", "tok-a"), holder_key("agenty", "tok-b"));
     }
 
+    /// A holder host name that is not a valid computer name, so it never matches
+    /// this machine's own name.
+    const HOLDER_HOST: &str = "holder host (test)";
+
+    /// A holder whose host is this machine's own name is another instance here,
+    /// whatever the machine is called: asked with the real local name on purpose.
+    #[test]
+    fn a_holder_with_this_machines_name_is_this_computer() {
+        let local = crate::backend::reactive::registry::local_host_label();
+        let body = serde_json::json!({ "state": "other", "held_by": { "host": local.to_uppercase(), "channel": "stable", "version": "0.59.5" } });
+        let Holder::Other(h) = holder_from(200, &body) else { panic!("a holder that is not ours is `Other`") };
+        assert_eq!(h.desc, "this computer, channel stable, v0.59.5");
+        assert!(holder_on_this_computer(&h.desc));
+    }
+
     /// The holder query's answers. Anything the relay
     /// does not say plainly is `Unknown`, which routes as before.
     #[test]
@@ -650,10 +665,13 @@ mod tests {
         use serde_json::json;
         assert_eq!(holder_from(200, &json!({ "state": "free" })), Holder::Free);
         assert_eq!(holder_from(200, &json!({ "state": "yours" })), Holder::Yours);
-        let other = holder_from(200, &json!({ "state": "other", "held_by": { "host": "area54", "channel": "stable", "version": "0.59.5" } }));
-        assert!(matches!(&other, Holder::Other(h) if h.desc.contains("area54") && h.channel == "stable" && h.seal.is_none()), "{other:?}");
+        // A holder name no computer can have (a space is not allowed in a host
+        // name), so these cases never turn into "this computer" on the machine
+        // running the test.
+        let other = holder_from(200, &json!({ "state": "other", "held_by": { "host": HOLDER_HOST, "channel": "stable", "version": "0.59.5" } }));
+        assert!(matches!(&other, Holder::Other(h) if h.desc.contains(HOLDER_HOST) && h.channel == "stable" && h.seal.is_none()), "{other:?}");
         let seal = json!({ "instance": "i", "key_fp": "f", "key": "k", "sig": "s" });
-        let sealed = holder_from(200, &json!({ "state": "other", "held_by": { "host": "area54", "channel": "stable", "features": ["files-cloud-v1"], "seal": seal } }));
+        let sealed = holder_from(200, &json!({ "state": "other", "held_by": { "host": HOLDER_HOST, "channel": "stable", "features": ["files-cloud-v1"], "seal": seal } }));
         let Holder::Other(h) = sealed else { panic!("{sealed:?}") };
         assert_eq!(h.features, vec!["files-cloud-v1".to_string()]);
         assert_eq!(h.seal.map(|s| s.instance), Some("i".to_string()));
