@@ -165,6 +165,9 @@ impl EventTrigger {
                 return Err(format!("trigger: event filter {key:?} is text of at most {MAX_EVENT_FILTER_TEXT} characters, a number, or true or false"));
             }
         }
+        if self.source == event_source::APP_EVENT {
+            super::app_events::validate_filter(&self.filter)?;
+        }
         Ok(())
     }
 }
