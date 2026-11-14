@@ -385,6 +385,8 @@ mod spawn_site_coverage {
          "own-exe: `agentmux run` becomes the server program of its own install (exec), with the channel's own folders in its environment; the shell's AGENTMUX_* variables were dropped first"),
         ("src/agentmux_cli/main.rs", "exe", 1,
          "own-exe: `agentmux start` runs `agentmux run` in the background from its own executable; the shell's AGENTMUX_* variables were dropped first"),
+        ("src/agentmux_cli/service.rs", "program", 1,
+         "mixed: `agentmux setup` and `start`/`stop` drive the person's own service manager (systemctl --user, launchctl) at their command, to install, start or stop the server's user service; no agent code runs through it, and nothing of the environment is added"),
         ("src/agentmux_cli/process.rs", "\"ps\"", 1,
          "probe: names the program of one process id on macOS (`ps -o comm= -p <pid>`), to check it is the server before it is signalled; no input but the id, no environment passed on"),
         ("src/open_cli.rs", "\"xdg-open\"", 1,
