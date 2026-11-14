@@ -362,15 +362,35 @@ async fn run_handoff(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if let Some(waiting) = super::browser_waiting::waiting_text(&body) {
         return Ok(waiting);
     }
-    let answer = match body.pointer("/data/answer").and_then(|v| v.as_str()).unwrap_or("") {
-        "done" => "The user clicked Done. Take a new snapshot: don't assume what they changed.",
-        "cancelled" => "The user clicked Cancel. Ask them in chat how to proceed; don't retry the hand-off unasked.",
-        _ => "The user didn't answer in time. Ask them in chat.",
-    };
+    let answer = handoff_answer_text(
+        body.pointer("/data/answer").and_then(|v| v.as_str()).unwrap_or(""),
+        body.pointer("/data/open_secs").and_then(|v| v.as_u64()),
+    );
     Ok(match body.pointer("/data/handoff_id").and_then(|v| v.as_str()) {
         Some(id) => format!("{answer} (handoff_id: {id})"),
-        None => answer.to_string(),
+        None => answer,
     })
+}
+
+/// A Done this soon after the banner went up may not be the person's doing on the page: the agent is told
+/// to check, since it can't see who clicked.
+const QUICK_DONE_SECS: u64 = 5;
+
+/// What the agent reads when its hand-off ends: who answered, after how long (`open_secs`, from srv), and what to do next.
+pub(crate) fn handoff_answer_text(answer: &str, open_secs: Option<u64>) -> String {
+    let after = open_secs.map(|s| format!(" after {}", agentmux_common::time::span_words(s))).unwrap_or_default();
+    match answer {
+        "done" => {
+            let quick = if open_secs.is_some_and(|s| s < QUICK_DONE_SECS) {
+                " That was quick: confirm in the new snapshot that the page really changed before you go on."
+            } else {
+                ""
+            };
+            format!("The user clicked Done{after}.{quick} Take a new snapshot: don't assume what they changed.")
+        }
+        "cancelled" => format!("The user clicked Cancel{after}. Ask them in chat how to proceed; don't retry the hand-off unasked."),
+        _ => format!("The user didn't answer in time{after}. Ask them in chat."),
+    }
 }
 
 async fn run_request_bypass(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

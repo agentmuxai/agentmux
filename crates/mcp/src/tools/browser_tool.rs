@@ -290,10 +290,12 @@ fn handoff_status_text(d: &Value) -> String {
     let id = d["handoff_id"].as_str().unwrap_or("?");
     let pane = d["pane"].as_str().unwrap_or("?");
     let ago = |k: &str| d[k].as_u64().map(|s| if s < 90 { format!("{s} s ago") } else { format!("{} min ago", s / 60) });
+    // How long the banner was up before the answer: an early Done reads as one.
+    let after = || d["open_secs"].as_u64().map(|s| format!(" after {}", agentmux_common::time::span_words(s))).unwrap_or_default();
     match d["status"].as_str().unwrap_or("") {
         "pending" => format!("Hand-off {id} on pane {pane:?} is still waiting for the user (asked {}).", ago("started_secs_ago").unwrap_or_default()),
-        "done" => format!("Hand-off {id}: the user clicked Done ({}). Take a new snapshot: don't assume what they changed.", ago("ended_secs_ago").unwrap_or_default()),
-        "cancelled" => format!("Hand-off {id}: the user clicked Cancel ({}). Ask them in chat how to proceed.", ago("ended_secs_ago").unwrap_or_default()),
+        "done" => format!("Hand-off {id}: the user clicked Done{} ({}). Take a new snapshot: don't assume what they changed.", after(), ago("ended_secs_ago").unwrap_or_default()),
+        "cancelled" => format!("Hand-off {id}: the user clicked Cancel{} ({}). Ask them in chat how to proceed.", after(), ago("ended_secs_ago").unwrap_or_default()),
         "timed_out" => format!("Hand-off {id}: the user didn't answer in time ({}). Ask them in chat.", ago("ended_secs_ago").unwrap_or_default()),
         _ => format!(
             "Hand-off {id}: abandoned ({}): your call ended before the user answered, so its request went down with it and nobody can answer it. Make a new hand-off if you still need the user.",
@@ -453,9 +455,28 @@ mod tests {
         assert!(handoff_status_text(&d("pending")).contains("still waiting for the user (asked 30 s ago)"));
         assert!(handoff_status_text(&d("done")).contains("clicked Done (3 min ago)") && handoff_status_text(&d("done")).contains("snapshot"));
         assert!(handoff_status_text(&d("cancelled")).contains("clicked Cancel"));
+        // With how long the banner was up, so an early Done reads as one.
+        let timed = json!({ "handoff_id": "h1", "pane": "p1", "status": "done", "started_secs_ago": 30, "ended_secs_ago": 20, "open_secs": 4 });
+        assert!(handoff_status_text(&timed).contains("clicked Done after 4 s (20 s ago)"), "{}", handoff_status_text(&timed));
         assert!(handoff_status_text(&d("timed_out")).contains("didn't answer in time"));
         let abandoned = handoff_status_text(&d("abandoned"));
         assert!(abandoned.contains("abandoned") && abandoned.contains("nobody can answer it") && abandoned.contains("new hand-off"), "{abandoned}");
+    }
+
+    #[test]
+    fn a_hand_off_answer_says_how_long_the_banner_was_up_and_doubts_a_quick_done() {
+        use super::super::browser::handoff_answer_text as text;
+        assert_eq!(
+            text("done", Some(42)),
+            "The user clicked Done after 42 s. Take a new snapshot: don't assume what they changed."
+        );
+        let quick = text("done", Some(1));
+        assert!(quick.contains("clicked Done after 1 s.") && quick.contains("That was quick") && quick.contains("really changed"), "{quick}");
+        assert!(!text("done", Some(5)).contains("quick"), "five seconds is the person's own pace");
+        // From an srv that does not say: the answer is as it was.
+        assert!(text("done", None).starts_with("The user clicked Done. Take a new snapshot"));
+        assert!(text("cancelled", Some(90)).starts_with("The user clicked Cancel after 1 min."));
+        assert!(text("timed_out", Some(15 * 60)).starts_with("The user didn't answer in time after 15 min."));
     }
 
     #[tokio::test]

@@ -476,3 +476,16 @@ async fn move_and_start_refuse_an_agent_the_tasks_board_leaves_out() {
     act(&state, json!({"action": "move", "id": id, "agent": "agentx"})).await.unwrap();
     act(&state, json!({"action": "move", "id": id, "agent": ""})).await.unwrap();
 }
+
+// ---- an edit that names who it is for ----
+
+#[tokio::test]
+async fn an_edit_that_names_who_it_is_for_is_refused_and_changes_nothing() {
+    let state = test_state();
+    let id = file(&state, "edit me").await;
+    let err = act(&state, json!({"action": "edit", "id": id, "title": "new title", "agent": "Dax"})).await.unwrap_err();
+    assert!(err.contains("use move with a target agent"), "{err}");
+    assert_eq!(board_task(&state, &id).item.title, "edit me");
+    act(&state, json!({"action": "edit", "id": id, "title": "new title"})).await.unwrap();
+    assert_eq!(board_task(&state, &id).item.title, "new title");
+}
