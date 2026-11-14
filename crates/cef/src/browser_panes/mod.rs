@@ -218,6 +218,8 @@ impl BrowserPaneManager {
                     rect = ?(rect.x, rect.y, rect.width, rect.height),
                     "browser pane create hit AlreadyLive — re-navigating existing browser (NOT creating in requested window)"
                 );
+                // No load follows a re-attach of the same page: nothing to time.
+                crate::browser_pane::open_timing::forget(block_id);
                 crate::browser_pane::trace::pane_trace(
                     block_id,
                     "create-already-live",

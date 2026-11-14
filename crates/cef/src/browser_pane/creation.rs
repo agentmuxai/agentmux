@@ -45,6 +45,8 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             // Running on the CEF UI thread.
+            use crate::browser_pane::open_timing::{self, Phase};
+            open_timing::mark(&self.block_id, Phase::Started);
             //
             // Two completely separate paths by platform:
             //   - Windows: native child window via WindowInfo::set_as_child +
@@ -99,6 +101,7 @@ wrap_task! {
                     self.window_label.clone(),
                     jar,
                 );
+                open_timing::mark(&self.block_id, Phase::Handed);
                 return;
             }
 
@@ -243,6 +246,7 @@ wrap_task! {
                     return;
                 }
 
+                open_timing::mark(&self.block_id, Phase::Handed);
                 tracing::info!(
                     block_id = %self.block_id,
                     label = %self.label,
