@@ -269,14 +269,17 @@
     border: 1px solid var(--border-color);
     border-left-width: 3px;
     border-radius: var(--radius-sm);
-    background: var(--main-bg-color);
+    // Always opaque: the message and task lines run behind the nodes and must not show through one.
+    --atlas-node-bg: var(--main-bg-color);
+    background: var(--atlas-node-bg);
     color: var(--main-text-color);
     font: inherit;
     text-align: left;
     cursor: pointer;
 
+    // The hover wash lies over the node's own colour, so it neither lets a line through nor takes the tint away.
     &:hover {
-        background: var(--hover-bg-color);
+        background: linear-gradient(var(--hover-bg-color), var(--hover-bg-color)), var(--atlas-node-bg);
     }
 
     &:focus-visible {
@@ -290,10 +293,11 @@
     // In the selection a fleet action reaches (or in the box being dragged): a tint and a tick, not the card's line.
     &--picked {
         border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 16%, var(--main-bg-color));
+        --atlas-node-bg: color-mix(in srgb, var(--accent-color) 16%, var(--main-bg-color));
     }
 
-    &--stale {
+    // Its words are muted, not the node: it stays opaque.
+    &--stale > * {
         opacity: 0.6;
     }
 
