@@ -77,7 +77,7 @@ function clickLabel(ariaLabel, labelledBy, text, el, axName) {
   } else if (e.link) {
     if (!e.download && !e.fileHref) {
       const short = fullName.split(" ").filter(Boolean).length <= LINK_WORDS;
-      const word = found(fullName, new RegExp("^(" + VERBS + ")\\b", "i")) || (short ? found(plain(fullName), anywhere) : "");
+      const word = found(clean(plain(fullName)), new RegExp("^(" + VERBS + ")\\b", "i")) || (short ? found(plain(fullName), anywhere) : "");
       if (word) {
         committing = true;
         why = "its name says \"" + word + "\"";

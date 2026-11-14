@@ -140,6 +140,10 @@ describe("clickLabel: a brand or plan with Pay in its name is not a payment (#47
         expect(asks("Payment methods", link)).toBe(false);
         expect(asks("Payment methods")).toBe(false);
         expect(asks("Pay-as-you-go")).toBe(false);
+        expect(asks("Pay-as-you-go", link)).toBe(false);
+        expect(asks("Pay-per-use plan", link)).toBe(false);
+        expect(asks("Pay-as-you-go: Pay now")).toBe(true);
+        expect(asks("Pay-per-use - Pay $20", link)).toBe(true);
         expect(asks("Pay-per-use plan")).toBe(false);
     });
 

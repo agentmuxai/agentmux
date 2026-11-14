@@ -519,10 +519,6 @@ const COMMANDS: [&str; 6] = ["pay", "buy", "confirm", "complete", "place", "make
 /// "Pay-as-you-go"), which a row, tab or link opens a panel for, and not a command to pay? One to three
 /// capitalised words, none a verb, in front of a last word "Pay".
 pub(crate) fn is_brand_pay(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    if lower.starts_with("pay-as-") || lower.starts_with("pay-per-") {
-        return true;
-    }
     let words: Vec<&str> = name.split_whitespace().collect();
     let Some((last, before)) = words.split_last() else { return false };
     (last.eq_ignore_ascii_case("pay") && last.starts_with('P'))
@@ -543,11 +539,18 @@ fn quoted(what: &str) -> &str {
 /// page lists dozens, and a click on one opens its settings. Its description still counts when it opens
 /// with a command ("Pay $20.00 now").
 pub(crate) fn click_is_payment(what: &str, description: &str) -> bool {
-    if is_brand_pay(quoted(what)) {
+    // A plan's name ("Pay-as-you-go", "Pay-per-use") is taken out as the page's script takes it out, and
+    // what is left is judged: "Pay-as-you-go: Pay now" is still a command to pay.
+    let name = quoted(what)
+        .split_whitespace()
+        .filter(|w| !(w.to_ascii_lowercase().starts_with("pay-as-") || w.to_ascii_lowercase().starts_with("pay-per-")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if name.is_empty() || is_brand_pay(&name) {
         let first = description.split(|c: char| !c.is_ascii_alphanumeric()).find(|w| !w.is_empty()).unwrap_or("");
         return COMMANDS.contains(&first.to_ascii_lowercase().as_str()) && is_payment(description);
     }
-    is_payment(what) || is_payment(description)
+    is_payment(&name) || is_payment(description)
 }
 
 /// The sites a grant on `pane` binds to: the origin of the page it shows
@@ -837,6 +840,9 @@ mod tests {
             ("Click \"Confirm and Pay\"", ""),
             ("Click \"Click to Pay\"", ""),
             ("Click \"Pay with Apple Pay\"", ""),
+            ("Click \"Pay-as-you-go: Pay now\"", ""),
+            ("Click \"Pay-per-use - Pay $20\"", ""),
+            ("Click \"Pay-as-you-go\"", "Pay now"),
             ("Click \"Confirm And Pay\"", ""),
             ("Click \"Proceed To Pay\"", ""),
             ("Click \"CLICK TO PAY\"", ""),
