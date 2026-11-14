@@ -120,6 +120,21 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],
     },
+    spawn: {
+        kind: "spawn",
+        emoji: "🚀",
+        label: "Spawn",
+        description: "Start a worker of an agent with a brief. The leader is fixed; every {{...}} value in the brief is put in as quoted data. The person is told first unless their settings allow it.",
+        color: "#8b5cf6", // colour: fixed (the block's identity colour)
+        defaultData: {
+            leader: "",
+            brief: "",
+            model: "",
+            account: "",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     api: {
         kind: "api",
         emoji: "🌐",
@@ -200,6 +215,7 @@ export const BLOCK_KINDS: BlockKind[] = [
     "task",
     "notify",
     "app_query",
+    "spawn",
     "api",
     "condition",
     "response",

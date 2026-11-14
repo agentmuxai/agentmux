@@ -97,11 +97,12 @@ fn the_prompt_lists_what_the_graph_does_outside_agentmux() {
             node("read", json!({ "kind": "api", "url": "https://example.com/a" })),
             node("post", json!({ "kind": "api", "method": "post", "url": "https://example.com/hook" })),
             node("note", json!({ "kind": "task", "title": "t" })),
+            node("worker", json!({ "kind": "spawn", "leader": "agenty", "brief": "x" })),
         ],
         "edges": []
     });
     let summary = graph::summarize(&parse(&manifest(json!({})), Some(&g), None).unwrap().graph.unwrap());
-    assert_eq!((summary.nodes, summary.agents), (4, 1));
+    assert_eq!((summary.nodes, summary.agents), (5, 2), "a Spawn node starts an agent, so the prompt counts it");
     assert_eq!(summary.writes_outside, vec!["post: POST https://example.com/hook".to_string()], "a plain read and an inside write are not listed");
 }
 

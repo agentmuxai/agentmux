@@ -30,6 +30,7 @@ pub enum BlockKind {
     /// Runs one body block once per item of a list.
     #[serde(rename = "foreach")]
     ForEach,
+    Spawn,
 }
 
 impl BlockKind {
@@ -46,6 +47,7 @@ impl BlockKind {
             "app_query" => Some(Self::AppQuery),
             "transform" => Some(Self::Transform),
             "foreach" => Some(Self::ForEach),
+            "spawn" => Some(Self::Spawn),
             _ => None,
         }
     }

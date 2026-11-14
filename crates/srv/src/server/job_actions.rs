@@ -115,7 +115,7 @@ pub(crate) fn target_of(state: &AppState, target: &str) -> (String, String) {
 
 /// The worker's first message: who it reports to, then the brief. As the
 /// `Agents` tool sends it, naming the tool exactly.
-fn worker_brief(leader: &str, brief: &str) -> String {
+pub(crate) fn worker_brief(leader: &str, brief: &str) -> String {
     let brief = neutralize_markers(&sanitize_message(brief));
     format!(
         "You are a worker of {leader}, started to do the task below. Report to {leader} with the agentmux \
