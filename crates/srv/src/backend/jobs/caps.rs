@@ -131,6 +131,9 @@ pub enum Refusal {
     JobCap,
     AccountCap,
     MessageCap,
+    /// An event job's `max_per_hour` (§3.7 of the Drone real-world jobs spec): not a spending cap, but it is told the
+    /// same way.
+    Rate,
 }
 
 impl Refusal {
@@ -140,6 +143,7 @@ impl Refusal {
             Refusal::JobCap => reason::JOB_CAP,
             Refusal::AccountCap => reason::ACCOUNT_CAP,
             Refusal::MessageCap => reason::MESSAGE_CAP,
+            Refusal::Rate => reason::RATE,
         }
     }
 
@@ -148,6 +152,7 @@ impl Refusal {
         match self {
             Refusal::JobCap | Refusal::AccountCap => "daily spending cap",
             Refusal::MessageCap => "daily message limit",
+            Refusal::Rate => "event rate limit",
         }
     }
 
@@ -157,6 +162,7 @@ impl Refusal {
             Refusal::JobCap => "this job's spending for today leaves no room for another run (its daily cap)",
             Refusal::AccountCap => "the account's spending on jobs for today leaves no room for another run (the account's daily cap)",
             Refusal::MessageCap => "this job has sent its messages for today to another agent (messages_per_day)",
+            Refusal::Rate => "this job already started its events for this hour (the trigger's max_per_hour); more events are skipped until the hour's runs age out",
         }
     }
 }

@@ -98,6 +98,7 @@ const REASON_TEXT: Record<string, string> = {
     overlap: "previous run still going",
     group_busy: "waiting for its group",
     delay_wait: "waiting out its delay",
+    rate: "too many events this hour",
     job_cap: "job's daily cap reached",
     account_cap: "account's daily cap reached",
     message_cap: "daily message limit reached",
