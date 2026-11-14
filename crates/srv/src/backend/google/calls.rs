@@ -66,7 +66,7 @@ fn still_held<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
 
 /// A line in the account's log (D7) for one call, however it ended.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn log_call<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
+pub fn log_call<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
     deps: &CallDeps<'_, G, O, S>,
     access: &Access,
     def: &AgentDefinition,

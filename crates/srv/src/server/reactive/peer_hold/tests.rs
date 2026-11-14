@@ -24,12 +24,14 @@ fn peer(hostname: &str, last_polled_ok: u64) -> LanInstance {
         agent_status: Default::default(),
         agent_lines: Default::default(),
         agent_providers: Default::default(),
+        agent_kinds: Default::default(),
         agent_accounts: Default::default(),
         agent_resets: Default::default(),
         agent_seats: Default::default(),
         first_seen: 0,
         last_seen: NOW,
         last_polled_ok,
+        install_id: String::new(),
         other_ttl_secs: 4500,
     }
 }

@@ -162,7 +162,7 @@
 211 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
 210 crates/srv/src/backend/bundle_export.rs::export_bundle
 130 crates/srv/src/backend/bundle_import.rs::unzip_bundle_import_with_budget
-105 crates/srv/src/backend/container.rs::ContainerManager::create_and_start
+106 crates/srv/src/backend/container.rs::ContainerManager::create_and_start
 115 crates/srv/src/backend/cron/mod.rs::CronScheduler::schedule_job_inner
 170 crates/srv/src/backend/fs_ops/host_jobs.rs::Transfer::entry
 128 crates/srv/src/backend/fs_ops/host_jobs.rs::Transfer::file
@@ -200,7 +200,6 @@
 119 crates/srv/src/backend/storage/migrations.rs::run_filestore_migrations
 131 crates/srv/src/backend/subagent_watcher/mod.rs::SubagentWatcher::build_watch
 139 crates/srv/src/backend/supervisor/watcher.rs::Supervisor::evaluate
-103 crates/srv/src/backend/swarm_remote.rs::lan_hosts
 167 crates/srv/src/backend/sysinfo.rs::log_memory_attribution
 218 crates/srv/src/backend/sysinfo.rs::run_sysinfo_loop
 106 crates/srv/src/backend/tool_store.rs::get_tool_statuses

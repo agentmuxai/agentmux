@@ -28,7 +28,7 @@
 
 pub mod expr;
 pub mod schedule;
-mod start;
+pub mod start;
 
 pub use start::{ActionOutcome, ActionRunner};
 
@@ -88,7 +88,7 @@ pub(crate) enum MissReason {
 
 /// What one fire's delivery decided, computed once in [`CronScheduler::fire`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum FireOutcome {
+pub enum FireOutcome {
     Delivered { block_id: Option<String> },
     Missed { reason: MissReason },
     Failed { error: String },
@@ -144,7 +144,7 @@ pub(crate) fn fire_message(prompt: &str, run_id: Option<&str>, late_for: Option<
 
 /// Which slot a fire is for (§3.1 `trigger`, `scheduled_for_ms`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Slot {
+pub enum Slot {
     /// A scheduled slot, ms epoch.
     Scheduled(i64),
     /// The newest slot missed while AgentMux was off, fired at startup.
@@ -156,7 +156,7 @@ pub(crate) enum Slot {
 
 /// How a fire ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Fired {
+pub struct Fired {
     /// The run's id in the ledger, when it was recorded.
     pub run_id: Option<String>,
     /// `None` when the fire didn't happen: another scheduler had the slot,
@@ -422,8 +422,8 @@ impl CronScheduler {
     }
 
     /// Whether a job has a live scheduled task.
-    #[cfg(test)]
-    pub(crate) fn is_scheduled(&self, id: &str) -> bool {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn is_scheduled(&self, id: &str) -> bool {
         self.handles.lock().unwrap().contains_key(id)
     }
 
@@ -454,7 +454,7 @@ impl CronScheduler {
 
     /// Run a job now: a `manual` run through the same path as a scheduled
     /// fire (§3.2), triggered by the operator or an agent uid.
-    pub(crate) async fn run_now(&self, job: &CronJob, triggered_by: &str) -> Fired {
+    pub async fn run_now(&self, job: &CronJob, triggered_by: &str) -> Fired {
         self.fire(job, Slot::Manual { triggered_by: triggered_by.to_string() }).await
     }
 
@@ -476,7 +476,7 @@ impl CronScheduler {
     ///
     /// The run's id is the delivery's `request_id`, and the prompt ends with
     /// a line naming it, so the agent can report the run's outcome.
-    pub(crate) async fn fire(&self, job: &CronJob, slot: Slot) -> Fired {
+    pub async fn fire(&self, job: &CronJob, slot: Slot) -> Fired {
         let id = job.id.as_str();
         let (trigger, scheduled_for, by) = match &slot {
             Slot::Scheduled(ms) => (jobs::TRIGGER_SCHEDULE, Some(*ms), jobs::BY_SCHEDULER.to_string()),
@@ -853,8 +853,8 @@ mod tests {
 }
 
 /// A job for tests: every minute, enabled, never fired, catch-up `skip`.
-#[cfg(test)]
-pub(crate) fn test_job(id: &str, prompt: &str, target: &str, target_uid: &str, created_by_uid: &str) -> CronJob {
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_job(id: &str, prompt: &str, target: &str, target_uid: &str, created_by_uid: &str) -> CronJob {
     CronJob {
         id: id.to_string(),
         name: format!("{id} name"),

@@ -195,9 +195,18 @@ jobs:
           if [ "$REF_TYPE" = "tag" ]; then
             # A release: the same gate release-core.yml runs, from main's copy of the script, and the
             # checkout must be the tagged commit itself.
-            gate="$RUNNER_TEMP/release-gate.mjs"
+            tmp="$RUNNER_TEMP"
+            if command -v cygpath > /dev/null 2>&1; then tmp="$(cygpath -m "$RUNNER_TEMP")"; fi
+            gate="$tmp/release-gate.mjs"
+            out="$tmp/release-gate.out"
+            rm -f "$out"
             gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPO}/contents/scripts/release-gate.mjs?ref=main" > "$gate"
-            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO"
+            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO" --github-output "$out"
+            # The script checks only when node was started with it as the main file; if that comparison is ever false
+            # (a path form, a drive letter's case) node exits 0 having checked nothing. So it must say it ran.
+            if ! grep -qx "sha=${RUN_SHA}" "$out" 2> /dev/null; then
+              echo "::error::the release gate did not say it ran"; exit 1
+            fi
             if [ "$HEAD_SHA" != "$RUN_SHA" ]; then
               echo "::error::the checkout ($HEAD_SHA) is not the tagged commit ($RUN_SHA)"; exit 1
             fi
@@ -212,7 +221,9 @@ jobs:
           fi
 
       - uses: dtolnay/rust-toolchain@1.99.1
+      # A release (a tag run) keeps no build cache and takes none: it builds from what it downloads.
       - uses: Swatinem/rust-cache@v2
+        if: github.ref_type != 'tag'
 
       - name: Install frontend dependencies
         run: npm install
@@ -235,8 +246,10 @@ jobs:
           platform: macos
           tag: ${{ steps.in.outputs.cef_tag }}
 
+      # Skipped on a release: with no cache step its `cache-hit` output is empty, so the download below runs.
       - name: Cache patched CEF framework
         id: cef-cache
+        if: github.ref_type != 'tag'
         uses: actions/cache@v4
         with:
           path: ${{ env.CEF_RUNTIME_DIR_DARWIN }}

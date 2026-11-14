@@ -523,7 +523,7 @@ fn status_of(head: &[u8]) -> Result<(), String> {
 enum RuntimeSlot {
     /// Test/no-docker-expected fixtures — `get()` never attempts a real
     /// connect, always reports unavailable.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     Disabled,
     /// No manager yet: never found a runtime, or the last one stopped answering. `get()` looks
     /// again ([`ContainerManager::connect_detected`]) while in this state, at most once per
@@ -578,7 +578,7 @@ impl ContainerRuntimeHandle {
     /// Test-only constructor: permanently reports unavailable and never
     /// attempts a real connect, keeping host-only unit tests hermetic and
     /// deterministic regardless of whether the test box has Docker.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn disabled() -> Self {
         Self {
             slot: tokio::sync::RwLock::new(RuntimeSlot::Disabled),
@@ -625,7 +625,7 @@ impl ContainerRuntimeHandle {
             let slot = self.slot.read().await;
             match &*slot {
                 RuntimeSlot::Connected(mgr) => return Some(mgr.clone()),
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-support"))]
                 RuntimeSlot::Disabled => return None,
                 RuntimeSlot::Empty => {}
             }
@@ -636,7 +636,7 @@ impl ContainerRuntimeHandle {
         if let RuntimeSlot::Connected(mgr) = &*slot {
             return Some(mgr.clone());
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if matches!(&*slot, RuntimeSlot::Disabled) {
             return None;
         }

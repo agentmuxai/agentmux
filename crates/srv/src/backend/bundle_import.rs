@@ -489,7 +489,7 @@ pub(crate) const PROJECT_INSTRUCTIONS_NOT_APPLIED_WARNING: &str =
 /// rest of this parser follows.
 pub const MAX_IMPORTED_PROJECT_INSTRUCTIONS: usize = 200;
 
-pub(crate) const MEMORY_COMPONENT_IGNORED_WARNING: &str =
+pub const MEMORY_COMPONENT_IGNORED_WARNING: &str =
     "components.memory: present but ignored — memory requires an agent-scoped import (bundle.import_for_agent), not bundle.import";
 
 /// Parse one `components.instructions`-shaped path array (either the v0.1
@@ -1073,7 +1073,7 @@ pub fn unzip_bundle_import_with_budget(
 }
 
 #[path = "bundle_import_parse.rs"]
-mod parse_steps;
+pub mod parse_steps;
 
 #[cfg(test)]
 #[path = "bundle_import_tests.rs"]

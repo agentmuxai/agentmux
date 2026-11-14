@@ -7,12 +7,12 @@
 //!
 //! Orchestrates Store mutations with MPS event publishing.
 
-mod block;
-mod event;
-pub(crate) mod object_meta;
-mod tab;
-mod window;
-mod workspace;
+pub mod block;
+pub mod event;
+pub mod object_meta;
+pub mod tab;
+pub mod window;
+pub mod workspace;
 
 // Re-export all public APIs so callers can continue using `wcore::function_name`.
 pub use block::*;
@@ -200,7 +200,7 @@ pub(crate) fn write_default_three_pane_layout(
 /// display order — sysinfo renders above swarm in the right column. Callers
 /// that build their block list positionally must keep passing them by
 /// meaning, not by visual position.
-pub(crate) fn default_three_pane_tree(
+pub fn default_three_pane_tree(
     agent_block_id: &str,
     swarm_block_id: &str,
     sysinfo_block_id: &str,
@@ -277,7 +277,7 @@ pub(crate) fn default_three_pane_tree(
 /// (e.g. "Open in New Window" on a widget) instead of wanting the default
 /// 3-pane launch layout — the new window's sole pane is the requested
 /// widget, not that widget plus the default agent/swarm/sysinfo split.
-pub(crate) fn single_leaf_tree(block_id: &str) -> (LayoutNode, String) {
+pub fn single_leaf_tree(block_id: &str) -> (LayoutNode, String) {
     let node_id = Uuid::new_v4().to_string();
     let rootnode = LayoutNode {
         id: node_id.clone(),

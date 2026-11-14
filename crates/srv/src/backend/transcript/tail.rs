@@ -22,7 +22,7 @@ use crate::backend::transcript::source::{Tail, TranscriptSource};
 const FIRST_WINDOW: i64 = 256 * 1024;
 
 /// What a transcript read found.
-pub(crate) struct TailLines {
+pub struct TailLines {
     /// The last non-blank lines, oldest first.
     pub lines: Vec<String>,
     /// Whether the transcript holds earlier lines than these.
@@ -31,7 +31,7 @@ pub(crate) struct TailLines {
 
 /// Run blocking work (store reads) off the async workers. A panic in `f` gives
 /// `T::default()`, as no result at all would for a best-effort reader.
-pub(crate) async fn off_worker<T: Default + Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+pub async fn off_worker<T: Default + Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     tokio::task::spawn_blocking(f).await.unwrap_or_default()
 }
 
@@ -74,7 +74,7 @@ fn tail_lines_with(mut read: impl FnMut(i64) -> Option<Tail>, requested: usize) 
 
 /// The last `requested` lines of `block_id`'s transcript: a bounded tail read of the
 /// live file, else (an archived session) the whole-session read. Blocking.
-pub(crate) fn tail_lines(
+pub fn tail_lines(
     mstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     block_id: &str,

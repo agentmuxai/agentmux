@@ -434,6 +434,15 @@
     }
   },
   {
+    "event": "checks-flow",
+    "payloadTs": {
+      "imports": [
+        "ChecksFlowEvent"
+      ],
+      "name": "ChecksFlowEvent"
+    }
+  },
+  {
     "event": "compaction_started",
     "payloadTs": {
       "imports": [
@@ -467,6 +476,24 @@
         "ConnectivityStatus"
       ],
       "name": "ConnectivityStatus"
+    }
+  },
+  {
+    "event": "container-runtime",
+    "payloadTs": {
+      "imports": [
+        "ContainerRuntimeStatus"
+      ],
+      "name": "ContainerRuntimeStatus"
+    }
+  },
+  {
+    "event": "container-status",
+    "payloadTs": {
+      "imports": [
+        "ContainerStatus"
+      ],
+      "name": "ContainerStatus"
     }
   },
   {
@@ -711,6 +738,15 @@
     }
   },
   {
+    "event": "merge-flow",
+    "payloadTs": {
+      "imports": [
+        "MergeFlowEvent"
+      ],
+      "name": "MergeFlowEvent"
+    }
+  },
+  {
     "event": "message-flow",
     "payloadTs": {
       "imports": [
@@ -835,6 +871,15 @@
     "payloadTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "event": "review-flow",
+    "payloadTs": {
+      "imports": [
+        "ReviewFlowEvent"
+      ],
+      "name": "ReviewFlowEvent"
     }
   },
   {

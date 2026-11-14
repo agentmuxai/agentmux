@@ -121,11 +121,18 @@ if [ -z "${RELEASE_CHANNEL:-}" ]; then
     export AGENTMUX_BUILD_LABEL="$LABEL"
 fi
 
+# Time each phase and print the table on exit (and into the job summary in CI).
+. "$REPO_ROOT/scripts/phase-times.sh"
+
 task build:frontend
+phase_done "frontend"
 task build:backend
+phase_done "srv (cargo build --release)"
 task build:host
+phase_done "host"
 task copy:schema
 task bundle
+phase_done "schema and bundle"
 
 for f in "${FORMATS[@]}"; do
     BUILD_SCRIPT="scripts/build-${f}-linux.sh"
@@ -134,4 +141,5 @@ for f in "${FORMATS[@]}"; do
     else
         bash "$BUILD_SCRIPT"
     fi
+    phase_done "package: $f"
 done

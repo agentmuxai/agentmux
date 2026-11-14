@@ -16,7 +16,7 @@ use super::types::*;
 use super::SubagentWatcher;
 
 #[path = "jsonl_change_steps.rs"]
-mod steps;
+pub mod steps;
 
 impl SubagentWatcher {
     /// Process a changed/new JSONL subagent file. Reads new lines, updates state,

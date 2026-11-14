@@ -66,9 +66,21 @@ pub const EVENT_AGENT_MESSAGE_ACCEPTED: &str = "agent-message-accepted";
 /// One message between two agents was handled by this srv: ids and times only, never its text
 /// (`message_flow`). Not scoped: any window may subscribe. Payload: `MessageFlowEvent`.
 pub const EVENT_MESSAGE_FLOW: &str = "message-flow";
+/// One of this machine's agent containers changed (`container_status`). Not scoped. Payload: `ContainerStatus`.
+pub const EVENT_CONTAINER_STATUS: &str = "container-status";
+/// The container runtime appeared, went away or changed (`container_status`). Not scoped. Payload: `ContainerRuntimeStatus`.
+pub const EVENT_CONTAINER_RUNTIME: &str = "container-runtime";
 /// A task was filed, reassigned, started or handed back (`task_flow`): names, ids and times only, never its text.
 /// Not scoped. Payload: `TaskFlowEvent`.
 pub const EVENT_TASK_FLOW: &str = "task-flow";
+/// A review of a PR for the agent it belongs to (`pr_flow`): ids, a state and times only, never the review's text.
+/// Not scoped. Payload: `ReviewFlowEvent`.
+pub const EVENT_REVIEW_FLOW: &str = "review-flow";
+/// The checks of a PR's head commit (`pr_flow`): ids, a state and times only, never a log. Not scoped. Payload:
+/// `ChecksFlowEvent`.
+pub const EVENT_CHECKS_FLOW: &str = "checks-flow";
+/// A PR reached its end (`pr_flow`): ids, a state and times only. Not scoped. Payload: `MergeFlowEvent`.
+pub const EVENT_MERGE_FLOW: &str = "merge-flow";
 /// Image attachment processing (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md
 /// §6.5). Scoped `block:<id>` of the pane that started the batch. Payloads are
 /// `AttachmentProgressEvent` / `AttachmentReadyEvent` / `AttachmentFailedEvent`

@@ -88,7 +88,7 @@ pub enum NameResolution {
 /// rather than proceed: `None` would send the bare name on, and a
 /// same-named live agent could then take work or a cron fire meant for a
 /// stored agent the fault hid (Codex P1 on #3563).
-pub(crate) fn resolve_name_to_uid(
+pub fn resolve_name_to_uid(
     store: &Store,
     registry: &ReactiveHandler,
     typed: &str,

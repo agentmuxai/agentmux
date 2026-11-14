@@ -38,14 +38,14 @@ use super::error::StoreError;
 use super::store::Store;
 use crate::registry::RecordScope;
 
-mod canonical_slug;
-mod definition;
-mod former_names;
-mod former_slugs;
-mod instance;
-mod name_keys;
-mod purge;
-mod row;
+pub mod canonical_slug;
+pub mod definition;
+pub mod former_names;
+pub mod former_slugs;
+pub mod instance;
+pub mod name_keys;
+pub mod purge;
+pub mod row;
 
 pub(in crate::backend::storage) use canonical_slug::{canonical_slug, rows_with_canonical_slugs, SharedSlugs};
 pub use former_slugs::FormerSlugOwner;
@@ -373,8 +373,8 @@ pub struct AgentInstance {
 /// module no longer has), leaving `base_agent` as the remaining caller —
 /// kept as one definition here regardless, so a future field addition only
 /// needs updating once.
-#[cfg(test)]
-pub(crate) fn test_agent_def(
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_agent_def(
     id: &str,
     name: &str,
     provider: &str,

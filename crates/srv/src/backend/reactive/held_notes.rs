@@ -259,7 +259,7 @@ impl AttachedLog {
 }
 
 static ATTACHED: LazyLock<Mutex<AttachedLog>> = LazyLock::new(|| {
-    let path = if cfg!(test) {
+    let path = if cfg!(any(test, feature = "test-support")) {
         None
     } else {
         agentmux_common::DataPaths::from_env().map(|p| p.instance_dir.join(ATTACHED_FILE))

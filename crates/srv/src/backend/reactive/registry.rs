@@ -397,7 +397,7 @@ fn shared_channel_path(shared_dir: &Path, agent_id: &str, channel: &str) -> Path
 /// same-host by construction (a local file only readable by local
 /// processes) — unlike a LAN/cloud registry, PID-liveness is an
 /// authoritative staleness signal, not just a heuristic.
-pub(crate) fn pid_alive(pid: u32) -> bool {
+pub fn pid_alive(pid: u32) -> bool {
     let target = sysinfo::Pid::from(pid as usize);
     let mut sys = sysinfo::System::new();
     // Targeted refresh, no CPU/memory/exe/cmdline needed — existence alone
@@ -445,7 +445,7 @@ impl AgentEntry {
 /// `verify-sender` route can reuse the same real, already-tested staleness
 /// judgment for shared-registry entries instead of inventing its own
 /// threshold (see that module's own doc comment for why).
-pub(crate) const FORWARD_FAILURE_GRACE_MS: u64 = 60_000;
+pub const FORWARD_FAILURE_GRACE_MS: u64 = 60_000;
 
 /// Should `server/reactive.rs`'s evict-on-forward-failure sites remove this
 /// entry after a failed forward (`success:false` or a connection error)?
@@ -851,7 +851,7 @@ fn write_entry_file(path: &Path, entry: &AgentEntry) {
 /// need a deterministic `jekt_public_key` regardless of which other test in
 /// the binary happened to install the `OnceLock` resolver first
 /// (`server/reactive.rs`'s cross-channel verification tests).
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn write_shared_entry_for_test(shared_dir: &Path, entry: &AgentEntry) {
     let _guard = REGISTRY_OP_LOCK.lock().unwrap();
     let _ = std::fs::create_dir_all(shared_agent_dir(shared_dir, &entry.agent_id));

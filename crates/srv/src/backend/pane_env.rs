@@ -317,7 +317,7 @@ fn apply_edits_pty(c: &mut portable_pty::CommandBuilder, edits: Vec<(String, Opt
 /// uses the in-pane helpers. Call sites that spawn the CLI as a plain
 /// third-party binary (auth checks, version probes) tighten this to
 /// `sanitize_external_command` on top, which only removes more.
-pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
+pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     let mut cmd = agentmux_common::make_cli_cmd(cli_path);
     sanitize_process_command(&mut cmd);
     cmd

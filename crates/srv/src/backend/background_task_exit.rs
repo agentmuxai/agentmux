@@ -64,7 +64,7 @@ fn end_row(store: &Store, exit: &Exit) -> bool {
 }
 
 /// Start listening. Called once, with the app's broker and store.
-pub(crate) fn install(broker: Arc<Broker>, store: Arc<Store>) {
+pub fn install(broker: Arc<Broker>, store: Arc<Store>) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Exit>();
     // Observers run inside `Broker::publish`, under its locks: parse and hand off only. Every line of every Bash call's
     // output passes here, so a chunk that is not an exit costs one string comparison.

@@ -387,16 +387,16 @@ pub async fn scan_push(slug: &str, repo: &str, material: &[u8]) -> ScanOutcome {
 }
 
 /// A stand-in `gh-agent` on PATH for tests: it appends its arguments to a log, prints one line and exits with a code.
-#[cfg(test)]
-pub(crate) mod fake {
+#[cfg(any(test, feature = "test-support"))]
+pub mod fake {
     use std::path::{Path, PathBuf};
 
     /// Tests that change PATH take this first.
-    pub(crate) static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    pub static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Puts a `gh-agent` in `dir` that logs its arguments, prints `stdout` and exits `code`, and puts `dir` first on PATH.
     /// Returns the PATH to put back.
-    pub(crate) fn install(dir: &Path, stdout: &str, code: i32) -> std::ffi::OsString {
+    pub fn install(dir: &Path, stdout: &str, code: i32) -> std::ffi::OsString {
         let log = dir.join("calls.log");
         #[cfg(windows)]
         {
@@ -419,7 +419,7 @@ pub(crate) mod fake {
     }
 
     /// The argument lines the stand-in was called with, in order.
-    pub(crate) fn calls(dir: &Path) -> Vec<String> {
+    pub fn calls(dir: &Path) -> Vec<String> {
         let log: PathBuf = dir.join("calls.log");
         std::fs::read_to_string(log).unwrap_or_default().lines().map(|l| l.trim().to_string()).collect()
     }

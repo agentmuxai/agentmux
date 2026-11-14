@@ -17,19 +17,20 @@
 //! Independence boundary: this module has no dependency on any other project's container code.
 //! Docker best practices here were researched independently.
 
-pub(crate) mod drift;
+pub mod drift;
 pub mod limits;
 pub mod oom;
-mod keychain_credentials;
-mod mount_source;
-mod mounts;
+pub mod keychain_credentials;
+pub mod mount_source;
+pub mod mounts;
+pub mod status_source;
 pub(crate) use self::mounts::container_memory_dir;
-mod pull;
-mod reap;
+pub mod pull;
+pub mod reap;
 pub mod argv;
 pub mod cli;
 pub mod cli_release;
-mod upload;
+pub mod upload;
 pub mod credential;
 pub mod image;
 pub mod listener;
@@ -547,6 +548,7 @@ impl ContainerManager {
             Some(status) => {
                 if status != "running" {
                     // Exists but stopped — start it.
+                    crate::backend::container_status::note_starting(container_name, "");
                     self.inner.docker
                         .start_container(container_name, None::<StartContainerOptions<String>>)
                         .await?;
@@ -560,6 +562,7 @@ impl ContainerManager {
                 // has the image locally. Unlike `docker run`, the Engine's
                 // create_container does NOT auto-pull — it returns 404 if the image
                 // is absent. pull_image is a no-op when the image already exists.
+                crate::backend::container_status::note_starting(container_name, image);
                 let image = self.pull_with_fallback(image, observe).await?;
                 // Create and start.
                 observe(StartEvent::Starting);
@@ -1280,6 +1283,7 @@ impl ContainerManager {
             // `docker exec`, not as the PID-1 process.
             tty: Some(false),
             open_stdin: Some(true),
+            labels: status_source::agent_labels(container_name),
             host_config: Some(HostConfig {
                 mounts: Some(all_mounts),
                 // Security: no host network, no privileged mode.

@@ -16,7 +16,7 @@
 
 use serde::Serialize;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use crate::backend::rpc::schema::{ts_type, TsType};
 
 /// A broker event with a typed payload.
@@ -44,7 +44,7 @@ macro_rules! per_id_events {
             }
         )*
         /// Every per-id event: its prefix and its payload as TypeScript.
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         pub fn per_id_schema() -> Vec<(&'static str, TsType)> {
             vec![$(($prefix, ts_type::<$payload>())),*]
         }
@@ -66,7 +66,7 @@ macro_rules! events {
             }
         )*
         /// Every typed event: its wire name and its payload as TypeScript (the export test reads it).
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         pub fn schema() -> Vec<(&'static str, TsType)> {
             vec![$(($name, ts_type::<$payload>())),*]
         }
@@ -94,8 +94,18 @@ events! {
     AgentMessageAccepted: super::mps::EVENT_AGENT_MESSAGE_ACCEPTED => crate::backend::blockcontroller::MessageAcceptedEvent,
     /// A message between two agents was handled by this srv (`message_flow`): ids and times, never its text.
     MessageFlow: super::mps::EVENT_MESSAGE_FLOW => crate::backend::message_flow::MessageFlowEvent,
+    /// One of this machine's agent containers changed (`container_status`): names and states, nothing from inside it.
+    ContainerStatusChanged: super::mps::EVENT_CONTAINER_STATUS => crate::backend::container_status::ContainerStatus,
+    /// The container runtime appeared, went away or changed (`container_status`).
+    ContainerRuntimeChanged: super::mps::EVENT_CONTAINER_RUNTIME => crate::backend::container_status::ContainerRuntimeStatus,
     /// A task was filed, reassigned, started or handed back (`task_flow`): names and numbers, never its text.
     TaskFlow: super::mps::EVENT_TASK_FLOW => crate::backend::task_flow::TaskFlowEvent,
+    /// A review of a PR reached the agent it belongs to (`pr_flow`): ids, a state and times, never its text.
+    ReviewFlow: super::mps::EVENT_REVIEW_FLOW => crate::backend::pr_flow::ReviewFlowEvent,
+    /// The checks of a PR's head commit passed or failed (`pr_flow`): ids, a state and times, never a log.
+    ChecksFlow: super::mps::EVENT_CHECKS_FLOW => crate::backend::pr_flow::ChecksFlowEvent,
+    /// A PR was merged (`pr_flow`): ids, a state and times.
+    MergeFlow: super::mps::EVENT_MERGE_FLOW => crate::backend::pr_flow::MergeFlowEvent,
     /// A stale `--resume` is being retried, or the retry resolved.
     AgentResumeRetry: super::mps::EVENT_AGENT_RESUME_RETRY => ResumeRetryEvent,
     /// A Claude CLI request is being retried, or no longer is.
@@ -654,7 +664,7 @@ pub struct ResumeRetryEvent {
 
 /// `schema()` and `per_id_schema()` as the JSON the event-schema export writes: one row per event,
 /// sorted by name. A per-id event's row names its prefix, with `perId: true`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn schema_json() -> serde_json::Value {
     let mut rows: Vec<(&str, TsType, bool)> = schema().into_iter().map(|(n, t)| (n, t, false)).collect();
     rows.extend(per_id_schema().into_iter().map(|(n, t)| (n, t, true)));

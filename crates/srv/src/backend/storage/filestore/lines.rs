@@ -13,7 +13,7 @@
 //! Both users call [`is_blank_line`], so they can't drift apart.
 
 /// Whether `line` (without its `\n`) is blank under the reader's rule.
-pub(crate) fn is_blank_line(line: &[u8]) -> bool {
+pub fn is_blank_line(line: &[u8]) -> bool {
     // Fast path for ASCII, nearly every transcript line: the ASCII characters
     // `char::is_whitespace` (and so `str::trim`) accepts. Unlike
     // `u8::is_ascii_whitespace`, that includes U+000B (vertical tab).

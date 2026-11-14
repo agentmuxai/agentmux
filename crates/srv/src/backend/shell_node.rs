@@ -132,7 +132,7 @@ impl ShellSessionRegistry {
     // real child process, to exercise the `shellstatus` RPC handler's JSON
     // shape end-to-end for both branches — the same pre-tested primitive
     // this module's own tests already use, not duplicated logic.
-    pub(crate) fn register_full(
+    pub fn register_full(
         &self,
         shell_id: String,
         stop_tx: oneshot::Sender<()>,
@@ -261,7 +261,7 @@ impl ShellSessionRegistry {
     /// already-exited shell, so a fast, still-registering, genuinely LIVE
     /// shell (e.g. a real `task dev`) could be shown as failed in the
     /// Activity Dock for its entire run.
-    pub(crate) fn get_status_if_known(&self, shell_id: &str) -> Option<ShellStatusInfo> {
+    pub fn get_status_if_known(&self, shell_id: &str) -> Option<ShellStatusInfo> {
         self.status_map.lock().get(shell_id).map(|arc| arc.lock().clone())
     }
 

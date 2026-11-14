@@ -24,7 +24,7 @@
 
 import { landedTab, markLanded } from "./pane-tab-landing";
 export { LANDING_BOUNCE_MS } from "./pane-tab-landing";
-import { createEffect, For, on, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { isDraggedDocTab, isDraggedPaneTab } from "@/app/drag/pane-tab-drag";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { usePulseWhen } from "@/app/motion/solid";
@@ -37,6 +37,8 @@ import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import type { PaneTabSelectionApi } from "./pane-tab-selection";
 import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
+import { STRIP_EDGE_FADE_PX } from "./strip-reveal";
+import { outerStripScroller } from "./strip-scroller";
 import { foreignDropHighlightFor, foreignDropRootFor, incomingTabLabel, useForeignTabDrop, type PaneTabBodyDrop } from "./pane-tab-foreign-drop";
 import { useStripScrollInput, useStripWidthAnimation } from "./pane-tab-strip-hooks";
 import { dropPositionForPointerX, pillTooltipContent, usePillDrag, usePillFlash, usePillGestures, usePillProgress, type DocTabDrag } from "./pane-tab-pill";
@@ -278,14 +280,27 @@ function createStripState<T>(props: PaneTabStripProps<T>) {
     // reads no geometry; it reveals once when it is shown again.
     const windowDisplayed = useWindowTabDisplayed();
     const blockVisibility = props.docDrag ? usePaneTabVisibility(props.docDrag.blockId) : undefined;
+    // In a pane's header the strip does not scroll itself: the header's range scrolls it, with the header's
+    // controls after it (strip-scroller.ts), so the reveal scrolls that box and keeps clear of its fade.
+    const outer = () => outerStripScroller(refs.strip);
+    const scrollBox = () => outer()?.el ?? refs.strip;
     const reveal = createStripReveal({
-        strip: () => refs.strip,
+        strip: scrollBox,
         activeId: () => props.activeId,
         tabIds: () => props.tabs.map(props.getId),
         shown: () => windowDisplayed() && (blockVisibility?.() ?? "active") === "active",
-        overflows: () => edges.moreLeft() || edges.moreRight(),
+        overflows: () => outer()?.scroller.overflows() ?? (edges.moreLeft() || edges.moreRight()),
+        edgeClearance: () => outer()?.scroller.edgeFadePx ?? STRIP_EDGE_FADE_PX,
+        lastTabEndsStrip: () => !outer(),
     });
-    registerStripWithPane(() => refs.strip, reveal);
+    registerStripWithPane(scrollBox, reveal);
+    onMount(() => {
+        const box = outer();
+        if (!box) return;
+        onCleanup(box.scroller.onUserScroll(reveal.noteUserScroll));
+        // The box starts where the pane's last header was: the tab the person picked travels from there.
+        onCleanup(box.scroller.onCarried(() => reveal.request("selected")));
+    });
     // A new selection may leave the strip where it was (already flush, or hidden until shown): measure the fade again.
     const shown = () => windowDisplayed() && (blockVisibility?.() ?? "active") === "active";
     createEffect(

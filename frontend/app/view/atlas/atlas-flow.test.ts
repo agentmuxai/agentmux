@@ -6,8 +6,10 @@ import type { MessageFlowEvent } from "@/types/rpc/MessageFlowEvent";
 import type { TaskFlowEvent } from "@/types/rpc/TaskFlowEvent";
 import {
     flowCurve,
+    flowCurves,
     flowEndResolver,
     flowsAt,
+    labelKeepOut,
     LEAVING_MS,
     MAX_MESSAGES,
     MESSAGE_SHOWN_MS,
@@ -212,6 +214,30 @@ describe("flowCurve", () => {
         expect(flowCurve(third, first, grid)!.label).toEqual({ x: NODE_W, y: NODE_H + 7 });
     });
 
+    it("keeps its label clear of the frame round a node", () => {
+        const row = [0, 154, 308].map((x) => ({ x, y: 0 }));
+        const [first, second, third] = row;
+        // The frame round the second reaches into the gap: the number moves along the first's edge, away from it.
+        expect(flowCurve(third, first, [first, { ...second, pad: 7 }, third])!.label).toEqual({ x: NODE_W - 44, y: NODE_H + 7 });
+        // The frame round the node it lands on: the number goes under the frame, not on it.
+        const framed = { ...first, pad: 7 };
+        expect(flowCurve(third, framed, [framed, second, third])!.label).toEqual({ x: NODE_W, y: NODE_H + 14 });
+    });
+
+    it("keeps its label off the strip a region's title is written in", () => {
+        // An agent in a region, and the review bot in the region under it: the middle of the line between them
+        // is on the lower region's title.
+        const agent = { x: 16, y: 56 };
+        const bot = { x: 16, y: 204 };
+        const title = { x: 0, y: 148, w: 326, h: 30 };
+        const middle = flowCurve(bot, agent, [agent, bot])!.label;
+        expect(middle.y).toBeGreaterThan(title.y);
+        const moved = flowCurve(bot, agent, [agent, bot, title])!.label;
+        // In the gap between the two regions: under the agent's region, over the title.
+        expect(moved.y).toBeLessThanOrEqual(title.y - 9);
+        expect(moved.y).toBeGreaterThanOrEqual(agent.y + NODE_H + 9);
+    });
+
     it("takes the other side of the node it lands on when the first is covered", () => {
         const row = [0, 154, 308].map((x) => ({ x, y: 0 }));
         const under = { x: 70, y: NODE_H + 4 };
@@ -228,5 +254,138 @@ describe("flowCurve", () => {
     it("is nothing for two nodes on top of each other, or touching", () => {
         expect(flowCurve({ x: 10, y: 10 }, { x: 10, y: 10 })).toBeNull();
         expect(flowCurve({ x: 0, y: 0 }, { x: NODE_W, y: 0 })).toBeNull();
+    });
+});
+
+describe("flowCurves", () => {
+    const row = [0, 154, 308].map((x) => ({ x, y: 0 }));
+    const [first, second, third] = row;
+
+    it("bows each line further than the one before it between the same two nodes", () => {
+        const bot = { x: 0, y: 200 };
+        const line = (id: string, to = first) => ({ id, from: bot, to, label: null });
+        const curves = flowCurves([line("a"), line("b"), line("c"), line("other", second)], [first, second, bot]);
+        const bowOf = (id: string) => Number(/Q([-\d.]+),/.exec(curves.get(id)!.d)![1]);
+        const middle = first.x + NODE_W / 2;
+        // To the left of its way up, further each time; a line to another node starts again.
+        expect(bowOf("a")).toBeLessThan(middle);
+        expect(bowOf("b")).toBeLessThan(bowOf("a") - 10);
+        expect(bowOf("c")).toBeLessThan(bowOf("b") - 10);
+        expect(curves.get("other")!.d).toBe(flowCurve(bot, second)!.d);
+        expect(curves.get("a")!.d).toBe(flowCurve(bot, first)!.d);
+    });
+
+    it("keeps a label inside the map, off a region's title and off the line along its bottom", () => {
+        // A machine's region with one agent, and the review bot in its region under it, as the layout places them.
+        const agent = { x: 16, y: 56 };
+        const bot = { x: 16, y: 204 };
+        const layout = {
+            regions: [
+                { key: "m", x: 0, y: 0, w: 220, h: 120, foldY: 0 },
+                { key: "services", x: 0, y: 148, w: 220, h: 120, foldY: 0 },
+            ],
+            width: 220,
+            height: 268,
+        };
+        const lines = ["#7301", "#7290 person", "#7302"].map((label, i) => ({ id: String(i), from: bot, to: agent, label }));
+        const placed = [...flowCurves(lines, [agent, bot, ...labelKeepOut(layout)]).values()].map((c) => c.label);
+        lines.forEach((line, i) => {
+            const p = placed[i];
+            const halfW = line.label.length * 3.25 + 1;
+            expect(p.x - halfW).toBeGreaterThanOrEqual(0);
+            expect(p.x + halfW).toBeLessThanOrEqual(layout.width);
+            // Not on the title of the lower region (148 to 178), nor on the bottom line of the upper (119).
+            expect(p.y + 7 <= 148 || p.y - 7 >= 178).toBe(true);
+            expect(p.y + 7 <= 119 || p.y - 7 >= 120).toBe(true);
+        });
+        // And not on each other.
+        for (let i = 0; i < placed.length; i++) {
+            for (let j = i + 1; j < placed.length; j++) {
+                const apart = Math.abs(placed[i].y - placed[j].y) >= 14 || Math.abs(placed[i].x - placed[j].x) >= 34;
+                expect(apart).toBe(true);
+            }
+        }
+    });
+    const labels = (lines: Parameters<typeof flowCurves>[0], nodes = row) =>
+        [...flowCurves(lines, nodes).values()].map((curve) => curve.label);
+
+    it("gives two lines that land on one corner of a node a label each", () => {
+        // Two tasks handed to the first agent, by its neighbour and by the third: both lines land on its right
+        // corner from below, so alone each would put its number under that corner.
+        const [near, far] = labels([
+            { id: "a", from: second, to: first, label: "#1" },
+            { id: "b", from: third, to: first, label: "#3" },
+        ]);
+        expect(near).toEqual({ x: NODE_W, y: NODE_H + 7 });
+        // The second takes the other side of the node.
+        expect(far).toEqual({ x: NODE_W, y: -7 });
+    });
+
+    it("steps along the node's edge when both sides of the corner are taken", () => {
+        const fourth = { x: 462, y: 0 };
+        const [, , last] = labels(
+            [
+                { id: "a", from: second, to: first, label: "#47601" },
+                { id: "b", from: third, to: first, label: "#47602" },
+                { id: "c", from: fourth, to: first, label: "#47603" },
+            ],
+            [...row, fourth]
+        );
+        expect(last).toEqual({ x: NODE_W - 44, y: NODE_H + 7 });
+    });
+
+    it("puts the numbers of a line and its answer next to each other, in the gap the lines cross", () => {
+        // One agent over another, as By seat places them: the two lines bow apart by less than a number's width.
+        const over = { x: 0, y: 0 };
+        const under = { x: 0, y: NODE_H + 40 };
+        const alone = flowCurve(under, over, [over, under])!.label;
+        const pair = (down: string, up: string) =>
+            labels(
+                [
+                    { id: "a", from: over, to: under, label: down },
+                    { id: "b", from: under, to: over, label: up },
+                ],
+                [over, under]
+            );
+        for (const [a, b, apart] of [
+            ["#4", "#1", 16],
+            ["#47601", "#47602", 42],
+        ] as const) {
+            const [down, up] = pair(a, b);
+            expect(down).toEqual(flowCurve(over, under, [over, under])!.label);
+            // The second stays at its own height, on the side of the first that its line is on.
+            expect(up.y).toBe(alone.y);
+            expect(Math.sign(up.x - down.x)).toBe(Math.sign(alone.x - down.x));
+            expect(Math.abs(up.x - down.x)).toBeCloseTo(apart, 5);
+        }
+    });
+
+    it("leaves a line and its answer their own numbers when the lines bow far enough apart", () => {
+        const left = { x: 0, y: 0 };
+        const right = { x: 600, y: 0 };
+        const [there, back] = labels(
+            [
+                { id: "a", from: left, to: right, label: "#47601" },
+                { id: "b", from: right, to: left, label: "#47602" },
+            ],
+            [left, right]
+        );
+        expect(there).toEqual(flowCurve(left, right, [left, right])!.label);
+        expect(back).toEqual(flowCurve(right, left, [left, right])!.label);
+    });
+
+    it("places no label for a line without one, and leaves out a line with no curve", () => {
+        const curves = flowCurves(
+            [
+                { id: "a", from: second, to: first, label: "#1" },
+                { id: "m", from: third, to: first, label: null },
+                { id: "x", from: first, to: first, label: "#2" },
+                { id: "b", from: third, to: first, label: "#3" },
+            ],
+            row
+        );
+        expect([...curves.keys()]).toEqual(["a", "m", "b"]);
+        // The message's line lands on the same corner and takes no label's place.
+        expect(curves.get("b")!.label).toEqual({ x: NODE_W, y: -7 });
     });
 });

@@ -290,25 +290,25 @@ impl ProviderConfig {
 //
 // One file per provider under providers/, so adding a provider adds a file.
 
-mod claude;
-mod codex;
-mod gemini;
-mod qwen;
-mod kimi;
-mod openclaw;
-mod pi;
-mod muxcode;
-mod copilot;
-mod antigravity;
-mod aider;
-mod cline;
-mod crush;
-mod dsh;
-mod goose;
-mod grok;
-mod kilo;
-mod muse;
-mod opencode;
+pub mod claude;
+pub mod codex;
+pub mod gemini;
+pub mod qwen;
+pub mod kimi;
+pub mod openclaw;
+pub mod pi;
+pub mod muxcode;
+pub mod copilot;
+pub mod antigravity;
+pub mod aider;
+pub mod cline;
+pub mod crush;
+pub mod dsh;
+pub mod goose;
+pub mod grok;
+pub mod kilo;
+pub mod muse;
+pub mod opencode;
 
 use claude::CLAUDE;
 use codex::CODEX;

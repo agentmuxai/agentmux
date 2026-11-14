@@ -1,10 +1,10 @@
 //! The mounts of a container agent's home: the per-agent volume, the bound account's
 //! credentials, and the agent's Personal Memory folder.
 
-mod caches;
-mod credential_mode;
-mod dev_exec;
-mod host_name;
+pub mod caches;
+pub mod credential_mode;
+pub mod dev_exec;
+pub mod host_name;
 pub(super) use self::host_name::host_name_for_new_container;
 
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
@@ -46,7 +46,7 @@ impl ContainerMountSpec {
     /// its Personal Memory. A `~/...` working dir (what `agent.open` records for an agent with
     /// none of its own) is expanded here, against the AgentMux home an isolated instance
     /// overrides: Docker takes only an absolute bind source.
-    pub(crate) fn for_agent(env_vars: &std::collections::HashMap<String, String>, working_dir: &str) -> Self {
+    pub fn for_agent(env_vars: &std::collections::HashMap<String, String>, working_dir: &str) -> Self {
         let working_dir = crate::backend::base::expand_home_dir_safe(working_dir).to_string_lossy().into_owned();
         let working_dir = working_dir.as_str();
         let config_dir = env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str).filter(|d| !d.is_empty());

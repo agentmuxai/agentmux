@@ -41,7 +41,7 @@
 /// here: `identity_env` sets it, from the same slug when there is one; the
 /// git identity, `MUXBUS_AGENT_ID`, the PR-body tag and the OSC prompt hook
 /// all still derive from it.
-pub(crate) fn split_agent_identity_env(
+pub fn split_agent_identity_env(
     env_vars: &mut std::collections::HashMap<String, String>,
     display_name: &str,
     persisted_slug: Option<&str>,
@@ -87,7 +87,7 @@ pub(crate) fn split_agent_identity_env(
 /// expanded and a relative `cmd:cwd` is resolved against srv's own cwd, as
 /// `core::apply_working_dir` does, so `cd "$AGENTMUX_AGENT_WORKDIR"` works
 /// from anywhere (Codex on #4113).
-pub(crate) fn carry_agent_workdir_env(
+pub fn carry_agent_workdir_env(
     env_vars: &mut std::collections::HashMap<String, String>,
     block_meta: &crate::backend::obj::MetaMapType,
 ) {
@@ -115,7 +115,7 @@ pub(crate) fn carry_agent_workdir_env(
 /// What the server knows about the agent on a block, read from its
 /// `db_agents` row: the identity that will be carried into the process.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PersistedAgentIdentity {
+pub struct PersistedAgentIdentity {
     /// `db_agents.id` — the UID (spec §3). A UUID for every non-template row.
     pub uid: String,
     /// `db_agents.slug`, the collision-resolved value `agent_def_insert`
@@ -148,7 +148,7 @@ pub(crate) struct PersistedAgentIdentity {
 /// A store error is logged and treated as "unknown", never as a spawn
 /// failure: this is disambiguation, not a gate, and spec §10 constraint 1
 /// forbids a store read from making a healthy agent unreachable.
-pub(crate) fn persisted_agent_identity(
+pub fn persisted_agent_identity(
     mstore: &crate::backend::storage::store::Store,
     block_id: &str,
 ) -> Option<PersistedAgentIdentity> {
@@ -212,7 +212,7 @@ pub(crate) fn persisted_agent_identity(
 /// `.mcp.json` `agent_config.rs` writes into the working directory carries
 /// neither variable (it copies only `AGENTMUX_AGENT_ID`/`_BUS_ID`), so the
 /// token never lands in a file a human may commit.
-pub(crate) fn carry_agent_uid_env(
+pub fn carry_agent_uid_env(
     env_vars: &mut std::collections::HashMap<String, String>,
     identity: Option<&PersistedAgentIdentity>,
 ) {
@@ -243,7 +243,7 @@ pub(crate) fn carry_agent_uid_env(
 /// the builder's last-read re-check of the gate's refusal (Codex P1 on
 /// #3591). `None` whenever a row resolved, or the block names nothing
 /// deleted.
-pub(crate) fn deleted_agent_of_rowless_block(
+pub fn deleted_agent_of_rowless_block(
     mstore: &crate::backend::storage::store::Store,
     block_id: &str,
     identity: Option<&PersistedAgentIdentity>,
@@ -262,7 +262,7 @@ pub(crate) fn deleted_agent_of_rowless_block(
 /// or removed when the block has no row). A synchronous store read and an
 /// idempotent token mint, so on a multi-thread runtime worker it runs under
 /// `block_in_place`, as eager resume does (incident #1782).
-pub(crate) fn carry_block_identity_env(
+pub fn carry_block_identity_env(
     mstore: &crate::backend::storage::store::Store,
     block_id: &str,
     env_vars: &mut std::collections::HashMap<String, String>,

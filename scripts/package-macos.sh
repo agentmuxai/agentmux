@@ -153,10 +153,14 @@ fi
 
 # Time each phase and print the table on exit (and into the job summary in CI).
 . "$REPO_ROOT/scripts/phase-times.sh"
+# A memory line about every 30 seconds while srv builds; stopped right after it, before anything is signed.
+. "$REPO_ROOT/scripts/mem-sampler.sh"
 
 task build:frontend
 phase_done "frontend"
+mem_sampler_start
 task build:backend
+mem_sampler_stop
 phase_done "srv (cargo build --release)"
 task build:host
 phase_done "host"

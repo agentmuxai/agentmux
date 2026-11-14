@@ -208,11 +208,15 @@ fn at_text(ms: i64) -> String {
         .unwrap_or_default()
 }
 
-/// The tools line: the resumed conversation still holds any tool description
-/// the agent loaded before the upgrade (a deferred tool's schema is a message
-/// in it), while the tool itself is the new version's: the list of actions it
-/// read can be missing new ones (browser driver roadblocks, R8).
-const TOOLS_MAY_HAVE_CHANGED: &str = "Its tools may have changed: a tool description you loaded before the upgrade can be out of date, so load it again before relying on the actions it lists.";
+/// The tools line. The resumed session keeps the description of every tool the
+/// agent loaded before the upgrade, and loading it again returns that same old
+/// description: the CLI stores the loaded schema in the conversation and serves
+/// it from there, although the tool server it started after the upgrade lists
+/// the new one (measured on 0.60.26 -> 0.60.27: Tasks had no `handback`, while a
+/// tool not loaded before, Browser, came back with its new schema). So "load it
+/// again" cannot refresh it. A parameter the old description lacks is still
+/// passed through (the CLI does not reject it), and a tool not loaded yet is new.
+const TOOLS_MAY_HAVE_CHANGED: &str = "Its tools may have changed: a tool you loaded before the upgrade keeps its old description in this session (loading it again returns the old one), so a parameter added in this version can be missing from it but still works when you pass it; a tool you have not loaded yet shows the new description.";
 
 /// The note, with the upgrade's local time.
 pub fn note_text(u: &Upgraded) -> String {
@@ -327,14 +331,14 @@ fn has_session(store: &crate::backend::storage::store::Store, block_id: &str) ->
 }
 
 /// Why a note wasn't delivered: the pane is gone, or it may be ready later.
-pub(crate) enum Undelivered {
+pub enum Undelivered {
     Gone(String),
     Retry(String),
 }
 
 /// `deliver` until it succeeds, at most `attempts` times, `gap` apart; the
 /// last error when none does. A pane that is gone isn't waited for.
-pub(crate) async fn deliver_with_retry(
+pub async fn deliver_with_retry(
     mut deliver: impl FnMut() -> Result<(), Undelivered>,
     attempts: u32,
     gap: Duration,
@@ -552,7 +556,10 @@ mod tests {
         let text = note_text(&up("0.59.26", "0.59.27", 1_792_000_000_000, &[]).unwrap());
         assert!(text.starts_with("[AgentMux] AgentMux was upgraded from 0.59.26 to 0.59.27 at "), "{text}");
         assert!(text.contains("Your session resumed; nothing is needed from you. Its tools may have changed: "), "{text}");
-        assert!(text.ends_with("load it again before relying on the actions it lists."), "{text}");
+        // Loading a tool again does not refresh one loaded before the upgrade, so the note must not say it does.
+        assert!(!text.contains("load it again"), "{text}");
+        assert!(text.contains("loading it again returns the old one"), "{text}");
+        assert!(text.ends_with("a tool you have not loaded yet shows the new description."), "{text}");
     }
 
     #[test]
@@ -595,7 +602,8 @@ mod tests {
         let after_upgrade = continue_text(Some(&upgraded), 1_792_000_000_000);
         assert!(after_upgrade.starts_with("[AgentMux] AgentMux was upgraded from 0.60.3 to 0.60.4 at "), "{after_upgrade}");
         assert!(after_upgrade.contains(" while you were working; your last turn was cut off mid-tool. "), "{after_upgrade}");
-        assert!(after_upgrade.contains("load it again before relying on the actions it lists."), "{after_upgrade}");
+        assert!(after_upgrade.contains("loading it again returns the old one"), "{after_upgrade}");
+        assert!(!after_upgrade.contains("load it again"), "{after_upgrade}");
         assert!(after_upgrade.ends_with("Check the state of what you were doing and carry on."), "{after_upgrade}");
         assert!(!after_upgrade.contains("nothing is needed from you"), "{after_upgrade}");
         let after_restart = continue_text(None, 1_792_000_000_000);

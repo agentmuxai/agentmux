@@ -53,7 +53,7 @@ const RELAY_TIMEOUT_SECS: u64 = 10;
 /// Previously private to `pkce.rs`; promoted here because tier 4 needs the same
 /// resolution and two copies of "where is the cloud" is exactly the drift this
 /// report set out to remove.
-pub(crate) fn rest_base_url() -> String {
+pub fn rest_base_url() -> String {
     std::env::var("AGENTMUX_MUXBUS_REST_URL")
         .ok()
         .filter(|v| !v.is_empty())
@@ -99,7 +99,7 @@ pub(crate) fn note_batch_routes_missing(base: &str) {
 /// can re-check it. Field names are the cloud's; an old cloud silently
 /// drops them.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub(crate) struct WanCarried {
+pub struct WanCarried {
     pub wan_sig: String,
     pub wan_msg_id: String,
     pub wan_ts_secs: i64,
@@ -135,7 +135,7 @@ const MAX_CARRIED_ID_CHARS: usize = 256;
 /// Every signed field but the message and target is srv's own: its instance,
 /// its channel, its clock. A `wan_sig`, host or timestamp in the request body
 /// is not read (agents signed these themselves before; see the spec §2).
-pub(crate) fn wan_sign_at_origin(
+pub fn wan_sign_at_origin(
     req: &crate::backend::reactive::types::InjectionRequest,
     signer: Option<&str>,
     wan: Option<&crate::backend::storage::wan_identity::WanIdentityStore>,
@@ -211,7 +211,7 @@ pub(crate) fn wan_sign_at_origin(
 /// answered earlier and more cheaply by [`relay_token`] returning `None`, so
 /// reaching this function at all already means tier 4 exists here.
 #[derive(Debug)]
-pub(crate) enum RelayOutcome {
+pub enum RelayOutcome {
     /// The cloud accepted and persisted the injection. **Queued, not
     /// delivered** — see the module doc.
     Queued {
@@ -292,7 +292,7 @@ fn relay_body(
 ///   exactly one marker, applied by the receiver — identical to how tiers 2
 ///   and 3 already behave.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn relay_inject(
+pub async fn relay_inject(
     base_url: &str,
     http: &reqwest::Client,
     token: &str,
@@ -397,7 +397,7 @@ pub(crate) async fn relay_inject(
 /// needs the directory this send goes into, and reading the account
 /// separately would let a sign-in in between pair one account's token with
 /// another's directory (Codex P2 on #3994).
-pub(crate) async fn relay_token(
+pub async fn relay_token(
     source_agent: &str,
     store: &Arc<Store>,
     http: &reqwest::Client,
@@ -434,7 +434,7 @@ fn settled_account(before: String, after: Option<String>) -> String {
 /// What [`relay_token`] resolved: the bearer to send with, and the account
 /// (`sub`) of the shared token it was resolved under — empty if that token
 /// names none, which leaves the carry gate without a directory (unsigned).
-pub(crate) struct RelayCredential {
+pub struct RelayCredential {
     pub token: String,
     pub account_sub: String,
 }

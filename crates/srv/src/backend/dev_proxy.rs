@@ -16,7 +16,7 @@
 //! needs one), and a container whose address the host cannot reach (Docker Desktop) is reached
 //! through the relay in `dev_relay`.
 
-mod forward;
+pub mod forward;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;

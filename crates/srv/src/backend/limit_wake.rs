@@ -124,7 +124,7 @@ fn schedule(block_id: &str, resets_at_ms: u64) {
 /// Tell the agent of `block_id` something as a system note (it starts a turn), once it has registered:
 /// a pane srv just restarted has no process yet, so this waits up to [`NUDGE_PENDING_MS`] for it
 /// instead of dropping the note. `false` when the agent didn't start in time or the note didn't go.
-pub(crate) async fn tell_when_registered(block_id: &str, text: &str) -> bool {
+pub async fn tell_when_registered(block_id: &str, text: &str) -> bool {
     let found = until_registered(
         || registered_agent(block_id),
         std::time::Duration::from_millis(NUDGE_POLL_MS),

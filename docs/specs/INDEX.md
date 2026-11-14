@@ -479,6 +479,7 @@ partial list.
 | [`SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03`](SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md) | SPEC: resize through collapsed panes — every edge of a collapsed run resizes the expanded panes either side |
 | [`SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24`](SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md) | SPEC: Move the narrow-width responsive tab bar to the top (from the bottom) |
 | [`SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05`](SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md) | SPEC: Retire the Armory — two panes, Connectors and Knowledge |
+| [`SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14`](SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14.md) | Spec: review and checks flow, two events and a recent list (for the Atlas review bot and CI nodes) |
 | [`SPEC_SAGA_DURABILITY_2026-05-01`](SPEC_SAGA_DURABILITY_2026-05-01.md) | SPEC: Saga durability — durable saga log |
 | [`SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) | Spec: Make `settings.json` isolated-by-default for every non-`stable` channel |
 | [`SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22`](SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md) | SPEC — Settings commit on blur, not on change; plus the remaining terminal live-apply gaps |
@@ -834,6 +835,7 @@ partial list.
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SUPER_AGENT_2026_10_25`](SPEC_SUPER_AGENT_2026_10_25.md) | Spec: the super agent, one place for sensitive operations |
+| [`SPEC_SWARM_CLOUD_TIER_2026_11_14`](SPEC_SWARM_CLOUD_TIER_2026_11_14.md) | Spec: The cloud tier: agents on the account's other machines that are not on the LAN, listed by srv for the Swarm and Atlas |
 | [`SPEC_SWARM_FILTER_BAR_2026_10_29`](SPEC_SWARM_FILTER_BAR_2026_10_29.md) | The Swarm filter bar: narrow the agent list by name and by what an agent is working on |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_SWARM_REFINEMENTS_2026_10_17`](SPEC_SWARM_REFINEMENTS_2026_10_17.md) | Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents |
@@ -1152,6 +1154,7 @@ partial list.
 | [`SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05`](SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05.md) | SPEC: Practice time for building computer-use skills, and two new ones: Voicemeeter and Cantabile |
 | [`SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13`](SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md) | SPEC — Consolidate Forge + Identity into the Agent Pane |
 | [`SPEC_CONTAINER_PANE_SUPPORT_2026_06_11`](SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) | SPEC: Container Pane Support |
+| [`SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14`](SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14.md) | Spec: Container status in the frontend: each agent's runtime kind, and a live list of this machine's agent containers |
 | [`SPEC_CONTEXT_VISIBILITY_2026_06_17`](SPEC_CONTEXT_VISIBILITY_2026_06_17.md) | SPEC: Context & Token Visibility — what we can show the user, and how |
 | [`SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25`](SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md) | Cron & Loop Robustness — Research + Design |
 | [`SPEC_CROSS_PROCESS_DISPATCH_2026-05-01`](SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md) | Cross-Process Dispatch — Launcher → Host Command Pipe |

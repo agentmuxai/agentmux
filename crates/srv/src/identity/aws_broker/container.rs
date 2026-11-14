@@ -52,7 +52,7 @@ fn shared() -> Option<std::sync::Arc<Policy>> {
 /// can't be written: the container then has no AWS, as before).
 pub fn config_dir() -> Option<String> {
     // The machine running the tests has its own answer; the tests give theirs.
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return None;
     }
     let policy = shared()?;
@@ -69,7 +69,7 @@ pub fn config_dir() -> Option<String> {
 /// The variables to add to a container exec's environment: none when nothing is shared, and none when the config
 /// folder can't be written, so they never point the SDK at a file the container doesn't have.
 pub fn exec_env() -> Vec<(String, String)> {
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return Vec::new();
     }
     match (shared(), config_dir()) {

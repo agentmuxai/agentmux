@@ -52,6 +52,10 @@
 #
 # CI_ATTEMPT_CMD replaces the cargo commands, CI_MONITOR=0 turns the trace and watchdog off, CI_CEILING=0 turns the
 # ceiling off: all three are for scripts/ci-nextest-run.test.sh.
+#
+# CI_ATTEMPT_CMD is also how another step puts a command under the same guard (the Linux legs of
+# .github/workflows/build-server-package.yml build the server package this way: the same trace, ceiling, time limits
+# and one retry of a stalled attempt); CI_STEP_NAME says in the messages which step that is.
 
 set -uo pipefail
 
@@ -60,6 +64,7 @@ TRACE="${CI_TRACE_FILE:-${RUNNER_TEMP:-/tmp}/resource-trace.log}"
 BUILD_LOG="${CI_BUILD_LOG:-${RUNNER_TEMP:-/tmp}/nextest-build.log}"
 FIRED="$TRACE.watchdog"
 CARGO_JOBS="${CI_CARGO_JOBS:-2}"
+STEP_NAME="${CI_STEP_NAME:-nextest}"
 CGROUP_ROOT="${CI_CGROUP_ROOT:-/sys/fs/cgroup}"
 CONFINE_BASE=()
 CEILING_RAM="${CI_MEM_MAX:-14G}"
@@ -230,7 +235,7 @@ attempt() {
         # common's one integration test. The other crates keep the cheaper check (srv's own is covered by its test
         # build).
         cargo check --tests -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee -a "$BUILD_LOG" || return $?
-        cargo nextest run --profile queue -p agentmux-common -p agentmux-srv -p agentmux-mcp --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
+        cargo nextest run --profile queue -p agentmux-common -p agentmux-srv -p agentmux-mcp --lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
         return 0
     fi
     # shellcheck disable=SC2086 # CRATES is a list of arguments
@@ -293,7 +298,7 @@ main() {
         confine_cleanup "$n"
         [ "$status" -eq 0 ] && return 0
         if [ "$n" -eq 1 ] && stalled "$status"; then
-            echo "::warning::The nextest step stalled (status $status after at most ${limits[0]} s); running it once more, which reuses what was built."
+            echo "::warning::The $STEP_NAME step stalled (status $status after at most ${limits[0]} s); running it once more, which reuses what was built."
             tail -n 5 "$TRACE" 2>/dev/null
             rm -f "$FIRED"
             continue
@@ -301,7 +306,7 @@ main() {
         break
     done
     if stalled "$status"; then
-        echo "::error::The nextest step stalled twice (status $status). The resource trace is in the job's artifacts; its last lines:"
+        echo "::error::The $STEP_NAME step stalled twice (status $status). The resource trace is in the job's artifacts; its last lines:"
         tail -n 10 "$TRACE" 2>/dev/null
     fi
     return "$status"

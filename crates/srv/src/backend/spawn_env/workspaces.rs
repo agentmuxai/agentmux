@@ -22,7 +22,7 @@ fn launch_workspaces() -> &'static Mutex<HashMap<String, PathBuf>> {
 /// Uploads are checked against this record, not the block's `cmd:cwd`: any
 /// client with the instance auth key can rewrite that meta, so an agent
 /// could otherwise point its "workspace" at `/` and upload anything.
-pub(crate) fn record_launch_workspace(block_id: &str, env_vars: &HashMap<String, String>) {
+pub fn record_launch_workspace(block_id: &str, env_vars: &HashMap<String, String>) {
     // A block is one or the other: a host launch ends any container record.
     container_workspaces().lock().unwrap_or_else(|p| p.into_inner()).remove(block_id);
     let mut map = launch_workspaces().lock().unwrap_or_else(|p| p.into_inner());
@@ -38,7 +38,7 @@ pub(crate) fn record_launch_workspace(block_id: &str, env_vars: &HashMap<String,
 
 /// The workspace the agent on `block_id` was launched in, if srv started it
 /// as a host agent.
-pub(crate) fn agent_workspace(block_id: &str) -> Option<PathBuf> {
+pub fn agent_workspace(block_id: &str) -> Option<PathBuf> {
     launch_workspaces().lock().unwrap_or_else(|p| p.into_inner()).get(block_id).cloned()
 }
 
@@ -51,7 +51,7 @@ fn container_workspaces() -> &'static Mutex<HashMap<String, PathBuf>> {
 /// agent on `block_id`, as srv started it: the mount's source, not the block's
 /// `cmd:cwd`, which any client can rewrite after the launch. Called where the
 /// container's mounts are decided.
-pub(crate) fn record_container_workspace(block_id: &str, host_dir: Option<&str>) {
+pub fn record_container_workspace(block_id: &str, host_dir: Option<&str>) {
     launch_workspaces().lock().unwrap_or_else(|p| p.into_inner()).remove(block_id);
     let mut map = container_workspaces().lock().unwrap_or_else(|p| p.into_inner());
     match host_dir.map(str::trim).filter(|d| !d.is_empty()) {
@@ -65,6 +65,6 @@ pub(crate) fn record_container_workspace(block_id: &str, host_dir: Option<&str>)
 }
 
 /// The host folder behind `/workspace` for the container agent on `block_id`.
-pub(crate) fn container_workspace(block_id: &str) -> Option<PathBuf> {
+pub fn container_workspace(block_id: &str) -> Option<PathBuf> {
     container_workspaces().lock().unwrap_or_else(|p| p.into_inner()).get(block_id).cloned()
 }

@@ -77,7 +77,7 @@ pub fn udp_5353_holders() -> Result<Vec<PortHolder>, String> {
 }
 
 #[cfg(windows)]
-mod windows_impl {
+pub mod windows_impl {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     use windows_sys::Win32::NetworkManagement::IpHelper::{

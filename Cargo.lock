@@ -262,6 +262,7 @@ dependencies = [
  "agentmux-common",
  "agentmux-procstats",
  "agentmux-remote",
+ "agentmux-srv",
  "apple-native-keyring-store",
  "async-stream",
  "axum 0.7.9",

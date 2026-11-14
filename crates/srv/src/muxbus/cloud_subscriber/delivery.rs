@@ -10,10 +10,10 @@ use crate::backend::message_flow::{self, MessageFlowOutcome, MessageFlowVia, See
 use crate::backend::reactive::InjectionRequest;
 
 #[path = "delivery_steps.rs"]
-mod steps;
+pub mod steps;
 
 #[path = "reagent_age.rs"]
-mod reagent_age;
+pub mod reagent_age;
 
 /// One agent's answer to a pending pull, single or batched.
 #[derive(Deserialize)]
@@ -81,6 +81,12 @@ pub(super) struct PendingInj {
     // passed it on. Absent when none was declared and from an older relay.
     #[serde(default)]
     jekt_tier: Option<String>,
+    // What a review, CI or merge notice is, as the relay sends it beside the text (spec
+    // SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14.md). Not signed: kept as it came so a shape this build does
+    // not know cannot fail the pull, and read by `backend::pr_flow` (one object, or a short list), which applies it only
+    // with a verified notice.
+    #[serde(default)]
+    flow: Option<serde_json::Value>,
 }
 
 /// The sender's declared tier as the relay carries it. The tier is not part
@@ -189,13 +195,14 @@ pub(super) async fn claim_and_deliver(
         // Remembered, so a bare "got it" back to this sender is refused (`backend::ack_policy`); the relay
         // doesn't carry `reply` yet, so a WAN message never arrives marked `REPLY=none`.
         note_arrival(mstore, &req);
+        let pr_flow = steps::pr_flow(inj, &checked, &req);
         // Verified, and its agent can't work now: kept here until it can. Injected now it would be lost in
         // a failed turn, or given back to the relay to come again. Or a routine message to a session gone
         // cold, which waits for its next activity as a local or LAN one does (#2263).
         if hooks.hold_wan_for_unavailable(mstore, handler, &req) || hooks.hold_relayed(&req).await {
             note_flow(&req, MessageFlowOutcome::Held);
             delivered_count += 1;
-            steps::record_delivered(&checked);
+            steps::record_delivered(&checked, &pr_flow);
             continue;
         }
         // W3-S §2.5: only now, after it landed, is this signature "seen" —
@@ -203,7 +210,7 @@ pub(super) async fn claim_and_deliver(
         // a replay.
         if inject_or_release(base, http, &agent_token, agent_id, inj, &delivered_at, handler, req).await {
             delivered_count += 1;
-            steps::record_delivered(&checked);
+            steps::record_delivered(&checked, &pr_flow);
         }
     }
 

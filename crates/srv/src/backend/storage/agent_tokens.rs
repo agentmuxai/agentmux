@@ -102,7 +102,7 @@ impl TokenIndex {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn len(&self) -> usize {
         self.maps
             .read()
@@ -147,7 +147,7 @@ impl Store {
     /// only tests read this, hence the `dead_code` allowance outside test
     /// builds. Deletion does not go through here — `purge_agent_dependents`
     /// covers `db_agent_tokens` directly.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn agent_token_load(&self, uid: &str) -> Result<Option<String>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT token FROM db_agent_tokens WHERE agent_id = ?1")?;
