@@ -285,15 +285,24 @@ jobs:
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.macos-tag }}
     secrets: inherit
 
-  # The server package (no desktop app): one tarball per platform, Linux and macOS, x64 and arm64. It is built from the
-  # release commit like the desktop builds and reaches the release through the same two file selections below, so the
-  # signed manifest lists it and `install.sh --server` can check it
+  # The server package (no desktop app): one tarball per platform. It is built from the release commit like the desktop
+  # builds and reaches the release through the same two file selections below, so the signed manifest lists it and
+  # `install.sh --server` can check it
   # (docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md section 4).
   #
-  # Advisory for now: `sign-release` and `publish` wait for it but do not look at its result, so a new job on four
-  # legs (two on scarce runners) cannot hold back a desktop release. The legs that built are published and signed; a
-  # platform that did not is absent from the manifest, and `install.sh --server` says that version has no server package
-  # for it. `publish` says so in its summary. It becomes required after the first release in which all four legs are green.
+  # `legs: release`: Linux x64, Linux arm64 and macOS arm64, on kinds of runner a release already waits for (the desktop
+  # builds use ubuntu-22.04 and macos-latest; container-image, which `sign-release` needs, uses the hosted arm64 Linux
+  # kind). `sign-release` and `publish` wait for this job, so it never asks for a kind they do not already wait for: a leg
+  # queued for a scarce runner (macOS x64) would hold the whole release for as long as GitHub keeps it queued, and one leg
+  # of a run cannot be cancelled. That platform is not in a release's package set: the manifest is signed once, from the
+  # files the release has when `sign-release` runs, and `install.sh --server` installs nothing the manifest does not
+  # list, so a tarball added after the signature would be an asset nobody can install. It stays buildable by hand (the
+  # workflow's `legs: all`, from workflow_dispatch). `publish` says so in its summary.
+  #
+  # Advisory for now: `sign-release` and `publish` wait for it but do not look at its result, so a new job on three legs
+  # cannot hold back a desktop release (its legs have their own time limits). The legs that built are published and
+  # signed; a platform that did not is absent from the manifest, and `install.sh --server` says that version has no server
+  # package for it. It becomes required after the first release in which all three legs are green.
   build-server-package:
     name: Build — server package
     needs: gate
@@ -302,6 +311,7 @@ jobs:
     uses: agentmuxai/agentmux/.github/workflows/build-server-package.yml@main
     with:
       ref: ${{ github.sha }}
+      legs: release
 
   # ── Phase 2b: Sign the release's manifest ───────────────────────────────
   # docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md. The app downloads
@@ -504,14 +514,17 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Say that the server package is incomplete
-        if: ${{ needs.build-server-package.result != 'success' }}
+      - name: Say which server packages this release has
         env:
           PACKAGE_RESULT: ${{ needs.build-server-package.result }}
         run: |
-          line="Release v${VERSION}: the server package is incomplete (its build ended ${PACKAGE_RESULT}); the platforms that built are published, the others have no server package."
-          echo "::warning::$line"
+          line="Release v${VERSION}: the server package is built for Linux x64, Linux arm64 and macOS arm64; for macOS x64 the release has none, and install.sh --server says so."
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PACKAGE_RESULT" != success ]; then
+            line="Release v${VERSION}: the server package is incomplete (its build ended ${PACKAGE_RESULT}); the platforms that built are published, the others have no server package."
+            echo "::warning::$line"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4

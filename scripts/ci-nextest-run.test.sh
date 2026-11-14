@@ -45,6 +45,15 @@ echo "the stall message names where the trace is"
 run "a second stall says so" 124 2 "$COUNT; sleep 20" 1
 echo "$out" | grep -q "stalled twice" && ok "second stall is named" || bad "second stall is named" "$out"
 
+echo "another step under the same guard"
+# CI_STEP_NAME puts the step's name in the messages, which say "nextest" when it is not set (the server package build uses it).
+out=$(STUB="$TMP/named" CI_STEP_NAME="server package build" CI_MONITOR=0 CI_CEILING=0 CI_TRACE_FILE="$TMP/named.trace" CI_BUILD_LOG="$TMP/named.build" \
+    CI_ATTEMPT1_SECONDS=1 CI_ATTEMPT2_SECONDS=1 CI_ATTEMPT_CMD="sleep 20" bash "$SCRIPT" 2>&1)
+echo "$out" | grep -q "The server package build step stalled twice" && ok "the step's name is in the stall message" || bad "the step's name is in the stall message" "$out"
+echo "$out" | grep -q "nextest" && bad "no stray nextest in the messages" "$out" || ok "no stray nextest in the messages"
+run "the default name is nextest" 124 2 "$COUNT; sleep 20" 1
+echo "$out" | grep -q "The nextest step stalled" && ok "the default name is nextest" || bad "the default name is nextest" "$out"
+
 echo "memory pressure"
 # shellcheck source=ci-nextest-run.sh
 source "$SCRIPT"
