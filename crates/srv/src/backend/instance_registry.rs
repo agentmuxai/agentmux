@@ -179,7 +179,7 @@ fn own_record(id: &Identity) -> InstanceRecord {
 /// `cargo test`, whose srv instances must not write into a developer's real folder. Tests that
 /// exercise the files pass a temp directory.
 fn instances_dir() -> Option<PathBuf> {
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return None;
     }
     crate::registry::resolve_shared_instances_dir()

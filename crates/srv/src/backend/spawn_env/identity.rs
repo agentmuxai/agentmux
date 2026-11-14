@@ -61,7 +61,7 @@ pub(crate) fn carry_slug_identity_env(env_vars: &mut HashMap<String, String>, sl
 /// For an env built from the agent's stored `cmd:env` outside a spawn, so
 /// it skips the token mint and key ensure a spawn's lookup does. A store
 /// error reads as no slug.
-pub(crate) fn block_agent_slug(mstore: &crate::backend::storage::store::Store, block_id: &str) -> Option<String> {
+pub fn block_agent_slug(mstore: &crate::backend::storage::store::Store, block_id: &str) -> Option<String> {
     let instance = mstore.instance_get_active_for_block(block_id).ok().flatten()?;
     let def = mstore.agent_def_get(&instance.definition_id).ok().flatten()?;
     Some(def.slug).filter(|s| !s.trim().is_empty())
@@ -69,7 +69,7 @@ pub(crate) fn block_agent_slug(mstore: &crate::backend::storage::store::Store, b
 
 /// [`carry_slug_identity_env`] for the agent on `block_id`; nothing for a
 /// block with no row slug.
-pub(crate) fn carry_block_slug_identity_env(
+pub fn carry_block_slug_identity_env(
     mstore: &crate::backend::storage::store::Store,
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
@@ -86,7 +86,7 @@ pub(crate) fn carry_block_slug_identity_env(
 /// an interactive shell exporting `AGENTMUX_AGENT_ID` reports it through its
 /// shell integration (OSC 16162 `E`), which registers that pane as the agent
 /// for message delivery (`termagent.ts`), beside the agent's own pane.
-pub(crate) fn pty_child_identity_env(agent_env: &HashMap<String, String>) -> serde_json::Map<String, serde_json::Value> {
+pub fn pty_child_identity_env(agent_env: &HashMap<String, String>) -> serde_json::Map<String, serde_json::Value> {
     ["AGENTMUX_AGENT_SLUG", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"]
         .into_iter()
         .filter_map(|k| agent_env.get(k).map(|v| (k.to_string(), serde_json::Value::String(v.clone()))))

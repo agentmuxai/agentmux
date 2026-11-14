@@ -155,7 +155,7 @@ const RETIREMENT_TOMBSTONE_SOURCE: &str = "operator_config_seed_retired";
 /// The `source` of the version an entry gets when it leaves Global Memory: the
 /// content it held and the writer who removed it, so history can show the
 /// removal and a revert can bring the entry back.
-pub(crate) const REMOVE_SOURCE: &str = "remove";
+pub const REMOVE_SOURCE: &str = "remove";
 
 /// Extracts a `{"manifest_version": N}` field from a version row's
 /// `source_detail` JSON, defaulting to `0` when absent or unparseable — so a
@@ -587,7 +587,7 @@ impl Store {
 
     /// [`Self::bundle_upsert_system_unobserved`], then tell the Global Memory record's
     /// observer (`GlobalMemoryChange`).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn bundle_upsert_system(&self, memory: &Bundle) -> Result<(), StoreError> {
         let r = self.bundle_upsert_system_unobserved(memory);
         if r.is_ok() {
@@ -603,7 +603,7 @@ impl Store {
     /// `is_blank`/`is_global`/`is_system` are hardcoded (not read from
     /// `memory`) so this method can never produce anything other than a
     /// well-formed system row regardless of what the caller passed in.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fn bundle_upsert_system_unobserved(&self, memory: &Bundle) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         if self.bundle_is_system(&conn, &memory.id)? == Some(false) {

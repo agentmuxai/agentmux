@@ -66,7 +66,7 @@ impl RunLedger {
 
     /// Tests: how to interrupt the turn in a pane (a timeout, `cancel_other`).
     /// Otherwise the pane's controller is asked, as the Stop button does.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn install_interrupt(&self, interrupt: super::BlockHook) {
         let _ = self.interrupt.set(interrupt);
     }
@@ -212,7 +212,7 @@ impl RunLedger {
     /// instance follows isn't closed here: that instance is asked to stop it
     /// (`remote.rs`), so the row closes only once its agent's turn is
     /// interrupted. `false` for it too.
-    pub(crate) fn stop_run(&self, run: &JobRun, infra_status: &str, why: &str, summary: &str) -> bool {
+    pub fn stop_run(&self, run: &JobRun, infra_status: &str, why: &str, summary: &str) -> bool {
         if self.run_followed_elsewhere(run) {
             self.request_remote_stop(run, infra_status, why, summary);
             return false;

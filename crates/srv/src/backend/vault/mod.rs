@@ -36,7 +36,7 @@ pub mod transfer;
 pub mod uses;
 pub mod vaults;
 pub mod versions;
-mod wordlist;
+pub mod wordlist;
 
 use std::collections::BTreeMap;
 

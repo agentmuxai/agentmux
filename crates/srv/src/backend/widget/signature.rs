@@ -202,7 +202,7 @@ pub fn write_pins(path: &Path, pins: &Pins) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_keys {
     use base64::Engine;
     use ed25519_dalek::{Signer, SigningKey};

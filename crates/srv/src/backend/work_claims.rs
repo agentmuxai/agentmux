@@ -17,7 +17,7 @@ pub fn holds_claim(claimed_by: &str, claimed_by_uid: &str, agent_id: &str, uid: 
 }
 
 /// The agent's claimed work items (R7).
-pub(crate) fn claims_held_by<'a>(items: &'a [WorkItem], agent_id: &str, uid: Option<&str>) -> Vec<&'a WorkItem> {
+pub fn claims_held_by<'a>(items: &'a [WorkItem], agent_id: &str, uid: Option<&str>) -> Vec<&'a WorkItem> {
     items
         .iter()
         .filter(|w| w.state == work_state::CLAIMED && holds_claim(&w.claimed_by, &w.claimed_by_uid, agent_id, uid))
@@ -27,7 +27,7 @@ pub(crate) fn claims_held_by<'a>(items: &'a [WorkItem], agent_id: &str, uid: Opt
 /// Release the agent's claimed work items with `reason` (each counts as an
 /// attempt), so they go back to the pool now rather than when the 120 s lease
 /// expires. How many went. Blocking.
-pub(crate) fn release_claims(work_store: &crate::backend::storage::store::Store, a: &str, u: Option<&str>, reason: &str, now: i64) -> usize {
+pub fn release_claims(work_store: &crate::backend::storage::store::Store, a: &str, u: Option<&str>, reason: &str, now: i64) -> usize {
     let items = work_store.work_queue_claimed_by(a, u.unwrap_or("")).unwrap_or_default();
     claims_held_by(&items, a, u)
         .into_iter()

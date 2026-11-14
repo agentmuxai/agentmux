@@ -27,7 +27,7 @@ use crate::backend::storage::store::Store;
 /// validation, or was empty), which is a finished attempt, not a failure, and
 /// `tokens` is the spend either way.
 #[derive(Debug)]
-pub(crate) struct Generated {
+pub struct Generated {
     pub text: Option<String>,
     pub tokens: Option<TokenCounts>,
 }
@@ -153,7 +153,7 @@ pub(crate) async fn generate_recovered_title(
 /// no raw output to summarize, the CLI path isn't resolvable, this call was
 /// superseded/capped, or the CLI failed — the caller treats all of these as
 /// "still nothing to show," not an error.
-pub(crate) async fn generate_definition_activity_summary(
+pub async fn generate_definition_activity_summary(
     mstore: &Store,
     filestore: &crate::backend::storage::filestore::FileStore,
     broker: &Arc<crate::backend::mps::Broker>,
@@ -226,7 +226,7 @@ async fn provider_fallback_target(provider_id: &str) -> Option<CliTarget> {
 /// row showing its slug/id fallback," not an error. A cache hit (name
 /// already generated) returns the cached name with `tokens: None` — there's
 /// no new spend to report.
-pub(crate) async fn generate_subagent_name(
+pub async fn generate_subagent_name(
     mstore: &Store,
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     agent_id: &str,
@@ -340,7 +340,7 @@ const TASK_TAIL_CHARS: usize = 300;
 /// caller simply says nothing. A UI state change must NEVER be gated on this:
 /// if Haiku is slow, capped out, or absent, the thing being narrated still
 /// happened and the UI must already reflect it.
-pub(crate) async fn generate_ambient_narration(
+pub async fn generate_ambient_narration(
     mstore: &Store,
     block_id: &str,
     event_id: &str,

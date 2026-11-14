@@ -104,7 +104,7 @@ pub fn root_beside(isolated_work_store: Option<PathBuf>, shared_dir: Option<Path
 }
 
 /// The folder this srv uses, in step with its work store (see [`root_beside`]).
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 pub fn default_root() -> Option<PathBuf> {
     root_beside(
         crate::registry::resolve_isolated_work_store_path(&super::base::get_mux_db_dir()),
@@ -113,7 +113,7 @@ pub fn default_root() -> Option<PathBuf> {
 }
 
 /// In tests, a folder of the test process's own, never the real shared home.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn default_root() -> Option<PathBuf> {
     static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
     Some(DIR.get_or_init(|| tempfile::tempdir().unwrap()).path().join("task-media"))

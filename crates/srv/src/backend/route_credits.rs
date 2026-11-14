@@ -124,7 +124,7 @@ pub(crate) fn on_failure(mstore: &Arc<Store>, bus: &Arc<EventBus>, block_id: &st
 
 /// A response on `route` worked: its episode ends, and the failure goes off every pane that shows it.
 /// BLOCKING (store reads and writes), but only once per episode; any other call is a map lookup.
-pub(crate) fn cleared(mstore: &Arc<Store>, bus: &Arc<EventBus>, broker: &Arc<Broker>, route: &str) {
+pub fn cleared(mstore: &Arc<Store>, bus: &Arc<EventBus>, broker: &Arc<Broker>, route: &str) {
     {
         // The note comes down under the lock that ended the episode, so [`post_while_open`] can't post it between the two.
         let mut episodes = EPISODES.lock();

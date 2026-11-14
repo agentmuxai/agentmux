@@ -68,7 +68,7 @@ pub(super) fn keep_better_address(current: &str, new: String) -> String {
 
 /// `http://host:port` for a peer. An IPv6 literal goes in brackets: `http://fe80::1:29700` is not a URL,
 /// and every request to such a peer failed with "builder error" before it left this machine.
-pub(crate) fn peer_base_url(address: &str, port: u16) -> String {
+pub fn peer_base_url(address: &str, port: u16) -> String {
     if address.contains(':') && !address.starts_with('[') {
         format!("http://[{address}]:{port}")
     } else {
@@ -95,7 +95,7 @@ fn better(a: &LanInstance, b: &LanInstance) -> bool {
 }
 
 /// `peers` with each running instance once, in the order its first entry was listed.
-pub(crate) fn one_per_instance(peers: Vec<LanInstance>) -> Vec<LanInstance> {
+pub fn one_per_instance(peers: Vec<LanInstance>) -> Vec<LanInstance> {
     let mut out: Vec<LanInstance> = Vec::with_capacity(peers.len());
     for peer in peers {
         match out.iter().position(|kept| same_instance(kept, &peer)) {

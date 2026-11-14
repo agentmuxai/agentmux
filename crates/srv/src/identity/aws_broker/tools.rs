@@ -202,7 +202,7 @@ fn prune(pkg: &Path, command: &str, keep: Option<&str>, unused_for: std::time::D
 /// agent, or the folder can't be written (the container then has no tools folder, as before).
 pub fn config_dir_for(slug: &str) -> Option<String> {
     // The machine running the tests has its own answer; the tests give theirs.
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return None;
     }
     if !policy::current().ok().flatten().is_some_and(|p| !p.open_to(slug).is_empty()) {

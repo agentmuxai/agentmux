@@ -186,7 +186,7 @@ impl FleetFeed {
         self
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn epoch(&self) -> &str {
         &self.epoch
     }
@@ -283,7 +283,7 @@ impl FleetFeed {
 
     /// [`Self::observe_fleet`] with names only: no kinds, the channel count
     /// unchanged.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn observe(&self, names: impl IntoIterator<Item = String>) -> bool {
         let channels_running = self.snapshot().channels_running;
         self.observe_fleet(FleetObservation {
@@ -377,7 +377,7 @@ impl FleetFeed {
         ))
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn open_streams(&self) -> usize {
         self.streams.load(Ordering::SeqCst)
     }

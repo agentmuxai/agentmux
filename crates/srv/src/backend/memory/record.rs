@@ -43,7 +43,7 @@ pub(crate) fn zone_for(agent_uid: &str) -> Option<String> {
     crate::backend::agent_session::is_valid_definition_id(agent_uid).then(|| format!("agent-uid:{agent_uid}:memory"))
 }
 
-pub(crate) fn sha256_hex(body: &[u8]) -> String {
+pub fn sha256_hex(body: &[u8]) -> String {
     hex::encode(Sha256::digest(body))
 }
 

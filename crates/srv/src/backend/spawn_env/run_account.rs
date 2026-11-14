@@ -12,7 +12,7 @@ use crate::backend::storage::store::Store;
 /// Note on `block_id` the account its spawn resolves: its agent's link for
 /// its provider, as the identity injection resolves it. Best-effort; a pane
 /// without it falls back to the agent's current link.
-pub(crate) fn note_run_account(mstore: &Store, identity_store: &Store, block_id: &str) {
+pub fn note_run_account(mstore: &Store, identity_store: &Store, block_id: &str) {
     use crate::backend::providers::resolve_provider_alias;
     let Ok(Some(block)) = mstore.get::<Block>(block_id) else {
         return;

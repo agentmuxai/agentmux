@@ -14,11 +14,11 @@
 //! similarly-named modules where only one watched cost real debugging time;
 //! see REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md §7.
 
-mod loader;
+pub mod loader;
 pub mod redact;
-mod settings_read;
+pub mod settings_read;
 pub mod types;
-mod state;
+pub mod state;
 
 // Re-export all public APIs so callers can continue using `wconfig::Type`.
 pub use loader::*;

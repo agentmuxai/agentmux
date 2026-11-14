@@ -30,7 +30,7 @@
 
 pub mod account_email;
 pub mod sign_in_hook;
-pub(crate) mod auth_dirs;
+pub mod auth_dirs;
 pub mod accounts_changed;
 pub mod account_numbering;
 pub mod auth_diag;

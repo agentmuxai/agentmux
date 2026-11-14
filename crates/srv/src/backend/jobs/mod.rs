@@ -14,7 +14,7 @@
 //! §5.2), which the scheduler delivers when the agent is back.
 
 pub mod admission;
-mod cap_alert;
+pub mod cap_alert;
 pub mod caps;
 pub mod cloud_events;
 pub mod cloud_hub;
@@ -184,10 +184,10 @@ pub struct RunLedger {
     /// (`reservation.rs`).
     caps: std::sync::OnceLock<reservation::CapSources>,
     /// Tests: the start of the day, as a fixed clock gives it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     day_start: std::sync::Mutex<Option<Arc<dyn Fn(i64) -> i64 + Send + Sync>>>,
     /// Tests: the cap alerts raised, as `(job id, reason)`.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     cap_alerts: std::sync::Mutex<Vec<(String, String)>>,
 }
 
@@ -200,7 +200,7 @@ impl RunLedger {
 
     /// [`Self::new`] as the instance of `channel`: tests run two channels'
     /// ledgers in one process.
-    pub(crate) fn new_in(store: Arc<Store>, mstore: Option<Arc<Store>>, broker: Arc<Broker>, channel: &str) -> Arc<Self> {
+    pub fn new_in(store: Arc<Store>, mstore: Option<Arc<Store>>, broker: Arc<Broker>, channel: &str) -> Arc<Self> {
         if let Err(e) = store.job_runs_ensure_schema() {
             tracing::warn!(error = %e, "jobs: couldn't create the run ledger table");
         }
@@ -219,9 +219,9 @@ impl RunLedger {
             worker_stop: std::sync::OnceLock::new(),
             remote_stop: std::sync::OnceLock::new(),
             caps: std::sync::OnceLock::new(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             day_start: std::sync::Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             cap_alerts: std::sync::Mutex::new(Vec::new()),
         })
     }
@@ -504,7 +504,7 @@ impl RunLedger {
     }
 
     /// The followed turn ended (or never showed up).
-    pub(crate) fn turn_finished(&self, run_id: &str, infra_status: &str, cost: Option<RunCost>, summary: &str) {
+    pub fn turn_finished(&self, run_id: &str, infra_status: &str, cost: Option<RunCost>, summary: &str) {
         // Only the call that closes the row retries and reaps: a run stopped on
         // purpose (overlap, timeout) is already closed, and its turn ending later
         // must not file a retry of a run nobody wants again.

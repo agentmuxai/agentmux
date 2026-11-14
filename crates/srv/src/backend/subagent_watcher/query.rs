@@ -345,7 +345,7 @@ impl SubagentWatcher {
     /// Deliberately separate from `trigger_eager_naming`'s live path: runs as
     /// background work (`limits::Class::Background`), so it never queues ahead
     /// of a name or title the user is waiting on.
-    pub(crate) async fn resolve_unnamed_backlog(self: std::sync::Arc<Self>) {
+    pub async fn resolve_unnamed_backlog(self: std::sync::Arc<Self>) {
         let items = self.select_unnamed_backlog(BACKLOG_NAMING_BATCH_LIMIT);
         for item in items {
             let watcher = std::sync::Arc::clone(&self);

@@ -1121,7 +1121,7 @@ impl Router {
     /// Hold `pending` for a window opened on its workspace. A newer request for the same workspace
     /// replaces the older one; requests for other workspaces are kept, so two panes in two closed
     /// workspaces both reach their windows.
-    pub(crate) fn park_activation(&self, pending: PendingActivation) {
+    pub fn park_activation(&self, pending: PendingActivation) {
         let mut parked = self.pending_activation.lock().unwrap_or_else(|e| e.into_inner());
         parked.retain(|p| now_ms() - p.at_ms <= PENDING_ACTIVATION_MAX_AGE_MS && p.workspace_id != pending.workspace_id);
         parked.push(pending);

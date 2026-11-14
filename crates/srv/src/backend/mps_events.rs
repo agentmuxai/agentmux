@@ -16,7 +16,7 @@
 
 use serde::Serialize;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use crate::backend::rpc::schema::{ts_type, TsType};
 
 /// A broker event with a typed payload.
@@ -44,7 +44,7 @@ macro_rules! per_id_events {
             }
         )*
         /// Every per-id event: its prefix and its payload as TypeScript.
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         pub fn per_id_schema() -> Vec<(&'static str, TsType)> {
             vec![$(($prefix, ts_type::<$payload>())),*]
         }
@@ -66,7 +66,7 @@ macro_rules! events {
             }
         )*
         /// Every typed event: its wire name and its payload as TypeScript (the export test reads it).
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         pub fn schema() -> Vec<(&'static str, TsType)> {
             vec![$(($name, ts_type::<$payload>())),*]
         }
@@ -660,7 +660,7 @@ pub struct ResumeRetryEvent {
 
 /// `schema()` and `per_id_schema()` as the JSON the event-schema export writes: one row per event,
 /// sorted by name. A per-id event's row names its prefix, with `perId: true`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn schema_json() -> serde_json::Value {
     let mut rows: Vec<(&str, TsType, bool)> = schema().into_iter().map(|(n, t)| (n, t, false)).collect();
     rows.extend(per_id_schema().into_iter().map(|(n, t)| (n, t, true)));

@@ -15,7 +15,7 @@ use super::drone_types::{DroneDefinition, DroneRun};
 
 /// The definition upsert, shared by [`DroneStore::drone_upsert`] and the
 /// versioned save in `versions.rs`, so both write the same row.
-pub(crate) fn upsert_definition(conn: &rusqlite::Connection, wf: &DroneDefinition) -> Result<(), StoreError> {
+pub fn upsert_definition(conn: &rusqlite::Connection, wf: &DroneDefinition) -> Result<(), StoreError> {
     let graph = serde_json::to_string(&wf.graph).unwrap_or_else(|_| "{}".to_string());
     let viewport = serde_json::to_string(&wf.viewport).unwrap_or_else(|_| "{}".to_string());
     conn.execute(

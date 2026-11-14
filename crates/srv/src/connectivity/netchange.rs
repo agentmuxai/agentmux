@@ -66,7 +66,7 @@ pub(super) use windows_watch::Watch;
 pub(super) use no_watch::Watch;
 
 #[cfg(not(windows))]
-mod no_watch {
+pub mod no_watch {
     use std::sync::Arc;
 
     use tokio::sync::Notify;
@@ -82,7 +82,7 @@ mod no_watch {
 }
 
 #[cfg(windows)]
-mod windows_watch {
+pub mod windows_watch {
     use std::ffi::c_void;
     use std::sync::Arc;
 

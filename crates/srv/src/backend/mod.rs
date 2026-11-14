@@ -3,8 +3,8 @@
 
 
 pub mod agent_admission;
-pub(crate) mod agent_route;
-pub(crate) mod session_snapshot;
+pub mod agent_route;
+pub mod session_snapshot;
 pub mod agent_grants;
 pub mod agent_line;
 pub mod agent_seat;
@@ -198,9 +198,9 @@ pub mod mps;
 pub mod mps_events;
 pub mod osc_extractor;
 pub mod tool_store;
-pub(crate) mod packaged_tools;
+pub mod packaged_tools;
 pub mod agent_env_scope;
-pub(crate) mod spawn_env;
+pub mod spawn_env;
 pub mod agent_tools;
 pub mod container;
 pub mod runtime_adapter;
@@ -234,7 +234,7 @@ pub mod sensitive_requests;
 pub mod shutdown_events;
 pub mod startup_mode;
 pub mod sweep_stats;
-pub(crate) mod teardown_hooks;
+pub mod teardown_hooks;
 pub mod work_claims;
 pub mod prompt_events;
 pub mod drone_run_event;

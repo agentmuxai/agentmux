@@ -105,7 +105,7 @@ pub(crate) fn link_history_if_isolated(
 /// path / OAuth-start handler never drift on which env var redirects
 /// each CLI's config home. The single source of truth lives in
 /// `crates/srv/src/backend/providers.rs`.
-pub(crate) fn compute_and_ensure_bundle_dir(
+pub fn compute_and_ensure_bundle_dir(
     into_bundle_id: Option<&str>,
     provider_id: &str,
     auth_env: &mut std::collections::HashMap<String, String>,
@@ -225,7 +225,7 @@ const ORPHAN_SWEEP_MIN_AGE_SECS: u64 = 30 * 60;
 /// `dir` is `None` on the same gate/registry/fs failures
 /// `compute_and_ensure_bundle_dir` treats as soft failures — never
 /// abort `auth.start` over a config-dir issue.
-pub(crate) fn compute_and_ensure_account_dir(
+pub fn compute_and_ensure_account_dir(
     store: &Store,
     existing_account_id: &str,
     provider_id: &str,
@@ -336,7 +336,7 @@ pub(crate) fn compute_and_ensure_account_dir(
 /// the provider's `auth_config_dir_env_var`: the key that keeps a login the
 /// caller persists itself (not `direct_account`) to one live session per
 /// directory. `None` for a provider without one, or when it isn't set.
-pub(crate) fn caller_auth_dir(
+pub fn caller_auth_dir(
     provider_id: &str,
     auth_env: &std::collections::HashMap<String, String>,
 ) -> Option<String> {

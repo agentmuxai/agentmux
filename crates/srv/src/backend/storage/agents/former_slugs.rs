@@ -67,7 +67,7 @@ pub(in crate::backend::storage) struct FormerSlugSet {
     /// (`Store::display_route_owner`, #1459): a name not in it costs nothing.
     pub(super) routes: Mutex<Option<(Instant, HashMap<String, Option<FormerSlugOwner>>)>>,
     /// Store reads it caused (the set's re-reads and full lookups), for tests.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) reads: std::sync::atomic::AtomicUsize,
 }
 
@@ -80,7 +80,7 @@ impl FormerSlugSet {
     }
 
     pub(super) fn read(&self) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
@@ -300,13 +300,13 @@ pub(super) fn local_former_slugs(conn: &rusqlite::Connection, uid: &str) -> Resu
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Store {
     /// Rename `uid`'s slug to `new` as Phase 2's S1 and S2 will: the shared
     /// record (straight to its file, since an update keeps the slug) and this
     /// channel's row, with the old slug recorded as a former one in both.
     /// Nothing renames in production yet. Returns the old slug.
-    pub(crate) fn test_rename_slug(&self, uid: &str, new: &str, retired_at: i64) -> String {
+    pub fn test_rename_slug(&self, uid: &str, new: &str, retired_at: i64) -> String {
         let old = self.agent_def_get(uid).unwrap().unwrap().slug;
         let former = FormerSlug { slug: old.clone(), retired_at };
         if let Some(reg) = self.shared_def_registry() {

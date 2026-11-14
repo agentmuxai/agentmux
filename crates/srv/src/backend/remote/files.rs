@@ -620,8 +620,8 @@ fn canonical(conn: &str) -> Result<String, RemoteError> {
 /// Tests: a connection to `conn` that is the real helper's request handling
 /// in this process (the files under `home`), put in the pool so [`connect`]
 /// returns it as it would a connection over ssh.
-#[cfg(test)]
-pub(crate) async fn connect_in_process(conn: &str, home: std::path::PathBuf) -> Arc<RemoteFiles> {
+#[cfg(any(test, feature = "test-support"))]
+pub async fn connect_in_process(conn: &str, home: std::path::PathBuf) -> Arc<RemoteFiles> {
     let (r, w) = testing::helper(home);
     let f = RemoteFiles::over(conn, r, w, Box::new(())).await.unwrap();
     let name = canonical(conn).unwrap();
@@ -649,7 +649,7 @@ mod quiet_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) mod testing {
     use super::*;
 

@@ -168,7 +168,7 @@ pub fn collect_local(store: &Store, regs: &[AgentRegistration], channel: &str) -
 /// The build slot hold to show on the agent `agent_id`, when `holder` is that agent. The lock
 /// names its holder by `AGENTMUX_AGENT_ID`, the slug; the registry by name, so either may match.
 /// `slug` is only asked for while somebody holds the slot.
-pub(crate) fn build_slot_of(
+pub fn build_slot_of(
     holder: Option<&agentmux_common::build_slot::SlotHolder>,
     agent_id: &str,
     slug: impl FnOnce() -> Option<String>,

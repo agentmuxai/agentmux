@@ -154,7 +154,7 @@ impl FileStore {
     /// one transaction — so the metadata can describe the content without a
     /// window where it describes other content.
     #[track_caller]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn put_file_with_meta(&self, zone_id: &str, name: &str, data: &[u8], meta: FileMeta) -> Result<(), StoreError> {
         self.replace_inner(zone_id, name, data, Some(meta), &[], None).map(|_| ())
     }

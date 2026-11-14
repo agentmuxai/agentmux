@@ -94,7 +94,7 @@ pub(crate) fn find_active_record_by_slug(agent_id: &str) -> Option<NamedAgentRec
 /// [`find_active_record_by_slug`] this stays correct under a slug collision,
 /// because `definition_id` is the disambiguator the slug lacks — so it returns
 /// a record in cases where the slug-only lookup must give up.
-pub(crate) fn find_active_record_by_slug_and_definition(
+pub fn find_active_record_by_slug_and_definition(
     agent_id: &str,
     definition_id: &str,
 ) -> Option<NamedAgentRecord> {

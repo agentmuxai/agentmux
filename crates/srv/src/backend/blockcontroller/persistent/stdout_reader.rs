@@ -11,7 +11,7 @@ use super::*;
 // What the reader does when the loop guard says the agent is stuck. Declared here, not in `mod.rs`, which is
 // at its size ratchet.
 #[path = "loop_stop.rs"]
-pub(super) mod loop_stop;
+pub mod loop_stop;
 
 /// What the stdout reader task captures from `spawn_process`.
 pub(super) struct StdoutReaderCtx {

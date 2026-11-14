@@ -19,27 +19,27 @@
 use super::audience::{Audience, HostCap, RuntimeCaps};
 
 /// Run a command on the host, in any form.
-pub(crate) const HOST_COMMANDS: &str = "container agents can't run commands on the host. Run it in your own shell in the container, \
+pub const HOST_COMMANDS: &str = "container agents can't run commands on the host. Run it in your own shell in the container, \
                              or ask a native agent or your leader.";
 /// The app's own plumbing: approvals and state the user's windows report.
-pub(crate) const APP_ONLY: &str = "this route is for the AgentMux app itself, not for agents.";
+pub const APP_ONLY: &str = "this route is for the AgentMux app itself, not for agents.";
 /// Driving the operating system.
-pub(crate) const DESKTOP: &str = "desktop control can launch programs on the host, so container agents can't use it. \
+pub const DESKTOP: &str = "desktop control can launch programs on the host, so container agents can't use it. \
                        Ask a native agent or your leader.";
 /// Generic gateways that reach everything else.
-pub(crate) const GATEWAY: &str = "this is a generic gateway to the host that container agents can't use. Use the specific tool for what you need.";
+pub const GATEWAY: &str = "this is a generic gateway to the host that container agents can't use. Use the specific tool for what you need.";
 /// Reading host files for the windows.
-pub(crate) const HOST_FILES: &str = "this reads files on the host for the app's windows. A container agent reads its own files in /workspace directly; \
+pub const HOST_FILES: &str = "this reads files on the host for the app's windows. A container agent reads its own files in /workspace directly; \
                           to show one in a pane, open it with the editor.";
 /// Replacing the app.
-pub(crate) const UPGRADE: &str = "upgrading AgentMux replaces the app on the host, so container agents can't. Ask a native agent or your leader.";
+pub const UPGRADE: &str = "upgrading AgentMux replaces the app on the host, so container agents can't. Ask a native agent or your leader.";
 /// Global Memory is composed into every native agent's context at launch.
-pub(crate) const GLOBAL_MEMORY: &str = "Global Memory is read by every native agent at launch, so a container agent can read it but not change it. \
+pub const GLOBAL_MEMORY: &str = "Global Memory is read by every native agent at launch, so a container agent can read it but not change it. \
                              Ask a native agent or your leader to write it.";
 /// Srv does this for a container agent.
-pub(crate) const SRV_DOES_IT: &str = "srv does this for container agents itself.";
+pub const SRV_DOES_IT: &str = "srv does this for container agents itself.";
 /// Peer-to-peer routes between AgentMux instances.
-pub(crate) const INSTANCE_ONLY: &str = "this route is for other AgentMux instances, not for agents.";
+pub const INSTANCE_ONLY: &str = "this route is for other AgentMux instances, not for agents.";
 /// What a path with no entry is told.
 pub const UNCLASSIFIED: &str = "this route has not been classified for container agents yet. Ask your leader to have its audience set.";
 

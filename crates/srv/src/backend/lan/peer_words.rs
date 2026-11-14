@@ -43,7 +43,7 @@ pub(crate) fn keep_known(known: &mut String, new: String) {
 }
 
 /// How an install is said in a message ("Microsoft Store"); empty when the peer didn't say or it is unknown.
-pub(crate) fn install_words(install: &str) -> &'static str {
+pub fn install_words(install: &str) -> &'static str {
     match install {
         "windows-store" => "Microsoft Store",
         "windows-setup" => "installed",
@@ -59,7 +59,7 @@ pub(crate) fn install_words(install: &str) -> &'static str {
 /// `host/channel` is the peer's address (the channel is where its data lives); what kind of build it is
 /// comes from the build itself, so a release that kept a local build's channel still reads "release".
 /// "No agents" is said only of a peer that was asked and runs nobody.
-pub(crate) fn describe_peer(p: &LanInstance) -> String {
+pub fn describe_peer(p: &LanInstance) -> String {
     let host = p.hostname.trim();
     let name = if p.channel.is_empty() { host.to_string() } else { format!("{host}/{}", p.channel) };
     let mut notes: Vec<&str> = Vec::new();

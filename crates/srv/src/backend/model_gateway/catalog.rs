@@ -135,13 +135,13 @@ pub fn route(id: &str) -> Option<&'static Route> {
 }
 
 /// A test's stand-in upstream, in place of the route's own address.
-#[cfg(test)]
-pub(crate) static TEST_BASE_URL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+#[cfg(any(test, feature = "test-support"))]
+pub static TEST_BASE_URL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 impl Route {
     /// Where the gateway forwards to: the route's own address, fixed in this file.
     pub fn base(&self) -> String {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(url) = TEST_BASE_URL.lock().unwrap().clone() {
             return url;
         }

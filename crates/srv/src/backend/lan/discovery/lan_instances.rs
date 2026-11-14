@@ -197,7 +197,7 @@ pub(super) fn attach_siblings(
 /// calls must not overwrite a real instance's record on the developer's
 /// machine. Tests that exercise the files pass a temp directory.
 pub(super) fn instances_dir() -> Option<PathBuf> {
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return None;
     }
     crate::registry::resolve_shared_lan_instances_dir()
