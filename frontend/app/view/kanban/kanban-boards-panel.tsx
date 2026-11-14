@@ -9,7 +9,7 @@
 
 import { createEffect, createMemo, createSignal, For, on, Show, type JSX } from "solid-js";
 
-import { Button, IconButton, MenuTrigger, Pill, TextInput, type MenuEntry } from "@/app/element/ui";
+import { Button, CloseButton, MenuTrigger, Pill, TextInput, type MenuEntry } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { useTick } from "@/app/hook/useTick";
 
@@ -154,7 +154,7 @@ export function KanbanBoardsPanel(props: { s: KanbanSectionState }): JSX.Element
         <section class="kanban-boards" aria-label="Boards">
             <div class="kanban-boards__head">
                 <strong>Boards</strong>
-                <IconButton icon="xmark" label="Close" onClick={() => s.setManaging(false)} />
+                <CloseButton label="Close" onClick={() => s.setManaging(false)} />
             </div>
             <ul class="kanban-boards__list">
                 <For each={s.boards()}>{(b) => <BoardRow s={s} b={b} now={now()} />}</For>
