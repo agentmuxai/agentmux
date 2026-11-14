@@ -504,10 +504,16 @@ pub(crate) fn is_payment(what: &str) -> bool {
 
 /// Words that, in front of "Pay", make a name a command ("Confirm and Pay", "Click to Pay", "Place Pay")
 /// and not a brand's.
-const NOT_BRAND: [&str; 21] = [
+/// Keep in step with `NOT_BRAND` in `click_label.js`.
+const NOT_BRAND: [&str; 41] = [
     "pay", "buy", "confirm", "complete", "place", "make", "click", "tap", "press", "finish", "submit", "send", "and", "to",
-    "with", "now", "then", "or", "the", "a", "your",
+    "with", "now", "then", "or", "the", "a", "your", "proceed", "continue", "review", "order", "checkout", "check", "out",
+    "purchase", "subscribe", "donate", "go", "use", "sign", "agree", "accept", "transfer", "delete", "remove", "securely",
+    "express",
 ];
+
+/// A description that opens with one of these tells the person to pay.
+const COMMANDS: [&str; 6] = ["pay", "buy", "confirm", "complete", "place", "make"];
 
 /// Is `name` a brand's or a plan's name with "Pay" in it ("Kakao Pay", "Cash App Pay", "Apple Pay",
 /// "Pay-as-you-go"), which a row, tab or link opens a panel for, and not a command to pay? One to three
@@ -539,7 +545,7 @@ fn quoted(what: &str) -> &str {
 pub(crate) fn click_is_payment(what: &str, description: &str) -> bool {
     if is_brand_pay(quoted(what)) {
         let first = description.split(|c: char| !c.is_ascii_alphanumeric()).find(|w| !w.is_empty()).unwrap_or("");
-        return NOT_BRAND[..6].contains(&first.to_ascii_lowercase().as_str()) && is_payment(description);
+        return COMMANDS.contains(&first.to_ascii_lowercase().as_str()) && is_payment(description);
     }
     is_payment(what) || is_payment(description)
 }
@@ -831,6 +837,11 @@ mod tests {
             ("Click \"Confirm and Pay\"", ""),
             ("Click \"Click to Pay\"", ""),
             ("Click \"Pay with Apple Pay\"", ""),
+            ("Click \"Confirm And Pay\"", ""),
+            ("Click \"Proceed To Pay\"", ""),
+            ("Click \"CLICK TO PAY\"", ""),
+            ("Click \"Confirm Apple Pay\"", ""),
+            ("Click \"Place Order And Pay\"", ""),
             ("Click \"Apple Pay\"", "Pay $20.00 now"),
             ("Click \"Continue\"", "Pay now"),
         ] {
