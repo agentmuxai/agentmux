@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-14. Code read at `origin/main`, logs from a task dev build on Windows 11, and from the operator's own clicks in it.
 **Task:** #47567. **Author:** Camper@narko.
-**Status:** draft. The cause of the first section is shown by the code and the host log. Section 3 is a reading of one logged exception, not a proof, and the fix's own live check settles it.
+**Status:** active. Shipped: the child-window default (#7235) and the overlay click fix (#7263, #47567). Left: the operator's own click and typing in a build with the fix, before overlays become the default again. The cause of the first section is shown by the code and the host log. Section 3 is a reading of one logged exception, not a proof; the fix's live check (section 6) agrees with it.
 **Readers:** AgentY, the operator, whoever reviews the overlay fix.
 **Publishing note:** ships in the pull request that fixes the overlay path. It cites no private-repo material.
 
