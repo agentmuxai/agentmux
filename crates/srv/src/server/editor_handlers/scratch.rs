@@ -5,6 +5,7 @@
 //! unchanged as named functions. Spec: docs/specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md. Each takes the
 //! user's home folder as a parameter, so a test can point it at a temp dir.
 
+use std::io;
 use std::path::{Path, PathBuf};
 
 use super::{editor_may_change, in_a_distro_home, scratch_session_token};
@@ -135,7 +136,33 @@ fn mint_scratch(
     Ok(CreateScratchFileResult { scratch_id, file_path: file_path.to_string_lossy().into_owned(), display_name })
 }
 
-/// Promotes a scratch buffer to a real user-chosen path (Save As).
+/// The refusal for a destination the Editor may not write: the same limit as its saves.
+const OUTSIDE_HOME: &str = "The Editor saves only inside your home folder.";
+
+/// A failed save as a sentence for the person.
+pub(super) fn save_error(err: &io::Error, name: &str) -> String {
+    match err.kind() {
+        io::ErrorKind::AlreadyExists => crate::backend::fs_ops::exists_message(name),
+        io::ErrorKind::PermissionDenied => "You don't have permission to save there.".to_string(),
+        io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => "There isn't enough space to save it there.".to_string(),
+        _ => format!("Couldn't save it there: {err}"),
+    }
+}
+
+/// Writes all of `from` to a new file at `dest`. The file is created exclusively, so one that appeared since
+/// any earlier check is never replaced; a write that fails part-way leaves nothing behind.
+pub(super) fn copy_to_new_file(from: &mut dyn io::Read, dest: &Path) -> io::Result<()> {
+    let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(dest)?;
+    let written = io::copy(from, &mut out).and_then(|_| out.sync_all());
+    drop(out);
+    if written.is_err() {
+        let _ = std::fs::remove_file(dest);
+    }
+    written
+}
+
+/// Promotes a scratch buffer to a real user-chosen path (Save As, or a name typed into its tab). The errors
+/// are sentences, shown to the person as they are.
 pub(super) fn move_scratch_file(home: &Path, cmd: &MoveScratchFileReq) -> Result<MoveScratchFileResult, String> {
     let canonical_home = home.canonicalize().map_err(|e| format!("movescratchfile: home: {e}"))?;
     // The scratch_id has no path components.
@@ -153,20 +180,25 @@ pub(super) fn move_scratch_file(home: &Path, cmd: &MoveScratchFileReq) -> Result
     // A coarse home-boundary check before any filesystem mutation, on the unexpanded path because the
     // destination may not exist yet (canonicalize fails on non-existent paths).
     if !dest_path.starts_with(home) && !in_a_distro_home(dest_path) {
-        return Err("movescratchfile: destination outside home directory".to_string());
+        return Err(OUTSIDE_HOME.to_string());
     }
     // Reject ".." components before create_dir_all: the coarse starts_with check is purely lexical and passes
     // paths like ~/foo/../../../tmp/evil because the prefix matches, but create_dir_all would then materialize
     // directories outside the home boundary before the canonical check fires.
     if dest_path.components().any(|c| c == std::path::Component::ParentDir) {
-        return Err("movescratchfile: destination path must not contain '..' components".to_string());
+        return Err("A path can't contain “..”.".to_string());
     }
-    // An existing destination is rejected to avoid silent data loss.
-    if dest_path.exists() {
-        return Err("movescratchfile: destination already exists".to_string());
+    // The file's own name follows the rules a rename does (Windows' reserved names and characters, a
+    // trailing dot or space), so the file saved is the file named.
+    let name = dest_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    crate::backend::fs_ops::validate_new_name(&name)?;
+    // An existing destination is refused before any folder is made. `symlink_metadata`, so a dangling link
+    // counts as taken; the exclusive create below is what holds if something appears in between.
+    if std::fs::symlink_metadata(dest_path).is_ok() {
+        return Err(crate::backend::fs_ops::exists_message(&name));
     }
     if let Some(parent) = dest_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("movescratchfile: create dirs: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| save_error(&e, &name))?;
     }
     // Canonicalize the parent (now guaranteed to exist) and append the filename.
     let canonical_dest = dest_path
@@ -176,10 +208,13 @@ pub(super) fn move_scratch_file(home: &Path, cmd: &MoveScratchFileReq) -> Result
         .ok_or_else(|| "movescratchfile: invalid destination path".to_string())?;
     // The fine-grained home-boundary check, with canonical paths.
     if !editor_may_change(&canonical_dest, &canonical_home) {
-        return Err("movescratchfile: destination outside home directory".to_string());
+        return Err(OUTSIDE_HOME.to_string());
     }
-    // Copy then remove the scratch source (a cross-device-safe move).
-    std::fs::copy(&scratch_path, &canonical_dest).map_err(|e| format!("movescratchfile: copy: {e}"))?;
+    // Copy, then remove the scratch source (a cross-device-safe move): the buffer's file goes only once the
+    // real one is whole.
+    let mut scratch = std::fs::File::open(&scratch_path).map_err(|e| save_error(&e, &name))?;
+    copy_to_new_file(&mut scratch, &canonical_dest).map_err(|e| save_error(&e, &name))?;
+    drop(scratch);
     std::fs::remove_file(&scratch_path).map_err(|e| format!("movescratchfile: remove scratch: {e}"))?;
     // Clean up the .meta sidecar and the claim file.
     let _ = std::fs::remove_file(scratch_dir.join(format!("{}.md.meta", cmd.scratch_id)));

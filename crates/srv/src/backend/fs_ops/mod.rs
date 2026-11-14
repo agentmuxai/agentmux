@@ -667,11 +667,39 @@ fn system_roots() -> Vec<PathBuf> {
 // the thread that acts (spec §9: "re-validated at execution time"), and
 // logs one info line per operation for audit.
 
-fn exists_message(name: &str) -> String {
+pub fn exists_message(name: &str) -> String {
     format!("Something named “{name}” already exists here.")
 }
 
+/// What to say when another program holds the file (Windows: a sharing or a lock violation).
+pub const IN_USE: &str = "Another program is using this file. Close it there and try again.";
+
+/// Whether `err` is Windows refusing because another program has the file open without sharing it.
+fn in_use(err: &io::Error) -> bool {
+    cfg!(windows) && matches!(err.raw_os_error(), Some(32 | 33))
+}
+
+/// The no-replace rename, tried once more after a moment when another program holds the file: a virus
+/// scan or a search indexer lets go within milliseconds, an editor doesn't.
+fn rename_patiently(from: &Path, to: &Path) -> io::Result<()> {
+    match platform::rename_no_replace(from, to) {
+        Err(e) if in_use(&e) => {
+            std::thread::sleep(Duration::from_millis(200));
+            platform::rename_no_replace(from, to)
+        }
+        done => done,
+    }
+}
+
+/// `raw` as `fs.rename` resolves and reports it: what a rename event names as the path before.
+pub fn entry_display_path(raw: &str) -> Option<String> {
+    resolve_entry_path(raw).ok().map(|p| display_path(&p))
+}
+
 fn missing_or(err: io::Error, what: &str) -> String {
+    if in_use(&err) {
+        return IN_USE.to_string();
+    }
     match err.kind() {
         io::ErrorKind::NotFound => "It doesn't exist anymore.".to_string(),
         io::ErrorKind::PermissionDenied => format!("You don't have permission to {what} it."),
@@ -702,7 +730,7 @@ pub fn rename(req: &FsRenameReq) -> Result<FsRenameResult, String> {
     let result = if old_name.to_lowercase() == req.new_name.to_lowercase() {
         rename_case_only(&src, &dest, &parent, &req.new_name)
     } else {
-        platform::rename_no_replace(&src, &dest).map_err(|e| match e.kind() {
+        rename_patiently(&src, &dest).map_err(|e| match e.kind() {
             io::ErrorKind::AlreadyExists => exists_message(&req.new_name),
             _ => missing_or(e, "rename"),
         })
@@ -729,7 +757,7 @@ fn rename_case_only(src: &Path, dest: &Path, parent: &Path, new_name: &str) -> R
         return Err(exists_message(new_name));
     }
     let tmp = parent.join(format!(".agentmux-rename-{}", uuid::Uuid::new_v4().simple()));
-    platform::rename_no_replace(src, &tmp).map_err(|e| missing_or(e, "rename"))?;
+    rename_patiently(src, &tmp).map_err(|e| missing_or(e, "rename"))?;
     if let Err(e) = platform::rename_no_replace(&tmp, dest) {
         // Put it back under its old name rather than strand it under the
         // temporary one.

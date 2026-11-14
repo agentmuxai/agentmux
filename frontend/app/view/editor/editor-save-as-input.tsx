@@ -42,9 +42,11 @@ export function SaveAsInput(props: { onConfirm: (path: string) => void; onCancel
             value={value()}
             onInput={(e) => setValue(e.currentTarget.value)}
             onKeyDown={(e) => {
+                e.stopPropagation();
+                // Enter that confirms an input-method composition is not a commit (Safari: key code 229).
+                if (e.isComposing || e.keyCode === 229) return;
                 if (e.key === "Enter") { e.preventDefault(); confirm(); }
                 if (e.key === "Escape") { e.preventDefault(); cancel(); }
-                e.stopPropagation();
             }}
             onClick={(e) => e.stopPropagation()}
             onBlur={cancel}

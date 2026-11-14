@@ -57,6 +57,11 @@ export function trackSave(model: EditorViewModel, tabId: string | null | undefin
     });
 }
 
+/** Whether a save of tab `tabId` is in flight. */
+export function isSaving(model: EditorViewModel, tabId: string): boolean {
+    return saving.get(model)?.has(tabId) ?? false;
+}
+
 /** What travels with an Editor tab, beside the tab itself. */
 interface EditorLiveState {
     /** A tab's unsaved text. Absent for a clean tab: its text is its file,

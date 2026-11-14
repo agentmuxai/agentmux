@@ -165,8 +165,6 @@ export type {
     MoveScratchFileReq,
     MoveScratchFileResult,
     OpenInShellReq,
-    RenameEditorFileReq,
-    RenameEditorFileResult,
     UnwatchMediaDirReq,
     WatchEditorFileReq,
     WatchMediaDirReq,
