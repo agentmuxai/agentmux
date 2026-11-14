@@ -7,6 +7,7 @@
  */
 
 import type { AppSkillCatalogEntry } from "@/types/rpc/AppSkillCatalogEntry";
+import type { AppSkillCatalogItem } from "@/types/rpc/AppSkillCatalogItem";
 import type { SkillApp } from "@/types/rpc/SkillApp";
 import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import type { VerifiedRecord } from "@/types/rpc/VerifiedRecord";
@@ -156,4 +157,37 @@ export function catalogStatus(entry: AppSkillCatalogEntry, platform: string): Ap
     }
     const elsewhere = mine.find((r) => r.result === "pass");
     return { tone: "idle", label: elsewhere ? `tested on ${osNames([elsewhere.platform])} only` : "not tested yet" };
+}
+
+/** Whether `found` ("16.0.18227.20162") is the tested version `tested` ("16.0") or a build of it: whole parts only, a missing trailing part of `found` counting as 0 ("16" is a build of "16.0"). */
+function isBuildOf(found: string, tested: string): boolean {
+    const f = found.split(".");
+    return tested.split(".").every((part, i) => (f[i] ?? "0") === part);
+}
+
+/**
+ * What Browse says about the application itself on this computer, from the executables the entry lists for this
+ * platform: its version, set against the version the entry was last tested on here (the drift wording the card
+ * uses). `null` when the entry lists none for this platform, or is for another OS, where there is nothing to look for.
+ */
+export function appHereLine(item: AppSkillCatalogItem, platform: string): string | null {
+    const names = item.entry.app.executables?.[platform];
+    if (forAnotherOs(item.entry, platform) || !names?.length) {
+        return null;
+    }
+    if (!item.app_found) {
+        return `${item.entry.name} is not found on this computer.`;
+    }
+    if (!item.app_version) {
+        return `${item.entry.name} is on this computer; its version could not be read.`;
+    }
+    const here = `${item.entry.name} on this computer: version ${item.app_version}`;
+    const passes = item.entry.verification.filter((r) => r.skillVersion === item.entry.version && r.platform === platform && r.result === "pass");
+    const last = passes.reduce<(typeof passes)[number] | undefined>((a, r) => (!a || r.date >= a.date ? r : a), undefined);
+    if (!last) {
+        return `${here}.`;
+    }
+    return isBuildOf(item.app_version, last.appVersion)
+        ? `${here}, the version it was tested on.`
+        : `${here}. The last test passed on ${last.appVersion}: check before trusting it.`;
 }

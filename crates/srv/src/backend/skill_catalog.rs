@@ -56,6 +56,9 @@ pub struct CatalogVersions {
 pub struct CatalogApp {
     #[serde(default)]
     pub vendor: String,
+    /// Per platform, the executable names the app runs as: how its version is found on this computer.
+    #[serde(default)]
+    pub executables: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub versions: CatalogVersions,
 }
@@ -126,6 +129,10 @@ pub struct AppSkillCatalogItem {
     pub state: String,
     pub installed_version: Option<String>,
     pub skill_id: Option<String>,
+    /// The application itself is on this computer (found by the executable names the entry lists for this platform).
+    pub app_found: bool,
+    /// The application's version here, when it is found and says one.
+    pub app_version: Option<String>,
 }
 
 fn is_part(s: &str) -> bool {
@@ -216,10 +223,35 @@ pub fn items(entries: Vec<CatalogEntry>, installed: &BTreeMap<String, SkillApp>)
                 state: state.to_string(),
                 installed_version: here.map(|(_, a)| a.info.version.clone()),
                 skill_id: here.map(|(id, _)| id.clone()),
+                app_found: false,
+                app_version: None,
                 entry,
             }
         })
         .collect()
+}
+
+/// Says for each entry whether its application is on this computer, and which version, by the executable names it lists
+/// for `platform` (`find` is `app_version::find`). An entry that lists none for this platform is left as it is.
+pub fn add_app_versions(items: &mut [AppSkillCatalogItem], platform: &str, find: impl Fn(&[String]) -> Option<crate::backend::app_version::Found>) {
+    for item in items {
+        let Some(names) = item.entry.app.executables.get(platform).filter(|n| !n.is_empty()) else { continue };
+        if let Some(found) = find(names) {
+            item.app_found = true;
+            item.app_version = found.version;
+        }
+    }
+}
+
+/// The platform name skills use for the computer this runs on.
+pub fn this_platform() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
 }
 
 /// Checks a downloaded zip against its entry: the zip's SHA-256, then, unpacked and read like any skill folder, the

@@ -31,6 +31,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     cwd: "",
     replaces: false,
     signin: false,
+    account: false,
     requested_ms: 1,
     block_id: "pane-1",
     deadline_ms: 1,
@@ -202,6 +203,30 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(dialog.textContent).not.toContain("Into");
         fireEvent.click(within(dialog).getByRole("button", { name: "Always for Agent1 on accounts.example.com" }));
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
+    });
+
+    it("asks for an agent's new account by site, says the Vault makes the password, and offers no Always", async () => {
+        uses = [
+            use({
+                account: true,
+                what: "new account",
+                kind: "login",
+                entry_id: "",
+                entry_label: "a new account on https://shop.example.com",
+                origin: "https://shop.example.com",
+                field: "",
+                offer_always: false,
+                reason: "Agent1 hasn't made an account on this site with you before",
+            }),
+        ];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const dialog = await screen.findByRole("group");
+        expect(dialog.textContent).toContain("Agent1 wants to create an account on shop.example.com");
+        expect(dialog.textContent).toContain("sign-up form on shop.example.com");
+        expect(dialog.textContent).toContain("The agent never sees it");
+        expect(dialog.textContent).not.toContain("Into");
+        expect(within(dialog).queryByRole("button", { name: /^Always/ })).toBeNull();
     });
 
     it("says a command's output will replace the entry's value, that the old one is kept, and offers no Always", async () => {
