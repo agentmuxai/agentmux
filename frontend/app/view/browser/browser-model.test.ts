@@ -733,6 +733,15 @@ describe("BrowserViewModel Save link as / Save image as (SPEC_BROWSER_PANE_DOWNL
         expect(invokeCommand).toHaveBeenCalledWith("browser_download_start", { block_id: vm.blockId, url: "https://example.com/p.png" });
     });
 
+    it("says so when a copied link can't reach any clipboard, rather than staying silent", async () => {
+        const vm = makeVM();
+        vi.mocked(invokeCommand).mockImplementationOnce(() => Promise.reject(new Error("clipboard write failed (install wl-copy, xclip, or xsel)")));
+        itemNamed(vm.getBodyContextMenuItems({ x: 1, y: 2, linkUrl: "https://example.com/a" }), "Copy Link Address").click?.();
+        await vi.waitFor(() => expect(vm.attentionAtom()?.message).toMatch(/Couldn't copy the link/));
+        expect(vm.attentionAtom()).toMatchObject({ kind: "notice", local: true });
+        expect(invokeCommand).toHaveBeenCalledWith("write_clipboard", { text: "https://example.com/a" });
+    });
+
     it("gives both rows the download icon", () => {
         const items = makeVM().getBodyContextMenuItems({ x: 1, y: 2, linkUrl: "https://example.com/", imageUrl: "https://example.com/p.png" });
         expect(itemNamed(items, "Save link as…").icon).toBe("download");
