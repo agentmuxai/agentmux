@@ -1104,26 +1104,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_redock_into_a_tab_of_nothing_but_chips_is_refused_and_moves_nothing() {
-        // The spec says a pane arrives restored here. Today the placement refuses first: a fully
-        // minimized tree is a locked state, never an insert target (backend/layout collect_insert_candidates),
-        // and a tab of only chips is not one the layout engine produces (deleting the last expanded
-        // pane restores one). This pins what happens if one is dragged to anyway: nothing is lost.
+    async fn a_chip_redocked_into_a_tab_of_nothing_but_chips_arrives_expanded() {
+        // No chip is a place to insert at, so the pane goes in at the root of the target tree; it is
+        // then the only pane showing content there, so the minimize is refused and it stays restored.
         let state = test_state();
         let (ws_id, src_tab, src, dst_tab, dst) = two_tabs(&state, &[true, false], &[true, true]).await;
         let chip = src[0].clone();
 
         let ret = redock_dragged(&state, &chip, &src_tab, &dst_tab, &ws_id, None).await;
-        assert!(ret.error.is_some(), "the redock reports that it could not place the pane");
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
 
-        let srv = state.srv_state.lock().await;
-        assert_eq!(srv.blocks[&chip].tab_id, src_tab, "the block is back in its own tab");
-        assert!(!srv.tabs[&dst_tab].block_ids.contains(&chip), "the target tab does not own it");
-        drop(srv);
-        assert!(is_chip(&state, &src_tab, &chip).await.is_some(), "and the source tab shows it again");
-        assert_eq!(is_chip(&state, &dst_tab, &chip).await, None, "the target tab does not show it");
+        assert_eq!(is_chip(&state, &dst_tab, &chip).await, Some(false), "it arrives expanded");
         assert_eq!(is_chip(&state, &dst_tab, &dst[0]).await, Some(true), "the chips there are untouched");
         assert_eq!(is_chip(&state, &dst_tab, &dst[1]).await, Some(true));
+        assert!(queued_minimize_actions(&state, &dst_tab).is_empty(), "nothing tells the window to minimize it");
+        assert_eq!(is_chip(&state, &src_tab, &chip).await, None, "the source tab no longer shows it");
+        assert_eq!(state.srv_state.lock().await.blocks[&chip].tab_id, dst_tab, "and the target tab owns it");
+    }
+
+    #[tokio::test]
+    async fn an_expanded_pane_redocked_into_a_tab_of_nothing_but_chips_stays_expanded() {
+        let state = test_state();
+        let (ws_id, src_tab, src, dst_tab, dst) = two_tabs(&state, &[false, false], &[true]).await;
+        let pane = src[0].clone();
+
+        let ret = redock_dragged(&state, &pane, &src_tab, &dst_tab, &ws_id, None).await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        assert_eq!(is_chip(&state, &dst_tab, &pane).await, Some(false));
+        assert_eq!(is_chip(&state, &dst_tab, &dst[0]).await, Some(true), "the chip there is still a chip");
     }
 
     #[tokio::test]
