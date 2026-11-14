@@ -109,16 +109,54 @@
     container-name: swarm-tree;
 }
 
-// A narrow pane: the row's name keeps room by giving up what only decorates it (the age, the
-// Supervisor chip's state word, which its tooltip still says).
+// A narrow pane: the row's name and its status word keep room by giving up what only decorates them, a step at
+// a time as the pane narrows: the age and the Supervisor chip's state word (360 px), the context size and the
+// chip's mode word (320 px), the seat badge (240 px). The Supervisor chip's colour and tooltip still say the rest.
+//
+// Between the steps nothing leaves the card: when the row's parts still do not fit (a question with its seconds,
+// beside a Supervisor mode), they give way in turn: the seat badge, then the name down to its least width, then
+// the status chip from its end, its seconds first.
+//
+// Flex shares a shortfall by these weights, so each is far enough from the next that the later part loses less
+// than a layout unit, and gets no ellipsis, while the earlier one still shrinks. The name is written both ways
+// so that its rule in swarm-seats.scss, as specific as the row's own, cannot win by coming later.
 @container swarm-tree (max-width: 360px) {
     .swarm-agent-row {
         .swarm-last-active {
             display: none;
         }
 
-        .swarm-agent-label {
+        .swarm-seat-badge {
+            flex-shrink: 10000000000;
+        }
+
+        // As wide as its words, so it has a width to give up after the badge and before the chip. It still
+        // grows into the room that is left, with a badge too, as it does at every width: the row's `flex: 1`
+        // below comes after swarm-seats.scss in the built stylesheet and wins over its `flex: 0 1 auto`, so
+        // the badge already sits at the row's end. Growing here keeps that; it does not move the badge.
+        .swarm-agent-label,
+        .swarm-agent-label:has(+ .swarm-seat-badge) {
+            flex: 1 100000 auto;
             min-width: 6ch;
+        }
+
+        .swarm-status-chip {
+            flex-shrink: 1;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .swarm-status-countdown {
+            flex-shrink: 100000;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .swarm-status-label {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
     }
 
@@ -127,13 +165,45 @@
     }
 }
 
-// A pane too narrow for the row's fixed parts and the name's 6ch: the name shrinks first, down to nothing, then the
+// Narrower, where a status word no longer fits beside a seat badge and a Supervisor mode: the context size and
+// the Supervisor chip's mode word go (the chip's colour and tooltip still say the mode). The Supervisor button
+// stays whole.
+@container swarm-tree (max-width: 320px) {
+    .swarm-agent-row .swarm-ctx-size {
+        display: none;
+    }
+
+    .swarm-supervisor-chip .swarm-supervisor-mode {
+        display: none;
+    }
+}
+
+// Narrower: the name gives way down to 5ch, about three letters and the ellipsis, before the chip is cut.
+@container swarm-tree (max-width: 280px) {
+    .swarm-agent-row {
+        .swarm-agent-label,
+        .swarm-agent-label:has(+ .swarm-seat-badge) {
+            min-width: 5ch;
+        }
+    }
+}
+
+// Narrower, where the seat badge is down to a stub of its padding and the status word would be cut to keep it:
+// the badge goes, and the word has its room.
+@container swarm-tree (max-width: 240px) {
+    .swarm-agent-row .swarm-seat-badge {
+        display: none;
+    }
+}
+
+// A pane too narrow for the row's fixed parts and the name's least width: the name goes down to nothing, then the
 // chips at the row's end (clipped, not wrapped), and the row never grows past the pane.
 @container swarm-tree (max-width: 200px) {
     .swarm-agent-row {
         overflow: hidden;
 
-        .swarm-agent-label {
+        .swarm-agent-label,
+        .swarm-agent-label:has(+ .swarm-seat-badge) {
             min-width: 0;
         }
 
