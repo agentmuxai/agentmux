@@ -138,6 +138,11 @@ describe("App skill status", () => {
             references: [reference(), reference({ path: "references/b.png", appVersion: "16.1" }), reference({ path: "references/c.png", platform: "macos" })],
         });
         expect(referenceDrift(a as never, "windows")).toBe("1 of 2 references were taken on 16.0; the last pass was on 16.1");
+        // Against the app on this computer when it is known: a build of the crop's version fits, another version does not.
+        expect(referenceDrift(a as never, "windows", "16.1.4")).toBe("1 of 2 references were taken on 16.0; Word here is 16.1.4");
+        expect(referenceDrift(a as never, "windows", "16.0.9")).toBe("1 of 2 references were taken on 16.1; Word here is 16.0.9");
+        expect(referenceDrift(app({ references: [reference({ appVersion: "16.1" })] }) as never, "windows", "16.1.4")).toBeNull();
+        expect(referenceDrift(a as never, "windows", null)).toBe("1 of 2 references were taken on 16.0; the last pass was on 16.1");
         expect(referenceDrift(app() as never, "windows")).toBeNull();
         expect(referenceDrift(app({ references: [] }) as never, "windows")).toBeNull();
     });
@@ -260,6 +265,7 @@ describe("Signature and script approval", () => {
         fireEvent.click(await screen.findByText("acme-word"));
         detail = await screen.findByRole("region", { name: "App skill" });
         expect(detail.textContent).toContain("Word on this computer: version 17.1.2. It was last tested on another version: check before trusting it.");
+        expect(detail.textContent).toContain("1 of 1 references were taken on 16.0; Word here is 17.1.2");
         cleanup();
 
         // Not found, found without a version: said, and the test status is left as it was.
