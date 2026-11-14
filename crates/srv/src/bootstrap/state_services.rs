@@ -191,6 +191,18 @@ fn install_message_brokers(state: &AppState) {
     backend::message_flow::install(Arc::clone(&state.broker));
     backend::task_flow::install(Arc::clone(&state.broker));
     backend::pr_flow::install(Arc::clone(&state.broker));
+    start_container_status(state);
+}
+
+/// The Atlas map and the Swarm show this machine's agent containers as they change (`backend::container_status`).
+/// A machine with no container runtime is looked at once.
+fn start_container_status(state: &AppState) {
+    let mstore = Arc::clone(&state.mstore);
+    let hub = backend::container_status::install(Arc::clone(&state.broker), move || {
+        mstore.agent_def_list().unwrap_or_default().into_iter().filter(|d| d.is_seeded != 1).map(|d| (d.id, d.name)).collect()
+    });
+    let source = backend::container_status::DockerSource::new(Arc::clone(&state.container_manager));
+    tokio::spawn(backend::container_status::run(source, hub, Default::default()));
 }
 
 /// Lists this instance for the other AgentMux instances on this machine (`muxspect instances`).

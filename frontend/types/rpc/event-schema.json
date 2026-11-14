@@ -479,6 +479,24 @@
     }
   },
   {
+    "event": "container-runtime",
+    "payloadTs": {
+      "imports": [
+        "ContainerRuntimeStatus"
+      ],
+      "name": "ContainerRuntimeStatus"
+    }
+  },
+  {
+    "event": "container-status",
+    "payloadTs": {
+      "imports": [
+        "ContainerStatus"
+      ],
+      "name": "ContainerStatus"
+    }
+  },
+  {
     "event": "controllerstatus",
     "payloadTs": {
       "imports": [

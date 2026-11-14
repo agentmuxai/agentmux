@@ -66,6 +66,10 @@ pub const EVENT_AGENT_MESSAGE_ACCEPTED: &str = "agent-message-accepted";
 /// One message between two agents was handled by this srv: ids and times only, never its text
 /// (`message_flow`). Not scoped: any window may subscribe. Payload: `MessageFlowEvent`.
 pub const EVENT_MESSAGE_FLOW: &str = "message-flow";
+/// One of this machine's agent containers changed (`container_status`). Not scoped. Payload: `ContainerStatus`.
+pub const EVENT_CONTAINER_STATUS: &str = "container-status";
+/// The container runtime appeared, went away or changed (`container_status`). Not scoped. Payload: `ContainerRuntimeStatus`.
+pub const EVENT_CONTAINER_RUNTIME: &str = "container-runtime";
 /// A task was filed, reassigned, started or handed back (`task_flow`): names, ids and times only, never its text.
 /// Not scoped. Payload: `TaskFlowEvent`.
 pub const EVENT_TASK_FLOW: &str = "task-flow";

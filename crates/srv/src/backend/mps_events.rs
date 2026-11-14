@@ -94,6 +94,10 @@ events! {
     AgentMessageAccepted: super::mps::EVENT_AGENT_MESSAGE_ACCEPTED => crate::backend::blockcontroller::MessageAcceptedEvent,
     /// A message between two agents was handled by this srv (`message_flow`): ids and times, never its text.
     MessageFlow: super::mps::EVENT_MESSAGE_FLOW => crate::backend::message_flow::MessageFlowEvent,
+    /// One of this machine's agent containers changed (`container_status`): names and states, nothing from inside it.
+    ContainerStatusChanged: super::mps::EVENT_CONTAINER_STATUS => crate::backend::container_status::ContainerStatus,
+    /// The container runtime appeared, went away or changed (`container_status`).
+    ContainerRuntimeChanged: super::mps::EVENT_CONTAINER_RUNTIME => crate::backend::container_status::ContainerRuntimeStatus,
     /// A task was filed, reassigned, started or handed back (`task_flow`): names and numbers, never its text.
     TaskFlow: super::mps::EVENT_TASK_FLOW => crate::backend::task_flow::TaskFlowEvent,
     /// A review of a PR reached the agent it belongs to (`pr_flow`): ids, a state and times, never its text.
