@@ -289,6 +289,11 @@ jobs:
   # release commit like the desktop builds and reaches the release through the same two file selections below, so the
   # signed manifest lists it and `install.sh --server` can check it
   # (docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md section 4).
+  #
+  # Advisory for now: `sign-release` and `publish` wait for it but do not look at its result, so a new job on four
+  # legs (two on scarce runners) cannot hold back a desktop release. The legs that built are published and signed; a
+  # platform that did not is absent from the manifest, and `install.sh --server` says that version has no server package
+  # for it. `publish` says so in its summary. It becomes required after the first release in which all four legs are green.
   build-server-package:
     name: Build — server package
     needs: gate
@@ -336,7 +341,6 @@ jobs:
       && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
-      && contains(fromJSON('["success","skipped"]'), needs.build-server-package.result)
       && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
     environment: release-signing
@@ -483,7 +487,6 @@ jobs:
       && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
-      && contains(fromJSON('["success","skipped"]'), needs.build-server-package.result)
       && contains(fromJSON('["success","skipped"]'), needs.sign-release.result)
       && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
@@ -500,6 +503,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+
+      - name: Say that the server package is incomplete
+        if: ${{ needs.build-server-package.result != 'success' }}
+        env:
+          PACKAGE_RESULT: ${{ needs.build-server-package.result }}
+        run: |
+          line="Release v${VERSION}: the server package is incomplete (its build ended ${PACKAGE_RESULT}); the platforms that built are published, the others have no server package."
+          echo "::warning::$line"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4

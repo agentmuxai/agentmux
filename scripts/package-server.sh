@@ -60,5 +60,9 @@ else
     (cd "$STAGE" && tar -cf - "$TOP") | gzip -n -9 > "$tarball"
 fi
 
-if command -v sha256sum > /dev/null 2>&1; then sum="$(sha256sum < "$tarball" | cut -d ' ' -f 1)"; else sum="$(shasum -a 256 < "$tarball" | cut -d ' ' -f 1)"; fi
+if command -v sha256sum > /dev/null 2>&1; then
+    sum="$(sha256sum < "$tarball" | cut -d ' ' -f 1)"
+else
+    sum="$(shasum -a 256 < "$tarball" | cut -d ' ' -f 1)"
+fi
 echo "package-server: $tarball ($(wc -c < "$tarball" | tr -d ' ') bytes, sha256 $sum)"
