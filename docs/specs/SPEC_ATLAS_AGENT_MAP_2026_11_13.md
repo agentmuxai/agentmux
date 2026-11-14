@@ -185,7 +185,11 @@ Both carry ids, hosts and times only, so the map shows that something passed bet
   found a number landing on another node's name, and dim on the dark theme, with the lines in front). Agents side
   by side in a row leave no such stretch (the gap between two is narrower than a number, and the line is behind
   the ones in between), so there the number goes just under or just over the node the line lands on, at the corner
-  it lands on (the Linux re-look found the number hidden behind the node in between).
+  it lands on (the Linux re-look found the number hidden behind the node in between). A number also keeps clear of
+  the numbers placed before it. Two tasks handed to one agent in a row land on the same corner, so the second
+  number takes the other side of the node, and a third goes a number's width along the node's edge (the same
+  re-look found one number drawn on top of the other). A task and one handed back between two agents close
+  together bow apart by less than a number's width, so the second number goes next to the first.
 - **Motion.** With the Animations setting on Off, a line appears whole and goes after its time; nothing travels.
   The operating system's own "reduce motion" preference alone does not change it, as everywhere in the app
   (the motion policy's 2026-10-15 decision).

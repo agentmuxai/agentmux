@@ -10,7 +10,7 @@
 
 import { createMemo, For, Show, type JSX } from "solid-js";
 import type { MessageFlowEnd } from "@/types/rpc/MessageFlowEnd";
-import { flowCurve, type AtlasFlow, type FlowCurve } from "./atlas-flow";
+import { flowCurves, type AtlasFlow, type FlowCurve, type FlowLine } from "./atlas-flow";
 import { NODE_H, NODE_W, type Placed } from "./atlas-layout";
 
 /** How far outside a node its ring is drawn. */
@@ -18,27 +18,35 @@ const RING_GAP = 3;
 
 type Mark = { curve: FlowCurve; ring: null } | { curve: null; ring: Placed };
 
-function FlowMark(props: {
-    flow: AtlasFlow;
-    resolve: (end: MessageFlowEnd) => string | null;
-    nodes: ReadonlyMap<string, Placed>;
-}): JSX.Element {
-    const mark = createMemo<Mark | null>(() => {
-        const at = (end: MessageFlowEnd) => {
-            const key = props.resolve(end);
-            return key ? props.nodes.get(key) : undefined;
-        };
-        const from = at(props.flow.from);
-        const to = at(props.flow.to);
-        if (from && to) {
-            const curve = flowCurve(from, to, [...props.nodes.values()]);
-            return curve && { curve, ring: null };
-        }
+/**
+ * What to draw for each line, by its id: a curve between its two nodes, or a ring for a message with one end on
+ * the map. The curves are worked out together, so that their labels keep clear of each other.
+ */
+function flowMarks(
+    flows: readonly AtlasFlow[],
+    resolve: (end: MessageFlowEnd) => string | null,
+    nodes: ReadonlyMap<string, Placed>
+): Map<string, Mark> {
+    const at = (end: MessageFlowEnd) => {
+        const key = resolve(end);
+        return key ? nodes.get(key) : undefined;
+    };
+    const marks = new Map<string, Mark>();
+    const lines: FlowLine[] = [];
+    for (const flow of flows) {
+        const from = at(flow.from);
+        const to = at(flow.to);
         const one = to ?? from;
-        return one && props.flow.kind === "message" ? { curve: null, ring: one } : null;
-    });
+        if (from && to) lines.push({ id: flow.id, from, to, label: flow.label });
+        else if (one && flow.kind === "message") marks.set(flow.id, { curve: null, ring: one });
+    }
+    for (const [id, curve] of flowCurves(lines, [...nodes.values()])) marks.set(id, { curve, ring: null });
+    return marks;
+}
+
+function FlowMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Element {
     return (
-        <Show when={mark()}>
+        <Show when={props.mark}>
             {(m) => (
                 <g
                     class={`atlas-flow atlas-flow--${props.flow.tone}`}
@@ -88,12 +96,13 @@ export function AtlasFlowLayer(props: {
     // By id, so a line keeps its element (and is not drawn again) when only its state changes.
     const ids = createMemo(() => props.flows.map((f) => f.id));
     const byId = createMemo(() => new Map(props.flows.map((f) => [f.id, f] as const)));
+    const marks = createMemo(() => flowMarks(props.flows, props.resolve, props.nodes));
     return (
         <svg class="atlas-flows" width={props.width} height={props.height} aria-hidden="true">
             <For each={ids()}>
                 {(id) => (
                     <Show when={byId().get(id)}>
-                        {(flow) => <FlowMark flow={flow()} resolve={props.resolve} nodes={props.nodes} />}
+                        {(flow) => <FlowMark flow={flow()} mark={marks().get(id)} />}
                     </Show>
                 )}
             </For>

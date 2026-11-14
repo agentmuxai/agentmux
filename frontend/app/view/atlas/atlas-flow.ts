@@ -176,6 +176,30 @@ const LABEL_TIGHT_H = 7;
 /** Where along a line its label is tried: the middle first, then further out on either side. */
 const LABEL_STOPS = [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65, 0.3, 0.7, 0.25, 0.75, 0.2, 0.8, 0.15, 0.85];
 
+/** A label already on the map: its point, and half the width of its text. */
+export interface PlacedLabel extends Placed {
+    halfW: number;
+}
+
+/** Half the width of a label's text. A short number is narrow, so two of them fit side by side. */
+export const labelHalfWidth = (text: string) => text.length * 3.25 + 1;
+
+/** How far apart along a node's edge two labels are tried: the widest label, and a little air. */
+const LABEL_STEP = LABEL_HALF_W * 2 + 4;
+
+/** Whether a label of half-width `halfW` at `p` would lie on the label `taken`. */
+function onLabel(taken: PlacedLabel, p: Placed, halfW: number): boolean {
+    return Math.abs(p.x - taken.x) < taken.halfW + halfW && Math.abs(p.y - taken.y) < LABEL_TIGHT_H * 2;
+}
+
+/** `p` moved sideways to sit next to the label it lies on, on the side it is already nearer; `p` when it lies on none. */
+function nextToLabel(taken: readonly PlacedLabel[], p: Placed, halfW: number): Placed {
+    const on = taken.find((label) => onLabel(label, p, halfW));
+    if (!on) return p;
+    const side = p.x >= on.x ? 1 : -1;
+    return { x: round(on.x + side * (on.halfW + halfW + 1)), y: p.y };
+}
+
 /** Whether a label at `p` would lie on `node`: lines run behind the nodes, so it would be hidden there. */
 function hidesLabel(node: Placed, p: Placed, halfH = LABEL_HALF_H): boolean {
     return (
@@ -189,22 +213,35 @@ function hidesLabel(node: Placed, p: Placed, halfH = LABEL_HALF_H): boolean {
 /**
  * Where a label goes when no stretch of its line is clear (agents side by side, the line passing behind the ones
  * between): just under or just over the node the line lands on, at the point it lands, on the side it comes from
- * first. Null when both are covered too.
+ * first. When both are taken (by a node, or by the label of another line that lands there), the same two a label's
+ * width further along the node's edge, as far as the node goes. Null when none is free.
  */
-function labelBesideEnd(to: Placed, end: Placed, fromBelow: boolean, nodes: readonly Placed[]): Placed | null {
-    const under = { x: end.x, y: to.y + NODE_H + LABEL_TIGHT_H };
-    const over = { x: end.x, y: to.y - LABEL_TIGHT_H };
-    const clear = (p: Placed) => !nodes.some((node) => hidesLabel(node, p, LABEL_TIGHT_H));
-    return (fromBelow ? [under, over] : [over, under]).find(clear) ?? null;
+function labelBesideEnd(to: Placed, end: Placed, fromBelow: boolean, free: (p: Placed) => boolean): Placed | null {
+    const under = to.y + NODE_H + LABEL_TIGHT_H;
+    const over = to.y - LABEL_TIGHT_H;
+    const inward = end.x >= to.x + NODE_W / 2 ? -1 : 1;
+    for (let x = end.x; x > to.x - 1 && x < to.x + NODE_W + 1; x += inward * LABEL_STEP) {
+        const spot = (fromBelow ? [under, over] : [over, under]).map((y) => ({ x, y })).find(free);
+        if (spot) return spot;
+    }
+    return null;
 }
 
 /**
  * The curve from one node's edge to another's, bowed a little to the left of its direction, so a line and its
  * answer do not lie on each other. Its label goes on the stretch nearest its middle that no node of `nodes` covers;
  * when every stretch is covered, beside the node it lands on (`labelBesideEnd`), and failing that on its middle.
+ * It also keeps clear of the labels in `taken`, as a label `halfW` wide each side of its point: on a clear stretch
+ * that another label has (a line and its answer, close together), it goes next to that label.
  * Null for two nodes on top of each other.
  */
-export function flowCurve(from: Placed, to: Placed, nodes: readonly Placed[] = []): FlowCurve | null {
+export function flowCurve(
+    from: Placed,
+    to: Placed,
+    nodes: readonly Placed[] = [],
+    taken: readonly PlacedLabel[] = [],
+    halfW = LABEL_HALF_W
+): FlowCurve | null {
     const ax = from.x + NODE_W / 2;
     const ay = from.y + NODE_H / 2;
     const bx = to.x + NODE_W / 2;
@@ -227,10 +264,37 @@ export function flowCurve(from: Placed, to: Placed, nodes: readonly Placed[] = [
         y: round((1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t ** 2 * y2),
     });
     const end = { x: round(x2), y: round(y2) };
-    const clear = LABEL_STOPS.map(at).find((p) => !nodes.some((node) => hidesLabel(node, p)));
+    const free = (halfH: number) => (p: Placed) =>
+        !nodes.some((node) => hidesLabel(node, p, halfH)) && !taken.some((label) => onLabel(label, p, halfW));
+    const clear = LABEL_STOPS.map((t) => nextToLabel(taken, at(t), halfW)).find(free(LABEL_HALF_H));
     return {
         d: `M${round(x1)},${round(y1)} Q${round(cx)},${round(cy)} ${round(x2)},${round(y2)}`,
         end,
-        label: clear ?? labelBesideEnd(to, end, cy >= y2, nodes) ?? at(0.5),
+        label: clear ?? labelBesideEnd(to, end, cy >= y2, free(LABEL_TIGHT_H)) ?? at(0.5),
     };
+}
+
+/** A line to draw between two placed nodes, with the label it carries, if any. */
+export interface FlowLine {
+    id: string;
+    from: Placed;
+    to: Placed;
+    label: string | null;
+}
+
+/**
+ * The curve of each line, by its id. A line's label keeps clear of the labels of the lines before it, so two tasks
+ * handed to one agent both show their number.
+ */
+export function flowCurves(lines: readonly FlowLine[], nodes: readonly Placed[]): Map<string, FlowCurve> {
+    const taken: PlacedLabel[] = [];
+    const curves = new Map<string, FlowCurve>();
+    for (const line of lines) {
+        const halfW = line.label ? labelHalfWidth(line.label) : LABEL_HALF_W;
+        const curve = flowCurve(line.from, line.to, nodes, line.label ? taken : [], halfW);
+        if (!curve) continue;
+        curves.set(line.id, curve);
+        if (line.label) taken.push({ ...curve.label, halfW });
+    }
+    return curves;
 }
