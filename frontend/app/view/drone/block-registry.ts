@@ -34,7 +34,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "variables",
         emoji: "🔢",
         label: "Variables",
-        description: "Declare drone-scope variables. Read via {{var.name}}.",
+        description: "Declare drone-scope variables. Read via {{var.name}}; any {{reference}} takes filters: {{a.log | tail:20 | lower}} (tail, head, json:path, lower, trunc, default).",
         color: "#a855f7",
         defaultData: {
             entries: [{ name: "example", value: "hello" }],

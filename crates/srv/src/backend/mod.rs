@@ -53,6 +53,7 @@ pub mod bundle_widgets;
 pub mod bundle_validate;
 pub mod background_task_exit;
 pub mod background_task_feed;
+pub mod background_task_pid;
 pub mod background_task_sweep;
 pub mod desktop_gate;
 pub mod dock_snapshot;
@@ -142,6 +143,8 @@ pub mod continuity_state;
 pub mod builtin_skills;
 /// Reading a skill from a folder, a git repository or a URL, for import.
 pub mod computer_use_skill;
+/// The version of an application on this computer, found from the executable names a computer-use skill lists.
+pub mod app_version;
 pub mod skill_catalog;
 pub mod skill_file;
 pub mod skill_import;
@@ -224,6 +227,8 @@ pub mod sensitive_ops;
 /// The requests for those operations and what became of them.
 pub mod sensitive_requests;
 pub mod shutdown_events;
+pub mod prompt_events;
+pub mod drone_run_event;
 /// Replies that say nothing are not sent (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).
 pub mod ack_policy;
 pub mod jekt_seal;

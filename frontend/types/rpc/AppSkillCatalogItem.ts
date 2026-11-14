@@ -13,4 +13,12 @@ badge: string,
  * `not_installed`, `current` (the same files), `update` (installed here is older), `newer_here` (installed here is
  * newer than the catalog's), or `changed` (the same version, other files).
  */
-state: string, installed_version: string | null, skill_id: string | null, };
+state: string, installed_version: string | null, skill_id: string | null, 
+/**
+ * The application itself is on this computer (found by the executable names the entry lists for this platform).
+ */
+app_found: boolean, 
+/**
+ * The application's version here, when it is found and says one.
+ */
+app_version: string | null, };

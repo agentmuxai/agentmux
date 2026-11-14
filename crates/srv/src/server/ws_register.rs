@@ -779,7 +779,6 @@ fn register_background_task_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn dock_node_status(state: &AppState, cmd: CommandDockNodeStatusData) -> Result<(), String> {
     let dock_snapshots = state.dock_snapshots.clone();
     let mstore = state.mstore.clone();
-    let pending_pids = state.pending_background_pids.clone();
     let broker = state.broker.clone();
     let observed_at = agentmux_common::time::now_ms();
 
@@ -810,20 +809,7 @@ fn dock_node_status(state: &AppState, cmd: CommandDockNodeStatusData) -> Result<
         // set_or_stash call for the same id — see
         // pending_background_pids.rs's module doc for why that
         // matters (Codex/reagentx findings on PR #2681).
-        let node_id = cmd.node_id.clone();
-        let mstore_apply = mstore.clone();
-        let result: Result<(), crate::backend::storage::StoreError> = pending_pids
-            .observe_and_apply(&cmd.node_id, observed_at, |pid| {
-                mstore_apply.background_task_set_pid(&node_id, pid)
-            });
-        if let Err(e) = result {
-            tracing::warn!(
-                target: "background_tasks",
-                node_id = %cmd.node_id,
-                error = %e,
-                "failed to apply a pid stashed ahead of this task's registry row",
-            );
-        }
+        crate::backend::background_task_pid::apply_stashed(&mstore, &cmd.node_id, observed_at);
     }
 
     dock_snapshots.push_delta(
@@ -862,24 +848,7 @@ fn background_task_completion(state: &AppState, cmd: CommandBackgroundTaskComple
 
 /// `backgroundtaskpid`: a declared-background task's OS pid, stashed when its row does not exist yet.
 fn background_task_pid(state: &AppState, cmd: CommandBackgroundTaskPidData) -> Result<(), String> {
-    let mstore = state.mstore.clone();
-    let pending_pids = state.pending_background_pids.clone();
-    let broker = state.broker.clone();
-    let now_ms = agentmux_common::time::now_ms();
-    let node_id = cmd.node_id.clone();
-    let mstore_set = mstore.clone();
-    let result = pending_pids.set_or_stash(&cmd.node_id, cmd.pid as i64, now_ms, |pid| {
-        mstore_set.background_task_set_pid(&node_id, pid)
-    });
-    match result {
-        Ok(()) => publish_background_task_updated(&broker, &cmd.blockid),
-        Err(e) => tracing::warn!(
-            target: "background_tasks",
-            node_id = %cmd.node_id,
-            error = %e,
-            "failed to record background task pid in the durable registry",
-        ),
-    }
+    crate::backend::background_task_pid::file_pid(&state.mstore, Some(&state.broker), &cmd.blockid, &cmd.node_id, cmd.pid as i64, agentmux_common::time::now_ms());
     Ok(())
 }
 

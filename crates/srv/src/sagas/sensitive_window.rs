@@ -28,14 +28,13 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::backend::prompt_events::{SensitiveClearedEvent, SensitiveView, EVENT_SENSITIVE_CLEARED, EVENT_SENSITIVE_PENDING};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::sensitive_ops;
 use crate::backend::sensitive_requests::{self as requests, Request, Status};
 use crate::server::AppState;
 use agentmux_common::time::now_ms;
 
-pub const EVENT_SENSITIVE_PENDING: &str = "sensitive:pending";
-pub const EVENT_SENSITIVE_CLEARED: &str = "sensitive:cleared";
 /// The person's veto or approve-now of a countdown.
 pub const COMMAND_SENSITIVE_DECIDE: &str = "sensitive.decide";
 /// A settled window stays answerable this long, then is dropped.
@@ -43,45 +42,6 @@ const KEEP_FINISHED_MS: i64 = 10 * 60 * 1000;
 /// How many of each event are kept for a window that opens mid-countdown: more than the
 /// countdowns that can overlap in the longest wait.
 const REPLAY_EVENTS: usize = 32;
-
-/// A countdown as the person's banner shows it.
-#[derive(Clone, Debug, Serialize, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct SensitiveView {
-    pub request_id: String,
-    pub op: String,
-    /// What will happen, built by AgentMux from the request's facts.
-    pub summary: String,
-    /// The words of its two buttons: the cancel and the do-it-now (`OpSpec`).
-    pub cancel_label: String,
-    pub now_label: String,
-    /// The agent that asked.
-    pub requester: String,
-    /// The super agent that approved it; absent when none reviewed it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub approver: Option<String>,
-    #[ts(type = "number")]
-    pub deadline_ms: i64,
-    /// When the countdown began. A window that connects later is replayed the countdowns still
-    /// running; this is what tells those from a new one.
-    #[ts(type = "number")]
-    pub opened_ms: i64,
-    /// `pending` → `vetoed` or `cancelled`, or `proceeding` → `done` / `failed`.
-    #[ts(type = r#""pending" | "vetoed" | "cancelled" | "proceeding" | "done" | "failed""#)]
-    pub status: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub error: Option<String>,
-}
-
-/// `sensitive:cleared`: the countdown ended, and how.
-#[derive(Clone, Debug, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct SensitiveClearedEvent {
-    pub request_id: String,
-    pub outcome: String,
-}
 
 /// Data for `sensitive.decide`: the countdown's `request_id` (from `sensitive:pending`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]

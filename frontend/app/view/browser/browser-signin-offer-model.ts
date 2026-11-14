@@ -70,6 +70,8 @@ export interface SigninPending {
     origin: string;
     /** Masked, e.g. `al***`. */
     user: string;
+    /** `account`: an agent making a new account; otherwise signing in. */
+    kind: "signin" | "account";
     deadlineMs: number;
 }
 
@@ -78,11 +80,12 @@ export function readSigninPending(meta: Record<string, unknown> | undefined): Si
     if (!v || typeof v !== "object") return undefined;
     const { id, agent, origin, user, deadline_ms } = v;
     if (typeof id !== "string" || typeof agent !== "string" || typeof origin !== "string" || typeof deadline_ms !== "number") return undefined;
-    return { id, agent, origin, user: typeof user === "string" ? user : "", deadlineMs: deadline_ms };
+    return { id, agent, origin, user: typeof user === "string" ? user : "", kind: v.kind === "account" ? "account" : "signin", deadlineMs: deadline_ms };
 }
 
 export function signinPendingText(p: SigninPending, nowMs: number): string {
     const left = Math.max(0, Math.ceil((p.deadlineMs - nowMs) / 1000));
+    if (p.kind === "account") return `${p.agent} is creating an account on ${p.origin}: the password comes from your Vault (${left} s)`;
     const as = p.user ? ` as ${p.user}` : "";
     return `${p.agent} is signing in to ${p.origin}${as} with your saved sign-in (${left} s)`;
 }

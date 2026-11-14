@@ -373,6 +373,8 @@ mod spawn_site_coverage {
          "sanitized: the host's `gh-agent token` for a container agent's repository, sanitize_external_command (it is told only the agent id); and its `scan-push`, which judges a container's push from data on stdin, sanitize_external_command, run in a temp directory with fixed arguments; and its `pr merge`, which srv runs for a container agent with arguments it builds itself, sanitize_external_command, run in a temp directory"),
         ("src/identity/aws_broker/mint.rs", "&spec.program", 1,
          "sanitized: the host program that mints a container agent's AWS session (aws configure export-credentials, or a grant's own recipe), sanitize_external_command, then only an allowlist of the environment is passed on"),
+        ("src/backend/app_version.rs", "\"/usr/bin/plutil\"", 1,
+         "sanitized: macOS only: reads a binary Info.plist's version for Browse (`plutil -extract CFBundleShortVersionString`), sanitize_external_std_command, no input, output parsed then discarded"),
         ("src/open_cli.rs", "\"open\"", 1,
          "sanitized: `agentmux-srv open` starts the person's browser (macOS) at the sign-in line, sanitize_external_std_command"),
         ("src/open_cli.rs", "\"rundll32\"", 1,
