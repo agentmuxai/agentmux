@@ -25,6 +25,22 @@
 #      automatic retry of a STALLED attempt (timed out, killed by the watchdog or by a signal). The retry reuses what
 #      the first attempt compiled. A failing test or a compile error is not retried.
 #
+# 2026-11-14: the stall is the srv test compile, and the watchdog above could not catch it. Its last sample before a
+# freeze (PR 7232, run 43538724481) read 724 MB available with 11.5 GB of swap free, nowhere near the trigger, and then
+# the sampler was starved too: no sample for 20 minutes 49 seconds, until the 25-minute limit killed rustc and the
+# machine was fine within 5 seconds. Every healthy run sits at the same edge (26 runs: 338 to 530 MB available at the
+# lowest, 15.2 to 15.6 GB used of ~15.6, 2.7 to 5.1 GB swapped, memory pressure peaks of 9 to 69), so no threshold on
+# those readings tells a healthy run from the one that is about to freeze. What changed:
+#
+#   4. The build runs with CARGO_BUILD_JOBS=2 (CI_CARGO_JOBS): the srv test compile holds about 10 GB when type-checking
+#      ends and takes 4+ GB more in the parallel LLVM phase, with ~19 GB wanted in all (14.9 GB resident + the swap) on a
+#      16 GB runner. Two LLVM threads instead of four is the cut, a candidate until the trace of the first runs shows
+#      the new peak in the `top=` and `demand=` fields.
+#   5. The sampler starts no process (it reads /proc with the shell's own builtins), so a machine that is paging has
+#      less to page in to keep it running, and a gap longer than GAP_SECONDS between two samples on a machine with
+#      under GAP_MEM_MB free counts as three strikes at once: the sampler found it was starved, which is the stall.
+#      Healthy runs never leave more than 8 seconds between samples. The trace says when it was starved.
+#
 # CI_ATTEMPT_CMD replaces the cargo commands, CI_MONITOR=0 turns the trace and watchdog off: both are for
 # scripts/ci-nextest-run.test.sh.
 
@@ -34,6 +50,9 @@ SELF="${BASH_SOURCE[0]}"
 TRACE="${CI_TRACE_FILE:-${RUNNER_TEMP:-/tmp}/resource-trace.log}"
 BUILD_LOG="${CI_BUILD_LOG:-${RUNNER_TEMP:-/tmp}/nextest-build.log}"
 FIRED="$TRACE.watchdog"
+CARGO_JOBS="${CI_CARGO_JOBS:-2}"
+GAP_SECONDS=20
+GAP_MEM_MB=2048
 CRATES="-p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats"
 
 # Whether the machine is out of memory: below 512 MB available and 1 GB of swap free, or below 300 MB available
@@ -47,9 +66,19 @@ pressure_high() {
     [ "$mem_avail" -lt 300 ] || { [ "$mem_avail" -lt 512 ] && [ "$swap_free" -lt 1024 ]; }
 }
 
+# The sampler below starts no process: every figure comes from /proc through the shell's own builtins (a read loop, printf's
+# time format, a read with a timeout for the sleep), because on a machine that is paging each new process has to be paged in
+# first, and the old one (ps, awk, free, df, date, tee) went 20 minutes without a sample.
+
 # The kernel's memory pressure: the share of the last 10 s in which every task was stalled on memory ("full avg10").
+# Sets PSI ("na" without it).
 memory_psi() {
-    awk '/^full/ {split($2, a, "="); print a[2]; found = 1} END {if (!found) print "na"}' /proc/pressure/memory 2>/dev/null || echo na
+    local kind a rest
+    PSI=na
+    while read -r kind a rest; do
+        [ "$kind" = full ] && PSI=${a#avg10=}
+    done 2>/dev/null < /proc/pressure/memory
+    return 0
 }
 
 # Whether an attempt's exit status means it stalled rather than failed: timed out (124), killed (137), terminated
@@ -59,39 +88,94 @@ stalled() {
     [ -e "$FIRED" ]
 }
 
-# MB figures from /proc/meminfo: available memory and free swap.
-meminfo_mb() {
-    awk '/^MemAvailable:/ {a=$2} /^SwapFree:/ {s=$2} END {printf "%d %d", a / 1024, s / 1024}' /proc/meminfo
+# Memory in MB from /proc/meminfo: MEM_AVAIL_MB, MEM_USED_MB (total less available, which is what free shows as used),
+# SWAP_FREE_MB, SWAP_USED_MB.
+read_mem() {
+    local key val rest total=0 avail=0 swap_total=0 swap_free=0
+    while read -r key val rest; do
+        case "$key" in
+            MemTotal:) total=$val ;;
+            MemAvailable:) avail=$val ;;
+            SwapTotal:) swap_total=$val ;;
+            SwapFree:) swap_free=$val ;;
+        esac
+    done < /proc/meminfo
+    MEM_AVAIL_MB=$((avail / 1024))
+    MEM_USED_MB=$(((total - avail) / 1024))
+    SWAP_FREE_MB=$((swap_free / 1024))
+    SWAP_USED_MB=$(((swap_total - swap_free) / 1024))
 }
 
+# The process holding the most memory: TOP_PID, TOP_COMM and TOP_MB. With an argument, the runner's own processes and the
+# system's are left out (what the watchdog may kill).
+top_process() {
+    local d rss comm best=0
+    TOP_PID="" TOP_COMM="-" TOP_MB=0
+    for d in /proc/[0-9]*; do
+        { read -r _ rss _; } 2>/dev/null < "$d/statm" || continue
+        [ "${rss:-0}" -gt "$best" ] || continue
+        { read -r comm; } 2>/dev/null < "$d/comm" || continue
+        if [ -n "${1:-}" ]; then
+            case "$comm" in Runner* | dotnet* | systemd* | sshd* | bash | ps | awk) continue ;; esac
+        fi
+        best=$rss TOP_PID=${d#/proc/} TOP_COMM=$comm TOP_MB=$((rss * 4 / 1024))
+    done
+}
+
+# Sets SAMPLE: one trace line. `demand` is memory used plus swap used: what the build wants, past what the machine has.
 sample() {
-    local mem swap
-    read -r mem swap < <(meminfo_mb)
-    echo "[resources] $(date -u +%H:%M:%S) mem_avail=${mem}MB swap_free=${swap}MB $(free -m | awk 'NR==2{printf "mem_used=%dMB ", $3} NR==3{printf "swap_used=%dMB", $3}') disk_root_avail=$(df -m --output=avail / | tail -1 | tr -d ' ')MB top=$(ps -eo rss=,comm= --sort=-rss | head -1 | awk '{printf "%s:%dMB", $2, $1/1024}') psi_full10=$(memory_psi)"
+    local now
+    TZ=UTC printf -v now '%(%H:%M:%S)T' -1
+    read_mem
+    memory_psi
+    top_process
+    SAMPLE="[resources] $now mem_avail=${MEM_AVAIL_MB}MB swap_free=${SWAP_FREE_MB}MB mem_used=${MEM_USED_MB}MB swap_used=${SWAP_USED_MB}MB demand=$((MEM_USED_MB + SWAP_USED_MB))MB top=${TOP_COMM}:${TOP_MB}MB psi_full10=$PSI"
 }
 
-# Kill the process that holds the most memory, leaving the runner's own processes alone, and say what it was.
+# Kill the process that holds the most memory, leaving the runner's own processes alone, and say what it was. The kill comes
+# first: the report below starts processes, which a paging machine may take a while to start.
 kill_biggest() {
-    local pid rss comm
-    read -r pid rss comm < <(ps -eo pid=,rss=,comm= --sort=-rss | awk '$3 !~ /^(Runner|dotnet|systemd|sshd|ps|awk)/ {print; exit}')
-    [ -n "${pid:-}" ] || return 0
-    echo "[watchdog] memory is nearly gone; killing pid $pid ($comm, $((rss / 1024)) MB). Biggest processes:"
-    ps -eo pid=,rss=,etimes=,args= --sort=-rss | head -8 | cut -c1-200
+    top_process runner-safe
+    [ -n "$TOP_PID" ] || return 0
     : > "$FIRED"
-    kill -KILL "$pid" 2>/dev/null || true
+    kill -KILL "$TOP_PID" 2>/dev/null || true
+    local line="[watchdog] memory is nearly gone; killed pid $TOP_PID ($TOP_COMM, $TOP_MB MB). Biggest processes:"
+    echo "$line"
+    echo "$line" >> "$TRACE"
+    ps -eo pid=,rss=,etimes=,args= --sort=-rss | head -8 | cut -c1-200 | tee -a "$TRACE"
+}
+
+# One reading's verdict: STRIKES, from the strikes so far, the readings (MB) and the seconds since the last sample. Three
+# strikes in a row, or one sampler that was starved for GAP_SECONDS on a machine with under GAP_MEM_MB free, fire the watchdog.
+judge() {
+    local strikes=$1 mem=$2 swap=$3 gap=$4
+    if pressure_high "$mem" "$swap"; then strikes=$((strikes + 1)); else strikes=0; fi
+    if [ "$gap" -ge "$GAP_SECONDS" ] && [ "$mem" -lt "$GAP_MEM_MB" ]; then strikes=3; fi
+    STRIKES=$strikes
 }
 
 monitor() {
-    local strikes=0 mem swap
+    local strikes=0 now last=0 gap=0 fd="" tick="$TRACE.tick"
+    mkfifo "$tick" 2>/dev/null && exec {fd}<>"$tick"
     while true; do
-        sample | tee -a "$TRACE"
-        read -r mem swap < <(meminfo_mb)
-        if pressure_high "$mem" "$swap"; then strikes=$((strikes + 1)); else strikes=0; fi
+        printf -v now '%(%s)T' -1
+        [ "$last" -gt 0 ] && gap=$((now - last))
+        last=$now
+        sample
+        echo "$SAMPLE"
+        echo "$SAMPLE" >> "$TRACE"
+        if [ "$gap" -ge "$GAP_SECONDS" ]; then
+            echo "[watchdog] the sampler was starved for ${gap}s: the machine was paging"
+            echo "[watchdog] the sampler was starved for ${gap}s: the machine was paging" >> "$TRACE"
+        fi
+        judge "$strikes" "$MEM_AVAIL_MB" "$SWAP_FREE_MB" "$gap"
+        strikes=$STRIKES
         if [ "$strikes" -ge 3 ]; then
-            kill_biggest 2>&1 | tee -a "$TRACE"
+            kill_biggest 2>&1
             strikes=0
         fi
-        sleep 5
+        gap=0
+        if [ -n "$fd" ]; then read -r -t 5 -u "$fd" || true; else sleep 5; fi
     done
 }
 
@@ -102,6 +186,8 @@ attempt() {
         bash -c "$CI_ATTEMPT_CMD"
         return $?
     fi
+    # Two LLVM threads in the srv test compile instead of four: see 4. in the header.
+    export CARGO_BUILD_JOBS="$CARGO_JOBS"
     if [ "${IN_QUEUE:-}" = true ]; then
         # The queue builds only what its tests need: srv's unit tests (where most guards are), mcp's unit tests and
         # common's one integration test. The other crates keep the cheaper check (srv's own is covered by its test
@@ -125,7 +211,7 @@ main() {
         monitor &
         monitor_pid=$!
         # shellcheck disable=SC2064
-        trap "kill $monitor_pid 2>/dev/null" EXIT
+        trap "kill $monitor_pid 2>/dev/null; rm -f '$TRACE.tick'" EXIT
     fi
     local limits=("${CI_ATTEMPT1_SECONDS:-1500}" "${CI_ATTEMPT2_SECONDS:-900}") status=0 n
     for n in 1 2; do
