@@ -40,8 +40,8 @@
 //! [`publish_now`]; a sign-in calls [`sign_in_changed`]; a change of the
 //! settings calls [`settings_changed`].
 
-mod machine;
-pub(crate) mod policy;
+pub mod machine;
+pub mod policy;
 
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -426,7 +426,7 @@ struct Publisher {
 static PUBLISHER: OnceLock<Publisher> = OnceLock::new();
 
 /// The publisher's status; `None` until it has one (or without a publisher).
-pub(crate) fn status() -> Option<PresenceStatusResult> {
+pub fn status() -> Option<PresenceStatusResult> {
     SHARED.status.lock().ok()?.clone()
 }
 
@@ -460,7 +460,7 @@ async fn farewell_now() -> bool {
 
 /// A clean quit: say goodbye, at most [`GOODBYE_TIMEOUT`]. Nothing is
 /// published after it.
-pub(crate) async fn goodbye_on_shutdown() {
+pub async fn goodbye_on_shutdown() {
     if farewell_now().await {
         tracing::info!("wan presence: said goodbye, devices show this computer as offline");
     }
@@ -469,13 +469,13 @@ pub(crate) async fn goodbye_on_shutdown() {
 /// A sign-out, before the sign-in is cleared (the goodbye needs it): say
 /// goodbye, at most [`GOODBYE_TIMEOUT`], and publish nothing more until
 /// [`signed_out`]. Whether the relay stored it.
-pub(crate) async fn goodbye_before_sign_out() -> bool {
+pub async fn goodbye_before_sign_out() -> bool {
     farewell_now().await
 }
 
 /// The sign-in is cleared (or clearing it failed): publishing may go on,
 /// and the status says "signed off" when the goodbye was stored.
-pub(crate) fn signed_out(stored: bool) {
+pub fn signed_out(stored: bool) {
     SHARED.hold.store(false, Ordering::SeqCst);
     if let Some(tx) = SIGNALS.get() {
         let _ = tx.send(Event::Goodbye { stored });
@@ -483,12 +483,12 @@ pub(crate) fn signed_out(stored: bool) {
 }
 
 /// Forget the backoff and try at once. False when no publisher runs.
-pub(crate) fn publish_now() -> bool {
+pub fn publish_now() -> bool {
     SIGNALS.get().is_some_and(|tx| tx.send(Event::PublishNow).is_ok())
 }
 
 /// A sign-in, sign-out or account change in this process: try at once.
-pub(crate) fn sign_in_changed() {
+pub fn sign_in_changed() {
     if let Some(tx) = SIGNALS.get() {
         let _ = tx.send(Event::SignIn);
     }
@@ -497,7 +497,7 @@ pub(crate) fn sign_in_changed() {
 /// Start the publisher. No-op without a WAN identity store (nothing to sign
 /// with). `headless` is srv's `--headless` ([`policy`]). Stops with `token`
 /// (srv shutdown).
-pub(crate) fn spawn(
+pub fn spawn(
     feed: Arc<FleetFeed>,
     id_store: Arc<Store>,
     config: Arc<ConfigState>,

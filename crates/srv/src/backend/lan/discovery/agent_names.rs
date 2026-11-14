@@ -37,7 +37,7 @@ use std::collections::HashSet;
 ///   time only; never the account, the title or the failure text.
 ///
 /// An agent with no kind, state, line, provider or seat is left out of that map.
-pub(crate) fn agent_names_body(
+pub fn agent_names_body(
     mstore: &crate::backend::storage::store::Store,
     settings: &crate::backend::wconfig::SettingsType,
     agents: &[crate::backend::reactive::types::AgentRegistration],
@@ -103,7 +103,7 @@ pub(crate) fn agent_names_body(
 /// What an instance's `/agentmux/reactive/agent-names` answer says about its
 /// agents.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(crate) struct PeerAgents {
+pub struct PeerAgents {
     pub names: Vec<String>,
     /// Lower-cased name → state, for listed names only.
     pub status: BTreeMap<String, AgentState>,
@@ -130,7 +130,7 @@ pub(crate) struct PeerAgents {
 /// so the map is never larger than the name list. The same goes for
 /// `agent_lines` (`{name: line}`). A body from a build before `agent_status`
 /// gives names only.
-pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
+pub fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
     let names: Vec<String> = value
         .get("agents")
         .and_then(|a| a.as_array())

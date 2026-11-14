@@ -576,7 +576,7 @@ fn run_outcome_message(op: &str, outcome: RunOutcome) -> String {
 /// account key, so no key text (ids, hostnames) reaches a file name and no
 /// key can escape the directory. No timeouts: file operations don't wait
 /// on a user.
-mod file {
+pub mod file {
     use super::*;
     use sha2::{Digest, Sha256};
     use std::io::Write;

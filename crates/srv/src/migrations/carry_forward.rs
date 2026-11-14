@@ -139,7 +139,7 @@ pub(crate) fn continuity_problem(db_dir: &Path, from: &str) -> Option<String> {
 /// from ([`CARRIED_FROM_FILE`]). Returns
 /// the version directory copied from, or `None` when there was nothing to do
 /// or the copy failed (logged; the version then starts fresh).
-pub(crate) fn from_previous_version(db_dir: &Path, version: &str) -> Option<PathBuf> {
+pub fn from_previous_version(db_dir: &Path, version: &str) -> Option<PathBuf> {
     match try_from_previous_version(db_dir, version) {
         Ok(from) => from,
         Err(e) => {

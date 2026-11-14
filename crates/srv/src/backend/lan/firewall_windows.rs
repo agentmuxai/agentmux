@@ -143,7 +143,7 @@ fn rule_from_variant(v: &VARIANT) -> windows::core::Result<FwRule> {
         let interfaces_set = !rule.Interfaces()?.is_empty();
         let restricted = is_restricted(&rule, !app.trim().is_empty());
         Ok(FwRule {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             name: rule.Name().map(|b| b.to_string()).unwrap_or_default(),
             enabled: rule.Enabled()?.as_bool(),
             inbound: rule.Direction()? == NET_FW_RULE_DIR_IN,
@@ -261,7 +261,7 @@ fn adapters(categories: &HashMap<String, Category>) -> Vec<Adapter> {
         let id = iface.adapter_name.to_uppercase();
         let entry = by_id.entry(id.clone()).or_insert_with(|| Adapter {
             category: categories.get(&id).copied(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             id,
             name: iface.name.clone(),
             ipv4: Vec::new(),

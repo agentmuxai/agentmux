@@ -101,12 +101,12 @@ pub fn all_in(config_home: &Path, topic: Topic) -> Vec<String> {
 
 /// This instance's config dir; in tests one temporary dir for the whole run, so no test writes the real one.
 fn home() -> PathBuf {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
         DIR.get_or_init(|| tempfile::tempdir().expect("a temporary config dir")).path().to_path_buf()
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     crate::backend::base::get_mux_config_dir()
 }
 

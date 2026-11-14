@@ -170,7 +170,7 @@ impl SupervisorSettings {
 
     /// The settings now; the defaults before the config is attached.
     pub fn current() -> Self {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(s) = SETTINGS_IN_TEST.with(|c| c.get()) {
             return s;
         }
@@ -208,7 +208,7 @@ impl SupervisorSettings {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static ENABLED_IN_TEST: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
     static SETTINGS_IN_TEST: std::cell::Cell<Option<SupervisorSettings>> = const { std::cell::Cell::new(None) };
@@ -228,7 +228,7 @@ pub fn set_enabled_for_test(on: bool) {
 
 /// Whether the master switch is on now.
 pub fn enabled() -> bool {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(on) = ENABLED_IN_TEST.with(|c| c.get()) {
         return on;
     }

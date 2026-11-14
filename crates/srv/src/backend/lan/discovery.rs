@@ -24,16 +24,16 @@ use tokio::sync::oneshot;
 
 use crate::backend::eventbus::EventBus;
 
-mod agent_names;
-mod events;
-mod lan_instances;
-mod one_per_instance;
-mod udp_peers;
-mod uid_refetch;
+pub mod agent_names;
+pub mod events;
+pub mod lan_instances;
+pub mod one_per_instance;
+pub mod udp_peers;
+pub mod uid_refetch;
 
 pub use events::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
-pub(crate) use agent_names::{agent_names_body, parse_agent_names_body, PeerAgents};
-pub(crate) use one_per_instance::{one_per_instance, peer_base_url};
+pub use agent_names::{agent_names_body, parse_agent_names_body, PeerAgents};
+pub use one_per_instance::{one_per_instance, peer_base_url};
 pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
 
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
@@ -1462,7 +1462,7 @@ pub struct LanDiscoveryController {
     /// per-id cache) bounds the damage regardless of how many distinct
     /// identities are probed.
     pubkey_lookup_limiter: std::sync::Mutex<LookupRateLimiter>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     peers_for_test: std::sync::Mutex<Vec<LanInstance>>,
 }
 
@@ -1491,7 +1491,7 @@ struct LanPubkeyCacheEntry {
 /// function is ever called, `verify_lan_signature` has already confirmed a
 /// `lan_sig` was actually presented — so "we didn't check" must be
 /// distinguishable from "there was nothing to check."
-pub(crate) enum LanPubkeyLookup {
+pub enum LanPubkeyLookup {
     /// A peer has a public key on file for this agent_id.
     Found(Vec<u8>),
     /// No peer (that answered) has ever minted a LAN key for this agent_id
@@ -1583,7 +1583,7 @@ impl LanDiscoveryController {
             event_bus,
             agent_cache: std::sync::RwLock::new(HashMap::new()),
             pubkey_cache: std::sync::RwLock::new(HashMap::new()),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             peers_for_test: Default::default(),
             pubkey_lookup_limiter: std::sync::Mutex::new(LookupRateLimiter::new(LAN_PUBKEY_LOOKUP_RATE_LIMIT)),
         }
@@ -1796,7 +1796,7 @@ impl LanDiscoveryController {
     }
 
     /// Cache a peer's answer for `agent_id` as `find_agent_lan_pubkey` would.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn seed_lan_pubkey_for_test(&self, agent_id: &str, public_key: Vec<u8>, uid_key: Option<(String, Vec<u8>)>) {
         self.pubkey_cache.write().unwrap().insert(
             agent_id.to_string(),

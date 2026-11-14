@@ -9,7 +9,7 @@ use serde::Serialize;
 
 /// `agent:shutdown` — the shutdown log a closing pane shows
 /// (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5, §12.1).
-pub(crate) const EVENT_AGENT_SHUTDOWN: &str = "agent:shutdown";
+pub const EVENT_AGENT_SHUTDOWN: &str = "agent:shutdown";
 
 /// One `agent:shutdown` line (`mps_events::AgentShutdown`): its order, step and text, and what
 /// the step adds.
@@ -139,7 +139,7 @@ pub struct BlockOutcome {
 }
 
 /// The longest reason the banner shows.
-pub(crate) const REASON_MAX: usize = 120;
+pub const REASON_MAX: usize = 120;
 /// Shown in place of a reason that looks like it holds a credential or asks
 /// for something destructive.
 pub const REASON_HIDDEN: &str = "Reason hidden: it looks sensitive.";
@@ -162,7 +162,7 @@ pub fn clean_reason(raw: &str) -> String {
 
 /// One line for display: bidi-override characters removed, control characters
 /// turned into spaces, whitespace collapsed, cut at `max` characters.
-pub(crate) fn clean_line(raw: &str, max: usize) -> String {
+pub fn clean_line(raw: &str, max: usize) -> String {
     let cleaned: String = raw
         .chars()
         .filter(|c| !crate::backend::notify::router::is_bidi_control(*c))

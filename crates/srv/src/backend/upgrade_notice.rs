@@ -327,14 +327,14 @@ fn has_session(store: &crate::backend::storage::store::Store, block_id: &str) ->
 }
 
 /// Why a note wasn't delivered: the pane is gone, or it may be ready later.
-pub(crate) enum Undelivered {
+pub enum Undelivered {
     Gone(String),
     Retry(String),
 }
 
 /// `deliver` until it succeeds, at most `attempts` times, `gap` apart; the
 /// last error when none does. A pane that is gone isn't waited for.
-pub(crate) async fn deliver_with_retry(
+pub async fn deliver_with_retry(
     mut deliver: impl FnMut() -> Result<(), Undelivered>,
     attempts: u32,
     gap: Duration,

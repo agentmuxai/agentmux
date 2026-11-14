@@ -75,7 +75,7 @@ fn sweep(store: &Store, now_ms: i64, alive: &impl Fn(u32, u64) -> bool) -> BTree
 }
 
 /// Starts the sweep: a first pass soon after srv starts, then every [`EVERY`].
-pub(crate) fn start(store: Arc<Store>, broker: Arc<Broker>) {
+pub fn start(store: Arc<Store>, broker: Arc<Broker>) {
     tokio::spawn(async move {
         tokio::time::sleep(FIRST_AFTER).await;
         let mut tick = tokio::time::interval(EVERY);

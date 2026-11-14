@@ -53,7 +53,7 @@ pub fn open_browser(url: &str) {
 }
 
 #[cfg(all(test, target_os = "windows"))]
-mod tests {
+pub mod tests {
     use std::os::windows::process::CommandExt;
 
     // Regresses the truncation bug this module fixes: cmd.exe splits an

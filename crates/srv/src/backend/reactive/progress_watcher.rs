@@ -93,7 +93,7 @@ const REPUBLISH_EVERY_TICKS: u64 = 5;
 const TODO_TOOL_NAMES: &[&str] = &["TodoWrite", "TaskCreate", "TaskUpdate"];
 
 #[path = "progress_codex_plan.rs"]
-mod codex_plan;
+pub mod codex_plan;
 use codex_plan::codex_plan;
 
 fn is_todo_tool(name: &str) -> bool {

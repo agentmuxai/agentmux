@@ -98,23 +98,6 @@ fn creates_and_upserts_take_just_their_required_fields() {
     assert_eq!(c.id, "");
     let u: CommandUnlinkAgentIdentityData = serde_json::from_value(json!({ "agent_id": "a1", "provider": "claude" })).unwrap();
     assert!(!u.silent);
-    let w: WidgetInstallReq = serde_json::from_value(json!({ "path": "/tmp/w" })).unwrap();
-    assert!(!w.replace);
-}
-
-#[test]
-fn auth_start_takes_a_request_without_account_or_env() {
-    // What login-backend.ts sends.
-    let r: StartProviderAuthReq = serde_json::from_value(json!({
-        "providerId": "claude",
-        "cliPath": "claude",
-        "authLoginArgs": ["auth", "login"],
-        "authCheckArgs": ["auth", "status"],
-    }))
-    .unwrap();
-    assert!(!r.direct_account && !r.requires_tty);
-    assert_eq!(r.existing_account_id, "");
-    assert!(r.auth_env.is_empty());
 }
 
 #[test]

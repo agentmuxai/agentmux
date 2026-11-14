@@ -28,7 +28,7 @@ pub struct TranscriptSource<'a> {
     pub global: bool,
     /// For a global source: the block's own copy, which a read uses when the
     /// zone turns out to be corrupt ([`damage`]).
-    pub(crate) own: Option<(&'a FileStore, String)>,
+    pub own: Option<(&'a FileStore, String)>,
 }
 
 /// What a tail read found.

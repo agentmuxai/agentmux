@@ -18,13 +18,13 @@ pub(crate) fn creds_json(mins: i64) -> String {
 }
 
 /// Credential JSON that expires `mins` minutes after `base` (the real clock, for a handler that reads it).
-pub(crate) fn creds_json_from(base: DateTime<Utc>, mins: i64) -> String {
+pub fn creds_json_from(base: DateTime<Utc>, mins: i64) -> String {
     let exp = (base + chrono::Duration::minutes(mins)).format("%Y-%m-%dT%H:%M:%SZ");
     format!(r#"{{"Version":1,"AccessKeyId":"AKIATESTKEY","SecretAccessKey":"test-secret-value","SessionToken":"test-session-token","Expiration":"{exp}"}}"#)
 }
 
 /// A runner that says what it is told to and remembers what it was asked.
-pub(crate) struct Fake {
+pub struct Fake {
     pub which: Option<PathBuf>,
     pub answer: Mutex<Option<Result<RunOutput, RunError>>>,
     pub seen: Mutex<Vec<(PathBuf, Vec<String>, Vec<(String, String)>)>>,

@@ -45,14 +45,14 @@ pub(crate) struct ClaimedFolderView {
 
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NativeMemoryClaimList")]
-pub(crate) struct ClaimList {
+pub struct ClaimList {
     pub list_id: String,
     pub agent_uid: String,
     pub folders: Vec<ClaimedFolderView>,
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum ReleaseError {
+pub enum ReleaseError {
     UnknownList,
     BadChoice,
     Store(String),
@@ -76,7 +76,7 @@ fn issued() -> &'static Mutex<HashMap<String, Issued>> {
 }
 
 /// The folders `agent_uid` has claimed, under a new `list_id`.
-pub(crate) fn list(fs: &FileStore, agent_uid: &str) -> Result<ClaimList, StoreError> {
+pub fn list(fs: &FileStore, agent_uid: &str) -> Result<ClaimList, StoreError> {
     let found = claims::claims_of(fs, agent_uid)?;
     let folders = found
         .iter()
@@ -95,7 +95,7 @@ pub(crate) fn list(fs: &FileStore, agent_uid: &str) -> Result<ClaimList, StoreEr
 
 /// Release `agent_uid`'s claim on folder `index` of list `list_id`. Returns
 /// whether a claim was removed (it may already be gone).
-pub(crate) fn release(fs: &FileStore, agent_uid: &str, list_id: &str, index: usize) -> Result<bool, ReleaseError> {
+pub fn release(fs: &FileStore, agent_uid: &str, list_id: &str, index: usize) -> Result<bool, ReleaseError> {
     let zone = {
         let map = issued().lock().unwrap_or_else(|e| e.into_inner());
         let list = map

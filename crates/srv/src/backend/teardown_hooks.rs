@@ -13,7 +13,7 @@ use std::sync::{Arc, OnceLock};
 use crate::backend::blockcontroller::Controller;
 
 /// The teardown's entries for callers that have no `AppState`.
-pub(crate) trait TeardownHooks: Send + Sync {
+pub trait TeardownHooks: Send + Sync {
     /// `controller.stop()` and nothing else, as the watchdog and the pane's `AgentStop` ask. Errors with
     /// `NOT_RUNNING` when the block has no controller.
     fn stop_now(&self, block_id: &str, graceful: bool) -> Result<(), String>;
@@ -28,7 +28,7 @@ pub(crate) trait TeardownHooks: Send + Sync {
 static HOOKS: OnceLock<Arc<dyn TeardownHooks>> = OnceLock::new();
 
 /// Register the teardown's entries. Later calls change nothing.
-pub(crate) fn install(hooks: Arc<dyn TeardownHooks>) {
+pub fn install(hooks: Arc<dyn TeardownHooks>) {
     let _ = HOOKS.set(hooks);
 }
 
@@ -39,11 +39,11 @@ pub(crate) fn hooks() -> Arc<dyn TeardownHooks> {
     if let Some(h) = HOOKS.get() {
         return h.clone();
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         Arc::new(PlainEntries)
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         Arc::new(NotReady)
     }
@@ -63,10 +63,10 @@ impl TeardownHooks for NotReady {
 
 /// What a controller test gets when nothing registered: a replace stops the old controller's own CLI process
 /// the way the agent teardown's replace does, and nothing else is stopped or dropped.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 struct PlainEntries;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl TeardownHooks for PlainEntries {
     fn stop_now(&self, block_id: &str, _: bool) -> Result<(), String> {
         Err(format!("NOT_RUNNING: no controller for block {block_id}"))

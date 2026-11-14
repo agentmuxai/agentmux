@@ -140,7 +140,7 @@ fn the_scripts_fetch_over_https_only_and_check_the_hash_before_anything_is_insta
 
 /// Runs the real download script in a shell with a fake `curl` that serves a local file.
 #[cfg(unix)]
-mod shell {
+pub mod shell {
     use super::*;
     use sha2::{Digest, Sha256};
     use std::os::unix::fs::PermissionsExt;

@@ -358,7 +358,7 @@ mod ambient_cli_stream_tests {
 /// The side call's CLI leads its own process group, so cancelling it ends the
 /// helpers it started, and a signal to its group can't reach srv.
 #[cfg(all(test, unix))]
-mod ambient_cli_group_tests {
+pub mod ambient_cli_group_tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt as _;
 

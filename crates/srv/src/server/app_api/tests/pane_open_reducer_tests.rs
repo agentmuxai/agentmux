@@ -1379,7 +1379,7 @@ fn signed_agent_on(state: &AppState, block_id: &str) -> (String, serde_json::Val
 }
 
 async fn post_json(app: &axum::Router, uri: &str, body: serde_json::Value) -> (axum::http::StatusCode, serde_json::Value) {
-    use tower::ServiceExt;
+    use ::tower::ServiceExt;
     let req = axum::http::Request::builder()
         .uri(uri)
         .method("POST")
@@ -1511,7 +1511,7 @@ async fn post_json_headers(
     body: serde_json::Value,
     extra: &[(&str, &str)],
 ) -> (axum::http::StatusCode, serde_json::Value) {
-    use tower::ServiceExt;
+    use ::tower::ServiceExt;
     let mut b = axum::http::Request::builder()
         .uri(uri)
         .method("POST")
@@ -3029,7 +3029,7 @@ async fn a_navigation_stopped_during_a_handoff_is_asked_about_over_it() {
 /// token in the key header, opens a pane in a jar of its own (never the user's Personal profile) and says so.
 #[tokio::test]
 async fn a_container_agents_browser_open_gets_its_own_incognito_jar() {
-    use tower::ServiceExt;
+    use ::tower::ServiceExt;
     let state = test_state();
     let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
         .await

@@ -67,7 +67,7 @@ pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 /// so that `is_held_elsewhere_error` is checked against the same text
 /// `spawn_process` actually returns, rather than a second copy that could
 /// drift; `tests/reopen_guard.rs` pins the wording users see.
-pub(crate) fn held_elsewhere_error(other: &str, closing: bool) -> String {
+pub fn held_elsewhere_error(other: &str, closing: bool) -> String {
     if closing {
         format!("This conversation's previous process (block {other}) is still shutting down. Try again in a few seconds.")
     } else {
@@ -83,7 +83,7 @@ pub(crate) fn held_elsewhere_error(other: &str, closing: bool) -> String {
 /// it silently hands the user's accepted prompt to a new conversation
 /// while the real one is open next door — exactly what the guard exists to
 /// prevent (codex P1 on PR #3551).
-pub(crate) fn is_held_elsewhere_error(err: &str) -> bool {
+pub fn is_held_elsewhere_error(err: &str) -> bool {
     err.starts_with("This conversation's previous process (block ")
         || err.starts_with("This conversation is already open in another pane (block ")
 }
@@ -963,7 +963,7 @@ fn build_answer_resume_message(answers: &serde_json::Value) -> String {
 /// `useAgentQuestions.test.ts`, "handleCancel fallback" describe block)
 /// pins it on that side. Neither test can see the other language's
 /// constant, so both must be updated by hand together.
-pub(crate) const ASK_USER_QUESTION_DENY_MESSAGE: &str = "The user declined to answer this question.";
+pub const ASK_USER_QUESTION_DENY_MESSAGE: &str = "The user declined to answer this question.";
 
 /// Compose the directive follow-up message used by the AskUserQuestion dead-air
 /// fallback when the answer was a DECLINE rather than a real answer. Mirrors
@@ -1568,24 +1568,27 @@ fn surface_error_line(
     true
 }
 
-mod eager_resume;
-mod input;
+pub mod eager_resume;
+pub mod input;
 #[cfg(test)]
 use input::park_tool_permission_request;
-pub(crate) mod lifecycle;
-pub(crate) mod outcome_line;
-mod process_waiter;
-mod queue;
-mod queued;
+pub mod lifecycle;
+pub mod outcome_line;
+pub mod process_waiter;
+pub mod queue;
+pub mod queued;
 use queued::{Deferred, QueuedMessage};
-mod resume_retry;
-mod segments;
-pub(crate) use resume_retry::pane_history_session_id;
-mod spawn;
-mod spawn_steps;
-mod status;
-mod stderr_reader;
-mod stdout_reader;
+pub mod resume_retry;
+pub mod segments;
+pub use resume_retry::pane_history_session_id;
+pub mod spawn;
+pub mod spawn_steps;
+pub mod status;
+pub mod stderr_reader;
+pub mod stdout_reader;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(any(test, feature = "test-support"))]
+pub mod lease_hooks;

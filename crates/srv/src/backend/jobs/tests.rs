@@ -798,7 +798,7 @@ async fn a_drone_run_is_written_to_the_ledger_with_its_cost() {
 }
 
 #[path = "policy_runs_tests.rs"]
-mod policy_runs;
+pub mod policy_runs;
 
 #[path = "caps_runs_tests.rs"]
-mod caps_runs;
+pub mod caps_runs;

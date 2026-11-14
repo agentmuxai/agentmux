@@ -15,7 +15,7 @@
 //! nondeterministic failures (reagent/codex on PR #2318). Every test that
 //! touches these env vars must acquire THIS lock instead of a local one.
 
-pub(crate) static ISOLATED_AUTH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub static ISOLATED_AUTH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// A `WpsClient` that records every event it's sent, for tests asserting a
 /// `Broker::publish` call actually fired (and with what event name/scopes) —
@@ -25,20 +25,20 @@ pub(crate) static ISOLATED_AUTH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mute
 /// `app_api::mod`. `mps.rs`'s own test module has an equivalent `TestClient`,
 /// but it's private to that file — this is the shared, crate-visible
 /// version for every OTHER module's tests, rather than three private copies.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Default)]
-pub(crate) struct RecordingWpsClient {
+pub struct RecordingWpsClient {
     events: std::sync::Mutex<Vec<(String, crate::backend::mps::MuxEvent)>>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl RecordingWpsClient {
-    pub(crate) fn received_events(&self) -> Vec<(String, crate::backend::mps::MuxEvent)> {
+    pub fn received_events(&self) -> Vec<(String, crate::backend::mps::MuxEvent)> {
         self.events.lock().unwrap().clone()
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl crate::backend::mps::WpsClient for std::sync::Arc<RecordingWpsClient> {
     fn send_event(&self, route_id: &str, event: crate::backend::mps::MuxEvent) {
         self.events.lock().unwrap().push((route_id.to_string(), event));
@@ -49,8 +49,8 @@ impl crate::backend::mps::WpsClient for std::sync::Arc<RecordingWpsClient> {
 /// fixed `"test-route"` route id, with a fresh `RecordingWpsClient` wired in
 /// as its client — the minimum setup every `agent:memory:changed:*` publish
 /// test needs, so each call site's test isn't re-deriving the same six lines.
-#[cfg(test)]
-pub(crate) fn broker_recording(event_type: &str) -> (crate::backend::mps::Broker, std::sync::Arc<RecordingWpsClient>) {
+#[cfg(any(test, feature = "test-support"))]
+pub fn broker_recording(event_type: &str) -> (crate::backend::mps::Broker, std::sync::Arc<RecordingWpsClient>) {
     let broker = crate::backend::mps::Broker::new();
     let client = std::sync::Arc::new(RecordingWpsClient::default());
     broker.set_client(Box::new(std::sync::Arc::clone(&client)));
@@ -69,17 +69,17 @@ pub(crate) fn broker_recording(event_type: &str) -> (crate::backend::mps::Broker
 /// schemas with the first workspace seeded, a file store, the event bus and the broker. A core
 /// test takes this and no more, so it does not name `server::AppState`, which belongs to the
 /// layer above; `server::tests::test_state` is built from the same parts.
-#[cfg(test)]
-pub(crate) struct CoreParts {
-    pub(crate) mstore: std::sync::Arc<crate::backend::storage::store::Store>,
-    pub(crate) filestore: std::sync::Arc<crate::backend::storage::filestore::FileStore>,
-    pub(crate) event_bus: std::sync::Arc<crate::backend::eventbus::EventBus>,
-    pub(crate) broker: std::sync::Arc<crate::backend::mps::Broker>,
+#[cfg(any(test, feature = "test-support"))]
+pub struct CoreParts {
+    pub mstore: std::sync::Arc<crate::backend::storage::store::Store>,
+    pub filestore: std::sync::Arc<crate::backend::storage::filestore::FileStore>,
+    pub event_bus: std::sync::Arc<crate::backend::eventbus::EventBus>,
+    pub broker: std::sync::Arc<crate::backend::mps::Broker>,
     /// The reducer's state, empty: what `dispatch` runs commands against.
-    pub(crate) srv_state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    pub srv_state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl CoreParts {
     /// Run a command through the reducer and persist what it emitted to the store, as a handler does:
     /// how a core test makes a workspace, a tab or a pane the way the app does.
@@ -95,8 +95,8 @@ impl CoreParts {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn core_parts() -> CoreParts {
+#[cfg(any(test, feature = "test-support"))]
+pub fn core_parts() -> CoreParts {
     use std::sync::Arc;
     let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
     // This one store backs mstore/id_store/identity_store below, so it has to
@@ -120,7 +120,7 @@ pub(crate) fn core_parts() -> CoreParts {
 /// be built into a fresh temp dir that was deliberately leaked every run —
 /// 4.4 MB each, gigabytes of `/tmp` on a machine where many agents run the
 /// srv tests.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn fake_app_server_binary() -> &'static std::path::PathBuf {
     static BINARY: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     BINARY.get_or_init(|| {

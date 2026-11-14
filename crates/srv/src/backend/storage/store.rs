@@ -189,7 +189,7 @@ impl Store {
     /// Every statement in that schema is `CREATE TABLE/INDEX IF NOT EXISTS`,
     /// so tables already present from the object schema are left untouched;
     /// this only fills in the ones that are missing.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn apply_identity_schema_for_tests(&self) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         run_identity_store_schema(&conn)?;
@@ -327,7 +327,7 @@ impl Store {
     /// own per-table CRUD via the `DroneStore` extension trait
     /// pattern (see `crates/srv/src/backend/storage/drone_store.rs`). Outside
     /// callers must use the typed methods on this impl.
-    pub(crate) fn conn(&self) -> &Mutex<Connection> {
+    pub fn conn(&self) -> &Mutex<Connection> {
         &self.conn
     }
 

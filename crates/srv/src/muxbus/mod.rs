@@ -12,12 +12,12 @@ pub mod wan_lease;
 pub mod pkce;
 pub mod relay;
 pub mod relay_watch;
-pub(crate) mod server_hooks;
+pub mod server_hooks;
 pub mod wan_presence;
 pub mod wan_publish;
 pub mod wan_key_revocation;
 pub mod wan_verify;
-pub(crate) mod ws_connect;
+pub mod ws_connect;
 
 use crate::backend::storage::muxbus::MuxBusCredentials;
 use crate::broker::CredentialState;
@@ -60,7 +60,7 @@ pub(crate) fn stale_sign_in_reason(
 
 /// [`stale_sign_in_reason`] against the global broker and the cloud's
 /// published settings (cached, see `discovery::cloud_settings`).
-pub(crate) async fn stale_sign_in(creds: &MuxBusCredentials, http: &reqwest::Client) -> Option<String> {
+pub async fn stale_sign_in(creds: &MuxBusCredentials, http: &reqwest::Client) -> Option<String> {
     let broker = crate::broker::get_global().and_then(|s| s.state(CREDENTIAL_ID));
     let discovered = discovery::cloud_settings(http).await;
     stale_sign_in_reason(broker.as_ref(), creds, discovered.as_ref())

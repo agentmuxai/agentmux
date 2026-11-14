@@ -27,16 +27,16 @@
 // exhaustiveness; same pattern as the launcher reducer.
 
 
-mod block;
-mod layout;
+pub mod block;
+pub mod layout;
 pub(crate) use layout::heal_loaded_layout;
-mod lifecycle;
-mod snapshot;
-mod tab;
-#[cfg(test)]
+pub mod lifecycle;
+pub mod snapshot;
+pub mod tab;
+#[cfg(any(test, feature = "test-support"))]
 mod test_support;
-mod window;
-mod workspace;
+pub mod window;
+pub mod workspace;
 
 use agentmux_common::ipc::{Command, ErrorCode, Event};
 use crate::state::State;

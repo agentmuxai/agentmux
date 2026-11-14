@@ -10,10 +10,10 @@ use crate::backend::message_flow::{self, MessageFlowOutcome, MessageFlowVia, See
 use crate::backend::reactive::InjectionRequest;
 
 #[path = "delivery_steps.rs"]
-mod steps;
+pub mod steps;
 
 #[path = "reagent_age.rs"]
-mod reagent_age;
+pub mod reagent_age;
 
 /// One agent's answer to a pending pull, single or batched.
 #[derive(Deserialize)]

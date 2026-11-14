@@ -312,13 +312,13 @@ impl WshRpcEngine {
     /// Snapshot of every typed command's request/response pair, in command
     /// order. Handlers registered through the untyped [`Self::register_handler`]
     /// are absent — that is what lets the migration proceed one at a time.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn schema_json(&self) -> serde_json::Value {
         self.lock_inner().schema.to_json()
     }
 
     /// Every command with a handler, typed or not, sorted.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn command_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.lock_inner().handlers.keys().cloned().collect();
         names.sort();

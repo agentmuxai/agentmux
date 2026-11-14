@@ -229,7 +229,7 @@ pub fn check(store: &Store) -> Result<VaultChain, String> {
 }
 
 fn read_head() -> Option<Head> {
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return None;
     }
     let stored = secret_store::get_optional(HEAD_ID).ok()??;
@@ -258,7 +258,7 @@ fn write_head(value: &str) {
 /// Keeps the new row's place in the keychain: at once, or at most every [`HEAD_EVERY`], with a write after a
 /// burst so the head catches up with the last row.
 fn note_head(row: &VaultActivityRow) {
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return;
     }
     let value = format!("{}:{}", row.seq, row.hash);

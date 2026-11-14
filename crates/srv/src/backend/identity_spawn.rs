@@ -87,12 +87,12 @@ pub(crate) enum SpawnPath {
 /// `record_process_spawn`'s callers need not pass a store.
 static ROW_STORE: OnceLock<Arc<Store>> = OnceLock::new();
 
-pub(crate) fn attach_row_store(store: Arc<Store>) {
+pub fn attach_row_store(store: Arc<Store>) {
     let _ = ROW_STORE.set(store);
 }
 
 /// The object store [`attach_row_store`] attached; `None` before boot does.
-pub(crate) fn row_store() -> Option<&'static Arc<Store>> {
+pub fn row_store() -> Option<&'static Arc<Store>> {
     ROW_STORE.get()
 }
 
@@ -108,7 +108,7 @@ pub(crate) fn block_has_row(block_id: &str) -> bool {
 
 /// [`block_has_row`] against a given store. A store fault answers "has a
 /// row" (counted): a gate must never read clear because a read failed.
-pub(crate) fn store_block_has_row(store: &Store, block_id: &str) -> bool {
+pub fn store_block_has_row(store: &Store, block_id: &str) -> bool {
     match store.instance_get_active_for_block(block_id) {
         Ok(Some(instance)) => !instance.id.trim().is_empty(),
         Ok(None) => false,
@@ -171,7 +171,7 @@ pub(crate) fn carried_token(block_id: &str) -> Option<bool> {
 /// although it has a row, so `has_row` asks the store. `is_live` filters out
 /// registrations whose block no longer runs anything here, so a stale
 /// registration cannot hold the gauge up.
-pub(crate) fn live_gauges(
+pub fn live_gauges(
     registrations: &[AgentRegistration],
     is_live: impl Fn(&str) -> bool,
     has_row: impl Fn(&str) -> bool,

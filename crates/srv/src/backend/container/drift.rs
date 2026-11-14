@@ -11,7 +11,7 @@ use crate::backend::container::image::is_agent_base_image;
 
 /// Held shared by every turn that runs in a container, and exclusively while the container is
 /// being updated: a turn cannot start inside an update, and an update cannot start under a turn.
-pub(crate) fn update_gate(container_name: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
+pub fn update_gate(container_name: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex, OnceLock};
     static GATES: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::RwLock<()>>>>> = OnceLock::new();
@@ -36,7 +36,7 @@ fn version_of(label: Option<&str>, image_ref: &str) -> Option<String> {
 impl ContainerManager {
     /// The AgentMux version of the base image `container_name` was created from, or `None`
     /// when it isn't the base image (a custom image is the user's), or can't be read.
-    pub(crate) async fn base_image_version(&self, container_name: &str) -> Option<String> {
+    pub async fn base_image_version(&self, container_name: &str) -> Option<String> {
         let details = self.inner.docker.inspect_container(container_name, None).await.ok()?;
         let image_ref = details.config.as_ref()?.image.clone()?;
         if !is_agent_base_image(&image_ref) {
@@ -52,7 +52,7 @@ impl ContainerManager {
     /// Removes the container so the next turn creates it again from the current image. The
     /// per-agent volumes (CLI, Claude home) and the bind-mounted workspace and memory stay;
     /// whatever else was installed inside the container is gone.
-    pub(crate) async fn update_container(&self, container_name: &str) -> Result<(), ContainerError> {
+    pub async fn update_container(&self, container_name: &str) -> Result<(), ContainerError> {
         let _ = self.stop(container_name, 10).await;
         self.remove(container_name, true).await
     }

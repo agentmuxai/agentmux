@@ -26,7 +26,7 @@
 //! This is a pure addition in its first PR — no existing watcher has been
 //! migrated onto it yet. See the spec's §5 migration path.
 
-mod pool;
-mod recovery;
+pub mod pool;
+pub mod recovery;
 
 pub use pool::{FsWatchEvent, FsWatchEventKind, FsWatchPool, Subscription};

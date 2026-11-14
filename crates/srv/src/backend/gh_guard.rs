@@ -151,12 +151,12 @@ pub fn apply_gh_guard_for(env_vars: &mut HashMap<String, String>, config_home: &
 /// [`apply_gh_guard`] keep the person's login from it.
 pub fn has_other_github_identity(env: &HashMap<String, String>) -> bool {
     // Under test every spawn is guarded, as every test of a spawn env expects.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         let _ = env;
         true
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         crate::backend::publish_guard::hooks_dir_for(env, |k| std::env::var(k).ok()).is_some()
             || gh_agent_on_path(env)
@@ -194,7 +194,7 @@ fn gh_agent_on_path(env: &HashMap<String, String>) -> bool {
 pub fn apply_gh_guard(env_vars: &mut HashMap<String, String>) {
     let other_identity = has_other_github_identity(env_vars);
     apply_gh_guard_for(env_vars, &guard_config_home(), other_identity);
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         crate::backend::publish_guard::apply_publish_guard(env_vars);
         crate::identity::github_tokens::apply_agent_git(env_vars);
@@ -205,11 +205,11 @@ pub fn apply_gh_guard(env_vars: &mut HashMap<String, String>) {
 /// builds a spawn env reaches this, and none of them should create or clear
 /// anything in the developer's real config home.
 pub fn guard_config_home() -> PathBuf {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         std::env::temp_dir().join(format!("agentmux-gh-guard-test-{}", std::process::id()))
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         crate::backend::base::get_mux_config_dir()
     }

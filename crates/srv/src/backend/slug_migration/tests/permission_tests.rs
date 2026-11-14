@@ -22,7 +22,7 @@ fn the_journal_holds_no_key_or_secret() {
 }
 
 #[cfg(unix)]
-mod unix {
+pub mod unix {
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 

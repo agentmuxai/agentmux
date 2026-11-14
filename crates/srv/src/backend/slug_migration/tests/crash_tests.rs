@@ -47,7 +47,7 @@ fn a_crashed_run_rolls_back_from(crash: Crash) {
 /// own process, and a failure names the case.
 macro_rules! crash_cases {
     ($($module:ident: $step:ident),* $(,)?) => {
-        mod resumes {
+        pub mod resumes {
             use super::*;
             $(
                 mod $module {
@@ -63,7 +63,7 @@ macro_rules! crash_cases {
                 }
             )*
         }
-        mod rolls_back {
+        pub mod rolls_back {
             use super::*;
             $(
                 mod $module {

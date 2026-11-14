@@ -53,7 +53,7 @@ const URL: base64::engine::GeneralPurpose = base64::engine::general_purpose::URL
 /// directory; `key` is the X25519 public key and `sig` the agent's WAN key
 /// over it, both standard base64.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct SealOffer {
+pub struct SealOffer {
     pub instance: String,
     pub key_fp: String,
     pub key: String,
@@ -63,7 +63,7 @@ pub(crate) struct SealOffer {
 /// Where a sender seals to: the receiver's X25519 key, checked, and the
 /// fingerprint of the WAN key it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Recipient {
+pub struct Recipient {
     pub key: [u8; 32],
     pub key_fp: String,
 }
@@ -91,7 +91,7 @@ fn offer_material(agent_id: &str, instance: &str, key_fp: &str, key_b64: &str) -
 
 /// This install's offer for `agent_id`, whose WAN keypair is `wan_public`
 /// and `wan_seed`; `None` for a malformed key.
-pub(crate) fn offer(instance_id: &str, agent_id: &str, wan_public: &[u8; 32], wan_seed: &[u8; 32]) -> Option<SealOffer> {
+pub fn offer(instance_id: &str, agent_id: &str, wan_public: &[u8; 32], wan_seed: &[u8; 32]) -> Option<SealOffer> {
     let signing = ed25519_dalek::SigningKey::from_bytes(wan_seed);
     if signing.verifying_key().to_bytes() != *wan_public {
         return None;
@@ -107,7 +107,7 @@ pub(crate) fn offer(instance_id: &str, agent_id: &str, wan_public: &[u8; 32], wa
 /// directory) proves it: the record's chain holds, it is `agent_id`'s record
 /// for the offer's install and key, and that key signed the offer. `Err`
 /// says why not, to follow the agent's name.
-pub(crate) fn check_offer(offer: &SealOffer, record: &WanKeyRecord, agent_id: &str) -> Result<Recipient, &'static str> {
+pub fn check_offer(offer: &SealOffer, record: &WanKeyRecord, agent_id: &str) -> Result<Recipient, &'static str> {
     let wan_public = record.check_chain().ok_or("has a key record whose certificate doesn't check out")?;
     if record.instance_id != offer.instance || record.key_fp != offer.key_fp || !record.agent_id.eq_ignore_ascii_case(agent_id) {
         return Err("offered a sealing key for a different key record");
@@ -147,7 +147,7 @@ fn agree(secret: [u8; 32], public: &[u8; 32]) -> Option<[u8; 32]> {
 }
 
 /// `file_key` sealed to `to`, for the file `sha256` stored as `blob_id`.
-pub(crate) fn wrap(file_key: &[u8; 32], to: &Recipient, sha256: &str, blob_id: &str) -> Option<String> {
+pub fn wrap(file_key: &[u8; 32], to: &Recipient, sha256: &str, blob_id: &str) -> Option<String> {
     let mut secret = [0u8; 32];
     SystemRandom::new().fill(&mut secret).ok()?;
     let ephemeral = MontgomeryPoint::mul_base_clamped(secret).to_bytes();
@@ -165,7 +165,7 @@ pub(crate) fn wrap(file_key: &[u8; 32], to: &Recipient, sha256: &str, blob_id: &
 
 /// Why a sealed key didn't open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UnwrapError {
+pub enum UnwrapError {
     /// Sealed to another key: another install's copy of this agent, after
     /// its lease moved.
     OtherKey,
@@ -174,7 +174,7 @@ pub(crate) enum UnwrapError {
 }
 
 /// The file key `sealed` holds, opened with the agent's WAN seed.
-pub(crate) fn unwrap(sealed: &str, wan_public: &[u8; 32], wan_seed: &[u8; 32], sha256: &str, blob_id: &str) -> Result<[u8; 32], UnwrapError> {
+pub fn unwrap(sealed: &str, wan_public: &[u8; 32], wan_seed: &[u8; 32], sha256: &str, blob_id: &str) -> Result<[u8; 32], UnwrapError> {
     let (key_fp, body) = sealed
         .strip_prefix(SEALED_KEY_PREFIX)
         .and_then(|rest| rest.split_once('.'))

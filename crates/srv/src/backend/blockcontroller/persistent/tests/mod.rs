@@ -6,25 +6,24 @@
 //! — the controller module itself — so it sees exactly what the inline
 //! module used to see via `use super::*;`, private items included.
 
-mod continuation;
-mod fresh_start_disclosure;
-mod muxbus_registration;
-mod classify_exit_line;
-mod send_input;
-mod resume_poison;
-mod agent_id;
-mod shutdown;
-mod loop_stop;
-mod cap_interrupt;
-mod reopen_guard;
-mod eager_resume;
-mod immediate_delivery;
-mod single_live_instance;
-mod lease_hooks;
-mod resume_gate;
-mod cli_native;
-mod turn_ledger;
-mod login_failure;
-mod system_notes;
-mod message_origin;
-mod spawn_process;
+pub mod continuation;
+pub mod fresh_start_disclosure;
+pub mod muxbus_registration;
+pub mod classify_exit_line;
+pub mod send_input;
+pub mod resume_poison;
+pub mod agent_id;
+pub mod shutdown;
+pub mod loop_stop;
+pub mod cap_interrupt;
+pub mod reopen_guard;
+pub mod eager_resume;
+pub mod immediate_delivery;
+pub mod single_live_instance;
+pub mod resume_gate;
+pub mod cli_native;
+pub mod turn_ledger;
+pub mod login_failure;
+pub mod system_notes;
+pub mod message_origin;
+pub mod spawn_process;

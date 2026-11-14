@@ -17,19 +17,19 @@
 //! Independence boundary: this module has no dependency on any other project's container code.
 //! Docker best practices here were researched independently.
 
-pub(crate) mod drift;
+pub mod drift;
 pub mod limits;
 pub mod oom;
-mod keychain_credentials;
-mod mount_source;
-mod mounts;
+pub mod keychain_credentials;
+pub mod mount_source;
+pub mod mounts;
 pub(crate) use self::mounts::container_memory_dir;
-mod pull;
-mod reap;
+pub mod pull;
+pub mod reap;
 pub mod argv;
 pub mod cli;
 pub mod cli_release;
-mod upload;
+pub mod upload;
 pub mod credential;
 pub mod image;
 pub mod listener;

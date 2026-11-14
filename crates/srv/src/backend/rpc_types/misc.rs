@@ -252,7 +252,7 @@ impl RpcContext {
 
     /// The operator's window, proven: what tests hand an operator-only
     /// handler that should let the operator through.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn operator_for_tests() -> Self {
         Self { operator_proven: true, ..Default::default() }
     }

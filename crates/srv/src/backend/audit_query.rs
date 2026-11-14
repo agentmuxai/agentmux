@@ -10,13 +10,13 @@
 //! holds is not copied. Tool calls, turn ends and thoughts come from the activity day files (`audit_activity`), and are
 //! given only when asked for by kind.
 
-mod activity;
-mod jekt_file;
+pub mod activity;
+pub mod jekt_file;
 pub mod message_stats;
-mod ordered;
-mod provenance;
-mod segments;
-mod totals;
+pub mod ordered;
+pub mod provenance;
+pub mod segments;
+pub mod totals;
 
 use std::collections::HashSet;
 use std::path::Path;

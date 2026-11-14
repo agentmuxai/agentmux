@@ -1,44 +1,28 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-mod adoption;
-mod agents;
-mod ambient;
-mod backend;
-mod boot_timing;
 mod bootstrap;
-mod broker;
 mod config;
-mod connectivity;
-mod event_log;
 mod headless;
-mod identity;
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 mod malloc_arenas;
-mod migrations;
-mod persist;
-mod persist_subscriber;
 mod proc_name;
-mod reducer;
-mod registry;
 mod sagas;
 mod server;
 #[cfg(target_os = "windows")]
 mod srv_ipc;
-mod srv_info;
-mod state;
 mod system_drive;
 mod drone;
 mod messaging;
-mod muxbus;
 mod open_cli;
-mod util;
 #[cfg(windows)]
 mod crash_monitor;
-#[cfg(test)]
-mod test_support;
 
+use agentmux_srv::{adoption, agents, ambient, backend, boot_timing, broker, connectivity, event_log, identity, migrations, muxbus, persist, persist_subscriber, reducer, registry, srv_info, state, util};
 use server::build_routers;
+
+#[cfg(test)]
+use agentmux_srv::test_support;
 
 #[cfg(test)]
 mod tls_test_init;

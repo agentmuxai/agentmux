@@ -669,7 +669,7 @@ fn get_pagefile_volume_data(_values: &mut HashMap<String, f64>) {
 }
 
 #[cfg(all(test, target_os = "windows"))]
-mod handle_anomaly_tests {
+pub mod handle_anomaly_tests {
     use super::*;
 
     fn hsample(pid: u32, name: &str, handles: u32) -> HandleSample {
@@ -829,7 +829,7 @@ mod handle_anomaly_tests {
 }
 
 #[cfg(all(test, target_os = "windows"))]
-mod commit_attribution_tests {
+pub mod commit_attribution_tests {
     use super::*;
 
     fn sample(pid: u32, name: &str, commit_mb: f64) -> ProcSample {
@@ -1407,7 +1407,7 @@ mod uptime_tests {
 }
 
 #[cfg(all(test, not(target_os = "windows")))]
-mod watch_volume_tests {
+pub mod watch_volume_tests {
     use super::*;
     use std::path::Path;
 
