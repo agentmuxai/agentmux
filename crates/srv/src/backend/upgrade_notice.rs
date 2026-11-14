@@ -265,6 +265,22 @@ struct State {
 
 static STATE: OnceLock<Option<State>> = OnceLock::new();
 
+/// This start of srv: its version, when it began and, only when this very start made an upgrade, the version it came from.
+/// A restart soon after an upgrade is no new upgrade, though the note to the agents still counts it as one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Started {
+    pub version: String,
+    pub upgraded_from: Option<String>,
+    pub at_ms: i64,
+}
+
+static STARTED: OnceLock<Started> = OnceLock::new();
+
+/// How this srv started, once [`init`] has run: what an `app.started` event says.
+pub fn this_start() -> Option<Started> {
+    STARTED.get().cloned()
+}
+
 /// At srv start (`bootstrap::background`): record this version and remember
 /// whether an upgrade is being announced and which agents' turns the last quit
 /// cut off.
@@ -273,6 +289,11 @@ pub fn init(store: Arc<crate::backend::storage::store::Store>) {
         let dir = paths.instance_dir.clone();
         let now = agentmux_common::time::now_ms();
         let upgraded = observe_start(&dir, env!("CARGO_PKG_VERSION"), now);
+        let _ = STARTED.set(Started {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            upgraded_from: upgraded.as_ref().filter(|u| u.at_ms == now).map(|u| u.from.clone()),
+            at_ms: now,
+        });
         let cut_off = read_interrupted(&dir, now);
         if upgraded.is_none() && cut_off.agents.is_empty() {
             return None;
