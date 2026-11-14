@@ -285,6 +285,19 @@ jobs:
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.macos-tag }}
     secrets: inherit
 
+  # The server package (no desktop app): one tarball per platform, Linux and macOS, x64 and arm64. It is built from the
+  # release commit like the desktop builds and reaches the release through the same two file selections below, so the
+  # signed manifest lists it and `install.sh --server` can check it
+  # (docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md section 4).
+  build-server-package:
+    name: Build — server package
+    needs: gate
+    permissions:
+      contents: read
+    uses: agentmuxai/agentmux/.github/workflows/build-server-package.yml@main
+    with:
+      ref: ${{ github.sha }}
+
   # ── Phase 2b: Sign the release's manifest ───────────────────────────────
   # docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md. The app downloads
   # nothing a signed manifest doesn't list, so this runs between the builds and
@@ -315,7 +328,7 @@ jobs:
     # container-image is needed for its digest, not for the release: a failed image job
     # leaves the manifest without an image (the app then uses its versioned tag, as before),
     # so the other jobs are checked one by one instead of by `!failure()`.
-    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, container-image]
+    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, container-image]
     if: >-
       ${{ vars.RELEASE_SIGNING_ENABLED == 'true' && !cancelled()
       && contains(fromJSON('["success","skipped"]'), needs.gate.result)
@@ -323,6 +336,7 @@ jobs:
       && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
+      && contains(fromJSON('["success","skipped"]'), needs.build-server-package.result)
       && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
     environment: release-signing
@@ -380,7 +394,7 @@ jobs:
       - name: Flatten artifact tree
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-server-*.tar.gz" \) -exec cp {} dist-flat/ \;
           # The install scripts are release assets too, so the signed manifest covers them
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" dist-flat/; fi; done
@@ -461,7 +475,7 @@ jobs:
   # because macOS signing isn't set up (check-macos), never anything else.
   publish:
     name: Publish release
-    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, sign-release]
+    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, sign-release]
     if: >-
       ${{ !cancelled()
       && contains(fromJSON('["success","skipped"]'), needs.gate.result)
@@ -469,6 +483,7 @@ jobs:
       && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
+      && contains(fromJSON('["success","skipped"]'), needs.build-server-package.result)
       && contains(fromJSON('["success","skipped"]'), needs.sign-release.result)
       && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
@@ -504,7 +519,7 @@ jobs:
         # the only *.zip (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-server-*.tar.gz" \) -exec cp {} dist-flat/ \;
           # The install scripts are release assets too, so the signed manifest covers them
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" dist-flat/; fi; done
