@@ -571,6 +571,9 @@ pub async fn read_frames(
                 tree.nodes = t.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
                 let hidden = super::act::hidden_choices(&mut on, Some(fl.raw.id.as_str())).await;
                 super::snapshot::add_hidden_choices(&mut tree.nodes, &hidden);
+                // A frame is read whole, hidden text and all: what it hides is withheld as on the top page.
+                let layout = super::visibility::capture(&mut on).await;
+                super::hidden_secrets::withhold(&mut tree.nodes, &layout.hidden, layout.unknown);
                 for (backend, name) in nodes_needing_facts(&tree.nodes) {
                     if *describes_left == 0 {
                         break;

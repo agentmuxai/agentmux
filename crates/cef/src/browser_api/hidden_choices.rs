@@ -170,7 +170,7 @@ pub(super) async fn hidden_choices(cdp: &mut CdpSession, frame_id: Option<&str>)
             label_backend,
             file: f.get("file").and_then(Value::as_bool).unwrap_or(false),
             radio: f.get("radio").and_then(Value::as_bool).unwrap_or(false),
-            name: f.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+            name: super::hidden_secrets::scrub(f.get("name").and_then(Value::as_str).unwrap_or("")),
             checked: f.get("checked").and_then(Value::as_bool).unwrap_or(false),
             disabled: f.get("disabled").and_then(Value::as_bool).unwrap_or(false),
         });

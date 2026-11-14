@@ -448,6 +448,9 @@ pub(super) fn is_actionable_role(role: &str) -> bool {
 /// Whether `node`'s line masks a secret the page shows once: it then gets a
 /// reference, for `Browser` `capture`.
 fn masks_shown_once(node: &Value, role: &str, name: &str, in_zone: bool) -> bool {
+    if super::hidden_secrets::is_withheld(node) {
+        return true;
+    }
     let value = if VALUE_ROLES.contains(&role) { value_text(node) } else { None };
     super::shown_once::masks(name, value.as_deref(), in_zone, truthy(prop(node, "readonly")))
 }

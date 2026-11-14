@@ -43,6 +43,7 @@ pub mod frame_scope;
 pub mod frames;
 pub mod hibernation;
 pub mod hidden_choices;
+mod hidden_secrets;
 pub mod key_typing;
 pub mod last_input;
 pub mod nav_settle;
