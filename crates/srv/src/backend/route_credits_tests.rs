@@ -6,22 +6,18 @@
 use super::*;
 use crate::agents::failure::{classify, FailureClass, ROUTE_CREDITS_TITLE};
 use crate::backend::storage::agents::test_agent_def;
-use crate::server::AppState;
+use crate::test_support::CoreParts;
 use agentmux_common::ipc::{Command, Event};
 use serde_json::json;
 
 /// What Claude Code printed on the DeepSeek route when the key's credits ran out.
 const NO_CREDITS: &str = "API Error: 402 This request would exceed your available credits. This request requires more credits, or fewer max_tokens.";
 
-async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
-    let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
-    for ev in &evs {
-        crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
-    }
-    evs
+async fn dispatch_apply(state: &CoreParts, cmd: Command) -> Vec<Event> {
+    state.dispatch_apply(cmd).await
 }
 
-async fn tab(state: &AppState) -> String {
+async fn tab(state: &CoreParts) -> String {
     let ws = dispatch_apply(state, Command::CreateWorkspace { name: "w".into() })
         .await
         .iter()
@@ -40,7 +36,7 @@ async fn tab(state: &AppState) -> String {
         .unwrap()
 }
 
-async fn pane(state: &AppState, tab: &str, def: &str) -> String {
+async fn pane(state: &CoreParts, tab: &str, def: &str) -> String {
     dispatch_apply(state, Command::CreateBlock { tab_id: tab.into(), meta: json!({ "view": "agent", "agentId": def }) })
         .await
         .iter()
@@ -51,17 +47,17 @@ async fn pane(state: &AppState, tab: &str, def: &str) -> String {
         .unwrap()
 }
 
-fn agent(state: &AppState, id: &str, name: &str) {
+fn agent(state: &CoreParts, id: &str, name: &str) {
     let mut def = test_agent_def(id, name, "claude", "host", 1, "");
     state.mstore.agent_def_insert(&mut def).unwrap();
 }
 
-fn serve(state: &AppState, worker_id: &str, lead_id: &str) {
+fn serve(state: &CoreParts, worker_id: &str, lead_id: &str) {
     state
         .mstore
         .agent_content_set(&crate::backend::storage::store::AgentContent {
             agent_id: worker_id.to_string(),
-            content_type: crate::server::app_api::agent_spawn::WORKER_OF_CONTENT.into(),
+            content_type: crate::backend::agent_seat::WORKER_OF_CONTENT.into(),
             content: json!({ "agent": "lead", "id": lead_id }).to_string(),
             updated_at: 1,
         })
@@ -69,7 +65,7 @@ fn serve(state: &AppState, worker_id: &str, lead_id: &str) {
 }
 
 /// What the launch of the pane's harness records on it: the route it was started on.
-fn launched_on(state: &AppState, block_id: &str, route: &str) {
+fn launched_on(state: &CoreParts, block_id: &str, route: &str) {
     let mut update = crate::backend::obj::MetaMapType::new();
     update.insert(launch::BLOCK_META_KEY.to_string(), json!({ "route": route }));
     crate::backend::wcore::object_meta::update_object_meta(&state.mstore, &format!("block:{block_id}"), &update).unwrap();
@@ -110,7 +106,7 @@ fn only_a_credits_failure_event_with_its_pane_is_picked_up() {
 /// takes the failure off again and the next 402 is news again.
 #[tokio::test]
 async fn the_first_402_marks_every_agent_on_the_route_and_the_first_success_clears_them() {
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let tab = tab(&state).await;
     let id = uuid::Uuid::new_v4().to_string();
     let (a, b, c) = (format!("a-{id}"), format!("b-{id}"), format!("c-{id}"));
@@ -148,7 +144,7 @@ async fn the_first_402_marks_every_agent_on_the_route_and_the_first_success_clea
 /// ends. A 402 on the route left marks the panes still on it, wherever the agent's saved choice points (#47474).
 #[tokio::test]
 async fn a_402_after_a_switch_marks_the_panes_still_on_the_route_left_and_not_the_ones_relaunched() {
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let tab = tab(&state).await;
     let id = uuid::Uuid::new_v4().to_string();
     let (a, b, c) = (format!("a-{id}"), format!("b-{id}"), format!("c-{id}"));
@@ -195,7 +191,7 @@ async fn a_402_after_a_switch_marks_the_panes_still_on_the_route_left_and_not_th
 /// failure inside the episode's six hours is news again (#47473).
 #[tokio::test]
 async fn a_standalone_agents_next_failure_is_news_again_after_a_turn_that_worked() {
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let tab = tab(&state).await;
     let def = format!("solo-{}", uuid::Uuid::new_v4());
     agent(&state, &def, "Solo");
@@ -212,7 +208,7 @@ async fn a_standalone_agents_next_failure_is_news_again_after_a_turn_that_worked
 
 #[tokio::test]
 async fn an_agent_on_no_route_has_an_episode_of_its_own_and_one_that_ran_long_enough_is_let_go() {
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let tab = tab(&state).await;
     let def = format!("own-{}", uuid::Uuid::new_v4());
     agent(&state, &def, "Dee");
@@ -226,7 +222,7 @@ async fn an_agent_on_no_route_has_an_episode_of_its_own_and_one_that_ran_long_en
 
 #[tokio::test]
 async fn each_lead_is_told_once_about_its_own_agents_and_an_agent_with_no_lead_tells_no_one() {
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let id = uuid::Uuid::new_v4().to_string();
     let (lead, other_lead, a, b, c, loner) = (
         format!("lead-{id}"),
@@ -275,7 +271,7 @@ fn the_person_is_told_the_route_and_what_to_do_and_no_agent_by_name() {
 /// (#47508).
 #[tokio::test]
 async fn a_success_before_the_note_is_posted_leaves_no_note_for_a_route_that_works() {
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let tab = tab(&state).await;
     let id = uuid::Uuid::new_v4().to_string();
     let def = format!("a-{id}");
