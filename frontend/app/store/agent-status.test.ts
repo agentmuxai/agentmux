@@ -103,6 +103,15 @@ describe("rankAgentStatus", () => {
         expect(rankAgentStatus({ live: true, pausedForYou: true }).kind).toBe("working");
     });
 
+    // A Browser call answered "waiting" and the agent ended its turn: nothing is live, and the person is asked.
+    it("an open Browser request needs you only while no turn is in flight", () => {
+        expect(rankAgentStatus({ live: false, browserRequest: true }).kind).toBe("needs-you");
+        expect(rankAgentStatus({ live: false, browserRequest: true, ended: "completed" }).kind).toBe("needs-you");
+        // A message started another turn: it works until that turn ends.
+        expect(rankAgentStatus({ live: true, browserRequest: true }).kind).toBe("working");
+        expect(rankAgentStatus({ live: false, browserRequest: false }).kind).toBe("idle");
+    });
+
     it("holds with no turn in flight", () => {
         expect(rankAgentStatus({ live: false, held: { reconnecting: true } }).kind).toBe("held");
     });

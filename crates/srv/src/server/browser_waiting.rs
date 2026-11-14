@@ -123,10 +123,15 @@ pub(crate) fn open_on(pane: &str) -> Option<(String, String)> {
     lock().iter().find(|(_, r)| r.pane == pane && r.state == State::Open).map(|(id, r)| (id.clone(), r.question.clone()))
 }
 
-/// The open request `agent` has, if any (for the availability code: the agent is waiting for the person).
-#[allow(dead_code)]
-pub(crate) fn pending_for(agent: &str) -> Option<(String, String)> {
-    lock().iter().find(|(_, r)| r.state == State::Open && r.agent.eq_ignore_ascii_case(agent)).map(|(_, r)| (r.kind.to_string(), r.question.clone()))
+/// Whether any request is open. A list of agents asks about each of them only then.
+pub(crate) fn any_open() -> bool {
+    lock().values().any(|r| r.state == State::Open)
+}
+
+/// The pane where `agent`'s open request waits for the person, if it has one: an agent between turns with one
+/// is waiting for the person (`agent_runtime`). Its oldest request, so every look gives the same pane.
+pub(crate) fn pending_for(agent: &str) -> Option<String> {
+    lock().values().filter(|r| r.state == State::Open && r.agent.eq_ignore_ascii_case(agent)).min_by_key(|r| r.started).map(|r| r.pane.clone())
 }
 
 /// What a call that returned "waiting" answers.
@@ -373,7 +378,7 @@ mod tests {
         let (agent, pane) = ("agent-w1", "pane-w1");
         let id = fresh(agent, pane);
         assert_eq!(open_on(pane).map(|(i, _)| i), Some(id.clone()));
-        assert_eq!(pending_for(agent).map(|(k, _)| k), Some("approval".to_string()));
+        assert_eq!(pending_for(agent), Some(pane.to_string()));
         assert!(finish(&id, State::Done("The page is now https://example.com/sent.".into())));
         assert!(!finish(&id, State::Declined), "a second settlement does not replace the first");
         assert_eq!(open_on(pane), None);

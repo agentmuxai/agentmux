@@ -12,7 +12,8 @@ export type AgentRuntime = {
  */
 agent_id: string, state: AgentRuntimeState, 
 /**
- * Why, for a state that has a reason: `usage_limit`, `needs_login` or `starts_on_first_message`.
+ * Why, for a state that has a reason: `usage_limit`, `needs_login`, `starts_on_first_message` or
+ * `browser_request`.
  */
 detail?: string, 
 /**
@@ -22,7 +23,12 @@ resets_at?: number,
 /**
  * The block the agent runs in, shown in a pane or parked; absent for an agent that has never had one.
  */
-block_id?: string, desired: AgentDesiredState, name: string, provider: string, icon: string, 
+block_id?: string, 
+/**
+ * The pane where the person answers, when that is not the agent's own: the Browser pane its open
+ * request waits in (`detail` is `browser_request`).
+ */
+waiting_in?: string, desired: AgentDesiredState, name: string, provider: string, icon: string, 
 /**
  * The colour its pane shows, once it has had one.
  */
