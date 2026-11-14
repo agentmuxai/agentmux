@@ -20,6 +20,7 @@ import { revealBlock } from "@/app/util/reveal-block";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { SwarmFilterBar } from "../swarm/swarm-filter-bar";
 import { CardFacts } from "./atlas-card-facts";
+import { inContainer } from "./atlas-containers";
 import { ExtraCard, ExtraNodes, ServicesRegion } from "./atlas-extras";
 import { AtlasFleetBar } from "./atlas-fleet-bar";
 import { flowEndResolver } from "./atlas-flow";
@@ -85,14 +86,14 @@ function Node(props: {
                 "atlas-node--selected": props.selected,
                 "atlas-node--picked": props.picked,
                 "atlas-node--stale": a().stale,
-                "atlas-node--container": a().runtime === "container",
+                "atlas-node--container": inContainer(a()),
             }}
             data-tint={props.tint ?? undefined}
             data-container={a().container?.state}
             data-testid="atlas-node"
             style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${NODE_W}px`, height: `${NODE_H}px` }}
             aria-pressed={props.selected}
-            aria-label={`${a().name}, ${STATE_LABELS[a().state]}${a().runtime === "container" ? ", in a container" : ""}${props.picked ? ", selected" : ""}`}
+            aria-label={`${a().name}, ${STATE_LABELS[a().state]}${inContainer(a()) ? ", in a container" : ""}${props.picked ? ", selected" : ""}`}
             {...tip(a().line ?? STATE_LABELS[a().state])}
             onClick={(e) => props.onSelect(a().key, e)}
             onKeyDown={(e) => {
@@ -104,7 +105,7 @@ function Node(props: {
             <span class="atlas-node__top">
                 <span class="atlas-node__dot" />
                 <span class="atlas-node__name">{a().name}</span>
-                <Show when={a().runtime === "container"}>
+                <Show when={inContainer(a())}>
                     <i class="fa-solid fa-box atlas-node__kind" aria-hidden="true" />
                 </Show>
                 <Show when={props.picked}>

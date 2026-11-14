@@ -9,7 +9,13 @@
 
 import type { ContainerRuntimeStatus } from "@/types/rpc/ContainerRuntimeStatus";
 import type { ContainerStatus } from "@/types/rpc/ContainerStatus";
+import { isContainerRuntime } from "@/util/runtime-kind";
 import type { AtlasAgent, AtlasContainer, AtlasOrphan } from "./atlas-graph";
+
+/** The agent runs in a container, as far as its machine says where its agents run. */
+export function inContainer(agent: Pick<AtlasAgent, "runtime">): boolean {
+    return agent.runtime != null && isContainerRuntime(agent.runtime);
+}
 
 /** A container as the map shows it; null for one that is gone, or in a state this build does not know. */
 function containerOf(status: ContainerStatus): AtlasContainer | null {
@@ -49,6 +55,6 @@ export function containerRuntimeNote(
     containers: readonly ContainerStatus[]
 ): string | undefined {
     if (runtime.available || runtime.at_ms <= 0) return undefined;
-    const used = containers.length > 0 || agents.some((a) => !a.remote && a.runtime === "container");
+    const used = containers.length > 0 || agents.some((a) => !a.remote && inContainer(a));
     return used ? "container runtime not running" : undefined;
 }
