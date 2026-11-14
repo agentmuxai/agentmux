@@ -49,6 +49,7 @@ function Mount(props: { blockId: string; driver?: string; allowed?: string[] }) 
     let ph: HTMLDivElement | undefined;
     const model = {
         blockId: props.blockId,
+        setPageLive: () => {},
         closed: false,
         urlAtom: () => "https://agentmux.ai/",
         driverAgentAtom: () => props.driver,

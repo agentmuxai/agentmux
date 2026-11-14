@@ -44,6 +44,7 @@ globalThis.ResizeObserver ??= class {
 
 const model = {
     blockId: "hib1",
+    setPageLive: () => {},
     closed: false,
     urlAtom: () => "https://agentmux.ai/",
     driverAgentAtom: () => undefined,

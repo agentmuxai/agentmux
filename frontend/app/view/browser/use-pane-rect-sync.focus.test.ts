@@ -32,7 +32,8 @@ vi.stubGlobal(
 describe("usePaneRectSync — claim focus once the page is created", () => {
     it("claims focus for its block after browser_pane_create resolves", async () => {
         const giveFocus = vi.fn(() => true);
-        const model = { blockId: "b1", closed: false, giveFocus, urlAtom: () => "", driverAgentAtom: () => undefined, allowedOriginsAtom: () => [], identityAtom: () => undefined, onError: vi.fn(), onLoad: vi.fn() } as any;
+        const setPageLive = vi.fn();
+        const model = { blockId: "b1", closed: false, giveFocus, setPageLive, urlAtom: () => "", driverAgentAtom: () => undefined, allowedOriginsAtom: () => [], identityAtom: () => undefined, onError: vi.fn(), onLoad: vi.fn() } as any;
         const placeholder = document.createElement("div");
         document.body.appendChild(placeholder);
 
@@ -45,10 +46,15 @@ describe("usePaneRectSync — claim focus once the page is created", () => {
         await sync.createPane("https://example.com");
 
         expect(sync.paneCreated()).toBe(true);
+        // The model is told its page exists before the claim, so the claim's giveFocus reaches the host.
+        expect(setPageLive).toHaveBeenCalledWith(true);
+        expect(setPageLive.mock.invocationCallOrder[0]).toBeLessThan(claimFocusOnMount.mock.invocationCallOrder[0]);
         expect(claimFocusOnMount).toHaveBeenCalledWith("b1", expect.any(Function));
         // The claim's focus action is the pane's own giveFocus (browser_pane_focus).
         claimFocusOnMount.mock.calls[0][1]();
         expect(giveFocus).toHaveBeenCalled();
         dispose();
+        // The view going closes the page: the model is told there is none.
+        expect(setPageLive).toHaveBeenLastCalledWith(false);
     });
 });

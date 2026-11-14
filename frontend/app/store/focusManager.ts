@@ -150,7 +150,8 @@ class FocusManager {
         // A pane that finishes mounting after the user already clicked into
         // one of its inputs must not take the caret back.
         if (userCaretInBlock(blockId)) return;
-        giveFocus();
+        // The pane took it: the frames still trying its target on its behalf would only ask again.
+        if (giveFocus()) cancelFocusRetry();
     }
 }
 
