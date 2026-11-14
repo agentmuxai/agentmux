@@ -141,7 +141,7 @@ pub(crate) fn this_srv_may_clean() -> bool {
     let channel = agentmux_common::DataPaths::from_env().map(|p| p.channel);
     may_clean(&Start {
         own_home: std::env::var_os("AGENTMUX_HOME_OVERRIDE").is_some_and(|v| !v.is_empty()),
-        headless: crate::headless::active() || crate::headless::requested(),
+        headless: crate::backend::startup_mode::headless(),
         built_in_tree: agentmux_common::is_dev_self(),
         dev_mode: matches!(agentmux_common::RuntimeMode::from_env(), Some(agentmux_common::RuntimeMode::Dev { .. })),
         channel: channel.as_deref(),
