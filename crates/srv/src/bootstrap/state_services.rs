@@ -190,6 +190,7 @@ fn install_message_brokers(state: &AppState) {
     backend::audit_live::install_broker(Arc::clone(&state.broker));
     backend::message_flow::install(Arc::clone(&state.broker));
     backend::task_flow::install(Arc::clone(&state.broker));
+    backend::pr_flow::install(Arc::clone(&state.broker));
 }
 
 /// Lists this instance for the other AgentMux instances on this machine (`muxspect instances`).

@@ -96,6 +96,12 @@ events! {
     MessageFlow: super::mps::EVENT_MESSAGE_FLOW => crate::backend::message_flow::MessageFlowEvent,
     /// A task was filed, reassigned, started or handed back (`task_flow`): names and numbers, never its text.
     TaskFlow: super::mps::EVENT_TASK_FLOW => crate::backend::task_flow::TaskFlowEvent,
+    /// A review of a PR reached the agent it belongs to (`pr_flow`): ids, a state and times, never its text.
+    ReviewFlow: super::mps::EVENT_REVIEW_FLOW => crate::backend::pr_flow::ReviewFlowEvent,
+    /// The checks of a PR's head commit passed or failed (`pr_flow`): ids, a state and times, never a log.
+    ChecksFlow: super::mps::EVENT_CHECKS_FLOW => crate::backend::pr_flow::ChecksFlowEvent,
+    /// A PR was merged (`pr_flow`): ids, a state and times.
+    MergeFlow: super::mps::EVENT_MERGE_FLOW => crate::backend::pr_flow::MergeFlowEvent,
     /// A stale `--resume` is being retried, or the retry resolved.
     AgentResumeRetry: super::mps::EVENT_AGENT_RESUME_RETRY => ResumeRetryEvent,
     /// A Claude CLI request is being retried, or no longer is.
