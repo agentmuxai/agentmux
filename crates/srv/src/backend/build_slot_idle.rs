@@ -160,17 +160,17 @@ pub fn check(root: &Path, watch: &mut Watch, now: u64, processes: impl FnOnce() 
 /// What the holder's agent is told.
 pub fn note_text(idle: &Idle, now: u64) -> String {
     let minutes = now.saturating_sub(idle.since) / 60;
+    let process = match idle.holder.process_id() {
+        Some(pid) => format!("its process id is {pid}, and what it started runs below it"),
+        None => "by its process id, which `BUILD_SLOT_VERBOSE=1 build-slot status` shows".to_string(),
+    };
     let command: String = idle.holder.command.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     format!(
         "The build you started in the build slot has used no CPU for {minutes} min: {command}\n\
          It may be stuck (a hung test, a prompt waiting for input, a lost network call), and anyone queued behind it is waiting. \
-         `build-slot status` shows it. AgentMux has not stopped it: if it is stuck, end it (by its process id) so the slot is free. \
+         `build-slot status` shows it. AgentMux has not stopped it: if it is stuck, end it ({process}) so the slot is free. \
          You hear of it again at most once an hour while it stays idle."
     )
-}
-
-fn unix_now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 fn snapshot(sys: &mut sysinfo::System) -> Vec<Proc> {
@@ -192,7 +192,7 @@ pub fn install() {
         loop {
             std::thread::sleep(CHECK_EVERY);
             let Some(root) = slot::lock_dir() else { return };
-            let now = unix_now();
+            let now = agentmux_common::time::now_secs_u64();
             let Some(idle) = check(&root, &mut watch, now, || snapshot(&mut sys)).filter(|i| i.notify) else { continue };
             let handler = crate::backend::reactive::get_global_handler();
             match handler.deliver_system_note(&idle.holder.agent, &note_text(&idle, now)) {
@@ -293,7 +293,7 @@ mod tests {
     fn check_writes_the_idle_note_and_removes_it_when_the_holder_works_again() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let t0 = unix_now();
+        let t0 = agentmux_common::time::now_secs_u64();
         holder_slot(root, OWNER, t0 + 30 * 60);
         let idle_file = root.join("slot").join("idle");
         let mut w = Watch::default();
@@ -315,17 +315,18 @@ mod tests {
         let root = dir.path();
         let mut w = Watch::default();
         let never = || -> Vec<Proc> { panic!("no slot is held: the machine's processes are not listed") };
-        assert_eq!(check(root, &mut w, unix_now(), never), None);
-        holder_slot(root, "agent=lazo\npid=1\ntoken=tok\nstart=1\ncmd=x\n", unix_now());
+        assert_eq!(check(root, &mut w, agentmux_common::time::now_secs_u64(), never), None);
+        holder_slot(root, "agent=lazo\npid=1\ntoken=tok\nstart=1\ncmd=x\n", agentmux_common::time::now_secs_u64());
         let never = || -> Vec<Proc> { panic!("no usable process id: the processes are not listed") };
-        assert_eq!(check(root, &mut w, unix_now(), never), None, "a script from before version 9 wrote no Windows id");
+        assert_eq!(check(root, &mut w, agentmux_common::time::now_secs_u64(), never), None, "a script from before version 9 wrote no Windows id");
     }
 
     #[test]
     fn the_note_names_the_command_and_says_nothing_was_stopped() {
-        let holder = SlotHolder { agent: "lazo".into(), command: "cargo test -p srv\nsecond line".into(), ..Default::default() };
+        let holder = SlotHolder { agent: "lazo".into(), command: "cargo test -p srv\nsecond line".into(), pid: Some(4321), winpid: Some(4321), ..Default::default() };
         let text = note_text(&Idle { holder, since: T0, notify: true }, T0 + 12 * 60 + 5);
         assert!(text.contains("12 min") && text.contains("cargo test -p srv second line"), "got {text}");
         assert!(text.contains("has not stopped it"));
+        assert!(text.contains("process id is 4321"), "the note gives the id to end: {text}");
     }
 }
