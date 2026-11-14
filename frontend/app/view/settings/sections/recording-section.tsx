@@ -8,7 +8,7 @@
  * for the full design this section implements.
  */
 import { t } from "@/app/i18n/i18n";
-import { Button, Select, TextInput } from "@/app/element/ui";
+import { Button, Notice, Select, TextInput } from "@/app/element/ui";
 import { authHeaders } from "@/app/store/auth-headers";
 import { createSignal, onCleanup, onMount, Show, For, type Accessor, type JSX, type Setter } from "solid-js";
 
@@ -20,7 +20,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createMicLevelMeter, type MicLevelMeter } from "@/app/hook/useMicLevelMeter";
 import { pickMime } from "@/app/hook/whisperVoiceEngine";
 import { settingEntry, type SettingsIndexEntry } from "../settings-model";
-import { MaskedKeyField, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
+import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
+import { VaultKeyField } from "../vault-key-field";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
@@ -419,14 +420,15 @@ function EngineRows(p: {
                     id={RECORDING_SETTINGS.groqApiKey.id}
                     label={RECORDING_SETTINGS.groqApiKey.label}
                     control={
-                        <MaskedKeyField
-                            value={p.s()["voice:groqApiKey"] as string | undefined}
-                            onSave={(key) => set("voice:groqApiKey", key)}
-                            placeholder={t("settings.recording.groqKey.placeholder")}
-                        />
+                        <VaultKeyField value={p.s()["voice:groqApiKey"] as string | undefined} onChoose={(ref) => set("voice:groqApiKey", ref)} what="Groq key" />
                     }
                     description={RECORDING_SETTINGS.groqApiKey.description}
                 />
+                <Show when={p.s()["voice:groqApiKeyMoved"]}>
+                    <Notice tone="accent" title="Your Groq key is now in the Vault" onDismiss={() => set("voice:groqApiKeyMoved", null)}>
+                        It was in settings.json as plain text. AgentMux moved it into your Vault and settings.json now only names the entry.
+                    </Notice>
+                </Show>
             </Show>
 
             <Show when={p.engine() === "whisper-local"}>
