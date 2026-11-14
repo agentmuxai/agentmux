@@ -20,10 +20,17 @@
 //      (a squash merge adds the pull request number);
 //   4. it changes nothing but what a release changes: the five version files
 //      (all five, modified) and deleted `.changesets/*.md` files;
-//   5. the five version locations at that commit all equal the tag's version.
+//   5. the five version locations at that commit all equal the tag's version;
+//   6. the push run of CI (PR) on main for exactly that commit has finished green.
 // Why 4: a release commit then carries no code of its own. Its tree is its
 // parent's (already on main, so merged through the merge queue with a review
 // and the required checks) plus the version bump.
+// Why 6: the merge queue runs only part of the test suite; the full suite runs on
+// the push to main. Two PRs that were each green broke it on 2026-11-14 and the
+// release commit built on top of that was tagged and released with its own push run
+// red (0.60.28). A tag whose commit has no finished, green push run waits: run the
+// release workflow again once the push run is green. Only the commit's own run counts:
+// a later commit's green run says nothing about a red release commit.
 //
 // Exits non-zero with every reason on stderr when any check fails: a commit
 // that is not a release commit on main is never built, signed or published.
@@ -60,10 +67,12 @@ export function parseVersions(texts) {
 /**
  * Pure decision. `commit` is what the GitHub API says about the commit:
  * `{ status: <compare main...sha>, subject, files: [{ status, filename }] }`;
- * `versions` is parseVersions() of the five files at the commit.
+ * `versions` is parseVersions() of the five files at the commit;
+ * `pushRun` is the newest push run of CI (PR) on main for that commit, `{ status, conclusion, url }`,
+ * or `null` when there is none, or `undefined` when it could not be read (refused too).
  * Returns { ok, version, reasons }.
  */
-export function evaluateGate({ refType, refName, sha, commit, versions }) {
+export function evaluateGate({ refType, refName, sha, commit, versions, pushRun }) {
     const reasons = [];
     const tag = TAG_RE.exec(refName ?? "");
     if (refType !== "tag") reasons.push(`the run is for a ${refType || "unknown"} ref, not a tag`);
@@ -103,7 +112,21 @@ export function evaluateGate({ refType, refName, sha, commit, versions }) {
             if (v !== version) reasons.push(`${name} is at version '${v}', the tag is '${version}'`);
         }
     }
+    const pushReason = pushRunReason(pushRun);
+    if (pushReason) reasons.push(pushReason);
     return { ok: reasons.length === 0, version, reasons };
+}
+
+/** Why a commit's push run does not allow a release, or "" when it finished green. */
+export function pushRunReason(pushRun) {
+    const where = "the push run of CI (PR) on main for this commit";
+    if (pushRun === undefined) return `${where} could not be read`;
+    if (pushRun === null) return `${where} was not found: it must finish green first`;
+    if (pushRun.status !== "completed") return `${where} has not finished (${pushRun.status || "unknown"}): run this workflow again when it is green`;
+    if (pushRun.conclusion !== "success") {
+        return `${where} finished with '${pushRun.conclusion || "no result"}'${pushRun.url ? ` (${pushRun.url})` : ""}: it must be green first`;
+    }
+    return "";
 }
 
 // ── the GitHub side ──────────────────────────────────────────────────────
@@ -134,6 +157,38 @@ export function readVersions(repo, sha) {
     return parseVersions(texts);
 }
 
+/**
+ * The push run of CI (PR) on main for exactly `sha` out of a list of workflow runs: `{ status, conclusion, url }`, or null
+ * when none is for that commit and event. A re-run keeps the run's id and raises run_attempt, so the newest attempt is the
+ * one read. A run of another commit, or of a pull request, never counts.
+ */
+export function pickPushRun(runs, sha) {
+    const mine = (runs ?? []).filter((r) => r.head_sha === sha && r.event === "push");
+    if (mine.length === 0) return null;
+    mine.sort((a, b) => (a.run_number ?? 0) - (b.run_number ?? 0) || (a.run_attempt ?? 0) - (b.run_attempt ?? 0));
+    const r = mine[mine.length - 1];
+    return { status: r.status, conclusion: r.conclusion ?? null, url: r.html_url };
+}
+
+/**
+ * Reads the runs through the run's token, and without one when that is refused: the repository is public and its workflow
+ * runs are public data, so the release job needs no `actions: read` (the caller, release.yml, keeps the copy of its
+ * permissions a tag was made with, and a called workflow cannot ask for more than its caller grants).
+ */
+export function readPushRun(repo, sha) {
+    const query = `repos/${repo}/actions/workflows/ci-pr.yml/runs?head_sha=${sha}&event=push&branch=main&per_page=20`;
+    let text;
+    try {
+        text = gh(["api", query]);
+    } catch {
+        text = execFileSync("curl", ["-fsS", "-H", "Accept: application/vnd.github+json", `https://api.github.com/${query}`], {
+            encoding: "utf8",
+            maxBuffer: 64 * 1024 * 1024,
+        });
+    }
+    return pickPushRun(JSON.parse(text).workflow_runs, sha);
+}
+
 function arg(argv, name) {
     const i = argv.indexOf(`--${name}`);
     return i >= 0 ? argv[i + 1] : undefined;
@@ -152,6 +207,7 @@ export function main(argv) {
     // Refuse before touching the API when the shape alone is wrong.
     let commit;
     let versions;
+    let pushRun; // undefined stays "could not be read", which is refused
     if (refType === "tag" && TAG_RE.test(refName ?? "") && SHA_RE.test(sha ?? "")) {
         try {
             commit = readCommit(repo, sha);
@@ -160,8 +216,13 @@ export function main(argv) {
             console.error(`::error::could not read the commit from GitHub: ${e.message.split("\n")[0]}`);
             return 1;
         }
+        try {
+            pushRun = readPushRun(repo, sha);
+        } catch (e) {
+            console.error(`::warning::could not read the push run: ${e.message.split("\n")[0]}`);
+        }
     }
-    const result = evaluateGate({ refType, refName, sha, commit, versions });
+    const result = evaluateGate({ refType, refName, sha, commit, versions, pushRun });
     if (!result.ok) {
         for (const r of result.reasons) console.error(`::error::release gate: ${r}`);
         console.error(`::error::refusing to build, sign or publish ${refName} at ${sha}`);
