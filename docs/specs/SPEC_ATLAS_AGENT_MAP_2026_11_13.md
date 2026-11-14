@@ -142,6 +142,23 @@ One PR, in this order, each behind the pane existing:
 Out of v1, filed as follow-ups: the message-flow event and pulses; PR and branch on the card; review bot, CI and
 container nodes; lasso select to Broadcast or Bulk stop; the cloud tier (typed, never sent).
 
+### 6.1 After v1: selecting on the map (#47554)
+
+Built as decision 6 foresaw. The map selects into **the Swarm's own selection** (the pane's `SwarmViewModel`), and the
+actions are the Swarm's own components, so nothing about reach, approval or reporting is decided twice:
+
+- **Selecting.** A drag on the background still pans. With **Shift** held it draws a box, and the agents the box
+  touches join the selection when it is let go (Escape drops it). **Select**, a toggle in the bar, swaps the two for
+  a trackpad or a touch screen: a drag selects and Shift pans. A Shift, Ctrl or Cmd click on a node (any click with
+  Select on) adds or removes that one agent. A box only adds; "Select none" clears.
+- **What can be selected** is what the Swarm can tick: this instance's agents that have a pane, and the agents of
+  other instances whose machine is not stale. A stopped agent is not a node and is not selected from the map.
+- **Acting.** While anything is selected (or Select is on), a strip under the map holds the Swarm's Select all and
+  count, **Stop** (with the Swarm's confirmation, which lists every agent and what it cannot reach), the Supervisor
+  **Mode** menu, and the **Broadcast** composer; the per-agent result panel follows. It is under the map, not over
+  it, so the map's top left stays where it is when the strip appears. An agent on a LAN peer gets a broadcast and
+  cannot be stopped from here, exactly as in the Swarm.
+
 ## 7. Risks and notes
 
 - **"Steward" is not a stored seat role** (`ROLES` is leader, worker, specialist, platform_tester, analyst, super), so a
