@@ -31,11 +31,13 @@
 }
 
 // Under the slot, so it outranks the kit pill's own rules whichever stylesheet comes last. A block and not the
-// pill's flex box, which takes no ellipsis. Its least width is 4ch, or its words when they are shorter.
+// pill's flex box, which takes no ellipsis. Its least width leaves its words 4ch, or their own width when they
+// are shorter: the width is the whole box, so the pill's padding and border (pill.scss) are added to the 4ch.
 .swarm-seat-slot .swarm-seat-badge {
     display: block;
     flex: 1 1 0;
-    min-width: calc-size(max-content, min(size, 4ch));
+    box-sizing: border-box;
+    min-width: calc-size(max-content, min(size, 4ch + 2 * var(--space-2) + 2px));
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
