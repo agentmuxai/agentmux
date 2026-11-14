@@ -1011,7 +1011,7 @@ fn act_result_text(name: &str, r: &str, body: &serde_json::Value) -> String {
         let secs = body.pointer("/data/waited_ms").and_then(|v| v.as_u64()).unwrap_or(0) as f64 / 1000.0;
         return format!("{name} {r}: done; the user approved this click in the pane after {secs:.0} s. The element now: {after}{}", page_now_text(body));
     }
-    // A click nobody was asked about says so, so an agent that told the person an approval would come can stop.
+    // A click that asked for no approval says so in its answer.
     let asked = if name.ends_with("click") { " No approval was asked: it submits no form and its name says nothing that commits." } else { "" };
     format!("{name} {r}: done.{asked} The element now: {after}{}", page_now_text(body))
 }
