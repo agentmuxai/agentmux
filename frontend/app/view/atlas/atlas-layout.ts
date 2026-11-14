@@ -6,6 +6,8 @@
  * pixels. It is deterministic and has no physics, so the map does not move when a refresh brings the same agents:
  * regions are placed left to right and wrap to a new row; inside one, the agents that have reports form trees
  * (a lead above its reports, centred over them), and the agents with none and no lead stand in a wrapped grid below.
+ * A machine's containers that no agent uses stand at the end of that grid, and the review bot and CI in a region of
+ * their own after the machines'.
  */
 
 import type { AtlasEdge, AtlasGraph } from "./atlas-graph";
@@ -23,6 +25,8 @@ export const ROW_MAX_W = 1400;
 /** The columns of the grid the agents with no lead and no reports stand in. */
 const GRID_COLS = 5;
 const MIN_REGION_W = 220;
+/** The key of the region the review bot and CI stand in. */
+export const SERVICES_REGION = "services";
 
 export interface Placed {
     x: number;
@@ -120,14 +124,10 @@ export function layoutAtlas(graph: AtlasGraph): AtlasLayout {
     let y = 0;
     let rowH = 0;
     let width = 0;
-    for (const region of graph.regions) {
-        const inner = layoutRegion(
-            region.shown.map((a) => a.key),
-            graph.edges
-        );
+    const place = (key: string, keys: readonly string[], folds: boolean) => {
+        const inner = layoutRegion(keys, graph.edges);
         const w = Math.max(MIN_REGION_W, inner.w + PAD * 2);
-        const innerH = region.shown.length === 0 ? 0 : inner.h;
-        const folds = region.folded.length > 0;
+        const innerH = keys.length === 0 ? 0 : inner.h;
         const h = HEAD + PAD + innerH + (folds ? (innerH > 0 ? GAP_X : 0) + FOLD_H : 0) + PAD;
         if (x > 0 && x + w > ROW_MAX_W) {
             x = 0;
@@ -136,21 +136,32 @@ export function layoutAtlas(graph: AtlasGraph): AtlasLayout {
         }
         // The nodes are centred in the region when it is wider than they are.
         const offset = PAD + (w - PAD * 2 - inner.w) / 2;
-        for (const [key, p] of inner.nodes) nodes.set(key, { x: x + offset + p.x, y: y + HEAD + PAD + p.y });
-        boxes.push({ key: region.key, x, y, w, h, foldY: y + HEAD + PAD + innerH + (innerH > 0 ? GAP_X : 0) });
+        for (const [node, p] of inner.nodes) nodes.set(node, { x: x + offset + p.x, y: y + HEAD + PAD + p.y });
+        boxes.push({ key, x, y, w, h, foldY: y + HEAD + PAD + innerH + (innerH > 0 ? GAP_X : 0) });
         x += w + REGION_GAP;
         rowH = Math.max(rowH, h);
         width = Math.max(width, x - REGION_GAP);
+    };
+    for (const region of graph.regions) {
+        const keys = [...region.shown, ...region.orphans].map((n) => n.key);
+        place(region.key, keys, region.folded.length > 0);
     }
+    const services = graph.services.map((s) => s.key);
+    if (services.length > 0) place(SERVICES_REGION, services, false);
     return { regions: boxes, nodes, width, height: boxes.length === 0 ? 0 : y + rowH };
 }
 
 /**
  * The By seat layout: every shown agent in one picture, whatever machine it is on, a lead above its reports. No
- * regions: the machine is the node's tint. Stopped agents are not drawn (the bar counts them).
+ * regions: the machine is the node's tint. Stopped agents are not drawn (the bar counts them). The containers no
+ * agent uses, and the review bot and CI, stand with the agents that have no lead.
  */
 export function layoutBySeat(graph: AtlasGraph): AtlasLayout {
-    const keys = graph.regions.flatMap((r) => r.shown.map((a) => a.key));
+    const keys = [
+        ...graph.regions.flatMap((r) => r.shown.map((a) => a.key)),
+        ...graph.regions.flatMap((r) => r.orphans.map((o) => o.key)),
+        ...graph.services.map((s) => s.key),
+    ];
     const inner = layoutRegion(keys, graph.edges);
     const nodes = new Map<string, Placed>();
     for (const [key, p] of inner.nodes) nodes.set(key, { x: PAD + p.x, y: PAD + p.y });

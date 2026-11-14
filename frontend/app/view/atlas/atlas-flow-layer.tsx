@@ -5,12 +5,13 @@
  * The lines of the Atlas map that are not "reports to": a message from one agent to another, drawn from the
  * sender to the receiver as it happens and gone a few seconds later, and a task one agent handed another, dotted
  * and numbered, for a few minutes (atlas-flow.ts). A message with one end on the map only (its other agent is
- * stopped, filtered out, or not an agent of any machine listed) is a ring round the end that is.
+ * stopped, filtered out, or not an agent of any machine listed) is a ring round the end that is. A review of a
+ * pull request, and its checks, are dashed lines from the review bot's node and CI's to the pull request's agent
+ * (atlas-pr.ts), with its number: bright at first, then dim for as long as the pull request is open.
  */
 
 import { createMemo, For, Show, type JSX } from "solid-js";
-import type { MessageFlowEnd } from "@/types/rpc/MessageFlowEnd";
-import { flowCurves, type AtlasFlow, type FlowCurve, type FlowLine } from "./atlas-flow";
+import { flowCurves, type AtlasFlow, type FlowCurve, type FlowEnd, type FlowLine } from "./atlas-flow";
 import { NODE_H, NODE_W, type Placed } from "./atlas-layout";
 
 /** How far outside a node its ring is drawn. */
@@ -24,10 +25,10 @@ type Mark = { curve: FlowCurve; ring: null } | { curve: null; ring: Placed };
  */
 function flowMarks(
     flows: readonly AtlasFlow[],
-    resolve: (end: MessageFlowEnd) => string | null,
+    resolve: (end: FlowEnd) => string | null,
     nodes: ReadonlyMap<string, Placed>
 ): Map<string, Mark> {
-    const at = (end: MessageFlowEnd) => {
+    const at = (end: FlowEnd) => {
         const key = resolve(end);
         return key ? nodes.get(key) : undefined;
     };
@@ -50,7 +51,7 @@ function FlowMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Eleme
             {(m) => (
                 <g
                     class={`atlas-flow atlas-flow--${props.flow.tone}`}
-                    classList={{ "atlas-flow--leaving": props.flow.leaving }}
+                    classList={{ "atlas-flow--leaving": props.flow.leaving, "atlas-flow--dim": !!props.flow.dim }}
                     data-testid="atlas-flow"
                     data-kind={props.flow.kind}
                 >
@@ -88,7 +89,7 @@ function FlowMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Eleme
 export function AtlasFlowLayer(props: {
     flows: readonly AtlasFlow[];
     /** The node an end of a line names, by its key, or null (atlas-flow.ts `flowEndResolver`). */
-    resolve: (end: MessageFlowEnd) => string | null;
+    resolve: (end: FlowEnd) => string | null;
     nodes: ReadonlyMap<string, Placed>;
     width: number;
     height: number;
