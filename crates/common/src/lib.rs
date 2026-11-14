@@ -13,6 +13,7 @@ pub mod client_events;
 mod cli;
 pub mod copy_into_dir;
 pub mod data_paths;
+pub mod dev_home_guard;
 mod data_home;
 pub mod disk_space;
 pub mod mcp_config_path;

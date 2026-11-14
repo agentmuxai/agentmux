@@ -12,6 +12,7 @@
 // this file must still compile on those platforms.
 
 mod app;
+mod dev_home_check;
 mod background_audit;
 mod start_hidden;
 mod browser_api;
@@ -222,6 +223,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // it behind an "Application Error" dialog. Must be the first statement —
     // set before anything can fault.
     suppress_os_crash_dialogs();
+    dev_home_check::refuse_hand_started_dev_host(launcher_is_genuine_parent());
 
     // Set the DLL search path so CEF's runtime LoadLibrary calls (chrome_elf,
     // libEGL, libGLESv2, d3dcompiler_47, …) resolve against the directory that
