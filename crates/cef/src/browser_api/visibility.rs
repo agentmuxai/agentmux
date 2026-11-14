@@ -128,6 +128,8 @@ pub(super) async fn capture(cdp: &mut CdpSession) -> Layout {
 /// `include_hidden`) out of `nodes`; how many were cut.
 pub(super) fn apply(nodes: &mut [Value], layout: &Layout, include_hidden: bool) -> usize {
     super::clickable::mark(nodes, &layout.clickable, &layout.hidden);
+    // Whatever is left of the hidden text (all of it with `include_hidden`) never carries a secret.
+    super::hidden_secrets::withhold(nodes, &layout.hidden);
     if include_hidden {
         0
     } else {
