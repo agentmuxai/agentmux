@@ -347,3 +347,17 @@ fn an_answer_with_an_approval_request_in_it_is_left_as_the_person_is_shown_it() 
     assert_eq!(answered["value"], json!(WITHHELD));
     assert_eq!(answered["checked"], json!(true));
 }
+
+#[test]
+fn a_cell_whose_only_content_is_the_withheld_text_has_the_reference_for_capture() {
+    // A table cell named from its one hidden text: the marker is the cell's name, and the cell's line has a ref.
+    let mut nodes = vec![
+        n("1", None, "RootWebArea", "Settings", 1, &["2"]),
+        n("2", Some("1"), "cell", SECRET, 2, &["3"]),
+        n("3", Some("2"), "StaticText", SECRET, 9, &[]),
+    ];
+    visibility::apply(&mut nodes, &layout(&[9]), true);
+    let out = shown(&nodes, None);
+    assert!(!out.text.contains(SECRET) && out.text.contains(WITHHELD), "{}", out.text);
+    assert!(out.refs.iter().any(|(_, b)| *b == 2), "the cell has a reference: {:?} {}", out.refs, out.text);
+}

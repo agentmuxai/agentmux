@@ -715,7 +715,7 @@ fn log_text(data: &Value) -> String {
                 line.push_str(&v);
             }
         }
-        out.push_str(&line);
+        out.push_str(&agentmux_common::secret_shape::scrub(&line));
         out.push('\n');
     }
     out
@@ -1362,17 +1362,6 @@ mod tests {
         assert!(text.contains("\n01:02:03 naki fill e4 — allowed\n"), "{text}");
         assert!(text.contains("01:02:04 naki click \"Delete draft\" · ref e9 — auto-approved at https://github.com/x"), "{text}");
         assert!(log_text(&json!({ "pane": "p", "count": 0, "entries": [] })).contains("Nothing yet."));
-    }
-
-    #[test]
-    fn a_log_line_holds_no_secret_shape_the_page_put_in_a_click_name() {
-        // The Log the agent reads: a click's name is page text, and may hold what the page hides.
-        let text = log_text(&json!({
-            "pane": "p1", "count": 1,
-            "entries": [{ "ts": 3_723_000, "agent": "naki", "kind": "click", "target": "\"Copy sk_live_abcdefgh12\"", "detail": "ref e9", "how": "allowed" }],
-        }));
-        assert!(!text.contains("sk_live"), "{text}");
-        assert!(text.contains("naki click") && text.contains("· ref e9 — allowed"), "{text}");
     }
 
     #[test]

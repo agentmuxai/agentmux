@@ -42,7 +42,8 @@ use serde_json::Value;
 use super::snapshot::str_of;
 
 pub use agentmux_common::secret_shape::WITHHELD;
-use agentmux_common::secret_shape::{has_key_shape, scrub, token_like};
+pub(super) use agentmux_common::secret_shape::scrub;
+use agentmux_common::secret_shape::{has_key_shape, token_like};
 
 /// Set on a text node whose text was withheld, so its line gets a reference.
 const FLAG: &str = "agentmuxWithheld";
@@ -195,6 +196,42 @@ fn squeezed(text: &str) -> String {
     text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
+/// Take the withheld pieces out of the other nodes' names, values and descriptions: those above a withheld text
+/// (`above`, by node) at any length, and every node for the pieces in `anywhere`.
+fn clean_echoes(nodes: &mut [Value], chosen: &HashSet<usize>, above: &HashMap<usize, Vec<String>>, anywhere: &[String]) {
+    for (i, node) in nodes.iter_mut().enumerate() {
+        if chosen.contains(&i) || ignored(node) {
+            continue;
+        }
+        let near = above.get(&i);
+        for field in FIELDS {
+            let text = str_of(node, field).to_string();
+            if text.is_empty() || text == WITHHELD {
+                continue;
+            }
+            let mut now = text.clone();
+            for p in anywhere.iter().chain(near.into_iter().flatten()) {
+                now = now.replace(p.as_str(), WITHHELD);
+            }
+            // An ancestor's name is made from its contents, so the text may come apart (spaces, line breaks).
+            if let Some(near) = near {
+                let squeezed_now = squeezed(&now);
+                if near.iter().any(|p| !p.is_empty() && squeezed_now.contains(&squeezed(p))) {
+                    now = WITHHELD.to_string();
+                }
+            }
+            if now != text {
+                // A cell or row named from the text it holds shows the marker as its name, and is the line
+                // that carries the reference `capture` needs (its text node is not listed apart from it).
+                if now.contains(WITHHELD) && !super::snapshot::is_actionable_role(str_of(node, "role")) {
+                    node[FLAG] = Value::Bool(true);
+                }
+                node[field]["value"] = Value::String(now);
+            }
+        }
+    }
+}
+
 /// Replace, in `nodes`, the text the page hides (`hidden`: backend ids; every text node when `unknown`) that
 /// has a secret's shape or sits in a row named like a secret, and what repeats it in another node's name,
 /// value or description. Returns how many text nodes were withheld.
@@ -269,32 +306,7 @@ pub(super) fn withhold(nodes: &mut [Value], hidden: &HashSet<i64>, unknown: bool
             }
         }
     }
-    for (i, node) in nodes.iter_mut().enumerate() {
-        if chosen_set.contains(&i) || ignored(node) {
-            continue;
-        }
-        let near = above.get(&i);
-        for field in FIELDS {
-            let text = str_of(node, field).to_string();
-            if text.is_empty() || text == WITHHELD {
-                continue;
-            }
-            let mut now = text.clone();
-            for p in anywhere.iter().chain(near.into_iter().flatten()) {
-                now = now.replace(p.as_str(), WITHHELD);
-            }
-            // An ancestor's name is made from its contents, so the text may come apart (spaces, line breaks).
-            if let Some(near) = near {
-                let squeezed_now = squeezed(&now);
-                if near.iter().any(|p| !p.is_empty() && squeezed_now.contains(&squeezed(p))) {
-                    now = WITHHELD.to_string();
-                }
-            }
-            if now != text {
-                node[field]["value"] = Value::String(now);
-            }
-        }
-    }
+    clean_echoes(nodes, &chosen_set, &above, &anywhere);
     changed
 }
 
