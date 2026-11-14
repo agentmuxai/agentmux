@@ -85,6 +85,8 @@ frontend or between the app and the cloud.
 flow: { kind: "review" | "checks" | "merge", repo_id, pr, state, by?, head? }
 ```
 
+It is one object, or a list of up to three when one notice is two results (a "ready to merge" notice is an approval and green checks); each object is judged on its own, and the events of one notice share its id, each in its own list.
+
 ### 5.2 Where it is applied
 
 In the delivery loop (`delivery.rs`), after `verify` and `is_repeat` and where the message is accepted (delivered or held), once per
