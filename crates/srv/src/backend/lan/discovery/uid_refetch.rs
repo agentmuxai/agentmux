@@ -170,6 +170,7 @@ impl LanDiscoveryController {
             first_seen: 0,
             last_seen: agentmux_common::time::now_secs_u64(),
             last_polled_ok: 0,
+            install_id: String::new(),
             other_ttl_secs: 4500,
         };
         self.peers_for_test.lock().unwrap().push(instance);

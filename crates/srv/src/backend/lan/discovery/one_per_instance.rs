@@ -135,6 +135,7 @@ mod tests {
             first_seen: 0,
             last_seen: seen,
             last_polled_ok: polled,
+            install_id: String::new(),
             other_ttl_secs: 4500,
         }
     }

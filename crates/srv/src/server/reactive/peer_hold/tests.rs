@@ -31,6 +31,7 @@ fn peer(hostname: &str, last_polled_ok: u64) -> LanInstance {
         first_seen: 0,
         last_seen: NOW,
         last_polled_ok,
+        install_id: String::new(),
         other_ttl_secs: 4500,
     }
 }

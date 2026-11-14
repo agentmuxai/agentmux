@@ -55,6 +55,7 @@ fn peer_at(addr: &str) -> LanInstance {
         first_seen: 0,
         last_seen: 0,
         last_polled_ok: 0,
+        install_id: String::new(),
         other_ttl_secs: 4500,
     }
 }

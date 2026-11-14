@@ -8,11 +8,21 @@
 
 use super::discovery::LanInstance;
 
-/// A peer's `os`, `install` and kind of build from its mDNS TXT record: self-reported, so only a plain
-/// token is kept, and of the build only a kind `BuildKind` knows.
-pub(crate) fn advertised(info: &mdns_sd::ServiceInfo) -> (String, String, String) {
+/// A peer's `os`, `install`, kind of build and WAN instance id from its mDNS TXT record: self-reported, so only a
+/// plain token is kept, of the build only a kind `BuildKind` knows, and of the id only one that is shaped like one.
+pub(crate) fn advertised(info: &mdns_sd::ServiceInfo) -> (String, String, String, String) {
     let token = |key: &str| info.get_property_val_str(key).and_then(crate::backend::host_os::sanitize_os).unwrap_or_default();
-    (token("os"), token("install"), build_token(info.get_property_val_str("build")))
+    (token("os"), token("install"), build_token(info.get_property_val_str("build")), install_id_token(info.get_property_val_str("install_id")))
+}
+
+/// The WAN instance id a peer advertises (`install_id`: 26 lowercase base32 characters, a hash of the install's
+/// public key), kept only when it is shaped like one; empty for a peer that predates advertising it. An
+/// identifier and nothing more: the peer chose it, and nothing here proves the peer holds the key behind it.
+pub(crate) fn install_id_token(said: Option<&str>) -> String {
+    said.map(str::trim)
+        .filter(|s| s.len() == 26 && s.bytes().all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b)))
+        .map(str::to_string)
+        .unwrap_or_default()
 }
 
 /// The kind of build a peer says it is, kept only when it is one of the tokens `BuildKind` knows
@@ -78,5 +88,21 @@ pub fn describe_peer(p: &LanInstance) -> String {
         name
     } else {
         format!("{name} ({})", notes.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::install_id_token;
+
+    #[test]
+    fn an_install_id_is_kept_only_when_it_is_shaped_like_one() {
+        let id = "mw3am46w5weex4a4fqrc3avnua";
+        assert_eq!(install_id_token(Some(id)), id);
+        assert_eq!(install_id_token(Some(&format!(" {id} "))), id, "trimmed");
+        for bad in ["", "short", "MW3AM46W5WEEX4A4FQRC3AVNUA", "mw3am46w5weex4a4fqrc3avnu1", "mw3am46w5weex4a4fqrc3avnuaa", "mw3am46w5weex4a4fqrc3avné"] {
+            assert_eq!(install_id_token(Some(bad)), "", "{bad:?}");
+        }
+        assert_eq!(install_id_token(None), "");
     }
 }
