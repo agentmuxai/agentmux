@@ -492,6 +492,33 @@
     }
 }
 
+// A second line under a row's value, such as who else is on an account.
+.atlas-card__note {
+    display: block;
+    color: var(--secondary-text-color);
+}
+
+.atlas-card__tasks {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+
+    li {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-1);
+    }
+}
+
+// A task's title: two lines at most, so three long ones do not push the card's other rows out of sight.
+.atlas-card__task {
+    @include mixins.truncate-lines(2);
+    min-width: 0;
+}
+
 .atlas-card__actions {
     display: flex;
     gap: var(--space-2);

@@ -18,6 +18,7 @@ import { openAgentInActiveTab, startAgent } from "@/app/store/agent-runtime-live
 import { revealBlock } from "@/app/util/reveal-block";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { SwarmFilterBar } from "../swarm/swarm-filter-bar";
+import { CardFacts } from "./atlas-card-facts";
 import { AtlasFleetBar } from "./atlas-fleet-bar";
 import { flowEndResolver } from "./atlas-flow";
 import { AtlasFlowLayer } from "./atlas-flow-layer";
@@ -37,6 +38,8 @@ import { useAtlasLasso } from "./atlas-lasso";
 import { NOT_BACKGROUND, useAtlasPanZoom, type AtlasPanZoom } from "./atlas-pan-zoom";
 import { selectionKeyOf } from "./atlas-select";
 import { clampZoom, type Viewport } from "./atlas-viewport";
+import type { AtlasWork } from "./atlas-work";
+import { useAtlasWork } from "./atlas-work-store";
 import "./atlas.scss";
 
 const STATE_LABELS: Record<AtlasState, string> = {
@@ -153,7 +156,13 @@ function FoldedChip(props: {
     );
 }
 
-function Card(props: { agent: AtlasAgent; machineTitle: string; onClose: () => void }): JSX.Element {
+function Card(props: {
+    agent: AtlasAgent;
+    machineTitle: string;
+    agents: ReadonlyMap<string, AtlasAgent>;
+    work: AtlasWork | null;
+    onClose: () => void;
+}): JSX.Element {
     const a = () => props.agent;
     return (
         <aside class="atlas-card" data-testid="atlas-card" aria-label={`${a().name} details`}>
@@ -186,6 +195,7 @@ function Card(props: { agent: AtlasAgent; machineTitle: string; onClose: () => v
                     <dt>Provider</dt>
                     <dd>{a().provider}</dd>
                 </Show>
+                <CardFacts agent={a()} agents={props.agents} work={props.work} />
                 <Show when={a().contextTokens}>
                     <dt>Context</dt>
                     <dd>{tokensText(a().contextTokens!)} tokens</dd>
@@ -427,6 +437,11 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
         sel.lasso.onPointerUp(e);
         zoom.onPointerUp(e);
     };
+    // Branch and tasks are this instance's facts: an agent of another instance has no pane here to ask about.
+    const work = useAtlasWork(() => {
+        const agent = selectedAgent();
+        return agent && !agent.remote ? agent.blockId : null;
+    });
     const onEscape = () => (sel.lasso.rect() ? sel.lasso.cancel() : setSelected(null));
     return (
         <div class="atlas" data-testid="atlas" onKeyDown={(e) => e.key === "Escape" && onEscape()}>
@@ -473,6 +488,8 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
                         <Card
                             agent={agent()}
                             machineTitle={data.machines().get(agent().machine)?.title ?? ""}
+                            agents={data.agents()}
+                            work={work()}
                             onClose={() => setSelected(null)}
                         />
                     )}

@@ -8,28 +8,15 @@
  * time is up.
  */
 
-import { authHeaders } from "@/app/store/auth-headers";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import type { MessageFlowEvent } from "@/types/rpc/MessageFlowEvent";
 import type { TaskFlowEvent } from "@/types/rpc/TaskFlowEvent";
-import { getWebServerEndpoint } from "@/util/endpoints";
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 import { flowsAt, messageFlow, taskFlow, withFlow, type AtlasFlow } from "./atlas-flow";
+import { srvList } from "./atlas-srv";
 
 const TICK_MS = 500;
-
-/** What `route` answers under `key`, or nothing when srv is older than the route or cannot be reached. */
-async function recent<T>(route: string, key: string): Promise<T[]> {
-    try {
-        const res = await fetch(`${getWebServerEndpoint()}${route}`, { headers: authHeaders() });
-        if (!res.ok) return [];
-        const list = ((await res.json()) as Record<string, unknown>)[key];
-        return Array.isArray(list) ? (list as T[]) : [];
-    } catch {
-        return [];
-    }
-}
 
 /** The lines to draw now, following srv for as long as the caller lives. */
 export function useAtlasFlows(): Accessor<readonly AtlasFlow[]> {
@@ -58,8 +45,8 @@ export function useAtlasFlows(): Accessor<readonly AtlasFlow[]> {
         onMuxEvent(WpsEvent.TaskFlow, (event) => live(taskFlow(event))),
     ];
     void Promise.all([
-        recent<MessageFlowEvent>("/api/v1/message-flow", "messages"),
-        recent<TaskFlowEvent>("/api/v1/task-flow", "events"),
+        srvList<MessageFlowEvent>("/api/v1/message-flow", "messages"),
+        srvList<TaskFlowEvent>("/api/v1/task-flow", "events"),
     ]).then(([messages, tasks]) => {
         if (disposed) return;
         for (const event of messages) add(messageFlow(event));

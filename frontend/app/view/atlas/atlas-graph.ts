@@ -10,6 +10,7 @@
  */
 
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
+import type { RuntimeKind } from "@/util/runtime-kind";
 
 /** What an agent is doing, in Atlas's own words: the Swarm's local and remote states folded into one set. */
 export type AtlasState = "working" | "waiting" | "idle" | "error" | "limited" | "signed_out" | "stopped";
@@ -41,6 +42,19 @@ export interface AtlasAgent {
     stale: boolean;
     /** Spent today against its daily cap, for an agent on a model route with one (this instance's only). */
     spend?: { spent: number; cap: number } | null;
+    /** Where it runs: on its machine or in a container. Absent for an agent of another instance, which does not say. */
+    runtime?: RuntimeKind | null;
+    /** The account an agent of another machine runs on, when its machine reported one. `label` is this
+     *  computer's name for it, null when the account is not signed in here. */
+    account?: { id: string; label: string | null } | null;
+}
+
+/** The other agents that run on `agent`'s account, by name: they use up the same quota. */
+export function accountSharers(agent: AtlasAgent, agents: Iterable<AtlasAgent>): string[] {
+    const id = agent.account?.id;
+    if (!id) return [];
+    const names = [...agents].filter((other) => other.key !== agent.key && other.account?.id === id).map((other) => other.name);
+    return names.sort((a, b) => a.localeCompare(b));
 }
 
 /** One machine, or one channel of one. */

@@ -200,7 +200,6 @@
 119 crates/srv/src/backend/storage/migrations.rs::run_filestore_migrations
 131 crates/srv/src/backend/subagent_watcher/mod.rs::SubagentWatcher::build_watch
 139 crates/srv/src/backend/supervisor/watcher.rs::Supervisor::evaluate
-103 crates/srv/src/backend/swarm_remote.rs::lan_hosts
 167 crates/srv/src/backend/sysinfo.rs::log_memory_attribution
 218 crates/srv/src/backend/sysinfo.rs::run_sysinfo_loop
 106 crates/srv/src/backend/tool_store.rs::get_tool_statuses

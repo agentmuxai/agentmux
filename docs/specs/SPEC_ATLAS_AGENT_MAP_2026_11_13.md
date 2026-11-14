@@ -194,6 +194,28 @@ Both carry ids, hosts and times only, so the map shows that something passed bet
   The operating system's own "reduce motion" preference alone does not change it, as everywhere in the app
   (the motion policy's 2026-10-15 decision).
 
+### 6.3 After v1: more on the card (#47553)
+
+Decision 5's three additions. Each is a row on the card that shows only when its fact is known; the node at rest
+does not change.
+
+- **Runtime.** Host or container, with the badge the agent pane uses, for this instance's agents (from the pane's
+  own meta). Another instance's agents say nothing about it yet; that comes with the container status work
+  (#47595).
+- **Account**, for an agent of another machine. Its machine reports the account as an id every machine agrees on
+  (a provider and a hash, never an email). srv now adds this computer's own label for it when the same account is
+  signed in here (`swarm.other-instances`, `account_label`), so the row reads "Work"; otherwise it reads "Not
+  signed in on this computer". Under it, the other agents on the map that run on the same account, since they
+  use up the same quota. Nothing about an account leaves the machine that did not already.
+- **Branch.** The repository and branch of the agent's clone, from srv's work facts (`GET /api/v1/work-facts`),
+  else the branch its newest held task was filed with.
+- **Tasks.** The Kanban tasks it holds (claimed, waiting on a question, or in review), the three touched last,
+  each with its pull request as a button that opens it. A title is cut after two lines, and the whole of it is
+  its hover label (the Linux look check had one title fill four lines of the card).
+
+Branch and tasks are this instance's facts, so they show for its own agents only. They are read while a card is
+open and not otherwise: the work facts once and then every 20 seconds, the board through the Kanban's own model.
+
 ## 7. Risks and notes
 
 - **"Steward" is not a stored seat role** (`ROLES` is leader, worker, specialist, platform_tester, analyst, super), so a
