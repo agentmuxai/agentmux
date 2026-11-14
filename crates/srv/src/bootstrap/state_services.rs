@@ -169,6 +169,12 @@ fn spawn_spend_services(state: &AppState) {
     crate::server::spend_watch::start(state.clone());
 }
 
+/// Background-task rows whose process is gone, or that nothing has reported on for a day, are ended
+/// (SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md §5).
+fn spawn_background_task_sweep(state: &AppState) {
+    backend::background_task_sweep::start(Arc::clone(&state.mstore), Arc::clone(&state.broker));
+}
+
 /// Starts the services that run beside the server and need the app state.
 /// The panes that watch messages are told as they happen: the Audit when a row is written, the Atlas map when
 /// a message goes between two agents.
@@ -185,6 +191,7 @@ pub fn spawn_state_services(state: &AppState) {
     // Every agent's runtime state is looked at and each change published (`agentruntime:changed:<id>`).
     crate::server::agent_runtime::spawn(state.clone());
     spawn_spend_services(state);
+    spawn_background_task_sweep(state);
     // Overlap notes (an agent editing a file another agent is also changing
     // is told who): the progress watcher's edits are checked from here on.
     backend::work_facts::overlap_notes::install(
