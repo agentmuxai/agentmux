@@ -471,6 +471,16 @@
     align-self: center;
 }
 
+// The count of messages not yet seen in a pane's Messages panel, on its tab and its Swarm row
+// (MessagesUnreadChip, store/messages-unread.ts). The pill is the kit's; this only seats it in a line of text.
+.messages-unread-chip {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    margin: 0 var(--space-1);
+    line-height: 1;
+}
+
 // The header's one horizontal range (#29325, SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md):
 // the tab strip and its "+", the pane's inline header elements, the grip and the aux
 // controls scroll together; the window controls after it stay pinned. The content is

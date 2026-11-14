@@ -17,6 +17,8 @@ export const AUDIT_PAGE = 50;
 export const AUDIT_AGENT_META_KEY = "audit:agent";
 /** The sound the status bar's "last sound" asks the Audit to show the row of (audit-sound.ts `encodeSoundRef`). */
 export const AUDIT_SOUND_META_KEY = "audit:sound";
+/** The message the Messages panel asks the Audit to show the row of (audit-message.ts `encodeMessageRef`). */
+export const AUDIT_MESSAGE_META_KEY = "audit:message";
 
 /** The kinds the query knows, in the order the chips show them. */
 export const KIND_CHIPS: { kind: string; label: string }[] = [
