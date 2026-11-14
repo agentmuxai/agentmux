@@ -300,12 +300,15 @@ $gap: 6px;
             opacity: 0;
             transition: opacity var(--duration-decorative-instant) linear;
 
+            // The chip's own fill is set above, so the kit's red has to be set again here to win over it.
             &:hover:not(:disabled) {
                 border-color: var(--window-close-hover-bg);
+                background: var(--window-close-hover-bg);
             }
 
             &:active:not(:disabled) {
                 border-color: var(--window-close-press-bg);
+                background: var(--window-close-press-bg);
             }
         }
 
