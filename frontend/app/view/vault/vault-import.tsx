@@ -23,6 +23,7 @@ import {
     deleteImportFile,
     pickImport,
     signinVaultOf,
+    vaultList,
     type CsvMapping,
     type Duplicates,
     type ImportStep,
@@ -480,12 +481,16 @@ function BrowserProfileField(props: { s: ImportState; count: number }): JSX.Elem
         const id = signinVaultOf()[s.profile()] ?? "personal";
         return vaultChoices().find((v) => v.value === id)?.label ?? "Personal";
     };
+    // "Above" points at the Import-into field, which is hidden while there is only one Vault.
+    const description = () => {
+        const logins = `${props.count} ${props.count === 1 ? "login" : "logins"}`;
+        const where = `go to this profile's sign-in Vault (${vaultName()}), where its browser offers them`;
+        return vaultList().length > 1
+            ? `${logins} with a site ${where}, whatever Vault is chosen above. The rest go to the Vault above.`
+            : `${logins} with a site ${where}.`;
+    };
     return (
-        <Field
-            label="Browser profile for the sign-ins"
-            layout="stacked"
-            description={`${props.count} ${props.count === 1 ? "login" : "logins"} with a site go to this profile's sign-in Vault (${vaultName()}), where its browser offers them, whatever Vault is chosen above. The rest go to the Vault above.`}
-        >
+        <Field label="Browser profile for the sign-ins" layout="stacked" description={description()}>
             <Select
                 value={s.profile()}
                 onChange={s.setProfile}

@@ -604,6 +604,24 @@ describe("what to do with duplicates", () => {
         );
     });
 
+    it("points at the Vault above only while that field is on screen", async () => {
+        const preview = { browser_signins: 2, source: "chrome", source_label: "a browser's password export (Chrome, Edge, Brave)" };
+        vaultImport.mockResolvedValueOnce(previewStep(preview));
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import/);
+        expect(screen.queryByText("Import into")).toBeNull();
+        expect(dialog().textContent).toContain("where its browser offers them.");
+        expect(dialog().textContent).not.toContain("Vault above");
+        cleanup();
+
+        vaults = VAULTS;
+        await refreshVault();
+        vaultImport.mockResolvedValueOnce(previewStep(preview));
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import/);
+        expect(dialog().textContent).toContain("whatever Vault is chosen above. The rest go to the Vault above.");
+    });
+
     it("asks nothing about a profile for a file with no browser logins", async () => {
         vaultImport.mockResolvedValueOnce(previewStep());
         render(() => <VaultImportDialog onClose={vi.fn()} />);
