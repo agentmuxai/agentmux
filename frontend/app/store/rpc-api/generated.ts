@@ -1827,7 +1827,7 @@ export const GeneratedApi = {
   // command "kanban.list"
   KanbanListCommand(
     client: RpcClient,
-    data: Record<string, never>,
+    data: { board?: string },
     opts?: RpcOpts
   ): Promise<import("@/app/view/kanban/kanban-types").KanbanBoard> {
     return client.rpcCall("kanban.list", data, opts);
