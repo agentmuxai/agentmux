@@ -863,14 +863,15 @@ pub async fn dispatch_key(
         None => None,
     };
     let _ = cdp.close().await;
-    let (changed, focus_moved) = match (&before, &after) {
-        (Some(b), Some(a)) if !a.is_null() => (
-            Some(b.get("value") != a.get("value") || b.get("checked") != a.get("checked")),
-            Some(b.get("element") != a.get("element")),
-        ),
-        _ => (None, None),
+    let effect = match (&before, &after) {
+        (Some(b), Some(a)) => super::page_state::key_effect(b, a),
+        _ => None,
     };
-    ok_body(ApiResponse::ok(DispatchKeyData { ok: true, after, changed, focus_moved }))
+    let (changed, focus_moved, was) = match effect {
+        Some(e) => (Some(e.changed), Some(e.focus_moved), e.was),
+        None => (None, None, None),
+    };
+    ok_body(ApiResponse::ok(DispatchKeyData { ok: true, after, changed, focus_moved, was }))
 }
 
 /// `POST /agentmux/browser/navigate` — navigate the pane to a new

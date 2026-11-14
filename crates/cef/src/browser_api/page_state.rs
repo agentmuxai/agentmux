@@ -43,6 +43,17 @@ const FOCUSED_STATE: &str = r#"(() => {
   else if ("value" in el && el.tagName !== "BUTTON") out.value = el.value;
   if ("checked" in el && (el.type === "checkbox" || el.type === "radio")) out.checked = el.checked;
   if (el.validationMessage) out.validationMessage = el.validationMessage;
+  // A custom list's trigger (a button or a div with aria-expanded, aria-haspopup or a combobox or listbox
+  // role) has no value of its own: what it shows is its text, and aria-expanded says whether its options
+  // are out. Only such a control's text is read: any other focused element's could be a secret shown once.
+  const expanded = el.getAttribute("aria-expanded");
+  const role = el.getAttribute("role");
+  const isList = expanded !== null || el.hasAttribute("aria-haspopup") || role === "combobox" || role === "listbox";
+  if (isList && (!("value" in el) || el.tagName === "BUTTON")) {
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (text) out.text = text.length > 80 ? text.slice(0, 80) + "…" : text;
+  }
+  if (expanded === "true" || expanded === "false") out.expanded = expanded === "true";
   return out;
 })()"#;
 
@@ -63,7 +74,7 @@ pub async fn focused_state(cdp: &mut CdpSession) -> Value {
     }
     let facts = DomFacts::from_described(&raw);
     let mut shown = serde_json::Map::new();
-    for key in ["tag", "type", "value", "checked", "validationMessage", "contentEditable"] {
+    for key in ["tag", "type", "value", "checked", "validationMessage", "contentEditable", "text", "expanded"] {
         if let Some(v) = raw.get(key) {
             shown.insert(key.to_string(), v.clone());
         }
@@ -79,6 +90,38 @@ pub async fn focused_state(cdp: &mut CdpSession) -> Value {
     };
     shown.insert("element".to_string(), json!(id));
     redact_secret(Value::Object(shown), &facts)
+}
+
+/// What a key did to the focused control, from what had focus before and after it.
+#[derive(Debug, Default, PartialEq)]
+pub struct KeyEffect {
+    /// Its value, checked state or (for a custom list's trigger) text changed.
+    pub changed: bool,
+    /// Another element has focus now.
+    pub focus_moved: bool,
+    /// What changed on the same control, as it was before: `text` and `expanded`, where they differ.
+    /// Only for the same control: when focus moved, they are another control's.
+    pub was: Option<Value>,
+}
+
+/// The effect of a key, `None` when there is no reading after it.
+pub fn key_effect(before: &Value, after: &Value) -> Option<KeyEffect> {
+    if after.is_null() {
+        return None;
+    }
+    let moved = before.get("element") != after.get("element");
+    let mut was = serde_json::Map::new();
+    if !moved {
+        for key in ["text", "expanded"] {
+            if before.get(key) != after.get(key) {
+                was.insert(key.to_string(), before.get(key).cloned().unwrap_or(Value::Null));
+            }
+        }
+    }
+    let changed = before.get("value") != after.get("value")
+        || before.get("checked") != after.get("checked")
+        || (!moved && was.contains_key("text"));
+    Some(KeyEffect { changed, focus_moved: moved, was: (!was.is_empty()).then_some(Value::Object(was)) })
 }
 
 /// The element that really has focus (through shadow roots and same-origin
@@ -392,6 +435,40 @@ mod tests {
 
     fn scan(boxes: &[[f64; 4]], complete: bool) -> SecretBoxes {
         SecretBoxes { boxes: boxes.to_vec(), css_width: Some(800.0), complete, vault_values: 0, read_all: true }
+    }
+
+    #[test]
+    fn a_custom_list_whose_option_changed_or_closed_is_called_out() {
+        use serde_json::json;
+        let list = |text: &str, open: bool| json!({ "tag": "button", "text": text, "expanded": open, "element": "node:7" });
+        // Escape on an open list that took the highlighted option, as QTest saw on Stripe.
+        let e = key_effect(&list("Choose an option", true), &list("AGENTMUX", false)).unwrap();
+        assert!(e.changed && !e.focus_moved);
+        assert_eq!(e.was, Some(json!({ "text": "Choose an option", "expanded": true })));
+        // Escape that only closed it.
+        let e = key_effect(&list("Choose an option", true), &list("Choose an option", false)).unwrap();
+        assert!(!e.changed);
+        assert_eq!(e.was, Some(json!({ "expanded": true })));
+        // Nothing happened.
+        assert_eq!(key_effect(&list("A", true), &list("A", true)), Some(KeyEffect::default()));
+    }
+
+    #[test]
+    fn a_key_that_moved_focus_reports_no_was_for_the_other_control() {
+        use serde_json::json;
+        let before = json!({ "tag": "button", "text": "Country", "expanded": true, "element": "node:7" });
+        let after = json!({ "tag": "input", "value": "x", "element": "node:9" });
+        let e = key_effect(&before, &after).unwrap();
+        assert!(e.focus_moved && e.changed && e.was.is_none());
+        assert!(key_effect(&before, &json!(null)).is_none());
+    }
+
+    #[test]
+    fn a_field_whose_value_changed_is_changed_as_before() {
+        use serde_json::json;
+        let b = json!({ "tag": "input", "value": "", "element": "node:1" });
+        let a = json!({ "tag": "input", "value": "x", "element": "node:1" });
+        assert_eq!(key_effect(&b, &a).unwrap(), KeyEffect { changed: true, focus_moved: false, was: None });
     }
 
     #[test]
