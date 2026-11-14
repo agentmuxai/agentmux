@@ -52,6 +52,10 @@ export const WpsEvent = {
     ReviewFlow: "review-flow",
     ChecksFlow: "checks-flow",
     MergeFlow: "merge-flow",
+    // One of this machine's agent containers changed, `gone` once when it is removed: names and states only. Payload ContainerStatus.
+    ContainerStatusChanged: "container-status",
+    // The container runtime appeared, went away or changed. Payload ContainerRuntimeStatus.
+    ContainerRuntimeChanged: "container-runtime",
     // Image attachment processing, scoped `block:<id>` of the pane that
     // started the batch. Payloads in frontend/types/rpc/Attachment*Event.ts;
     // see docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.5.

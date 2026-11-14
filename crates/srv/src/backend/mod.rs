@@ -203,6 +203,7 @@ pub mod agent_env_scope;
 pub mod spawn_env;
 pub mod agent_tools;
 pub mod container;
+pub mod container_status;
 pub mod runtime_adapter;
 pub mod route_audience;
 pub mod audience;

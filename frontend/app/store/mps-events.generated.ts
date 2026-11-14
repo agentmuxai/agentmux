@@ -32,6 +32,8 @@ import type { CompactionStarted } from "@/types/rpc/CompactionStarted";
 import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import type { ConnectivityStatus } from "@/types/rpc/ConnectivityStatus";
+import type { ContainerRuntimeStatus } from "@/types/rpc/ContainerRuntimeStatus";
+import type { ContainerStatus } from "@/types/rpc/ContainerStatus";
 import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
 import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
@@ -158,6 +160,8 @@ export type MuxEventPayloads = {
   config: ConfigEvent;
   connchange: ConnStatus;
   "connectivity:changed": ConnectivityStatus;
+  "container-runtime": ContainerRuntimeStatus;
+  "container-status": ContainerStatus;
   controllerstatus: BlockControllerRuntimeStatus;
   cron_changed: null;
   "dispatch:activity": DispatchActivityEvent;
@@ -291,6 +295,8 @@ export const TYPED_MUX_EVENTS = [
   "config",
   "connchange",
   "connectivity:changed",
+  "container-runtime",
+  "container-status",
   "controllerstatus",
   "cron_changed",
   "dispatch:activity",

@@ -3,7 +3,7 @@
 **Status:** draft. For Camper's agreement (the Atlas side), then the build (#47596).
 
 Task #47595 (build: #47596, after this). Owner: AgentA (srv core). Requested by Camper (Atlas, #47554 part b); routed by
-AgentY. Written 2026-11-14 from origin/main `a87476e72`. Nothing here is built.
+AgentY. Written 2026-11-14 from origin/main `a87476e72`. Part a (the `runtime` field on rows) is built (#7304); part b (the container module, events, route and store) is built in the PR that carries this file.
 
 ## 1. What is asked
 
@@ -65,11 +65,13 @@ agents by default).
 
 A new module `backend/container_status.rs`, shaped like the flow modules:
 
-- **Which containers.** Only AgentMux's agent containers: the name is `agentmux-<slug>` (`container_name_for_slug`), where
-  `<slug>` is an agent definition's slug; a container of that form with no definition is listed as an **orphan**
-  (`agent_id` absent), because that is the one a person wants to see. Other containers on the machine are never listed or
-  counted by name. (Containers carry no label today; a new label `ai.agentmux.agent=<slug>` on create is a cheap addition
-  and the lookup stays by name for the ones that predate it. Decision 4.)
+- **Which containers.** Only AgentMux's agent containers: the name is `agentmux-<agent id>` (`container_name_for_slug`,
+  where the agent id is the definition's id, the one `AgentRuntime.agent_id` carries). A container of that form whose id is
+  no definition's is listed as an **orphan** (`agent_id` null), because that is the one a person wants to see. Another
+  container is never listed: the name must start with `agentmux-` and then carry the label `ai.agentmux.agent=<agent id>`
+  (new containers get it on create), or look like an agent id (a UUID), or be a definition's id, so a container such as
+  `agentmux-<something else>` is not taken for an agent's. The lookup stays by name for the containers that predate the
+  label. Decision 4.
 - **The row.** `ContainerStatus { name, agent_id, agent_name, state, image, since_ms }`, where `agent_id` and `agent_name`
   are **null** (present, not omitted) for an orphan. `state` is one of `starting`,
   `running`, `stopped`, `gone`; `image` is the reference as srv created it (name and tag, no credentials: a reference
@@ -82,7 +84,7 @@ A new module `backend/container_status.rs`, shaped like the flow modules:
   exported by ts-rs.
 - **The list.** `GET /api/v1/containers` → `{ "runtime": ContainerRuntimeStatus, "containers": [ContainerStatus] }`: what is
   there now (a removed container is only ever an event). `Audience::Everyone` in `route_audience.rs`, behind the normal
-  auth, so a container agent can read it; read-only, no query that reaches a container. **Where there is no Docker it
+  auth, so a container agent can read it; read-only, no query that reaches a container. The route looks at the runtime live, as `containerruntimeavailable` does, so a reader finds a runtime that started after srv did. **Where there is no Docker it
   answers 200 with `containers: []` and `runtime.available: false`, never an error.**
 - **Typed events.** Both events are typed mux events (registered in `mps_events.rs`, bindings from `gen-mux-events`,
   checked with `--check`), so a pane subscribes with `onMuxEvent` the way it would for message-flow.
@@ -110,7 +112,7 @@ kind the same way.
    *Recommend:* as written.
 3. **Docker events plus a 60-second reconcile**, against polling alone every 10 s. *Recommend:* events plus reconcile
    (state changes are shown within a second and an idle machine costs a list per minute).
-4. **A label on new containers.** `ai.agentmux.agent=<slug>`. *Recommend:* yes, in the same PR; the name check stays for
+4. **A label on new containers.** `ai.agentmux.agent=<agent id>`. *Recommend:* yes, in the same PR; the name check stays for
    older containers.
 5. **The route.** `GET /api/v1/containers`, `Everyone`. *Recommend:* as written. *Alternative:* none: the websocket is
    closed to container agents.
@@ -136,7 +138,7 @@ kind the same way.
 - **Podman** answers the Docker API through a compatibility socket; its event stream differs in detail (event names for a
   pod's containers). The mapping reads only start, die, stop and destroy, and the reconcile list corrects a miss; the
   build checks both runtimes where one is available.
-- **Several channels on one machine** share one Docker daemon and the same `agentmux-<slug>` names, so each lists the same
+- **Several channels on one machine** share one Docker daemon and the same `agentmux-<agent id>` names, so each lists the same
   containers; that is true to the machine and costs one event stream per instance.
 - **A container started outside srv** under an `agentmux-` name appears as an orphan, which is the point.
 - **Older builds** send no `runtime` on remote rows: the frontend shows no kind for them, never a guess.
