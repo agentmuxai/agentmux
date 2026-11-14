@@ -28,6 +28,14 @@ fn global_app_skill(store: &crate::backend::storage::store::Store, id: &str, wha
     store.skill_app_get(id).map_err(|e| format!("{what}: {e}"))?.map(|_| ()).ok_or_else(|| format!("{what}: {id} is not a computer-use skill"))
 }
 
+/// A reference crop as a data URL. Only a PNG is one: the bytes are checked, not the file name.
+fn png_data_url(bytes: &[u8]) -> Option<String> {
+    use base64::Engine as _;
+    bytes
+        .starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A])
+        .then(|| format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
 fn register_app_file(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let identity_store = state.identity_store.clone();
     engine.register_typed(COMMAND_SKILL_CATALOG_APP_FILE, move |req: CommandSkillCatalogAppFileData, _ctx| {
@@ -39,10 +47,11 @@ fn register_app_file(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .skill_file_get(&req.skill_id, &req.path)
                 .map_err(|e| format!("{E}: {e}"))?
                 .ok_or_else(|| format!("{E}: no file {} in that skill", req.path))?;
-            if f.image.is_some() {
-                return Err(format!("{E}: {} is an image; it is not shown as text", req.path));
-            }
-            Ok(SkillAppFile { path: f.path, text: f.content })
+            let Some(bytes) = f.image else {
+                return Ok(SkillAppFile { path: f.path, text: f.content, image_data_url: None });
+            };
+            let data_url = png_data_url(&bytes).ok_or_else(|| format!("{E}: {} is not a PNG image", req.path))?;
+            Ok(SkillAppFile { path: f.path, text: String::new(), image_data_url: Some(data_url) })
         }
     });
 }

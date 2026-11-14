@@ -15,6 +15,14 @@ async fn call(state: &AppState, command: &str, data: Value) -> Result<Value, Str
 
 const SCRIPT: &str = "print('hi')\n";
 
+#[test]
+fn a_crop_is_shown_only_when_its_bytes_are_a_png() {
+    let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+    assert_eq!(super::png_data_url(&png).as_deref(), Some("data:image/png;base64,iVBORw0KGgoBAgM="));
+    assert_eq!(super::png_data_url(b"<svg onload=alert(1)>"), None, "other bytes are never turned into an image");
+    assert_eq!(super::png_data_url(&[]), None);
+}
+
 fn sha(text: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
