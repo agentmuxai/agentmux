@@ -206,3 +206,11 @@ Two notes:
   - `media:image`: the wheel zooms about the pointer (scale 1 → 1.72), a drag pans, a double-click goes back to fit, `+` zooms (1.25) and `0` fits.
   - `browser:keys`: Ctrl+L focuses the address bar, Alt+← and Alt+→ go back and forward, and Ctrl+R reloads (checked on pages served from 127.0.0.1; the browser pane doesn't open `file://` URLs).
   - The agent tips are still unchecked on Windows: a dev build shares the agent list, and starting a session would run a real agent.
+
+**Niche views (task #7, 2026-11-14, Opaz@charlie).** Seven tips for views whose gestures nothing on screen explains join the table, each tried by hand in a task dev build on Linux (X11, real input through XTest; the Delete and arrow keys through CDP key events). All seven passed.
+- **Files:** drag a column header's right edge to resize that column; double-click it to give it its default width back (`files:column:resize`).
+- **Memory:** on an open entry, the line between the toolbar and the text drags, steps with the arrow keys once it has keyboard focus (a press on it does not focus it, so Tab gets there), and resets on a double-click (`memory:divider`). The memory grid's "Drag entries to change their order" line already says how to reorder, so there is no tip for that.
+- **Atlas:** the wheel zooms about the pointer, and a drag on the empty background pans (`atlas:zoom`, `atlas:pan`).
+- **Drone:** the wheel zooms about the pointer; a drag on the empty background, or the middle button anywhere, pans; Delete removes the selected node and Esc only clears the selection (`drone:zoom`, `drone:pan`, `drone:delete`). The canvas says the same in its empty state, but that text goes once a node is on it. A selected link is removed by the same key in the code; it was not tried.
+- Not done: the optional `kind: "tip"` list for agents. No agent has asked for it, and `ListShortcuts` still returns table keys only.
+- Not checked on Windows or macOS: the gestures are plain pointer and key events in code that has no platform branch, but nobody has run them there.
