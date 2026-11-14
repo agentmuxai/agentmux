@@ -249,6 +249,17 @@ describe("the prompt for an agent's use of an entry", () => {
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
     });
 
+    it("cuts a long agent name and a long site short in the Always button, which is for the whole card to fit", async () => {
+        const site = `accounts.${"very-long-subdomain.".repeat(5)}shop.example.com`;
+        uses = [use({ account: true, what: "new account", kind: "login", entry_id: "", entry_label: `a new account on https://${site}`, origin: `https://${site}`, field: "", offer_always: true, agent: "Maricon-the-Second-Agent-With-A-Very-Long-Display-Name" })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const dialog = await screen.findByRole("group");
+        const always = within(dialog).getByRole("button", { name: /^Always for / });
+        expect(always.textContent!.length).toBeLessThan(140);
+        expect(always.textContent).toContain("…");
+    });
+
     it("says a command's output will replace the entry's value, that the old one is kept, and offers no Always", async () => {
         uses = [use({ origin: "", field: "", what: "value", entry_label: "GitHub token", kind: "", command: "gh auth token", cwd: "C:/work", offer_always: false, replaces: true, reason: "what the command prints replaces the value" })];
         await refreshVault();
