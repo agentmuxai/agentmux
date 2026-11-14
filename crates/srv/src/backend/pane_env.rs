@@ -407,6 +407,8 @@ mod spawn_site_coverage {
          "test: re-runs the test harness as a child that sleeps, to prove the extraction deadline kills it"),
         ("src/backend/spawn_env/endpoint.rs", "\"claude\"", 1,
          "test: builds a command only to read the environment it would get, to prove an emptied login variable is removed from it; never spawned"),
+        ("src/http_client_tests.rs", "std::env::current_exe(", 1,
+         "test: re-runs the test harness as a child whose SSL_CERT_FILE names an empty, a valid or a replaced certificate bundle, because the machine's certificates are read from the environment when a client is built; the child makes requests to a loopback server only"),
         ("src/backend/storage/muxbus.rs", "std::env::current_exe(", 1,
          "test: re-runs the test harness as children that save and read one keychain sign-in at once (ignored; real keychain)"),
         ("src/backend/storage/filestore/tests_checkpoint.rs", "std::env::current_exe(", 1,

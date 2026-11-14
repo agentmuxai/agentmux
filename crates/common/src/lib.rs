@@ -45,6 +45,9 @@ pub mod runtime_mode;
 pub mod shown_once;
 pub mod secret_eq;
 pub mod secret_env;
+pub mod system_certs;
+#[cfg(feature = "local-http")]
+pub mod local_http;
 pub mod settings_file;
 mod settings_patch;
 pub mod settings_jsonc;

@@ -8,6 +8,7 @@
 pub mod frame;
 pub mod fsproto;
 pub mod procs;
+pub mod rename;
 pub mod ring;
 pub mod serve;
 

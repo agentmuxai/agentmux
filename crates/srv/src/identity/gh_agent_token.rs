@@ -138,7 +138,7 @@ fn remembered(entry: Option<Lookup>, now: std::time::Instant) -> Option<Option<u
 }
 
 async fn fetch_bot_user_id(slug: &str) -> Option<u64> {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).user_agent("agentmux-srv").build().ok()?;
+    let client = crate::http_client::builder().timeout(Duration::from_secs(5)).user_agent("agentmux-srv").build().ok()?;
     let resp = client
         .get(format!("https://api.github.com/users/{slug}%5Bbot%5D"))
         .header("Accept", "application/vnd.github+json")

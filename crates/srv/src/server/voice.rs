@@ -253,7 +253,7 @@ async fn transcribe_groq(
         form = form.text("language", l.to_string());
     }
 
-    let resp = reqwest::Client::new()
+    let resp = crate::http_client::client()
         .post(GROQ_TRANSCRIBE_URL)
         .bearer_auth(key)
         .multipart(form)
@@ -341,7 +341,7 @@ async fn ensure_local_model(
     let bytes = tokio::time::timeout(
         std::time::Duration::from_secs(MODEL_DOWNLOAD_TIMEOUT_SECS),
         async {
-            let resp = reqwest::Client::new()
+            let resp = crate::http_client::client()
                 .get(&url)
                 .send()
                 .await

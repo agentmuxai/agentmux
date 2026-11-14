@@ -157,6 +157,7 @@ dependencies = [
 name = "agentmux-common"
 version = "0.60.27"
 dependencies = [
+ "agentmux-common",
  "base64 0.22.1",
  "dirs 5.0.1",
  "ed25519-dalek",
@@ -165,6 +166,7 @@ dependencies = [
  "junction",
  "libc",
  "psl",
+ "reqwest",
  "rustls",
  "same-file",
  "serde",

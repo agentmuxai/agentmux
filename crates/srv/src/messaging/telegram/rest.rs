@@ -74,10 +74,10 @@ fn redact(token: &str, s: String) -> String {
 /// exceeds Telegram's own 30s long-poll wait. Kept distinct from the client
 /// used for sends (spec §9).
 pub fn build_poll_client() -> reqwest::Client {
-    reqwest::Client::builder()
+    crate::http_client::builder()
         .timeout(Duration::from_secs(POLL_CLIENT_TIMEOUT_SECS))
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        .unwrap_or_else(|_| crate::http_client::client())
 }
 
 /// GET /bot{token}/getUpdates
