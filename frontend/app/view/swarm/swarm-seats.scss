@@ -3,12 +3,8 @@
 //
 // Seats in the Swarm (swarm-seats.tsx; docs/specs/SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4).
 
-// The badge sits right after the name; the row's other chips stay at its end.
-.swarm-agent-label:has(+ .swarm-seat-badge) {
-    flex: 0 1 auto;
-    min-width: 2em;
-}
-
+// The badge sits right after the name (the row's rule for a name with a badge, in swarm-view.scss, keeps the
+// name from growing); its margin keeps the row's other chips at the row's end.
 .swarm-seat-badge {
     flex: 0 1 auto;
     min-width: 0;
