@@ -877,6 +877,8 @@ mod tests {
         let mut paused = bare_grant(60, None);
         let ten_minutes_ago = now.checked_sub(Duration::from_secs(600)).unwrap_or(now);
         paused.paused_at = Some(ten_minutes_ago);
+        // Paused ten minutes ago with sixty minutes then left: its clock stands at the pause.
+        paused.expires = ten_minutes_ago + Duration::from_secs(3600);
         assert_eq!(paused.shorten(15, now), Some(60));
         assert!((14..=15).contains(&paused.minutes_left()));
         // The header's end is 15 minutes after the pause, which resuming moves later by the time paused.
