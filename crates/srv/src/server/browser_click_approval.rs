@@ -116,11 +116,14 @@ pub(crate) async fn approve_click(
 /// The question the agent is told it waits on: the click's own words and its page.
 fn question_of(ask: &serde_json::Value) -> String {
     let s = |k: &str| ask.get(k).and_then(|v| v.as_str()).unwrap_or("");
-    match (s("what"), s("page")) {
+    let question = match (s("what"), s("page")) {
         ("", "") => "a committing click".to_string(),
         (what, "") => what.to_string(),
         (what, page) => format!("{what} on {page}"),
-    }
+    };
+    // This is the agent's copy (the waiting notice and the request's status): the person's prompt has the
+    // click's own words, the agent gets them without anything shaped like a secret.
+    agentmux_common::secret_shape::scrub(&question)
 }
 
 /// Where the approved click left the page, for the agent's note.

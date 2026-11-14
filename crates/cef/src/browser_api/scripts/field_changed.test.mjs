@@ -42,6 +42,21 @@ describe("fieldChanged", () => {
         expect(fieldChanged({ tagName: "SELECT", options: opts([true, false], [true, false]) }, "select-one")).toBe(false);
     });
 
+    it("an untouched dropdown whose first option the page never marked is not changed", () => {
+        const o = (selected, disabled = false) => ({ selected, defaultSelected: false, disabled });
+        expect(fieldChanged({ tagName: "SELECT", options: [o(true), o(false)] }, "select-one")).toBe(false);
+        expect(fieldChanged({ tagName: "SELECT", options: [o(false), o(true)] }, "select-one")).toBe(true);
+        // A disabled first option is not what the browser shows.
+        expect(fieldChanged({ tagName: "SELECT", options: [o(false, true), o(true)] }, "select-one")).toBe(false);
+    });
+
+    it("a field the agent wrote to is changed whatever its default says", () => {
+        // A controlled input moves its default along with what was typed.
+        const typed = { tagName: "INPUT", value: "Acme", defaultValue: "Acme", hasAttribute: (n) => n === "data-agentmux-filled" };
+        expect(fieldChanged(typed, "text")).toBe(true);
+        expect(fieldChanged({ ...typed, hasAttribute: () => false }, "text")).toBe(false);
+    });
+
     it("a file input is changed when it holds a file", () => {
         expect(fieldChanged({ tagName: "INPUT", files: [{ name: "a.pdf" }] }, "file")).toBe(true);
         expect(fieldChanged({ tagName: "INPUT", files: [] }, "file")).toBe(false);

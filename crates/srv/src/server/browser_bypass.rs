@@ -115,7 +115,9 @@ impl Grant {
         }
         let was = self.minutes_left();
         self.expires = self.paused_at.unwrap_or(now) + dur;
-        self.expires_at_ms = chrono::Utc::now().timestamp_millis() + dur.as_millis() as i64;
+        // The clock stands at the pause; resuming moves the end later by the time paused so far.
+        let paused_for = self.paused_at.map_or(Duration::ZERO, |at| now.saturating_duration_since(at));
+        self.expires_at_ms = chrono::Utc::now().timestamp_millis() - paused_for.as_millis() as i64 + dur.as_millis() as i64;
         self.minutes = minutes;
         Some(was)
     }
@@ -873,9 +875,14 @@ mod tests {
         let mut always = bare_grant(0, Some("row".into()));
         assert_eq!(always.shorten(15, now), None, "a standing grant has no clock to cut");
         let mut paused = bare_grant(60, None);
-        paused.paused_at = Some(now);
+        let ten_minutes_ago = now.checked_sub(Duration::from_secs(600)).unwrap_or(now);
+        paused.paused_at = Some(ten_minutes_ago);
         assert_eq!(paused.shorten(15, now), Some(60));
         assert!((14..=15).contains(&paused.minutes_left()));
+        // The header's end is 15 minutes after the pause, which resuming moves later by the time paused.
+        let end_in_ms = paused.expires_at_ms - chrono::Utc::now().timestamp_millis();
+        let expected = 15 * 60_000 - now.saturating_duration_since(ten_minutes_ago).as_millis() as i64;
+        assert!((end_in_ms - expected).abs() < 5_000, "{end_in_ms} vs {expected}");
     }
 
     #[test]

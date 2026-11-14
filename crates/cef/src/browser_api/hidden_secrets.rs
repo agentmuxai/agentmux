@@ -24,8 +24,9 @@
 //! matches on, so `find` can't count a secret out a piece at a time.
 //!
 //! When the page's layout can't be read, nothing is known to be hidden, so every text node counts as
-//! hidden and the shape rule alone applies: a secret's shape is withheld wherever it is, rather than shown
-//! for want of an answer (the row rule needs to know what is hidden, and is not applied).
+//! hidden: a secret's shape is withheld wherever it is, and text in a secret row when it is one odd token
+//! (an id, a key a page makes up), rather than shown for want of an answer. A phrase beside a password field
+//! is kept.
 //!
 //! [`scrub`] is the shape rule alone, for the strings read from a page's own script (the state an action
 //! reports, a name read for one element): there is no tree to climb, and a secret shape is withheld
@@ -40,8 +41,8 @@ use serde_json::Value;
 
 use super::snapshot::str_of;
 
-/// What an agent reads in place of withheld hidden text.
-pub const WITHHELD: &str = "[hidden text withheld: it may be a secret; use Browser capture to save it]";
+pub use agentmux_common::secret_shape::WITHHELD;
+use agentmux_common::secret_shape::{has_key_shape, scrub, token_like};
 
 /// Set on a text node whose text was withheld, so its line gets a reference.
 const FLAG: &str = "agentmuxWithheld";
@@ -71,34 +72,6 @@ const NOT_A_ROW: &[&str] = &["navigation", "banner", "complementary", "contentin
 /// from its contents), and from any node at all.
 const ECHO_BELOW: usize = 3;
 const ECHO_ANYWHERE: usize = 6;
-
-/// Prefixes of keys, tokens and signing secrets that are short enough to miss the one-time shape.
-const KEY_PREFIXES: &[&str] = &["sk_", "rk_", "pk_", "whsec_", "ghp_", "gho_", "ghs_", "github_pat_", "xoxb-", "xoxp-", "xoxa-", "eyj"];
-
-/// A cloud access key id: four capital letters and sixteen capitals or digits, as one word.
-fn is_access_key_id(t: &str) -> bool {
-    t.len() == 20 && (t.starts_with("AKIA") || t.starts_with("ASIA")) && t.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
-}
-
-fn has_key_shape(text: &str) -> bool {
-    agentmux_common::shown_once::has_shown_once(text)
-        || text.to_ascii_lowercase().contains("-----begin")
-        || text.split_whitespace().any(|t| {
-            let lower = t.to_ascii_lowercase();
-            is_access_key_id(t) || (t.len() >= 12 && KEY_PREFIXES.iter().any(|p| lower.starts_with(p)))
-        })
-}
-
-/// One long word with a digit and a letter in it, which words are not: an odd-shaped value (an id, a key a
-/// page makes up) that is safe to take out of unrelated nodes' names.
-fn token_like(text: &str) -> bool {
-    let t = text.trim();
-    t.chars().count() >= 12
-        && !t.chars().any(char::is_whitespace)
-        && t.chars().any(|c| c.is_ascii_digit())
-        && t.chars().any(char::is_alphabetic)
-        && t.chars().all(|c| c.is_alphanumeric() || "-_=+/.:".contains(c))
-}
 
 /// The words of a name, lowercased, split on anything that is not a letter or digit and on a lower-to-upper
 /// step (`apiKey` is `api`, `key`).
@@ -197,7 +170,7 @@ impl Tree<'_> {
         }
         inside.into_iter().any(|i| {
             let node = &self.nodes[i];
-            i != skip && !ignored(node) && !(is_text(node) && self.is_hidden(node)) && says_secret(str_of(node, "name"))
+            i != skip && !ignored(node) && !(is_text(node) && !self.unknown && self.is_hidden(node)) && says_secret(str_of(node, "name"))
         })
     }
 
@@ -239,8 +212,10 @@ pub(super) fn withhold(nodes: &mut [Value], hidden: &HashSet<i64>, unknown: bool
             }
             let shaped = FIELDS.iter().any(|f| has_key_shape(str_of(node, f)));
             let holds_text = FIELDS.iter().any(|f| !str_of(node, f).trim().is_empty());
-            // Without a layout nothing is known of rows: the shape rule alone.
-            if shaped || (!unknown && is_text(node) && holds_text && tree.in_secret_row(i)) {
+            // Without a layout, text in a secret row is withheld only when it is one odd token (a phrase beside a
+            // password field is kept): the row's own words are all that can be told.
+            let odd = !unknown || FIELDS.iter().any(|f| token_like(str_of(node, f)));
+            if shaped || (is_text(node) && holds_text && odd && tree.in_secret_row(i)) {
                 chosen.push(i);
             }
         }
@@ -323,12 +298,13 @@ pub(super) fn withhold(nodes: &mut [Value], hidden: &HashSet<i64>, unknown: bool
     changed
 }
 
-/// `text` with every word that has a secret's shape replaced by [`WITHHELD`]; the text itself when none has.
-pub(super) fn scrub(text: &str) -> String {
-    if !has_key_shape(text) {
-        return text.to_string();
+/// An action's answer about the element: no secret-shaped text in it. An approval request (a click that asks
+/// the person first) is left as it is: the agent never receives it (its notice is scrubbed on srv's side).
+pub(super) fn scrub_answer(mut after: Value) -> Value {
+    if after.get("needs_approval").is_none() {
+        scrub_value(&mut after);
     }
-    text.split_whitespace().map(|w| if has_key_shape(w) { WITHHELD } else { w }).collect::<Vec<_>>().join(" ")
+    after
 }
 
 /// [`scrub`] on every string in `value`, at any depth.

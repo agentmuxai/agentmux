@@ -320,3 +320,30 @@ fn an_odd_shaped_value_a_row_withheld_is_still_taken_out_of_a_siblings_descripti
     assert!(!said.contains("q7Zp") && said.contains("to the clipboard"), "{said}");
     assert!(!shown(&nodes, None).text.contains("q7Zp"));
 }
+
+#[test]
+fn an_unreadable_layout_withholds_an_odd_token_in_a_secret_row_and_keeps_a_phrase_beside_a_password_field() {
+    let unknown = Layout { unknown: true, ..Layout::default() };
+    // The odd-shaped value in a "Signing key" row, with no key shape of its own.
+    let mut nodes = row("Signing key", "q7Zp-93xaLm2Rt");
+    visibility::apply(&mut nodes, &unknown, true);
+    let out = shown(&nodes, None);
+    assert!(!out.text.contains("q7Zp") && out.text.contains(WITHHELD), "{}", out.text);
+    // Help text beside a password field is a phrase, not a token.
+    let mut nodes = row("Password", "At least eight characters");
+    visibility::apply(&mut nodes, &unknown, true);
+    assert!(shown(&nodes, None).text.contains("At least eight characters"));
+    // With the layout read, the same odd token is withheld as before.
+    let mut nodes = row("Signing key", "q7Zp-93xaLm2Rt");
+    visibility::apply(&mut nodes, &layout(&[9]), true);
+    assert!(!shown(&nodes, None).text.contains("q7Zp"));
+}
+
+#[test]
+fn an_answer_with_an_approval_request_in_it_is_left_as_the_person_is_shown_it() {
+    let ask = json!({ "needs_approval": { "what": "Click \"Save\"", "fields": [["Key", "ghp_abcdefghij12", true]] } });
+    assert_eq!(scrub_answer(ask.clone()), ask);
+    let answered = scrub_answer(json!({ "value": "ghp_abcdefghij12", "checked": true }));
+    assert_eq!(answered["value"], json!(WITHHELD));
+    assert_eq!(answered["checked"], json!(true));
+}
