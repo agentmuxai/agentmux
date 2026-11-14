@@ -6,6 +6,11 @@
 //! binary's tests and the core's tests are type-checked apart; the binary reaches these modules
 //! through the `use agentmux_srv::...` lines at the top of `main.rs`.
 
+// A build that ships never has the test-only feature. Tests run in the dev profile, which keeps
+// debug assertions on; a release-profile build with the feature on does not compile.
+#[cfg(all(feature = "test-support", not(test), not(debug_assertions)))]
+compile_error!("the `test-support` feature is for test builds only; a release build must not enable it");
+
 pub mod adoption;
 pub mod agents;
 pub mod ambient;

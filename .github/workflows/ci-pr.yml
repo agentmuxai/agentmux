@@ -474,6 +474,10 @@ jobs:
       # (.config/nextest.toml): only the tests that read the source tree or the
       # files generated from it, which a merge race breaks (#6193 + #6196).
       # Its build is srv's unit tests, nearly all of the step's time.
+      # A normal (non-test) resolve of the workspace has the test-only feature off.
+      - name: A shipped build never has the test-only feature
+        if: matrix.os == 'ubuntu-latest'
+        run: node scripts/check-test-support-off.mjs --resolved
       - name: Install cargo-nextest
         if: matrix.os != 'windows-latest'
         uses: taiki-e/install-action@nextest
@@ -776,6 +780,9 @@ jobs:
       # One Rust version everywhere (rust-toolchain.toml, each workflow's install, the developer image).
       - name: Rust version pinned the same everywhere
         run: node scripts/check-rust-pin.mjs
+      # A shipped build never has the test-only feature: no command asks for it.
+      - name: No build command enables the test-only feature
+        run: node scripts/check-test-support-off.mjs
 
       # The ratchet half of the same rule set. check-doc-status.sh is scoped to
       # CHANGED FILES on purpose (a repo-wide gate would fail every PR on the
@@ -1101,7 +1108,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator
