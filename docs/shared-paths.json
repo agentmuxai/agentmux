@@ -102,6 +102,19 @@
       ]
     },
     {
+      "name": "running instances",
+      "paths": [
+        "instances/"
+      ],
+      "why": "One instance on the machine can name and reach another (muxspect instances, muxspect --channel; SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02). A record holds the loopback URL and auth key of its srv.",
+      "gate": "None; a record that does not parse or names a non-loopback address is ignored, and a record is listed only while its process is alive and it was written in the last minute.",
+      "lock": "One file per instance, written atomically, rewritten every 20 s, removed at exit and by the reader once its process is gone.",
+      "users": [
+        "crates/srv/src/backend/instance_registry.rs",
+        "crates/srv/src/server/muxspect_instances.rs"
+      ]
+    },
+    {
       "name": "LAN instances",
       "paths": [
         "lan/instances/"
