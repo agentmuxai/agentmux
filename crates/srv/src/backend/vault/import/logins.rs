@@ -70,6 +70,22 @@ pub(super) fn cell<'a>(row: &'a csv::StringRecord, col: Option<usize>) -> &'a st
     col.and_then(|i| row.get(i)).map(str::trim).unwrap_or("")
 }
 
+/// On a login Chrome kept for an Android app: it has no site to be offered on, so it stays in the Vault only.
+pub(super) const ANDROID_APP: &str = "from an Android app: no site to offer it on";
+
+/// A browser export's address as a saved sign-in names its site: the exact origin of a web page's
+/// address (`https://accounts.example.com/signin?x=1` is `https://accounts.example.com`), and none for an
+/// Android app (`android://<hash>@com.example.app/`), whose package is given back for a label. An address
+/// with no web origin is kept as exported.
+pub(super) fn chrome_site(url: &str) -> (String, Option<String>) {
+    let url = url.trim();
+    if let Some(app) = url.strip_prefix("android://") {
+        let package = app.rsplit_once('@').map_or(app, |(_, p)| p).trim_end_matches('/');
+        return (String::new(), Some(if package.is_empty() { "Android app".to_string() } else { package.to_string() }));
+    }
+    (agentmux_common::allowed_origins::target_origin(url).unwrap_or_else(|| url.to_string()), None)
+}
+
 /// A host for a label when a row has no title.
 pub(super) fn host_of(url: &str) -> String {
     let rest = url.split("://").nth(1).unwrap_or(url);
@@ -101,9 +117,19 @@ pub fn read(text: &str, mapping: Option<&Mapping>) -> Result<Imported, ReadError
     let mut entries = Vec::new();
     let mut skipped = Vec::new();
     for row in &rows {
-        let site = cell(row, cols.site);
+        // A browser export gives a page's address; a saved sign-in is offered for exactly a site's origin.
+        let (site, android) = if source == Source::Chrome { chrome_site(cell(row, cols.site)) } else { (cell(row, cols.site).to_string(), None) };
+        let site = site.as_str();
         let title = cell(row, cols.label);
-        let label = if !title.is_empty() { title.to_string() } else if !host_of(site).is_empty() { host_of(site) } else { cell(row, cols.username).to_string() };
+        let label = if !title.is_empty() {
+            title.to_string()
+        } else if !host_of(site).is_empty() {
+            host_of(site)
+        } else if let Some(app) = android.as_deref() {
+            app.to_string()
+        } else {
+            cell(row, cols.username).to_string()
+        };
         let label = if label.is_empty() { "(unnamed)".to_string() } else { label };
         let folder = cell(row, cols.folder);
         if source == Source::LastPass && site == "http://sn" {
@@ -138,6 +164,9 @@ pub fn read(text: &str, mapping: Option<&Mapping>) -> Result<Imported, ReadError
             continue;
         }
         let mut login = Incoming::new("login", &label).part("password", password).field("site", site).field("username", cell(row, cols.username)).tag(folder);
+        if android.is_some() {
+            login = login.tag(ANDROID_APP);
+        }
         let totp = cell(row, cols.totp);
         if !totp.is_empty() {
             login = login.part("totp", totp);
