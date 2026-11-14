@@ -16,6 +16,7 @@ import { devInstance } from "./scripts/dev-instance-plugin.mjs";
 import { shikiNoThemes } from "./scripts/shiki-no-themes.mjs";
 import { shikiPrebundleDeps } from "./scripts/shiki-prebundle.mjs";
 import { thirdPartyNotices } from "./scripts/third-party-notices.mjs";
+import { makeWatchIgnore } from "./scripts/vite-watch-ignore.mjs";
 
 /**
  * Maps Taskfile {{OS}} values to Node.js process.platform equivalents.
@@ -257,6 +258,9 @@ export default defineConfig({
                 `${path.resolve(__dirname).replace(/\\/g, "/")}/.dev-home/**`,
                 `${path.resolve(__dirname).replace(/\\/g, "/")}/**/*.md`,
                 `${path.resolve(__dirname).replace(/\\/g, "/")}/**/*.json`,
+                // Every other top-level directory the dev server never serves (crates, docs, an
+                // alternative `target-<name>` cargo dir, ...): see scripts/vite-watch-ignore.mjs.
+                makeWatchIgnore(__dirname),
             ],
         },
     },
