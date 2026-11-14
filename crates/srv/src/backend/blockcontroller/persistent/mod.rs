@@ -88,6 +88,18 @@ pub(crate) fn is_held_elsewhere_error(err: &str) -> bool {
         || err.starts_with("This conversation is already open in another pane (block ")
 }
 
+/// The stop request a pane given a lease by `hold_lease_for_test` receives.
+#[cfg(test)]
+pub(crate) struct StopRequest(tokio::sync::oneshot::Receiver<KillRequest>);
+
+#[cfg(test)]
+impl StopRequest {
+    /// Waits for the request; whether it was a graceful stop (stdin closed, then a deadline) and not a kill.
+    pub(crate) async fn was_graceful(self) -> bool {
+        matches!(self.0.await, Ok(KillRequest::Graceful(_)))
+    }
+}
+
 /// What the process-waiter task's kill arm is asked to do.
 #[derive(Debug, Clone, Copy)]
 enum KillRequest {
@@ -1155,6 +1167,23 @@ impl PersistentSubprocessController {
         self.lease_store = crate::backend::agent_admission::lease_store_for(registry);
         self.boot_id = boot_id;
         self
+    }
+
+    /// For the tests of the layer above (`server::agent_move_here`): make this pane hold `held` as if
+    /// its process were running, and hand back what its stop request will say.
+    #[cfg(test)]
+    pub(crate) fn hold_lease_for_test(&self, held: crate::backend::agent_admission::HeldAgentLease) -> StopRequest {
+        let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<KillRequest>();
+        let mut g = self.inner.lock().unwrap();
+        g.agent_lease = Some(Arc::new(held));
+        g.kill_tx = Some(kill_tx);
+        StopRequest(kill_rx)
+    }
+
+    /// The process this pane stood for has exited: its lease is dropped.
+    #[cfg(test)]
+    pub(crate) fn drop_lease_for_test(&self) {
+        self.inner.lock().unwrap().agent_lease = None;
     }
 
     /// Claim (or keep) this agent's single-live-instance lease for the

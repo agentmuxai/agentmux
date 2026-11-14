@@ -10,8 +10,10 @@ use crate::backend::reactive as backend_reactive;
 use crate::backend::wconfig;
 
 // Tests that need the whole server (its router and state) but belong to a module below it.
+mod agent_move_here_tests;
 mod container_listener_tests;
 mod listener_itest;
+mod tower_peers_tests;
 mod turn_itest;
 
 /// A token for the agent whose slug is `name`, creating its row on first use:
