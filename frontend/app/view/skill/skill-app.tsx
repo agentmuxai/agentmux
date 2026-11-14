@@ -80,7 +80,7 @@ function AppHereLine(p: { app: SkillApp; here: AppSkillHere | undefined; drift: 
 export function SkillAppDetail(p: { skillId: string; app: SkillApp; here?: AppSkillHere; agents?: AgentDefinition[] }): JSX.Element {
     const platform = appPlatform();
     const status = () => appStatus(p.app, platform, p.here);
-    const drift = () => referenceDrift(p.app, platform);
+    const drift = () => referenceDrift(p.app, platform, p.here?.found ? p.here.version : null);
     // Which scripts' Review panels are open, kept here because an approval rebuilds the rows below.
     const [reviewing, setReviewing] = createSignal<ReadonlySet<string>>(new Set());
     const toggle = (path: string) =>

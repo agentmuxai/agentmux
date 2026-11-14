@@ -91,17 +91,18 @@ export function lastPassedAppVersion(app: SkillApp, platform: string): string | 
 }
 
 /**
- * Reference crops against the last tested app version: "3 of 9 references were taken on 12.0" when the last
- * pass was on 12.1. Null when there are no crops, or none is stale (or nothing passed yet to compare with).
+ * Reference crops against the app version they are meant for: "3 of 9 references were taken on 12.0" when the
+ * app on this computer is 12.1 (`installed`, from `app_skills.here`), else when the last pass was on 12.1. A crop
+ * taken on 12.1 still fits 12.1.5. Null when there are no crops, none is stale, or there is nothing to compare with.
  */
-export function referenceDrift(app: SkillApp, platform: string): string | null {
-    const current = lastPassedAppVersion(app, platform);
+export function referenceDrift(app: SkillApp, platform: string, installed?: string | null): string | null {
+    const current = installed || lastPassedAppVersion(app, platform);
     const here = app.references.filter((r) => r.platform === platform);
     if (!current || here.length === 0) return null;
-    const older = here.filter((r) => r.appVersion !== current);
+    const older = here.filter((r) => !isBuildOf(current, r.appVersion));
     if (older.length === 0) return null;
     const versions = [...new Set(older.map((r) => r.appVersion))].join(", ");
-    return `${older.length} of ${here.length} references were taken on ${versions}; the last pass was on ${current}`;
+    return `${older.length} of ${here.length} references were taken on ${versions}; ${installed ? `${app.name} here is` : "the last pass was on"} ${current}`;
 }
 
 /** The route the skill tries first ("api", "mcp", "shortcuts" or "desktop"), as a card fact. */
