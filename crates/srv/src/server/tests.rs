@@ -111,7 +111,6 @@ pub(crate) fn test_state() -> AppState {
         process_tracker,
         process_broker,
         dock_snapshots: Arc::new(crate::backend::dock_snapshot::DockSnapshotCache::new()),
-        pending_background_pids: Arc::new(crate::backend::pending_background_pids::PendingBackgroundPids::new()),
         narrated_events: Arc::new(crate::backend::narrated_events::NarratedEvents::new()),
         // Phase E.2c.2 — workspace RPC dispatches through reducer.
         // Tests get fresh state + a dummy broadcast bus.
