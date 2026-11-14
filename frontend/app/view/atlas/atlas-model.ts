@@ -143,6 +143,8 @@ function remoteAgent(row: RemoteRow, key: string, agentId: string | null, seat: 
 
 export interface AtlasData {
     graph: Accessor<AtlasGraph>;
+    /** The Swarm's model: its selection and fleet actions are the map's too. */
+    model: SwarmViewModel;
     /** The Swarm's list, for its filter bar. */
     swarm: SwarmAgents;
     /** Every agent, by key, for the card. */
@@ -199,5 +201,5 @@ export function useAtlasData(model: SwarmViewModel, ctx: PaneTabHostContext): At
     const graph = createMemo(() => buildAtlasGraph(machines(), agentList()));
     const agents = createMemo(() => new Map(agentList().map((a) => [a.key, a] as const)));
     const machineMap = createMemo(() => new Map(machines().map((m) => [m.key, m] as const)));
-    return { graph, swarm, agents, machines: machineMap };
+    return { graph, model, swarm, agents, machines: machineMap };
 }

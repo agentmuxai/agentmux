@@ -38,10 +38,72 @@
     overflow: hidden;
     cursor: grab;
     touch-action: none;
+    // A drag on the map pans it or draws the selection box; it never selects the nodes' text.
+    user-select: none;
 
     &:active {
         cursor: grabbing;
     }
+
+    // Select is on: a drag draws the selection box.
+    &--selecting,
+    &--selecting:active {
+        cursor: crosshair;
+    }
+}
+
+// The box a drag draws to select agents, in the pane's own pixels over the map.
+.atlas-lasso {
+    position: absolute;
+    box-sizing: border-box;
+    border: 1px solid var(--accent-color);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+    pointer-events: none;
+}
+
+// What the selection can do, between the bar and the map: the Swarm's own controls, without their own surfaces.
+.atlas-fleet {
+    flex: 0 0 auto;
+    max-height: 45%;
+    overflow-y: auto;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--hover-bg-color);
+
+    .swarm-fleet-toolbar,
+    .swarm-fleet-result-panel {
+        border-bottom: 0;
+        background: transparent;
+    }
+
+    .swarm-fleet-toolbar {
+        padding: 0;
+    }
+
+    .swarm-broadcast-dock + .swarm-fleet-result-panel {
+        border-top: 1px solid var(--border-color);
+    }
+
+    .swarm-select-toggle {
+        padding: 0;
+    }
+
+    .swarm-broadcast-dock {
+        padding: var(--space-1) var(--space-2) var(--space-2);
+    }
+}
+
+.atlas-fleet__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2) 0;
+}
+
+.atlas-fleet__hint {
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
 }
 
 .atlas-world {
@@ -144,6 +206,12 @@
         border-color: var(--accent-color);
     }
 
+    // In the selection a fleet action reaches (or in the box being dragged): a tint and a tick, not the card's line.
+    &--picked {
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 16%, var(--main-bg-color));
+    }
+
     &--stale {
         opacity: 0.6;
     }
@@ -194,6 +262,13 @@
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.atlas-node__check {
+    flex: none;
+    margin-left: auto;
+    color: var(--accent-color);
+    font-size: var(--text-2xs);
 }
 
 .atlas-node__sub {
@@ -295,6 +370,7 @@
     border-radius: var(--radius-md);
     background: var(--main-bg-color);
     cursor: default;
+    user-select: text;
     z-index: var(--z-map-card);
 }
 
