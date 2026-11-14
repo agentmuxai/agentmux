@@ -49,17 +49,12 @@ function clickLabel(ariaLabel, labelledBy, text, el, axName) {
   const VERBS = "submit|send|pay|buy|purchase|order|checkout|check out|delete|remove|publish|post|confirm|sign up|sign|agree|accept|transfer|unsubscribe";
   const clean = (s) => String(s || "").replace(/\s+/g, " ").trim();
   // A plan's name ("Pay-as-you-go", "Pay-per-use") is not a word that commits: it is taken out of a name or a
-  // description before they are judged. A brand ("Kakao Pay") is not one either, but only when it is the whole
-  // name: one to three capitalised words and a last "Pay", none of the words a verb or a joiner (in any case:
-  // "Confirm And Pay", "CLICK TO PAY"). Any doubt leaves the name as it is, and it asks. Keep in step with
-  // is_brand_pay in browser_bypass.rs, whose list holds every word of VERBS.
-  const NOT_BRAND = new Set("pay buy confirm complete place make click tap press finish submit send and to with now then or the a your proceed continue review order checkout check out purchase subscribe unsubscribe donate go use sign up agree accept transfer delete remove publish post securely express".split(" "));
-  const BRAND_PAY = /^(?:[A-Z][\w.&'-]*\s+){1,3}P(?:ay|AY)$/;
+  // description before they are judged. A wallet's name ("Kakao Pay", "Cash App Pay") is not one either, but only
+  // when it is the whole name and one of BRANDS: a payment-methods page lists a row for each, and opening one
+  // pays nothing. Any other name with "Pay" in it asks. Keep in step with BRANDS in browser_bypass.rs.
+  const BRANDS = new Set(["apple pay", "google pay", "samsung pay", "amazon pay", "kakao pay", "naver pay", "toss pay", "cash app pay", "shop pay", "meta pay", "microsoft pay", "venmo pay", "link pay", "alipay"]);
   const planOnly = (s) => String(s || "").replace(/\bpay-(?:as|per)-[\w-]+/gi, " ");
-  const plain = (s) => {
-    const name = clean(planOnly(s)).replace(/[.!]+$/, "");
-    return BRAND_PAY.test(name) && !name.split(" ").slice(0, -1).some((w) => NOT_BRAND.has(w.toLowerCase())) ? "" : planOnly(s);
-  };
+  const plain = (s) => (BRANDS.has(clean(planOnly(s)).replace(/[.!]+$/, "").toLowerCase()) ? "" : planOnly(s));
   const lines = String(text || "").split("\n").map(clean).filter(Boolean);
   const named = clean(ariaLabel) || clean(labelledBy);
   const fullName = named || lines[0] || "";

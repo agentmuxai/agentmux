@@ -502,28 +502,43 @@ pub(crate) fn is_payment(what: &str) -> bool {
         || words.windows(2).any(|p| PAIRS.iter().any(|q| p == q))
 }
 
-/// Words that, in front of "Pay", make a name a command ("Confirm and Pay", "Click to Pay", "Place Pay")
-/// and not a brand's.
-/// Keep in step with `NOT_BRAND` in `click_label.js`.
-const NOT_BRAND: [&str; 45] = [
-    "pay", "buy", "confirm", "complete", "place", "make", "click", "tap", "press", "finish", "submit", "send", "and", "to",
-    "with", "now", "then", "or", "the", "a", "your", "proceed", "continue", "review", "order", "checkout", "check", "out",
-    "purchase", "subscribe", "donate", "go", "use", "sign", "agree", "accept", "transfer", "delete", "remove", "securely",
-    "express", "unsubscribe", "publish", "post", "up",
-];
-
 /// A description that opens with one of these tells the person to pay.
 const COMMANDS: [&str; 6] = ["pay", "buy", "confirm", "complete", "place", "make"];
 
-/// Is `name` a brand's or a plan's name with "Pay" in it ("Kakao Pay", "Cash App Pay", "Apple Pay",
-/// "Pay-as-you-go"), which a row, tab or link opens a panel for, and not a command to pay? One to three
-/// capitalised words, none a verb, in front of a last word "Pay".
+/// The wallets and pay apps whose name ends in "Pay". A page of payment methods lists a row, tab or link for
+/// each, and opening one pays nothing. Only these: any other name with "Pay" in it (an unknown brand, "Quick
+/// Pay", "Approve Kakao Pay") asks, as it always did. Keep in step with `BRANDS` in `click_label.js`.
+const BRANDS: [&str; 14] = [
+    "apple pay", "google pay", "samsung pay", "amazon pay", "kakao pay", "naver pay", "toss pay", "cash app pay",
+    "shop pay", "meta pay", "microsoft pay", "venmo pay", "link pay", "alipay",
+];
+
+/// Is `name`, whole, one of the [`BRANDS`]?
 pub(crate) fn is_brand_pay(name: &str) -> bool {
-    let words: Vec<&str> = name.split_whitespace().collect();
-    let Some((last, before)) = words.split_last() else { return false };
-    (last.eq_ignore_ascii_case("pay") && last.starts_with('P'))
-        && (1..=3).contains(&before.len())
-        && before.iter().all(|w| w.starts_with(|c: char| c.is_ascii_uppercase()) && !NOT_BRAND.contains(&w.to_ascii_lowercase().as_str()))
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+    BRANDS.contains(&name.trim_end_matches(['.', '!']))
+}
+
+/// `name` without its plan names ("Pay-as-you-go", "Pay-per-use"): a `pay-as-` or `pay-per-` at the start
+/// of a word and the letters, digits, `_` and `-` after it. Done as `click_label.js` does it, so both judge
+/// the same text.
+fn without_plans(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    let (bytes, mut out, mut i) = (lower.as_bytes(), String::new(), 0);
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    while i < name.len() {
+        let at_word_start = i == 0 || !word(bytes[i - 1]);
+        if at_word_start && (lower[i..].starts_with("pay-as-") || lower[i..].starts_with("pay-per-")) {
+            let skip = lower[i..].bytes().take_while(|&b| word(b) || b == b'-').count();
+            out.push(' ');
+            i += skip;
+        } else {
+            let ch = name[i..].chars().next().unwrap_or(' ');
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
 }
 
 /// The name in a click's `what` (`Click "Kakao Pay"`): what is between the first and the last quote.
@@ -545,11 +560,7 @@ pub(crate) fn click_is_payment(what: &str, description: &str, submits: bool) -> 
     }
     // A plan's name ("Pay-as-you-go", "Pay-per-use") is taken out as the page's script takes it out, and
     // what is left is judged: "Pay-as-you-go: Pay now" is still a command to pay.
-    let name = quoted(what)
-        .split_whitespace()
-        .filter(|w| !(w.to_ascii_lowercase().starts_with("pay-as-") || w.to_ascii_lowercase().starts_with("pay-per-")))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let name = without_plans(quoted(what)).split_whitespace().collect::<Vec<_>>().join(" ");
     if name.is_empty() || is_brand_pay(&name) {
         let first = description.split(|c: char| !c.is_ascii_alphanumeric()).find(|w| !w.is_empty()).unwrap_or("");
         return (COMMANDS.contains(&first.to_ascii_lowercase().as_str()) && is_payment(description))
@@ -859,6 +870,11 @@ mod tests {
             ("Click \"Post Kakao Pay\"", ""),
             ("Click \"Publish Kakao Pay\"", ""),
             ("Click \"Kakao Pay $20\"", ""),
+            ("Click \"Quick Pay\"", ""),
+            ("Click \"Approve Kakao Pay\"", ""),
+            ("Click \"Charge Apple Pay\"", ""),
+            ("Click \"Bill Pay\"", ""),
+            ("Click \"Pay-as-you-go:Pay now\"", ""),
             ("Click \"Pay-as-you-go: Pay now\"", ""),
             ("Click \"Pay-per-use - Pay $20\"", ""),
             ("Click \"Pay-as-you-go\"", "Pay now"),
