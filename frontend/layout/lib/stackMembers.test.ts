@@ -16,6 +16,7 @@ import {
     effectiveStack,
     moveMemberAcrossStacks,
     moveMemberInStack,
+    memberAfter,
     removeMemberFromStack,
 } from "./stackMembers";
 
@@ -173,5 +174,17 @@ describe("existing stack helpers still work", () => {
         expect(data.blockStack).toEqual(["a", "b"]);
         expect(removeMemberFromStack(data, "a")).toBe(true);
         expect(data.blockStack).toEqual(["b"]);
+    });
+
+    it("memberAfter names the tab a removal brings to the front: the right-hand neighbour, the last when it was rightmost", () => {
+        expect(memberAfter(["a", "b", "c"], "a")).toBe("b");
+        expect(memberAfter(["a", "b", "c"], "b")).toBe("c");
+        expect(memberAfter(["a", "b", "c"], "c")).toBe("b");
+        expect(memberAfter(["a"], "a")).toBeUndefined();
+        expect(memberAfter(["a", "b"], "z")).toBeUndefined();
+        // The same tab the removal itself puts in front.
+        const data = stacked("b", ["a", "b", "c"], "b");
+        removeMemberFromStack(data, "b");
+        expect(data.activeBlockId).toBe("c");
     });
 });

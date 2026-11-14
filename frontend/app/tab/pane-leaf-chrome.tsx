@@ -9,10 +9,12 @@ import {
     createViewModelScopes,
     useAgentMountWatch,
     useChromeNodeModel,
+    useDraggedTab,
     useLatchedChromeVm,
     useMinimizedMembers,
     usePaneKinds,
     useScopedNodeModel,
+    useShownBlockId,
     useStackMembers,
 } from "./pane-leaf-state";
 
@@ -44,13 +46,17 @@ import {
  */
 
 export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
-    const nodeModel = props.nodeModel;
-    const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
+    // The tab in front is the one the pane shows, which is not the layout's active tab while that one is
+    // dragged out of the pane (`useShownBlockId`). Everything under the leaf reads it from here: the chrome,
+    // the members and each Block's own node model.
+    const activeBlockId = useShownBlockId(props.nodeModel);
+    const draggedTab = useDraggedTab(props.nodeModel);
+    const nodeModel: NodeModel = { ...props.nodeModel, activeBlockId };
 
-    const { hoisted, keepAlive } = usePaneKinds(activeBlockId);
+    const { hoisted, keepAlive } = usePaneKinds(activeBlockId, () => draggedTab() !== undefined);
     const scopes = createViewModelScopes(nodeModel, hoisted);
     const scopedNodeModel = useScopedNodeModel(nodeModel, activeBlockId, hoisted, scopes);
-    const members = useStackMembers(nodeModel, activeBlockId, scopes);
+    const members = useStackMembers(nodeModel, activeBlockId, scopes, draggedTab);
     useAgentMountWatch(nodeModel, activeBlockId, members);
     useMinimizedMembers(nodeModel, members.stackBlockIds);
     const chromeNodeModel = useChromeNodeModel(nodeModel, activeBlockId, scopes);
@@ -61,6 +67,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
         mountedBlockIds: members.mountedBlockIds,
         activeBlockId,
         keepAliveNodeModelFor: scopes.keepAliveNodeModelFor,
+        lands: members.lands,
     });
 
     const chromeVm = useLatchedChromeVm(chromeNodeModel);

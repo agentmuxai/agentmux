@@ -16,6 +16,10 @@ import { agentMountForgotten, agentMountSettled, expectAgentMount } from "@/app/
 import { MOS } from "@/app/store/global";
 import type { NodeModel } from "@/layout/index";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
+import { memberAfter } from "@/layout/lib/stackMembers";
+import { tabLandingMountOf } from "@/layout/lib/tabLanding";
+import { tabDraggedFrom, tabGoneFrom } from "@/layout/lib/tabTearOff";
+import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
 
 /**
@@ -94,7 +98,7 @@ export interface PaneKinds {
  * agent or terminal tab kept every tab of its pane mounted, which is what let
  * Help's content ghost over the next tab.)
  */
-export function usePaneKinds(activeBlockId: () => string): PaneKinds {
+export function usePaneKinds(activeBlockId: () => string, tabDragged: Accessor<boolean> = () => false): PaneKinds {
     // Effective view type of the ACTIVE member, reactive — getMuxObjectAtom
     // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
     // PR #3134 established for BlockFrame_Header (frontend/app/store/mos.ts's
@@ -132,15 +136,41 @@ export function usePaneKinds(activeBlockId: () => string): PaneKinds {
 
     // Same latch shape as `hoisted` above, over the narrower keep-alive view types
     // set — see `usePaneKinds`' own doc comment for what this changes and why.
+    //
+    // A pane one of whose tabs is dragged out of it latches too (`tabDragged`): the dragged tab stays
+    // mounted while the pane shows the tab that takes its place (`useShownBlockId`, `useStackMembers`), and
+    // only this branch mounts more than one member. For a pane that was not keeping tabs alive the switch
+    // remounts the dragged tab once, under its tear-off place.
     let latchedKeepAlive = false;
     const keepAlive = createMemo(() => {
-        if (!latchedKeepAlive && isKeepAliveView(effectiveViewType())) {
+        if (!latchedKeepAlive && (isKeepAliveView(effectiveViewType()) || tabDragged())) {
             latchedKeepAlive = true;
         }
         return latchedKeepAlive;
     });
 
     return { effectiveViewType, hoisted, keepAlive };
+}
+
+/** The tab being dragged out of this pane (layout/lib/tabTearOff.ts), once its picture has been taken. */
+export function useDraggedTab(nodeModel: NodeModel): Accessor<string | undefined> {
+    return createMemo(() => (paneCaptureInFlight() ? undefined : tabDraggedFrom(nodeModel.layoutModel, nodeModel.nodeId)));
+}
+
+/**
+ * The tab the pane shows in front: its active one. While that one is dragged out of the pane and has left it
+ * for the rest of its drag (layout/lib/tabTearOff.ts), the tab that comes to the front when it goes
+ * (`memberAfter`, the rule its removal follows), so the pane already looks as the release leaves it and
+ * nothing changes at the release. Only what is shown: the layout's own active tab is untouched, and it is
+ * back in front if the drag ends with the tab still in the pane. Not while the tab's picture is being taken:
+ * the picture is of the pane with the tab in front.
+ */
+export function useShownBlockId(nodeModel: NodeModel): Accessor<string> {
+    return createMemo(() => {
+        const active = nodeModel.activeBlockId?.() ?? nodeModel.blockId;
+        const gone = paneCaptureInFlight() ? undefined : tabGoneFrom(nodeModel.layoutModel, nodeModel.nodeId);
+        return (gone === active && memberAfter(paneStackIds(nodeModel), active)) || active;
+    });
 }
 
 interface ViewModelSlot {
@@ -235,6 +265,10 @@ export function createViewModelScopes(nodeModel: NodeModel, hoisted: Accessor<bo
                 paneChromeHoisted: hoisted,
                 activeViewModel: slot.get,
                 setActiveViewModel: slot.set,
+                // While the member stands in its landing place (layout/lib/tabLanding.ts) its content fills
+                // the place, as a lone pane's fills its tile: sized for the pane it is dragged out of, it
+                // was cut off in a smaller place and left a bare strip in a larger one.
+                innerRect: () => (tabLandingMountOf(id) ? null : nodeModel.innerRect()),
             } as NodeModel;
             keepAliveNodeModelCache.set(id, scoped);
         }
@@ -321,12 +355,15 @@ export interface StackMembers {
     viewTypeOf: (id: string) => string;
     /** The members actually mounted in the keep-alive branch. */
     mountedBlockIds: Accessor<string[]>;
+    /** Whether a member's own content can stand in its landing place while its tab is dragged (layout/lib/tabLanding.ts). */
+    lands: (id: string) => boolean;
 }
 
 export function useStackMembers(
     nodeModel: NodeModel,
     activeBlockId: () => string,
     scopes: ViewModelScopes,
+    draggedTab: Accessor<string | undefined> = () => undefined,
 ): StackMembers {
     const stackBlockIds = createMemo<string[]>(() => {
         const stack = paneStackIds(nodeModel);
@@ -346,12 +383,17 @@ export function useStackMembers(
     // SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5.
     const viewTypeOf = (id: string) =>
         resolveEffectiveViewType(MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta?.view ?? "");
+    // A tab being dragged out of the pane stays mounted as well, whatever its type: the pane shows another
+    // tab in front meanwhile (`useShownBlockId`), and the dragged one stands in its landing place.
     const mountedBlockIds = createMemo<string[]>(() => {
         const active = activeBlockId();
-        return stackBlockIds().filter((id) => id === active || isKeepAliveView(viewTypeOf(id)));
+        const dragged = draggedTab();
+        return stackBlockIds().filter((id) => id === active || id === dragged || isKeepAliveView(viewTypeOf(id)));
     });
+    // A native surface (a browser's page) is drawn above the DOM by the host: moving its element moves nothing.
+    const lands = (id: string) => getPaneTab(viewTypeOf(id))?.capabilities?.nativeSurface !== true;
 
-    return { stackBlockIds, viewTypeOf, mountedBlockIds };
+    return { stackBlockIds, viewTypeOf, mountedBlockIds, lands };
 }
 
 /**

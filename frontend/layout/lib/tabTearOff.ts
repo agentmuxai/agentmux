@@ -15,9 +15,11 @@
  *   (the pane's body) is the tear-off place. A release there tears the tab off. The pane's body places nothing
  *   for its own tab meanwhile, as a dragged pane's own place does not.
  * - gone, from the first time anything else is shown (the tab over another pane, a drop the layout shows, the
- *   pointer out of the window) to the end of the drag: the red does not come back. The pane shows that the tab
- *   has left it (an empty body, no pill), and the tab is a pane trying to drop in wherever it goes, its own
- *   pane included.
+ *   pointer out of the window) to the end of the drag: the red does not come back. The pane is shown as the
+ *   tab leaves it: no pill for it, and in front the tab that comes to the front when it goes
+ *   (app/tab/pane-leaf-state.ts `useShownBlockId`; the operator, 2026-11-13: "when tearing a pane tab with
+ *   pane tabs left behind, instead of seeing their content, we see the agentmux logo"). The tab is a pane
+ *   trying to drop in wherever it goes, its own pane included.
  *
  * A release that tears the tab off (over its own place while offered, or outside the window) keeps the pane
  * showing the tab gone until the tab has left it (`holdTabTearOff`), so the tab does not come back for the
@@ -85,6 +87,12 @@ export function holdTabTearOff(): void {
 export function tabTearOffOfferedIn(model: LayoutModel, nodeId: string): boolean {
     const now = state();
     return !!now && now.offered && now.model === model && now.nodeId === nodeId;
+}
+
+/** The tab being dragged out of pane `nodeId`, whether its place still offers the tear-off or it has left, or none. Reactive. */
+export function tabDraggedFrom(model: LayoutModel, nodeId: string): string | undefined {
+    const now = state();
+    return now && now.model === model && now.nodeId === nodeId ? now.blockId : undefined;
 }
 
 /** The tab that has left pane `nodeId` for the rest of its drag, or none. Reactive. */

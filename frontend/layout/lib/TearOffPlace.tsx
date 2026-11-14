@@ -11,9 +11,9 @@
  *
  * One tab dragged out of a pane that keeps others has the same place, under the pane's header: the pane and
  * its other tabs stay, and only the tab's own place says it tears off (tabTearOff.ts). `top` is where that
- * place starts, from the tile's top. Once the tab has left the pane for the rest of its drag the place is
- * `TabGonePlace`: the pane with nothing in front, as an empty pane is drawn, until the release says which
- * of its tabs comes to the front.
+ * place starts, from the tile's top. Once the tab has left the pane for the rest of its drag there is no
+ * place: the pane shows the tab that comes to the front when the dragged one goes
+ * (app/tab/pane-leaf-state.ts `useShownBlockId`).
  */
 
 import type { JSX } from "solid-js";
@@ -25,11 +25,5 @@ export const TearOffPlace = (props: { top?: number }): JSX.Element => (
     <div class="tear-off-place" aria-hidden="true" style={under(props.top)}>
         <EmptyPaneLogo />
         <span class="tear-off-words">TEAR OFF</span>
-    </div>
-);
-
-export const TabGonePlace = (props: { top?: number }): JSX.Element => (
-    <div class="tab-gone-place" aria-hidden="true" style={under(props.top)}>
-        <EmptyPaneLogo />
     </div>
 );

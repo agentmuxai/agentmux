@@ -15,6 +15,7 @@ import { findNode } from "@/layout/lib/layoutNode";
 import { landingPictureOf } from "@/layout/lib/paneLandingPicture";
 import { pillPlacingIn } from "@/layout/lib/pillDragState";
 import { effectiveStack } from "@/layout/lib/stackMembers";
+import { captureTabShell } from "@/layout/lib/tabLanding";
 import {
     beginTabTearOff,
     endTabTearOff,
@@ -92,6 +93,8 @@ function liftTab(model: LayoutModel, blockId: string, paneKey: string): boolean 
     if (!node?.data || effectiveStack(node.data).length <= 1) return false;
     ensureTabPicture(blockId);
     void landingPictureOf(blockId);
+    // The shell the tab has in its pane, for its landing place: now, while it is the tab in front.
+    captureTabShell(blockId, paneKey);
     beginTabTearOff(model, blockId, paneKey);
     watchWindowExit();
     return true;
@@ -99,7 +102,7 @@ function liftTab(model: LayoutModel, blockId: string, paneKey: string): boolean 
 
 /**
  * The home layout of a lifted tab's drag. The layout shows the tab only while its own place offers the tear-off
- * or a drop is shown for it (its picture in the landing place): anywhere else over the layout (a header it
+ * or a drop is shown for it (the tab itself in the landing place): anywhere else over the layout (a header it
  * would join, its own pane once it has left it) the hand carries the picture, or the tab would be nowhere.
  */
 function tabHome(base: HomeLayout, model: LayoutModel, blockId: string): HomeLayout {

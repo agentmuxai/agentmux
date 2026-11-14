@@ -19,6 +19,8 @@ import type { NodeModel } from "@/layout/index";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import { PaneStackMemberActiveProvider, usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
+import { resetTabLandingForTests, showTabLanding } from "@/layout/lib/tabLanding";
+import { beginTabTearOff, endTabTearOff, tabTearOffShown } from "@/layout/lib/tabTearOff";
 
 const h = vi.hoisted(() => ({
     log: [] as string[],
@@ -78,6 +80,8 @@ vi.mock("@/app/element/PaneChrome", () => ({
 }));
 
 let chromeNodeModel: NodeModel | null = null;
+/** The node model each mounted Block was given, by block id. */
+const blockNodeModels = new Map<string, NodeModel>();
 /** Members whose ViewModel supplies no chrome of its own, so the leaf uses the shared shell. */
 const noChrome = new Set<string>();
 vi.mock("@/app/block/block", () => ({
@@ -85,6 +89,7 @@ vi.mock("@/app/block/block", () => ({
     Block: (props: { nodeModel: NodeModel; preview: boolean }) => {
         const nm = props.nodeModel;
         const id = nm.blockId;
+        blockNodeModels.set(id, nm);
         log(`Block mount ${id} wrapper#${numberOf(nm)} hoisted=${(nm as { paneChromeHoisted?: () => boolean }).paneChromeHoisted?.()} preview=${props.preview}`);
         const owner = {};
         const memberActive = usePaneStackMemberActive();
@@ -140,6 +145,7 @@ async function mount(initialActive = "b1"): Promise<Rig> {
         activeBlockId: active,
         isMinimized: minimized,
         isMagnified: magnified,
+        innerRect: () => ({ width: "400px - 3px", height: "300px - 3px" }),
         activeViewModel: leafVm[0],
         setActiveViewModel: (vm: ViewModel | null, _owner: object) => {
             log(`leaf setActiveViewModel ${(vm as any)?.blockId ?? null}`);
@@ -330,5 +336,100 @@ describe("a minimized pane", () => {
         log("-- unmount");
         cleanup();
         await expect(out()).toMatchFileSnapshot(snap("minimized"));
+    });
+});
+
+describe("a tab dragged out of the pane", () => {
+    afterEach(() => {
+        endTabTearOff();
+        resetTabLandingForTests();
+    });
+
+    /** The mounted members, the one in front marked. */
+    const members = () =>
+        [...document.querySelectorAll<HTMLElement>(".pane-leaf-keepalive-slot")]
+            .map((s) => (s.style.visibility === "hidden" ? s.textContent : `[${s.textContent}]`))
+            .join(" ");
+
+    it("shows the tab that takes its place once it has left, keeps the dragged one mounted, and puts it back in front if it stays", async () => {
+        setView("a1", "agent");
+        setView("h1", "help");
+        setView("h2", "help");
+        setStack(["a1", "h1", "h2"]);
+        const rig = await mount("a1");
+        rig.setActive("h1");
+        expect(members()).toBe("a1 [h1]");
+
+        // Its own place still offers the tear-off: the tab is in front, under that place.
+        beginTabTearOff(fakeLayoutModel, "h1", "node-1");
+        expect(members()).toBe("a1 [h1]");
+
+        // It has left: its right-hand neighbour is in front, for the chrome too, and it stays mounted.
+        tabTearOffShown();
+        expect(members()).toBe("a1 h1 [h2]");
+        expect(chromeNodeModel?.activeBlockId?.()).toBe("h2");
+
+        // The drag ends with the tab still in the pane.
+        endTabTearOff();
+        expect(members()).toBe("a1 [h1]");
+        expect(chromeNodeModel?.activeBlockId?.()).toBe("h1");
+    });
+
+    it("shows the last tab when the dragged one was rightmost, and leaves a pane alone whose dragged tab was not in front", async () => {
+        setView("a1", "agent");
+        setView("a2", "agent");
+        setStack(["a1", "a2"]);
+        const rig = await mount("a2");
+        beginTabTearOff(fakeLayoutModel, "a2", "node-1");
+        tabTearOffShown();
+        expect(members()).toBe("[a1] a2");
+        endTabTearOff();
+
+        rig.setActive("a1");
+        beginTabTearOff(fakeLayoutModel, "a2", "node-1");
+        tabTearOffShown();
+        expect(members()).toBe("[a1] a2");
+    });
+
+    it("keeps a pane of tabs that are not kept alive showing both through the drag", async () => {
+        setView("h1", "help");
+        setView("h2", "help");
+        setStack(["h1", "h2"]);
+        await mount("h1");
+        // One tab mounted, and no slots: nothing in this pane is kept alive.
+        expect(members()).toBe("");
+        expect(document.querySelectorAll('[data-testid^="block-"]').length).toBe(1);
+
+        beginTabTearOff(fakeLayoutModel, "h1", "node-1");
+        expect(members()).toBe("[h1]");
+        tabTearOffShown();
+        expect(members()).toBe("h1 [h2]");
+        endTabTearOff();
+        expect(members()).toBe("[h1]");
+    });
+
+    it("sizes the dragged tab's content for its landing place while it stands there, and for its pane otherwise", async () => {
+        setView("a1", "agent");
+        setView("a2", "agent");
+        setStack(["a1", "a2"]);
+        await mount("a1");
+        const inner = () => blockNodeModels.get("a1")!.innerRect();
+        expect(inner()).toEqual({ width: "400px - 3px", height: "300px - 3px" });
+        const hide = showTabLanding("a1", document.createElement("div"));
+        // No size of its own: the content fills the place.
+        expect(inner()).toBeNull();
+        expect(blockNodeModels.get("a2")!.innerRect()).not.toBeNull();
+        hide();
+        expect(inner()).toEqual({ width: "400px - 3px", height: "300px - 3px" });
+    });
+
+    it("is another pane's drag to every other pane", async () => {
+        setView("a1", "agent");
+        setView("a2", "agent");
+        setStack(["a1", "a2"]);
+        await mount("a1");
+        beginTabTearOff(fakeLayoutModel, "a1", "node-2");
+        tabTearOffShown();
+        expect(members()).toBe("[a1] a2");
     });
 });
