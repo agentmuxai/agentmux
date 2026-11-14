@@ -187,6 +187,7 @@ async fn app_main() {
 
     let viewer_router = server::build_viewer_router(state.clone());
     bootstrap::spawn_state_services(&state);
+    bootstrap::publish_instance_record(&state);
     // A headless srv that serves its own UI signs a browser in on its web port.
     server::local_session_routes::enable(net.web_addr.port(), &config.instance_id);
     let routers = build_routers(state.clone());

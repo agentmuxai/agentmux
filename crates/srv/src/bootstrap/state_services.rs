@@ -192,6 +192,16 @@ fn install_message_brokers(state: &AppState) {
     backend::task_flow::install(Arc::clone(&state.broker));
 }
 
+/// Lists this instance for the other AgentMux instances on this machine (`muxspect instances`).
+pub fn publish_instance_record(state: &AppState) {
+    backend::instance_registry::spawn(backend::instance_registry::Identity {
+        version: state.version.clone(),
+        local_url: state.local_web_url.clone(),
+        auth_key: state.auth_key.clone(),
+        started_at: agentmux_common::time::now_ms_u64(),
+    });
+}
+
 pub fn spawn_state_services(state: &AppState) {
     // Keeps the host's copy of which panes agents own current (for its popup
     // decisions; docs/specs/SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
@@ -447,6 +457,7 @@ pub async fn shut_down(
 ) {
     // This host's other LAN channels stop listing this one as a sibling.
     lan_discovery.withdraw_instance_record();
+    backend::instance_registry::withdraw();
     crate::headless::withdraw_port_file();
 
     // Shutdown cleanup: close every agent through the one teardown
