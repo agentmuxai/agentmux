@@ -288,12 +288,13 @@ $gap: 6px;
             left: 3px;
         }
 
-        // The kit's close button, lifted onto the tile's corner. It keeps a round chip (border + fill) so it reads over a
+        // The kit's close button, on the tile's top-right corner. It keeps a round chip (border + fill) so it reads over a
         // thumbnail; the kit supplies the size, the colour and the red hover, and the chip's border follows the fill.
+        // It sits inside the tile's box: the tile's `content-visibility: auto` clips anything drawn outside it.
         &__remove.ui-close {
             position: absolute;
-            top: -6px;
-            right: -6px;
+            top: 3px;
+            right: 3px;
             border: 1px solid var(--border-color);
             border-radius: 50%;
             background: var(--main-bg-color);
