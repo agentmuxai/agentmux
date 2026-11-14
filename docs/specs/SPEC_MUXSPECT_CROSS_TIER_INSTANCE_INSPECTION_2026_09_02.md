@@ -1,6 +1,6 @@
 # muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN)
 
-**Status:** Phase 2a (same-host, §2) implemented by Posa@Area54, 2026-11-14; Phase 2b (LAN, §3) proposed, not built
+**Status:** active. Shipped: Phase 2a (same-host, §2) in PR #7287 (Posa@Area54, 2026-11-14). Remaining: Phase 2b (LAN, §3), proposed and waiting for its tier-rule spec and the repo owner's sign-off
 **Phase 2a as built:** the record is `~/.agentmux/shared/instances/<channel>-<hash>.json`
 (`backend::instance_registry`; `<hash>` keeps channels that slug alike apart), beaten every 20 s and
 listed for 60 s; liveness is the pid check that also rejects a recycled pid

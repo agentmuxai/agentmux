@@ -786,6 +786,7 @@ partial list.
 | [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for MuxAPI |
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over MuxAPI |
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
+| [`SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02`](SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md) | muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN) |
 | [`SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03`](SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md) | SPEC: My Agents tiles — larger tiles, an honest auth line, real history summaries, and no ambient credentials |
 | [`SPEC_NIGHTLY_PERF_REGRESSION_2026_10_19`](SPEC_NIGHTLY_PERF_REGRESSION_2026_10_19.md) | Spec: a nightly performance regression check |
 | [`SPEC_NINE_NEW_HARNESSES_2026_10_14`](SPEC_NINE_NEW_HARNESSES_2026_10_14.md) | Spec: Nine new harnesses — OpenCode, Kilo Code, Cline, goose, Grok Build, DeepSeek Harness, Muse Code, Crush, Aider |
@@ -981,7 +982,6 @@ partial list.
 | [`SPEC_MODEL_EFFORT_CAPABILITY_VALIDATION_2026_07_02`](SPEC_MODEL_EFFORT_CAPABILITY_VALIDATION_2026_07_02.md) | SPEC — Per-model effort-capability validation for the composer strip |
 | [`SPEC_MULTIWINDOW_TASKBAR_GROUPING`](SPEC_MULTIWINDOW_TASKBAR_GROUPING.md) | SPEC: Multi-Window Taskbar Behaviour — Full Instances + Sub-Windows |
 | [`SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15`](SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md) | SPEC: MuxBus cloud-relayed login callback (no loopback listener) |
-| [`SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02`](SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md) | muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN) |
 | [`SPEC_NAMED_AGENT_CONTINUATION_2026_05_12`](SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md) | Spec: Named agent continuation — launch modal dropdown of existing agents |
 | [`SPEC_ORPHAN_THINKING_NODES_2026_05_27`](SPEC_ORPHAN_THINKING_NODES_2026_05_27.md) | SPEC: Orphan in-progress nodes — cancel + collapse on session reopen |
 | [`SPEC_PANE_CLOSE_CONFIRM_NAMES_PROCESSES_2026_09_23`](SPEC_PANE_CLOSE_CONFIRM_NAMES_PROCESSES_2026_09_23.md) | SPEC: The pane-close confirmation names the processes it will stop |
