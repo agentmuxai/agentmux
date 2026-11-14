@@ -17,6 +17,7 @@
 mod bitwarden;
 mod bitwarden_encrypted;
 mod dashlane;
+mod enpass;
 mod env;
 mod kdbx;
 mod keeper;
@@ -24,8 +25,10 @@ pub use kdbx::{MAX_ARGON_ITERATIONS, MAX_ARGON_MEMORY, MAX_ARGON_PARALLELISM, MA
 mod logins;
 mod nordpass;
 mod onepux;
+mod proton;
 mod roboform;
 mod shared;
+mod sticky;
 mod zoho;
 
 use std::collections::BTreeMap;
@@ -52,6 +55,9 @@ pub enum Source {
     NordPass,
     RoboForm,
     ZohoVault,
+    ProtonPass,
+    Enpass,
+    StickyPassword,
 }
 
 impl Source {
@@ -72,6 +78,9 @@ impl Source {
             Source::NordPass => "NordPass",
             Source::RoboForm => "RoboForm",
             Source::ZohoVault => "Zoho Vault",
+            Source::ProtonPass => "Proton Pass",
+            Source::Enpass => "Enpass",
+            Source::StickyPassword => "Sticky Password",
         }
     }
 }
@@ -196,7 +205,10 @@ pub fn read_keyed(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, pass
         if onepux::looks_like(bytes) {
             return onepux::read(bytes);
         }
-        return Err("this is a zip file that isn't a 1Password export (a Proton Pass export is a zip too, which AgentMux can't import yet); export a CSV or JSON from that app instead".into());
+        if proton::zip_looks_like(bytes) {
+            return proton::read_zip(bytes);
+        }
+        return Err("this is a zip file that isn't a 1Password or Proton Pass export; export a CSV or JSON from that app instead".into());
     }
     let text = std::str::from_utf8(bytes).map_err(|_| "this isn't a text file AgentMux knows how to read: its export formats are CSV, JSON and .env".to_string())?;
     let text = text.trim_start_matches('\u{feff}');
@@ -205,7 +217,17 @@ pub fn read_keyed(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, pass
         if let Some(own) = read_own_json(text) {
             return own;
         }
-        return bitwarden::read(text, passphrase);
+        match json_source(text) {
+            JsonSource::ProtonPass => return proton::read_json(text),
+            JsonSource::Enpass => return enpass::read_json(text),
+            JsonSource::Bitwarden => return bitwarden::read(text, passphrase),
+        }
+    }
+    if trimmed.starts_with("-----BEGIN PGP MESSAGE-----") {
+        return Err(proton::ENCRYPTED.into());
+    }
+    if sticky::looks_like(text) {
+        return sticky::read(text);
     }
     if file_name.to_ascii_lowercase().ends_with(".env") || env::looks_like_env(text) {
         return env::read(text);
@@ -234,7 +256,38 @@ fn read_service_csv(text: &str) -> Option<Result<Imported, ReadError>> {
     if zoho::looks_like(&names) {
         return Some(zoho::read(text));
     }
+    if proton::csv_looks_like(&names) {
+        return Some(proton::read_csv(text));
+    }
+    if enpass::csv_looks_like(&names) {
+        return Some(enpass::read_csv(text));
+    }
     dashlane::read(text)
+}
+
+/// Whose JSON this is, when it isn't AgentMux's own: found from what it holds, without reading the entries.
+enum JsonSource {
+    ProtonPass,
+    Enpass,
+    Bitwarden,
+}
+
+fn json_source(text: &str) -> JsonSource {
+    /// An item, as far as Enpass's `template_type` (which Bitwarden's items don't have) shows.
+    #[derive(Deserialize)]
+    struct Peek {
+        template_type: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct Probe {
+        vaults: Option<serde::de::IgnoredAny>,
+        items: Option<Vec<Peek>>,
+    }
+    match serde_json::from_str::<Probe>(text) {
+        Ok(p) if p.vaults.is_some() => JsonSource::ProtonPass,
+        Ok(p) if p.items.as_ref().is_some_and(|items| items.iter().any(|i| i.template_type.is_some())) => JsonSource::Enpass,
+        _ => JsonSource::Bitwarden,
+    }
 }
 
 /// AgentMux's own plain JSON export (a `.vault` file's contents, unencrypted), or `None` when the
@@ -274,3 +327,5 @@ mod tests;
 mod fuzz_tests;
 #[cfg(test)]
 mod second_wave_tests;
+#[cfg(test)]
+mod third_wave_tests;

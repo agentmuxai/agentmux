@@ -77,17 +77,25 @@ pub(super) fn expiry(s: &str) -> Option<String> {
 pub(super) fn sealed(parts: &[(&str, &str)]) -> String {
     let mut out = String::new();
     for (name, value) in parts {
-        let Some(v) = present(value) else { continue };
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        if name.is_empty() {
-            out.push_str(v);
-        } else {
-            out.push_str(&format!("{name}: {v}"));
-        }
+        add_line(&mut out, name, value);
     }
     out
+}
+
+/// Adds one line to text to seal: `name: value`, or just the value when the name is empty. A
+/// value with nothing in it adds nothing.
+pub(super) fn add_line(out: &mut String, name: &str, value: &str) {
+    let Some(v) = present(value) else { return };
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    if name.is_empty() {
+        out.push_str(v);
+    } else {
+        out.push_str(name);
+        out.push_str(": ");
+        out.push_str(v);
+    }
 }
 
 /// A label for a row that has no title: its host, else its username.
