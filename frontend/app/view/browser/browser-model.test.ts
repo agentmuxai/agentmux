@@ -402,6 +402,23 @@ describe("BrowserViewModel nav-state loading wiring", () => {
         expect(vm.loadingAtom()).toBe(false);
     });
 
+    // The host reports "" for a page that has committed nothing yet, right after the pane is created
+    // (task #47585). It cleared the address and title the pane had just been given, and "" was saved
+    // as the pane's address.
+    it("an empty address from the host does not clear the tab's address or get saved", () => {
+        const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        const urlBefore = vm.urlAtom();
+        expect(urlBefore).not.toBe("");
+        ctxSetMeta.mockClear();
+        navStateHandler({ block_id: "test-block-id", url: "", is_loading: false, can_go_back: false, can_go_forward: false });
+        expect(vm.urlAtom()).toBe(urlBefore);
+        expect(ctxSetMeta).not.toHaveBeenCalled();
+        // The address the page then settles on is taken and saved as before.
+        navStateHandler({ block_id: "test-block-id", url: "https://example.com/", is_loading: true });
+        expect(vm.urlAtom()).toBe("https://example.com/");
+        expect(ctxSetMeta).toHaveBeenCalledWith(expect.objectContaining({ url: "https://example.com/" }));
+    });
+
     it("a nav-state event for a different block_id is ignored", () => {
         const { vm, navStateHandler } = makeVMWithNavStateHandler();
         expect(vm.loadingAtom()).toBe(true);

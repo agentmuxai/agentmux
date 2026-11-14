@@ -50,6 +50,7 @@
 // * Saga state across srv restart (gap; Phase F+).
 
 pub mod agent_teardown;
+pub(crate) mod teardown_hooks;
 pub mod close_pane;
 pub mod delete_block;
 pub mod delete_tab;

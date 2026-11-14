@@ -28,7 +28,7 @@ function installAction(item: AppSkillCatalogItem): { label: string; note?: strin
         case "update":
             return { label: `Update to ${item.entry.version}`, note: `Installed here: ${item.installed_version}` };
         case "changed":
-            return { label: "Replace with the catalog's", note: `The same version ${item.entry.version} is installed here with other files` };
+            return { label: "Replace with the catalog's", note: `The same version ${item.entry.version} is installed here, but not as the catalog lists it` };
         case "newer_here":
             return null;
         default:

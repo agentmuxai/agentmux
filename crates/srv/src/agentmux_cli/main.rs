@@ -639,10 +639,16 @@ fn facts(paths: &DataPaths, port: u16, srv_flag: Option<&Path>, web_dir_flag: Op
         port_free: record.is_none().then(|| doctor::ports_free(port)),
         running: record,
         tools: ["node", "npm", "git"].into_iter().map(|t| (t, doctor::on_path(t))).collect(),
+        missing_libs: doctor::missing_libs(),
         installed_version: VERSION,
         service_installed: service_text.is_some(),
         service_names_exe: service_text.zip(exe).map(|(text, exe)| service::file_names_exe(&text, &exe)),
     }
+}
+
+/// The checks with each command they name written the way this program was run.
+fn said(checks: Vec<doctor::Check>) -> Vec<doctor::Check> {
+    checks.into_iter().map(|c| doctor::Check { fix: c.fix.map(|f| say_as(&f)), ..c }).collect()
 }
 
 fn cmd_doctor(paths: &DataPaths, json: bool) -> i32 {
@@ -650,7 +656,7 @@ fn cmd_doctor(paths: &DataPaths, json: bool) -> i32 {
         Ok(s) => s.port,
         Err(e) => return fail(&e),
     };
-    let checks = doctor::evaluate(&facts(paths, port, None, None));
+    let checks = said(doctor::evaluate(&facts(paths, port, None, None)));
     if json {
         println!("{}", serde_json::json!({ "ok": !doctor::failed(&checks), "checks": checks }));
     } else {
@@ -666,7 +672,7 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
         Ok(s) => s,
         Err(e) => return fail(&e),
     };
-    let checks = doctor::evaluate(&facts(paths, args.port.unwrap_or(current.port), args.srv_bin.as_deref(), args.web_dir.as_deref()));
+    let checks = said(doctor::evaluate(&facts(paths, args.port.unwrap_or(current.port), args.srv_bin.as_deref(), args.web_dir.as_deref())));
     for line in doctor::lines(&checks) {
         println!("{line}");
     }
@@ -707,6 +713,11 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
                 }
             }
             Err(e) => return fail(&e),
+        }
+        // launchd starts an agent as it loads it (RunAtLoad), where systemd's enable leaves the unit stopped: with
+        // --no-start the agent is unloaded again (its file stays, so the next login loads it).
+        if !plan.start && cfg!(target_os = "macos") {
+            let _ = service::control(&home, &paths.channel, "stop");
         }
     } else if let Err(e) = service::remove(&home, &paths.channel) {
         return fail(&e);
@@ -903,6 +914,14 @@ mod tests {
         std::fs::copy(bin.join(srv_name), &renamed).unwrap();
         let e = find_srv_in(&bin, Some(&renamed)).unwrap_err();
         assert!(e.contains("must be named"), "a program under another name would be left running unseen: {e}");
+    }
+
+    #[test]
+    fn the_hints_of_a_check_name_the_command_as_it_was_run() {
+        let check = doctor::Check { name: "service", level: doctor::Level::Warn, detail: "d".into(), fix: Some("`agentmux setup --service` points it here".into()) };
+        let said = said(vec![check]);
+        assert_eq!(said[0].fix.as_deref(), Some(say_as("`agentmux setup --service` points it here").as_str()));
+        assert_eq!(said[0].detail, "d");
     }
 
     #[test]

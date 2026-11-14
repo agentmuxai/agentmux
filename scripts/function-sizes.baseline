@@ -20,7 +20,7 @@
 183 crates/cef/src/browser_api/routes.rs::dispatch_key
 101 crates/cef/src/browser_api/routes.rs::query
 163 crates/cef/src/browser_api/routes.rs::screenshot
-210 crates/cef/src/browser_pane/creation.rs::CreateBrowserPaneTask::Task::execute
+197 crates/cef/src/browser_pane/creation.rs::CreateBrowserPaneTask::Task::execute
 397 crates/cef/src/browser_pane/creation_views.rs::create_browser_pane_view
 119 crates/cef/src/browser_pane/creation_views.rs::resize_browser_pane_view_inner
 240 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass
@@ -113,12 +113,12 @@
 126 crates/launcher/src/saga/mod.rs::SagaCoordinator::spawn_saga
 185 crates/launcher/src/saga/mod.rs::run_coordinator
 183 crates/launcher/src/second_instance.rs::bind_socket_with_recovery
-119 crates/launcher/src/splash.rs::draw_stages
+120 crates/launcher/src/splash.rs::draw_stages
 182 crates/launcher/src/splash.rs::run_splash
 163 crates/launcher/src/splash_linux/x11.rs::run
 105 crates/launcher/src/splash_mac.rs::Splash::run_until_dismissed
 233 crates/launcher/src/splash_mac.rs::build_window
-108 crates/launcher/src/splash_mac.rs::flatten_rows
+109 crates/launcher/src/splash_mac.rs::flatten_rows
 238 crates/launcher/src/srv_spawner.rs::spawn_srv_once
 858 crates/launcher/src/supervisor/unix.rs::run_unix
 1290 crates/launcher/src/supervisor/windows.rs::run_windows
@@ -262,7 +262,6 @@
 123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
 109 crates/srv/src/server/app_api/memory.rs::memory_write_impl
-102 crates/srv/src/server/app_api/pane.rs::build_pane_meta
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
 116 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 118 crates/srv/src/server/browser_capture.rs::handle_browser_capture

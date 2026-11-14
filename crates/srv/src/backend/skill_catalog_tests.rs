@@ -146,6 +146,9 @@ fn browse_says_what_is_installed_and_whether_the_catalog_is_ahead() {
     c.skill_upsert_unique_global(&skill_row(&b)).unwrap();
     install_checked(&c, "x", &b, 1).unwrap();
     let here = c.skill_app_map().unwrap();
+    assert_eq!(items(vec![entry.clone()], &here)[0].state, "changed", "the same files added another way are not as the catalog lists them");
+    install_download(&c, &zip, &entry, 2).unwrap();
+    let here = c.skill_app_map().unwrap();
     assert_eq!(items(vec![entry.clone()], &here)[0].state, "current");
     let newer = CatalogEntry { version: "1.1.0".into(), hash: "f".repeat(64), ..entry.clone() };
     let item = &items(vec![newer], &here)[0].clone();
@@ -235,6 +238,49 @@ fn a_catalog_skill_installs_unapproved_and_an_update_replaces_it_in_place() {
     assert_eq!(app.info.version, "1.1.0");
     assert!(app.files.iter().find(|f| f.script).unwrap().approved);
     assert_eq!(c.skill_app_map().unwrap().len(), 1);
+}
+
+#[test]
+fn a_skill_is_from_the_catalog_only_while_it_is_still_what_the_catalog_listed() {
+    let v1 = signed_with_script(1, "1.0.0");
+    let zip1 = zip_of(&v1);
+    let c = catalog();
+
+    // A skill added another way (here, a folder import) was never from the catalog.
+    c.skill_upsert_unique_global(&skill_row(&v1)).unwrap();
+    install_checked(&c, "x", &v1, 1).unwrap();
+    assert!(!c.skill_app_get("x").unwrap().unwrap().from_catalog);
+
+    // Installed from the catalog it is, in the one skill and in the list.
+    let first = install_download(&c, &zip1, &entry_for(&v1, &zip1, 1), 10).unwrap();
+    assert!(c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog);
+    assert!(c.skill_app_map().unwrap().get(&first.skill_id).unwrap().from_catalog);
+
+    // An edit of its text in Memory ends it: the content hash does not follow an edit, the text does.
+    let mut edited = c.skill_get(&first.skill_id).unwrap().unwrap();
+    edited.content.push_str("
+My own note.");
+    c.skill_upsert_unique_global(&edited).unwrap();
+    assert!(!c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog);
+    let entry = entry_for(&v1, &zip1, 1);
+    assert_eq!(items(vec![entry.clone()], &c.skill_app_map().unwrap())[0].state, "changed", "Browse offers the catalog's version back");
+
+    // Installing the catalog's version again puts it back.
+    let again = install_download(&c, &zip1, &entry_for(&v1, &zip1, 1), 11).unwrap();
+    assert_eq!(again.skill_id, first.skill_id);
+    assert!(c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog);
+    assert_eq!(items(vec![entry], &c.skill_app_map().unwrap())[0].state, "current");
+
+    // Different files than the catalog listed, or another key, are not: the record holds what the catalog said.
+    c.skill_catalog_source_set(&first.skill_id, &"f".repeat(64), &entry_for(&v1, &zip1, 1).publisher_key).unwrap();
+    assert!(!c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog, "other files");
+    let app = c.skill_app_get(&first.skill_id).unwrap().unwrap();
+    c.skill_catalog_source_set(&first.skill_id, &app.content_hash, "another-key").unwrap();
+    assert!(!c.skill_app_get(&first.skill_id).unwrap().unwrap().from_catalog, "another key");
+
+    // Deleting the skill drops the record with it.
+    c.skill_catalog_forget(&first.skill_id).unwrap();
+    assert!(c.skill_app_get(&first.skill_id).unwrap().is_none());
 }
 
 #[test]
