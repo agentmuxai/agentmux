@@ -127,7 +127,10 @@
             flex-shrink: 10000000000;
         }
 
-        // As wide as its words, so it has a width to give up after the badge and before the chip.
+        // As wide as its words, so it has a width to give up after the badge and before the chip. It still
+        // grows into the room that is left, with a badge too, as it does at every width: the row's `flex: 1`
+        // below comes after swarm-seats.scss in the built stylesheet and wins over its `flex: 0 1 auto`, so
+        // the badge already sits at the row's end. Growing here keeps that; it does not move the badge.
         .swarm-agent-label,
         .swarm-agent-label:has(+ .swarm-seat-badge) {
             flex: 1 100000 auto;
