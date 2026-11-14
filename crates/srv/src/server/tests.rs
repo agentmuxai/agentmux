@@ -8,7 +8,11 @@ use tower::ServiceExt;
 
 use crate::backend::reactive as backend_reactive;
 use crate::backend::wconfig;
-use crate::backend::wcore;
+
+// Tests that need the whole server (its router and state) but belong to a module below it.
+mod container_listener_tests;
+mod listener_itest;
+mod turn_itest;
 
 /// A token for the agent whose slug is `name`, creating its row on first use:
 /// what a test attaches to a request that acts for an agent.
