@@ -66,6 +66,89 @@ jobs:
       CEF_RUNTIME_DIR_WINDOWS: ${{ github.workspace }}/cef-runtime-windows
 
     steps:
+      # The inputs reach the shell through env, never interpolated into the script, and are
+      # checked for shape: a dispatch input (or a repository_dispatch payload) is text anyone
+      # who can dispatch controls.
+      - name: Resolve inputs
+        id: in
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          P_REF: ${{ github.event.client_payload.ref }}
+          P_RELEASE_TAG: ${{ github.event.client_payload.release_tag }}
+          P_CEF_TAG: ${{ github.event.client_payload.cef_runtime_tag }}
+          I_REF: ${{ inputs.ref }}
+          I_RELEASE_TAG: ${{ inputs.release-tag }}
+          I_CEF_TAG: ${{ inputs.cef-runtime-tag }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "repository_dispatch" ]; then
+            REF="$P_REF"; RELEASE_TAG="$P_RELEASE_TAG"; CEF_TAG="$P_CEF_TAG"
+          else
+            REF="$I_REF"; RELEASE_TAG="$I_RELEASE_TAG"; CEF_TAG="$I_CEF_TAG"
+          fi
+          for v in "$REF" "$RELEASE_TAG" "$CEF_TAG"; do
+            # bash's own match covers the whole string (grep checks line by line, so a value
+            # with a line break could carry extra `name=value` lines into the outputs file)
+            if ! [[ "$v" =~ ^[A-Za-z0-9._/+-]*$ ]]; then
+              echo "::error::an input has characters a ref or tag does not"; exit 1
+            fi
+          done
+          printf 'ref=%s\nrelease_tag=%s\ncef_tag=%s\n' "$REF" "$RELEASE_TAG" "$CEF_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout agentmux source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.in.outputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Before any step asks the broker for anything or runs code from the checkout (npm scripts,
+      # build scripts). Only main's history, or the gated release commit of a tag run, gets this
+      # far: a `workflow_dispatch` or `repository_dispatch` can name any ref to build, and a tag's
+      # own workflow can call this file on main with a tag of its own making. The same gate as
+      # build-macos.yml's; a build of another branch is made on a machine of ours, not here.
+      - name: The code to be built is main's
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          STATUS="$(gh api "repos/${REPO}/compare/main...${HEAD_SHA}" --jq .status)"
+          case "$STATUS" in
+            identical|behind) ;;
+            *) echo "::error::the commit to build ($HEAD_SHA) is not on main (compare main...sha says '$STATUS'): only main's history is built here"; exit 1 ;;
+          esac
+          if [ "$REF_TYPE" = "tag" ]; then
+            # A release: the same gate release-core.yml runs, from main's copy of the script, and the
+            # checkout must be the tagged commit itself.
+            tmp="$RUNNER_TEMP"
+            if command -v cygpath > /dev/null 2>&1; then tmp="$(cygpath -m "$RUNNER_TEMP")"; fi
+            gate="$tmp/release-gate.mjs"
+            gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPO}/contents/scripts/release-gate.mjs?ref=main" > "$gate"
+            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO"
+            if [ "$HEAD_SHA" != "$RUN_SHA" ]; then
+              echo "::error::the checkout ($HEAD_SHA) is not the tagged commit ($RUN_SHA)"; exit 1
+            fi
+          else
+            case "$EVENT" in
+              schedule|workflow_dispatch|repository_dispatch) ;;
+              *) echo "::error::event '$EVENT' does not build here"; exit 1 ;;
+            esac
+            if [ "$RUN_REF" != "refs/heads/main" ]; then
+              echo "::error::a run on '$RUN_REF' does not build here: only main and release tags do"; exit 1
+            fi
+          fi
+
       # Replaces CEF_RUNTIME_TOKEN, a long-lived PAT, with an installation
       # token that expires in an hour. The broker gives this job a token that can
       # only read agentmuxai/cef, and only to this workflow file as it is on main
@@ -121,29 +204,8 @@ jobs:
           echo "::add-mask::$value"
           echo "value=$value" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve inputs
-        id: in
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            echo "ref=${{ github.event.client_payload.ref }}"                   >> "$GITHUB_OUTPUT"
-            echo "release_tag=${{ github.event.client_payload.release_tag }}"   >> "$GITHUB_OUTPUT"
-            echo "cef_tag=${{ github.event.client_payload.cef_runtime_tag }}"   >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=${{ inputs.ref }}"                  >> "$GITHUB_OUTPUT"
-            echo "release_tag=${{ inputs.release-tag }}"  >> "$GITHUB_OUTPUT"
-            echo "cef_tag=${{ inputs.cef-runtime-tag }}"  >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.in.outputs.ref }}
 
       - uses: dtolnay/rust-toolchain@1.99.1
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
 
       - run: npm install
 
@@ -304,8 +366,9 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.in.outputs.release_tag }}
         run: |
-          gh release upload "${{ steps.in.outputs.release_tag }}" \
+          gh release upload "$RELEASE_TAG" \
             "$OUT"/agentmux-*-x64-portable.7z \
             "$OUT"/AgentMux-*-x64-setup.exe \
             "$OUT"/msix/AgentMux_*_x64.msix \
