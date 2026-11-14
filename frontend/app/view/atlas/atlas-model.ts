@@ -11,7 +11,7 @@ import { readSeatMeta } from "@/app/agent-model/seat-format";
 import { unavailableOfMeta } from "@/app/store/agent-unavailable";
 import { MOS } from "@/app/store/global";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
-import { isAwaitingUser } from "@/app/store/swarm-line";
+import { awaitsBrowserAnswer, isAwaitingUser } from "@/app/store/swarm-line";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createMemo, type Accessor } from "solid-js";
 import { buildAtlasGraph, type AtlasAgent, type AtlasGraph, type AtlasMachine, type AtlasState } from "./atlas-graph";
@@ -71,7 +71,7 @@ function localAgent(key: string, node: AgentTreeNode, agentId: string | null, se
         : node.agentStatus === "running"
           ? "working"
           : "idle";
-    const chip = chipStatus(display, isAwaitingUser(meta, node.agentStatus));
+    const chip = chipStatus(display, isAwaitingUser(meta, node.agentStatus), awaitsBrowserAnswer(meta, node.agentStatus));
     const live = chip !== "idle";
     const unavailable = unavailableOfMeta(meta, live, Date.now());
     const state: AtlasState =

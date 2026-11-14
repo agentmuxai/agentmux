@@ -30,6 +30,7 @@ const DETAIL_TEXT: Record<string, string> = {
     usage_limit: "Out of usage until it resets",
     needs_login: "Signed out: sign in to continue",
     starts_on_first_message: "Runs on its first message",
+    browser_request: "Waiting for your answer in a browser pane",
 };
 
 /** A stopped agent that is wanted running but cannot start: not the same as one stopped on purpose. */

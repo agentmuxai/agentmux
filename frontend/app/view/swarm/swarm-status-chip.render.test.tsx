@@ -62,6 +62,13 @@ describe("chipStatus", () => {
     it("a waiting flag on an agent with no turn in flight stays idle", () => {
         expect(chipStatus("idle", true)).toBe("idle");
     });
+
+    it("an agent that ended its turn with a Browser request open is question, until a turn is in flight", () => {
+        expect(chipStatus("idle", true, true)).toBe("question");
+        expect(chipStatus("idle", false, true)).toBe("question");
+        expect(chipStatus("working", false, true)).toBe("working");
+        expect(chipStatus("idle", false, false)).toBe("idle");
+    });
 });
 
 describe("AgentStatusChip: question", () => {

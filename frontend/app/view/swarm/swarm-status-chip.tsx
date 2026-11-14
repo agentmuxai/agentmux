@@ -25,11 +25,14 @@ import { longRunningToolRows } from "./swarm-longrunning";
 export type ChipStatus = "working" | "question" | "idle";
 
 /** `awaitingUser` is `isAwaitingUser(meta, agentStatus)` from swarm-line.ts,
- *  the same check as the row's "Waiting for you" line. */
-export function chipStatus(status: AgentDisplayStatus, awaitingUser = false): ChipStatus {
+ *  the same check as the row's "Waiting for you" line. `browserRequest` is
+ *  `awaitsBrowserAnswer(meta, agentStatus)`: the agent ended its turn with a
+ *  Browser request still open, which asks the person with no turn in flight. */
+export function chipStatus(status: AgentDisplayStatus, awaitingUser = false, browserRequest = false): ChipStatus {
     const ranked = rankAgentStatus({
         live: status === "working" || status === "tools" || status === "stopping",
         needsYou: awaitingUser,
+        browserRequest,
         held: { stopping: status === "stopping" },
     });
     if (ranked.kind === "needs-you") return "question";
@@ -53,9 +56,10 @@ function currentOperation(blockId: string | undefined): { bucket: Bucket; since:
 export function AgentStatusChip(props: {
     status: AgentDisplayStatus;
     awaitingUser?: boolean;
+    browserRequest?: boolean;
     blockId?: string;
 }): JSX.Element {
-    const chip = () => chipStatus(props.status, props.awaitingUser);
+    const chip = () => chipStatus(props.status, props.awaitingUser, props.browserRequest);
     const countdown = () => (chip() === "question" && props.blockId ? questionCountdown(props.blockId) : null);
     const tick = useTick(1000);
     const operation = createMemo(() => (chip() === "working" ? (tick(), currentOperation(props.blockId)) : null));
