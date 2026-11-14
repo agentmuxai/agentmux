@@ -731,7 +731,7 @@ mod tests {
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let id_store = Store::open_shared(tmp.path()).unwrap();
-        let state = crate::server::tests::test_state();
+        let state = crate::test_support::core_parts();
 
         let config_a = tempfile::tempdir().unwrap();
         let config_b = tempfile::tempdir().unwrap();
@@ -812,7 +812,7 @@ mod tests {
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let id_store = Store::open_shared(tmp.path()).unwrap();
-        let state = crate::server::tests::test_state();
+        let state = crate::test_support::core_parts();
         let config = tempfile::tempdir().unwrap();
 
         let mut def = crate::backend::storage::AgentDefinition {

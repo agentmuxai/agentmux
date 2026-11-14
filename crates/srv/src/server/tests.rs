@@ -29,17 +29,10 @@ pub(crate) fn actor_in(body: &serde_json::Value) -> String {
 }
 
 pub(crate) fn test_state() -> AppState {
-    let mstore = Arc::new(Store::open_in_memory().unwrap());
-    // This one store backs mstore/id_store/identity_store below, so it has to
-    // carry BOTH schemas. Without the identity schema, any handler touching a
-    // table that lives only in the global identity store (`db_work_queue`)
-    // failed with a bare "no such table" 500 in tests while being perfectly
-    // correct in production. Additive and idempotent — every statement in that
-    // schema is CREATE ... IF NOT EXISTS.
-    mstore.apply_identity_schema_for_tests().unwrap();
-    let filestore = Arc::new(FileStore::open_in_memory().unwrap());
-    let event_bus = Arc::new(EventBus::new());
-    let broker = Arc::new(Broker::new());
+    // The store, file store, event bus and broker come from the core fixture, which core tests use
+    // by themselves. This one store backs mstore/id_store/identity_store below and carries both
+    // schemas (see `core_parts`).
+    let crate::test_support::CoreParts { mstore, filestore, event_bus, broker } = crate::test_support::core_parts();
     let reactive_handler = backend_reactive::get_global_handler();
     let poller = Arc::new(Poller::new(
         backend_reactive::PollerConfig {
@@ -49,9 +42,6 @@ pub(crate) fn test_state() -> AppState {
         },
         reactive_handler,
     ));
-
-    // Bootstrap initial data
-    wcore::ensure_initial_data(&mstore).unwrap();
 
     let config_watcher = Arc::new(wconfig::ConfigState::new());
 
