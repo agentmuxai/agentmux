@@ -60,6 +60,21 @@ pub(crate) struct Status {
     pub started_secs_ago: u64,
     /// When the person answered, or the hand-off ended without them; None while pending.
     pub ended_secs_ago: Option<u64>,
+    /// How long it stayed open: from the banner going up to the answer (or the end); None while pending.
+    pub open_secs: Option<u64>,
+}
+
+/// What the Log and the answer say of how a hand-off ended: who answered, and how long the banner was up.
+/// An answer within seconds is worth an agent's doubt (it can't tell an early Done from a request that closed
+/// itself), so the time is always in it.
+pub(crate) fn ended_words(a: crate::server::browser_attention::Answer, open: Duration) -> String {
+    use crate::server::browser_attention::Answer;
+    let span = agentmux_common::time::span_words(open.as_secs());
+    match a {
+        Answer::Yes | Answer::YesAlways | Answer::YesAsking => format!("the person clicked Done after {span}"),
+        Answer::Cancelled => format!("the person clicked Cancel after {span}"),
+        Answer::TimedOut => format!("nobody answered in {span}"),
+    }
 }
 
 const KEPT: usize = 256;
@@ -128,6 +143,7 @@ pub(crate) fn status(agent: &str, id: Option<&str>, pane: Option<&str>) -> Optio
         state: e.state,
         started_secs_ago: e.started.elapsed().as_secs(),
         ended_secs_ago: e.ended.map(|t| t.elapsed().as_secs()),
+        open_secs: e.ended.map(|t| t.saturating_duration_since(e.started).as_secs()),
     })
 }
 
@@ -150,6 +166,24 @@ mod tests {
         let s = status(&agent, Some(&id), None).unwrap();
         assert_eq!(s.state, State::Done);
         assert!(s.ended_secs_ago.is_some());
+        assert!(s.open_secs.is_some(), "how long it stayed open is kept with the answer");
+        assert_eq!(status(&agent, Some(&id), None).unwrap().open_secs, s.open_secs);
+    }
+
+    #[test]
+    fn a_pending_handoff_has_no_open_time_yet() {
+        let (id, pane, agent) = fresh();
+        let _t = Tracked::start(&id, &pane, &agent);
+        assert_eq!(status(&agent, Some(&id), None).unwrap().open_secs, None);
+    }
+
+    #[test]
+    fn the_end_of_a_handoff_says_who_answered_and_after_how_long() {
+        use crate::server::browser_attention::Answer;
+        let words = |a, s| ended_words(a, Duration::from_secs(s));
+        assert_eq!(words(Answer::Yes, 3), "the person clicked Done after 3 s");
+        assert_eq!(words(Answer::Cancelled, 40), "the person clicked Cancel after 40 s");
+        assert_eq!(words(Answer::TimedOut, 15 * 60), "nobody answered in 15 min");
     }
 
     #[test]

@@ -1157,14 +1157,19 @@ pub(crate) async fn handle_ui_browser_handoff(
         }
     };
     drop(waiting);
+    let open = started.elapsed();
     tracked.finish(crate::server::browser_handoffs::State::of_answer(answer));
-    note(&block_id, &req.auth.agent_id, Kind::Handoff).target(&reason).how(How::from_answer(answer)).record(&state);
+    note(&block_id, &req.auth.agent_id, Kind::Handoff)
+        .target(&reason)
+        .how(How::from_answer(answer))
+        .detail(&crate::server::browser_handoffs::ended_words(answer, open))
+        .record(&state);
     let answer = match answer {
         crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways | crate::server::browser_attention::Answer::YesAsking => "done",
         crate::server::browser_attention::Answer::Cancelled => "cancelled",
         crate::server::browser_attention::Answer::TimedOut => "timed_out",
     };
-    (StatusCode::OK, Json(json!({ "ok": true, "data": { "answer": answer, "handoff_id": handoff_id } }))).into_response()
+    (StatusCode::OK, Json(json!({ "ok": true, "data": { "answer": answer, "handoff_id": handoff_id, "open_secs": open.as_secs() } }))).into_response()
 }
 
 /// `POST /api/v1/host/browser_attention` — the user's answer to a hand-off

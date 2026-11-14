@@ -231,6 +231,9 @@ pub(crate) fn outcome_text(id: &str, kind: &str, question: &str, state: &State) 
     let quoted = |text: &str| quote_in_system_note(&agentmux_common::pii_mask::mask_short_text(text));
     let head = format!("Your Browser request {id} ({})", quoted(question));
     match (kind, state) {
+        ("handoff", State::Done(after)) if !after.is_empty() => {
+            format!("{head}: the person clicked Done {after}. Take a new snapshot: don't assume what they changed.")
+        }
         ("handoff", State::Done(_)) => format!("{head}: the person clicked Done. Take a new snapshot: don't assume what they changed."),
         ("handoff", State::Declined) => format!("{head}: the person clicked Cancel. Ask them in chat how to proceed."),
         (_, State::Done(d)) => format!("{head}: the person approved it and it was done. {}", quoted(d)),
@@ -306,12 +309,17 @@ pub(crate) fn detach_handoff(
             raised.settled(Some(wait.saturating_sub(started.elapsed()))).await;
         drop(waiting);
         // An agent that took the request down itself knows: the Log says so, and nobody is woken.
+        let open = started.elapsed();
         tracked.finish(crate::server::browser_handoffs::State::of_answer(answer));
         let how = if by_agent { How::Refused("taken back by the agent".to_string()) } else { How::from_answer(answer) };
-        note(&block_id, &agent, Kind::Handoff).target(&reason).how(how).record(&state);
+        note(&block_id, &agent, Kind::Handoff)
+            .target(&reason)
+            .how(how)
+            .detail(&crate::server::browser_handoffs::ended_words(answer, open))
+            .record(&state);
         let settled = match answer {
             _ if by_agent => State::Cancelled,
-            Answer::Yes | Answer::YesAlways | Answer::YesAsking => State::Done(String::new()),
+            Answer::Yes | Answer::YesAlways | Answer::YesAsking => State::Done(format!("after {}", agentmux_common::time::span_words(open.as_secs()))),
             Answer::Cancelled => State::Declined,
             Answer::TimedOut => State::TimedOut,
         };
@@ -427,6 +435,7 @@ mod tests {
         assert!(t("approval", State::Void("the page changed".into())).contains("void, nothing was done: the page changed"));
         assert!(t("approval", State::Failed("the form changed".into())).contains("wasn't done: the form changed"));
         assert!(t("handoff", State::Done(String::new())).contains("clicked Done. Take a new snapshot"));
+        assert!(t("handoff", State::Done("after 7 s".into())).contains("clicked Done after 7 s. Take a new snapshot"));
         assert!(t("handoff", State::Declined).contains("clicked Cancel"));
     }
 
