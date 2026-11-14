@@ -433,10 +433,7 @@ pub async fn check_before_spawn(
 }
 
 static PROBE_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-    crate::http_client::builder()
-        .timeout(std::time::Duration::from_millis(1_500))
-        .build()
-        .unwrap_or_default()
+    crate::http_client::client_with(|b| b.timeout(std::time::Duration::from_millis(1_500)))
 });
 
 /// Ask every other live AgentMux instance on this host (from the

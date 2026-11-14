@@ -64,4 +64,37 @@ describe("check-srv-http-clients", () => {
     it("finds none in the tree today", () => {
         expect(collect()).toEqual([]);
     });
+
+    describe("a helper build that ends in a panic, in srv", () => {
+        const chain = (end) => `fn c() -> Client {\n    crate::http_client::builder()\n        .timeout(t)\n        .build()\n        ${end}\n}\n`;
+
+        it("flags unwrap_or_default, expect and unwrap, on the line of the ending", () => {
+            for (const end of [".unwrap_or_default()", '.expect("builds")', ".unwrap()"]) {
+                expect(lines("crates/srv/src/identity/x.rs", chain(end))).toEqual([5]);
+            }
+        });
+
+        it("flags the ending when the chain holds a closure with its own statements and when it is on one line", () => {
+            const closure = "fn c() {\n    crate::http_client::builder()\n        .redirect(Policy::custom(|a| {\n            let x = 1;\n            a.follow()\n        }))\n        .build()\n        .expect(\"x\")\n}\n";
+            expect(lines("crates/srv/src/drone/x.rs", closure)).toEqual([8]);
+            expect(lines("crates/srv/src/a.rs", "fn c() { let c = crate::http_client::builder().build().unwrap(); }\n")).toEqual([1]);
+        });
+
+        it("leaves the sites that return the error, the finisher and the other crates alone", () => {
+            for (const end of [".map_err(|e| e.to_string())?", ".ok()?", ".unwrap_or_else(|_| crate::http_client::client())"]) {
+                expect(lines("crates/srv/src/identity/x.rs", chain(end))).toEqual([]);
+            }
+            expect(lines("crates/srv/src/a.rs", "fn c() {\n    crate::http_client::client_with(|b| b.timeout(t))\n}\n")).toEqual([]);
+            expect(lines("crates/mcp/src/main.rs", chain('.expect("http client")').replace("crate::http_client", "agentmux_common::local_http"))).toEqual([]);
+        });
+
+        it("does not blame a later build for an earlier builder, a comment or a string", () => {
+            const text = 'fn a() { let b = crate::http_client::builder(); let c = b.build(); }\nfn d() { let x = other.build().expect("x"); }\n// crate::http_client::builder().build().unwrap()\nfn e() { let s = "crate::http_client::builder().build().unwrap()"; }\n';
+            expect(lines("crates/srv/src/a.rs", text)).toEqual([]);
+        });
+
+        it("leaves a test module alone", () => {
+            expect(lines("crates/srv/src/a.rs", `fn a() {}\n#[cfg(test)]\nmod tests {\n${chain(".unwrap()")}}\n`)).toEqual([]);
+        });
+    });
 });

@@ -35,12 +35,12 @@ static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn http_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
-        crate::http_client::builder()
+        crate::http_client::client_with(|b| {
             // Re-run SSRF validation on every redirect target —
             // otherwise a public attacker-controlled URL can return
             // `302 Location: http://169.254.169.254/...` and bypass
             // the initial check. (codex P1 on PR #755.)
-            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            b.redirect(reqwest::redirect::Policy::custom(|attempt| {
                 if let Err(e) = validate_url_for_safety(attempt.url()) {
                     return attempt.error(format!("redirect blocked: {e}"));
                 }
@@ -49,8 +49,7 @@ fn http_client() -> &'static reqwest::Client {
                 }
                 attempt.follow()
             }))
-            .build()
-            .expect("reqwest client build failed")
+        })
     })
 }
 

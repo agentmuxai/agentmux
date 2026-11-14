@@ -12,7 +12,7 @@
 //!     local machine and the LAN keeps working, and the log and the connectivity error say why. Nothing is bundled,
 //!     no other trust source is read, and no verification is relaxed.
 //!
-//! Every client srv builds goes through [`builder`] or [`client`]; `scripts/check-srv-http-clients.mjs` fails CI on a
+//! Every client srv builds goes through [`builder`], [`client_with`] or [`client`]; `scripts/check-srv-http-clients.mjs` fails CI on a
 //! direct `reqwest::Client::new()` or `reqwest::Client::builder()` anywhere else in srv's own code.
 
 use std::sync::OnceLock;
@@ -87,7 +87,29 @@ pub fn client() -> reqwest::Client {
     })
 }
 
-/// The client that trusts nothing, built with no other setting: the last step when [`client`] fails.
+/// A client built from the site's own settings (timeouts, headers, redirect rules, proxy), for a site with nowhere to
+/// return an error to. Never fails. The settings come as a function because a builder is used up by `build()`, and a
+/// build that fails (the certificates the probe saw are gone since: a bundle removed or replaced while the server runs)
+/// is tried again with the same settings and nothing to trust, so a site's redirect rule or `no_proxy` is never lost
+/// and every https request still fails closed. Only if that fails too, [`client`] is the last step.
+pub fn client_with(settings: impl Fn(reqwest::ClientBuilder) -> reqwest::ClientBuilder) -> reqwest::Client {
+    match settings(builder()).build() {
+        Ok(c) => c,
+        Err(first) => {
+            tracing::error!(error = %chain(&first), "building the HTTP client failed; trying again with no certificates to trust");
+            agentmux_common::tls_provider::install_ring_provider();
+            match settings(reqwest::Client::builder().tls_certs_only(Vec::<reqwest::Certificate>::new())).build() {
+                Ok(c) => c,
+                Err(second) => {
+                    tracing::error!(error = %chain(&second), "the site's settings cannot build a client; using one with the defaults that trusts nothing");
+                    distrusting_client()
+                }
+            }
+        }
+    }
+}
+
+/// The client that trusts nothing, built with no other setting: the last step when a build fails.
 fn distrusting_client() -> reqwest::Client {
     reqwest::Client::builder().tls_certs_only(Vec::<reqwest::Certificate>::new()).build().unwrap_or_else(|e| {
         // Unreachable once the provider is installed: an empty set of roots is a valid configuration.

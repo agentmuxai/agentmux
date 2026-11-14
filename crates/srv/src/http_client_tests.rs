@@ -133,6 +133,38 @@ async fn child_with_no_certificates() {
     assert_eq!(with_cert.get(&url).send().await.unwrap().text().await.unwrap(), "ok");
 }
 
+#[test]
+fn certificates_that_vanish_after_start_leave_every_site_with_a_client_that_trusts_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let tls = crate::backend::viewer::cert::load_or_create(dir.path()).unwrap();
+    let bundle = dir.path().join("bundle.pem");
+    std::fs::write(&bundle, pem(&tls.cert_der)).unwrap();
+    run_child("child_whose_certificates_vanish", &bundle, dir.path());
+}
+
+/// The child of `certificates_that_vanish_after_start_leave_every_site_with_a_client_that_trusts_nothing`: the machine
+/// has a certificate when the server starts, and the bundle is replaced by an empty one while it runs.
+#[tokio::test]
+async fn child_whose_certificates_vanish() {
+    let Some(dir) = child_dir() else { return };
+    assert_eq!(*trust(), Trust::System);
+    let secure = tls_server(&dir).await;
+    let plain = http_server().await;
+    let url = format!("https://{FIXTURE_HOST}:{}/", secure.port());
+
+    let empty = dir.join("empty.pem");
+    std::fs::write(&empty, "").unwrap();
+    std::env::set_var("SSL_CERT_FILE", &empty);
+
+    // A site's own builder can no longer build, which is the panic the sites that cannot return an error had.
+    assert!(builder().build().is_err(), "the fixture's certificates were expected to be gone");
+    // Its finisher still gives it a client, with the site's own settings (here the timeout and the redirect rule).
+    let client = client_with(|b| b.resolve(FIXTURE_HOST, secure).timeout(std::time::Duration::from_secs(5)).redirect(reqwest::redirect::Policy::none()));
+    assert_eq!(client.get(format!("http://{plain}/")).send().await.unwrap().text().await.unwrap(), "ok");
+    let err = client.get(&url).send().await.expect_err("https must fail closed once the certificates are gone");
+    assert!(format!("{err:?}").contains("UnknownIssuer"), "unexpected error: {err:?}");
+}
+
 /// The child of `a_machine_with_a_certificate_trusts_it_as_before`; passes at once when run on its own.
 #[tokio::test]
 async fn child_with_a_certificate() {

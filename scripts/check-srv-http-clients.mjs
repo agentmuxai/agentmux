@@ -18,8 +18,14 @@
 // `reqwest::Client`, in the source of those four crates, outside comments and test code (a test file or folder by its name,
 // and any item marked `#[cfg(test)]`, a test module included).
 //
+// The helper's `builder()` can still fail to build when the certificates it saw at start are gone later (a bundle removed or
+// replaced while the server runs) or when a site's own setting is refused, and `.unwrap_or_default()` (reqwest's
+// `Client::default()`, the same panic), `.expect(..)` and `.unwrap()` after its `.build()` turn that into a panic. So in srv
+// those three endings fail too; a site with no one to return the error to uses `crate::http_client::client_with(|b| ..)`, and
+// a site that can return it keeps `map_err`, `.ok()?` or `let Ok(..) else`.
+//
 // Usage: node scripts/check-srv-http-clients.mjs
-// Exit 0 = clean, exit 1 = a direct construction was found.
+// Exit 0 = clean, exit 1 = a direct construction or a panicking ending was found.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, extname, join, relative, sep } from "node:path";
@@ -33,6 +39,10 @@ const HELPER = "crates/srv/src/http_client.rs";
 const FULL = /reqwest::(?:Client::(?:new|builder|default)\b|ClientBuilder::new\b|get\s*\()/;
 const SHORT = /(?<![\w:])Client::(?:new|builder|default)\s*\(/;
 const IMPORTS_CLIENT = /use\s+reqwest::(?:\{[^}]*\bClient\b[^}]*\}|Client\b)/;
+
+const SRV = "crates/srv/src/";
+const HELPER_BUILDER = /http_client::builder\s*\(\)/g;
+const PANICKING_END = /\.build\s*\(\s*\)\s*(\.(?:unwrap_or_default\s*\(\s*\)|expect\s*\(|unwrap\s*\(\s*\)))/g;
 
 const isTestFile = (path) => /(^|\/)(tests|test_support|test_stub|tls_test_init)(\.rs|\/)/.test(path) || /(^|\/)[^/]*_tests?\.rs$/.test(path) || path.endsWith("/tests.rs");
 
@@ -109,6 +119,17 @@ export function testLines(text) {
     return isTest;
 }
 
+/** The offsets of the endings (`.expect(..)` and the like) that follow the `.build()` of a chain begun by the helper's `builder()`. */
+function panickingEndings(code) {
+    const starts = [...code.matchAll(HELPER_BUILDER)].map((m) => m.index);
+    const out = [];
+    for (const m of code.matchAll(PANICKING_END)) {
+        const begun = starts.filter((i) => i < m.index).pop();
+        if (begun !== undefined && !/\.build\s*\(/.test(code.slice(begun, m.index))) out.push(m.index + m[0].length - m[1].length);
+    }
+    return out;
+}
+
 /** Direct constructions in one file: `{ path, line, text }`, line 1-based, `path` repo-relative with forward slashes. */
 export function checkFile(path, text) {
     if (path === HELPER || isTestFile(path)) return [];
@@ -120,6 +141,13 @@ export function checkFile(path, text) {
     for (const [i, l] of code.entries()) {
         if (test[i]) continue;
         if (FULL.test(l) || (imports && SHORT.test(l))) out.push({ path, line: i + 1, text: raw[i].trim() });
+    }
+    if (path.startsWith(SRV)) {
+        const whole = code.join("\n");
+        for (const at of panickingEndings(whole)) {
+            const line = whole.slice(0, at).split("\n").length - 1;
+            if (!test[line]) out.push({ path, line: line + 1, text: raw[line].trim() });
+        }
     }
     return out;
 }
@@ -141,10 +169,11 @@ export function collect(root = REPO_ROOT) {
 if (isMain(import.meta.url)) {
     const found = collect();
     if (found.length === 0) {
-        console.log("OK: srv, the MCP server, bashwrap and the desktop host build their HTTP clients only through their helpers.");
+        console.log("OK: srv, the MCP server, bashwrap and the desktop host build their HTTP clients only through their helpers, and no srv site panics when a build fails.");
     } else {
-        console.error("ERROR: a reqwest client built directly (in srv use crate::http_client::builder() or ::client(); in mcp, bashwrap and");
-        console.error(`cef use agentmux_common::local_http; both still build a client on a machine with no system certificates; see ${HELPER}):`);
+        console.error("ERROR: a reqwest client built directly, or a helper build ended in unwrap_or_default(), expect() or unwrap() (in srv use");
+        console.error("crate::http_client::client_with(|b| ..), ::builder() with the error returned, or ::client(); in mcp, bashwrap and cef use");
+        console.error(`agentmux_common::local_http; both still build a client on a machine with no system certificates; see ${HELPER}):`);
         for (const v of found) console.error(`  ${v.path}:${v.line}: ${v.text}`);
         process.exit(1);
     }

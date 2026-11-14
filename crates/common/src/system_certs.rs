@@ -8,7 +8,7 @@
 pub const NO_SYSTEM_CERTS: &str = "no system certificates found: every https request the server makes (models, updates, connected accounts) would fail";
 
 /// What to do about it.
-pub const NO_SYSTEM_CERTS_FIX: &str = "install the ca-certificates package (Debian and Ubuntu: `apt install ca-certificates`; Fedora: `dnf install ca-certificates`; Alpine: `apk add ca-certificates`), or point SSL_CERT_FILE at a bundle";
+pub const NO_SYSTEM_CERTS_FIX: &str = "install the ca-certificates package (Debian and Ubuntu: `apt install ca-certificates`; Fedora: `dnf install ca-certificates`; Alpine: `apk add ca-certificates`), or point SSL_CERT_FILE at a bundle, then restart AgentMux (the server reads the certificates once, when it starts)";
 
 /// The two together, as one sentence for a log line or an error.
 pub fn no_system_certs_message() -> String {
