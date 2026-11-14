@@ -9,6 +9,12 @@ description = "AgentMux Rust backend server"
 name = "agentmux-srv"
 path = "src/main.rs"
 
+# The command that runs and manages the server (SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI §4.1).
+# Its own program, with none of the server's modules.
+[[bin]]
+name = "agentmux"
+path = "src/agentmux_cli/main.rs"
+
 [dependencies]
 agentmux-common = { path = "../common", features = ["ts"] }
 tokio = { version = "1", features = ["full"] }
