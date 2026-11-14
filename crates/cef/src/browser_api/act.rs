@@ -334,6 +334,16 @@ const COMMIT_INFO: &str = concat!(
 }"#
 );
 
+/// An action's answer about the element, with no secret-shaped text in it: a value or a text the page's own
+/// script read can hold what the page hides inside the element. An approval request (what the person is
+/// shown) is left as it is.
+fn read_back_scrubbed(mut after: Value) -> Value {
+    if after.get("needs_approval").is_none() {
+        super::hidden_secrets::scrub_value(&mut after);
+    }
+    after
+}
+
 /// The element's state, for read-back after every action.
 pub(super) const READ_BACK: &str = r#"function () {
   const out = { tag: this.tagName.toLowerCase() };
@@ -468,7 +478,7 @@ pub(super) async fn describe(cdp: &mut CdpSession, backend: i64) -> Option<DomFa
         .call("Accessibility.getPartialAXTree", json!({ "backendNodeId": backend, "fetchRelatives": false }))
         .await
         .ok()
-        .and_then(|t| t.pointer("/nodes/0/name/value").and_then(|n| n.as_str()).map(str::to_string))
+        .and_then(|t| t.pointer("/nodes/0/name/value").and_then(|n| n.as_str()).map(super::hidden_secrets::scrub))
         .unwrap_or_default();
     Some(facts.with_label(&label))
 }
@@ -951,7 +961,7 @@ pub async fn act_route(
     };
     let _ = cdp.close().await;
     match result {
-        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after, page }))),
+        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after: read_back_scrubbed(after), page }))),
         Err(e) => fail(e),
     }
 }
@@ -1453,7 +1463,7 @@ pub async fn set_files_route(
     let result = set_files(&mut cdp, &table, backend, frame.as_ref(), &req).await;
     let _ = cdp.close().await;
     match result {
-        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after, page: None }))),
+        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after: read_back_scrubbed(after), page: None }))),
         Err(e) => fail(e),
     }
 }
