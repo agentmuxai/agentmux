@@ -111,22 +111,27 @@
 
 // A narrow pane: the row's name keeps room by giving up what only decorates it (the age, the
 // Supervisor chip's state word, which its tooltip still says). Nothing leaves the card: when the row's parts
-// still do not fit (a question with its seconds, beside a Supervisor mode), the seat badge gives way, then the
-// end of the status chip, its seconds first, cut with an ellipsis.
+// still do not fit (a question with its seconds, beside a Supervisor mode), they give way in turn: the seat
+// badge, then the name down to its least width, then the status chip from its end, its seconds first.
+//
+// Flex shares a shortfall by these weights, so each is far enough from the next that the later part loses less
+// than a layout unit, and gets no ellipsis, while the earlier one still shrinks. The name is written both ways
+// so that its rule in swarm-seats.scss, as specific as the row's own, cannot win by coming later.
 @container swarm-tree (max-width: 360px) {
     .swarm-agent-row {
         .swarm-last-active {
             display: none;
         }
 
-        .swarm-agent-label {
-            min-width: 6ch;
+        .swarm-seat-badge {
+            flex-shrink: 10000000000;
         }
 
-        // As wide as their words when the row has a seat badge: far more willing to shrink than the status chip.
-        .swarm-agent-label:has(+ .swarm-seat-badge),
-        .swarm-seat-badge {
-            flex-shrink: 1000;
+        // As wide as its words, so it has a width to give up after the badge and before the chip.
+        .swarm-agent-label,
+        .swarm-agent-label:has(+ .swarm-seat-badge) {
+            flex: 1 100000 auto;
+            min-width: 6ch;
         }
 
         .swarm-status-chip {
@@ -136,6 +141,13 @@
         }
 
         .swarm-status-countdown {
+            flex-shrink: 100000;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .swarm-status-label {
             min-width: 0;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -149,15 +161,16 @@
 
 // Narrower, where a status chip that reads "question" no longer fits beside a name of 6ch: the context size and
 // the Supervisor chip's mode word go (the chip's colour and tooltip still say the mode), and the name gives way
-// down to 3ch, before the chip is cut. The Supervisor button stays whole.
+// down to 5ch, about three letters and the ellipsis, before the chip is cut. The Supervisor button stays whole.
 @container swarm-tree (max-width: 280px) {
     .swarm-agent-row {
         .swarm-ctx-size {
             display: none;
         }
 
-        .swarm-agent-label {
-            min-width: 3ch;
+        .swarm-agent-label,
+        .swarm-agent-label:has(+ .swarm-seat-badge) {
+            min-width: 5ch;
         }
     }
 
@@ -166,7 +179,7 @@
     }
 }
 
-// A pane too narrow for the row's fixed parts and the name's 6ch: the name shrinks first, down to nothing, then the
+// A pane too narrow for the row's fixed parts and the name's least width: the name goes down to nothing, then the
 // chips at the row's end (clipped, not wrapped), and the row never grows past the pane.
 @container swarm-tree (max-width: 200px) {
     .swarm-agent-row {
