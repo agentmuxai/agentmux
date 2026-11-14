@@ -14,12 +14,15 @@ import { describe, expect, it } from "vitest";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (name) => readFileSync(join(ROOT, ".github/workflows", name), "utf8").replace(/\r\n/g, "\n");
 
-/** The steps of a workflow's first job: each is the text from its `      - ` line to the next one. */
-function stepsOf(source) {
+/** The steps of one job: each is the text from its `      - ` line to the next one. */
+function stepsOf(source, job = "build") {
     const lines = source.split("\n");
     const steps = [];
+    let inJob = false;
     let inSteps = false;
     for (const line of lines) {
+        if (/^ {2}[A-Za-z0-9_-]+:\s*$/.test(line)) inJob = line.trim() === `${job}:`;
+        if (!inJob) continue;
         if (/^ {4}steps:\s*$/.test(line)) {
             inSteps = true;
             continue;
@@ -72,6 +75,22 @@ describe.each(["build-linux.yml", "build-windows.yml"])("%s", (file) => {
         }
         const resolve = steps.find((s) => /name: Resolve inputs/.test(s));
         expect(resolve).toContain('=~ ^[A-Za-z0-9._/+-]*$');
+    });
+});
+
+describe("build-server-package.yml", () => {
+    const steps = stepsOf(read("build-server-package.yml"), "package");
+    const gate = steps.findIndex(isGate);
+
+    it("has the gate step, which a pull request that changes the workflow does not run", () => {
+        expect(gate).toBeGreaterThan(-1);
+        expect(steps[gate]).toContain("if: github.event_name != 'pull_request'");
+        expect(steps[gate]).toContain("identical|behind");
+        expect(steps[gate]).toContain('--ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO"');
+    });
+
+    it("runs the gate before any step that runs the checkout's code", () => {
+        expect(steps.findIndex((s, i) => i !== gate && runsCheckoutCode(s))).toBeGreaterThan(gate);
     });
 });
 

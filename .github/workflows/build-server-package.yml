@@ -86,6 +86,56 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: ${{ github.ref_type != 'tag' && 'npm' || '' }}
+
+      # Before any step runs code from the checkout (npm scripts, build scripts). Only main's history, or the gated
+      # release commit of a tag run, gets this far: a `workflow_dispatch` can name any ref to build, and a tag's own
+      # workflow can call this file on main with a tag of its own making. The same gate as build-macos.yml's; a build
+      # of another branch is made on a machine of ours, not here. A pull request that changes this file builds its own
+      # merge commit, and what it saves is kept for that pull request alone.
+      - name: The code to be built is main's
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          STATUS="$(gh api "repos/${REPO}/compare/main...${HEAD_SHA}" --jq .status)"
+          case "$STATUS" in
+            identical|behind) ;;
+            *) echo "::error::the commit to build ($HEAD_SHA) is not on main (compare main...sha says '$STATUS'): only main's history is built here"; exit 1 ;;
+          esac
+          if [ "$REF_TYPE" = "tag" ]; then
+            # A release: the same gate release-core.yml runs, from main's copy of the script, and the
+            # checkout must be the tagged commit itself.
+            tmp="$RUNNER_TEMP"
+            if command -v cygpath > /dev/null 2>&1; then tmp="$(cygpath -m "$RUNNER_TEMP")"; fi
+            gate="$tmp/release-gate.mjs"
+            gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPO}/contents/scripts/release-gate.mjs?ref=main" > "$gate"
+            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO"
+            if [ "$HEAD_SHA" != "$RUN_SHA" ]; then
+              echo "::error::the checkout ($HEAD_SHA) is not the tagged commit ($RUN_SHA)"; exit 1
+            fi
+          else
+            case "$EVENT" in
+              schedule|workflow_dispatch|repository_dispatch) ;;
+              *) echo "::error::event '$EVENT' does not build here"; exit 1 ;;
+            esac
+            if [ "$RUN_REF" != "refs/heads/main" ]; then
+              echo "::error::a run on '$RUN_REF' does not build here: only main and release tags do"; exit 1
+            fi
+          fi
+
       - uses: dtolnay/rust-toolchain@1.99.1
 
       # agentmux-mcp links libdbus and libxcb (its screen capture); the Linux package needs them at run time too.
@@ -102,10 +152,6 @@ jobs:
         with:
           key: server-package-${{ matrix.os }}-${{ matrix.arch }}
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: ${{ github.ref_type != 'tag' && 'npm' || '' }}
       - run: npm ci
 
       - name: Build the web UI
