@@ -538,71 +538,53 @@ export type AgentPaneCommand =
           addedCount: number;
           at: number;
           /**
-           * Did this flush carry anything that is evidence the TURN is alive —
-           * document nodes, node updates, tool chunks, or a new shell node?
-           *
-           * `false` means the flush was shell OUTPUT only. That is a live
-           * BACKGROUND process writing to its dock row; it says nothing about
-           * whether the model is doing anything, so it must not refresh the
-           * turn idle clock or resurrect a finished turn. Omitted is treated as
-           * `true` — only the flush queue knows the difference, and only it
-           * sets this.
-           *
-           * See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md.
+           * Did this flush carry evidence the TURN is alive: document nodes, node updates, tool
+           * chunks or a new shell node? `false` means shell OUTPUT only, a live BACKGROUND process
+           * writing to its dock row, which says nothing about the model, so it must not refresh the
+           * turn idle clock or resurrect a finished turn. Omitted counts as `true`; only the flush
+           * queue knows the difference and sets this
+           * (docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md).
            */
           turnRelevant?: boolean;
       }
     /**
-     * Periodic tick from useAgentStream's watchdog interval. Emits a
-     * `stream-stuck` diagnostic past `STUCK_THRESHOLD_MS`, and — past the
-     * longer `LIVENESS_RECOVERY_MS` — force-recovers a hung `Streaming` turn
-     * (no tool active, not rate-limited) to `Idle`, clearing a stuck
-     * "Working" that never received its terminal `session_end`. See
-     * SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md.
+     * Periodic tick from useAgentStream's watchdog interval. Emits a `stream-stuck` diagnostic past
+     * `STUCK_THRESHOLD_MS` and, past the longer `LIVENESS_RECOVERY_MS`, force-recovers a hung
+     * `Streaming` turn (no tool active, not rate-limited) to `Idle`, clearing a stuck "Working"
+     * that never got its `session_end` (SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md).
      */
     | { type: "StreamWatchdogTick"; nowMs: number }
 
     /**
-     * Reconciliation from `BlockControllerRuntimeStatus.turn_active`
-     * (backend-verified, from the health monitor wired to the NDJSON
-     * stream — see `crates/srv/src/backend/blockcontroller/health.rs`),
-     * fetched via `GetControllerStatus` at mount AND dispatched on every
-     * live `controllerstatus` MPS event thereafter (useControllerStatusEvents).
-     * Bidirectional:
-     *   - `active: true`  — promote the mount-default `Idle` to `Streaming`
-     *     when the backend reports a turn already in flight. Corrects ONLY
-     *     an `Idle` phase; never overrides a phase a real stream/user event
-     *     already produced (TurnStart, StreamFlushObserved, etc. win if they
-     *     got there first). #2005 Finding 1.
-     *   - `active: false` — demote a stuck `Streaming` phase to `Idle`. The
-     *     backend flips `turn_active` false only on the CLI's `result` event
-     *     (genuine turn-end), so this is authoritative. Normally the frontend
-     *     reaches `Done` on its own via `session_end`; this covers the case
-     *     where it MISSED that event (pane backgrounded/unmounted across the
-     *     transition, or a dropped MPS event) and would otherwise stay
-     *     `Streaming` forever — the Agent1 stuck-"Working" / Agent2
-     *     stuck-"Queued" class. Only `Streaming` is demoted: `Submitting` is
-     *     covered by `SUBMIT_TIMEOUT` (and is where the send-race lives — a
-     *     just-dispatched local `TurnStart` racing a backend that hasn't yet
-     *     marked the turn active), `Interrupting` by `INTERRUPT_TIMEOUT`,
-     *     `Done`/`Idle`/`Disconnected` are already correct.
+     * Reconciliation from `BlockControllerRuntimeStatus.turn_active` (backend-verified, from the
+     * health monitor on the NDJSON stream, `crates/srv/src/backend/blockcontroller/health.rs`),
+     * fetched via `GetControllerStatus` at mount and dispatched on every live `controllerstatus`
+     * MPS event (useControllerStatusEvents). Bidirectional:
+     * - `active: true` promotes the mount-default `Idle` to `Streaming` when the backend reports a
+     *   turn in flight. It corrects only an `Idle` phase: a phase a real stream or user event
+     *   already produced (TurnStart, StreamFlushObserved) wins (#2005 Finding 1).
+     * - `active: false` demotes a stuck `Streaming` to `Idle`. The backend flips `turn_active`
+     *   false only on the CLI's `result` event, so this is authoritative. It covers a missed
+     *   `session_end` (pane backgrounded or unmounted across the transition, a dropped MPS event):
+     *   the stuck-"Working" / stuck-"Queued" class. Only `Streaming` is demoted: `Submitting` is
+     *   covered by `SUBMIT_TIMEOUT` (and is where the send race lives: a local `TurnStart` racing a
+     *   backend that hasn't marked the turn active), `Interrupting` by `INTERRUPT_TIMEOUT`, and
+     *   `Done` / `Idle` / `Disconnected` are already correct.
+     *
      * See docs/retro/retro-agent2-stuck-queued-message-2026-07-16.md.
      */
     | { type: "ReconcileTurnActive"; at: number; active: boolean }
     /**
-     * Mount-time reconciliation: history replay found the main agent's last
-     * API call from before this pane went live (`HistoryParser.lastContext`
-     * — that call's whole prompt and model, never a `result`'s turn total).
-     * Seeds `context` so the meter shows a real number immediately instead of
-     * sitting blank until the first live `TokensIn`. Seeds only while
-     * `contextSeedable` (no live reading, invalidation, compaction or reset
-     * yet) — a historical snapshot must never clobber real-time data. An
-     * implausible seed is refused (`context-reading-rejected`). `tokens` is
-     * absent when the restored window holds no main-agent call.
-     * `reportedWindows` (the history's own `result.modelUsage` windows) merge
-     * UNDER any reported live, either way.
-     * See docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md
-     * and docs/reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md.
+     * Mount-time reconciliation: history replay found the main agent's last API call from before
+     * this pane went live (`HistoryParser.lastContext`: that call's whole prompt and model, never a
+     * `result`'s turn total). Seeds `context` so the meter shows a real number at once rather than
+     * staying blank until the first live `TokensIn`. Seeds only while `contextSeedable` (no live
+     * reading, invalidation, compaction or reset yet): a historical snapshot must never clobber
+     * real-time data. An implausible seed is refused (`context-reading-rejected`). `tokens` is
+     * absent when the restored window holds no main-agent call. `reportedWindows` (the history's
+     * own `result.modelUsage` windows) merge UNDER any reported live. See
+     * docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md and
+     * docs/reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md.
      */
     | {
           type: "ReconcileContextFromHistory";
@@ -642,47 +624,37 @@ export type AgentPaneCommand =
      */
     | { type: "ContextModelSwitched"; model: string }
     /**
-     * User pressed send — turn becomes active. Also clears stale
-     * sessionStats from the previous turn.
+     * User pressed send: the turn becomes active, and the previous turn's stale `sessionStats` are
+     * cleared.
      *
-     * `content` — the literal text just submitted, threaded through into
-     * `TurnPhase.Submitting.pendingContent` (optional so the ~90 existing
-     * reducer/hook test call sites that construct this action without it
-     * keep compiling — the reducer defaults to `""` when absent). Used by
-     * `useAgentActivitySummary.ts` to derive the session-title Haiku call
-     * without a separate FileStore read. See
-     * docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
+     * `content` is the literal text just submitted, threaded into
+     * `TurnPhase.Submitting.pendingContent` (optional so the ~90 reducer/hook test call sites that
+     * build this action without it still compile; the reducer defaults to `""`).
+     * `useAgentActivitySummary.ts` uses it to derive the session-title Haiku call without a
+     * FileStore read (docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md).
      */
     | {
           type: "TurnStart";
           at: number;
           content?: string;
           /**
-           * True for a hidden memory-reinjection turn
-           * (`memory-reinjection-controller.ts`) — never set by any
-           * ordinary send. Propagated onto `TurnPhase.Submitting.hidden`
-           * so every ambient side-effect hook keyed off `turnPhase`
-           * (`useAgentActivitySummary.ts`, `useNextPromptSuggestion.ts`,
-           * and any future one) can skip its own LLM call for this turn
-           * without needing separate wiring — `turnPhase` already reaches
-           * them as their effect dependency. Found necessary the hard way:
-           * `useAgentActivitySummary.ts` forwarded `pendingContent`
-           * (unconditionally, regardless of source) to an ambient
-           * summarization call whose result became the human-visible pane
-           * title — reagentx P0 on PR #3502. Defense-in-depth, not the
-           * only fix: `content` for a hidden turn is ALSO never the real
-           * message (see memory-reinjection-controller.ts) — a consumer
-           * that forgets to check `hidden` still never sees real content,
-           * only a safe placeholder.
+           * True for a hidden memory-reinjection turn (`memory-reinjection-controller.ts`), never
+           * set by an ordinary send. Propagated onto `TurnPhase.Submitting.hidden` so every ambient
+           * side-effect hook keyed off `turnPhase` (`useAgentActivitySummary.ts`,
+           * `useNextPromptSuggestion.ts`, any future one) can skip its own LLM call for the turn
+           * with no separate wiring. Needed because `useAgentActivitySummary.ts` forwarded
+           * `pendingContent` to an ambient summarization call whose result became the human-visible
+           * pane title (#3502). Defense in depth: `content` for a hidden turn is also never the
+           * real message (see memory-reinjection-controller.ts), so a consumer that forgets to
+           * check `hidden` still sees only a safe placeholder.
            */
           hidden?: boolean;
       }
     /**
-     * Stream produced session_end (or fallback timer fired). Final
-     * stats merged with current turn-tokens, which are still there when
-     * the backend's turn-ended push already moved the phase to Idle.
-     * Clears currentTool and turnTokens, and transitions the phase to
-     * Done (interrupting → Done.stopped, otherwise Done.completed).
+     * Stream produced session_end (or the fallback timer fired). Final stats merge with the current
+     * turn tokens, which are still there when the backend's turn-ended push already moved the phase
+     * to Idle. Clears currentTool and turnTokens; the phase becomes Done (Interrupting →
+     * Done.stopped, otherwise Done.completed).
      */
     | {
           type: "TurnEnd";
@@ -698,17 +670,12 @@ export type AgentPaneCommand =
      *  or an older state of this one, landing late is ignored. */
     | { type: "TurnObserved"; ledger: TurnLedger }
     /**
-     * Revert an OPTIMISTIC `TurnStart` when the turn never actually began —
-     * the initiating send's own RPC call failed synchronously (no
-     * controller registered, the identity spawn gate blocked it, a plain
-     * network rejection), or the input was a slash/bang command handled
-     * locally. Phase-only: unlike `TurnReset`, this must NOT
-     * touch `sessionStats`/`sessionTotals`/`context` — those
-     * accumulate across a pane's whole lifetime, and a transient send
-     * failure on an agent with prior completed turns must not wipe that
-     * history (reagent/codex P2 on PR #2318 — `TurnReset` was reused here
-     * first and incorrectly cleared them). See
-     * `useAgentCommands.ts`'s `deliverToBackend`.
+     * Revert an OPTIMISTIC `TurnStart` when the turn never began: the send's own RPC failed
+     * synchronously (no controller registered, the identity spawn gate blocked it, a network
+     * rejection), or the input was a slash/bang command handled locally. Phase only: unlike
+     * `TurnReset` it must NOT touch `sessionStats` / `sessionTotals` / `context`, which accumulate
+     * over the pane's lifetime, so a transient send failure doesn't wipe the history of prior
+     * completed turns (#2318). See `deliverToBackend` in `useAgentCommands.ts`.
      */
     | { type: "TurnStartFailed" }
 
@@ -751,25 +718,19 @@ export type AgentPaneCommand =
     /** Stop RPC failed — bail on the stopping state. */
     | { type: "StopFailed" }
     /**
-     * Interrupt timeout watchdog fired (caller-scheduled setTimeout — see
-     * `schedule-interrupt-timeout` event). Bounded `Interrupting → Done`
-     * force-transition: if the agent never acks the SIGINT (backend died,
-     * stream dropped, etc.) the pane was previously stuck in Interrupting
-     * forever and the working animation would never settle. This command
-     * is a no-op if the phase has already moved off Interrupting
-     * (e.g. agent acked first, user already resumed). Spec §8.
+     * Interrupt timeout watchdog fired (caller-scheduled setTimeout, see the
+     * `schedule-interrupt-timeout` event). Bounded `Interrupting → Done` force transition: if the
+     * agent never acks the SIGINT (backend died, stream dropped) the pane would stay in
+     * Interrupting and the working animation never settle. A no-op once the phase has left
+     * Interrupting (agent acked first, user resumed). Spec §8.
      */
     | { type: "InterruptTimeoutElapsed"; at: number }
     /**
-     * Submit timeout watchdog fired (caller-scheduled setTimeout — see
-     * `schedule-submit-timeout` event). PR D — bounded
-     * `Submitting → Done.errored` force-transition: if the backend never
-     * acks a TurnStart with a chunk / token / tool event within
-     * `SUBMIT_TIMEOUT_MS`, the pane was previously stuck in Submitting
-     * forever (no `isWorking → false` signal) and the working animation
-     * would never settle. No-op if the phase has already moved off
-     * Submitting (e.g. promotion to Streaming via flush / bumpEvent,
-     * user already stopped, stream dropped). Spec §8 / issue #728 gap 2.
+     * Submit timeout watchdog fired (caller-scheduled setTimeout, see the `schedule-submit-timeout`
+     * event). Bounded `Submitting → Done.errored` force transition (#728 gap 2): if the backend
+     * never acks a TurnStart with a chunk, token or tool event within `SUBMIT_TIMEOUT_MS`, the pane
+     * would stay in Submitting with no `isWorking → false` signal. A no-op once the phase has left
+     * Submitting (promoted to Streaming, user stopped, stream dropped). Spec §8.
      */
     | { type: "SubmitTimeoutElapsed"; at: number }
 
@@ -783,25 +744,20 @@ export type AgentPaneCommand =
           /** The pane sends it on AgentMux's behalf (the start-up document): a retry sends it so again. */
           system?: boolean;
           /**
-           * True when the user sent this message while a turn was already
-           * in-flight (isWorking was true before TurnStart). False for
-           * idle sends. Stored on the PendingMessage entry and used by
-           * PendingMessagesPanel to gate visibility — idle-send messages
-           * must never flash in the amber queued zone.
-           * See ANALYSIS_IDLE_SEND_RACE_2026_06_11 (never committed to this repo).
+           * True when the user sent this while a turn was in flight (isWorking was true before
+           * TurnStart); false for idle sends. Stored on the PendingMessage entry;
+           * PendingMessagesPanel uses it so an idle-send message never flashes in the amber queued
+           * zone.
            */
           enqueuedWhileBusy: boolean;
       }
     /**
-     * flushHeldMessages (useAgentCommands.ts) is about to actually deliver
-     * this held message — dispatched right before the `deliverToBackend`
-     * call, i.e. the moment sending genuinely begins, not merely "the turn
-     * it was queued behind has ended" (those can be far apart when a
-     * controller refresh is deferred — see the `PendingMessageFlushStarted`
-     * reducer arm's own doc comment). Marks the entry `flushing` so
-     * PendingMessagesPanel can stop claiming "sends at the agent's next
-     * step" once that's no longer true. See
-     * docs/specs/SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1.
+     * flushHeldMessages (useAgentCommands.ts) is about to deliver this held message: dispatched
+     * right before `deliverToBackend`, the moment sending actually begins, not merely when the turn
+     * it was queued behind has ended (far apart when a controller refresh is deferred; see the
+     * `PendingMessageFlushStarted` reducer arm). Marks the entry `flushing` so PendingMessagesPanel
+     * stops claiming "sends at the agent's next step"
+     * (docs/specs/SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1).
      */
     | { type: "PendingMessageFlushStarted"; id: string }
     /** Backend acknowledged the message — remove from pending. */
@@ -809,31 +765,26 @@ export type AgentPaneCommand =
     /** RPC failed — remove the entry so user doesn't see a ghost row. */
     | { type: "PendingMessageRejected"; id: string }
     /**
-     * Pending entry ageing watchdog fired (caller-scheduled setTimeout).
-     * Removes the entry by id; idempotent no-op if already accepted/rejected.
-     * Issue #728 gap 2 — prevents zombie pending rows when the backend
-     * never acknowledges a queued message (e.g. RPC hang post-send).
+     * Pending entry ageing watchdog fired (caller-scheduled setTimeout). Removes the entry by id;
+     * idempotent. Prevents zombie pending rows when the backend never acknowledges a queued message
+     * (RPC hang post-send; #728 gap 2).
      */
     | { type: "PendingMessageExpired"; id: string }
 
     /**
-     * Provider is rate-limited (429) and waiting to retry. Updates
-     * `lastEventMs` (keeps the stuck-stream watchdog quiet) and sets
-     * `waitingReason` on `Streaming` so the working row can show
-     * "Rate limited — retrying…" instead of the thinking phrase.
-     * Cleared automatically on the next real activity (bumpEvent).
+     * Provider is rate-limited (429) and waiting to retry. Updates `lastEventMs` (keeps the
+     * stuck-stream watchdog quiet) and sets `waitingReason` on `Streaming` so the working row can
+     * say "Rate limited — retrying…". Cleared by the next real activity (bumpEvent).
      */
     | { type: "ProviderWaiting"; reason: "rate_limited"; retryAfterMs: number | null; at: number }
 
     // ── Failure recovery ──────────────────────────────────────────
     /**
-     * Backend classified a failure for this pane (the `agentfailure` wave
-     * event). Unconditionally force-ends a working turn (Submitting /
-     * Streaming / Interrupting → Done.errored) — this is what closes the
-     * "stuck Waiting after a rate-limit interruption" bug: an authoritative
-     * failure classification no longer depends on the CLI process actually
-     * exiting (persistent-mode agents never do between turns) to clear the
-     * turn phase. See SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
+     * Backend classified a failure for this pane (the `agentfailure` wave event). Force-ends a
+     * working turn unconditionally (Submitting / Streaming / Interrupting → Done.errored), closing
+     * the "stuck Waiting after a rate-limit interruption" bug: an authoritative failure no longer
+     * depends on the CLI process exiting, which persistent-mode agents never do between turns
+     * (SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md).
      */
     | {
           type: "FailureObserved";
@@ -873,24 +824,19 @@ export type AgentPaneCommand =
 
     // ── Compaction (SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md) ──
     /**
-     * The `PreCompact` hook fired — compaction has begun. Sourced from
-     * the `compaction_started` MPS event (`agentmux-bashwrap precompact`
-     * → `useCompactionStream.ts`). Sets `compacting` so the view can
-     * show a live "Compacting…" status chip + elapsed counter (Tier
-     * 1/2). Also bumps `lastEventMs` like `ProviderWaiting` does, so
-     * the stuck-stream watchdog doesn't misfire during a long
-     * compaction that produces no other stream activity.
+     * The `PreCompact` hook fired: compaction has begun (the `compaction_started` MPS event, from
+     * `agentmux-bashwrap precompact` via `useCompactionStream.ts`). Sets `compacting` for the live
+     * "Compacting…" chip and elapsed counter (Tier 1/2). Also bumps `lastEventMs` like
+     * `ProviderWaiting`, so the stuck-stream watchdog doesn't misfire during a long compaction with
+     * no other stream activity.
      */
     | { type: "CompactionStarted"; trigger: "manual" | "auto"; at: number }
     /**
-     * The real `compact_boundary` frame arrived — compaction finished.
-     * Sourced from the backend's `AgentEvent::CompactionBoundary`
-     * (translated 1:1 from Claude Code's stream-json `system` frame —
-     * exact data, not inferred). Clears `compacting`, records
-     * `lastCompactionBoundaryAt` (dedup guard for the `TokensIn`
-     * heuristic), and reconciles `context` to `postTokens` so
-     * the context-fill bar reflects the real post-compaction size
-     * immediately rather than waiting for the next `TokensIn`.
+     * The real `compact_boundary` frame arrived: compaction finished (the backend's
+     * `AgentEvent::CompactionBoundary`, translated 1:1 from Claude Code's stream-json `system`
+     * frame, so exact, not inferred). Clears `compacting`, records `lastCompactionBoundaryAt` (the
+     * dedup guard for the `TokensIn` heuristic), and reconciles `context` to `postTokens` so the
+     * context bar shows the real post-compaction size without waiting for the next `TokensIn`.
      */
     | {
           type: "CompactionBoundary";
@@ -900,14 +846,11 @@ export type AgentPaneCommand =
           durationMs: number;
           at: number;
           /**
-           * The `compact_boundary` frame's own `timestamp` field, raw
-           * (not parsed/reformatted) — absent/`null` if the frame didn't
-           * have one (or the caller doesn't have a raw frame at all, e.g.
-           * a test constructing this command directly). A time value
-           * only: the boundary's completion time for the stale-boundary
-           * checks and the node's time, falling back to `at` / receipt
-           * time when absent (the CLI's stdout frame has none). Never an
-           * id — see `boundaryUuid`.
+           * The `compact_boundary` frame's own `timestamp`, raw (not parsed or reformatted); absent
+           * or `null` when the frame has none (the CLI's stdout frame has none) or the caller has
+           * no raw frame (a test). A time value only: the boundary's completion time for the
+           * stale-boundary checks and the node's time, falling back to `at` / receipt time. Never
+           * an id: see `boundaryUuid`.
            */
           frameTimestamp?: string | null;
           /**
@@ -935,11 +878,9 @@ export type AgentPaneCommand =
     // ── Stale-`--resume` reconnect axis
     // (STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2) ──
     /**
-     * `mps.EVENT_AGENT_RESUME_RETRY`'s `{status:"retrying"}` landed — a
-     * stale `--resume` was just detected and a retry/recovery attempt is
-     * about to fire. No-op (idempotent) if already reconnecting, mirroring
-     * `AttachedTaskObserved` — a cascaded second retry must not reset
-     * `startedAt` back to a later time.
+     * `mps.EVENT_AGENT_RESUME_RETRY`'s `{status:"retrying"}` landed: a stale `--resume` was
+     * detected and a retry is about to fire. Idempotent, like `AttachedTaskObserved`: a cascaded
+     * second retry must not push `startedAt` later.
      */
     | { type: "ResumeRetryStarted"; at: number }
     /**
@@ -949,9 +890,8 @@ export type AgentPaneCommand =
     | { type: "ResumeRetryResolved" }
 
     // ── Registry-derived attached-task floor (Phase C of
-    // SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md) — see
-    // `registryAttachedTaskSince`'s doc comment above for why this is a
-    // separate axis rather than reusing AttachedTaskObserved/Cleared. ──
+    // SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md): see `registryAttachedTaskSince`'s
+    // doc for why it is a separate axis rather than AttachedTaskObserved/Cleared. ──
     /** Sets `registryAttachedTaskSince` verbatim (idempotent set, not an
      * edge-triggered toggle like AttachedTaskObserved — the registry's own
      * earliest-running-task computation already handles the "already
@@ -967,12 +907,10 @@ export type AgentPaneEvent =
     | { type: "stream-subscribed"; at: number }
     | { type: "stream-unsubscribed"; at: number }
     /**
-     * PR F: the stream tore down while a turn was in flight
-     * (Submitting / Streaming / Interrupting). Surfaced alongside the
-     * generic `stream-unsubscribed` so the view can drive a dedicated
-     * "Disconnected — reconnecting…" banner without re-deriving from
-     * `turnPhase.kind`. Emitted ONLY on the working-set → Disconnected
-     * transition; idle-state unsubscribes do not emit it.
+     * The stream tore down while a turn was in flight (Submitting / Streaming / Interrupting).
+     * Emitted alongside the generic `stream-unsubscribed`, only on the working-set → Disconnected
+     * transition (not on idle unsubscribes), so the view can drive a "Disconnected — reconnecting…"
+     * banner without re-deriving from `turnPhase.kind`.
      */
     | {
           type: "stream-disconnected";
@@ -991,22 +929,20 @@ export type AgentPaneEvent =
           /** The WARNING bar (STUCK_THRESHOLD_MS). Crossing it is cosmetic. */
           thresholdMs: number;
           /**
-           * The bar that would actually force this turn back to Idle. Always
-           * larger than `thresholdMs`, and larger still under a rate-limit
-           * backoff. Reported because a diagnostic that shows only the warning
-           * bar reads as "past the threshold and still stuck", which is how a
-           * real 5h stall was misread while it was in progress.
+           * The bar that would force this turn back to Idle: always larger than `thresholdMs`, and
+           * larger still under a rate-limit backoff. Reported because a diagnostic showing only the
+           * warning bar reads as "past the threshold and still stuck", which is how a real 5h stall
+           * was misread.
            */
           recoverThresholdMs: number;
       }
     | {
           /**
-           * The watchdog force-recovered a hung `Streaming` turn to `Idle`
-           * after `idleSinceMs` ≥ `LIVENESS_RECOVERY_MS` with no tool active
-           * and no rate-limit wait — i.e. a turn whose terminal `session_end`
-           * was never observed (the persistent-mode stuck-"Working" class).
-           * Surfaced for telemetry; the phase change is the real effect.
-           * See SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md.
+           * The watchdog force-recovered a hung `Streaming` turn to `Idle` after `idleSinceMs` ≥
+           * `LIVENESS_RECOVERY_MS` with no tool active and no rate-limit wait: its terminal
+           * `session_end` was never observed (the persistent-mode stuck-"Working" class). For
+           * telemetry; the phase change is the real effect
+           * (SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md).
            */
           type: "working-recovered";
           idleSinceMs: number;
@@ -1014,24 +950,18 @@ export type AgentPaneEvent =
       }
     | { type: "turn-started"; at: number }
     /**
-     * `ReconcileTurnActive` promoted the phase to `Streaming` because the
-     * backend reported a turn already in flight — either the mount-default
-     * `Idle` (the original case) or a settled `Done.completed` episode (the
-     * focus-triggered reconcile's missed-live-turn-start case). Surfaced
-     * for diagnostics — distinguishes this from a normal user-initiated
-     * `turn-started`. Not "-at-mount" anymore since it can now fire well
-     * after mount.
+     * `ReconcileTurnActive` promoted the phase to `Streaming` because the backend reported a turn
+     * already in flight, from the mount-default `Idle` or from a settled `Done.completed` episode
+     * (the focus-triggered reconcile's missed-live-turn-start case). For diagnostics: distinguishes
+     * this from a user-initiated `turn-started`.
      */
     | { type: "turn-active-reconciled" }
     /**
-     * `ReconcileTurnActive` demoted a stuck `Streaming` phase to `Idle`
-     * because the backend's authoritative `turn_active` reported the turn
-     * has ended (the `result` event fired) but the frontend never observed
-     * the terminal `session_end` — the class behind the Agent1 stuck-"Working"
-     * and Agent2 stuck-"Queued" incidents. Completes #2005's reconciliation
-     * symmetry (which only promoted Idle→Streaming). Surfaced for telemetry;
-     * the phase change is the real effect. See
-     * docs/retro/retro-agent2-stuck-queued-message-2026-07-16.md.
+     * `ReconcileTurnActive` demoted a stuck `Streaming` phase to `Idle` because the backend's
+     * authoritative `turn_active` reported the turn over (the `result` event fired) while the
+     * frontend never saw `session_end`: the stuck-"Working" / stuck-"Queued" class. Completes
+     * #2005's symmetry, which only promoted Idle→Streaming. For telemetry; the phase change is the
+     * real effect (docs/retro/retro-agent2-stuck-queued-message-2026-07-16.md).
      */
     | { type: "turn-inactive-reconciled"; at: number }
     /**
@@ -1054,22 +984,17 @@ export type AgentPaneEvent =
           reason: string;
       }
     /**
-     * An accepted prompt was larger than the window Claude Code reported for
-     * its model, so the reported window can't be right; the meter uses the
-     * next known tier above the prompt instead. Logged once per model by the
-     * pane store. context-reading.ts `refutedReportedWindow`.
+     * An accepted prompt was larger than the window Claude Code reported for its model, so the
+     * reported window can't be right; the meter uses the next known tier above the prompt. Logged
+     * once per model by the pane store (context-reading.ts `refutedReportedWindow`).
      */
     | { type: "context-window-refuted"; model: string; reported: number; tokens: number; window: number }
     | {
           /**
-           * A turn finished and the phase transitioned to `Done`. Since
-           * the sound-notifications subsystem (SPEC_SOUND_NOTIFICATIONS_
-           * 2026_06_05.md §3.2), the event carries the outcome directly
-           * so downstream consumers (notification sounds, telemetry,
-           * future UI affordances) don't have to snapshot the slot to
-           * read it back from `state.turnPhase.outcome`. The reducer
-           * already computes `outcome` two lines earlier — this is a
-           * pure forwarding of an existing value.
+           * A turn finished and the phase became `Done`. Carries `outcome` directly (the reducer
+           * already computes it) so consumers (notification sounds, telemetry, future UI) needn't
+           * snapshot the slot to read `state.turnPhase.outcome`
+           * (SPEC_SOUND_NOTIFICATIONS_2026_06_05.md §3.2).
            */
           type: "turn-ended";
           outcome: TurnOutcome;
@@ -1090,10 +1015,9 @@ export type AgentPaneEvent =
     | { type: "tool-ended" }
     | { type: "tokens-updated"; input: number | null; output: number | null }
     /**
-     * `source: "real"` — sourced from an authoritative `CompactionBoundary`
-     * event (`trigger`/`durationMs` present). `source: "heuristic"` —
-     * inferred from a ≥50%-drop in `TokensIn` (the pre-existing
-     * cross-provider fallback; `trigger`/`durationMs` absent). See
+     * `source: "real"`: an authoritative `CompactionBoundary` event (`trigger` / `durationMs`
+     * present). `source: "heuristic"`: inferred from a ≥50% drop in `TokensIn`, the cross-provider
+     * fallback (`trigger` / `durationMs` absent). See
      * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3.
      */
     | {
@@ -1130,13 +1054,11 @@ export type AgentPaneEvent =
     | { type: "stop-requested"; at: number }
     | { type: "stop-failed" }
     /**
-     * Reducer signal: a turn has just entered Interrupting. The
-     * dispatch layer (view / saga) is expected to start a setTimeout
-     * for `INTERRUPT_TIMEOUT_MS` and fire `InterruptTimeoutElapsed`
-     * when it expires — gated by a shared cancel flag (analogous to
-     * `Arc<AtomicBool>`) so a later `RequestStop` doesn't double-fire.
-     * `deadlineMs` is `at + INTERRUPT_TIMEOUT_MS` so the caller can
-     * compute the remaining slice deterministically. Spec §8.
+     * Reducer signal: a turn has just entered Interrupting. The dispatch layer starts a setTimeout
+     * for `INTERRUPT_TIMEOUT_MS` and fires `InterruptTimeoutElapsed` on expiry, gated by a shared
+     * cancel flag (like an `Arc<AtomicBool>`) so a later `RequestStop` doesn't double-fire.
+     * `deadlineMs` is `at + INTERRUPT_TIMEOUT_MS`, so the caller can compute the remaining slice
+     * deterministically. Spec §8.
      */
     | {
           type: "schedule-interrupt-timeout";
@@ -1150,24 +1072,20 @@ export type AgentPaneEvent =
      */
     | { type: "interrupt-timed-out"; at: number }
     /**
-     * Reducer signal: a turn has just entered Submitting. The dispatch
-     * layer is expected to start a setTimeout for `SUBMIT_TIMEOUT_MS`
-     * and fire `SubmitTimeoutElapsed` when it expires — gated by a
-     * shared cancel flag so a graceful promotion to Streaming (via
-     * `StreamFlushObserved` or `bumpEvent` from tool / token activity)
-     * cancels the timer before it fires. `deadlineMs` is
-     * `at + SUBMIT_TIMEOUT_MS` so the caller can compute the remaining
-     * slice deterministically. PR D — spec §8 / issue #728 gap 2.
+     * Reducer signal: a turn has just entered Submitting. The dispatch layer starts a setTimeout
+     * for `SUBMIT_TIMEOUT_MS` and fires `SubmitTimeoutElapsed` on expiry, gated by a shared cancel
+     * flag so a promotion to Streaming (`StreamFlushObserved`, or `bumpEvent` from tool / token
+     * activity) cancels the timer first. `deadlineMs` is `at + SUBMIT_TIMEOUT_MS`. Spec §8, #728
+     * gap 2.
      */
     | {
           type: "schedule-submit-timeout";
           deadlineMs: number;
       }
     /**
-     * Reducer signal: the bounded `Submitting → Done.{errored}`
-     * force-transition fired because no stream activity arrived within
-     * `SUBMIT_TIMEOUT_MS`. Carries the firing wall-clock for audit.
-     * PR D — spec §8 / issue #728 gap 2.
+     * Reducer signal: the bounded `Submitting → Done.{errored}` force transition fired because no
+     * stream activity arrived within `SUBMIT_TIMEOUT_MS`. Carries the firing wall-clock for audit
+     * (spec §8, #728 gap 2).
      */
     | { type: "submit-timed-out"; at: number }
     | { type: "pending-flush-started"; id: string }
@@ -1222,40 +1140,31 @@ export interface ReducerResult {
 }
 
 /**
- * Stuck-stream threshold. A subscribed stream that hasn't received any
- * observable event (subscribe, flush, tool, tokens) for this many ms is
- * flagged. 45s covers the typical Claude/Codex idle window between
- * thinking and tool calls during long reasoning runs without false
- * positives. Issue #728 gap 3.
+ * Stuck-stream threshold (#728 gap 3): a subscribed stream with no observable event (subscribe,
+ * flush, tool, tokens) for this many ms is flagged. 45s covers the typical Claude/Codex idle window
+ * between thinking and tool calls in long reasoning runs without false positives.
  */
 export const STUCK_THRESHOLD_MS = 45_000;
 
 /**
- * Liveness-recovery threshold. A `Streaming` turn that has produced no
- * observable activity for this many ms — with no tool running and not
- * rate-limited — is treated as hung: its terminal `session_end` was never
- * observed and no other signal will arrive to clear it. For persistent-mode
- * agents the process never exits between turns, so `ControllerStatus: done`
- * never fires and the process-exit grace timer can't recover the phase; the
- * watchdog itself must transition out of "Working" (→ `Idle`). 3 min is well
- * past `STUCK_THRESHOLD_MS` (45s) so a merely-quiet reasoning run is never
- * mistaken for a hang. See SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md.
+ * Liveness-recovery threshold: a `Streaming` turn with no observable activity for this many ms, no
+ * tool running and not rate-limited, is treated as hung: its terminal `session_end` was never
+ * observed and nothing else will clear it. A persistent-mode agent's process never exits between
+ * turns, so `ControllerStatus: done` never fires and the process-exit grace timer can't recover the
+ * phase; the watchdog itself moves out of "Working" (→ `Idle`). 3 min is well past
+ * `STUCK_THRESHOLD_MS` (45s), so a merely quiet reasoning run is never mistaken for a hang
+ * (SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md).
  */
 export const LIVENESS_RECOVERY_MS = 180_000;
 
 /**
- * Bounded `Interrupting → Done.{interrupted}` window. After `RequestStop`
- * fires SIGINT, if neither `TurnEnd` nor `StreamUnsubscribe` lands within
- * this many ms the reducer force-transitions to Done.interrupted on
- * receipt of `InterruptTimeoutElapsed`. 5 s is generous compared to the
- * typical sub-second SIGINT-ack on a healthy agent but tight enough that
- * a dead agent doesn't keep the working animation pinned forever.
- *
- * Spec: SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §8 — the spec doc
- * suggests 3_000 but the implementation lands at 5_000 to leave more
- * headroom for slow Windows PTY teardowns and remote agents on flaky
- * networks. Tune in a follow-up if telemetry shows the watchdog firing
- * on live agents.
+ * Bounded `Interrupting → Done.{interrupted}` window. After `RequestStop` fires SIGINT, if neither
+ * `TurnEnd` nor `StreamUnsubscribe` lands within this many ms, the reducer force-transitions to
+ * Done.interrupted on `InterruptTimeoutElapsed`. 5 s is generous for a healthy agent's sub-second
+ * SIGINT ack but tight enough that a dead agent doesn't pin the working animation forever.
+ * SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §8 suggests 3_000; 5_000 leaves headroom for slow
+ * Windows PTY teardowns and remote agents on flaky networks. Tune if telemetry shows the watchdog
+ * firing on live agents.
  */
 export const INTERRUPT_TIMEOUT_MS = 5_000;
 
@@ -1264,34 +1173,26 @@ export const INTERRUPT_TIMEOUT_MS = 5_000;
 export const NO_RATE_LIMIT_WAIT = { waitingReason: undefined, retryAfterMs: undefined, retryAtMs: undefined } as const;
 
 /**
- * Bounded `Submitting → Done.{errored}` window. After `TurnStart` puts a
- * turn into Submitting, if no stream activity (flush / bumpEvent from
- * tool / token) lands within this many ms the reducer force-transitions
- * to Done.errored on receipt of `SubmitTimeoutElapsed`. 30 s is the
- * generous outer bound for a backend ack — network handshakes, agent
- * spawn, and the first model token round-trip on a fresh session. Any
- * longer and the working animation has been pinned past the user's
- * patience window; PR E's streaming watchdog covers the longer "agent
- * is thinking" idle case once we're in Streaming.
+ * Bounded `Submitting → Done.{errored}` window. After `TurnStart` puts a turn into Submitting, if
+ * no stream activity (flush, or bumpEvent from tool / token) lands within this many ms, the reducer
+ * force-transitions to Done.errored on `SubmitTimeoutElapsed`. 30 s is the generous outer bound for
+ * a backend ack (network handshake, agent spawn, the first model token on a fresh session); longer
+ * pins the working animation past the user's patience, and the streaming watchdog covers the longer
+ * "agent is thinking" idle case once in Streaming.
  *
- * PR D — spec §8 / issue #728 gap 2. The dispatcher arms this via the
- * `schedule-submit-timeout` event emitted when `TurnStart` promotes the
- * phase into Submitting; the standard cancel-flag pattern (the same
- * `Arc<AtomicBool>` analogue used for the interrupt timeout) gates a
- * stale fire against a graceful promotion to Streaming.
+ * Spec §8 / #728 gap 2. The dispatcher arms it from the `schedule-submit-timeout` event emitted
+ * when `TurnStart` promotes the phase into Submitting; the same cancel-flag pattern as the
+ * interrupt timeout gates a stale fire against a promotion to Streaming.
  */
 export const SUBMIT_TIMEOUT_MS = 30_000;
 
 /**
- * Suppression window for the `TokensIn` ≥50%-drop compaction heuristic
- * after a REAL `CompactionBoundary` event landed. Claude Code's
- * `compact_boundary` frame precedes the next turn's `message_start` in
- * the same stream, so `context` is normally already
- * reconciled to `postTokens` before the heuristic's next check runs —
- * this window is a defensive backstop against any ordering surprise or
- * a `postTokens` that doesn't closely match the next observed
- * `TokensIn.input`. 2 minutes comfortably covers one turn's round trip
- * without risking suppressing a LATER, genuinely new compaction. See
- * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3.
+ * Suppression window for the `TokensIn` ≥50%-drop compaction heuristic after a REAL
+ * `CompactionBoundary`. Claude Code's `compact_boundary` frame precedes the next turn's
+ * `message_start` in the same stream, so `context` is normally already reconciled to `postTokens`
+ * before the heuristic's next check. The window is a backstop against an ordering surprise or a
+ * `postTokens` that doesn't closely match the next `TokensIn.input`. 2 minutes covers one turn's
+ * round trip without suppressing a LATER, genuinely new compaction
+ * (`docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3).
  */
 export const COMPACTION_HEURISTIC_SUPPRESS_MS = 120_000;
