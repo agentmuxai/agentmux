@@ -403,7 +403,11 @@ fn observe(
                 .map(|_| ())
         });
     match result {
-        Ok(()) => true,
+        Ok(()) => {
+            // The pid is published when the command starts, before this row can exist: apply it if it came first.
+            super::background_task_pid::apply_stashed(store, tool_use_id, seen_at_ms);
+            true
+        }
         Err(e) => {
             tracing::warn!(target: "background_tasks", block_id, node_id = %tool_use_id, error = %e,
                 "failed to record a background task from the CLI's task feed");

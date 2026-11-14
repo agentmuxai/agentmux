@@ -215,7 +215,7 @@
 123 crates/srv/src/backend/widget/packages.rs::describe
 102 crates/srv/src/bootstrap/logging.rs::init_logging
 234 crates/srv/src/bootstrap/network.rs::bind_listeners_and_network
-144 crates/srv/src/bootstrap/plumbing.rs::build_app_state
+143 crates/srv/src/bootstrap/plumbing.rs::build_app_state
 102 crates/srv/src/bootstrap/stores.rs::prepare_in_process
 113 crates/srv/src/bootstrap/watchers.rs::start_parent_watcher
 154 crates/srv/src/broker/state.rs::update

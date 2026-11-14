@@ -68,6 +68,14 @@ impl PendingBackgroundPids {
         Self::default()
     }
 
+    /// The one pen of this srv. A pid is filed from srv's own broker observer (`background_task_pid`) and a row is
+    /// created from either the pane's `docknodestatus` or the CLI's task feed in the stdout reader, which has no app
+    /// state to hold a pen of its own: all of them meet here.
+    pub fn global() -> &'static PendingBackgroundPids {
+        static PEN: std::sync::LazyLock<PendingBackgroundPids> = std::sync::LazyLock::new(PendingBackgroundPids::new);
+        &PEN
+    }
+
     fn evict_expired_locked(guard: &mut HashMap<String, PendingEntry>, now_ms: i64) {
         guard.retain(|_, e| now_ms.saturating_sub(e.stashed_at_ms) < PENDING_PID_TTL_MS);
     }
