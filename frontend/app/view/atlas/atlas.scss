@@ -62,12 +62,12 @@
     pointer-events: none;
 }
 
-// What the selection can do, between the bar and the map: the Swarm's own controls, without their own surfaces.
+// What the selection can do, under the map: the Swarm's own controls, without their own surfaces.
 .atlas-fleet {
     flex: 0 0 auto;
     max-height: 45%;
     overflow-y: auto;
-    border-bottom: 1px solid var(--border-color);
+    border-top: 1px solid var(--border-color);
     background: var(--hover-bg-color);
 
     .swarm-fleet-toolbar,

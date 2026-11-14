@@ -153,10 +153,11 @@ actions are the Swarm's own components, so nothing about reach, approval or repo
   Select on) adds or removes that one agent. A box only adds; "Select none" clears.
 - **What can be selected** is what the Swarm can tick: this instance's agents that have a pane, and the agents of
   other instances whose machine is not stale. A stopped agent is not a node and is not selected from the map.
-- **Acting.** While anything is selected (or Select is on), a strip under the bar holds the Swarm's Select all and
+- **Acting.** While anything is selected (or Select is on), a strip under the map holds the Swarm's Select all and
   count, **Stop** (with the Swarm's confirmation, which lists every agent and what it cannot reach), the Supervisor
-  **Mode** menu, and the **Broadcast** composer; the per-agent result panel follows. An agent on a LAN peer gets a
-  broadcast and cannot be stopped from here, exactly as in the Swarm.
+  **Mode** menu, and the **Broadcast** composer; the per-agent result panel follows. It is under the map, not over
+  it, so the map's top left stays where it is when the strip appears. An agent on a LAN peer gets a broadcast and
+  cannot be stopped from here, exactly as in the Swarm.
 
 ## 7. Risks and notes
 

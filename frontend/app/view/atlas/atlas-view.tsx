@@ -420,7 +420,6 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
     return (
         <div class="atlas" data-testid="atlas" onKeyDown={(e) => e.key === "Escape" && onEscape()}>
             <AtlasBar data={data} ctx={ctx} mode={mode()} zoom={zoom} selecting={sel.selecting()} onSelecting={sel.setSelecting} />
-            <AtlasFleetBar model={data.model} swarm={data.swarm} selecting={sel.selecting()} nodeKeys={sel.nodeKeys} />
             <div
                 class="atlas-viewport"
                 classList={{ "atlas-viewport--selecting": sel.selecting() }}
@@ -468,6 +467,8 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
                     )}
                 </Show>
             </div>
+            {/* Under the map, not over it: the map's top left stays put when the first agent is selected and this appears. */}
+            <AtlasFleetBar model={data.model} swarm={data.swarm} selecting={sel.selecting()} nodeKeys={sel.nodeKeys} />
         </div>
     );
 }
