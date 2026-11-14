@@ -34,7 +34,6 @@ jobs:
   package:
     name: Server package (${{ matrix.os }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    # The macOS legs link the release profile (full LTO, one codegen unit) on a small runner: 66 minutes cold, so 75 was too tight.
     timeout-minutes: 150
     strategy:
       fail-fast: false
@@ -72,13 +71,16 @@ jobs:
       - name: Build the web UI
         run: node scripts/build-web.mjs --out dist/web
 
+      # The fast-release profile (thin LTO, optimised for speed) rather than release (full LTO, one codegen unit, optimised
+      # for size): the full-LTO link of the server did not finish in two hours on a 7 GB macOS runner, and the desktop
+      # apps keep the release profile.
       - name: Build the programs
-        run: cargo build --release --locked -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap
+        run: cargo build --profile fast-release --locked -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap
 
       - name: Pack
         run: |
           bash scripts/package-server.sh --os "${{ matrix.os }}" --arch "${{ matrix.arch }}" \
-            --bin-dir target/release --web-dir dist/web --out dist-server
+            --bin-dir target/fast-release --web-dir dist/web --out dist-server
           ls -l dist-server
 
       # What was packed, not what was built: unpack it and run it as a user would.
