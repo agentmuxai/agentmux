@@ -5,15 +5,13 @@ import type { RemoteRegistrationEntry } from "./RemoteRegistrationEntry";
 
 export type ReactiveRegistrationsResult = { 
 /**
- * This instance's own registration for the agent, if any — same data
- * `GET /agentmux/reactive/agent` exposes, reused here so the frontend
- * makes one call instead of two.
+ * This instance's own registration for the agent, if any: the same data as
+ * `GET /agentmux/reactive/agent`, reused so the frontend makes one call instead of two.
  */
 local: AgentRegistration | null, 
 /**
- * Every OTHER instance/channel on this host currently claiming this
- * same agent_id, freshest first — a non-empty list here is the actual
- * risk signal the Stash badge exists to surface (issue #2694's root
- * cause was exactly two panes racing to hold the same agent_id).
+ * Every OTHER instance/channel on this host claiming this agent_id, freshest first. A
+ * non-empty list is the risk signal the Stash badge surfaces (#2694's root cause was two
+ * panes racing to hold one agent_id).
  */
 remote: Array<RemoteRegistrationEntry>, recent_mismatch: MismatchAuditSummary | null, };
