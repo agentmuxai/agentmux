@@ -469,6 +469,8 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         .route("/api/v1/ui/browser/vault_fill", post(super::browser_vault_fill::handle_vault_fill))
         // An agent's `Browser` `signin`: the person says yes, or a grant and a notice.
         .route("/api/v1/ui/browser/signin", post(super::browser_signin::handle_signin))
+        // An agent's `Browser` `generate_password`: the person says yes, then a countdown with Stop.
+        .route("/api/v1/ui/browser/generate_password", post(super::browser_account::handle_generate_password))
         .route("/api/v1/ui/browser/capture", post(super::browser_capture::handle_capture))
         .merge(google_agent_routes())
 }
