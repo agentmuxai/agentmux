@@ -49,6 +49,15 @@
 }
 
 // Run test: the button, and under it what it asks and what it did.
+// A skill card's facts report how it was tested and which version is installed, so they wrap instead of being cut off
+// by the kit Card's one-line ellipsis: a long version ("12.1.5 (2024-12-11_18e1550166)") would hide the very thing the
+// card says.
+.skill-card .ui-card-meta {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+}
+
 .skill-app-crop {
     display: block;
     max-width: 100%;
