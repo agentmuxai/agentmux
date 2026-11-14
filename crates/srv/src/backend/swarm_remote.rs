@@ -148,6 +148,10 @@ pub struct SwarmOtherInstancesResult {
     pub hostname: String,
     pub channel: String,
     pub hosts: Vec<RemoteHost>,
+    /// How the read of the account's other installs went: `off`, `ok` or `unavailable` (`swarm_cloud`).
+    /// Absent until the cloud has been asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloud: Option<&'static str>,
 }
 
 /// Group the shared registry's entries into this machine's other channels.
@@ -473,6 +477,7 @@ pub fn snapshot(
         hostname: hostname.to_string(),
         channel: own_channel.to_string(),
         hosts,
+        cloud: None,
     }
 }
 
@@ -575,6 +580,7 @@ mod tests {
             hostname: "narko".into(),
             channel: "stable".into(),
             hosts: vec![RemoteHost { host_id: "lan:charlie".into(), display_name: "charlie".into(), tier: "lan", channels: vec![channel] }],
+            cloud: None,
         };
         let labels: AccountLabels = [("claude:0123456789abcdef".to_string(), "Work".to_string())].into();
         fill_account_labels(&mut snap, &labels);
@@ -1221,6 +1227,7 @@ mod tests {
             hostname: "narko".into(),
             channel: "stable".into(),
             hosts: vec![RemoteHost { host_id: "lan:x".into(), display_name: "x".into(), tier: "lan", channels: vec![channel] }],
+            cloud: None,
         };
         fill_defined_providers(&mut snap, &entries, &defined);
         assert_eq!(snap.hosts[0].channels[0].agents[0].provider, None, "another machine's agent isn't this machine's definition");

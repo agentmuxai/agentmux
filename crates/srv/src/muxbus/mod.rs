@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod agent_credentials;
+pub mod cloud_installs;
 pub mod cloud_subscriber;
 pub mod delivery_status;
 pub mod discovery;
