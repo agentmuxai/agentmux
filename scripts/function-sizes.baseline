@@ -17,7 +17,7 @@
 157 crates/cef/src/browser_api/act.rs::act
 118 crates/cef/src/browser_api/act.rs::snapshot_route
 108 crates/cef/src/browser_api/routes.rs::click_element
-183 crates/cef/src/browser_api/routes.rs::dispatch_key
+178 crates/cef/src/browser_api/routes.rs::dispatch_key
 101 crates/cef/src/browser_api/routes.rs::query
 163 crates/cef/src/browser_api/routes.rs::screenshot
 197 crates/cef/src/browser_pane/creation.rs::CreateBrowserPaneTask::Task::execute
@@ -128,7 +128,7 @@
 153 crates/launcher/src/wrr/mod.rs::apply_hwnd_position_changed
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
-162 crates/remote/src/serve.rs::handle
+159 crates/remote/src/serve.rs::handle
 116 crates/srv/src/agents/runner.rs::run_agent_with_bin
 104 crates/srv/src/ambient/cli.rs::invoke_haiku
 124 crates/srv/src/ambient/digest.rs::extract_digest_parts

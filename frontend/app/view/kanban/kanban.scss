@@ -48,10 +48,75 @@ $kanban-narrow: 760px;
     align-items: center;
     gap: var(--space-2);
 
-    > :first-child {
-        flex: 1 1 220px;
-        min-width: 160px;
-    }
+}
+
+.kanban-toolbar__find {
+    flex: 1 1 220px;
+    min-width: 160px;
+}
+
+.kanban-board-picker {
+    max-width: 14rem;
+}
+
+.kanban-board-picker__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kanban-board-picker__chevron {
+    font-size: 0.7em;
+    opacity: 0.7;
+}
+
+// The boards panel: in the pane, above the board, as the new-task form is.
+.kanban-boards {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid var(--accent-color);
+    border-radius: var(--radius-sm);
+}
+
+.kanban-boards__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.kanban-boards__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.kanban-boards__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.kanban-boards__main,
+.kanban-boards__actions,
+.kanban-boards__new {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.kanban-boards__slug,
+.kanban-boards__count,
+.kanban-boards__share {
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
 }
 
 .kanban-toolbar__switch,

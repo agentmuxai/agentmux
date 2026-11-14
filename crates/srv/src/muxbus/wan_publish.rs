@@ -303,7 +303,7 @@ pub fn spawn(mstore: Arc<Store>, id_store: Arc<Store>) {
     let Some(wan) = mstore.wan_identity() else { return };
     let notify = nudge_handle();
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
+        let http = crate::http_client::client();
         loop {
             let wait = run_pass(&wan, &id_store, &http).await;
             match wait {

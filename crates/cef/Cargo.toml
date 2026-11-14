@@ -49,7 +49,7 @@ patched-libcef = []
 resources_path = "resources"
 
 [dependencies]
-agentmux-common = { path = "../common", features = ["tls-provider"] }
+agentmux-common = { path = "../common", features = ["tls-provider", "local-http"] }
 zeroize = "1"
 # CEF 156, all platforms (SPEC_CEF_156_UPGRADE_2026_11_10.md);
 # one milestone everywhere since 152's Phase E collapsed the temporary
@@ -83,7 +83,9 @@ whoami = "1"
 # Codex, Gemini, etc.) still go through the plain-pipes path inside
 # run_cli_login. See SPEC_OPENCLAW_AGENT_2026_05_17.md §6.
 portable-pty = "0.9"
-# Talks only to srv at AGENTMUX_LOCAL_URL (http://127.0.0.1:<port>): no TLS feature on purpose (#4207).
+# Talks only to srv at AGENTMUX_LOCAL_URL (http://127.0.0.1:<port>). The client comes from agentmux_common::local_http, which reads
+# no certificates: a build together with agentmux-srv (the server package, the desktop) turns TLS on for reqwest here too, and
+# on a Linux machine with no system certificates reqwest then refuses to build a client (#4207 kept TLS off; it cannot be kept off there).
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 # A window renderer's size, for recycling it (commands/recycle.rs).
 agentmux-procstats = { path = "../procstats" }

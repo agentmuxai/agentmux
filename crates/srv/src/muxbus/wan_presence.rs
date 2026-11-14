@@ -510,7 +510,7 @@ pub fn spawn(
     let install = policy::Install::from_env(headless);
     let publisher = Publisher {
         session: LiveSession { wan, feed, id_store, config, install },
-        http: reqwest::Client::new(),
+        http: crate::http_client::client(),
         base_url: crate::muxbus::relay::rest_base_url(),
     };
     if PUBLISHER.set(publisher).is_err() {

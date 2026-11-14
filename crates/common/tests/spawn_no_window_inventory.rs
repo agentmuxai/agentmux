@@ -66,6 +66,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/publish_scan.rs", "\"git\"", 1,
      "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/srv/src/http_client_tests.rs", "std::env::current_exe(", 1,
+     "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/identity/gh_agent_token.rs", "&exe", 3,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/identity/aws_broker/mint.rs", "&spec.program", 1,

@@ -19,6 +19,9 @@ export interface KanbanSectionProps {
     /** Pane meta `kanban:collapsed`: the columns folded to a strip, by id. */
     collapsed: string[];
     onCollapsed(ids: string[]): void;
+    /** Pane meta `kanban:board`: the board shown, by slug (none: the default board). */
+    board: string | null;
+    onBoard(slug: string): void;
     /** Where a card's agent opens; without it the agent's own pane is revealed (`revealBlock`). */
     onOpenAgent?(blockId: string): void;
 }

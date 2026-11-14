@@ -154,6 +154,17 @@ pub enum Slot {
     Manual { triggered_by: String },
 }
 
+/// What a source reports for an `event` job (`CronScheduler::fire_event`).
+#[derive(Debug, Clone)]
+pub struct JobEvent {
+    /// Unique among the source's events; a repeat starts nothing.
+    pub id: String,
+    /// Which source reported it (`definition::event_source`).
+    pub source: String,
+    /// What the run's graph reads as `{{trigger.*}}`: already cut down to the fields the source declares.
+    pub input: serde_json::Value,
+}
+
 /// How a fire ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fired {
@@ -456,6 +467,38 @@ impl CronScheduler {
     /// fire (§3.2), triggered by the operator or an agent uid.
     pub async fn run_now(&self, job: &CronJob, triggered_by: &str) -> Fired {
         self.fire(job, Slot::Manual { triggered_by: triggered_by.to_string() }).await
+    }
+
+    /// A source's event for an `event` job: record it (an event the job already heard of starts nothing), let policy
+    /// and the caps decide, and start its drone run with the event's input. A job that is paused or isn't an event job
+    /// ignores it. An event that policy, a cap or Pause all refuses is a `skipped` row, not an error: nobody asked.
+    pub async fn fire_event(&self, job: &CronJob, event: JobEvent) -> Fired {
+        let none = Fired { run_id: None, outcome: None, waiting: None };
+        if !job.enabled || job.trigger_kind != crate::backend::jobs::definition::trigger_kind::EVENT {
+            return none;
+        }
+        let Some(runs) = self.runs().cloned() else { return none };
+        let admitted = {
+            let (runs, owned, id, source) = (runs.clone(), job.clone(), event.id.clone(), event.source.clone());
+            tokio::task::spawn_blocking(move || runs.admit_event(&owned, &id, &source)).await.unwrap_or(Admission::Unrecorded)
+        };
+        match admitted {
+            Admission::Run(run_id) => {
+                runs.put_event_input(&run_id, event.input);
+                let fired = self.start_run(job, Some(run_id), true, None).await;
+                if matches!(fired.outcome, Some(FireOutcome::Delivered { .. })) {
+                    self.stop_at_max_fires(&job.id);
+                }
+                fired
+            }
+            Admission::Waiting(run_id, why) => {
+                runs.put_event_input(&run_id, event.input);
+                self.publish_changed();
+                Fired { run_id: Some(run_id), outcome: None, waiting: Some(why) }
+            }
+            // A drone run needs a ledger row to follow it: with none recorded there is nothing to start.
+            Admission::Unrecorded | Admission::Taken | Admission::Skipped | Admission::Refused | Admission::Capped(_) => none,
+        }
     }
 
     /// Fire a cron job: record the run, deliver the prompt, and record the

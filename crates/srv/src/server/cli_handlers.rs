@@ -578,7 +578,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 let url = format!("http://127.0.0.1:{}{}", port, path);
-                let client = reqwest::Client::builder()
+                let client = crate::http_client::builder()
                     .timeout(std::time::Duration::from_secs(3))
                     .build()
                     .map_err(|e| e.to_string())?;
@@ -645,7 +645,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let headers_obj = data.get("headers").and_then(|v| v.as_object()).cloned();
 
                 let url = format!("http://127.0.0.1:{}{}", port, path);
-                let client = reqwest::Client::builder()
+                let client = crate::http_client::builder()
                     .timeout(std::time::Duration::from_secs(30))
                     .redirect(reqwest::redirect::Policy::none())
                     .build()
@@ -706,7 +706,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
                 let packages = req.packages;
 
-                let client = reqwest::Client::builder()
+                let client = crate::http_client::builder()
                     .timeout(std::time::Duration::from_secs(5))
                     .user_agent("agentmux/toolchain-versions")
                     .build()
