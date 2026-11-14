@@ -6,6 +6,7 @@ import type { MessageFlowEvent } from "@/types/rpc/MessageFlowEvent";
 import type { TaskFlowEvent } from "@/types/rpc/TaskFlowEvent";
 import {
     flowCurve,
+    flowCurves,
     flowEndResolver,
     flowsAt,
     LEAVING_MS,
@@ -228,5 +229,92 @@ describe("flowCurve", () => {
     it("is nothing for two nodes on top of each other, or touching", () => {
         expect(flowCurve({ x: 10, y: 10 }, { x: 10, y: 10 })).toBeNull();
         expect(flowCurve({ x: 0, y: 0 }, { x: NODE_W, y: 0 })).toBeNull();
+    });
+});
+
+describe("flowCurves", () => {
+    const row = [0, 154, 308].map((x) => ({ x, y: 0 }));
+    const [first, second, third] = row;
+    const labels = (lines: Parameters<typeof flowCurves>[0], nodes = row) =>
+        [...flowCurves(lines, nodes).values()].map((curve) => curve.label);
+
+    it("gives two lines that land on one corner of a node a label each", () => {
+        // Two tasks handed to the first agent, by its neighbour and by the third: both lines land on its right
+        // corner from below, so alone each would put its number under that corner.
+        const [near, far] = labels([
+            { id: "a", from: second, to: first, label: "#1" },
+            { id: "b", from: third, to: first, label: "#3" },
+        ]);
+        expect(near).toEqual({ x: NODE_W, y: NODE_H + 7 });
+        // The second takes the other side of the node.
+        expect(far).toEqual({ x: NODE_W, y: -7 });
+    });
+
+    it("steps along the node's edge when both sides of the corner are taken", () => {
+        const fourth = { x: 462, y: 0 };
+        const [, , last] = labels(
+            [
+                { id: "a", from: second, to: first, label: "#47601" },
+                { id: "b", from: third, to: first, label: "#47602" },
+                { id: "c", from: fourth, to: first, label: "#47603" },
+            ],
+            [...row, fourth]
+        );
+        expect(last).toEqual({ x: NODE_W - 44, y: NODE_H + 7 });
+    });
+
+    it("puts the numbers of a line and its answer next to each other, in the gap the lines cross", () => {
+        // One agent over another, as By seat places them: the two lines bow apart by less than a number's width.
+        const over = { x: 0, y: 0 };
+        const under = { x: 0, y: NODE_H + 40 };
+        const alone = flowCurve(under, over, [over, under])!.label;
+        const pair = (down: string, up: string) =>
+            labels(
+                [
+                    { id: "a", from: over, to: under, label: down },
+                    { id: "b", from: under, to: over, label: up },
+                ],
+                [over, under]
+            );
+        for (const [a, b, apart] of [
+            ["#4", "#1", 16],
+            ["#47601", "#47602", 42],
+        ] as const) {
+            const [down, up] = pair(a, b);
+            expect(down).toEqual(flowCurve(over, under, [over, under])!.label);
+            // The second stays at its own height, on the side of the first that its line is on.
+            expect(up.y).toBe(alone.y);
+            expect(Math.sign(up.x - down.x)).toBe(Math.sign(alone.x - down.x));
+            expect(Math.abs(up.x - down.x)).toBeCloseTo(apart, 5);
+        }
+    });
+
+    it("leaves a line and its answer their own numbers when the lines bow far enough apart", () => {
+        const left = { x: 0, y: 0 };
+        const right = { x: 600, y: 0 };
+        const [there, back] = labels(
+            [
+                { id: "a", from: left, to: right, label: "#47601" },
+                { id: "b", from: right, to: left, label: "#47602" },
+            ],
+            [left, right]
+        );
+        expect(there).toEqual(flowCurve(left, right, [left, right])!.label);
+        expect(back).toEqual(flowCurve(right, left, [left, right])!.label);
+    });
+
+    it("places no label for a line without one, and leaves out a line with no curve", () => {
+        const curves = flowCurves(
+            [
+                { id: "a", from: second, to: first, label: "#1" },
+                { id: "m", from: third, to: first, label: null },
+                { id: "x", from: first, to: first, label: "#2" },
+                { id: "b", from: third, to: first, label: "#3" },
+            ],
+            row
+        );
+        expect([...curves.keys()]).toEqual(["a", "m", "b"]);
+        // The message's line lands on the same corner and takes no label's place.
+        expect(curves.get("b")!.label).toEqual({ x: NODE_W, y: -7 });
     });
 });
