@@ -16,6 +16,7 @@ import { CloseButton } from "@/app/element/ui";
 
 import { AgentStrip, BoardArea, KanbanToolbar, OpenDrawer } from "./kanban-section-parts";
 import { createKanbanSection, type SectionProps } from "./kanban-section-state";
+import { KanbanBoardsPanel } from "./kanban-boards-panel";
 import { KanbanNewTask } from "./kanban-new-task";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -38,8 +39,12 @@ export const KanbanSection = (props: SectionProps): JSX.Element => {
                     )}
                 </Show>
 
+                <Show when={s.managing()}>
+                    <KanbanBoardsPanel s={s} />
+                </Show>
+
                 <Show when={s.adding()}>
-                    <KanbanNewTask model={s.model} agents={s.agents()} onDone={() => s.setAdding(false)} />
+                    <KanbanNewTask model={s.model} agents={s.agents()} board={s.selectedSlug()} onDone={() => s.setAdding(false)} />
                 </Show>
 
                 <AgentStrip s={s} />

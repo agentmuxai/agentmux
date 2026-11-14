@@ -49,7 +49,13 @@ export interface KanbanPr {
 }
 
 export interface KanbanCardFields {
+    /** Its number on its board. */
     num: number;
+    /** The board it is on: its id and its slug (absent from an older srv, which had one board). */
+    board_id?: string;
+    board?: string;
+    /** How a message names it: `#12` on the default board, `work#12` elsewhere (absent from an older srv). */
+    task_ref?: string;
     repo: string;
     branch: string;
     pr_url: string;
@@ -163,9 +169,35 @@ export interface KanbanAcceptedBy {
     at: number;
 }
 
+/** One board in the picker (`board_json` in crates/srv/src/server/work_boards.rs). */
+export interface KanbanBoardInfo {
+    id: string;
+    /** Lowercase letters, digits and hyphen: what a ref says (`work#12`). */
+    slug: string;
+    name: string;
+    /** `local` (this machine); `lan` and `cloud` come with sync. */
+    tier: string;
+    readable: boolean;
+    /** The agents that see it; empty means all. */
+    agents: string[];
+    default: boolean;
+    archived: boolean;
+    /** Tasks not finished, and all tasks. */
+    open: number;
+    total: number;
+    /** While a delete waits out its countdown: when it happens (ms). */
+    pending_delete_at?: number | null;
+}
+
 export interface KanbanBoard {
     tasks: KanbanTask[];
     agents: KanbanAgent[];
+    /** Every board there is (absent from an older srv, which had one). */
+    boards?: KanbanBoardInfo[];
+    /** The board the tasks are of: its slug, or `all`. */
+    board?: string;
+    /** The slug of the default board. */
+    default_board?: string | null;
     /** The colours of agents tasks name that aren't running here, by uid (absent from an older srv). */
     agent_colors?: Record<string, string>;
     /** The newest change, to tell whether anything moved. */
@@ -209,7 +241,14 @@ export interface KanbanActRequest {
         | "release"
         | "reassign"
         | "media_remove"
-        | "ui_change";
+        | "ui_change"
+        | "board_create"
+        | "board_edit"
+        | "board_archive"
+        | "board_unarchive"
+        | "board_default"
+        | "board_delete"
+        | "board_cancel_delete";
     id?: string;
     title?: string;
     payload?: string;
@@ -234,6 +273,15 @@ export interface KanbanActRequest {
     media_id?: number;
     /** ui_change: whether the task changes the UI. */
     ui_change?: boolean;
+    /** create: the board to file on; move: the board to move the task to; board_*: the board acted on (name or slug). */
+    board?: string;
+    /** move to a board: remove the dependencies the task has, which stay inside one board. */
+    drop_deps?: boolean;
+    /** board_create, board_edit: the display name; the slug stays unless `slug` is given. */
+    name?: string;
+    slug?: string;
+    /** board_edit: the agents that see the board; `[]` means all. */
+    agents?: string[];
 }
 
 export interface KanbanActResult {

@@ -847,7 +847,7 @@
         {
             "command": "kanban.list",
             "method": "KanbanListCommand",
-            "dataType": "Record<string, never>",
+            "dataType": "{ board?: string }",
             "returns": "import(\"@/app/view/kanban/kanban-types\").KanbanBoard"
         },
         {
