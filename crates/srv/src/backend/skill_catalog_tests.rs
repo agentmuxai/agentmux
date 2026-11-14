@@ -45,7 +45,7 @@ fn entry_for(b: &Bundle, zip: &[u8], seed: u8) -> CatalogEntry {
         publisher_key: test_keys::public_key(seed),
         verification: vec![],
         zip: "https://catalog.test/acme-word-1.0.0.zip".into(),
-        zip_sha256: hex_sha256(zip),
+        zip_sha256: sha256_hex(zip),
     }
 }
 

@@ -17,6 +17,7 @@ use rusqlite::{params, OptionalExtension};
 
 use super::error::StoreError;
 use super::store::Store;
+use crate::backend::memory::record::sha256_hex;
 
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS db_skill_app (
         skill_id     TEXT PRIMARY KEY,
@@ -236,11 +237,6 @@ fn pins_of(conn: &rusqlite::Connection) -> Result<crate::backend::widget::signat
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-fn hex_sha256(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
-}
-
 impl Store {
     /// Make `skill_id` a computer-use skill, replacing any earlier manifest and files in one step.
     /// A script that was approved with the same text stays approved; a changed or new one needs a new
@@ -273,7 +269,7 @@ impl Store {
         )?;
         tx.execute("DELETE FROM db_skill_file WHERE skill_id = ?1", params![skill_id])?;
         for f in files {
-            let sha = hex_sha256(f.image.as_deref().unwrap_or(f.content.as_bytes()));
+            let sha = sha256_hex(f.image.as_deref().unwrap_or(f.content.as_bytes()));
             let keep = f.script && approved.contains(&(f.path.clone(), sha.clone()));
             tx.execute(
                 "INSERT INTO db_skill_file (skill_id, path, content, image, sha256, script, approved) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
