@@ -194,4 +194,35 @@ describe("lazyPaneTab", () => {
         expect(screen.getByText("real view")).toBeTruthy();
         expect(load).toHaveBeenCalledOnce();
     });
+
+    it("preload loads the code ahead of the first pane, which is then built at once", async () => {
+        const { load, resolve } = deferredLoad();
+        const create = vi.fn(() => ({ component: () => <div>real view</div>, liveTitle: () => ({ text: "Loaded" }) }));
+        const manifest = lazyPaneTab({ apiVersion: 1, view: "demo", label: "Demo", icon: "star", members: ["liveTitle"], load });
+        // A pointer over the widget, twice: one load.
+        manifest.preload!();
+        manifest.preload!();
+        expect(load).toHaveBeenCalledOnce();
+        resolve({ create });
+        await flush();
+        expect(create).not.toHaveBeenCalled();
+
+        const { container } = render(() => {
+            const instance = manifest.create(ctx);
+            return <instance.component ctx={ctx} />;
+        });
+        expect(container.querySelector(".lazy-pane-standin")).toBeNull();
+        expect(screen.getByText("real view")).toBeTruthy();
+        expect(load).toHaveBeenCalledOnce();
+    });
+
+    it("a preload that fails is forgotten, and the pane loads again", async () => {
+        const failing = deferredLoad();
+        const manifest = lazyPaneTab({ apiVersion: 1, view: "demo", label: "Demo", icon: "star", members: [], load: failing.load });
+        manifest.preload!();
+        failing.reject(new Error("offline"));
+        await flush();
+        createRoot(() => manifest.create(ctx));
+        expect(failing.load).toHaveBeenCalledTimes(2);
+    });
 });
