@@ -19,8 +19,6 @@
 
 import { onCleanup } from "solid-js";
 import { onMuxEvent } from "@/app/store/mps";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 
 import { WpsEvent } from "@/app/store/mps-events";
@@ -30,24 +28,6 @@ export interface UseToolChunkStreamOptions {
     /** Every output chunk's text, by tool call id (the live status reads a
      *  test runner's progress from it). */
     onOutput?: (toolId: string, content: string) => void;
-}
-
-/**
- * Pure parse of a `tool_chunk` event's `op: "pid"` payload (bashwrap's own
- * OS pid for a declared-background invocation — see bash_wrap.rs). Returns
- * `null` for anything else, including a `"pid"` op missing a valid
- * `tool_id`/`pid`, so the caller can fail closed with one check. Extracted
- * from the MPS handler below purely for unit-testability, mirroring
- * `useCompactionStream.ts`'s `resolveCompactionStart` pattern.
- */
-export function parsePidChunk(data: unknown): { toolId: string; pid: number } | null {
-    if (!data || typeof data !== "object") return null;
-    const d = data as Record<string, unknown>;
-    if (d.op !== "pid") return null;
-    const toolId = typeof d.tool_id === "string" ? d.tool_id : "";
-    if (!toolId) return null;
-    if (typeof d.pid !== "number" || !Number.isFinite(d.pid)) return null;
-    return { toolId, pid: d.pid };
 }
 
 export function useToolChunkStream(opts: UseToolChunkStreamOptions): void {
@@ -65,21 +45,9 @@ export function useToolChunkStream(opts: UseToolChunkStreamOptions): void {
     const blockChunkUnsub = onMuxEvent(
         WpsEvent.ToolChunk,
         (data) => {
-            if (data.op === "pid") {
-                // Not renderable stream content, so it bypasses the
-                // queue/RAF machinery entirely — a plain fire-and-forget
-                // relay into db_background_tasks.pid. See
-                // docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
-                const parsed = parsePidChunk(data);
-                if (parsed) {
-                    void RpcApi.BackgroundTaskPidCommand(TabRpcClient, {
-                        blockid: opts.blockId,
-                        node_id: parsed.toolId,
-                        pid: parsed.pid,
-                    }).catch(() => {});
-                }
-                return;
-            }
+            // A pid is not stream content. srv files it in the background-task registry itself, from the same
+            // event, so a pane that is closed or parked still gets it (`background_task_pid.rs`).
+            if (data.op === "pid") return;
             const toolId = data.tool_id;
             if (!toolId) return;
             if (data.op === "terminal") {

@@ -46,7 +46,7 @@ pub fn shim_dir(home: &Path) -> PathBuf {
 const STALE_SECS: u64 = 90;
 
 /// Who holds the build slot right now, read from the lock's owner file.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SlotHolder {
     /// The holder's `AGENTMUX_AGENT_ID` (else its user name), as the script recorded it.
     pub agent: String,
@@ -56,11 +56,30 @@ pub struct SlotHolder {
     pub reason: String,
     /// The command line it runs, cut to 120 characters: a background subagent's build holds the slot under its leader's id, and this says what is really running.
     pub command: String,
+    /// The run's own token: tells this holder's slot from one a later holder made.
+    #[serde(default)]
+    pub token: String,
+    /// The pid the script saw for itself. A real one on Linux and macOS; on Windows a Git Bash
+    /// pid, which no native tool can use (see `winpid`).
+    #[serde(default)]
+    pub pid: Option<u32>,
+    /// The script's Windows process id (Git Bash only): the root of the holder's process tree.
+    #[serde(default)]
+    pub winpid: Option<u32>,
+}
+
+impl SlotHolder {
+    /// The operating system's id for the script's process, the root of the holder's process
+    /// tree: the Windows id on Windows (none for a script older than version 9, which did not
+    /// record it), the pid elsewhere.
+    pub fn process_id(&self) -> Option<u32> {
+        if cfg!(windows) { self.winpid } else { self.pid }.filter(|p| *p > 1)
+    }
 }
 
 /// `~/.agentmux/shared/locks/build`, the lock's own folder, or `AGENTMUX_BUILD_SLOT_DIR` when
 /// that is set (the script honours it too).
-fn lock_dir() -> Option<PathBuf> {
+pub fn lock_dir() -> Option<PathBuf> {
     match std::env::var_os("AGENTMUX_BUILD_SLOT_DIR").filter(|d| !d.is_empty()) {
         Some(dir) => Some(PathBuf::from(dir)),
         None => dirs::home_dir().map(|h| h.join(".agentmux").join("shared").join("locks").join("build")),
@@ -92,7 +111,38 @@ pub fn read_holder(root: &Path, now_secs: u64) -> Option<SlotHolder> {
     let start: u64 = field("start")?.parse().ok()?;
     let reason = field("reason").filter(|r| !r.is_empty()).or_else(|| field("cmd")).unwrap_or_default().to_string();
     let command: String = field("cmd").unwrap_or_default().chars().take(120).collect();
-    Some(SlotHolder { agent, since_ms: start.saturating_mul(1000), reason, command })
+    let number = |key: &str| field(key).and_then(|v| v.parse::<u32>().ok());
+    Some(SlotHolder {
+        agent,
+        since_ms: start.saturating_mul(1000),
+        reason,
+        command,
+        token: field("token").unwrap_or_default().to_string(),
+        pid: number("pid"),
+        winpid: number("winpid"),
+    })
+}
+
+/// The file srv writes into the held slot once the holder's process tree has used no CPU for a
+/// while; `build-slot status` prints it (`idle_note` in the script).
+fn idle_path(root: &Path) -> PathBuf {
+    root.join("slot").join("idle")
+}
+
+/// Records that the holder with `token` has been idle since `since_secs` (epoch seconds). Does
+/// nothing when the slot now belongs to another holder: a note about the last run must never
+/// land on the next one.
+pub fn write_idle(root: &Path, token: &str, since_secs: u64) -> io::Result<()> {
+    let owner = std::fs::read_to_string(root.join("slot").join("owner")).unwrap_or_default();
+    if !owner.lines().any(|l| l.strip_prefix("token=").is_some_and(|t| t.trim() == token)) {
+        return Ok(());
+    }
+    std::fs::write(idle_path(root), format!("token={token}\nidle_since={since_secs}\n"))
+}
+
+/// Removes the idle note: the holder is busy again, or gone.
+pub fn clear_idle(root: &Path) {
+    let _ = std::fs::remove_file(idle_path(root));
 }
 
 /// Environment variables that make a bash started with them define `cargo`, `task`, `npm`, `npx`
@@ -257,8 +307,23 @@ mod tests {
         write_slot(root, "agent=Lazo\npid=1\ntoken=t\nstart=1792830000\ncwd=/x\ncmd=/c/bin/cargo test -p x\nreason=cargo test\n", true);
         assert_eq!(
             read_holder(root, now_secs()),
-            Some(SlotHolder { agent: "Lazo".into(), since_ms: 1_792_830_000_000, reason: "cargo test".into(), command: "/c/bin/cargo test -p x".into() })
+            Some(SlotHolder {
+                agent: "Lazo".into(),
+                since_ms: 1_792_830_000_000,
+                reason: "cargo test".into(),
+                command: "/c/bin/cargo test -p x".into(),
+                token: "t".into(),
+                pid: Some(1),
+                winpid: None,
+            })
         );
+        write_slot(root, "agent=Lazo\npid=77\nwinpid=4242\ntoken=t\nstart=1792830000\ncmd=x\n", true);
+        let holder = read_holder(root, now_secs()).unwrap();
+        assert_eq!((holder.pid, holder.winpid), (Some(77), Some(4242)));
+        let expected = if cfg!(windows) { Some(4242) } else { Some(77) };
+        assert_eq!(holder.process_id(), expected, "the Windows id on Windows, the pid elsewhere");
+        write_slot(root, "agent=Lazo\npid=1\ntoken=t\nstart=1792830000\ncmd=x\n", true);
+        assert_eq!(read_holder(root, now_secs()).unwrap().process_id(), None, "a pid of 1 is no process of ours");
         assert_eq!(read_holder(root, now_secs() + 10 * 60), None, "no heartbeat for minutes: its holder died");
         write_slot(root, "agent=Manoz\nstart=1792830001\ncmd=npm run build\n", true);
         assert_eq!(read_holder(root, now_secs()).unwrap().reason, "npm run build", "no reason: the command line");
@@ -357,8 +422,31 @@ mod tests {
 
     /// What the `tool` shim ran, given `args`, for a home with or without the lock script.
     fn run_tool_env(tool: &str, with_slot: bool, off: bool, args: &[&str], env: &[(&str, &str)]) -> Option<String> {
+        // In a project with a package.json beside a Cargo.toml: what npm and npx are queued for.
+        run_tool_in(tool, with_slot, off, args, env, &["proj/package.json", "proj/Cargo.toml"], "proj").map(|(out, _)| out)
+    }
+
+    /// [`run_tool_env`] with the files of a project laid out under the home (`files`, paths from
+    /// it) and the shim run from `cwd` (a folder in it). Also returns the home, so a test can
+    /// read what the shim wrote there.
+    fn run_tool_in(
+        tool: &str,
+        with_slot: bool,
+        off: bool,
+        args: &[&str],
+        env: &[(&str, &str)],
+        files: &[&str],
+        cwd: &str,
+    ) -> Option<(String, tempfile::TempDir)> {
         let bash = bash()?;
         let h = home();
+        for f in files {
+            let path = h.path().join(f);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "{}").unwrap();
+        }
+        let cwd = h.path().join(cwd);
+        std::fs::create_dir_all(&cwd).unwrap();
         let real_dir = h.path().join("real");
         let shim = shim_dir(h.path());
         std::fs::create_dir_all(&real_dir).unwrap();
@@ -378,7 +466,7 @@ mod tests {
         let sep = if cfg!(windows) { ";" } else { ":" };
         let path = format!("{}{sep}{}{sep}{}", shim.display(), real_dir.display(), std::env::var("PATH").unwrap_or_default());
         let mut cmd = std::process::Command::new(bash);
-        cmd.arg(shim.join(tool)).args(args).env("PATH", path).env("HOME", h.path());
+        cmd.arg(shim.join(tool)).args(args).env("PATH", path).env("HOME", h.path()).env_remove("AGENTMUX_BUILD_SLOT_DIR").current_dir(&cwd);
         if off {
             cmd.env("AGENTMUX_BUILD_SLOT_OFF", "1");
         }
@@ -389,7 +477,7 @@ mod tests {
             cmd.no_window();
         }
         let out = cmd.output().unwrap();
-        Some(String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n").trim().to_string())
+        Some((String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n").trim().to_string(), h))
     }
 
     fn run_tool(tool: &str, with_slot: bool, off: bool, args: &[&str]) -> Option<String> {
@@ -520,6 +608,59 @@ mod tests {
         ] {
             assert_eq!(with_tty(tool, args), Some(false), "{tool} {args:?} watches with a terminal, so it is not slotted");
         }
+    }
+
+    /// What npm and npx do in a folder laid out as `files` (paths under the home), run from `cwd`:
+    /// whether the command went through the slot, and the text of the lock folder's unqueued.log.
+    fn npm_in(files: &[&str], cwd: &str, tool: &str, args: &[&str]) -> Option<(bool, String)> {
+        let (out, home) = run_tool_in(tool, true, false, args, &[], files, cwd)?;
+        let log = std::fs::read_to_string(home.path().join(".agentmux/shared/locks/build/unqueued.log")).unwrap_or_default();
+        Some((out.starts_with("SLOT "), log))
+    }
+
+    /// The slot is for Rust and agentmux-frontend builds: an npm or npx build in a site-style repo
+    /// (a package.json with no Cargo.toml above it) runs at once, and says so in the lock folder's
+    /// log. A package in or below a Rust tree is still queued.
+    #[test]
+    fn npm_and_npx_queue_only_in_a_tree_with_a_cargo_toml() {
+        if bash().is_none() {
+            return;
+        }
+        let rust = &["agentmux/package.json", "agentmux/Cargo.toml"][..];
+        let site = &["site/package.json"][..];
+        for (tool, args) in [("npm", &["run", "build"][..]), ("npx", &["vite", "build"][..]), ("npm", &["test"][..])] {
+            let (slotted, log) = npm_in(rust, "agentmux", tool, args).unwrap();
+            assert!(slotted && log.is_empty(), "{tool} {args:?} beside a Cargo.toml queues, and says nothing: {log:?}");
+            let (slotted, log) = npm_in(site, "site", tool, args).unwrap();
+            assert!(!slotted, "{tool} {args:?} in a site repo runs at once");
+            assert!(log.trim_end().ends_with("not queued: no Cargo.toml") && log.contains(&format!("{tool}")), "one line for it: {log:?}");
+            assert_eq!(log.lines().count(), 1, "{log:?}");
+        }
+        // The line carries epoch, agent, command and folder, tab-separated.
+        let (_, log) = npm_in(site, "site", "npm", &["run", "build"]).unwrap();
+        let fields: Vec<&str> = log.trim_end().split('\t').collect();
+        assert_eq!(fields.len(), 5, "{log:?}");
+        assert!(fields[0].parse::<u64>().is_ok() && fields[2] == "npm run build" && fields[3].ends_with("/site"), "{fields:?}");
+        // A package nested in a Rust tree: the nearest package.json has no Cargo.toml beside it, but
+        // one sits above it, so it builds in that tree and is queued.
+        let nested = &["agentmux/Cargo.toml", "agentmux/widgets/clock/package.json"][..];
+        assert_eq!(npm_in(nested, "agentmux/widgets/clock", "npm", &["run", "build"]).unwrap().0, true, "nested in the tree: queued");
+        // A folder inside a site, below its package.json, is the site's.
+        assert_eq!(npm_in(site, "site", "npm", &["run", "build"]).unwrap().0, false);
+        let deep = &["site/package.json", "site/src/deep/x.ts"][..];
+        assert_eq!(npm_in(deep, "site/src/deep", "npm", &["run", "build"]).unwrap().0, false, "the nearest package.json is found from a subfolder");
+        // `--prefix` names the project, wherever the command is run from.
+        let both = &["agentmux/package.json", "agentmux/Cargo.toml", "site/package.json"][..];
+        assert_eq!(npm_in(both, "agentmux", "npm", &["run", "build", "--prefix", "../site"]).unwrap().0, false, "--prefix to a site");
+        assert_eq!(npm_in(both, "site", "npm", &["--prefix=../agentmux", "run", "build"]).unwrap().0, true, "--prefix=dir to the Rust tree");
+        // No package.json anywhere: not known to be a site, so it queues as before.
+        assert_eq!(npm_in(&[], "nowhere", "npx", &["vite", "build"]).unwrap().0, true);
+        // Light commands are never queued and never noted; cargo is unchanged.
+        let (slotted, log) = npm_in(site, "site", "npm", &["install"]).unwrap();
+        assert!(!slotted && log.is_empty(), "a light command is not a skipped queue: {log:?}");
+        let (out, home) = run_tool_in("cargo", true, false, &["test"], &[], site, "site").unwrap();
+        assert!(out.starts_with("SLOT "), "cargo queues wherever it is run: {out}");
+        assert!(!home.path().join(".agentmux/shared/locks/build/unqueued.log").exists());
     }
 
     /// Runs the lock script under bash with its slot directory at `root`, as a fresh top-level call.
@@ -872,6 +1013,48 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
         panic!("never saw {what}");
+    }
+
+    /// The owner file carries what srv needs to watch the holder, and `status` says when srv found
+    /// it idle: only for the run that srv named, and never for a run it has not flagged.
+    #[test]
+    fn status_says_a_holder_is_idle_only_when_srv_flagged_that_run() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        let status = || {
+            let out = spawn_slot(&bash, &script, &root, None, &["status"]).wait_with_output().unwrap();
+            String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n")
+        };
+        let mut holder = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "90"]);
+        wait_for("the holder", || read_holder(&root, now_secs()).is_some());
+        let held = read_holder(&root, now_secs()).expect("a live holder");
+        assert!(held.pid.is_some_and(|p| p > 1), "the owner file names the script's pid: {held:?}");
+        if cfg!(windows) {
+            assert!(held.winpid.is_some_and(|p| p > 1), "Git Bash records its Windows process id: {held:?}");
+        }
+        let busy = status();
+        assert!(busy.contains("HELD by") && !busy.contains("idle"), "a holder srv has not flagged is not idle: {busy}");
+
+        write_idle(&root, "some-other-run", now_secs() - 5 * 60).unwrap();
+        assert!(!root.join("slot").join("idle").exists(), "a note for another run is not written onto this one");
+        std::fs::write(root.join("slot").join("idle"), format!("token=an-earlier-run\nidle_since={}\n", now_secs() - 5 * 60)).unwrap();
+        assert!(!status().contains("idle"), "a note an earlier holder left is not this holder's");
+
+        write_idle(&root, &held.token, now_secs() - 12 * 60).unwrap();
+        let idle = status();
+        assert!(
+            idle.contains("idle for 12 min, no CPU") && idle.contains("not stopped"),
+            "got {idle}; owner {:?}; idle file {:?}",
+            std::fs::read_to_string(root.join("slot").join("owner")),
+            std::fs::read_to_string(root.join("slot").join("idle"))
+        );
+        clear_idle(&root);
+        assert!(!status().contains("idle"), "work removes the note");
+        let _ = holder.kill();
+        let _ = holder.wait();
     }
 
     /// A waiter that a loaded host makes slow (more than the ticket limit between two touches of

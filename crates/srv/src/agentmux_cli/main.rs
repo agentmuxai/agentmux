@@ -14,7 +14,11 @@
 //! Exit codes: 0 done, 1 the thing asked is not so (not running), 2 bad use, 3 could not do it.
 //! Nothing here prints a key, a code or a token.
 
+mod doctor;
 mod process;
+mod service;
+mod settings;
+mod setup;
 mod state;
 
 use std::path::{Path, PathBuf};
@@ -25,12 +29,40 @@ use agentmux_common::win32::NoWindow;
 use agentmux_common::{DataPaths, RuntimeMode};
 use clap::{Args, Parser, Subcommand};
 
+use settings::SecretStore;
 use state::ServerState;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// What this command is called where the person runs it: `agentmux`, or `agentmux-server`, the name
+/// the install always links and the one to use on a machine whose `agentmux` is the desktop app's.
+fn invoked_name() -> &'static str {
+    static NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        let argv0 = std::env::args_os().next().map(PathBuf::from);
+        let name = argv0.as_deref().and_then(Path::file_stem).map(|n| n.to_string_lossy().into_owned());
+        if name.as_deref() == Some("agentmux-server") { "agentmux-server" } else { "agentmux" }
+    })
+}
+
+/// A text for the person, with every command of this program named the way they ran it.
+pub(crate) fn say_as(text: &str) -> String {
+    match invoked_name() {
+        "agentmux" => text.to_string(),
+        name => text.replace("`agentmux ", &format!("`{name} ")),
+    }
+}
+
+/// A line to the person on stderr, led by the program's name.
+macro_rules! warn {
+    ($($arg:tt)*) => { eprintln!("{}: {}", invoked_name(), say_as(&format!($($arg)*))) };
+}
+
+/// A line to the person on stdout, with the commands it names under the name they ran.
+macro_rules! tell {
+    ($($arg:tt)*) => { println!("{}", say_as(&format!($($arg)*))) };
+}
 const DEFAULT_CHANNEL: &str = "headless";
-/// The server's web port when none is given; the websocket port is the next one.
-const DEFAULT_PORT: u16 = 7380;
 /// The server's key file name inside its data folder.
 const KEY_FILE_NAME: &str = "srv-auth-key";
 /// How long `start` waits for the server to answer, which includes preparing the data of a new version.
@@ -50,9 +82,15 @@ struct Cli {
 
 #[derive(Args, Debug, Clone, Default)]
 struct ServerArgs {
-    /// The web port the browser opens (the websocket port is the next one).
-    #[arg(long, default_value_t = DEFAULT_PORT, value_parser = clap::value_parser!(u16).range(1024..=65534))]
-    port: u16,
+    /// The web port the browser opens (the websocket port is the next one). Default: the one `setup` kept, else 7380.
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1024..=65534))]
+    port: Option<u16>,
+    /// Where the server keeps secrets. Default: the one `setup` kept, else `file`.
+    #[arg(long, value_enum)]
+    secret_store: Option<SecretStore>,
+    /// The address a browser reaches the server on when it is not the server's own: `http://127.0.0.1:<port>`.
+    #[arg(long)]
+    public_origin: Option<String>,
     /// The server program (default: `agentmux-srv` beside this command).
     #[arg(long, value_name = "FILE")]
     srv_bin: Option<PathBuf>,
@@ -75,6 +113,13 @@ enum Cmd {
     },
     /// Stop, then start.
     Restart(ServerArgs),
+    /// The first-run choices: port, where secrets live, a service that starts it at login; then start it and sign in.
+    Setup(setup::SetupArgs),
+    /// Check this machine for the server, and say what to do about each problem.
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
     /// Is the server running, and where.
     Status {
         #[arg(long)]
@@ -125,10 +170,19 @@ fn dispatch(cli: Cli) -> i32 {
         Cmd::Run(args) => cmd_run(&paths, &args),
         Cmd::Start(args) => cmd_start(&paths, &args),
         Cmd::Stop { force } => cmd_stop(&paths, force),
-        Cmd::Restart(args) => match cmd_stop(&paths, false) {
-            0 => cmd_start(&paths, &args),
-            code => code,
-        },
+        Cmd::Restart(args) => {
+            if let Some(code) = service_ignores(&paths, &args) {
+                return code;
+            }
+            // Saved settings are the choice of port when there are any; the old port is kept only when setup never ran.
+            let args = if settings::settings_path(&paths.instance_dir).exists() { args } else { restart_args(running(&paths), args) };
+            match cmd_stop(&paths, false) {
+                0 => cmd_start(&paths, &args),
+                code => code,
+            }
+        }
+        Cmd::Setup(args) => cmd_setup(&paths, &args),
+        Cmd::Doctor { json } => cmd_doctor(&paths, json),
         Cmd::Status { json } => cmd_status(&paths, json),
         Cmd::Open { print, origin } => cmd_client(&paths, "open", &client_args(print, origin)),
         Cmd::Logout => cmd_client(&paths, "logout", &[]),
@@ -137,8 +191,35 @@ fn dispatch(cli: Cli) -> i32 {
     }
 }
 
+impl ServerArgs {
+    /// Any flag that says how the server is started.
+    fn any(&self) -> bool {
+        self.port.is_some() || self.secret_store.is_some() || self.public_origin.is_some() || self.srv_bin.is_some() || self.web_dir.is_some()
+    }
+}
+
+/// With a service installed the server is started by the service from the saved settings, so flags given to `start`
+/// or `restart` would be dropped without a word: refuse them, and say where they are changed.
+fn service_ignores(paths: &DataPaths, args: &ServerArgs) -> Option<i32> {
+    if !args.any() {
+        return None;
+    }
+    user_home().ok().filter(|h| service::installed(h, &paths.channel))?;
+    warn!("AgentMux starts from its service, which uses the saved settings, so these flags would be ignored. Change them with `agentmux setup` (for example `agentmux setup --port 7500`).");
+    Some(2)
+}
+
+/// A restart keeps the port the running server was started on unless a flag says otherwise. The program is not kept:
+/// a restart runs the installed one, which is the point of restarting after an install.
+fn restart_args(was: Option<ServerState>, mut args: ServerArgs) -> ServerArgs {
+    if let Some(was) = was {
+        args.port = args.port.or(Some(was.web_port));
+    }
+    args
+}
+
 fn fail(message: &str) -> i32 {
-    eprintln!("agentmux: {message}");
+    warn!("{message}");
     3
 }
 
@@ -182,7 +263,19 @@ fn path_with_dir(dir: Option<&Path>, existing: Option<std::ffi::OsString>) -> st
 
 fn find_srv_in(bin_dir: &Path, flag: Option<&Path>) -> Result<PathBuf, String> {
     let path = flag.map(Path::to_path_buf).unwrap_or_else(|| bin_dir.join(if cfg!(windows) { "agentmux-srv.exe" } else { "agentmux-srv" }));
-    if path.is_file() { Ok(path) } else { Err(format!("the server program is not at {} (--srv-bin names another)", path.display())) }
+    let wanted = if cfg!(windows) { "agentmux-srv.exe" } else { "agentmux-srv" };
+    // Absolute, so the folder put first on the server's PATH is a real one and never the current folder.
+    match path.canonicalize() {
+        Ok(abs) if abs.is_file() => {
+            // `status`, `stop` and `restart` find the server's process by this name; another name would leave it running unseen.
+            if abs.file_name().is_some_and(|n| n == wanted) {
+                Ok(abs)
+            } else {
+                Err(format!("the server program must be named {wanted} (it is found by that name), not {}", abs.display()))
+            }
+        }
+        _ => Err(format!("the server program is not at {} (--srv-bin names another)", path.display())),
+    }
 }
 
 fn find_web_in(bin_dir: &Path, flag: Option<&Path>) -> Result<PathBuf, String> {
@@ -193,7 +286,7 @@ fn find_web_in(bin_dir: &Path, flag: Option<&Path>) -> Result<PathBuf, String> {
     candidates
         .iter()
         .find(|dir| dir.join("index.html").is_file())
-        .cloned()
+        .map(|dir| dir.canonicalize().unwrap_or_else(|_| dir.clone()))
         .ok_or_else(|| format!("the built web UI (a folder with index.html) is not at {} (--web-dir names another)", candidates[0].display()))
 }
 
@@ -207,7 +300,7 @@ fn cmd_version(channel: &str, json: bool) -> i32 {
     if json {
         println!("{}", serde_json::json!({ "version": VERSION, "channel": channel, "build": build }));
     } else {
-        println!("agentmux {VERSION} (channel {channel})");
+        println!("{} {VERSION} (channel {channel})", invoked_name());
     }
     0
 }
@@ -220,7 +313,7 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
         return fail(&format!("cannot create the channel's folders: {e}"));
     }
     if let Some(other) = running(paths).filter(|s| s.pid != std::process::id()) {
-        eprintln!("agentmux: the server is already running (pid {}) at {}", other.pid, other.url());
+        warn!("the server is already running (pid {}) at {}", other.pid, other.url());
         return 1;
     }
     let bin_dir = match exe_dir() {
@@ -231,6 +324,13 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
         (Ok(srv), Ok(web)) => (srv, web),
         (Err(e), _) | (_, Err(e)) => return fail(&e),
     };
+    let settings = match settings::read(&paths.instance_dir) {
+        Ok(s) => s,
+        Err(e) => return fail(&e),
+    };
+    let port = args.port.unwrap_or(settings.port);
+    let secret_store = args.secret_store.unwrap_or(settings.secret_store);
+    let public_origin = args.public_origin.clone().or(settings.public_origin);
     if let Err(code) = prepare_data(paths, &srv) {
         return code;
     }
@@ -238,8 +338,8 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
         pid: std::process::id(),
         version: VERSION.to_string(),
         channel: paths.channel.clone(),
-        web_port: args.port,
-        ws_port: args.port + 1,
+        web_port: port,
+        ws_port: port + 1,
         started_unix: agentmux_common::time::now_secs_u64(),
         key_file: paths.data_dir.join(KEY_FILE_NAME),
         data_dir: paths.data_dir.clone(),
@@ -253,10 +353,12 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
         .arg("--frontend-dir")
         .arg(&web)
         .args(["--web-port", &record.web_port.to_string(), "--ws-port", &record.ws_port.to_string()])
-        .envs(paths.to_env_vars())
-        // The agents the server starts find their helpers (`agentmux-mcp`, `agentmux-bashwrap`) by name on the PATH.
-        .env("PATH", path_with_dir(srv.parent(), std::env::var_os("PATH")))
-        .stdin(Stdio::null());
+        .args(["--secret-store", secret_store.flag()]);
+    if let Some(origin) = &public_origin {
+        cmd.args(["--public-origin", origin]);
+    }
+    // The agents the server starts find their helpers (`agentmux-mcp`, `agentmux-bashwrap`) by name on the PATH.
+    cmd.envs(paths.to_env_vars()).env("PATH", path_with_dir(srv.parent(), std::env::var_os("PATH"))).stdin(Stdio::null());
     become_server(cmd)
 }
 
@@ -303,6 +405,9 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
     if !cfg!(unix) {
         return fail("the server package is for Linux and macOS in this release");
     }
+    if let Some(code) = service_ignores(paths, args) {
+        return code;
+    }
     if let Err(e) = paths.ensure_dirs() {
         return fail(&format!("cannot create the channel's folders: {e}"));
     }
@@ -310,10 +415,19 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
         println!("AgentMux is already running: {}", s.url());
         return 0;
     }
+    if let Some(home) = user_home().ok().filter(|h| service::installed(h, &paths.channel)) {
+        return match service::control(&home, &paths.channel, "start") {
+            Ok(()) => wait_for_server(paths, None),
+            Err(e) => fail(&e),
+        };
+    }
     let exe = match std::env::current_exe() {
         Ok(e) => e,
         Err(e) => return fail(&format!("cannot find this command: {e}")),
     };
+    if let Err(e) = exe_dir().and_then(|d| find_srv_in(&d, args.srv_bin.as_deref()).and_then(|_| find_web_in(&d, args.web_dir.as_deref()))) {
+        return fail(&e);
+    }
     let log = |e: std::io::Error| fail(&format!("cannot open the server's log: {e}"));
     let out = match state::open_log(&paths.instance_dir) {
         Ok(f) => f,
@@ -324,7 +438,16 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
         Err(e) => return log(e),
     };
     let mut cmd = Command::new(exe);
-    cmd.args(["--channel", &paths.channel, "run", "--port", &args.port.to_string()]);
+    cmd.args(["--channel", &paths.channel, "run"]);
+    if let Some(port) = args.port {
+        cmd.args(["--port", &port.to_string()]);
+    }
+    if let Some(store) = args.secret_store {
+        cmd.args(["--secret-store", store.flag()]);
+    }
+    if let Some(origin) = &args.public_origin {
+        cmd.args(["--public-origin", origin]);
+    }
     if let Some(srv) = &args.srv_bin {
         cmd.arg("--srv-bin").arg(srv);
     }
@@ -333,31 +456,48 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
     }
     cmd.stdin(Stdio::null()).stdout(out).stderr(err).no_window();
     process::detach(&mut cmd);
-    let mut child = match cmd.spawn() {
+    let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot start the server: {e}")),
     };
+    wait_for_server(paths, Some(child))
+}
+
+/// Wait until the server this start made answers. With a child of ours, only the record of that
+/// child counts (a record left by an earlier server names another process); a service's start has
+/// no child, and any record of a live server that answers is its.
+fn wait_for_server(paths: &DataPaths, mut child: Option<std::process::Child>) -> i32 {
     let begun = Instant::now();
     loop {
-        // The record of THIS start: a record left by an earlier server names another process.
-        if let Some(s) = state::read(&paths.instance_dir).filter(|s| s.pid == child.id()) {
+        let mine = state::read(&paths.instance_dir).filter(|s| match &child {
+            Some(c) => s.pid == c.id(),
+            None => process::is_server(s.pid),
+        });
+        if let Some(s) = mine {
             if process::health_ok(s.web_port) {
                 println!("AgentMux is running: {}", s.url());
-                println!("Sign in with: agentmux open");
+                tell!("Sign in with: `agentmux open`");
                 return 0;
             }
         }
-        if let Ok(Some(status)) = child.try_wait() {
-            eprintln!("agentmux: the server stopped while starting ({status}). The end of its log:");
+        if let Some(Ok(Some(status))) = child.as_mut().map(std::process::Child::try_wait) {
+            warn!("the server stopped while starting ({status}). The end of its log:");
             show_log_tail(paths, 15);
+            if log_mentions(paths, "Address already in use") {
+                warn!("that port is in use by another program: choose another with `agentmux setup --port <port>`.");
+            }
             return 3;
         }
         if begun.elapsed() > START_WAIT {
-            eprintln!("agentmux: the server has not answered after {} seconds; it is still starting. See `agentmux logs`.", START_WAIT.as_secs());
+            warn!("the server has not answered after {} seconds; it is still starting. See `agentmux logs`.", START_WAIT.as_secs());
             return 3;
         }
         std::thread::sleep(Duration::from_millis(300));
     }
+}
+
+fn log_mentions(paths: &DataPaths, text: &str) -> bool {
+    std::fs::read_to_string(state::log_path(&paths.instance_dir)).is_ok_and(|log| state::last_lines(&log, 15).iter().any(|l| l.contains(text)))
 }
 
 fn show_log_tail(paths: &DataPaths, lines: usize) {
@@ -379,12 +519,18 @@ fn cmd_stop(paths: &DataPaths, force: bool) -> i32 {
         println!("AgentMux is not running (cleared a record left by a server that is gone).");
         return 0;
     }
-    if !process::terminate(record.pid) {
-        return fail(&format!("could not signal the server (pid {})", record.pid));
+    // A service restarts a server that exits non-zero, so a service's server is stopped through the service.
+    let stopped = match user_home().ok().filter(|h| service::installed(h, &paths.channel)) {
+        Some(home) => service::control(&home, &paths.channel, "stop"),
+        None if process::terminate(record.pid) => Ok(()),
+        None => Err(format!("could not signal the server (pid {})", record.pid)),
+    };
+    if let Err(e) = stopped {
+        return fail(&e);
     }
     if !wait_gone(record.pid, STOP_WAIT) {
         if !force {
-            eprintln!("agentmux: the server has not left after {} seconds. `agentmux stop --force` ends it at once.", STOP_WAIT.as_secs());
+            warn!("the server has not left after {} seconds. `agentmux stop --force` ends it at once.", STOP_WAIT.as_secs());
             return 3;
         }
         process::kill(record.pid);
@@ -425,6 +571,7 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
                 "url": record.as_ref().map(ServerState::url),
                 "uptime_secs": uptime,
                 "data_dir": record.as_ref().map(|s| s.data_dir.clone()),
+                "service": user_home().is_ok_and(|h| service::installed(&h, &paths.channel)),
             })
         );
     } else if let Some(s) = &record {
@@ -432,10 +579,10 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
         println!("  open:  {}", s.url());
         println!("  data:  {}", s.data_dir.display());
         if s.version != VERSION {
-            println!("  installed version is {VERSION}: `agentmux restart` runs it");
+            tell!("  installed version is {VERSION}: `agentmux restart` runs it");
         }
     } else {
-        println!("AgentMux is not running (channel {}). Start it with `agentmux start`.", paths.channel);
+        tell!("AgentMux is not running (channel {}). Start it with `agentmux start`.", paths.channel);
     }
     if healthy { 0 } else { 1 }
 }
@@ -449,10 +596,147 @@ fn human_duration(secs: u64) -> String {
     }
 }
 
+fn user_home() -> Result<PathBuf, String> {
+    dirs::home_dir().ok_or_else(|| "cannot find your home folder".to_string())
+}
+
+/// The path a service should run this command by: the one it was started as, when that is a link
+/// to this program (an install's `current` link survives an update), else its resolved path.
+fn stable_exe() -> Result<PathBuf, String> {
+    let resolved = std::env::current_exe().and_then(|p| p.canonicalize()).map_err(|e| format!("cannot find this command: {e}"))?;
+    let as_run = std::env::args_os().next().map(PathBuf::from).and_then(|argv0| {
+        if argv0.is_absolute() {
+            Some(argv0)
+        } else if argv0.components().count() == 1 {
+            // Run by name: the entry of the PATH that holds it.
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).map(|dir| dir.join(&argv0)).find(|p| p.is_file())
+        } else {
+            None
+        }
+    });
+    Ok(as_run.filter(|p| p.canonicalize().is_ok_and(|c| c == resolved)).unwrap_or(resolved))
+}
+
+/// What the doctor judges; `srv_flag` and `web_dir_flag` are the places the person named, when they did.
+fn facts(paths: &DataPaths, port: u16, srv_flag: Option<&Path>, web_dir_flag: Option<&Path>) -> doctor::Facts {
+    let bin_dir = exe_dir();
+    let find = |f: fn(&Path, Option<&Path>) -> Result<PathBuf, String>, flag: Option<&Path>| bin_dir.clone().and_then(|d| f(&d, flag));
+    let record = running(paths);
+    let key_file = record.as_ref().map(|s| s.key_file.clone()).unwrap_or_else(|| paths.data_dir.join(KEY_FILE_NAME));
+    let exe = stable_exe().ok();
+    let service_file = user_home().ok().and_then(|h| service::manager().map(|m| service::file_path(m, &h, &paths.channel)));
+    let service_text = service_file.as_ref().and_then(|f| std::fs::read_to_string(f).ok());
+    doctor::Facts {
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        srv: find(find_srv_in, srv_flag),
+        web: find(find_web_in, web_dir_flag),
+        folders: paths.ensure_dirs().map_err(|e| format!("cannot create the channel's folders: {e}")).and_then(|()| doctor::writable(&paths.instance_dir)),
+        free_bytes: agentmux_common::disk_space::volume_free_total_bytes(&paths.instance_dir).map(|(free, _)| free),
+        key_mode: doctor::mode_of(&key_file),
+        port,
+        answering: record.as_ref().is_some_and(|s| process::health_ok(s.web_port)),
+        port_free: record.is_none().then(|| doctor::ports_free(port)),
+        running: record,
+        tools: ["node", "npm", "git"].into_iter().map(|t| (t, doctor::on_path(t))).collect(),
+        installed_version: VERSION,
+        service_installed: service_text.is_some(),
+        service_names_exe: service_text.zip(exe).map(|(text, exe)| service::file_names_exe(&text, &exe)),
+    }
+}
+
+fn cmd_doctor(paths: &DataPaths, json: bool) -> i32 {
+    let port = match settings::read(&paths.instance_dir) {
+        Ok(s) => s.port,
+        Err(e) => return fail(&e),
+    };
+    let checks = doctor::evaluate(&facts(paths, port, None, None));
+    if json {
+        println!("{}", serde_json::json!({ "ok": !doctor::failed(&checks), "checks": checks }));
+    } else {
+        for line in doctor::lines(&checks) {
+            println!("{line}");
+        }
+    }
+    if doctor::failed(&checks) { 1 } else { 0 }
+}
+
+fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
+    let current = match settings::read(&paths.instance_dir) {
+        Ok(s) => s,
+        Err(e) => return fail(&e),
+    };
+    let checks = doctor::evaluate(&facts(paths, args.port.unwrap_or(current.port), args.srv_bin.as_deref(), args.web_dir.as_deref()));
+    for line in doctor::lines(&checks) {
+        println!("{line}");
+    }
+    if doctor::failed(&checks) {
+        warn!("fix the failures above, then run `agentmux setup` again.");
+        return 1;
+    }
+    let service_installed = user_home().ok().is_some_and(|h| service::installed(&h, &paths.channel));
+    let plan = match setup::plan(args, &current, service::manager().is_some(), service_installed, &mut setup::Terminal) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("setup: {e}");
+            return 2;
+        }
+    };
+    // The server stops first, so the new choices and the service take effect at its next start.
+    if plan.start {
+        let code = cmd_stop(paths, false);
+        if code != 0 {
+            return code;
+        }
+    }
+    if let Err(e) = settings::write(&paths.instance_dir, &plan.settings) {
+        return fail(&format!("cannot write the settings: {e}"));
+    }
+    println!("Port {}, secrets in the {} store.", plan.settings.port, plan.settings.secret_store.flag());
+    let home = match user_home() {
+        Ok(h) => h,
+        Err(e) => return fail(&e),
+    };
+    if plan.service {
+        let installed = stable_exe().and_then(|exe| service::install(&home, &exe, &paths.channel, &state::log_path(&paths.instance_dir), &std::env::var("PATH").unwrap_or_default()));
+        match installed {
+            Ok(file) => {
+                println!("The service is installed ({}): AgentMux starts at every login.", file.display());
+                if cfg!(target_os = "linux") {
+                    println!("To keep it running with no one logged in: loginctl enable-linger $USER");
+                }
+            }
+            Err(e) => return fail(&e),
+        }
+    } else if let Err(e) = service::remove(&home, &paths.channel) {
+        return fail(&e);
+    }
+    if plan.start {
+        let start = setup_server_args(args);
+        let code = cmd_start(paths, &start);
+        if code != 0 {
+            return code;
+        }
+        if plan.open {
+            return cmd_client(paths, "open", &[]);
+        }
+    }
+    // A start has already said how to sign in.
+    let sign_in = if plan.start { "" } else { "Start it with `agentmux start`, and sign in with `agentmux open`. " };
+    tell!("{sign_in}Models sign in where their command-line tools do: run the tool (for example `claude`) in a terminal pane once.");
+    println!("Agents, tasks and Global Memory of this server live in {}.", paths.instance_dir.display());
+    0
+}
+
+/// The flags of `setup` that name where the server's parts are.
+fn setup_server_args(args: &setup::SetupArgs) -> ServerArgs {
+    ServerArgs { srv_bin: args.srv_bin.clone(), web_dir: args.web_dir.clone(), ..ServerArgs::default() }
+}
+
 /// `agentmux-srv open` or `logout`, run for the server of this channel with the same terminal.
 fn cmd_client(paths: &DataPaths, name: &str, extra: &[String]) -> i32 {
     let Some(record) = running(paths) else {
-        eprintln!("agentmux: the server is not running. Start it with `agentmux start`.");
+        warn!("the server is not running. Start it with `agentmux start`.");
         return 1;
     };
     let srv = if record.srv.is_file() { record.srv.clone() } else { exe_dir().and_then(|d| find_srv_in(&d, None)).unwrap_or(record.srv.clone()) };
@@ -472,7 +756,7 @@ fn cmd_logs(paths: &DataPaths, lines: usize, follow: bool) -> i32 {
     use std::io::{Read, Seek, SeekFrom, Write};
     let path = state::log_path(&paths.instance_dir);
     let Ok(text) = std::fs::read_to_string(&path) else {
-        eprintln!("agentmux: no log yet at {}", path.display());
+        warn!("no log yet at {}", path.display());
         return 1;
     };
     let mut out = std::io::stdout();
@@ -523,7 +807,8 @@ mod tests {
         let cli = parse(&["start"]).unwrap();
         assert_eq!(cli.channel, "headless");
         let Cmd::Start(args) = cli.command else { panic!("start") };
-        assert_eq!(args.port, 7380);
+        assert_eq!(args.port, None, "the port is the one setup kept, else the default");
+        assert_eq!(settings::DEFAULT_PORT, 7380);
     }
 
     #[test]
@@ -550,6 +835,9 @@ mod tests {
             vec!["stop", "--force"],
             vec!["restart"],
             vec!["status", "--json"],
+            vec!["doctor", "--json"],
+            vec!["setup", "--yes", "--port", "7380", "--secret-store", "file", "--service", "--no-open"],
+            vec!["run", "--secret-store", "keychain", "--public-origin", "http://127.0.0.1:8080"],
             vec!["open", "--print"],
             vec!["open", "--origin", "http://127.0.0.1:8080"],
             vec!["logout"],
@@ -606,11 +894,50 @@ mod tests {
         std::fs::write(bin.join(srv_name), b"").unwrap();
         std::fs::create_dir_all(root.path().join("web")).unwrap();
         std::fs::write(root.path().join("web").join("index.html"), b"<html>").unwrap();
-        assert_eq!(find_srv_in(&bin, None).unwrap(), bin.join(srv_name));
+        assert_eq!(find_srv_in(&bin, None).unwrap(), bin.join(srv_name).canonicalize().unwrap());
         assert!(find_web_in(&bin, None).is_ok(), "web is beside bin");
         let elsewhere = tempfile::tempdir().unwrap();
         assert!(find_web_in(&bin, Some(elsewhere.path())).is_err(), "a named folder without index.html is refused");
         assert!(find_srv_in(&bin, Some(&elsewhere.path().join("missing"))).is_err());
+        let renamed = bin.join("srv-custom");
+        std::fs::copy(bin.join(srv_name), &renamed).unwrap();
+        let e = find_srv_in(&bin, Some(&renamed)).unwrap_err();
+        assert!(e.contains("must be named"), "a program under another name would be left running unseen: {e}");
+    }
+
+    #[test]
+    fn flags_that_say_how_to_start_are_seen() {
+        assert!(!ServerArgs::default().any());
+        assert!(ServerArgs { port: Some(7500), ..ServerArgs::default() }.any());
+        assert!(ServerArgs { web_dir: Some("/w".into()), ..ServerArgs::default() }.any());
+    }
+
+    #[test]
+    fn a_relative_program_or_web_folder_is_made_absolute() {
+        let _lock = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let srv_name = if cfg!(windows) { "agentmux-srv.exe" } else { "agentmux-srv" };
+        std::fs::write(root.path().join(srv_name), b"").unwrap();
+        std::fs::create_dir_all(root.path().join("web")).unwrap();
+        std::fs::write(root.path().join("web").join("index.html"), b"<html>").unwrap();
+        let before = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root.path()).unwrap();
+        let srv = find_srv_in(Path::new("/nonexistent-bin"), Some(Path::new(srv_name)));
+        let web = find_web_in(Path::new("/nonexistent-bin"), Some(Path::new("web")));
+        std::env::set_current_dir(before).unwrap();
+        assert!(srv.unwrap().is_absolute(), "a bare name is not looked up on PATH or left relative");
+        assert!(web.unwrap().is_absolute());
+    }
+
+    #[test]
+    fn a_restart_keeps_the_port_the_server_was_started_on_and_runs_the_installed_program() {
+        let args = ServerArgs::default;
+        let kept = restart_args(Some(record(1)), args());
+        assert_eq!(kept.port, Some(record(1).web_port));
+        assert!(kept.srv_bin.is_none(), "the program is the installed one, not the old version's folder");
+        assert_eq!(restart_args(None, args()).port, None, "nothing running: the saved settings decide");
+        let flagged = restart_args(Some(record(1)), ServerArgs { port: Some(7500), ..args() });
+        assert_eq!(flagged.port, Some(7500), "a flag wins");
     }
 
     fn with_channel<T>(f: impl FnOnce(&DataPaths) -> T) -> T {

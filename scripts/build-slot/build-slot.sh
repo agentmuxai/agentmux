@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-slot-version: 8
+# build-slot-version: 9
 # build-slot: run one heavy build or test command while holding the host-wide
 # build slot, so only one such command runs on this machine at a time.
 # Spec: docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md. AgentMux installs this file to
@@ -93,6 +93,18 @@ ticket_live() {
   kill -0 "$pid" 2>/dev/null
 }
 
+# AgentMux's srv watches the CPU of the holder's process tree (Git Bash cannot see native
+# processes' CPU or children) and writes <slot>/idle (token=, idle_since=) once the tree has used
+# none for a while. It only says so; nothing here or there stops the run.
+idle_note() {
+  local itok since
+  itok=$(sed -n 's/^token=//p' "$SLOT/idle" 2>/dev/null | head -1)
+  since=$(sed -n 's/^idle_since=//p' "$SLOT/idle" 2>/dev/null | head -1)
+  case "$since" in ''|*[!0-9]*) return 0 ;; esac
+  [ -n "$itok" ] && [ "$itok" = "$(field token)" ] || return 0   # left by an earlier holder
+  echo "      idle for $(( ($(now) - since) / 60 )) min, no CPU: its process tree has used none since then (may be stuck; it was not stopped)"
+}
+
 status() {
   # Every slot there is room for: "slot" for the first, "slot-2", ... for the others.
   local lim i d free=0 saved="$SLOT"
@@ -110,6 +122,7 @@ status() {
       else
         echo "$label: HELD by $(field agent) since $(( ($(now) - $(num_field start)) / 60 )) min: $(field cmd)"
         echo "      in $(field cwd)${BUILD_SLOT_VERBOSE:+ (pid $(field pid))}"
+        idle_note
       fi
     else free=$((free+1)); [ "$lim" -eq 1 ] && echo "$label: free"; fi
   done
@@ -276,7 +289,10 @@ while :; do
   waited=$((waited + POLL))
 done
 
-{ echo "agent=$ME"; echo "pid=$$"; echo "token=$TOKEN"; echo "start=$(now)"; echo "cwd=$PWD"; echo "cmd=$CMDLINE";
+# winpid: this process's Windows pid, which Git Bash does not report as $$. srv needs it to find
+# the holder's process tree (empty on Linux and macOS, where pid is the real one).
+WINPID=$(cat "/proc/$$/winpid" 2>/dev/null | tr -dc '0-9')
+{ echo "agent=$ME"; echo "pid=$$"; [ -n "$WINPID" ] && echo "winpid=$WINPID"; echo "token=$TOKEN"; echo "start=$(now)"; echo "cwd=$PWD"; echo "cmd=$CMDLINE";
   [ -n "$REASON" ] && echo "reason=$REASON"; } > "$SLOT/owner"
 touch "$SLOT/heartbeat"
 rm -f "$TICKET"

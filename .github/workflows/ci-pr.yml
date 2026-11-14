@@ -287,7 +287,7 @@ jobs:
     # enforced after the service's grace period (2026-11-12: a 35-minute job was cancelled after 40).
     #
     # In the merge queue the Ubuntu leg gets 28: it takes 7 to 10 minutes there, the nextest step's two attempts
-    # are limited to 12 + 8, and a stalled leg holds every entry behind it until the limit ends it (and only the
+    # are limited to 14 + 8 (12 + 8 until the build was cut to two LLVM threads, which adds 1 to 2 minutes to a slow compile), and a stalled leg holds every entry behind it until the limit ends it (and only the
     # limit does: a cancel needs the runner to answer, which a stalled one cannot). 2026-11-13: nine stalls ran to
     # 50 + 5 minutes, the queue 19 deep behind them.
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && (needs.changes.outputs.queue == 'true' && 28 || 50) || 35 }}
@@ -484,9 +484,9 @@ jobs:
           # The attempt limits: a PR run takes 13 to 18 minutes (7 in the queue); a stalled attempt is ended at
           # about twice that and tried once more, which reuses what it built. The step's limit is the two together
           # and the job's (below) is just over it, so a stall is ended by the script and not by the job.
-          CI_ATTEMPT1_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 720 || 1500 }}
+          CI_ATTEMPT1_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 840 || 1500 }}
           CI_ATTEMPT2_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 480 || 900 }}
-        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 22 || 42 }}
+        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 24 || 42 }}
         # The build's warnings go to a file for the ts-rs check below, which used
         # to read them off a separate `cargo check`; pipefail keeps a failing
         # build or test failing the step.

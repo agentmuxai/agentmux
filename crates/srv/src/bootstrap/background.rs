@@ -126,6 +126,8 @@ fn install_build_slot() {
         Ok(_) => {}
         Err(e) => tracing::warn!(error = %e, "build slot: not installed"),
     });
+    // A holder that has used no CPU for 10 minutes is shown as idle and its agent told once.
+    backend::build_slot_idle::install();
 }
 
 /// Deploys the shell integration scripts at startup, whichever pane is opened first.

@@ -26,229 +26,156 @@ mod store_schema;
 
 pub(in crate::backend::storage) use object_schema::apply_additive_columns;
 
-/// `user_version` stamped into `~/.agentmux/shared/store.db` after
-/// `run_shared_store_schema`. Versioned independently from `objects.db`.
-///   v1 — initial: identity accounts/bundles/bindings/links, memory
-///         bundles, drone definitions, muxbus credentials
+/// `user_version` stamped into `~/.agentmux/shared/store.db` after `run_shared_store_schema`.
+/// Versioned independently from `objects.db`.
+///   v1 — initial: identity accounts/bundles/bindings/links, memory bundles, drone definitions,
+///        muxbus credentials
 ///   v2 — db_cron_jobs: persistent scheduled injection jobs
-///   v3 — Phase 4a of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md: rename
-///        db_identity_accounts -> db_accounts, db_memory_bundles -> db_bundles
-///        (SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md).
-///   v4 — db_agent_credentials: per-agent M2M Cognito client_id/secret +
-///        cached access token, one row per locally-registered agent_id.
-///        Lets cloud_subscriber use a credential bound to a specific agent
-///        instead of the single shared per-account MUXBUS_TOKEN for every
-///        /reactive/* call.
-///   v5 — db_cron_jobs.max_age_secs: optional hard expiry bound (seconds since
-///        created_at) alongside the existing max_fires bound. NULL = no expiry
-///        (existing rows unaffected). See
-///        docs/specs/SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md Phase 0.
-///   v6 — db_agent_native_memory: durable, location-consistent mirror of
-///        each agent's native memory files, keyed by (agent_id, filename).
-///        See docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md.
-///   v7 — db_bundles.instructions_by_provider: JSON object of
-///        {provider_id: content} instruction variants, additive to the
-///        existing flat `instructions` column. ABF v0.2 §2.2, see
-///        docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md.
-///   v8 — db_agent_native_memory_versions: append-only version history for
-///        native memory content, one row per `agent:memory:write_file`
-///        call (plus reverts and, later, out-of-band-write detection) —
-///        the mirror in v6 only ever holds the current value, with no way
-///        to see what a file contained before its last write. See
-///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
-///   v9 — db_bundles.is_system: AgentMux-controlled, highest-priority
-///        Global Bundle tier — see OBJECT_SCHEMA_VERSION's v27 doc
-///        comment (objects.db, above run_object_schema) for the full
-///        design; this store just needs schema parity.
-///   v10 — db_bundle_versions: append-only version history for Global
-///        Memory entry content — see OBJECT_SCHEMA_VERSION's v35 doc
-///        comment for the full rationale
-///        (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md); this store
-///        just needs schema parity, same as v9 above.
-///   v11 — db_cron_jobs.target_uid: the target agent's UID (`db_agents.id`)
-///        beside the slug column, resolved once at create time and
-///        dual-written; nothing reads it yet, a job still fires by
-///        `target`. Identity M1b of
-///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §9.1 —
-///        spec §5.4: non-interactive ingress never resolves a name at fire
-///        time, so the UID has to be captured while a human or model is
-///        present. Empty when the name did not resolve; never guessed.
-///   v12 — db_cron_jobs.created_by_uid and db_bundle_versions.written_by_uid:
-///        the actor's UID beside each actor-name column, taken from the
-///        request's `Caller` (its `X-Agent-Token`), never from a body field.
-///        Empty for an Unattributed request; never guessed. Dual-written,
-///        not yet read. Identity M4c-1 of
-///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9.
+///   v3 — rename db_identity_accounts -> db_accounts, db_memory_bundles -> db_bundles
+///        (SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md Phase 4a,
+///        SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md)
+///   v4 — db_agent_credentials: per-agent M2M Cognito client_id/secret + cached access token, one
+///        row per locally-registered agent_id, so cloud_subscriber's /reactive/* calls use a
+///        credential bound to the agent, not the shared per-account MUXBUS_TOKEN
+///   v5 — db_cron_jobs.max_age_secs: optional hard expiry (seconds since created_at) beside
+///        max_fires; NULL = no expiry
+///        (docs/specs/SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md Phase 0)
+///   v6 — db_agent_native_memory: durable mirror of each agent's native memory files, keyed by
+///        (agent_id, filename) (docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md)
+///   v7 — db_bundles.instructions_by_provider: JSON {provider_id: content} variants, additive to
+///        the flat `instructions` column (ABF v0.2 §2.2,
+///        docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md)
+///   v8 — db_agent_native_memory_versions: append-only history, one row per
+///        `agent:memory:write_file` call (plus reverts and, later, out-of-band-write detection);
+///        the v6 mirror only holds the current value
+///        (docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md)
+///   v9 — db_bundles.is_system: schema parity with objects.db v27 (the AgentMux-controlled Global
+///        Bundle tier)
+///   v10 — db_bundle_versions: append-only Global Memory entry history, schema parity with
+///        objects.db v35 (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md)
+///   v11 — db_cron_jobs.target_uid: the target agent's UID (`db_agents.id`) beside the slug column,
+///        resolved once at create time and dual-written; nothing reads it yet, a job still fires by
+///        `target`. Non-interactive ingress never resolves a name at fire time, so the UID is
+///        captured while a human or model is present; empty when the name did not resolve, never
+///        guessed (identity M1b, SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §5.4, §9.1)
+///   v12 — db_cron_jobs.created_by_uid and db_bundle_versions.written_by_uid: the actor's UID
+///        beside each actor-name column, from the request's `Caller` (its `X-Agent-Token`), never a
+///        body field; empty for an Unattributed request, never guessed. Dual-written, not yet read
+///        (identity M4c-1, SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9)
 pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 
-/// `user_version` value stamped into `objects.db` after `run_object_schema`.
-/// The flat schema reset the counter to 1 (the pre-flatten chain never set
-/// `user_version`, so legacy files read 0). Bumped per additive migration:
+/// `user_version` stamped into `objects.db` after `run_object_schema`. The flat schema reset
+/// the counter to 1 (the pre-flatten chain never set `user_version`, so legacy files read 0).
+/// Bumped per additive migration:
 ///   v1 — flat schema baseline
 ///   v2 — db_agent_definitions.updated_at
 ///   v3 — db_agent_definitions.user_hidden (Phase 2 hide templates,
 ///        SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md Q2 Decision Y)
-///   v4 — db_agents consolidation table (Phase 3a: every definition/
-///        instance write dual-writes here). Reads moved over
-///        piecemeal afterwards — the instance side in Phase 3b (#3080),
-///        every `agent_def_*` method in Phase 3d (#3092, v31) — and both
-///        legacy tables were dropped in v32.
-///   v5 — db_agents.last_block_id (Phase 3c; latest launch's block, so the
-///        consolidated read can find the session snapshot without joining
-///        db_agent_instances)
-///   v6 — container_image / container_volumes / container_name on both
-///        db_agent_definitions and db_agents (Phase 0 of
-///        SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md; host agents default
-///        to '' / '[]' / '')
-///   v7 — db_muxbus_credentials: global singleton for MuxBus cloud
-///        Cognito PKCE tokens (access, refresh, id) + expiry + user email
-///   v8 — db_memory_bundles.is_global: global-tier flag for Armory
-///        bundles injected into every agent's CLAUDE.md at launch
-///   v9 — db_memory_bundles.sort_order: explicit ordering for the Armory
-///        global bundles (controls CLAUDE.md injection order). Existing
-///        rows default to 0; the Armory Global section assigns positions via reorder.
-///   v10 — db_skills, db_mcp_servers, db_agent_skills_ref, db_agent_mcp_ref:
-///        standalone MCP Server and Skill primitives with per-agent ref tables
-///        (v1 composable model, SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md).
-///   v11 — Phase 4a of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md: rename
-///        db_identity_accounts -> db_accounts, db_memory_bundles -> db_bundles
-///        (SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md).
-///   v12 — use_ambient_login on both db_agent_definitions and db_agents:
-///        explicit per-agent opt-in to the CLI's global (ambient) login when
-///        no oauth-class account resolves at spawn (layer 3 of
-///        SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3). Defaults
-///        to 0 (fail-by-default); a data migration (since retired) grandfathered
-///        pre-existing linkless agents to 1.
-///   v13 — db_agent_credentials: per-agent M2M muxbus credential, mirroring
-///        db_muxbus_credentials' presence in both schemas — id_store falls
-///        back to this (per-channel) schema on installs that haven't yet
-///        applied 0011_shared_store_backfill, so cloud_subscriber's calls
-///        must not assume the shared-schema copy (v4 there) is the one in use.
-///   v14 — db_agent_native_memory: durable mirror of each agent's native
-///        memory files, keyed by (agent_id, filename). Same both-schemas
-///        duplication as db_agent_credentials, for the same id_store
-///        fallback reason. See
-///        docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md.
-///   v15 — model_vendor_base_url on both db_agent_definitions and db_agents:
-///        redirects a harness (CLI) at a non-default model vendor backend
-///        (e.g. ANTHROPIC_BASE_URL for a claude-provider agent) — the data-
-///        model side of formalizing harness vs. model-vendor as distinct
-///        concepts. Defaults to '' (use the harness's default vendor).
-///        Only settable via `agent.define`, validated against the resolved
-///        provider's `ProviderConfig::base_url_env_var`.
-///   v16 — db_bundles.instructions_by_provider: JSON object of
-///        {provider_id: content} instruction variants, additive to the
-///        existing flat `instructions` column (which keeps meaning
-///        "default"). ABF v0.2 storage half of provider-scoped
-///        instructions — see
-///        docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md
-///        §2.2. Defaults to '{}' for existing rows; delivering a selected
-///        variant into a running agent is explicitly out of scope for this
-///        version (per that spec's non-goals) — this column only makes the
-///        data storable/exportable/importable.
-///   v17 — auto_continue_enabled on both db_agent_definitions and db_agents:
-///        the Warden Supervisor's per-agent auto-continue opt-in (default 0).
-///        RETIRED with the Warden Supervisor: nothing reads or writes it now.
-///        It stays in the schema because older builds sharing the data dir
-///        still select it; new rows get DEFAULT 0. See
-///        docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
-///   v18 — db_agent_jekt_keys: per-agent HMAC-SHA256 signing key for
-///        host-tier jekt sender verification. One row per agent_id, minted
-///        on first use and injected into that agent's own MCP server
-///        process env (AGENTMUX_JEKT_KEY) at spawn — never into any other
-///        agent's env, so a signature can only be produced by the agent it
-///        claims to be from. See
-///        docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2.
-///   v19 — db_agent_definitions.memory_id: the agent's own dedicated ABF
-///        bundle, set once at creation and never updated thereafter
-///        (agent_def_update's SET clause deliberately omits it, same
-///        immutable-after-creation treatment as is_seeded/slug/parent_id).
-///        Distinct from db_agent_instances.memory_id (a specific launch's
-///        bundle, can still diverge on purpose). Mirrored into db_agents as
-///        a SEPARATE default_memory_id column, not db_agents.memory_id —
-///        that column is instance-only by existing convention (see
-///        db_agents' CREATE TABLE comment). Defaults to '' for existing
-///        rows; the m0021 migration
-///        backfills every unbound definition to a freshly-provisioned
-///        bundle. See ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1.
-///   v20 — db_agent_lan_keys: per-agent Ed25519 keypair for LAN-tier jekt
-///        sender verification — mirrors v18, asymmetric instead of HMAC
-///        (LAN is multi-party: a receiving peer must verify without being
-///        able to forge, which a shared secret can't provide). public_key
-///        is distributed to LAN peers on demand (not secret); private_key
-///        goes only to that one agent (its MCP config's AGENTMUX_LAN_KEY,
-///        and its own token-authenticated key fetch), same guarantee as
-///        v18. See docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1.
-///   v21 — db_lan_peer_pubkey_pins: trust-on-first-use pin of a REMOTE
-///        agent_id's LAN public key, as first observed from mDNS-discovered
-///        peers. reagentx P0 on the LAN signing PR: peer discovery itself
-///        is unauthenticated (any device can broadcast an mDNS instance and
-///        register an agent under an existing agent's name), so trusting
-///        "whichever peer answers first" for a pubkey lookup lets an
-///        attacker's self-minted key be accepted as authoritative for a
-///        victim's agent_id. Pinning the first-seen key and rejecting any
-///        later mismatch (rather than silently accepting the newest
-///        answer) is the standard SSH-host-key mitigation for exactly this
-///        "no PKI available" situation — closes the always-spoofable case,
-///        narrows it to a race on the very first lookup ever performed for
-///        that agent_id. See
-///        docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2.
-///   v22 — db_background_tasks: durable record of a declared long-running
-///        (`run_in_background: true`) task attached to a block, so its
-///        liveness survives past `DockSnapshotCache`'s 1-hour eviction and
-///        a session reconnect/reload — the ephemeral client-transcript-
-///        derived signal chain had no durable source of truth at all. Per-
-///        channel (block ids are only meaningful within their own
-///        channel), not the shared store. Renumbered from an earlier v20
-///        to v22 when merged alongside the LAN-tier jekt signing PR, which
-///        independently claimed v20/v21 for an unrelated table pair — see
-///        docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md,
-///        issue #2492.
-///   v23 — db_bundle_skills_ref, db_bundle_mcp_ref: bundle-level references
-///        to the standalone skill/MCP-server primitives, mirroring the v10
-///        agent-level ref tables but keyed by bundle_id — composable model
-///        v2, step 1 of docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md
-///        (GH issue #2024 item 3). A bundle's existing mcp_servers/skills
-///        JSON columns are untouched by this — still the .abf export/import
-///        format — these ref tables are the new live-resolution path.
-///        Deliberately NO FK to db_bundles (unlike the agent-level ref
-///        tables' FK to db_agent_definitions) — see this table's own doc
-///        comment at its CREATE TABLE for why.
-///   v24 — db_agent_native_memory_versions: append-only version history for
-///        native memory content, mirroring the v14 table's own dual-
-///        schema duplication (id_store per-channel fallback). See
-///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
-///   v25 — db_agent_groups: saved, named target sets for the fleet-control
-///        feature (broadcast/bulk-stop across many agent panes at once —
-///        docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md). A
-///        group is just a durable list of block ids under a name — the
-///        Ansible-inventory-group lesson from that spec's research: a
-///        saved group, not raw ephemeral selection, is the abstraction
-///        that scales as a fleet grows. Per-channel (block ids are only
-///        meaningful within their own channel), not the shared store.
-///        Renumbered from an earlier v24 — merged alongside the native-
-///        memory-version-history PR, which independently claimed v24 for
-///        an unrelated table (see that entry above for the same class of
-///        collision this codebase has hit before, e.g. v20→v22).
-///   v26 — db_agent_definitions.conversation_visibility (TEXT, default
-///        'private') + db_conversation_trust_grants: `muxspect` Phase B/C's
-///        per-agent disclosure policy for an incoming cross-tier
-///        `transcript_request` jekt (LAN/WAN conversation visibility —
-///        docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md,
-///        jekt tier rules confirmed in
-///        docs/specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md).
-///        One of "private" (default, auto-deny)/"trusted_peers" (auto-
-///        approve an allow-listed requester)/"ask" (force human
-///        escalation). Also dual-written to `db_agents` (mirrors
-///        `auto_continue_enabled`'s treatment exactly — a simple per-agent
-///        opt-in-style setting, unlike `memory_id`/`model_vendor_base_url`,
-///        which use a differently-named column there). Deliberately NOT
-///        added to `DefinitionRecordV1`'s cross-channel wire format —
-///        channel-local only, same precedent as those two fields; a
-///        cross-channel-reopened agent starts back at the safe "private"
-///        default. `db_conversation_trust_grants` mirrors
-///        `db_lan_peer_pubkey_pins`'s exact shape (own module,
-///        get/set-style methods, case-insensitive agent_id lookups).
+///   v4 — db_agents consolidation table (Phase 3a: every definition/instance write dual-writes
+///        here). Reads moved over piecemeal: the instance side in Phase 3b (#3080), every
+///        `agent_def_*` method in Phase 3d (#3092, v31); both legacy tables were dropped in v32
+///   v5 — db_agents.last_block_id (Phase 3c; the latest launch's block, so the consolidated read
+///        finds the session snapshot without joining db_agent_instances)
+///   v6 — container_image / container_volumes / container_name on db_agent_definitions and
+///        db_agents (SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md Phase 0; host agents default to '' /
+///        '[]' / '')
+///   v7 — db_muxbus_credentials: global singleton for MuxBus cloud Cognito PKCE tokens (access,
+///        refresh, id) + expiry + user email
+///   v8 — db_memory_bundles.is_global: global-tier flag for Armory bundles injected into every
+///        agent's CLAUDE.md at launch
+///   v9 — db_memory_bundles.sort_order: explicit order of the Armory global bundles (the CLAUDE.md
+///        injection order); existing rows default to 0, the Armory Global section assigns positions
+///        via reorder
+///   v10 — db_skills, db_mcp_servers, db_agent_skills_ref, db_agent_mcp_ref: standalone MCP Server
+///        and Skill primitives with per-agent ref tables
+///        (SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md)
+///   v11 — rename db_identity_accounts -> db_accounts, db_memory_bundles -> db_bundles
+///        (SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md Phase 4a,
+///        SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md)
+///   v12 — use_ambient_login on db_agent_definitions and db_agents: per-agent opt-in to the CLI's
+///        global (ambient) login when no oauth-class account resolves at spawn
+///        (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3, layer 3). Defaults to 0 (fail
+///        by default); a since-retired data migration set it to 1 for pre-existing linkless agents
+///   v13 — db_agent_credentials: per-agent M2M muxbus credential, mirroring db_muxbus_credentials
+///        in both schemas: id_store falls back to this per-channel schema on installs that haven't
+///        applied 0011_shared_store_backfill, so cloud_subscriber must not assume the shared-schema
+///        copy (v4 there) is in use
+///   v14 — db_agent_native_memory: durable mirror of each agent's native memory files, keyed by
+///        (agent_id, filename); duplicated in both schemas for the same id_store fallback reason as
+///        v13 (docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md)
+///   v15 — model_vendor_base_url on db_agent_definitions and db_agents: points a harness (CLI) at a
+///        non-default model vendor backend (e.g. ANTHROPIC_BASE_URL for a claude-provider agent),
+///        the data side of treating harness and model vendor as distinct. Defaults to '' (the
+///        harness's default vendor); settable only via `agent.define`, validated against the
+///        provider's `ProviderConfig::base_url_env_var`
+///   v16 — db_bundles.instructions_by_provider: JSON {provider_id: content} variants, additive to
+///        the flat `instructions` column (which stays "default")
+///        (docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md
+///        §2.2). Defaults to '{}'. Delivering a variant into a running agent is out of scope (that
+///        spec's non-goals): the column only makes the data storable, exportable and importable
+///   v17 — auto_continue_enabled on db_agent_definitions and db_agents: the Warden Supervisor's
+///        per-agent auto-continue opt-in (default 0). RETIRED with the Warden Supervisor: nothing
+///        reads or writes it. It stays because older builds sharing the data dir still select it
+///        (docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md)
+///   v18 — db_agent_jekt_keys: per-agent HMAC-SHA256 signing key for host-tier jekt sender
+///        verification. One row per agent_id, minted on first use and injected only into that
+///        agent's own MCP server env (AGENTMUX_JEKT_KEY), so a signature can only be produced by
+///        the agent it claims to be from (docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
+///        §2.2)
+///   v19 — db_agent_definitions.memory_id: the agent's own dedicated ABF bundle, set once at
+///        creation and never updated (agent_def_update's SET clause omits it, like
+///        is_seeded/slug/parent_id). Distinct from db_agent_instances.memory_id (a launch's bundle,
+///        which may diverge). Mirrored into db_agents as a SEPARATE default_memory_id column,
+///        because db_agents.memory_id is instance-only by convention (see db_agents' CREATE TABLE
+///        comment). Defaults to ''; the m0021 migration backfills every unbound definition with a
+///        fresh bundle (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1)
+///   v20 — db_agent_lan_keys: per-agent Ed25519 keypair for LAN-tier jekt sender verification,
+///        mirroring v18 but asymmetric: LAN is multi-party, so a receiving peer must verify without
+///        being able to forge. public_key is distributed to LAN peers on demand (not secret);
+///        private_key goes only to that agent (its MCP config's AGENTMUX_LAN_KEY and its own
+///        token-authenticated key fetch) (docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1)
+///   v21 — db_lan_peer_pubkey_pins: trust-on-first-use pin of a REMOTE agent_id's LAN public key as
+///        first seen from mDNS-discovered peers (#2588). Discovery is unauthenticated: any device
+///        can announce an agent under an existing name, so trusting whichever peer answers first
+///        lets an attacker's self-minted key be accepted for a victim's agent_id. Pinning the
+///        first-seen key and rejecting a later mismatch is the SSH-host-key mitigation for "no PKI
+///        available"; it narrows the spoofable case to a race on the first lookup
+///        (docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2)
+///   v22 — db_background_tasks: durable record of a declared long-running (`run_in_background:
+///        true`) task attached to a block, so its liveness survives `DockSnapshotCache`'s 1-hour
+///        eviction and a session reconnect/reload; the client-transcript-derived signal had no
+///        durable source of truth. Per-channel (block ids mean something only within their
+///        channel), not the shared store. Renumbered from v20 after merging with the LAN-tier
+///        signing PR, which claimed v20/v21 independently
+///        (docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md, #2492)
+///   v23 — db_bundle_skills_ref, db_bundle_mcp_ref: bundle-level references to the standalone
+///        skill/MCP-server primitives, mirroring v10's agent-level ref tables but keyed by
+///        bundle_id: composable model v2, step 1
+///        (docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, #2024 item 3). A bundle's
+///        mcp_servers/skills JSON columns are untouched (still the .abf export/import format);
+///        these tables are the live-resolution path. Deliberately NO FK to db_bundles (unlike the
+///        agent-level tables' FK to db_agent_definitions); see their CREATE TABLE comment
+///   v24 — db_agent_native_memory_versions: append-only version history for native memory content,
+///        duplicated across schemas like the v14 table (id_store per-channel fallback)
+///        (docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md)
+///   v25 — db_agent_groups: saved, named target sets for fleet control (broadcast/bulk-stop across
+///        many agent panes; docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md): a durable
+///        list of block ids under a name, since a saved group scales as a fleet grows where a raw
+///        ephemeral selection doesn't. Per-channel (block ids), not the shared store. Renumbered
+///        from v24 after colliding with the native-memory-version PR (the same collision class as
+///        v20 to v22)
+///   v26 — db_agent_definitions.conversation_visibility (TEXT, default 'private') +
+///        db_conversation_trust_grants: `muxspect` Phase B/C's per-agent disclosure policy for an
+///        incoming cross-tier `transcript_request` jekt
+///        (docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md; tier rules in
+///        docs/specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md). One of "private"
+///        (auto-deny), "trusted_peers" (auto-approve an allow-listed requester), "ask" (force human
+///        escalation). Also dual-written to `db_agents`, like `auto_continue_enabled` (a simple
+///        per-agent setting, unlike `memory_id`/`model_vendor_base_url`, which use a
+///        differently-named column there). Deliberately NOT in `DefinitionRecordV1`'s cross-channel
+///        wire format: channel-local, so a cross-channel-reopened agent starts at "private".
+///        `db_conversation_trust_grants` mirrors `db_lan_peer_pubkey_pins`' shape (own module,
+///        get/set methods, case-insensitive agent_id lookups)
 ///   v27 — db_bundles.is_system: an AgentMux-controlled, highest-priority
 ///        Global Bundle tier (INTEGER, default 0). A system row is always
 ///        also is_global=1 (enforced in code, not a CHECK constraint —
