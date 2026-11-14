@@ -24,6 +24,7 @@ import { isFailure, type Intent, type RemoteOutcome, type SelectionResult } from
 import { createSelectionTrace } from "@/app/selection/selection-trace";
 import { atoms, getApi, MOS, pushNotification, workspace } from "@/app/store/global";
 import { setActiveTab } from "@/app/store/tab-actions";
+import { afterTwoFrames } from "./after-two-frames";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ClientService, WorkspaceService } from "@/app/store/services";
@@ -146,7 +147,7 @@ function blockName(blockId: string): string {
 const twoFrames = () =>
     new Promise<void>((resolve) =>
         typeof requestAnimationFrame === "function"
-            ? requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            ? afterTwoFrames(resolve)
             : setTimeout(resolve, 32)
     );
 
