@@ -70,6 +70,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/identity/aws_broker/mint.rs", "&spec.program", 1,
      "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/srv/src/backend/app_version.rs", "\"/usr/bin/plutil\"", 1,
+     "not-windows: macOS/Linux/unix-only code path"),
     ("crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs", "&argv[0]", 1,
      "not-windows: a unix-only test runs the container turn launcher's argv"),
     ("crates/srv/src/agentmux_cli/main.rs", "&srv", 2,

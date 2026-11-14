@@ -48,7 +48,7 @@ pub struct SignupFillData {
 /// Which password fields count when telling a sign-up form's shape: those the
 /// page renders, as `signin_notice.js` counts them (`shown`), so the field it
 /// offered is the field found here. The one filled must also be [`VISIBLE`].
-const SHOWN: &str = r#"(el) => el.isConnected && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden""#;
+pub(super) const SHOWN: &str = r#"(el) => el.isConnected && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden""#;
 
 /// The field the listener offered, by its token, if it is still a visible
 /// field for a new password: marked `new-password`, the first of two password

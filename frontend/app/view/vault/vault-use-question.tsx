@@ -75,6 +75,7 @@ export function promptTitle(u: UseRequest, short = false): string {
         const from = u.import.service;
         return u.import.replaces ? `${agent} wants to replace the value of ${label} with a secret from ${from}` : `${agent} wants to copy a secret from ${from} into your Vault as ${label}`;
     }
+    if (u.account) return `${agent} wants to create an account on ${siteOf(u.origin)}`;
     if (u.signin) return `${agent} wants to sign in to ${siteOf(u.origin)} as ${short ? clip(u.field, CLIP.label) : u.field}`;
     if (u.replaces) return `${agent} wants to replace ${label} with what a command prints`;
     if (u.command) return `${agent} wants to run a command with your ${u.what}`;
@@ -86,6 +87,7 @@ function promptNote(u: UseRequest): string {
     if (u.import) return "The agent never sees the value: AgentMux reads it.";
     if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
     if (u.command) return "The agent never sees the value, and the command's output is cleaned of it.";
+    if (u.account) return "The Vault makes the password and keeps it for you. The agent never sees it. Check the site is the one you expect.";
     if (u.signin) return "The agent never sees the user name or the password. Check the site is the one you expect.";
     return "The agent never sees the value. Check the site is the one you expect.";
 }
@@ -104,7 +106,7 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
     const u = props.use;
     return (
         <Show
-            when={u.signin}
+            when={u.signin || u.account}
             fallback={
                 <p>
                     Into{" "}
@@ -128,7 +130,10 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
             }
         >
             <p>
-                The user name and password are typed into the sign-in form on <strong>{siteOf(u.origin)}</strong>
+                <Show when={u.account} fallback={<>The user name and password are typed into the sign-in form on</>}>
+                    A password the Vault makes is kept in your Vault and typed into the sign-up form on
+                </Show>{" "}
+                <strong>{siteOf(u.origin)}</strong>
                 <span class="warden-manager-dim"> ({u.origin})</span> in <Clipped text={u.agent} max={CLIP.name} />
                 's tab.
             </p>
