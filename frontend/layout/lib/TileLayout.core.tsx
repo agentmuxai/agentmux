@@ -596,8 +596,6 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
             height: `${entry.box.height}px`,
             "clip-path": REFLOW_CLIP,
             "will-change": "transform, clip-path",
-            // The dragged tile in its landing rect is the drop's own preview: not blurred as a dragged tile is.
-            filter: entry.moved ? "none" : undefined,
             // A pane being torn off has left the layout: its neighbours close over its slot. It fades over
             // the glide's own length (under reduced motion too), so its slot is never bare while they arrive.
             ...(entry.leaving && { opacity: 0 }),
@@ -688,7 +686,7 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
     return (
         <div
             class={clsx("tile-node", {
-                // Not while the pane's picture is still being taken: the picture would show the blur.
+                // The pane is being dragged. Not while its picture is still being taken (pane-capture-gate.ts).
                 dragging: isDragging() && !paneCaptureInFlight(),
                 "tear-off-offered": tearOffOffered(),
                 "tab-tear-off-offered": tabTearOffOffered(),

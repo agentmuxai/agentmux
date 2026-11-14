@@ -68,7 +68,7 @@ export interface ReflowEntry {
      * a smaller rect is running (the clip shows `rect` either way).
      */
     box: BoxSize;
-    /** The dragged pane, in its landing rect: the drop's own preview, so not blurred as a dragged tile otherwise is. */
+    /** The dragged pane, in its landing rect: the drop's own preview. */
     moved: boolean;
     /** The dragged pane while a tear-off is shown (tearOffPreview.ts): it has left the layout, so it is not shown. */
     leaving: boolean;

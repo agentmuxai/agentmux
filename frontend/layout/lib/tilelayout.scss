@@ -170,23 +170,22 @@
         height: 100%;
         isolation: isolate;
 
-        &.dragging {
-            filter: blur(8px);
-        }
+        // A dragged pane (`.dragging`) is drawn as it is wherever the layout shows it: in the place its drop
+        // would leave it, or in its own while no drop is shown. It was blurred in its own place, a rule older
+        // than the live reflow, which left it blurred only in the moments between two shown drops (the
+        // operator, 2026-11-13: "it turns blurry sometimes, not all the time").
 
         // The dragged pane's own place at the start of its drag, behind the pane in hand: a release there
         // tears the pane off, and the place says so (TearOffPlace.tsx), with nothing of the pane showing
         // through: a checkerboard of the error red and a lighter red, the AgentMux mark over it, a bit
         // transparent, and the words on top. It is over, for the rest of the drag, the first time the layout
         // shows a drop or closes over the place (`tearOffOffered`, futureLayout.ts); from then on the place is
-        // the blurred pane above, as before. The words scale with the place: `cq` units of the place itself.
+        // the pane itself. The words scale with the place: `cq` units of the place itself.
         //
         // A tab dragged out of a pane that keeps others has the same place under the pane's header
         // (`tab-tear-off-offered`, tabTearOff.ts): the place starts where the tile says (its inline `top`).
         &.tear-off-offered,
         &.tab-tear-off-offered {
-            filter: none;
-
             .tear-off-place {
                 --tear-off-light: color-mix(in srgb, var(--error-color) 68%, var(--button-color));
                 --tear-off-square: 24px;

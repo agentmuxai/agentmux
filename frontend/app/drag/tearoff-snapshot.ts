@@ -6,8 +6,8 @@
  * the window appears instead of the startup splash, until its live content
  * reveals. SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md phase 3.1.
  *
- * Taken on pointerdown on the pane's drag handle, before the drag starts: a
- * dragged pane is drawn blurred (tilelayout.scss `.dragging`), and a picture
+ * Taken on pointerdown on the pane's drag handle, before the drag starts: the
+ * drag draws over the pane (its tear-off place, tilelayout.scss), and a picture
  * taken at release would add its capture time to the tear-off. The browser
  * pane's drag catcher prewarms the same way (use-drag-snapshot.ts).
  *
