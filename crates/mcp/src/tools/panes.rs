@@ -319,6 +319,9 @@ async fn run_set_name(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
              Is this agent pane opened via AgentMux?"
         );
     }
+    if target == "file" {
+        return run_rename_file(arguments, new_name, cx).await;
+    }
     // block_id is only needed for own-context resolution; when
     // target_id is explicit we can reach any element without it.
     if target_id.is_none() && block_id.is_empty() {
@@ -355,7 +358,7 @@ async fn run_set_name(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             title: new_name.to_string(),
         })?),
         other => anyhow::bail!(
-            "invalid target '{other}' — expected one of: window, tab, pane, workspace"
+            "invalid target '{other}' — expected one of: window, tab, pane, workspace, file"
         ),
     };
     let url = format!("{}/api/v1/{path}", local_url.trim_end_matches('/'));
@@ -380,6 +383,47 @@ async fn run_set_name(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         .and_then(|v| v.get(resp_field).and_then(|s| s.as_str()).map(str::to_string))
         .unwrap_or_else(|| new_name.to_string());
     Ok(format!("{label} set to \"{applied}\""))
+}
+
+/// `rename` with target `file`: srv renames the file or folder in its folder, as the Files pane and
+/// an Editor tab do, so every Editor tab open on it follows (a rename in the agent's own shell
+/// leaves them on the old path). A refusal is srv's own sentence.
+async fn run_rename_file(arguments: &Value, name: &str, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    let path = arguments
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: path (the file or folder to rename, absolute)"))?;
+    let connection = connection_arg(arguments);
+    let req = FileRenameRequest {
+        path: path.to_string(),
+        name: name.to_string(),
+        block_id: if block_id.is_empty() { None } else { Some(block_id.to_string()) },
+        // On an SSH host: srv asks the user to allow it, checking this agent's signed identity.
+        auth: if connection.is_some() { Some(sign_ui_automation_auth()?) } else { None },
+        connection,
+    };
+    let url = format!("{}/api/v1/file/rename", local_url.trim_end_matches('/'));
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if !status.is_success() {
+        match reply.get("error").and_then(|e| e.as_str()) {
+            Some(why) => anyhow::bail!("{why}"),
+            None => anyhow::bail!("File rename failed: HTTP {status} — {text}"),
+        }
+    }
+    let new_path = reply.get("new_path").and_then(|p| p.as_str()).unwrap_or(name);
+    Ok(format!("Renamed {path} to {new_path}. Editor tabs open on it follow."))
 }
 
 async fn run_layout(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

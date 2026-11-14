@@ -145,12 +145,14 @@ pub mod reason {
     pub const JOB_CAP: &str = "job_cap";
     /// The same for the account the run would use.
     pub const ACCOUNT_CAP: &str = "account_cap";
+    /// An event job already started its `max_per_hour` runs in the last hour: the event is skipped.
+    pub const RATE: &str = "rate";
     /// A `message` job reached its messages a day to another agent.
     pub const MESSAGE_CAP: &str = "message_cap";
     /// The run was stopped at its per-run cap.
     pub const RUN_CAP: &str = "run_cap";
     /// The skips a cap makes: the once-a-day alert and "over cap today".
-    pub const CAPS: [&str; 3] = [JOB_CAP, ACCOUNT_CAP, MESSAGE_CAP];
+    pub const CAPS: [&str; 4] = [JOB_CAP, ACCOUNT_CAP, MESSAGE_CAP, RATE];
     /// The reasons a `scheduled` run waits to start with.
     pub const WAITING: [&str; 5] = [OVERLAP, GROUP_BUSY, GLOBAL_LIMIT, RETRY_WAIT, DELAY_WAIT];
 }

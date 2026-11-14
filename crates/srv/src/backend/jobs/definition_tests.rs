@@ -81,14 +81,17 @@ fn an_event_trigger_is_a_source_and_a_plain_filter_on_a_drone_job() {
     let mut ok = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" }));
     ok["policy"] = json!({ "overlap": "skip" });
     let with_trigger = |trigger: Value| with(ok.clone(), "/trigger", trigger);
-    let def = JobDefinition::parse(&with_trigger(json!({ "kind": "event", "source": "app_event", "filter": { "event": "job.finished", "outcome": "failed" } })), create()).unwrap();
+    let def = JobDefinition::parse(&with_trigger(json!({ "kind": "event", "source": "app_event", "filter": { "event": "agent.turn_ended", "outcome": "errored" } })), create()).unwrap();
     let Trigger::Event(event) = &def.trigger else { panic!("{:?}", def.trigger) };
     assert_eq!((event.source.as_str(), event.filter.len()), ("app_event", 2));
     assert_eq!(def.trigger.kind(), trigger_kind::EVENT);
-    // A filter is optional, and every source this build has is accepted.
+    // A filter is optional, and every source this build has is accepted (an app event names its event).
     for source in event_source::ALL {
-        assert!(JobDefinition::parse(&with_trigger(json!({ "kind": "event", "source": source })), create()).is_ok(), "{source}");
+        let filter = if source == event_source::APP_EVENT { json!({ "event": "agent.crashed" }) } else { json!({}) };
+        assert!(JobDefinition::parse(&with_trigger(json!({ "kind": "event", "source": source, "filter": filter })), create()).is_ok(), "{source}");
     }
+    let named = refused(with_trigger(json!({ "kind": "event", "source": "app_event" })));
+    assert!(named.contains("names its event"), "an app event job says which event: {named}");
     let bad = |trigger: Value| refused(with_trigger(trigger));
     assert!(bad(json!({ "kind": "event" })).contains("source"), "a source is required");
     assert!(bad(json!({ "kind": "event", "source": "github" })).contains("not one of"));
@@ -100,8 +103,10 @@ fn an_event_trigger_is_a_source_and_a_plain_filter_on_a_drone_job() {
     assert!(bad(json!({ "kind": "event", "source": "app_event", "filter": many })).contains("at most"));
     assert!(bad(json!({ "kind": "event", "source": "app_event", "delay": MAX_EVENT_DELAY_MINUTES + 1 })).contains("delay is at most"), "a delay is at most a week");
     assert!(bad(json!({ "kind": "event", "source": "app_event", "delay": -1 })).len() > 0, "and never negative");
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "max_per_hour": 0 })).contains("max_per_hour is 1 to"), "a limit of none is not a limit");
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "max_per_hour": MAX_EVENT_RATE_PER_HOUR + 1 })).contains("max_per_hour is 1 to"));
     // Only a drone is handed an event.
-    let e = refused(with(example(), "/trigger", json!({ "kind": "event", "source": "app_event" })));
+    let e = refused(with(example(), "/trigger", json!({ "kind": "event", "source": "app_event", "filter": { "event": "agent.crashed" } })));
     assert!(e.contains("the action is a drone"), "{e}");
     let e = refused(with(example(), "/policy/approval", json!("operator")));
     assert!(e.contains("policy.approval") && e.contains(LATER), "{e}");
@@ -125,11 +130,19 @@ fn an_event_trigger_survives_the_stored_row() {
     assert_eq!(job.trigger_event, json!({ "source": "file_watch", "filter": { "glob": "*.log" } }));
     assert_eq!(JobDefinition::from_job(&job).trigger, def.trigger);
     // A delay is stored with it, and read back; none is not written.
-    let delayed = JobDefinition::parse(&with(example_drone(), "/trigger", json!({ "kind": "event", "source": "app_event", "delay": 30 })), create()).unwrap();
+    let delayed = JobDefinition::parse(&with(example_drone(), "/trigger", json!({ "kind": "event", "source": "app_event", "filter": { "event": "agent.crashed" }, "delay": 30 })), create()).unwrap();
     let mut row = CronJob::default();
     delayed.apply_to(&mut row, &|to| (to.to_string(), String::new()));
-    assert_eq!(row.trigger_event, json!({ "source": "app_event", "filter": {}, "delay": 30 }));
+    assert_eq!(row.trigger_event, json!({ "source": "app_event", "filter": { "event": "agent.crashed" }, "delay": 30 }));
     assert_eq!(JobDefinition::from_job(&row).trigger, delayed.trigger);
+    // The hourly limit is stored when it is not the default, and read back as the default when absent.
+    let limited = JobDefinition::parse(&with(example_drone(), "/trigger", json!({ "kind": "event", "source": "app_event", "max_per_hour": 5 })), create()).unwrap();
+    limited.apply_to(&mut row, &|to| (to.to_string(), String::new()));
+    assert_eq!(row.trigger_event, json!({ "source": "app_event", "filter": {}, "max_per_hour": 5 }));
+    assert_eq!(JobDefinition::from_job(&row).trigger, limited.trigger);
+    row.trigger_event = json!({ "source": "app_event", "filter": {} });
+    let Trigger::Event(read) = JobDefinition::from_job(&row).trigger else { panic!("an event trigger") };
+    assert_eq!(read.max_per_hour, DEFAULT_EVENT_RATE_PER_HOUR);
     // Edited to a timer, the event is gone from the row.
     let mut timer = def.clone();
     timer.trigger = Trigger::Every { seconds: 3600 };

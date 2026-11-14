@@ -128,6 +128,10 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
         backend::jobs::paused::spawn(jobs_store, run_ledger.clone());
     }
     state.cron_scheduler.install_runs(run_ledger);
+    // An `app_event` job's runs start when the broker reports the event it names.
+    if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
+        backend::jobs::app_events::spawn(&state.broker, state.mstore.clone(), jobs_store, state.cron_scheduler.clone());
+    }
 
     // Start persistent cron scheduler — load enabled jobs from DB, fire any
     // that missed their window (FIRE_ONCE_NOW), schedule all for future fires.
