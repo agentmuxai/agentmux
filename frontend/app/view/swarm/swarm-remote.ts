@@ -15,6 +15,7 @@
 import { formatAgoPrecise } from "@/util/format-time";
 import type { UnavailableReason } from "@/app/store/agent-status";
 import type { AgentDisplayStatus } from "./swarm-view";
+import type { RuntimeKind } from "@/types/rpc/RuntimeKind";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
 
 /** An agent's state as its own instance reports it (srv `agent_state::AgentState`). */
@@ -41,6 +42,9 @@ export interface RemoteAgent {
     account?: string;
     /** This computer's own label for that account, when the same account is signed in here. */
     account_label?: string;
+    /** Where it runs, as its instance reports it (`agent_kinds`). Absent when that instance said
+     *  nothing (an older build): show no kind then, never a guess. */
+    runtime?: RuntimeKind;
 }
 
 export interface RemoteChannel {

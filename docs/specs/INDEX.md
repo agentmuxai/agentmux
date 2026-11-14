@@ -1153,6 +1153,7 @@ partial list.
 | [`SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05`](SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05.md) | SPEC: Practice time for building computer-use skills, and two new ones: Voicemeeter and Cantabile |
 | [`SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13`](SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md) | SPEC — Consolidate Forge + Identity into the Agent Pane |
 | [`SPEC_CONTAINER_PANE_SUPPORT_2026_06_11`](SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) | SPEC: Container Pane Support |
+| [`SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14`](SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14.md) | Spec: Container status in the frontend: each agent's runtime kind, and a live list of this machine's agent containers |
 | [`SPEC_CONTEXT_VISIBILITY_2026_06_17`](SPEC_CONTEXT_VISIBILITY_2026_06_17.md) | SPEC: Context & Token Visibility — what we can show the user, and how |
 | [`SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25`](SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md) | Cron & Loop Robustness — Research + Design |
 | [`SPEC_CROSS_PROCESS_DISPATCH_2026-05-01`](SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md) | Cross-Process Dispatch — Launcher → Host Command Pipe |
