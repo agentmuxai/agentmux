@@ -280,6 +280,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_reference_may_carry_filters_in_both_forms() {
+        let scope = scope_with(json!({ "a": { "log": "all fine\nERROR disk full", "body": r#"{"n":3,"s":"ABC"}"# } }));
+        assert_eq!(ask("{{a.log | tail:1}} contains 'ERROR'", &scope).await, Ok(true));
+        assert_eq!(ask("{{a.log | head:1}} contains 'ERROR'", &scope).await, Ok(false));
+        assert_eq!(ask("{{a.body | json:n}} > 2 && {{a.body | json:s | lower}} == 'abc'", &scope).await, Ok(true));
+        assert_eq!(ask("exists({{a.body | json:gone}}) || {{a.missing | default:none}} == 'none'", &scope).await, Ok(true));
+        assert_eq!(ask("{{a.log | trunc:3}} == all", &scope).await, Ok(true), "the simple form reads filters too");
+    }
+
+    #[tokio::test]
     async fn the_simple_form_keeps_its_reading_with_bare_words() {
         let mut scope = ExecutionScope::new();
         scope.outputs.insert("a".to_string(), json!({ "response": "OK!" }));
