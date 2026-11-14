@@ -288,19 +288,29 @@ $gap: 6px;
             left: 3px;
         }
 
+        // The kit's close button, on the tile's top-right corner. It keeps a round chip (border + fill) so it reads over a
+        // thumbnail; the kit supplies the size, the colour and the red hover, and the chip's border follows the fill.
+        // It sits inside the tile's box: the tile's `content-visibility: auto` clips anything drawn outside it.
         &__remove.ui-close {
             position: absolute;
-            top: -6px;
-            right: -6px;
-            width: 18px;
-            height: 18px;
+            top: 3px;
+            right: 3px;
             border: 1px solid var(--border-color);
             border-radius: 50%;
             background: var(--main-bg-color);
-            color: var(--secondary-text-color);
-            font-size: var(--text-2xs);
             opacity: 0;
             transition: opacity var(--duration-decorative-instant) linear;
+
+            // The chip's own fill is set above, so the kit's red has to be set again here to win over it.
+            &:hover:not(:disabled) {
+                border-color: var(--window-close-hover-bg);
+                background: var(--window-close-hover-bg);
+            }
+
+            &:active:not(:disabled) {
+                border-color: var(--window-close-press-bg);
+                background: var(--window-close-press-bg);
+            }
         }
 
         &:hover .agent-attachment-tile__remove,
