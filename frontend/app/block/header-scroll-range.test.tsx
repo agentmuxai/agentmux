@@ -6,7 +6,8 @@
  * range does not scroll itself, so its reveal scrolls the range. A selection, a narrowed pane, the
  * pane taking the focus and a click or a key in the pane bring the active tab back, clear of the
  * range's 20 px fade; the person's own scroll of the range, a press on one of its controls and a
- * control in it that holds the keyboard focus are left alone.
+ * control in it that holds the keyboard focus are left alone. A pane draws a new header for each tab it shows:
+ * the new one starts where the last was scrolled to, and the tab travels from there.
  *
  * jsdom has no layout, so the range's geometry is a small model (tabs of a fixed width, then the
  * "+" and a control) behind stubbed `scrollWidth`, `scrollLeft` and `getBoundingClientRect`, and
@@ -14,13 +15,14 @@
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const motion = vi.hoisted(() => ({ reduced: true }));
 vi.mock("@/app/motion/motion", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/app/motion/motion")>()),
-    // Every reveal is an instant write: the tween has its own tests (strip-reveal.test.ts).
-    shouldReduceMotion: () => true,
+    // A reveal is an instant write unless a test says otherwise: the tween has its own tests (strip-reveal.test.ts).
+    shouldReduceMotion: () => motion.reduced,
 }));
 
 import { installPaneInteractionReveal, revealPaneStrips } from "@/app/element/pane-strip-registry";
@@ -38,11 +40,13 @@ const MAX = SCROLL_W - CLIENT_W;
 
 let frames = new Map<number, FrameRequestCallback>();
 let nextFrame = 1;
+/** The time the frames run at. */
+let frameAt = 0;
 function flush(): void {
     for (let i = 0; i < 12 && frames.size; i++) {
         const batch = [...frames.values()];
         frames = new Map();
-        for (const cb of batch) cb(0);
+        for (const cb of batch) cb(frameAt);
     }
 }
 
@@ -65,8 +69,11 @@ const range = { el: undefined as HTMLElement | undefined, value: 0, writes: [] a
 let rectSpy: ReturnType<typeof vi.spyOn>;
 let now: ReturnType<typeof vi.spyOn>;
 
+/** Gives a new range its layout: at its start, as a new element is. */
 function stubRange(el: HTMLElement): void {
     range.el = el;
+    range.value = 0;
+    range.writes = [];
     const fixed = (n: number) => ({ get: () => n, configurable: true });
     Object.defineProperty(el, "scrollWidth", fixed(SCROLL_W));
     Object.defineProperty(el, "clientWidth", fixed(CLIENT_W));
@@ -85,6 +92,8 @@ function stubRange(el: HTMLElement): void {
 beforeEach(() => {
     frames = new Map();
     nextFrame = 1;
+    frameAt = 0;
+    motion.reduced = true;
     resizeCallbacks = [];
     range.el = undefined;
     range.value = 0;
@@ -121,38 +130,73 @@ function isRevealed(i: number): boolean {
     return left >= leftFade && left + TAB_W <= CLIENT_W - rightFade;
 }
 
-function mountHeader(active = "t5") {
-    const ids = Array.from({ length: TABS }, (_, i) => `t${i}`);
+const IDS = Array.from({ length: TABS }, (_, i) => `t${i}`);
+
+/** One header: its tab strip, built before the header around it as PaneHeaderTabStrip builds it, in the range. */
+function Header(props: { active: string }): JSX.Element {
+    let header!: HTMLDivElement;
+    const strip = (
+        <PaneTabStrip tabs={IDS} activeId={props.active} getId={(id) => id} getLabel={(id) => id} onActivate={() => {}} onAdd={() => {}} />
+    );
+    const scroll = useHeaderScrollRange(() => header);
+    return (
+        <div class="header" ref={header}>
+            <div
+                class="block-frame-header-scroll"
+                ref={(el) => {
+                    stubRange(el);
+                    scroll.setRange(el);
+                }}
+            >
+                {strip}
+                <button class="aux">aux</button>
+            </div>
+            <button class="pinned">minimize</button>
+        </div>
+    );
+}
+
+/**
+ * A pane with its header. `perTab`: the pane draws a new header for each tab it shows, as PaneChrome does; without
+ * it one header stays and only its selection changes.
+ */
+function mountHeader(active = "t5", perTab = false) {
     const [activeId, setActiveId] = createSignal(active);
     let root!: HTMLDivElement;
-    let header!: HTMLDivElement;
     render(() => {
-        // Built before the header around it, as PaneHeaderTabStrip builds it.
-        const strip = (
-            <PaneTabStrip tabs={ids} activeId={activeId()} getId={(id) => id} getLabel={(id) => id} onActivate={() => {}} onAdd={() => {}} />
-        );
-        const scroll = useHeaderScrollRange(() => header);
         onMount(() => onCleanup(installPaneInteractionReveal(root)));
         return (
             <div data-role="pane" ref={root}>
-                <div class="header" ref={header}>
-                    <div class="block-frame-header-scroll" ref={scroll.setRange}>
-                        {strip}
-                        <button class="aux">aux</button>
-                    </div>
-                    <button class="pinned">minimize</button>
-                </div>
+                <Show when={perTab} fallback={<Header active={activeId()} />}>
+                    <Show when={activeId()} keyed>
+                        {(id) => <Header active={id} />}
+                    </Show>
+                </Show>
                 <textarea class="content" />
             </div>
         );
     });
-    const el = root.querySelector<HTMLElement>(".block-frame-header-scroll")!;
-    stubRange(el);
-    // Let the range's scroll edges measure the stubbed layout, then run the mount reveal.
-    el.dispatchEvent(new Event("scroll"));
-    flush();
     const q = (selector: string) => root.querySelector<HTMLElement>(selector)!;
-    return { root, header, el, content: q(".content"), aux: q(".aux"), pinned: q(".pinned"), setActiveId };
+    /** Lets the range's scroll edges measure the stubbed layout, then runs the reveal that waits. */
+    const settle = () => {
+        q(".block-frame-header-scroll").dispatchEvent(new Event("scroll"));
+        flush();
+    };
+    settle();
+    return {
+        root,
+        header: q(".header"),
+        el: q(".block-frame-header-scroll"),
+        content: q(".content"),
+        aux: q(".aux"),
+        pinned: q(".pinned"),
+        setActiveId,
+        /** Selects another tab, and lets the header that follows settle. */
+        select: (id: string) => {
+            setActiveId(id);
+            settle();
+        },
+    };
 }
 
 /** The person wheels the header by `dy` px. */
@@ -260,5 +304,49 @@ describe("the header's scroll range is left where the person put it", () => {
         h.setActiveId("t2");
         flush();
         expect(isRevealed(2)).toBe(true);
+    });
+});
+
+describe("a pane that draws a new header for each tab it shows", () => {
+    it("starts the new header where the last one was, and brings the tab in by the least from there", () => {
+        const h = mountHeader("t9", true);
+        expect(range.value).toBe(toRight(9));
+        h.select("t6");
+        // From the header's start it would have come in from the right, to 420.
+        expect(range.writes).toEqual([toRight(9), 6 * TAB_W - FADE]);
+        expect(isRevealed(6)).toBe(true);
+    });
+
+    it("leaves the header where it was when the tab picked is already in view", () => {
+        const h = mountHeader("t9", true);
+        h.select("t8");
+        expect(range.writes).toEqual([toRight(9)]);
+        expect(isRevealed(8)).toBe(true);
+    });
+
+    it("the tab travels there: a selection, not a jump", () => {
+        const h = mountHeader("t9", true);
+        motion.reduced = false;
+        h.select("t6");
+        // On its way: nothing has moved in the frames of the instant it starts.
+        expect(range.value).toBe(toRight(9));
+        frameAt = 10_000;
+        flush();
+        expect(range.value).toBe(6 * TAB_W - FADE);
+    });
+
+    it("has nothing to take over from a header at its start", () => {
+        const h = mountHeader("t0", true);
+        h.select("t7");
+        expect(range.writes).toEqual([toRight(7)]);
+    });
+
+    it("takes over where the person scrolled the last one to", () => {
+        const h = mountHeader("t0", true);
+        wheel(h.header, 500);
+        h.select("t6");
+        // 500 shows 520 to 780 clear of the fades: t6 (600 to 700) is in view, so the header stays.
+        expect(range.writes).toEqual([500]);
+        expect(isRevealed(6)).toBe(true);
     });
 });

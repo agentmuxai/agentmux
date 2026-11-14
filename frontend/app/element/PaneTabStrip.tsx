@@ -296,7 +296,10 @@ function createStripState<T>(props: PaneTabStripProps<T>) {
     registerStripWithPane(scrollBox, reveal);
     onMount(() => {
         const box = outer();
-        if (box) onCleanup(box.scroller.onUserScroll(reveal.noteUserScroll));
+        if (!box) return;
+        onCleanup(box.scroller.onUserScroll(reveal.noteUserScroll));
+        // The box starts where the pane's last header was: the tab the person picked travels from there.
+        onCleanup(box.scroller.onCarried(() => reveal.request("selected")));
     });
     // A new selection may leave the strip where it was (already flush, or hidden until shown): measure the fade again.
     const shown = () => windowDisplayed() && (blockVisibility?.() ?? "active") === "active";

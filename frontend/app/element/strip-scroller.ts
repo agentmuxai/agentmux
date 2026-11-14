@@ -16,6 +16,9 @@ export interface StripScroller {
     edgeFadePx: number;
     /** Calls `fn` when the person scrolls the box themselves (a wheel, a touch). Returns the removal. */
     onUserScroll(fn: () => void): () => void;
+    /** Calls `fn` when the box starts scrolled to where the box before it was (a pane draws a new header for
+     *  each tab it shows): the reveal that follows is a selection's. Returns the removal. */
+    onCarried(fn: () => void): () => void;
 }
 
 const SCROLLER_ATTR = "data-strip-scroller";
