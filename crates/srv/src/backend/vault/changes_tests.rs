@@ -88,7 +88,7 @@ fn a_change_the_site_took_makes_a_sign_in_it_had_turned_down_offered_again() {
     let row = saved(&s, "alex", "old");
     let mut tags = signins::tags_of(&row);
     tags.push(signins::REFUSED.to_string());
-    super::update(&s, EntryChange { id: row.id.clone(), label: row.label.clone(), fields: signins::fields_of(&row), tags, parts: Parts::default(), clear: Vec::new() }).unwrap();
+    super::super::update(&s, EntryChange { id: row.id.clone(), label: row.label.clone(), fields: signins::fields_of(&row), tags, parts: Parts::default(), clear: Vec::new() }).unwrap();
     let row = s.vault_get(&row.id).unwrap().unwrap();
     assert!(!signins::offered(&row));
     start(&s, &row, "new", "Agent1").unwrap();
