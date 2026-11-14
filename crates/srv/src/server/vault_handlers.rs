@@ -151,6 +151,12 @@ fn entry_ops(store: &crate::backend::storage::store::Store, op: &str, body: &Val
             vault::vaults::set_signin_vault(store, &s("profile"), &s("vault_id"))?;
             Ok((json!({}), true))
         }
+        // The person's pick in Settings of the entry a setting reads its key from: the grant that lets srv
+        // read it for that setting (a setting that only names an entry reads nothing).
+        "allow_setting" => {
+            vault::setting_key::allow(store, &s("entry_id"), &s("setting"), vault::PERSON)?;
+            Ok((json!({}), true))
+        }
         // An entry's earlier values, and putting one back (spec §4.4 of the generate spec).
         "versions" => Ok((json!({ "versions": vault::versions::list(store, &s("id"))? }), false)),
         // An entry's history, and whether the record of it still holds together (the History dialog).
@@ -228,7 +234,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "versions" | "restore" | "history" | "history_check" => entry_ops(&store, &op, &body),
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "allow_setting" | "versions" | "restore" | "history" | "history_check" => entry_ops(&store, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {

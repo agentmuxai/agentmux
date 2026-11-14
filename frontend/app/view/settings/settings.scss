@@ -1070,3 +1070,37 @@
         gap: var(--space-2);
     }
 }
+
+// A settings key kept in the Vault: the picker and its add button side by side, wrapping under each other when narrow.
+.setting-vault-key {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 0;
+    max-width: 100%;
+}
+
+.setting-vault-key-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    max-width: 100%;
+
+    // A long entry label shortens the picker instead of pushing it out of the row; the button's words wrap
+    // when the row is too narrow for them.
+    > * {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .setting-select {
+        flex: 1 1 12rem;
+        text-overflow: ellipsis;
+    }
+
+    .ui-button {
+        white-space: normal;
+    }
+}

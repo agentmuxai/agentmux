@@ -29,6 +29,7 @@ pub mod endpoint_key;
 pub mod route_key;
 pub mod scrub;
 pub mod seal;
+pub mod setting_key;
 pub mod signins;
 pub mod signups;
 pub mod slots;

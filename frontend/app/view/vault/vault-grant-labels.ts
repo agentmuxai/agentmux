@@ -19,9 +19,20 @@ export function signinGrantLabel(grant: string): string {
     return origin ? `${agent} on ${siteOf(origin)}` : agent;
 }
 
-/** A grant for a site, not one for an agent's commands or sign-ins. */
+/** A setting's right to read the entry (an API key kept for it) is stored as `setting:<settings key>`. */
+export const SETTING_GRANT = "setting:";
+
+const SETTING_NAMES: Record<string, string> = { "voice:groqApiKey": "Voice input's Groq key" };
+
+/** `setting:voice:groqApiKey` as a person reads it: `Voice input's Groq key`. */
+export function settingGrantLabel(grant: string): string {
+    const key = grant.slice(SETTING_GRANT.length);
+    return SETTING_NAMES[key] ?? key;
+}
+
+/** A grant for a site, not one for an agent's commands or sign-ins, or for a setting. */
 export function isSiteGrant(grant: string): boolean {
-    return !grant.startsWith(COMMAND_GRANT) && !grant.startsWith(SIGNIN_GRANT);
+    return !grant.startsWith(COMMAND_GRANT) && !grant.startsWith(SIGNIN_GRANT) && !grant.startsWith(SETTING_GRANT);
 }
 
 /** `command:<agent>:<part>` as a person reads it: `Agent1 (value)`. */
@@ -34,5 +45,6 @@ export function commandGrantLabel(grant: string): string {
 /** A grant as a person reads it, in the list of what an agent may do without asking. */
 export function grantText(g: string): string {
     if (g.startsWith(COMMAND_GRANT)) return `runs commands: ${commandGrantLabel(g)}`;
+    if (g.startsWith(SETTING_GRANT)) return `read by a setting: ${settingGrantLabel(g)}`;
     return g.startsWith(SIGNIN_GRANT) ? `signs in: ${signinGrantLabel(g)}` : siteOf(g);
 }
