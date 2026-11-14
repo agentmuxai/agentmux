@@ -16,6 +16,7 @@ const rpc = vi.hoisted(() => ({
     SkillCatalogAppScriptCommand: vi.fn(),
     SkillCatalogExportCommand: vi.fn(),
     AppSkillsHereCommand: vi.fn(),
+    KanbanActCommand: vi.fn(),
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -280,6 +281,62 @@ describe("Signature and script approval", () => {
         expect(text).toContain("verified 16.0");
         expect(text).not.toContain("installed");
         expect(text).not.toContain("not found here");
+    });
+
+    describe("Run test", () => {
+        const testJson = { path: "test.json", bytes: 700, script: false, approved: false, image: false, sha256: "a".repeat(64) };
+        const withTest = (over: Record<string, unknown> = {}) =>
+            rpc.SkillCatalogListCommand.mockResolvedValue([skill({ app: app({ files: [testJson], ...over }) }), plain()]);
+        const open = async () => {
+            rpc.ListAgentDefinitionsCommand.mockResolvedValue([{ id: "a1", name: "Posa" }, { id: "a2", name: "Parlo" }]);
+            render(() => <SkillManager />);
+            fireEvent.click(await screen.findByText("acme-word"));
+            return screen.findByRole("region", { name: "App skill" });
+        };
+
+        it("is not offered for a skill without a test task", async () => {
+            const detail = await openDetail();
+            expect(within(detail).queryByRole("button", { name: "Run test" })).toBeNull();
+        });
+
+        it("files a normal task for the agent the person picks, and does not run anything itself", async () => {
+            withTest();
+            rpc.AppSkillsHereCommand.mockResolvedValue({ items: [{ skill_id: "k1", found: true, version: "16.0.18227" }] });
+            rpc.KanbanActCommand.mockResolvedValue({ ok: true, num: 7 });
+            const detail = await open();
+            fireEvent.click(within(detail).getByRole("button", { name: "Run test" }));
+            const panel = await within(detail).findByRole("group", { name: "Run test" });
+            expect(within(panel).getByRole("button", { name: "File the task" }).hasAttribute("disabled")).toBe(true);
+            fireEvent.change(within(panel).getByLabelText("Agent to run the test"), { target: { value: "Posa" } });
+            fireEvent.click(within(panel).getByRole("button", { name: "File the task" }));
+            await vi.waitFor(() => expect(rpc.KanbanActCommand).toHaveBeenCalledTimes(1));
+            const req = rpc.KanbanActCommand.mock.calls[0][1];
+            expect(req).toMatchObject({ action: "create", agent: "Posa", review: false, title: "Run the test of Word 1.0.0 on Windows" });
+            expect(req.payload).toContain("Skills get skill_id=k1 file=test.json");
+            expect(req.payload).toContain("AgentMux found Word 16.0.18227 on this computer");
+            expect(req.payload).toContain("Skills record skill_id=k1 skill_version=1.0.0 app_version=<the version you confirmed> platform=windows");
+            expect(await within(detail).findByText(/Task #7 filed for Posa/)).toBeTruthy();
+            expect(within(detail).queryByRole("group", { name: "Run test" })).toBeNull();
+        });
+
+        it("says so, and offers nothing to click, when the app is not on this computer", async () => {
+            withTest();
+            rpc.AppSkillsHereCommand.mockResolvedValue({ items: [{ skill_id: "k1", found: false, version: null }] });
+            const detail = await open();
+            await vi.waitFor(() => expect(within(detail).getByRole("button", { name: "Run test" }).hasAttribute("disabled")).toBe(true));
+            expect(detail.textContent).toContain("Word is not found on this computer: install it first.");
+        });
+
+        it("shows a refusal and files nothing twice", async () => {
+            withTest();
+            rpc.KanbanActCommand.mockRejectedValue(new Error("the board is read-only"));
+            const detail = await open();
+            fireEvent.click(within(detail).getByRole("button", { name: "Run test" }));
+            const panel = await within(detail).findByRole("group", { name: "Run test" });
+            fireEvent.change(within(panel).getByLabelText("Agent to run the test"), { target: { value: "Parlo" } });
+            fireEvent.click(within(panel).getByRole("button", { name: "File the task" }));
+            expect((await within(detail).findByRole("alert")).textContent).toContain("the board is read-only");
+        });
     });
 
     it("says it is from the AgentMux catalog, in the detail and in the script's review, only when it is exactly what the catalog listed", async () => {

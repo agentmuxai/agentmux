@@ -299,7 +299,7 @@ function SkillReadOnly(p: { m: ManagerState; skill: Accessor<SkillCatalogItem> }
                     ? "Used by every agent"
                     : `Used by ${skill().bound_count} ${skill().bound_count === 1 ? "agent" : "agents"}`}
             </p>
-            <Show when={skill().app}>{(app) => <SkillAppDetail skillId={skill().id} app={app()} here={p.m.appHere()[skill().id]} />}</Show>
+            <Show when={skill().app}>{(app) => <SkillAppDetail skillId={skill().id} app={app()} here={p.m.appHere()[skill().id]} agents={model.agentsAtom()} />}</Show>
             <SkillReach model={model} skill={skill()} />
             <SkillBoundAgents model={model} skill={skill()} />
             <Show when={skill().source}>
