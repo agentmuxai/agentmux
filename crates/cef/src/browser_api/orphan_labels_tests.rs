@@ -74,6 +74,21 @@ fn a_label_around_its_field_is_not_repeated_whatever_the_field_name_adds() {
 }
 
 #[test]
+fn a_label_around_a_field_with_a_value_is_not_repeated_for_the_value() {
+    // <label>Your name <input value="Lark"></label>: the value's text is the field's, not the label's.
+    let mut nodes = vec![
+        node("1", "RootWebArea", "t", &["5"]),
+        node("5", "generic", "", &["6"]),
+        node("6", "LabelText", "", &["10", "7"]),
+        node("7", "textbox", "Your name", &["11"]),
+    ];
+    nodes.extend(text("10", "Your name"));
+    nodes.extend(text("11", "Lark"));
+    assert!(matches!(open_orphans(&nodes), Cow::Borrowed(_)));
+    assert_eq!(shown(&nodes).matches("Your name").count(), 1);
+}
+
+#[test]
 fn a_legend_the_group_is_named_by_is_not_repeated() {
     let mut nodes = vec![
         node("1", "RootWebArea", "t", &["5"]),
