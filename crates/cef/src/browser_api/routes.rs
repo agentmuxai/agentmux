@@ -813,7 +813,6 @@ pub async fn dispatch_key(
             let _ = cdp.close().await;
             return ok_body(ApiResponse::err(format!("CDP Input.insertText: {e}")));
         }
-        super::filled::mark_active(&mut cdp).await;
     } else if let Some(key) = &req.key {
         let (key_name, code, windows_virtual_key_code) = match key.as_str() {
             "Enter" => ("Enter", "Enter", 13),
@@ -856,6 +855,7 @@ pub async fn dispatch_key(
         }
     }
 
+    if writes { super::filled::mark_active(&mut cdp).await; }
     let after = match before {
         Some(_) => Some(super::page_state::focused_state(&mut cdp).await),
         None => None,
