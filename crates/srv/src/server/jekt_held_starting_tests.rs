@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::backend::reactive::controller_wait::{testing, NO_CONTROLLER};
-use crate::backend::reactive::types::SenderDelivery;
+use crate::backend::reactive::types::{InjectionRequest, SenderDelivery};
 use crate::backend::storage::agents::test_agent_def;
 use crate::server::tests::test_state;
 
