@@ -455,3 +455,97 @@ fn permanent_delete_removes_files_and_folders() {
     assert!(!file.exists() && !sub.exists());
     assert!(delete_permanently(&s(&file)).is_err(), "already gone");
 }
+
+#[test]
+fn a_renamed_link_keeps_its_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("target.txt");
+    std::fs::write(&target, "t").unwrap();
+    let link = dir.path().join("link.txt");
+    if !try_symlink_file(&target, &link) {
+        return;
+    }
+    let out = rename(&FsRenameReq { path: s(&link), new_name: "other.txt".into(), connection: None, block_id: None }).unwrap();
+    assert!(out.new_path.ends_with("other.txt"));
+    assert!(target.exists(), "the target keeps its name");
+    assert!(std::fs::symlink_metadata(dir.path().join("other.txt")).unwrap().file_type().is_symlink());
+    assert!(std::fs::symlink_metadata(&link).is_err(), "the link has the new name only");
+}
+
+#[test]
+fn a_rename_event_names_the_path_as_a_rename_reports_it() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+    let before = entry_display_path(&s(&dir.path().join("a.txt"))).unwrap();
+    assert!(!before.starts_with(r"\\?\"));
+    let out = rename(&FsRenameReq { path: s(&dir.path().join("a.txt")), new_name: "b.txt".into(), connection: None, block_id: None }).unwrap();
+    assert_eq!(Path::new(&before).parent(), Path::new(&out.new_path).parent(), "the same folder, spelled the same way");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_rename_in_a_folder_that_cannot_be_written_says_so() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("a.txt");
+    std::fs::write(&file, "a").unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+    let out = rename(&FsRenameReq { path: s(&file), new_name: "b.txt".into(), connection: None, block_id: None });
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Root ignores the folder's mode: there the rename goes through.
+    if let Err(err) = out {
+        assert_eq!(err, "You don't have permission to rename it.");
+        assert!(file.exists());
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn a_read_only_file_is_renamed_all_the_same() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("a.txt");
+    std::fs::write(&file, "a").unwrap();
+    let mut perms = std::fs::metadata(&file).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&file, perms).unwrap();
+    let out = rename(&FsRenameReq { path: s(&file), new_name: "b.txt".into(), connection: None, block_id: None }).unwrap();
+    assert!(out.new_path.ends_with("b.txt"));
+    // So the temp dir can be removed.
+    let renamed = dir.path().join("b.txt");
+    let mut perms = std::fs::metadata(&renamed).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&renamed, perms).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn a_file_another_program_holds_is_refused_in_words() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("a.txt");
+    std::fs::write(&file, "a").unwrap();
+    // Share nothing: what an editor or a scanner holding the file looks like.
+    let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&file).unwrap();
+    let err = rename(&FsRenameReq { path: s(&file), new_name: "b.txt".into(), connection: None, block_id: None }).unwrap_err();
+    assert_eq!(err, IN_USE);
+    assert!(file.exists());
+    drop(held);
+    rename(&FsRenameReq { path: s(&file), new_name: "b.txt".into(), connection: None, block_id: None }).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn a_rename_works_past_the_260_character_path_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut deep = dir.path().canonicalize().unwrap();
+    for _ in 0..6 {
+        deep.push("d".repeat(50));
+    }
+    std::fs::create_dir_all(&deep).unwrap();
+    std::fs::write(deep.join("a.txt"), "a").unwrap();
+    assert!(deep.join("a.txt").to_string_lossy().len() > 260);
+    let out = rename(&FsRenameReq { path: display_path(&deep.join("a.txt")), new_name: "b.txt".into(), connection: None, block_id: None }).unwrap();
+    assert!(out.new_path.ends_with("b.txt"));
+    assert!(deep.join("b.txt").exists() && !deep.join("a.txt").exists());
+}

@@ -584,6 +584,15 @@
     }
   },
   {
+    "event": "fs:renamed",
+    "payloadTs": {
+      "imports": [
+        "FileRenamedEvent"
+      ],
+      "name": "FileRenamedEvent"
+    }
+  },
+  {
     "event": "google:notice",
     "payloadTs": {
       "imports": [

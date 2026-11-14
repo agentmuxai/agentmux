@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The editor's file RPCs (read, write, list, reveal, rename, create, delete), moved out of
+//! The editor's file RPCs (read, write, list, reveal, create, delete; a rename is `fs.rename`), moved out of
 //! `register_editor_handlers` unchanged as named functions. Each mutation takes the user's home folder as a
 //! parameter, so a test can point it at a temp dir; the registration passes `dirs::home_dir()`.
 
@@ -12,7 +12,7 @@ use crate::backend::base::expand_home_dir_safe;
 use crate::backend::rpc_types::{
     CommandReadEditorFileData, CommandReadEditorFileResult, CommandWriteEditorFileData, CreateEditorDirReq,
     CreateEditorDirResult, CreateEditorFileReq, CreateEditorFileResult, DeleteEditorFileReq, DirEntry, ListEditorDirReq,
-    ListEditorDirResult, OpenInShellReq, RenameEditorFileReq, RenameEditorFileResult,
+    ListEditorDirResult, OpenInShellReq,
 };
 use crate::backend::text_encoding::DecodedFile;
 
@@ -197,25 +197,6 @@ pub(super) fn reveal_in_shell(home: &Path, cmd: &OpenInShellReq) -> Result<(), S
     Ok(())
 }
 
-/// Renames a file or folder: the name only, in the same parent directory.
-pub(super) fn rename_file(home: &Path, cmd: &RenameEditorFileReq) -> Result<RenameEditorFileResult, String> {
-    let expanded = expand_home_dir_safe(&cmd.old_path);
-    let canonical_home = home.canonicalize().map_err(|e| format!("renameeditorfile: home: {e}"))?;
-    let canonical_old = expanded.as_path().canonicalize().map_err(|e| format!("renameeditorfile: {e}"))?;
-    if !editor_may_change(&canonical_old, &canonical_home) || is_a_home(&canonical_old, &canonical_home) {
-        return Err("renameeditorfile: path outside or is the home directory".to_string());
-    }
-    if !is_plain_name(&cmd.new_name) {
-        return Err("renameeditorfile: new_name must be a plain filename".to_string());
-    }
-    let new_path = canonical_old.parent().ok_or("renameeditorfile: no parent directory")?.join(&cmd.new_name);
-    if new_path.exists() {
-        return Err("renameeditorfile: destination already exists".to_string());
-    }
-    std::fs::rename(&canonical_old, &new_path).map_err(|e| format!("renameeditorfile: {e}"))?;
-    Ok(RenameEditorFileResult { new_path: new_path.to_string_lossy().into_owned() })
-}
-
 /// Creates an empty file inside an existing directory.
 pub(super) fn create_file(home: &Path, cmd: &CreateEditorFileReq) -> Result<CreateEditorFileResult, String> {
     let expanded = expand_home_dir_safe(&cmd.parent_path);
@@ -231,8 +212,12 @@ pub(super) fn create_file(home: &Path, cmd: &CreateEditorFileReq) -> Result<Crea
     if file_path.exists() {
         return Err("createeditorfile: file already exists".to_string());
     }
-    std::fs::write(&file_path, "").map_err(|e| format!("createeditorfile: {e}"))?;
-    Ok(CreateEditorFileResult { file_path: file_path.to_string_lossy().into_owned() })
+    // Created exclusively: a file that appeared since the check above is never emptied.
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&file_path) {
+        Ok(_) => Ok(CreateEditorFileResult { file_path: file_path.to_string_lossy().into_owned() }),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err("createeditorfile: file already exists".to_string()),
+        Err(e) => Err(format!("createeditorfile: {e}")),
+    }
 }
 
 /// Creates a directory inside an existing directory.

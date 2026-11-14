@@ -1289,10 +1289,6 @@
             "method": "RenameAgentDefinitionTitleCommand"
         },
         {
-            "command": "renameeditorfile",
-            "method": "RenameEditorFileCommand"
-        },
-        {
             "command": "reorderglobalbrain",
             "method": "ReorderGlobalBundlesCommand"
         },

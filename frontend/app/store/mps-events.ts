@@ -89,6 +89,11 @@ export const WpsEvent = {
     // re-fetch via ReadEditorFileCommand. See
     // docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
     EditorFileChanged: "editor:file_changed",
+    // Fired when a file or folder is renamed through `fs.rename`, by any pane
+    // or window. Payload: `{ old_path, new_path, connection }`. Not scoped:
+    // every Editor moves its tabs on the old path to the new one. See
+    // docs/specs/SPEC_EDITOR_TAB_RENAME_2026_11_14.md §4.
+    FileRenamed: "fs:renamed",
     // Fired when a file matching a Media pane's extension filter is
     // created/modified in a directory it's watching. Payload: `{ path }` —
     // a wake signal only. See docs/specs/SPEC_MEDIA_PANE_2026_07_26.md.

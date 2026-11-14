@@ -51,6 +51,8 @@ import { createEditorDropHook, openEmptyScratch } from "./editor-drop";
 import { openPendingFiles, pendingEntryKey } from "./pending-open-files";
 import { detectLanguage } from "./editor-language";
 import { sniffUnopenable } from "./editor-sniff";
+import { errorSentence } from "./editor-rename-names";
+import { followRename, renameOnDisk } from "./editor-tab-rename";
 import { openFileInNewTab } from "@/app/util/editor-open";
 import { applyMetaPatch, migrateMediaMeta } from "./media-migration";
 import { initialTreeExpanded, META_TREE_EXPANDED } from "./tree-default";
@@ -239,6 +241,8 @@ export class EditorViewModel {
     // the same path from this same pane is idempotent.
     private _watchedPathByTab = new Map<string, string>();
     private _unsubFileChanged: () => void = () => {};
+    /** A rename by any pane or window: this pane's tabs on that file follow. */
+    private _unsubRenamed = onMuxEvent(WpsEvent.FileRenamed, (data) => followRename(this, data));
     private _disposePendingOpenFilesEffect: () => void = () => {};
 
     // Document-tab persistence (SPEC_DOCUMENT_TABS §5.3). With no tabs left,
@@ -853,7 +857,7 @@ export class EditorViewModel {
      *  tab by its (already-updated) new path and re-points the watch if it
      *  was being watched under the old one. No-op for a tab that never
      *  finished loading (never got a watch registered in the first place). */
-    private _resyncWatchAfterRename(oldPath: string, newPath: string): void {
+    _resyncWatchAfterRename(oldPath: string, newPath: string): void {
         const oldCanon = canonicalizePath(oldPath);
         const newCanon = canonicalizePath(newPath);
         const tab = snapshot(this.blockId)?.tabs.find((t) => t.filePath === newCanon);
@@ -1106,10 +1110,12 @@ export class EditorViewModel {
         dispatch(this.blockId, { type: "MarkDirty", tabId, source: "system" });
     }
 
-    /** Promote the active scratch tab to a real path (Save As). */
-    async saveFileAs(destPath: string): Promise<void> {
+    /** Promote the active scratch tab to a real path (Save As). Answers why it
+     *  failed, or null; `report: false` when the caller shows that itself (the
+     *  tab's name box) rather than the pane's error line. */
+    async saveFileAs(destPath: string, report = true): Promise<string | null> {
         const tab = this.activeTabAtom();
-        if (!tab?.isScratch || !tab.scratchId) return;
+        if (!tab?.isScratch || !tab.scratchId) return null;
         try {
             // Flush the live in-memory buffer to the scratch file on disk first.
             // MoveScratchFileCommand copies from disk, so without this step any
@@ -1138,14 +1144,11 @@ export class EditorViewModel {
             // hash update, leaving the slice with a stale hash after PromoteScratch.
             this._contentByTab.delete(tab.id);
             await this.openFile(result.file_path);
+            return null;
         } catch (e: unknown) {
-            const message = e instanceof Error ? e.message : String(e);
-            dispatch(this.blockId, {
-                type: "TabContentLoadFailed",
-                tabId: tab.id,
-                error: `Save As failed: ${message}`,
-                source: "system",
-            });
+            const message = errorSentence(e);
+            if (report) dispatch(this.blockId, { type: "TabContentLoadFailed", tabId: tab.id, error: `Save As failed: ${message}`, source: "system" });
+            return message;
         }
     }
 
@@ -1170,42 +1173,11 @@ export class EditorViewModel {
         });
     }
 
-    /** Rename a file/folder. Updates open tabs (including children for dirs) and refreshes the tree. */
+    /** Rename a file or folder from the tree. Open tabs on it, and inside it, follow
+     *  (editor-tab-rename.ts); a refusal is shown as a notice. */
     async renameFile(path: string, newName: string): Promise<void> {
-        try {
-            const result = await RpcApi.RenameEditorFileCommand(TabRpcClient, {
-                old_path: path,
-                new_name: newName,
-            });
-            // Update the exact tab for this path.
-            dispatch(this.blockId, {
-                type: "RenameFile",
-                oldPath: path,
-                newPath: result.new_path,
-                source: "system",
-            });
-            this._resyncWatchAfterRename(path, result.new_path);
-            // Also update any tabs that are children of a renamed directory.
-            // Canonicalize both paths with a trailing sep so we don't match
-            // "~/proj2" when renaming "~/proj".
-            const oldCanon = canonicalizePath(path);
-            const newCanon = canonicalizePath(result.new_path);
-            const oldPrefix = oldCanon + "/";
-            const newPrefix = newCanon + "/";
-            for (const tab of snapshot(this.blockId)?.tabs ?? []) {
-                const tabCanon = canonicalizePath(tab.filePath);
-                if (tabCanon.startsWith(oldPrefix)) {
-                    const newTabPath = newPrefix + tabCanon.slice(oldPrefix.length);
-                    dispatch(this.blockId, { type: "RenameFile", oldPath: tab.filePath, newPath: newTabPath, source: "system" });
-                    this._resyncWatchAfterRename(tab.filePath, newTabPath);
-                }
-            }
-            // Refresh the parent directory.
-            const parentPath = path.replace(/[/\\][^/\\]*$/, "") || path;
-            void this.treeModel.refreshPath(parentPath);
-        } catch (e: unknown) {
-            this.reportFileOpError("Rename", e);
-        }
+        const problem = await renameOnDisk(this, path, newName);
+        if (problem) this.reportFileOpError("Rename", new Error(problem));
     }
 
     /** Delete a file or folder, closing any open tabs that were pointing to it.
@@ -1468,6 +1440,7 @@ export class EditorViewModel {
         this._docTabsSaver.flush();
         this._disposeFileDrop();
         this._unsubFileChanged();
+        this._unsubRenamed();
         this._disposePendingOpenFilesEffect();
         for (const tabId of [...this._watchedPathByTab.keys()]) this._unwatchTab(tabId);
         _instanceHandlers.delete(this._globalHandler);

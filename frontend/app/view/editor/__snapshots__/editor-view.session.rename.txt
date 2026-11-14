@@ -1,0 +1,16 @@
+run editor:renameFile -> true
+rpc FsRename {"path":"/home/u/a.ts","new_name":"z.ts","block_id":"session<n>"}
+lsp#1 didClose /home/u/a.ts
+lsp#1 didOpen /home/u/z.ts typescript "// edit\nexport const a = 1;\n"
+rpc UnwatchEditorFile {"path":"/home/u/a.ts","block_id":"session<n>"}
+rpc WatchEditorFile {"path":"/home/u/z.ts","block_id":"session<n>"}
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+-- to another language
+run editor:renameFile -> true
+rpc FsRename {"path":"/home/u/z.ts","new_name":"z.py","block_id":"session<n>"}
+diagnostics of lsp#1 unwired
+lsp#1 state unsubscribed
+lsp#1 dispose
+rpc UnwatchEditorFile {"path":"/home/u/z.ts","block_id":"session<n>"}
+rpc WatchEditorFile {"path":"/home/u/z.py","block_id":"session<n>"}

@@ -511,8 +511,6 @@ import type { ReactiveRegistrationsResult } from "@/types/rpc/ReactiveRegistrati
 import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
 import type { RemoteSshLocation } from "@/types/rpc/RemoteSshLocation";
 import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
-import type { RenameEditorFileReq } from "@/types/rpc/RenameEditorFileReq";
-import type { RenameEditorFileResult } from "@/types/rpc/RenameEditorFileResult";
 import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
 import type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";
 import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
@@ -2425,14 +2423,6 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentDefinition> {
     return client.rpcCall("renameagentdefinitiontitle", data, opts);
-  },
-  // command "renameeditorfile"
-  RenameEditorFileCommand(
-    client: RpcClient,
-    data: RenameEditorFileReq,
-    opts?: RpcOpts
-  ): Promise<RenameEditorFileResult> {
-    return client.rpcCall("renameeditorfile", data, opts);
   },
   // command "reorderglobalbrain"
   ReorderGlobalBundlesCommand(
