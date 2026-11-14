@@ -21,7 +21,6 @@ import {
     endTabTearOff,
     holdTabTearOff,
     tabTearOffHeld,
-    tabTearOffOffered,
     tabTearOffShown,
 } from "@/layout/lib/tabTearOff";
 import { beginDrag, isUnderway, markReleased, onSessionEnded, session } from "./drag-session";
@@ -101,12 +100,15 @@ function liftTab(model: LayoutModel, blockId: string, paneKey: string): boolean 
 }
 
 /**
- * The home layout of a lifted tab's drag. The layout shows the tab only while its own place offers the tear-off
- * or a drop is shown for it (the tab itself in the landing place): anywhere else over the layout (a header it
- * would join, its own pane once it has left it) the hand carries the picture, or the tab would be nowhere.
+ * The home layout of a lifted tab's drag. The layout shows the tab only while a drop is shown for it (the tab
+ * itself in the landing place): anywhere else over the layout the hand carries the picture, or the tab would
+ * be nowhere. That is over a header it would join, over its own pane once it has left it, and over its own
+ * place while that offers the tear-off: the place is the red one then, with nothing of the tab in it (the
+ * operator, 2026-11-13: "the background is correct, but we lost the follow window, we only see a special
+ * pointer").
  */
-function tabHome(base: HomeLayout, model: LayoutModel, blockId: string): HomeLayout {
-    return { ...base, holdsPane: () => base.holdsPane() && (tabTearOffOffered(blockId) || pillPlacingIn(model)) };
+function tabHome(base: HomeLayout, model: LayoutModel): HomeLayout {
+    return { ...base, holdsPane: () => base.holdsPane() && pillPlacingIn(model) };
 }
 
 /** `paneKey` is the pane the pill belongs to; `tabId` its window tab. `blockIds` is the
@@ -119,7 +121,7 @@ export function startPaneTabDrag(blockId: string, paneKey?: string, tabId?: stri
     const model = !several && paneKey && tabId ? getLayoutModelForTabById(tabId) : undefined;
     const lifted = !!model && liftTab(model, blockId, paneKey!);
     const base = model && homeLayoutOf(model, () => isUnderway("pane-tab"));
-    const home = base && lifted ? tabHome(base, model!, blockId) : base;
+    const home = base && lifted ? tabHome(base, model!) : base;
     watchEscapeDuringDrag(!several && paneKey && tabId ? { blockId, ...(home ? { home } : {}) } : undefined);
 }
 
