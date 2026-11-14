@@ -62,3 +62,10 @@
     0%   { transform: translateX(-100%); }
     100% { transform: translateX(300%); }
 }
+
+// A line drawing itself from its start to its end. The path carries
+// `pathLength="1"` and `stroke-dasharray: 1`, so the offset is a share of it.
+@keyframes am-draw {
+    from { stroke-dashoffset: 1; }
+    to   { stroke-dashoffset: 0; }
+}

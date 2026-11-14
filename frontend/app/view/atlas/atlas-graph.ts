@@ -27,6 +27,8 @@ export interface AtlasAgent {
     machine: string;
     /** What a lead's id names: its uid, or a synthetic one for an agent of another instance. */
     agentId: string | null;
+    /** The name messages reach it by, when that is not its name (a renamed agent keeps its first one). */
+    route?: string | null;
     seat: SeatSummary | null;
     contextTokens: number | null;
     currentTool: string | null;
@@ -50,6 +52,8 @@ export interface AtlasMachine {
     platform: string | null;
     stale: boolean;
     seenAtMs: number | null;
+    /** This computer, before its host name is known: its title is a placeholder, not a name. */
+    unnamed?: boolean;
 }
 
 /** A line from a lead to the agent that reports to it. */
@@ -81,11 +85,16 @@ function splitLeadName(name: string): { name: string; host: string | null } {
 
 const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" }) === 0;
 
-/** Whether a machine's title is the host a lead names ("narko", or "narko · dev" for one of its channels). */
+/** The computer a machine is, lowercased ("narko" for "narko", and for "narko · dev", one of its channels); null when not known. */
+export function machineHost(machine: AtlasMachine | undefined): string | null {
+    if (!machine || machine.unnamed) return null;
+    return machine.title.split("·")[0].trim().toLowerCase() || null;
+}
+
+/** Whether a machine is the host a lead names. */
 function onHost(machine: AtlasMachine | undefined, host: string): boolean {
-    if (!machine) return false;
-    const first = machine.title.split("·")[0].trim();
-    return same(first, host);
+    const name = machineHost(machine);
+    return name !== null && same(name, host);
 }
 
 /**

@@ -177,6 +177,86 @@
     }
 }
 
+// What moves between agents, over the nodes: a line per message, drawn from its sender to its receiver, and a
+// dotted line per task handed over. The colour says what became of it.
+.atlas-flows {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.atlas-flow {
+    color: var(--accent-color);
+    opacity: 0.9;
+    transition: opacity var(--duration-slow) var(--ease-out);
+
+    &--waiting {
+        color: var(--secondary-text-color);
+    }
+
+    &--refused {
+        color: var(--warning-text-color);
+    }
+
+    &--task {
+        color: var(--success-text-color);
+    }
+
+    &--leaving {
+        opacity: 0;
+    }
+}
+
+.atlas-flow__line {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-dasharray: 1;
+    animation: am-draw var(--duration-pulse) var(--ease-out) both;
+
+    // A task's line is dotted, so it fades in whole.
+    .atlas-flow--task > & {
+        stroke-dasharray: 2 5;
+        animation: am-fade-in var(--duration-moderate) var(--ease-out) both;
+    }
+
+    @include mixins.when-motion-reduced(status) {
+        animation: none;
+    }
+}
+
+// Where the line lands.
+.atlas-flow__end {
+    fill: currentColor;
+}
+
+// A message whose other end is not on the map: a ring round the one that is.
+.atlas-flow__ping {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    animation: am-fade-out var(--duration-pulse) var(--ease-out) both;
+
+    @include mixins.when-motion-reduced(status) {
+        animation: none;
+        opacity: 0.6;
+    }
+}
+
+.atlas-flow__label {
+    fill: currentColor;
+    stroke: var(--main-bg-color);
+    stroke-width: 3px;
+    paint-order: stroke;
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    text-anchor: middle;
+    dominant-baseline: central;
+}
+
 .atlas-node {
     position: absolute;
     box-sizing: border-box;

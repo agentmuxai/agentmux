@@ -159,6 +159,28 @@ actions are the Swarm's own components, so nothing about reach, approval or repo
   it, so the map's top left stays where it is when the strip appears. An agent on a LAN peer gets a broadcast and
   cannot be stopped from here, exactly as in the Swarm.
 
+### 6.2 After v1: messages and task hand-overs on the map (#47554)
+
+Decision 3's second half, on the two srv events that were filed for it: `message-flow` (#7173) and `task-flow` (#7192).
+Both carry ids, hosts and times only, so the map shows that something passed between two agents and never what.
+
+- **A message** draws a line from its sender's node to its receiver's as srv handles it: the line draws itself in that
+  direction, lands on a dot, stays about 12 seconds and fades. Its colour says what became of it: the accent for
+  delivered, muted for held or queued for later, the warning colour for refused. A repeat between the same two
+  agents draws the line again; a message and its answer bow to opposite sides, so both show.
+- **One end off the map** (the other agent is stopped, filtered out, or not an agent of a machine listed, such as
+  the review bot until it has a node): a ring round the end that is, which fades.
+- **A task one agent hands another** (filed for, moved to or started on it) is a dotted line with the task's
+  number, for five minutes; at most twelve show, the oldest going first. A task the operator filed, or one for
+  anyone, has one end and draws nothing.
+- **When the pane opens** it reads srv's recent lists (`GET /api/v1/message-flow`, `/api/v1/task-flow`), so the last
+  seconds of messages and the last minutes of hand-overs are already there.
+- **Which node an end is.** srv names an end by the name messages reach the agent by and, when it knows it, its
+  host. This instance's agents carry that name in their pane (it differs from the display name for a renamed
+  agent); another instance's agent is matched by its name on its machine. An end that matches no node, or two, is
+  not drawn: no line rather than a wrong one.
+- **Motion.** With animations reduced or off, a line appears whole and goes after its time; nothing travels.
+
 ## 7. Risks and notes
 
 - **"Steward" is not a stored seat role** (`ROLES` is leader, worker, specialist, platform_tester, analyst, super), so a
