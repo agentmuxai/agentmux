@@ -31,6 +31,7 @@ vi.mock("@/app/element/confirm-modal", () => ({
 
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { buildAtlasGraph, type AtlasAgent, type AtlasMachine } from "./atlas-graph";
+import type { AtlasFlow } from "./atlas-flow";
 import { layoutAtlas } from "./atlas-layout";
 import type { AtlasData } from "./atlas-model";
 import { AtlasView } from "./atlas-view";
@@ -98,7 +99,7 @@ function modelStub() {
     };
 }
 
-function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}) {
+function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}, flows: AtlasFlow[] = []) {
     const machines = [machine("local", "desk"), machine("lab", "lab-1")];
     const model = modelStub();
     const selectable = agents.flatMap((a) => (a.remote ? [a.key] : a.blockId ? [a.blockId] : []));
@@ -124,6 +125,7 @@ function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}) {
         } as unknown as AtlasData["swarm"],
         agents: () => new Map(agents.map((a) => [a.key, a] as const)),
         machines: () => new Map(machines.map((x) => [x.key, x] as const)),
+        flows: () => flows,
     };
     const ctx = { meta: m, setMeta } as unknown as PaneTabHostContext;
     const utils = render(() => <AtlasView data={data} ctx={ctx} />);
@@ -342,5 +344,65 @@ describe("selecting agents on the map", () => {
         fireEvent.click(getByText("confirm: Stop 2"));
         await Promise.resolve();
         expect(model.bulkStopSelection).toHaveBeenCalled();
+    });
+});
+
+describe("messages and tasks on the map", () => {
+    const fleet = () => [agent("Ann", "local"), agent("Bo", "local"), agent("Cy", "lab")];
+    const flow = (over: Partial<AtlasFlow>): AtlasFlow => ({
+        id: "f1",
+        kind: "message",
+        from: { agent: "ann", host: "desk" },
+        to: { agent: "bo", host: "desk" },
+        tone: "delivered",
+        label: null,
+        atMs: 0,
+        leaving: false,
+        ...over,
+    });
+    const marks = (c: HTMLElement) => [...c.querySelectorAll<SVGGElement>("[data-testid=atlas-flow]")];
+
+    it("draws nothing with nothing happening", () => {
+        const { container } = rig(fleet());
+        expect(marks(container)).toHaveLength(0);
+    });
+
+    it("draws a message as a line from its sender to its receiver, in the colour of what became of it", () => {
+        const { container } = rig(fleet(), {}, [flow({}), flow({ id: "f2", to: { agent: "cy", host: "lab-1" }, tone: "waiting" })]);
+        const [first, second] = marks(container);
+        expect(first.classList.contains("atlas-flow--delivered")).toBe(true);
+        expect(first.querySelector(".atlas-flow__line")!.getAttribute("d")).toMatch(/^M[\d.]+,[\d.]+ Q/);
+        expect(first.querySelector(".atlas-flow__end")).not.toBeNull();
+        expect(first.querySelector(".atlas-flow__ping")).toBeNull();
+        expect(second.classList.contains("atlas-flow--waiting")).toBe(true);
+    });
+
+    it("rings the end that is on the map when the other is not", () => {
+        const { container } = rig(fleet(), {}, [flow({ from: { agent: "github-consumer" } })]);
+        const [mark] = marks(container);
+        expect(mark.querySelector(".atlas-flow__ping")).not.toBeNull();
+        expect(mark.querySelector(".atlas-flow__line")).toBeNull();
+    });
+
+    it("draws a task handed over as a numbered line, and nothing for one with an end off the map", () => {
+        const task = flow({ id: "t1", kind: "task", tone: "task", label: "#12" });
+        const { container } = rig(fleet(), {}, [task, flow({ id: "t2", kind: "task", tone: "task", label: "#13", to: { agent: "nobody" } })]);
+        const [mark, ...rest] = marks(container);
+        expect(rest).toHaveLength(0);
+        expect(mark.dataset.kind).toBe("task");
+        expect(mark.querySelector(".atlas-flow__label")!.textContent).toBe("#12");
+        expect(mark.querySelector(".atlas-flow__line")!.hasAttribute("pathLength")).toBe(false);
+    });
+
+    it("runs the lines behind the nodes, so a line that passes a node does not cross its name", () => {
+        const { container } = rig(fleet(), {}, [flow({})]);
+        const layer = container.querySelector(".atlas-flows")!;
+        const node = container.querySelector(".atlas-node")!;
+        expect(layer.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("marks a line in its last second as leaving", () => {
+        const { container } = rig(fleet(), {}, [flow({ leaving: true })]);
+        expect(marks(container)[0].classList.contains("atlas-flow--leaving")).toBe(true);
     });
 });

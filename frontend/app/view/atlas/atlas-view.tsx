@@ -6,7 +6,8 @@
  * agents are nodes, a line runs from a lead to the agent that reports to it. The wheel zooms, a drag on the
  * background pans, Fit shows it all. A node opens a card; the card's Open and Start are the Swarm row's own actions.
  * A box dragged with Shift held (or with Select on) selects the agents it touches, for the Swarm's own Broadcast,
- * Stop and Supervisor mode (atlas-fleet-bar.tsx).
+ * Stop and Supervisor mode (atlas-fleet-bar.tsx). A message between two agents draws a line from its sender to its
+ * receiver as it happens, and a task one agent hands another a dotted one (atlas-flow-layer.tsx).
  */
 
 import { seatBadgeText, seatTooltipLine } from "@/app/agent-model/seat-format";
@@ -18,6 +19,8 @@ import { revealBlock } from "@/app/util/reveal-block";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { SwarmFilterBar } from "../swarm/swarm-filter-bar";
 import { AtlasFleetBar } from "./atlas-fleet-bar";
+import { flowEndResolver } from "./atlas-flow";
+import { AtlasFlowLayer } from "./atlas-flow-layer";
 import type { AtlasAgent, AtlasRegion, AtlasState } from "./atlas-graph";
 import {
     FOLD_CHIP,
@@ -241,6 +244,7 @@ function AtlasMap(props: {
     const regions = () => props.data.graph().regions;
     const shownAgents = createMemo(() => regions().flatMap((r) => r.shown));
     const machineIndex = (machine: string) => regions().findIndex((r) => r.key === machine);
+    const flowEnd = createMemo(() => flowEndResolver(shownAgents(), props.data.machines()));
     return (
         <div
             class="atlas-world"
@@ -276,6 +280,13 @@ function AtlasMap(props: {
                     }}
                 </For>
             </svg>
+            <AtlasFlowLayer
+                flows={props.data.flows()}
+                resolve={flowEnd()}
+                nodes={props.layout.nodes}
+                width={props.layout.width}
+                height={props.layout.height}
+            />
             <For each={shownAgents()}>
                 {(agent) => (
                     <Show when={props.layout.nodes.get(agent.key)}>

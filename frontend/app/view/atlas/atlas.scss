@@ -177,6 +177,87 @@
     }
 }
 
+// What moves between agents, over the nodes: a line per message, drawn from its sender to its receiver, and a
+// dotted line per task handed over. The colour says what became of it.
+.atlas-flows {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.atlas-flow {
+    color: var(--accent-color);
+    opacity: 0.9;
+    transition: opacity var(--duration-slow) var(--ease-out);
+
+    &--waiting {
+        color: var(--secondary-text-color);
+    }
+
+    &--refused {
+        color: var(--warning-text-color);
+    }
+
+    &--task {
+        color: var(--success-text-color);
+    }
+
+    &--leaving {
+        opacity: 0;
+    }
+}
+
+.atlas-flow__line {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-dasharray: 1;
+    animation: am-draw var(--duration-pulse) var(--ease-out) both;
+
+    // A task's line is dotted, so it fades in whole.
+    .atlas-flow--task > & {
+        stroke-dasharray: 2 5;
+        animation: am-fade-in var(--duration-moderate) var(--ease-out) both;
+    }
+
+    @include mixins.when-motion-reduced(status) {
+        animation: none;
+    }
+}
+
+// Where the line lands.
+.atlas-flow__end {
+    fill: currentColor;
+}
+
+// A message whose other end is not on the map: a ring round the one that is.
+.atlas-flow__ping {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    animation: am-fade-out var(--duration-pulse) var(--ease-out) both;
+
+    @include mixins.when-motion-reduced(status) {
+        animation: none;
+        opacity: 0.6;
+    }
+}
+
+// In the text colour, not the line's: a small number in the line's green is dim on the dark theme.
+.atlas-flow__label {
+    fill: var(--main-text-color);
+    stroke: var(--main-bg-color);
+    stroke-width: 3px;
+    paint-order: stroke;
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    text-anchor: middle;
+    dominant-baseline: central;
+}
+
 .atlas-node {
     position: absolute;
     box-sizing: border-box;
@@ -188,14 +269,17 @@
     border: 1px solid var(--border-color);
     border-left-width: 3px;
     border-radius: var(--radius-sm);
-    background: var(--main-bg-color);
+    // Always opaque: the message and task lines run behind the nodes and must not show through one.
+    --atlas-node-bg: var(--main-bg-color);
+    background: var(--atlas-node-bg);
     color: var(--main-text-color);
     font: inherit;
     text-align: left;
     cursor: pointer;
 
+    // The hover wash lies over the node's own colour, so it neither lets a line through nor takes the tint away.
     &:hover {
-        background: var(--hover-bg-color);
+        background: linear-gradient(var(--hover-bg-color), var(--hover-bg-color)), var(--atlas-node-bg);
     }
 
     &:focus-visible {
@@ -209,10 +293,11 @@
     // In the selection a fleet action reaches (or in the box being dragged): a tint and a tick, not the card's line.
     &--picked {
         border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 16%, var(--main-bg-color));
+        --atlas-node-bg: color-mix(in srgb, var(--accent-color) 16%, var(--main-bg-color));
     }
 
-    &--stale {
+    // Its words are muted, not the node: it stays opaque.
+    &--stale > * {
         opacity: 0.6;
     }
 
