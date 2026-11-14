@@ -1470,6 +1470,25 @@
     }
   },
   {
+    "command": "app_skills.here",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandAppSkillsHereData",
+    "requestName": "CommandAppSkillsHereData",
+    "requestTs": {
+      "imports": [
+        "CommandAppSkillsHereData"
+      ],
+      "name": "CommandAppSkillsHereData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::AppSkillsHere",
+    "responseName": "AppSkillsHere",
+    "responseTs": {
+      "imports": [
+        "AppSkillsHere"
+      ],
+      "name": "AppSkillsHere"
+    }
+  },
+  {
     "command": "appendagenthistory",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAppendAgentHistoryData",
     "requestName": "CommandAppendAgentHistoryData",

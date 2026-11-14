@@ -8,8 +8,10 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { Pill, SegmentedControl } from "@/app/element/ui";
+import type { AppSkillHere } from "@/types/rpc/AppSkillHere";
 import type { SkillApp } from "@/types/rpc/SkillApp";
 import {
+    appHereFact,
     appPlatform,
     appStatus,
     describeSignature,
@@ -59,10 +61,23 @@ function SignatureLines(p: { app: SkillApp }): JSX.Element {
     );
 }
 
+/** The application on this computer, and, when it is not the version the last pass was run against, that its test is stale. */
+function AppHereLine(p: { app: SkillApp; here: AppSkillHere | undefined; drift: boolean }): JSX.Element {
+    const fact = () => appHereFact(p.app, p.here, true);
+    return (
+        <Show when={fact()}>
+            <p class={`skill-app-line${p.drift ? " skill-app-warn" : " skill-app-muted"}`}>
+                {fact()}
+                {p.drift ? " It was last tested on another version: check before trusting it." : ""}
+            </p>
+        </Show>
+    );
+}
+
 /** The detail of a computer-use skill, below the usual skill facts. */
-export function SkillAppDetail(p: { skillId: string; app: SkillApp }): JSX.Element {
+export function SkillAppDetail(p: { skillId: string; app: SkillApp; here?: AppSkillHere }): JSX.Element {
     const platform = appPlatform();
-    const status = () => appStatus(p.app, platform);
+    const status = () => appStatus(p.app, platform, p.here);
     const drift = () => referenceDrift(p.app, platform);
     // Which scripts' Review panels are open, kept here because an approval rebuilds the rows below.
     const [reviewing, setReviewing] = createSignal<ReadonlySet<string>>(new Set());
@@ -88,6 +103,7 @@ export function SkillAppDetail(p: { skillId: string; app: SkillApp }): JSX.Eleme
                 <Pill tone={pillTone(status().tone)}>{status().label}</Pill> on this machine
                 ({platform}).
             </p>
+            <AppHereLine app={p.app} here={p.here} drift={status().tone === "warn"} />
             <Show when={p.app.ladder.length > 0}>
                 <span class="agent-primitive-modal-field-label">Routes, best first</span>
                 <ol class="skill-app-list skill-app-list--ordered" aria-label="Routes">

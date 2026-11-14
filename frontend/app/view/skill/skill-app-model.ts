@@ -8,6 +8,7 @@
 
 import type { AppSkillCatalogEntry } from "@/types/rpc/AppSkillCatalogEntry";
 import type { AppSkillCatalogItem } from "@/types/rpc/AppSkillCatalogItem";
+import type { AppSkillHere } from "@/types/rpc/AppSkillHere";
 import type { SkillApp } from "@/types/rpc/SkillApp";
 import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import type { VerifiedRecord } from "@/types/rpc/VerifiedRecord";
@@ -15,7 +16,7 @@ import type { WidgetSignatureInfo } from "@/types/rpc/WidgetSignatureInfo";
 import { getPlatform } from "@/util/platformutil";
 
 export type AppFilter = "all" | "app";
-export type AppTone = "ok" | "idle" | "error";
+export type AppTone = "ok" | "warn" | "idle" | "error";
 
 export interface AppStatus {
     tone: AppTone;
@@ -63,7 +64,7 @@ export function recordsFor(app: SkillApp, platform: string): VerifiedRecord[] {
  * Whether this version of the skill was tested on this platform: the newest record decides, because a pass
  * followed by a fail means the skill stopped working. A pass elsewhere is said, not counted.
  */
-export function appStatus(app: SkillApp, platform: string): AppStatus {
+export function appStatus(app: SkillApp, platform: string, onThisComputer?: AppSkillHere): AppStatus {
     // A skill for another platform's app is not "untested here": it does not apply here.
     if (app.platforms.length > 0 && !app.platforms.includes(platform)) {
         return { tone: "idle", label: `for ${osNames(app.platforms)} only` };
@@ -71,9 +72,13 @@ export function appStatus(app: SkillApp, platform: string): AppStatus {
     const here = recordsFor(app, platform);
     const last = here[here.length - 1];
     if (last) {
-        return last.result === "pass"
-            ? { tone: "ok", label: `verified ${last.appVersion}` }
-            : { tone: "error", label: `failed on ${last.appVersion}` };
+        if (last.result !== "pass") {
+            return { tone: "error", label: `failed on ${last.appVersion}` };
+        }
+        // Drift: the app here is not the version the last pass was run against. Whether it still works is untested.
+        return onThisComputer?.found && onThisComputer.version && !isBuildOf(onThisComputer.version, last.appVersion)
+            ? { tone: "warn", label: `tested on ${last.appVersion}, installed ${onThisComputer.version}` }
+            : { tone: "ok", label: `verified ${last.appVersion}` };
     }
     const elsewhere = app.verified.find((r) => r.skillVersion === app.version && r.result === "pass");
     return { tone: "idle", label: elsewhere ? `tested on ${osNames([elsewhere.platform])} only` : "not tested yet" };
@@ -115,7 +120,18 @@ export function scriptState(f: { script: boolean; approved: boolean }): string |
 }
 
 /** The tone a pill takes for a status (a status dot says "idle" where a pill says "neutral"). */
-export const pillTone = (tone: AppTone): "ok" | "neutral" | "error" => (tone === "idle" ? "neutral" : tone);
+export const pillTone = (tone: AppTone): "ok" | "warn" | "neutral" | "error" => (tone === "idle" ? "neutral" : tone);
+
+/**
+ * The application itself on this computer, from `app_skills.here`: short for a card ("installed 12.2"), longer for the
+ * detail. `null` while it is not known (the answer has not come, or the skill lists no executable for this platform).
+ */
+export function appHereFact(app: SkillApp, here: AppSkillHere | undefined, long: boolean): string | null {
+    if (!here) return null;
+    if (!here.found) return long ? `${app.name} is not found on this computer.` : "not found here";
+    if (!here.version) return long ? `${app.name} is on this computer; its version could not be read.` : "found here";
+    return long ? `${app.name} on this computer: version ${here.version}.` : `installed ${here.version}`;
+}
 
 /**
  * Who signed the skill, in the words the detail and the import preview use. A key that is not the one this
@@ -163,7 +179,7 @@ export function catalogStatus(entry: AppSkillCatalogEntry, platform: string): Ap
 }
 
 /** Whether `found` ("16.0.18227.20162") is the tested version `tested` ("16.0") or a build of it: whole parts only, a missing trailing part of `found` counting as 0 ("16" is a build of "16.0"). */
-function isBuildOf(found: string, tested: string): boolean {
+export function isBuildOf(found: string, tested: string): boolean {
     const f = found.split(".");
     return tested.split(".").every((part, i) => (f[i] ?? "0") === part);
 }

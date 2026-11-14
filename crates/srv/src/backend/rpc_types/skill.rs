@@ -457,6 +457,19 @@ pub struct AppSkillsCatalog {
     pub items: Vec<crate::backend::skill_catalog::AppSkillCatalogItem>,
 }
 
+/// `app_skills.here` — window-scoped. For each installed computer-use skill that lists an executable for this
+/// computer, whether its application is here and which version (SPEC_PACKS §8: a lookup per skill, no inventory scan).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAppSkillsHereData {}
+
+/// The answer of `app_skills.here`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AppSkillsHere {
+    pub items: Vec<crate::backend::skill_catalog::AppSkillHere>,
+}
+
 /// `app_skills.catalog.install` — window-scoped. Install or update one skill from the catalog, by its id
 /// (`<publisher>.<id>`). The catalog is fetched again and checked first; the skill arrives with its scripts unapproved.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

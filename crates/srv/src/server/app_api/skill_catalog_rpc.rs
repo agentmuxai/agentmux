@@ -6,12 +6,31 @@
 //! again at install and the entry is taken from that fetch, never from the request, so a caller cannot name a zip.
 
 use super::*;
-use crate::backend::rpc_types::{AppSkillInstallResult, AppSkillsCatalog, CommandAppSkillsCatalogData, CommandAppSkillsCatalogInstallData};
+use crate::backend::rpc_types::{AppSkillInstallResult, AppSkillsCatalog, AppSkillsHere, CommandAppSkillsCatalogData, CommandAppSkillsHereData, CommandAppSkillsCatalogInstallData};
 use crate::backend::skill_catalog;
 
 pub(super) fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_catalog(engine, state);
     register_install(engine, state);
+    register_here(engine, state);
+}
+
+fn register_here(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let identity_store = state.identity_store.clone();
+    engine.register_typed(COMMAND_APP_SKILLS_HERE, move |_req: CommandAppSkillsHereData, _ctx| {
+        let identity_store = identity_store.clone();
+        async move {
+            const E: &str = "app_skills.here";
+            let installed = identity_store.skill_app_map().map_err(|e| format!("{E}: {e}"))?;
+            // Registry and file reads: off the async threads.
+            let items = tokio::task::spawn_blocking(move || {
+                skill_catalog::installed_here(&installed, skill_catalog::this_platform(), crate::backend::app_version::find)
+            })
+            .await
+            .map_err(|e| format!("{E}: {e}"))?;
+            Ok(AppSkillsHere { items })
+        }
+    });
 }
 
 fn register_catalog(engine: &Arc<WshRpcEngine>, state: &AppState) {

@@ -246,6 +246,34 @@ pub fn add_app_versions(items: &mut [AppSkillCatalogItem], platform: &str, find:
     }
 }
 
+/// An installed skill's application on this computer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AppSkillHere {
+    pub skill_id: String,
+    /// The application is on this computer (found by the executable names the skill lists for this platform).
+    pub found: bool,
+    /// Its version, when it is found and says one.
+    pub version: Option<String>,
+}
+
+/// For each installed skill that lists an executable for `platform`: whether its application is here, and which
+/// version (`find` is `app_version::find`). A skill that lists none for this platform is left out: there is nothing to look for.
+pub fn installed_here(
+    installed: &BTreeMap<String, SkillApp>,
+    platform: &str,
+    find: impl Fn(&[String]) -> Option<crate::backend::app_version::Found>,
+) -> Vec<AppSkillHere> {
+    installed
+        .iter()
+        .filter_map(|(id, app)| {
+            let names = app.info.executables.get(platform).filter(|n| !n.is_empty())?;
+            let found = find(names);
+            Some(AppSkillHere { skill_id: id.clone(), found: found.is_some(), version: found.and_then(|f| f.version) })
+        })
+        .collect()
+}
+
 /// The platform name skills use for the computer this runs on.
 pub fn this_platform() -> &'static str {
     if cfg!(windows) {
