@@ -376,6 +376,34 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
 }
 
 /**
+ * A picture of pane `blockId` as it stands on screen now (a base64 JPEG), with the pane's size in CSS px: what
+ * the landing place of a dragged tab shows (layout/lib/paneLandingPicture.ts). The picture taken at the press
+ * can be of a tab that had only just been shown, still empty. The drag's own drawing waits for it as it does
+ * for the press's (pane-capture-gate.ts), so the pane is pictured where it stood. Nothing held is touched: the
+ * press's picture stays the one a tear-off opens on. None when the pane is not drawn, or cannot be pictured.
+ */
+export async function picturePaneNow(blockId: string): Promise<{ picture: string; size: { width: number; height: number } } | undefined> {
+    const el = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`);
+    const r = el?.getBoundingClientRect();
+    if (!el || !r || !(r.width > 0) || !(r.height > 0) || !isRendered(el)) return undefined;
+    const isBrowser = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.view === "browser";
+    const captured = beginPaneCapture();
+    const paneRect = { left: r.left, top: r.top, width: r.width, height: r.height };
+    const ph = isBrowser ? Array.from(el.querySelectorAll(".browser-placeholder")).find(isRendered)?.getBoundingClientRect() : undefined;
+    try {
+        const picture = await (isBrowser
+            ? captureBrowserPane(blockId, paneRect, ph ? { left: ph.left, top: ph.top, width: ph.width, height: ph.height } : null, captured)
+            : capturePane(paneRect, captured));
+        return picture ? { picture, size: { width: r.width, height: r.height } } : undefined;
+    } catch (e) {
+        Logger.debug("dnd:cross", "landing picture failed", { blockId, error: String(e) });
+        return undefined;
+    } finally {
+        captured();
+    }
+}
+
+/**
  * The picture of `blockId` taken for this drag, if it's ready within the
  * budget. Never starts a capture: that would delay the tear-off itself.
  */

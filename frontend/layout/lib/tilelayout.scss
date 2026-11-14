@@ -455,9 +455,10 @@
     }
 
     // The landing place of a tab pill that leaves other tabs behind (PaneLanding.tsx): no pane of the layout
-    // stands there until the release, so the place holds the tab's picture, at the pane's own size from its
-    // top left corner and cut to the place, over the pane's own colour (the empty pane where there is no
-    // picture). Under the zone's edge where the zone still draws one (no live reflow).
+    // stands there until the release, so the place holds the tab's picture, resized to the whole place (at the
+    // pane's own size it left bare gaps beside and under it; the operator, 2026-11-13: "still empty gaps.
+    // looks like the target pane needs to be resized right"), over the pane's own colour (the empty pane
+    // where there is no picture). Under the zone's edge where the zone still draws one (no live reflow).
     .placeholder .pane-landing {
         position: relative;
         width: 100%;
@@ -467,7 +468,8 @@
 
         img {
             display: block;
-            max-width: none;
+            width: 100%;
+            height: 100%;
             user-select: none;
         }
     }
