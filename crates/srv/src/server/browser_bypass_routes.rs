@@ -27,6 +27,15 @@ fn bypass_pane(target: &str) -> String {
     banner_for(target).0
 }
 
+/// The click `ask` asks although auto-approve is on for its site, because it pays: the words to add to the
+/// banner's "Asked because", so that it doesn't read as auto-approve being broken (#47625).
+pub(crate) fn payment_exception(block_id: &str, agent: &str, ask: &serde_json::Value) -> Option<&'static str> {
+    let g = bypass::active_for(&bypass_pane(block_id), agent)?;
+    let text = |k: &str| ask.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    (g.covers(text("page")) && bypass::click_is_payment(text("what"), text("description")))
+        .then_some("auto-approve is on for this site, but a payment always asks")
+}
+
 /// The address `target` (a pane or popup window) shows, as the host reports
 /// it from the browser's own record of the page: never block meta, which a
 /// client can write. Not the agent's `eval`: that scans the whole page for
@@ -83,7 +92,7 @@ pub(crate) async fn bypassed_click(
         tracing::info!(agent_id = %agent, block_id = %block_id, origin = %origin, "[browser-bypass] paused: the page is off the granted sites, so the click asks");
         return None;
     }
-    if bypass::is_payment(what) || bypass::is_payment(description) {
+    if bypass::click_is_payment(what, description) {
         tracing::info!(agent_id = %agent, block_id = %block_id, what = %what, "[browser-bypass] a payment still asks");
         return None;
     }

@@ -29,6 +29,11 @@
 //   here to download a PDF"), where a word like "confirm" means nothing. A
 //   download link or a file: link never commits: it fetches, it sends nothing.
 //
+// - "Pay" in a brand or a plan's name is not a command: "Kakao Pay", "Cash App Pay", "Apple Pay" and
+//   "Pay-as-you-go" are rows, tabs and links that open a panel, and a page of payment methods has dozens.
+//   The brand is one to three capitalised words in front of "Pay", none of them a verb or "and", "to",
+//   "with": "Pay", "Pay now", "Pay $5.46", "Confirm and Pay" and "Pay with Apple Pay" still commit.
+//
 // `why` says what made it commit, for the approval banner.
 //
 // `axName` is the accessible name the browser computed for the element
@@ -43,6 +48,10 @@ function clickLabel(ariaLabel, labelledBy, text, el, axName) {
   const LINK_WORDS = 6;
   const VERBS = "submit|send|pay|buy|purchase|order|checkout|check out|delete|remove|publish|post|confirm|sign up|sign|agree|accept|transfer|unsubscribe";
   const clean = (s) => String(s || "").replace(/\s+/g, " ").trim();
+  // A name a brand or plan puts "Pay" in: not a word that commits.
+  const NOT_BRAND = "pay|buy|confirm|complete|place|make|click|tap|press|finish|submit|send|and|to|with|now|then|or|the|a|your|securely|express|quick|fast";
+  const BRAND_PAY = new RegExp("(?:(?!(?:" + NOT_BRAND + ")\\b)[A-Z][\\w.&'-]*\\s+){1,3}P(?:ay|AY)\\b(?![\\w-])", "g");
+  const plain = (s) => String(s || "").replace(/\bpay-(?:as|per)-[\w-]+/gi, " ").replace(BRAND_PAY, " ");
   const lines = String(text || "").split("\n").map(clean).filter(Boolean);
   const named = clean(ariaLabel) || clean(labelledBy);
   const fullName = named || lines[0] || "";
@@ -65,7 +74,7 @@ function clickLabel(ariaLabel, labelledBy, text, el, axName) {
   } else if (e.link) {
     if (!e.download && !e.fileHref) {
       const short = fullName.split(" ").filter(Boolean).length <= LINK_WORDS;
-      const word = found(fullName, new RegExp("^(" + VERBS + ")\\b", "i")) || (short ? found(fullName, anywhere) : "");
+      const word = found(fullName, new RegExp("^(" + VERBS + ")\\b", "i")) || (short ? found(plain(fullName), anywhere) : "");
       if (word) {
         committing = true;
         why = "its name says \"" + word + "\"";
@@ -75,8 +84,8 @@ function clickLabel(ariaLabel, labelledBy, text, el, axName) {
     // A description is a sentence ("This deletes it permanently"): there a
     // word counts with its -s, -es, -d or -ed. A name is a command, and a tab
     // named "Orders" or "Posts" doesn't commit.
-    const inName = found(fullName, anywhere);
-    const inRest = inName ? "" : found(rest, new RegExp("\\b((?:" + VERBS + ")(?:s|es|d|ed)?)\\b", "i"));
+    const inName = found(plain(fullName), anywhere);
+    const inRest = inName ? "" : found(plain(rest),new RegExp("\\b((?:" + VERBS + ")(?:s|es|d|ed)?)\\b", "i"));
     if (inName || inRest) {
       committing = true;
       why = inName ? "its name says \"" + inName + "\"" : "its text says \"" + inRest + "\"";

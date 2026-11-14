@@ -128,3 +128,35 @@ describe("clickLabel: the accessible name", () => {
         expect(clickLabel(null, "", "", { submits: true }, "")).toMatchObject({ committing: true, why: "it submits a form" });
     });
 });
+
+describe("clickLabel: a brand or plan with Pay in its name is not a payment (#47625)", () => {
+    const asks = (name, el = button, ax) => clickLabel(null, "", name, el, ax).committing;
+
+    it("a payment-method row, link, tab or toggle does not commit", () => {
+        for (const name of ["Kakao Pay", "Cash App Pay", "Apple Pay", "Google Pay", "Amazon Pay", "APPLE PAY", "Samsung Pay"]) {
+            expect(asks(name), name).toBe(false);
+            expect(asks(name, link), `${name} (link)`).toBe(false);
+        }
+        expect(asks("Payment methods", link)).toBe(false);
+        expect(asks("Payment methods")).toBe(false);
+        expect(asks("Pay-as-you-go")).toBe(false);
+        expect(asks("Pay-per-use plan")).toBe(false);
+    });
+
+    it("a row whose accessible name or description carries the brand does not commit", () => {
+        expect(asks("Kakao Pay", button, "Kakao Pay")).toBe(false);
+        expect(clickLabel(null, "", "Kakao Pay\nAccept Kakao Pay from customers in Korea", button).committing).toBe(false);
+    });
+
+    it("a command still commits", () => {
+        for (const name of ["Pay", "Pay now", "Pay $5.46", "Place order", "Confirm and Pay", "Click to Pay", "Pay with Apple Pay", "Buy now", "Buy with Apple Pay"]) {
+            expect(asks(name), name).toBe(true);
+        }
+        expect(clickLabel(null, "", "Pay", button).why).toBe('its name says "Pay"');
+    });
+
+    it("a brand next to a command still commits", () => {
+        expect(asks("Kakao Pay", { submits: true })).toBe(true);
+        expect(asks("Apple Pay\nPay $20.00 now")).toBe(true);
+    });
+});
