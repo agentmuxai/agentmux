@@ -58,8 +58,9 @@ mod stores;
 mod store_attach;
 mod store_boot;
 mod shared_root;
-pub(crate) mod shared_guard;
-pub(crate) mod carry_forward;
+// Moved down to `registry/` and `migrations/` so the core does not reach up into `bootstrap`; the old paths resolve.
+pub(crate) use crate::migrations::carry_forward;
+pub(crate) use crate::registry::shared_guard;
 mod background;
 mod messaging_bridges;
 mod network;

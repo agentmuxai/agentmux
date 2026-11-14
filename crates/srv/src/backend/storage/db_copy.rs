@@ -5,7 +5,7 @@
 //! beside the destination, then rename it into place.
 //!
 //! Used by every copy srv makes of a store: the copy-forward of a previous
-//! version's databases (`bootstrap/carry_forward.rs`), the pre-migration
+//! version's databases (`migrations/carry_forward.rs`), the pre-migration
 //! snapshot (`snapshot.rs`) and the pre-migration backup
 //! (`migrations/runner.rs`). A plain file copy of a database in WAL mode can
 //! miss committed writes that are still only in its `-wal` file, and other

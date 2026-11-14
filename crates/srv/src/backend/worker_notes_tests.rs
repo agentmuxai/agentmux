@@ -6,7 +6,7 @@
 use super::*;
 use crate::backend::reactive::AuditLogEntry;
 use crate::backend::storage::agents::test_agent_def;
-use crate::server::AppState;
+use crate::test_support::CoreParts;
 use agentmux_common::ipc::{Command, Event};
 use serde_json::json;
 
@@ -84,15 +84,11 @@ fn the_note_says_whether_the_worker_is_waiting_and_quotes_it() {
     assert_eq!(clip(&"word ".repeat(100), 10).chars().count(), 11);
 }
 
-async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
-    let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
-    for ev in &evs {
-        crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
-    }
-    evs
+async fn dispatch_apply(state: &CoreParts, cmd: Command) -> Vec<Event> {
+    state.dispatch_apply(cmd).await
 }
 
-async fn pane(state: &AppState, tab: &str, def: &str) -> String {
+async fn pane(state: &CoreParts, tab: &str, def: &str) -> String {
     dispatch_apply(state, Command::CreateBlock { tab_id: tab.into(), meta: json!({ "view": "agent", "agentId": def }) })
         .await
         .iter()
@@ -103,7 +99,7 @@ async fn pane(state: &AppState, tab: &str, def: &str) -> String {
         .unwrap()
 }
 
-async fn tab(state: &AppState) -> String {
+async fn tab(state: &CoreParts) -> String {
     let ws = dispatch_apply(state, Command::CreateWorkspace { name: "w".into() })
         .await
         .iter()
@@ -122,12 +118,12 @@ async fn tab(state: &AppState) -> String {
         .unwrap()
 }
 
-fn mark_worker(state: &AppState, worker_id: &str, lead: &crate::backend::storage::agents::AgentDefinition) {
+fn mark_worker(state: &CoreParts, worker_id: &str, lead: &crate::backend::storage::agents::AgentDefinition) {
     state
         .mstore
         .agent_content_set(&crate::backend::storage::store::AgentContent {
             agent_id: worker_id.to_string(),
-            content_type: crate::server::app_api::agent_spawn::WORKER_OF_CONTENT.into(),
+            content_type: crate::backend::agent_seat::WORKER_OF_CONTENT.into(),
             content: json!({ "agent": lead.name, "id": lead.id }).to_string(),
             updated_at: 1,
         })
@@ -149,7 +145,7 @@ fn a_question_is_read_from_the_panes_flag_being_set() {
 async fn a_workers_question_mid_turn_notes_its_open_leader() {
     use crate::backend::agent_state::{test_support::register_stub, META_AWAITING_USER};
     use crate::backend::blockcontroller::{delete_controller, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let tab = tab(&state).await;
     let id = uuid::Uuid::new_v4().to_string();
     let (lead_id, worker_id) = (format!("lead-{id}"), format!("worker-{id}"));
@@ -183,7 +179,7 @@ async fn a_workers_question_mid_turn_notes_its_open_leader() {
 /// a pane that isn't a worker's, or a worker whose leader isn't open, notes no one.
 #[tokio::test]
 async fn a_workers_unreported_turn_notes_its_open_leader() {
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let tab = tab(&state).await;
     let id = uuid::Uuid::new_v4().to_string();
     let (lead_id, worker_id) = (format!("lead-{id}"), format!("worker-{id}"));
@@ -211,7 +207,7 @@ async fn a_workers_unreported_turn_notes_its_open_leader() {
 /// failure adds its own (#47449).
 #[tokio::test]
 async fn a_workers_credits_failure_adds_no_note_of_its_own() {
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let tab = tab(&state).await;
     let id = uuid::Uuid::new_v4().to_string();
     let (lead_id, worker_id) = (format!("lead-{id}"), format!("worker-{id}"));

@@ -160,7 +160,7 @@ pub fn resolve_isolated_work_store_path(fallback_dir: &std::path::Path) -> Optio
 /// `resolve_shared_store_path()`, which DOES vary with isolation.
 pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
     // A srv that gave the folder up to an earlier srv of another version runs as if there were none.
-    if crate::bootstrap::shared_guard::deferred() {
+    if crate::registry::shared_guard::deferred() {
         return None;
     }
     shared_root_ignoring_deferral()

@@ -31,6 +31,7 @@ pub(crate) use leases::{lock_exclusive, try_lock_exclusive};
 mod migrate;
 mod paths;
 mod schema;
+pub(crate) mod shared_guard;
 mod store;
 pub(crate) mod work_store;
 

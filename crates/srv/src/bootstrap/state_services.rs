@@ -14,6 +14,8 @@ use std::future::IntoFuture;
 pub fn install_state_hooks(state: &AppState) {
     // The relay's delivery path reaches the server's holds and file steps through this, before anything is claimed.
     crate::server::muxbus_hooks::install();
+    // The controller code reaches the agent teardown through this, before any controller runs.
+    crate::sagas::teardown_hooks::install();
     // Upgrade reactive message delivery now that AppState exists, so agents on a
     // SubprocessController (every container agent, plus codex/gemini/qwen/kimi/
     // muxcode/antigravity on the host) can actually receive inter-agent

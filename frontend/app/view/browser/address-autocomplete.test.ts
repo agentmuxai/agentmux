@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { createAddressAutocomplete, inlineCompletion } from "./address-autocomplete";
+import { carriedCompletion, createAddressAutocomplete, inlineCompletion } from "./address-autocomplete";
 
 const match = (over: Partial<BrowserAutocompleteMatch> = {}): BrowserAutocompleteMatch => ({
     contents: "github.com",
@@ -191,5 +191,24 @@ describe("inlineCompletion", () => {
         expect(inlineCompletion("gi", list(match()), false)).toBe("");
         expect(inlineCompletion("git", list(match({ allowed_to_be_default: false })), false)).toBe("");
         expect(inlineCompletion("git", list(match({ inline_autocompletion: "" })), false)).toBe("");
+    });
+});
+
+describe("carriedCompletion", () => {
+    it("is what is left of the completion when the next letters of it are typed", () => {
+        expect(carriedCompletion("google.com", "g", "go")).toBe("ogle.com");
+        expect(carriedCompletion("google.com", "g", "goo")).toBe("gle.com");
+        // The user's own capitals are kept; the completion still follows.
+        expect(carriedCompletion("google.com", "g", "gO")).toBe("ogle.com");
+    });
+
+    it("is nothing when the text leaves the completion, ends it, or there was none", () => {
+        expect(carriedCompletion("google.com", "g", "gi")).toBe("");
+        expect(carriedCompletion("google.com", "google.co", "google.com")).toBe("");
+        expect(carriedCompletion("google.com", "g", "google.com/")).toBe("");
+        expect(carriedCompletion("g", "g", "go")).toBe("");
+        // Text that did not grow (a delete, a replaced start) carries nothing.
+        expect(carriedCompletion("google.com", "go", "g")).toBe("");
+        expect(carriedCompletion("google.com", "g", "xo")).toBe("");
     });
 });

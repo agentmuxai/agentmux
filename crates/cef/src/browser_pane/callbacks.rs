@@ -70,6 +70,8 @@ wrap_task! {
 /// A redirect hop of an ALREADY-armed navigation must NOT call this — see
 /// `update_pane_load_watchdog_url` for why.
 pub(crate) fn arm_pane_load_watchdog(state: &Arc<AppState>, block_id: &str, browser: Browser, url: String) {
+    // A fresh navigation of the pane starts here too: its timing (browser_pane::open_timing).
+    crate::browser_pane::open_timing::begin_navigation(block_id);
     let epoch = PANE_LOAD_WATCHDOG_NEXT_EPOCH.fetch_add(1, Ordering::Relaxed);
     state
         .browser_pane_load_watchdog
@@ -456,6 +458,7 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str, browser_
 /// already fired/disarmed via some other path.
 pub fn on_load_start_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     if let Some(block_id) = resolve_pane_block_id(state, browser) {
+        crate::browser_pane::open_timing::mark(&block_id, crate::browser_pane::open_timing::Phase::Committed);
         if state.browser_pane_load_watchdog.lock().remove(&block_id).is_some() {
             crate::browser_pane::trace::pane_trace(
                 &block_id,
@@ -482,6 +485,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     if let Some(block_id) = &pane_block_id {
         let url = main_frame_url(browser);
         crate::browser_pane::trace::pane_trace(block_id, "load-end", &format!("url={url}"));
+        crate::browser_pane::open_timing::loaded(block_id, if browser_is_views_pane(state, browser) { "views" } else { "hwnd" });
 
         // Main-frame load actually finished — clear the loading-spinner
         // tracker (layer 1, SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md).

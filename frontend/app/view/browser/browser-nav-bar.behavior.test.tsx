@@ -447,6 +447,62 @@ describe("the suggestions", () => {
         await expect(out()).toMatchFileSnapshot(snap("suggest-ime"));
     });
 
+    it("keeps the completion selected while its next letter is typed, until the engine answers", async () => {
+        const shown = (rig: Rig) => `${rig.input.value}|${rig.input.selectionStart}-${rig.input.selectionEnd}`;
+        let land!: (v: unknown) => void;
+        h.answer = async () => ({ supported: true, matches: [match()] });
+        const rig = mount();
+        focus(rig.input);
+        type(rig.input, "git");
+        await flush();
+        expect(shown(rig)).toBe("github.com|3-10");
+
+        // The answer for "gith" is held back. The letter replaced the selection, as it does in a
+        // real input; the rest of the completion must be there, selected, all the while.
+        h.answer = () => new Promise((resolve) => (land = resolve));
+        type(rig.input, "gith");
+        expect(shown(rig)).toBe("github.com|4-10");
+        await flush();
+        expect(shown(rig)).toBe("github.com|4-10");
+
+        // The answer completes it another way: that one takes its place.
+        land({ supported: true, matches: [match({ contents: "githost.io", fill_into_edit: "githost.io", inline_autocompletion: "ost.io" })] });
+        await flush();
+        expect(shown(rig)).toBe("githost.io|4-10");
+
+        // A letter the completion does not go on with drops it at once.
+        h.answer = async () => ({ supported: true, matches: [match({ inline_autocompletion: "" })] });
+        type(rig.input, "githx");
+        expect(shown(rig)).toBe("githx|5-5");
+        await flush();
+        expect(shown(rig)).toBe("githx|5-5");
+    });
+
+    it("drops a carried completion when the engine's answer has none, or there is no answer", async () => {
+        const shown = (rig: Rig) => `${rig.input.value}|${rig.input.selectionStart}-${rig.input.selectionEnd}`;
+        h.answer = async () => ({ supported: true, matches: [match()] });
+        const rig = mount();
+        focus(rig.input);
+        type(rig.input, "git");
+        await flush();
+
+        h.answer = async () => ({ supported: true, matches: [match({ inline_autocompletion: "" })] });
+        type(rig.input, "gith");
+        expect(shown(rig)).toBe("github.com|4-10");
+        await flush();
+        expect(shown(rig)).toBe("gith|4-4");
+
+        h.answer = async () => ({ supported: true, matches: [match({ inline_autocompletion: "b.com" })] });
+        type(rig.input, "githu");
+        await flush();
+        expect(shown(rig)).toBe("github.com|5-10");
+        h.answer = async () => undefined;
+        type(rig.input, "github");
+        expect(shown(rig)).toBe("github.com|6-10");
+        await flush();
+        expect(shown(rig)).toBe("github|6-6");
+    });
+
     it("a host with no autocomplete keeps the bar plain", async () => {
         h.answer = async () => ({ supported: false, matches: [] });
         const rig = mount();

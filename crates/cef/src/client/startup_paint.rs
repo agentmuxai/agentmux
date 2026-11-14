@@ -32,6 +32,25 @@ pub(super) fn mark_finished() {
     FINISHED.store(true, Ordering::Relaxed);
 }
 
+/// How long the "Window paint" row says the wait took, when the first paint
+/// gate resolves: the whole wait since the first gate armed in this process,
+/// not just since the latest arm. A page that recovers after a minute of load
+/// retries re-arms the gate on each try, and the latest arm alone is a few
+/// milliseconds; the rest would land in the splash's "other" time.
+pub(super) fn final_elapsed_ms(armed_ms: u64) -> u64 {
+    let since_begin = BEGAN_AT.get().map(|began| began.elapsed().as_millis() as u64);
+    pick_final_elapsed(since_begin, FINISHED.load(Ordering::Relaxed), armed_ms)
+}
+
+/// The whole wait while the row is still open; after it was finalized (a later
+/// window's gate resolving in a long-running process) that gate's own time.
+fn pick_final_elapsed(since_begin_ms: Option<u64>, finished: bool, armed_ms: u64) -> u64 {
+    match since_begin_ms {
+        Some(ms) if !finished => ms.max(armed_ms),
+        _ => armed_ms,
+    }
+}
+
 /// The main page failed to load and will be retried: say why on the paint row
 /// instead of leaving it counting up. A later successful reveal ends the row
 /// again, as ok. Does nothing before the first paint gate was armed, after a
@@ -56,11 +75,23 @@ fn retry_detail(error_text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::retry_detail;
+    use super::{pick_final_elapsed, retry_detail};
 
     #[test]
     fn the_retry_detail_names_the_error() {
         assert_eq!(retry_detail("ERR_CONNECTION_REFUSED"), "Can't reach the app page: ERR_CONNECTION_REFUSED, retrying");
         assert_eq!(retry_detail("  "), "Can't reach the app page, retrying");
+    }
+
+    #[test]
+    fn the_final_duration_covers_the_whole_wait() {
+        // Retries re-armed the gate 40 ms ago, 61 s after the first arm.
+        assert_eq!(pick_final_elapsed(Some(61_000), false, 40), 61_000);
+        // No first arm recorded: that gate's own time.
+        assert_eq!(pick_final_elapsed(None, false, 40), 40);
+        // The row was already final: a later window's gate keeps its own time.
+        assert_eq!(pick_final_elapsed(Some(61_000), true, 40), 40);
+        // Never shorter than the arm it ends.
+        assert_eq!(pick_final_elapsed(Some(10), false, 40), 40);
     }
 }

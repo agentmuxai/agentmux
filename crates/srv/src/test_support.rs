@@ -65,6 +65,56 @@ pub(crate) fn broker_recording(event_type: &str) -> (crate::backend::mps::Broker
     (broker, client)
 }
 
+/// The pieces of a test server that the core modules' own tests build on: a store carrying both
+/// schemas with the first workspace seeded, a file store, the event bus and the broker. A core
+/// test takes this and no more, so it does not name `server::AppState`, which belongs to the
+/// layer above; `server::tests::test_state` is built from the same parts.
+#[cfg(test)]
+pub(crate) struct CoreParts {
+    pub(crate) mstore: std::sync::Arc<crate::backend::storage::store::Store>,
+    pub(crate) filestore: std::sync::Arc<crate::backend::storage::filestore::FileStore>,
+    pub(crate) event_bus: std::sync::Arc<crate::backend::eventbus::EventBus>,
+    pub(crate) broker: std::sync::Arc<crate::backend::mps::Broker>,
+    /// The reducer's state, empty: what `dispatch` runs commands against.
+    pub(crate) srv_state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+}
+
+#[cfg(test)]
+impl CoreParts {
+    /// Run a command through the reducer and persist what it emitted to the store, as a handler does:
+    /// how a core test makes a workspace, a tab or a pane the way the app does.
+    pub(crate) async fn dispatch_apply(&self, cmd: agentmux_common::ipc::Command) -> Vec<agentmux_common::ipc::Event> {
+        let events = {
+            let mut state = self.srv_state.lock().await;
+            crate::reducer::update(&mut state, cmd, &crate::reducer::Ctx::new(None))
+        };
+        for event in &events {
+            crate::persist_subscriber::apply_event_to_mstore(event, &self.mstore).unwrap();
+        }
+        events
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn core_parts() -> CoreParts {
+    use std::sync::Arc;
+    let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+    // This one store backs mstore/id_store/identity_store below, so it has to
+    // carry BOTH schemas. Without the identity schema, any handler touching a
+    // table that lives only in the global identity store (`db_work_queue`)
+    // failed with a bare "no such table" 500 in tests while being perfectly
+    // correct in production. Additive and idempotent — every statement in that
+    // schema is CREATE ... IF NOT EXISTS.
+    mstore.apply_identity_schema_for_tests().unwrap();
+    let filestore = Arc::new(crate::backend::storage::filestore::FileStore::open_in_memory().unwrap());
+    let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+    // Bootstrap initial data
+    crate::backend::wcore::ensure_initial_data(&mstore).unwrap();
+    let srv_state = Arc::new(tokio::sync::Mutex::new(crate::state::State::default()));
+    CoreParts { mstore, filestore, event_bus, broker, srv_state }
+}
+
 /// The fake App Server test binary (`tests/fixtures/fake_app_server.rs`),
 /// compiled once per source content and reused across test runs. It used to
 /// be built into a fresh temp dir that was deliberately leaked every run —
