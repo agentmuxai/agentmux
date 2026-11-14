@@ -228,6 +228,9 @@ pub mod sensitive_ops;
 /// The requests for those operations and what became of them.
 pub mod sensitive_requests;
 pub mod shutdown_events;
+pub mod sweep_stats;
+pub(crate) mod teardown_hooks;
+pub mod work_claims;
 pub mod prompt_events;
 pub mod drone_run_event;
 /// Replies that say nothing are not sent (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).
