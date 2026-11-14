@@ -62,11 +62,12 @@ pub(crate) fn install(hooks: &'static dyn ServerHooks) {
 }
 
 /// The registered steps, or `None` before the server has registered them. A delivery round that finds `None`
-/// claims nothing, so the relay offers the same messages again on the next pull. Under test, the server's own.
+/// claims nothing, so the relay offers the same messages again on the next pull. Under test, steps that leave
+/// every message alone stand in until something registers (the server's own are tested in the server layer).
 pub(crate) fn installed() -> Option<&'static dyn ServerHooks> {
     #[cfg(test)]
     {
-        Some(HOOKS.get().copied().unwrap_or(crate::server::muxbus_hooks::hooks()))
+        Some(HOOKS.get().copied().unwrap_or(&PlainSteps))
     }
     #[cfg(not(test))]
     {
@@ -109,6 +110,37 @@ impl ServerHooks for NotReady {
     }
 }
 
+/// What a delivery test gets when nothing registered: no hold, no files, no transcript request.
+#[cfg(test)]
+struct PlainSteps;
+
+#[cfg(test)]
+impl ServerHooks for PlainSteps {
+    fn hold_wan_for_unavailable(&self, _: &Store, _: &ReactiveHandler, _: &InjectionRequest) -> bool {
+        false
+    }
+    fn hold_relayed<'a>(&'a self, _: &'a InjectionRequest) -> BoxFuture<'a, bool> {
+        Box::pin(async { false })
+    }
+    fn settle_files(&self, _: &InjectionRequest, _: bool) {}
+    fn resolve_transcript_request_tier_fields(&self, _: &Arc<Store>, _: &mut InjectionRequest) {}
+    fn fetch_files<'a>(
+        &'a self,
+        _: &'a str,
+        _: &'a reqwest::Client,
+        _: &'a str,
+        _: &'a str,
+        _: &'a mut InjectionRequest,
+        _: Vec<CloudFile>,
+        _: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn prepare_files<'a>(&'a self, _: &'a mut InjectionRequest) -> BoxFuture<'a, ()> {
+        Box::pin(async {})
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,12 +165,12 @@ mod tests {
     }
 
     #[test]
-    fn under_test_the_servers_own_steps_stand_in_until_something_registers() {
+    fn under_test_plain_steps_stand_in_until_something_registers() {
         assert!(installed().is_some());
     }
 
     #[tokio::test]
-    async fn the_servers_steps_leave_a_message_with_no_files_and_no_transcript_request_alone() {
+    async fn the_steps_leave_a_message_with_no_files_and_no_transcript_request_alone() {
         let steps = installed().unwrap();
         let store = Arc::new(Store::open_in_memory().unwrap());
         let mut r = req();

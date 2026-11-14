@@ -360,7 +360,7 @@ async fn a_release_the_relay_refuses_does_not_stop_the_next_one() {
 }
 
 #[tokio::test]
-async fn a_manifest_the_cloud_limits_refuse_is_delivered_with_a_note_and_the_claim_kept() {
+async fn a_manifest_the_cloud_limits_refuse_is_delivered_and_the_claim_kept() {
     let agent = agent_name();
     let (handler, typed) = live_pane(&agent);
     let (base, asked) = relay(vec![won(&["inj-1"]), released()]).await;
@@ -374,7 +374,8 @@ async fn a_manifest_the_cloud_limits_refuse_is_delivered_with_a_note_and_the_cla
     claim(&base, &agent, handler, pulled, true).await;
 
     let typed = typed.lock().unwrap().join("");
-    assert!(typed.contains("with a file") && typed.contains("malformed or over the cloud's limits"), "{typed}");
+    // The note that none were delivered comes from the server's steps (`server/jekt_cloud.rs`, tested there).
+    assert!(typed.contains("with a file"), "{typed}");
     assert_eq!(lines(&asked), ["POST /reactive/ack"], "nothing to retry: no file was fetched");
 }
 
