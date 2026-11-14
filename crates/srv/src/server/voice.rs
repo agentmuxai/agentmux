@@ -30,6 +30,7 @@ use axum::{
 use serde_json::json;
 
 use super::AppState;
+use crate::backend::vault;
 
 const GROQ_TRANSCRIBE_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const GROQ_MODEL: &str = "whisper-large-v3-turbo";
@@ -46,7 +47,7 @@ pub(super) struct TranscribeQuery {
 /// → 200 `{ "text": "..." }` · 400 empty body · 501 no backend configured ·
 ///   502 upstream/subprocess error.
 pub(super) async fn handle_voice_transcribe(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Query(q): Query<TranscribeQuery>,
     body: Bytes,
 ) -> impl IntoResponse {
@@ -63,9 +64,13 @@ pub(super) async fn handle_voice_transcribe(
     let result = if engine == "whisper-local" {
         transcribe_local_whisper(body, lang.as_deref(), &settings).await
     } else {
-        match resolve_groq_key(&settings) {
-            Some(key) => transcribe_groq(&key, body, &mime, lang.as_deref()).await,
-            None => Err(NotConfigured(GROQ_NOT_CONFIGURED.to_string())),
+        // The key may be a Vault entry, opened here for this one request and sent nowhere else.
+        let (keyed, store) = (settings.clone(), state.identity_store.clone());
+        let key = tokio::task::spawn_blocking(move || groq_key(&keyed, Some(&store))).await.unwrap_or(GroqKey::Gone);
+        match key {
+            GroqKey::Found(key) => transcribe_groq(&key, body, &mime, lang.as_deref()).await,
+            GroqKey::Gone => Err(NotConfigured(GROQ_GONE.to_string())),
+            GroqKey::Unset => Err(NotConfigured(GROQ_NOT_CONFIGURED.to_string())),
         }
     };
 
@@ -84,17 +89,19 @@ pub(super) async fn handle_voice_transcribe(
     }
 }
 
-const GROQ_NOT_CONFIGURED: &str = "Groq backend not configured — set voice:groqApiKey in settings.json \
-     or the AGENTMUX_GROQ_API_KEY env var";
+const GROQ_NOT_CONFIGURED: &str = "Groq backend not configured — choose a Vault key for it in Settings > Recording \
+     (add one to the Vault there), or set the AGENTMUX_GROQ_API_KEY environment variable";
+const GROQ_GONE: &str = "The Vault key chosen for voice input is not there, or is not an API key — choose another in \
+     Settings > Recording, or set the AGENTMUX_GROQ_API_KEY environment variable";
 
 /// `GET /api/v1/voice/status` → `{ "engine": "groq", "ready": false, "missing": "groq-key", "error": "..." }`.
 /// Whether the chosen engine has what it needs to transcribe, read from the settings and the environment
 /// alone: nothing is sent anywhere, no program is run and no model is fetched. The mic asks this before it
 /// records, so a person with no engine set up is told at the click, not after speaking into nothing.
-pub(super) async fn handle_voice_status() -> impl IntoResponse {
+pub(super) async fn handle_voice_status(State(state): State<AppState>) -> impl IntoResponse {
     let settings = read_settings_json();
     let engine = resolve_engine(&settings);
-    let gap = setup_gap(&settings, &engine);
+    let gap = setup_gap(&settings, &engine, Some(&state.identity_store));
     if let Some(gap) = &gap {
         log_not_configured(&gap.error);
     }
@@ -117,15 +124,21 @@ struct SetupGap {
 
 /// The first thing `engine` still needs, or `None` when a transcription can be tried. For local whisper a
 /// model that is fetched on first use is not a gap: only a model path that was given and is not there.
-fn setup_gap(settings: &Option<serde_json::Value>, engine: &str) -> Option<SetupGap> {
+fn setup_gap(settings: &Option<serde_json::Value>, engine: &str, store: Option<&crate::backend::storage::store::Store>) -> Option<SetupGap> {
+    setup_gap_with(env_groq_key(), settings, engine, store)
+}
+
+fn setup_gap_with(groq_env: Option<String>, settings: &Option<serde_json::Value>, engine: &str, store: Option<&crate::backend::storage::store::Store>) -> Option<SetupGap> {
     let gap = |missing, error: SttError| {
         let (NotConfigured(error) | Upstream(error)) = error;
         Some(SetupGap { missing, error })
     };
     if engine != "whisper-local" {
-        return match resolve_groq_key(settings) {
-            Some(_) => None,
-            None => gap("groq-key", NotConfigured(GROQ_NOT_CONFIGURED.to_string())),
+        // The Vault entry is looked for, never opened: the status runs whenever the mic is clicked.
+        return match groq_key_state_with(groq_env, settings, store) {
+            GroqKeyState::Ready => None,
+            GroqKeyState::Gone => gap("groq-key", NotConfigured(GROQ_GONE.to_string())),
+            GroqKeyState::Unset => gap("groq-key", NotConfigured(GROQ_NOT_CONFIGURED.to_string())),
         };
     }
     if let Err(e) = resolve_whisper_cli(settings) {
@@ -190,15 +203,57 @@ fn resolve_engine(settings: &Option<serde_json::Value>) -> String {
         .unwrap_or_else(|| "groq".to_string())
 }
 
-/// Groq key: `AGENTMUX_GROQ_API_KEY` env, else settings.json `voice:groqApiKey`.
-fn resolve_groq_key(settings: &Option<serde_json::Value>) -> Option<String> {
-    if let Ok(k) = std::env::var("AGENTMUX_GROQ_API_KEY") {
-        let k = k.trim().to_string();
-        if !k.is_empty() {
-            return Some(k);
-        }
+/// What the Groq key setting comes to.
+enum GroqKey {
+    Found(zeroize::Zeroizing<String>),
+    /// The setting names a Vault entry that is not there (or is not an API key).
+    Gone,
+    Unset,
+}
+
+/// Groq key: `AGENTMUX_GROQ_API_KEY` env (it wins, for CI and scripts), else settings.json `voice:groqApiKey`:
+/// a `vault:<entry id>` reference, read from the Vault here, or a plain key from before it was moved.
+fn groq_key(settings: &Option<serde_json::Value>, store: Option<&crate::backend::storage::store::Store>) -> GroqKey {
+    groq_key_with(env_groq_key(), settings, store)
+}
+
+fn groq_key_with(env: Option<String>, settings: &Option<serde_json::Value>, store: Option<&crate::backend::storage::store::Store>) -> GroqKey {
+    if let Some(k) = env {
+        return GroqKey::Found(zeroize::Zeroizing::new(k));
     }
-    settings_str(settings, "voice:groqApiKey")
+    let Some(set) = settings_str(settings, "voice:groqApiKey") else { return GroqKey::Unset };
+    match (vault::setting_key::entry_of(&set), store) {
+        (Some(id), Some(store)) => match vault::setting_key::read(store, id, "AgentMux voice input", "voice input") {
+            Ok(v) => GroqKey::Found(v),
+            Err(_) => GroqKey::Gone,
+        },
+        (Some(_), None) => GroqKey::Gone,
+        (None, _) => GroqKey::Found(zeroize::Zeroizing::new(set)),
+    }
+}
+
+fn env_groq_key() -> Option<String> {
+    let k = std::env::var("AGENTMUX_GROQ_API_KEY").ok()?.trim().to_string();
+    (!k.is_empty()).then_some(k)
+}
+
+enum GroqKeyState {
+    Ready,
+    Gone,
+    Unset,
+}
+
+/// Whether there is a Groq key to use, without opening a Vault entry.
+fn groq_key_state_with(env: Option<String>, settings: &Option<serde_json::Value>, store: Option<&crate::backend::storage::store::Store>) -> GroqKeyState {
+    if env.is_some() {
+        return GroqKeyState::Ready;
+    }
+    let Some(set) = settings_str(settings, "voice:groqApiKey") else { return GroqKeyState::Unset };
+    match vault::setting_key::entry_of(&set) {
+        Some(id) if store.is_some_and(|s| vault::setting_key::present(s, id)) => GroqKeyState::Ready,
+        Some(_) => GroqKeyState::Gone,
+        None => GroqKeyState::Ready,
+    }
 }
 
 /// Env-first, then settings.json, for a path-valued config key.
@@ -500,19 +555,60 @@ mod tests {
             .all(|k| std::env::var(k).is_err())
     }
 
+    fn vault_with_key(value: &str) -> (crate::backend::storage::store::Store, String) {
+        crate::backend::vault::seal::use_test_key();
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        store.apply_identity_schema_for_tests().unwrap();
+        let id = vault::setting_key::keep(&store, "Groq key (voice input)", "gsk_from_the_vault").unwrap();
+        (store, id)
+    }
+
+    fn setting(v: &str) -> Option<serde_json::Value> {
+        Some(serde_json::json!({ "voice:groqApiKey": v }))
+    }
+
+    #[test]
+    fn a_vault_reference_is_read_from_the_vault_and_a_gone_one_says_so() {
+        let (store, id) = vault_with_key("x");
+        let GroqKey::Found(k) = groq_key_with(None, &setting(&format!("vault:{id}")), Some(&store)) else { panic!("not found") };
+        assert_eq!(k.as_str(), "gsk_from_the_vault");
+        assert!(matches!(groq_key_state_with(None, &setting(&format!("vault:{id}")), Some(&store)), GroqKeyState::Ready));
+        assert!(matches!(groq_key_with(None, &setting("vault:nope"), Some(&store)), GroqKey::Gone));
+        assert!(matches!(groq_key_with(None, &setting(&format!("vault:{id}")), None), GroqKey::Gone), "no Vault to open");
+        let gap = setup_gap_with(None, &setting("vault:nope"), "groq", Some(&store)).expect("a dangling reference is a gap");
+        assert_eq!((gap.missing, gap.error.contains("not there")), ("groq-key", true), "{}", gap.error);
+        assert!(!gap.error.contains("nope"), "the answer names no entry: {}", gap.error);
+    }
+
+    #[test]
+    fn the_environment_variable_still_wins_over_the_setting_and_the_vault() {
+        let (store, id) = vault_with_key("x");
+        let GroqKey::Found(k) = groq_key_with(Some("gsk_from_env".into()), &setting(&format!("vault:{id}")), Some(&store)) else { panic!("not found") };
+        assert_eq!(k.as_str(), "gsk_from_env");
+        // Even a dangling reference is not a gap when the environment has the key.
+        assert!(matches!(groq_key_state_with(Some("gsk_from_env".into()), &setting("vault:nope"), Some(&store)), GroqKeyState::Ready));
+        assert!(matches!(groq_key_with(None, &None, Some(&store)), GroqKey::Unset));
+    }
+
+    #[test]
+    fn a_plain_key_left_in_the_settings_still_works_until_it_is_moved() {
+        let GroqKey::Found(k) = groq_key_with(None, &setting("gsk_plain"), None) else { panic!("not found") };
+        assert_eq!(k.as_str(), "gsk_plain");
+    }
+
     #[test]
     fn groq_with_no_key_is_a_gap_and_with_one_is_ready() {
         if !env_is_clean() {
             return;
         }
-        let gap = setup_gap(&None, "groq").expect("no settings, no key");
+        let gap = setup_gap(&None, "groq", None).expect("no settings, no key");
         assert_eq!(gap.missing, "groq-key");
-        assert!(gap.error.contains("voice:groqApiKey"), "{}", gap.error);
+        assert!(gap.error.contains("Vault"), "{}", gap.error);
         // A blank key is no key.
         let blank = Some(serde_json::json!({ "voice:groqApiKey": "  " }));
-        assert_eq!(setup_gap(&blank, "groq").map(|g| g.missing), Some("groq-key"));
+        assert_eq!(setup_gap(&blank, "groq", None).map(|g| g.missing), Some("groq-key"));
         let keyed = Some(serde_json::json!({ "voice:groqApiKey": "gsk_x" }));
-        assert_eq!(setup_gap(&keyed, "groq"), None);
+        assert_eq!(setup_gap(&keyed, "groq", None), None);
     }
 
     #[test]
@@ -520,9 +616,9 @@ mod tests {
         if !env_is_clean() {
             return;
         }
-        assert_eq!(setup_gap(&None, "whisper-local").map(|g| g.missing), Some("whisper-cli"));
+        assert_eq!(setup_gap(&None, "whisper-local", None).map(|g| g.missing), Some("whisper-cli"));
         let gone = Some(serde_json::json!({ "voice:whisperCliPath": "/no/such/whisper-cli" }));
-        let gap = setup_gap(&gone, "whisper-local").expect("the program is not there");
+        let gap = setup_gap(&gone, "whisper-local", None).expect("the program is not there");
         assert_eq!(gap.missing, "whisper-cli");
         assert!(gap.error.contains("/no/such/whisper-cli"), "{}", gap.error);
 
@@ -530,15 +626,15 @@ mod tests {
         let here = std::env::current_exe().unwrap().to_string_lossy().to_string();
         // The default model is fetched on first use, so it is not a gap.
         let ready = Some(serde_json::json!({ "voice:whisperCliPath": here }));
-        assert_eq!(setup_gap(&ready, "whisper-local"), None);
+        assert_eq!(setup_gap(&ready, "whisper-local", None), None);
         let model_gone = Some(serde_json::json!({
             "voice:whisperCliPath": here, "voice:whisperModelPath": "/no/such/model.bin",
         }));
-        assert_eq!(setup_gap(&model_gone, "whisper-local").map(|g| g.missing), Some("whisper-model"));
+        assert_eq!(setup_gap(&model_gone, "whisper-local", None).map(|g| g.missing), Some("whisper-model"));
         let bad_name = Some(serde_json::json!({
             "voice:whisperCliPath": here, "voice:whisperModel": "../etc/passwd",
         }));
-        assert_eq!(setup_gap(&bad_name, "whisper-local").map(|g| g.missing), Some("whisper-model"));
+        assert_eq!(setup_gap(&bad_name, "whisper-local", None).map(|g| g.missing), Some("whisper-model"));
     }
 
     #[test]

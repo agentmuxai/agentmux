@@ -73,6 +73,7 @@ pub fn spawn_background_subsystems(
     deploy_shell_integration();
 
     let config_watcher = start_config_watchers(&fs_watch_pool, &event_bus, &broker);
+    move_voice_key_into_vault(identity_store);
 
     spawn_sampling_loops(mstore, filestore, work_store, &event_bus, &broker, &config_watcher);
 
@@ -151,6 +152,25 @@ fn deploy_shell_integration() {
     //     tell users to invoke directly, which must stay predictable.
     backend::shellintegration::deploy_scripts(&backend::shellintegration::integration_base());
     backend::shellintegration::deploy_scripts(&backend::shellintegration::documented_shell_root());
+}
+
+/// A Groq key left in settings.json as plain text goes into the Vault, and the setting becomes a `vault:<id>`
+/// reference (#47636). Decided from the value alone each start, so it runs once in practice and never leaves a
+/// marker. In the background: the Vault's seal key may need the OS keychain.
+fn move_voice_key_into_vault(identity_store: &Arc<Store>) {
+    let store = identity_store.clone();
+    std::thread::spawn(move || {
+        let path = backend::config_watcher_fs::resolve_settings_dir().join("settings.json");
+        let current = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| agentmux_common::settings_jsonc::parse_jsonc(&text))
+            .and_then(|v| v.get("voice:groqApiKey").and_then(|k| k.as_str()).map(str::to_string));
+        match backend::vault::setting_key::move_setting(&store, "voice:groqApiKey", "Groq key (voice input)", current.as_deref(), backend::config_watcher_fs::merge_settings_to_disk) {
+            Ok(Some(_)) => tracing::info!("the Groq key in settings.json was moved into the Vault"),
+            Ok(None) => {}
+            Err(e) => tracing::warn!(error = %e, "the Groq key in settings.json could not be moved into the Vault; it stays where it is"),
+        }
+    });
 }
 
 /// Creates the config state and starts the watchers for settings, widgets and the start page.

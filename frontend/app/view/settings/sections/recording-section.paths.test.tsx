@@ -8,7 +8,7 @@
  * stale continuations).
  */
 
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -19,6 +19,8 @@ const h = vi.hoisted(() => ({
     meterStop: vi.fn(),
     level: { v: 0 },
     pickMime: vi.fn(() => "audio/webm"),
+    entries: [] as { id: string; kind: string; label: string }[],
+    vaultOn: { on: true },
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({
@@ -28,6 +30,15 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+vi.mock("@/app/view/vault/vault-store", () => ({
+    vaultAvailable: () => h.vaultOn.on,
+    refreshVault: () => Promise.resolve(),
+    vaultEntries: () => h.entries,
+}));
+// The Vault's own form, stood in for: its Save reports the entry the person made.
+vi.mock("@/app/view/vault/vault-entry-form", () => ({
+    VaultEntryForm: (p: { onClose: (id?: string) => void }) => <button onClick={() => p.onClose("made-1")}>Save to the Vault</button>,
+}));
 vi.mock("@/app/store/global", async () => {
     const { createSignal } = await import("solid-js");
     const [get, setGet] = createSignal<Record<string, unknown>>({});
@@ -300,21 +311,62 @@ describe("RecordingSection engine picker", () => {
         expect(hasRow("Model")).toBe(false);
     });
 
-    it("saves the Groq key through MaskedKeyField into voice:groqApiKey", async () => {
-        await renderSection();
-        const input = row("Groq API key").querySelector("input") as HTMLInputElement;
-        expect(input.placeholder).toBe("paste key — never displayed again after saving");
-        fireEvent.input(input, { target: { value: "  gsk_abc " } });
-        fireEvent.click(screen.getByRole("button", { name: "Save" }));
-        expect(lastConfig()).toEqual({ "voice:groqApiKey": "gsk_abc" });
-    });
+    describe("the Groq key is a Vault entry", () => {
+        beforeEach(() => {
+            h.entries = [
+                { id: "k-2", kind: "api-key", label: "Work Groq" },
+                { id: "k-1", kind: "api-key", label: "Groq key (voice input)" },
+                { id: "n-1", kind: "note", label: "Not a key" },
+            ];
+            h.vaultOn.on = true;
+        });
 
-    it("shows a stored Groq key masked, never its value", async () => {
-        await renderSection({ "voice:groqApiKey": "gsk_secret" });
-        const r = row("Groq API key");
-        expect(r.textContent).toContain("••••••••");
-        expect(r.textContent).not.toContain("gsk_secret");
-        expect(r.querySelector("input")).toBeNull();
+        it("lists the Vault's API keys, not other entries, and stores a reference to the one chosen", async () => {
+            await renderSection();
+            const picker = within(row("Groq API key")).getByRole("combobox") as HTMLSelectElement;
+            expect(Array.from(picker.options).map((o) => o.textContent)).toEqual(["Choose a Groq key from the Vault…", "Groq key (voice input)", "Work Groq"]);
+            fireEvent.change(picker, { target: { value: "k-2" } });
+            expect(lastConfig()).toEqual({ "voice:groqApiKey": "vault:k-2" });
+            expect(row("Groq API key").querySelector("input[type=password]")).toBeNull();
+        });
+
+        it("shows the entry a reference names, and says so when it is not on this machine", async () => {
+            await renderSection({ "voice:groqApiKey": "vault:k-1" });
+            expect((within(row("Groq API key")).getByRole("combobox") as HTMLSelectElement).value).toBe("k-1");
+            expect(row("Groq API key").textContent).not.toContain("not on this machine");
+            cleanup();
+            await renderSection({ "voice:groqApiKey": "vault:elsewhere" });
+            expect(row("Groq API key").textContent).toContain("not on this machine");
+        });
+
+        it("adds a key in the Vault's own form and stores the entry it made", async () => {
+            await renderSection();
+            fireEvent.click(within(row("Groq API key")).getByRole("button", { name: "Add a key to the Vault…" }));
+            fireEvent.click(screen.getByRole("button", { name: "Save to the Vault" }));
+            expect(lastConfig()).toEqual({ "voice:groqApiKey": "vault:made-1" });
+        });
+
+        it("says a key still stored as plain text is that, and never shows its value", async () => {
+            // The renderer is given a placeholder for a plain key, never the key.
+            await renderSection({ "voice:groqApiKey": "••••••••" });
+            const r = row("Groq API key");
+            expect(r.textContent).toContain("still in settings.json as plain text");
+            expect(r.textContent).not.toContain("gsk_");
+        });
+
+        it("tells the person once that the key was moved, and the notice goes when dismissed", async () => {
+            await renderSection({ "voice:groqApiKey": "vault:k-1", "voice:groqApiKeyMoved": true });
+            expect(screen.getByText("Your Groq key is now in the Vault")).toBeInTheDocument();
+            fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+            expect(lastConfig()).toEqual({ "voice:groqApiKeyMoved": null });
+        });
+
+        it("has no picker to use outside the desktop app", async () => {
+            h.vaultOn.on = false;
+            await renderSection();
+            expect(row("Groq API key").textContent).toContain("The Vault needs the AgentMux desktop app.");
+            expect(within(row("Groq API key")).getByRole("button", { name: "Add a key to the Vault…" })).toBeDisabled();
+        });
     });
 });
 
