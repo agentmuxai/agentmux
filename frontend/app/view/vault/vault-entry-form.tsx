@@ -30,6 +30,7 @@ import {
 } from "./vault-card";
 import { kindsIn, type VaultInput, vaultKind, type VaultKind } from "./vault-kinds";
 import { firstSaveNotice } from "./vault-prompts";
+import { MachineCopyFields, offersSource, sourceFields } from "./vault-source";
 import { createEntry, updateEntry, vaultEntries } from "./vault-store";
 import { VaultField } from "./vault-vaults";
 // Loaded with the form, which an agent's pane opens without a Vault pane: a
@@ -173,7 +174,7 @@ async function save(s: FormState) {
             await updateEntry({
                 id: s.editing.id,
                 label: s.label(),
-                fields: pick(s.fields, k.fields),
+                fields: { ...pick(s.fields, k.fields), ...sourceFields(s.fields) },
                 tags: s.editing.tags,
                 parts: pick(s.parts, k.parts),
                 clear: k.parts.filter((p) => s.clear[p.name]).map((p) => p.name),
@@ -183,7 +184,7 @@ async function save(s: FormState) {
             const res = await createEntry({
                 kind: k.name,
                 label: s.label(),
-                fields: pick(s.fields, k.fields),
+                fields: { ...pick(s.fields, k.fields), ...sourceFields(s.fields) },
                 parts: pick(s.parts, k.parts),
                 request_id: s.request?.id,
                 vault: s.vault(),
@@ -288,6 +289,9 @@ function FormFields({ s }: { s: FormState }) {
             <For each={(s.kind()?.fields ?? []).filter((f) => !f.kept && (!f.profile || !!s.fields.site?.trim()))}>
                 {(f) => <FieldRow s={s} f={f} />}
             </For>
+            <Show when={offersSource(s.kind()?.section, s.fields)}>
+                <MachineCopyFields fields={s.fields} setFields={s.setFields} />
+            </Show>
             {/* Enter in a field saves. */}
             <input type="submit" hidden />
         </form>

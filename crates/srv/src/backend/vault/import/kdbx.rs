@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use keepass::db::GroupRef;
 use keepass::{Database, DatabaseKey};
 
-use super::super::{kdbx_names, kinds};
+use super::super::{kdbx_names, kinds, source_link};
 use super::{Imported, Incoming, ReadError, Source, MAX_ITEMS};
 
 pub const MAGIC: [u8; 4] = [0x03, 0xD9, 0xA2, 0x9A];
@@ -266,7 +266,7 @@ fn entry_into(e: &keepass::db::Entry, tag: &str, entries: &mut Vec<Incoming>, sk
         })
         .collect();
     custom.sort();
-    let mut used = vec![false; custom.len()];
+    let (mut used, link) = link_fields(&custom);
     let mut typed: Vec<Incoming> = Vec::new();
     for primary in kdbx_names::PRIMARY {
         let Some(i) = custom.iter().position(|(n, _)| kdbx_names::matches(primary.aliases, n)) else { continue };
@@ -345,7 +345,31 @@ fn entry_into(e: &keepass::db::Entry, tag: &str, entries: &mut Vec<Incoming>, sk
         skipped.push((label, "it has no password, note or secret field".to_string()));
         return;
     }
-    entries.extend(made.into_iter().map(|m| m.tag(tag)));
+    entries.extend(with_link(made, link).into_iter().map(|m| m.tag(tag)));
+}
+
+/// Which custom fields say where the entry's machine copy is, as an export from the Vault writes them: they come
+/// back as plain fields, not note text. Returns which of `custom` are used up, and the link's fields.
+fn link_fields(custom: &[(String, String)]) -> (Vec<bool>, Vec<(&'static str, String)>) {
+    let mut used = vec![false; custom.len()];
+    let mut link = Vec::new();
+    for (name, title) in source_link::TITLES {
+        if let Some(i) = custom.iter().position(|(n, _)| n.trim().eq_ignore_ascii_case(title)) {
+            used[i] = true;
+            link.push((name, custom[i].1.clone()));
+        }
+    }
+    (used, link)
+}
+
+/// `made` with the link on its first entry: the one the KeePass entry is about.
+fn with_link(mut made: Vec<Incoming>, link: Vec<(&'static str, String)>) -> Vec<Incoming> {
+    if let Some(first) = made.first_mut() {
+        for (name, value) in &link {
+            *first = std::mem::take(first).field(name, value);
+        }
+    }
+    made
 }
 
 #[cfg(test)]

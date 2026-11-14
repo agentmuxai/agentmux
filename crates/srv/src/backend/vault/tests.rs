@@ -190,7 +190,7 @@ fn generate_makes_an_entry_whose_value_nobody_was_given() {
     assert_eq!(value.chars().count(), generate::DEFAULT_LENGTH);
     // What an agent can see names it, and nothing else.
     let listed = list_for_agent(&s, None).unwrap();
-    assert_eq!(listed, vec![VaultAgentEntry { id: made.id.clone(), label: "Staging deploy key".into(), kind: "api-key".into(), section: VaultSection::ApiKeys, vault: "Personal".into(), expires: None }]);
+    assert_eq!(listed, vec![VaultAgentEntry { id: made.id.clone(), label: "Staging deploy key".into(), kind: "api-key".into(), section: VaultSection::ApiKeys, vault: "Personal".into(), expires: None, source: None }]);
     // The record names the agent, and never the value.
     let rows = activity(&s, 10).unwrap();
     let line = rows.iter().find(|r| r.action == "generated").unwrap();

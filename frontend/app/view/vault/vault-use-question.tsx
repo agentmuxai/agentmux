@@ -75,6 +75,10 @@ export function promptTitle(u: UseRequest, short = false): string {
         const from = u.import.service;
         return u.import.replaces ? `${agent} wants to replace the value of ${label} with a secret from ${from}` : `${agent} wants to copy a secret from ${from} into your Vault as ${label}`;
     }
+    if (u.link) {
+        if (!u.link.from) return `${agent} wants to record where the machine copy of ${label} is`;
+        return u.link.to ? `${agent} wants to change where the machine copy of ${label} is` : `${agent} wants to remove where the machine copy of ${label} is`;
+    }
     if (u.account) return `${agent} wants to create an account on ${siteOf(u.origin)}`;
     if (u.signin) return `${agent} wants to sign in to ${siteOf(u.origin)} as ${short ? clip(u.field, CLIP.label) : u.field}`;
     if (u.replaces) return `${agent} wants to replace ${label} with what a command prints`;
@@ -85,6 +89,7 @@ export function promptTitle(u: UseRequest, short = false): string {
 /** The line under the question: what the agent never sees. */
 function promptNote(u: UseRequest): string {
     if (u.import) return "The agent never sees the value: AgentMux reads it.";
+    if (u.link) return "The place decides what a check of this entry reads. No value is in it, and the agent never sees one.";
     if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
     if (u.command) return "The agent never sees the value, and the command's output is cleaned of it.";
     if (u.account) return "The Vault makes the password and keeps it for you. The agent never sees it. Check the site is the one you expect.";
@@ -138,6 +143,27 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
                 's tab.
             </p>
         </Show>
+    );
+}
+
+/** A change to where an entry's machine copy is: the place it has now and the place the agent asks for. */
+function UseLinkSubject(props: { use: UseRequest; link: NonNullable<UseRequest["link"]> }): JSX.Element {
+    return (
+        <>
+            <p>
+                The machine copy of <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong> is a copy of its value that a service or a build reads.
+            </p>
+            <p data-link="from">
+                Now: <Show when={props.link.from} fallback="no place is recorded.">
+                    <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.from} max={CLIP.reason} /></strong>
+                </Show>
+            </p>
+            <p data-link="to">
+                Asked for: <Show when={props.link.to} fallback="no place (the record is removed).">
+                    <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.to} max={CLIP.reason} /></strong>
+                </Show>
+            </p>
+        </>
     );
 }
 
@@ -241,7 +267,7 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
             fallback={
                 <Show when={!props.use.needs_value}>
                     <p class="vault-use-deadline">
-                        <strong>Waiting for you</strong>: {props.use.import ? "nothing is copied without a yes." : "ID and card details are never used without a yes."}
+                        <strong>Waiting for you</strong>: {props.use.import ? "nothing is copied without a yes." : props.use.link ? "the place is not changed without a yes." : "ID and card details are never used without a yes."}
                     </p>
                 </Show>
             }
@@ -437,11 +463,24 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 <Show
                     when={u.import}
                     fallback={
-                        <>
-                            <UseDeadline use={u} />
-                            <UseSays use={u} />
-                            <UseSubject use={u} answer={a} focus={props.focus} />
-                        </>
+                        <Show
+                            when={u.link}
+                            fallback={
+                                <>
+                                    <UseDeadline use={u} />
+                                    <UseSays use={u} />
+                                    <UseSubject use={u} answer={a} focus={props.focus} />
+                                </>
+                            }
+                        >
+                            {(l) => (
+                                <>
+                                    <UseLinkSubject use={u} link={l()} />
+                                    <UseSays use={u} />
+                                    <UseDeadline use={u} />
+                                </>
+                            )}
+                        </Show>
                     }
                 >
                     {(i) => (

@@ -239,6 +239,16 @@ Rules:
 
 Users' Vaults use only AgentMux's own tiers (decided by the operator). AgentMux Cloud's store is AgentMux's to choose. It holds sealed records, so it gains nothing from Secrets Manager's own encryption. The private note records that choice.
 
+### 11.3 Built first: where an entry's machine copy is, and a check
+
+Before backing or mirroring moves any value, an entry can say where a copy of its value lives outside the Vault, and the Vault can say whether that copy still equals its own. Neither changes which side is authoritative. Code: `crates/srv/src/backend/vault/source_link.rs`.
+
+- **The link** is plain fields on the entry, allowed on every kind, and never a value: `source_kind` (`aws-secret`, `github-secret` or `other`), `source_location` (the secret's name or ARN; `owner/repo` or `owner/repo@environment`; or a line of text), `source_key` (a JSON secret's dotted key, or the CI secret's name), and for an AWS secret optionally `source_region` and `source_profile`. The pane calls it the entry's machine copy. Agents see the kind, the location and the key in `list`, and never the profile.
+- **Who sets it.** The person, in the entry's form. An agent, with `update` and a reason: because the place decides what a check reads, the person is asked first, on a card that shows the place now and the place asked for, and silence is a no.
+- **The check** (`Vault` `check`, and a button in the pane) reads the other place with the asker's own access (this computer's AWS setup for the person or a native agent, a broker session for a container agent's grant), compares inside srv, and answers `same`, `different` or `could not read` with why. Neither value, nor a length or a hash of one, is in the answer, an error or the history. A place that refuses the read is the answer. Only an AWS secret is read back today; the other kinds answer `could not read`.
+- **The record.** Each check is a line in the entry's history that names the place. The newest one, for the place the link names now, is shown with the entry. Agents together get 6 checks of one entry an hour, because a check answers one bit about the sealed value.
+- **It stays with the entry** through a `.vault` and a KeePass export and import, a move to another Vault and a restored value. An import that replaces an entry and names no place leaves the entry's own.
+
 ## 12. What the Vault needs from the console
 
 The console (Clamk's spec, #17021) shows AgentMux Cloud's services. For the Vault it shows only what the cloud can know:

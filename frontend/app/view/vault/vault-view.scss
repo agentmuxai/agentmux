@@ -388,6 +388,12 @@
     color: var(--warning-text-color);
 }
 
+// Where a copy of the entry's value lives outside the Vault, and what the newest check of it found.
+.vault-machine-copy {
+    margin-top: var(--space-1);
+    overflow-wrap: anywhere;
+}
+
 // An entry's earlier values: last characters, when and by whom replaced, Restore.
 // The History dialog's All / Changes / Uses buttons sit together on the left.
 .vault-history-filters {

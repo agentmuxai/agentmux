@@ -12,6 +12,7 @@ use agentmux_common::time::now_ms;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
+use super::source_link::{self, Link};
 use super::{expiry, history, kinds, record_line, seal, signins, signups, validate, vaults, Line, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::{VaultRow, VALUE_SETTING};
@@ -122,7 +123,7 @@ pub fn show(store: &Store, id: &str, agent: Option<&str>, key: &KeyResult, today
 
 /// What an agent asks `update` for: a new label, plain fields (an empty value removes one) and a new set of tags.
 /// Never a value: that is `rotate`, `generate`, `import` with `id` or `capture`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct UpdateRequest {
     pub id: String,
     #[serde(default)]
@@ -171,7 +172,7 @@ fn apply_fields(kind: &kinds::Kind, now: &BTreeMap<String, String>, asked: &BTre
         if person_only(name) {
             return Err(format!("{name} decides where a saved sign-in is offered: the person sets it in the Vault pane"));
         }
-        if !kind.fields.contains(&name.as_str()) {
+        if !kind.fields.contains(&name.as_str()) && !source_link::is_field(name) {
             return Err(format!("a {} entry has no field {name:?}", kind.name));
         }
         match value.trim() {
@@ -207,9 +208,39 @@ fn what_changed(row: &VaultRow, label: &str, fields: &BTreeMap<String, String>, 
     out
 }
 
-/// `update`: changes an entry's label, plain fields and tags, with the agent's reason, for an entry in a Vault it may
-/// use. The sealed value is not opened or touched. Records one `changed details` line.
-pub fn update_details(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Updated, String> {
+/// A change `update` would make to where an entry's machine copy is. The place decides what a check reads, so the
+/// person is asked before an agent changes it, and is shown the old place and the new one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkChange {
+    pub entry_id: String,
+    pub label: String,
+    pub kind: String,
+    pub from: Option<Link>,
+    pub to: Option<Link>,
+    /// The agent's reason, as the person is shown it.
+    pub reason: String,
+}
+
+/// An `update` that has been checked: the entry as read, and what it would become.
+struct Planned {
+    row: VaultRow,
+    reason: String,
+    label: String,
+    fields: BTreeMap<String, String>,
+    tags: Vec<String>,
+    changed: Vec<String>,
+}
+
+impl Planned {
+    fn link_change(&self) -> Option<LinkChange> {
+        let (from, to) = (Link::of(&fields_of(&self.row)), Link::of(&self.fields));
+        (from != to).then(|| LinkChange { entry_id: self.row.id.clone(), label: self.row.label.clone(), kind: self.row.kind.clone(), from, to, reason: self.reason.clone() })
+    }
+}
+
+/// Every check of an `update`, with nothing written: the reason, that the agent may use the entry, and that the new
+/// details are ones the entry can have and differ from what it has.
+fn planned(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Planned, String> {
     let reason = history::require_reason(req.reason.as_deref())?;
     let row = entry_for(store, &req.id, Some(agent))?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
@@ -225,6 +256,42 @@ pub fn update_details(store: &Store, req: &UpdateRequest, agent: &str) -> Result
     if changed.is_empty() {
         return Err("nothing to change: give a new label, a field's new value or tags that differ from what the entry has".into());
     }
+    Ok(Planned { row, reason, label, fields, tags, changed })
+}
+
+/// What `update` would do to the entry's machine copy, after every other check of the request: `None` when it leaves
+/// the link alone, and the request can go ahead without asking anyone.
+pub fn link_change(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Option<LinkChange>, String> {
+    Ok(planned(store, req, agent)?.link_change())
+}
+
+/// Records that a change to an entry's machine copy did not happen, and why (`denied`, `expired`).
+pub fn note_link_refused(store: &Store, change: &LinkChange, agent: &str, outcome: &str) {
+    record_line(store, Line { entry_id: &change.entry_id, label: &change.label, actor: agent, action: CHANGED_DETAILS, target: "machine copy", outcome, reason: &change.reason });
+}
+
+/// `update`: changes an entry's label, plain fields and tags, with the agent's reason, for an entry in a Vault it may
+/// use. The sealed value is not opened or touched. Records one `changed details` line. A change to where the entry's
+/// machine copy is refused here: that one goes through [`update_details_allowed`], after the person's yes.
+pub fn update_details(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Updated, String> {
+    update_with(store, req, agent, None)
+}
+
+/// [`update_details`] for a request that changes the machine copy, which the person allowed as `allowed` shows it.
+/// If the entry changed while they were asked, so that the change is no longer that one, nothing is written.
+pub fn update_details_allowed(store: &Store, req: &UpdateRequest, agent: &str, allowed: &LinkChange) -> Result<Updated, String> {
+    update_with(store, req, agent, Some(allowed))
+}
+
+fn update_with(store: &Store, req: &UpdateRequest, agent: &str, allowed: Option<&LinkChange>) -> Result<Updated, String> {
+    let plan = planned(store, req, agent)?;
+    match (plan.link_change(), allowed) {
+        (None, _) => {}
+        (Some(change), Some(allowed)) if &change == allowed => {}
+        (Some(_), Some(_)) => return Err("the entry changed while the person was asked, so nothing was changed: look at it and ask again".into()),
+        (Some(_), None) => return Err("where an entry's machine copy is decides what a check reads, so the person is asked before it changes: nothing was changed".into()),
+    }
+    let Planned { row, reason, label, fields, tags, changed } = plan;
     let was = row.sealed.clone();
     let new = VaultRow {
         label: label.clone(),
@@ -265,7 +332,7 @@ fn entry_problems(row: &VaultRow, key: &KeyResult, today: chrono::NaiveDate) -> 
         out.push("it has no label".to_string());
     }
     for (name, value) in fields_of(row) {
-        if !kind.fields.contains(&name.as_str()) {
+        if !kind.fields.contains(&name.as_str()) && !source_link::is_field(&name) {
             out.push(format!("it has a field a {} entry doesn't have: {name}", kind.name));
         } else if name == expiry::FIELD && expiry::parse(&value).is_err() {
             out.push("its expiry date isn't a date (YYYY-MM-DD)".to_string());
@@ -275,6 +342,9 @@ fn entry_problems(row: &VaultRow, key: &KeyResult, today: chrono::NaiveDate) -> 
     }
     if let Some(date) = expiry::of(row).filter(|_| expiry::expired(row, today)) {
         out.push(format!("its value expired on {date}: rotate or replace it"));
+    }
+    if source_link::validate(&fields_of(row)).is_err() {
+        out.push("where its machine copy is isn't written the way that kind of place is".to_string());
     }
     out.extend(sealed_problems(row, kind, key));
     out

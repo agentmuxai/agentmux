@@ -17,9 +17,10 @@ import { VaultVersionsDialog } from "./vault-versions";
 import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { CARD_BRANDS } from "./vault-card";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
+import { machineCopy, MachineCopyLine } from "./vault-source";
 import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { EntryGrants } from "./vault-entry-grants";
-import { deleteEntry, revokeGrant, vaultEntries, vaultList, vaultLoading } from "./vault-store";
+import { checkSource, deleteEntry, revokeGrant, vaultEntries, vaultList, vaultLoading } from "./vault-store";
 import { vaultNameOf, VaultMoveDialog } from "./vault-vaults";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -48,7 +49,9 @@ export function entryDetails(e: VaultEntryInfo): string {
 export function entryMatches(e: VaultEntryInfo, filter: string): boolean {
     const q = filter.trim().toLowerCase();
     if (!q) return true;
-    return [e.label, e.id, vaultKind(e.kind)?.label ?? e.kind, entryDetails(e), e.fields.expires ?? "", ...e.tags].some((s) => s.toLowerCase().includes(q));
+    return [e.label, e.id, vaultKind(e.kind)?.label ?? e.kind, entryDetails(e), machineCopy(e.fields), e.fields.expires ?? "", ...e.tags].some((s) =>
+        s.toLowerCase().includes(q),
+    );
 }
 
 /** Past its date or within `EXPIRING_SOON_DAYS` of it. */
@@ -57,8 +60,25 @@ export function expiringSoon(e: VaultEntryInfo, now = new Date()): boolean {
     return x !== null && x.days <= EXPIRING_SOON_DAYS;
 }
 
-/** An entry's plain details, the Vault it is in (when the list shows more than one), and its expiry. */
-function EntryDetails(props: { entry: VaultEntryInfo; showVault: boolean }): JSX.Element {
+/** Has srv read the entry's machine copy and compare it with the entry's value. What it found is the entry's own
+ *  line once srv has it; only a check that could not start is an error (`onError`). */
+function CheckCopyButton(props: { entry: VaultEntryInfo; onError: (message: string | null) => void }): JSX.Element {
+    const [busy, setBusy] = createSignal(false);
+    const check = async () => {
+        setBusy(true);
+        try {
+            await checkSource(props.entry.id);
+            props.onError(null);
+        } catch (err) {
+            props.onError(err instanceof Error ? err.message : String(err));
+        }
+        setBusy(false);
+    };
+    return <IconButton icon="arrows-rotate" label="Check the machine copy" density="compact" disabled={busy()} onClick={() => void check()} />;
+}
+
+/** An entry's plain details, the Vault it is in (when the list shows more than one), its expiry and its machine copy. */
+function EntryDetails(props: { entry: VaultEntryInfo; showVault: boolean; onError: (message: string | null) => void }): JSX.Element {
     return (
         <>
             {entryDetails(props.entry)}
@@ -77,6 +97,9 @@ function EntryDetails(props: { entry: VaultEntryInfo; showVault: boolean }): JSX
                     </div>
                 )}
             </Show>
+            <MachineCopyLine entry={props.entry}>
+                <CheckCopyButton entry={props.entry} onError={props.onError} />
+            </MachineCopyLine>
         </>
     );
 }
@@ -213,7 +236,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                     </td>
                                     <td>{vaultKind(e.kind)?.label ?? e.kind}</td>
                                     <td class="warden-manager-dim">
-                                        <EntryDetails entry={e} showVault={!props.vault} />
+                                        <EntryDetails entry={e} showVault={!props.vault} onError={setError} />
                                     </td>
                                     <EntryValue entry={e} />
                                     <td class="warden-manager-dim">{formatWhen(e.updated_at)}</td>

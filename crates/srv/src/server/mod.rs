@@ -176,6 +176,7 @@ pub(crate) mod vault_handlers;
 pub(crate) mod vault_import;
 pub(crate) mod vault_inspect;
 pub(crate) mod vault_rotate;
+pub(crate) mod vault_source;
 pub(crate) mod browser_capture;
 pub(crate) mod browser_capture_card;
 pub(crate) mod browser_vault_fill;
