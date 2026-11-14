@@ -90,6 +90,14 @@ fn cases() -> Vec<Case> {
             json!({ "block_id": "b8", "title": "Term" }),
             &["Pane title set to \"Term2\""],
         ),
+        c(
+            "SetName",
+            json!({ "target": "file", "path": " /w/a.rs ", "name": "b.rs", "connection": "local" }),
+            json!({ "success": true, "new_path": "/w/b.rs" }),
+            "/api/v1/file/rename",
+            json!({ "path": "/w/a.rs", "name": "b.rs", "block_id": "blk" }),
+            &["Renamed /w/a.rs to /w/b.rs. Editor tabs open on it follow."],
+        ),
         c("Layout", json!({}), json!({ "a": 1 }), "/api/v1/layout", json!({}), &["\"a\": 1"]),
         c("Layout", json!({ "query": "tabs" }), json!({ "a": 1 }), "/api/v1/tabs?block_id=blk", json!({}), &["\"a\": 1"]),
         c("Layout", json!({ "query": "windows" }), json!({ "a": 1 }), "/api/v1/windows", json!({}), &["\"a\": 1"]),
@@ -144,6 +152,8 @@ async fn a_tool_missing_what_it_needs_refuses_before_it_asks_srv() {
         ("SetName", json!({}), "missing required parameter: target"),
         ("SetName", json!({ "target": "tab" }), "missing required parameter: name"),
         ("SetName", json!({ "target": "bogus", "name": "x" }), "invalid target 'bogus'"),
+        ("SetName", json!({ "target": "file", "name": "b.rs" }), "missing required parameter: path"),
+        ("SetName", json!({ "target": "file", "path": "/w/a.rs" }), "missing required parameter: name"),
         ("Layout", json!({ "query": "bogus" }), "invalid query 'bogus'"),
         ("SetActiveTab", json!({}), "missing required parameter: tab_id"),
         ("QuitSelf", json!({}), "missing required parameter: reason"),
@@ -183,6 +193,24 @@ async fn a_refusal_from_srv_names_the_tool_and_the_status() {
         let err = call(tool, &args, &fx.cx()).await.expect_err(&format!("{tool} should fail")).to_string();
         assert!(err.contains(wanted), "{tool} {args}: {err:?}, wanted {wanted:?}");
     }
+}
+
+/// A file rename that srv refuses says srv's sentence and nothing around it; an answer that is not
+/// srv's shape names the status, as the other tools do.
+#[tokio::test]
+async fn a_refused_file_rename_says_srvs_own_sentence() {
+    let args = json!({ "target": "file", "path": "/w/a.rs", "name": "b.rs" });
+    let srv = stub_srv("422 Unprocessable Entity", json!({ "error": "Something named “b.rs” already exists here." }));
+    let fx = Fixture::new(&srv);
+    let err = call("SetName", &args, &fx.cx()).await.expect_err("refused").to_string();
+    assert_eq!(err, "Something named “b.rs” already exists here.");
+    // One fixture at a time: it holds the lock the next one takes.
+    drop(fx);
+
+    let srv = stub_srv("500 Internal Server Error", json!("boom"));
+    let fx = Fixture::new(&srv);
+    let err = call("SetName", &args, &fx.cx()).await.expect_err("failed").to_string();
+    assert_eq!(err, "File rename failed: HTTP 500 Internal Server Error — \"boom\"");
 }
 
 #[tokio::test]
