@@ -99,8 +99,9 @@ pub(super) fn split_caller(facts: Vec<WorkFacts>, caller_block: Option<&str>) ->
     (mine.into_iter().next(), others)
 }
 
-/// LAN and WAN agents: name and liveness only.
-fn remote_agents(state: &AppState) -> Vec<serde_json::Value> {
+/// LAN and WAN agents: name and liveness only. A WAN agent that the account's cloud list (`cloud_installs`) has
+/// says its state there (`working`, `idle`, ...) instead of a bare "online"; the Swarm reads the same list.
+fn remote_agents(state: &AppState, cloud: Option<&crate::muxbus::cloud_installs::CloudView>) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     for lan in state.lan_discovery.get_instances() {
         for name in &lan.agents {
@@ -109,7 +110,7 @@ fn remote_agents(state: &AppState) -> Vec<serde_json::Value> {
     }
     if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
         for name in sub.subscribed_agents() {
-            out.push(json!({ "agent": name, "channel": "wan", "status": "online" }));
+            out.push(json!({ "agent": name, "channel": "wan", "status": cloud.and_then(|c| c.agent_state(&name)).unwrap_or("online") }));
         }
     }
     out
@@ -153,12 +154,13 @@ pub(crate) async fn handle_who_is_working_on(
     let recent_posts = tokio::task::spawn_blocking(move || super::coord_channel_handlers::recent_posts(&store, &asked, pr, now))
         .await
         .unwrap_or_default();
+    let cloud = crate::muxbus::cloud_installs::view().await;
     Json(json!({
         "asked": target,
         "caller": me.as_ref().map(|m| json!({ "agent": m.agent, "repo": m.repo, "branch": m.branch })),
         "agents": agents,
         "recent_posts": recent_posts,
-        "remote_agents": remote_agents(&state),
+        "remote_agents": remote_agents(&state, cloud.as_ref()),
         "unreachable_channels": unreachable,
         "note": NOTE,
     }))

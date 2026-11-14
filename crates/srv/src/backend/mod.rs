@@ -166,6 +166,7 @@ pub mod pane_env;
 pub mod posix_shell;
 pub mod shellintegration;
 pub mod shells;
+pub mod swarm_cloud;
 pub mod swarm_remote;
 pub mod sampler;
 // The commit attribution that uses it is Windows-only; the logic is tested everywhere.

@@ -442,6 +442,7 @@ pub fn spawn_serving_loops(
     // while signed in (`muxbus::wan_presence`). Here rather than beside
     // `wan_publish::spawn` because the feed exists only once AppState does.
     // A headless srv doesn't publish unless forced (`wan_presence::policy`).
+    crate::muxbus::cloud_installs::install(Arc::clone(&state.id_store), state.http_client.clone());
     crate::muxbus::wan_presence::spawn(
         Arc::clone(&state.fleet_feed),
         Arc::clone(&state.id_store),

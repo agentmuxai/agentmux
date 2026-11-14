@@ -69,6 +69,9 @@ export interface SwarmOtherInstances {
     hostname: string;
     channel: string;
     hosts: RemoteHost[];
+    /** How srv's read of the account's other installs went: `off` (signed out, or the relay has no list), `ok`, or
+     *  `unavailable` (the last read failed). Absent from an older srv. */
+    cloud?: "off" | "ok" | "unavailable";
 }
 
 /** One section the view renders. */

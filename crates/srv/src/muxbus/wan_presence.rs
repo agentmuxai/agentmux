@@ -476,6 +476,7 @@ pub async fn goodbye_before_sign_out() -> bool {
 /// The sign-in is cleared (or clearing it failed): publishing may go on,
 /// and the status says "signed off" when the goodbye was stored.
 pub fn signed_out(stored: bool) {
+    super::cloud_installs::invalidate();
     SHARED.hold.store(false, Ordering::SeqCst);
     if let Some(tx) = SIGNALS.get() {
         let _ = tx.send(Event::Goodbye { stored });
@@ -489,6 +490,7 @@ pub fn publish_now() -> bool {
 
 /// A sign-in, sign-out or account change in this process: try at once.
 pub fn sign_in_changed() {
+    super::cloud_installs::invalidate();
     if let Some(tx) = SIGNALS.get() {
         let _ = tx.send(Event::SignIn);
     }

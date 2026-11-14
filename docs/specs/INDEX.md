@@ -1253,6 +1253,7 @@ partial list.
 | [`SPEC_STATUS_BAR_WINDOW_COUNT_2026_05_16`](SPEC_STATUS_BAR_WINDOW_COUNT_2026_05_16.md) | SPEC: Status-Bar Window-Count Display |
 | [`SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10`](SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10.md) | SPEC: Submenu positioning flash + hover-intent (safe-triangle) timing |
 | [`SPEC_SUBPROCESS_INTEGRATION_TESTS_2026_04_16`](SPEC_SUBPROCESS_INTEGRATION_TESTS_2026_04_16.md) | SPEC: Subprocess Integration Tests |
+| [`SPEC_SWARM_CLOUD_TIER_2026_11_14`](SPEC_SWARM_CLOUD_TIER_2026_11_14.md) | Spec: The cloud tier: agents on the account's other machines that are not on the LAN, listed by srv for the Swarm and Atlas |
 | [`SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05`](SPEC_SWARM_LIVE_FEED_BINDINGS_2026_07_05.md) | SPEC: Swarm Live Feed — backend code bindings |
 | [`SPEC_SWARM_LIVE_FEED_UI_2026_07_05`](SPEC_SWARM_LIVE_FEED_UI_2026_07_05.md) | SPEC: Swarm Live Feed — UI |
 | [`SPEC_SWARM_TREE_REDESIGN_2026_06_19`](SPEC_SWARM_TREE_REDESIGN_2026_06_19.md) | Swarm View Tree Redesign |
