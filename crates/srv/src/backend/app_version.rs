@@ -142,11 +142,9 @@ fn bundle_version(bundle: &Path) -> Option<String> {
             return plist_string(xml, "CFBundleShortVersionString").or_else(|| plist_string(xml, "CFBundleVersion"));
         }
     }
-    let out = std::process::Command::new("/usr/bin/plutil")
-        .args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"])
-        .arg(&plist)
-        .output()
-        .ok()?;
+    let mut cmd = std::process::Command::new("/usr/bin/plutil");
+    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+    let out = cmd.args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"]).arg(&plist).output().ok()?;
     let v = String::from_utf8(out.stdout).ok()?.trim().to_string();
     (out.status.success() && !v.is_empty() && v.len() <= 64).then_some(v)
 }
