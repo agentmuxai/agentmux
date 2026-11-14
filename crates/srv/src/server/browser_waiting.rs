@@ -225,17 +225,20 @@ pub(crate) fn open_pane_of(agent: &str, id: &str) -> Result<String, String> {
 /// Whatever the page or the host wrote (the button's words, the address, an error) is masked and quoted: the note carries
 /// AgentMux's own marker, so a page must not be able to put words of its own in it.
 pub(crate) fn outcome_text(id: &str, kind: &str, question: &str, state: &State) -> String {
+    outcome_text_after(id, kind, question, state, None)
+}
+
+/// [`outcome_text`], for a hand-off with how long its banner was up (`open_secs`): "clicked Done after 7 s".
+pub(crate) fn outcome_text_after(id: &str, kind: &str, question: &str, state: &State, open_secs: Option<u64>) -> String {
     use crate::backend::reactive::sanitize::quote_in_system_note;
+    let after = open_secs.map(|s| format!(" after {}", agentmux_common::time::span_words(s))).unwrap_or_default();
     // Card numbers, ID numbers and credential-shaped tokens are masked as Browser's own answers are: this note
     // reaches the agent's transcript without passing through them.
     let quoted = |text: &str| quote_in_system_note(&agentmux_common::pii_mask::mask_short_text(text));
     let head = format!("Your Browser request {id} ({})", quoted(question));
     match (kind, state) {
-        ("handoff", State::Done(after)) if !after.is_empty() => {
-            format!("{head}: the person clicked Done {after}. Take a new snapshot: don't assume what they changed.")
-        }
-        ("handoff", State::Done(_)) => format!("{head}: the person clicked Done. Take a new snapshot: don't assume what they changed."),
-        ("handoff", State::Declined) => format!("{head}: the person clicked Cancel. Ask them in chat how to proceed."),
+        ("handoff", State::Done(_)) => format!("{head}: the person clicked Done{after}. Take a new snapshot: don't assume what they changed."),
+        ("handoff", State::Declined) => format!("{head}: the person clicked Cancel{after}. Ask them in chat how to proceed."),
         (_, State::Done(d)) => format!("{head}: the person approved it and it was done. {}", quoted(d)),
         (_, State::Declined) => format!("{head}: the person declined it. Don't retry it; ask them what to do."),
         (_, State::TimedOut) => format!("{head}: nobody answered in time. Ask them in chat before trying again."),
@@ -315,16 +318,16 @@ pub(crate) fn detach_handoff(
         note(&block_id, &agent, Kind::Handoff)
             .target(&reason)
             .how(how)
-            .detail(&crate::server::browser_handoffs::ended_words(answer, open))
+            .detail(&crate::server::browser_handoffs::ended_words(crate::server::browser_attention::Settled { answer, by_agent }, open))
             .record(&state);
         let settled = match answer {
             _ if by_agent => State::Cancelled,
-            Answer::Yes | Answer::YesAlways | Answer::YesAsking => State::Done(format!("after {}", agentmux_common::time::span_words(open.as_secs()))),
+            Answer::Yes | Answer::YesAlways | Answer::YesAsking => State::Done(String::new()),
             Answer::Cancelled => State::Declined,
             Answer::TimedOut => State::TimedOut,
         };
         if finish(&task_id, settled.clone()) && !by_agent {
-            wake(&agent, outcome_text(&task_id, "handoff", &reason, &settled)).await;
+            wake(&agent, outcome_text_after(&task_id, "handoff", &reason, &settled, Some(open.as_secs()))).await;
         }
     });
     let mut data = waiting_json(&id);
@@ -435,7 +438,9 @@ mod tests {
         assert!(t("approval", State::Void("the page changed".into())).contains("void, nothing was done: the page changed"));
         assert!(t("approval", State::Failed("the form changed".into())).contains("wasn't done: the form changed"));
         assert!(t("handoff", State::Done(String::new())).contains("clicked Done. Take a new snapshot"));
-        assert!(t("handoff", State::Done("after 7 s".into())).contains("clicked Done after 7 s. Take a new snapshot"));
+        let after = outcome_text_after("r1", "handoff", "log in", &State::Done(String::new()), Some(7));
+        assert!(after.contains("clicked Done after 7 s. Take a new snapshot"), "{after}");
+        assert!(outcome_text_after("r1", "handoff", "log in", &State::Declined, Some(95)).contains("clicked Cancel after 1 min."));
         assert!(t("handoff", State::Declined).contains("clicked Cancel"));
     }
 

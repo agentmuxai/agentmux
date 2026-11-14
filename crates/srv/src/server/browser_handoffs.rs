@@ -67,10 +67,13 @@ pub(crate) struct Status {
 /// What the Log and the answer say of how a hand-off ended: who answered, and how long the banner was up.
 /// An answer within seconds is worth an agent's doubt (it can't tell an early Done from a request that closed
 /// itself), so the time is always in it.
-pub(crate) fn ended_words(a: crate::server::browser_attention::Answer, open: Duration) -> String {
+pub(crate) fn ended_words(settled: crate::server::browser_attention::Settled, open: Duration) -> String {
     use crate::server::browser_attention::Answer;
     let span = agentmux_common::time::span_words(open.as_secs());
-    match a {
+    if settled.by_agent {
+        return format!("the agent took it back after {span}");
+    }
+    match settled.answer {
         Answer::Yes | Answer::YesAlways | Answer::YesAsking => format!("the person clicked Done after {span}"),
         Answer::Cancelled => format!("the person clicked Cancel after {span}"),
         Answer::TimedOut => format!("nobody answered in {span}"),
@@ -180,10 +183,13 @@ mod tests {
     #[test]
     fn the_end_of_a_handoff_says_who_answered_and_after_how_long() {
         use crate::server::browser_attention::Answer;
-        let words = |a, s| ended_words(a, Duration::from_secs(s));
+        let words = |a: Answer, s| ended_words(a.into(), Duration::from_secs(s));
         assert_eq!(words(Answer::Yes, 3), "the person clicked Done after 3 s");
         assert_eq!(words(Answer::Cancelled, 40), "the person clicked Cancel after 40 s");
         assert_eq!(words(Answer::TimedOut, 15 * 60), "nobody answered in 15 min");
+        // An agent that took its own request back is not the person's Cancel.
+        let taken_back = crate::server::browser_attention::Settled { answer: Answer::Cancelled, by_agent: true };
+        assert_eq!(ended_words(taken_back, Duration::from_secs(12)), "the agent took it back after 12 s");
     }
 
     #[test]
