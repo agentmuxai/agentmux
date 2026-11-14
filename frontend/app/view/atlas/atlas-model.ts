@@ -13,6 +13,7 @@ import { MOS } from "@/app/store/global";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { awaitsBrowserAnswer, isAwaitingUser } from "@/app/store/swarm-line";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
+import { runtimeKindOfBlockMeta } from "@/util/runtime-kind";
 import { createMemo, type Accessor } from "solid-js";
 import type { AtlasFlow } from "./atlas-flow";
 import { useAtlasFlows } from "./atlas-flow-store";
@@ -107,6 +108,7 @@ function localAgent(key: string, node: AgentTreeNode, agentId: string | null, se
         remote: false,
         stale: false,
         spend: spendOf(meta),
+        runtime: node.blockId ? runtimeKindOfBlockMeta(meta) : null,
     };
 }
 
@@ -147,6 +149,7 @@ function remoteAgent(row: RemoteRow, key: string, agentId: string | null, seat: 
         runtimeId: null,
         remote: true,
         stale: section.stale,
+        account: agent.account ? { id: agent.account, label: agent.account_label?.trim() || null } : null,
     };
 }
 

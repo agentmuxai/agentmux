@@ -18,6 +18,14 @@ vi.mock("@/app/store/agent-runtime-live", () => ({
     sharedAgentRuntime: vi.fn(),
 }));
 vi.mock("@/app/store/contextmenu", () => ({ ContextMenuModel: { showContextMenu: vi.fn() } }));
+// What an open card reads from srv and the Kanban (atlas-work-store.test.ts): here, which pane it is asked about.
+const workFor = vi.hoisted(() => ({ asked: [] as (string | null)[] }));
+vi.mock("./atlas-work-store", () => ({
+    useAtlasWork: (blockId: () => string | null) => () => {
+        workFor.asked.push(blockId());
+        return blockId() ? { repo: "agentmuxai/agentmux", branch: `branch-of-${blockId()}`, tasks: [] } : null;
+    },
+}));
 // The Swarm's own stop confirmation, as a title and its button: what it asks is the Swarm's to test.
 vi.mock("@/app/element/confirm-modal", () => ({
     ConfirmModal: (props: { open: boolean; title: string; confirmLabel?: string; onConfirm: () => void }) => () =>
@@ -344,6 +352,29 @@ describe("selecting agents on the map", () => {
         fireEvent.click(getByText("confirm: Stop 2"));
         await Promise.resolve();
         expect(model.bulkStopSelection).toHaveBeenCalled();
+    });
+});
+
+describe("the card's facts", () => {
+    it("shows the branch of one of this instance's agents, asked by its pane", () => {
+        const { getByText, getByTestId } = rig([agent("Ann", "local", { blockId: "b-ann", runtime: "host" })]);
+        fireEvent.click(getByText("Ann"));
+        expect(getByTestId("atlas-card-branch").textContent).toBe("agentmuxai/agentmux · branch-of-b-ann");
+        expect(getByTestId("atlas-card-runtime")).toBeTruthy();
+    });
+
+    it("asks nothing about an agent of another instance, and shows its account", () => {
+        const account = { id: "claude:0123456789abcdef", label: "Work" };
+        const { getByText, getByTestId, queryByTestId } = rig([
+            agent("Cy", "lab", { blockId: "b-cy", account }),
+            agent("Dee", "lab", { account: { ...account } }),
+        ]);
+        workFor.asked = [];
+        fireEvent.click(getByText("Cy"));
+        expect(workFor.asked.every((id) => id === null)).toBe(true);
+        expect(queryByTestId("atlas-card-branch")).toBeNull();
+        expect(getByTestId("atlas-card-account").textContent).toContain("Work");
+        expect(getByTestId("atlas-card-account").textContent).toContain("Also on it: Dee");
     });
 });
 

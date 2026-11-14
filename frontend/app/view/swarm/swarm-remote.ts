@@ -36,6 +36,11 @@ export interface RemoteAgent {
      *  (docs/specs/SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5). Self-reported:
      *  read it through `readSeatMeta`, which drops an unknown role. */
     seat?: SeatSummary;
+    /** The account it runs on, as the id every machine agrees on (srv `identity::stable_account`: a provider
+     *  and a hash, never an email). A LAN peer's agents only; absent when its instance reported none. */
+    account?: string;
+    /** This computer's own label for that account, when the same account is signed in here. */
+    account_label?: string;
 }
 
 export interface RemoteChannel {
