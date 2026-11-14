@@ -59,7 +59,7 @@ fn a_sign_in_is_named_by_the_world_it_came_from_never_by_the_page() {
 }
 
 #[test]
-fn the_listener_reports_six_kinds() {
+fn the_listener_reports_seven_kinds() {
     assert!(matches!(serde_json::from_str::<Notice>(SIGNIN), Ok(Notice::Signin { .. })));
     let field = r#"{"kind":"newpassword","field":"t-1","username":"alex","passwordrules":"required: digit;","maxlength":32}"#;
     match serde_json::from_str::<Notice>(field) {
@@ -72,11 +72,22 @@ fn the_listener_reports_six_kinds() {
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"newpassword","username":""}"#), Ok(Notice::NewPassword { .. })), "a field with no limits");
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"signup","username":"alex","password":"pw"}"#), Ok(Notice::Signup { .. })));
     assert!(serde_json::from_str::<Notice>(r#"{"kind":"signup","username":"alex"}"#).is_err(), "a sign-up without a password");
+    assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"change","username":"alex","password":"new"}"#), Ok(Notice::Change { .. })));
+    assert!(serde_json::from_str::<Notice>(r#"{"kind":"change","username":"alex"}"#).is_err(), "a change without a new password");
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"identifier","username":"alex"}"#), Ok(Notice::Identifier { .. })));
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"left"}"#), Ok(Notice::Left)));
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"form"}"#), Ok(Notice::Form)));
     assert!(serde_json::from_str::<Notice>(r#"{"kind":"signin","username":"alex"}"#).is_err(), "a sign-in without a password");
     assert!(serde_json::from_str::<Notice>(r#"{"kind":"other"}"#).is_err());
+}
+
+#[test]
+fn the_listener_reads_a_password_change_by_its_new_password_and_never_sends_the_current_one() {
+    for needle in ["const changeField", r#"kind: "change""#, "password: changed.value", r#"autocomplete(p).includes("current-password")"#] {
+        assert!(SCRIPT.contains(needle), "{needle}");
+    }
+    // Only the field for the new password is read: the current one's value is never taken.
+    assert!(!SCRIPT.contains("current.value"));
 }
 
 #[test]

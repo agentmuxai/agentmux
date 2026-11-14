@@ -88,6 +88,7 @@ pub(super) async fn handle_credential_service(state: &AppState, call: &WebCallTy
         "Form" => handle_form(state, call),
         "Signup" => handle_signup(state, call),
         "SignupSent" => handle_signup_sent(state, call),
+        "ChangeSent" => handle_change_sent(state, call),
         _ => WebReturnType::error(format!("unknown credential method: {}", call.method)),
     }
 }
@@ -390,6 +391,18 @@ fn handle_signup_sent(state: &AppState, call: &WebCallType) -> WebReturnType {
     };
     let Some(password) = args.password.filter(|p| !p.is_empty()).map(zeroize::Zeroizing::new) else { return WebReturnType::success_empty() };
     crate::server::browser_signup::sent(state, &args.block_id, &args.origin, zeroize::Zeroizing::new(args.username), password);
+    WebReturnType::success_empty()
+}
+
+/// A password-change form a page in pane `block_id` sent: the password an agent made for it becomes the
+/// saved sign-in's, or the password is offered "Update password?". Never logged.
+fn handle_change_sent(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args: OfferArgs = match get_arg(&call.args, 0) {
+        Ok(a) => a,
+        Err(_) => return WebReturnType::error("credential.ChangeSent: bad arguments"),
+    };
+    let Some(password) = args.password.filter(|p| !p.is_empty()).map(zeroize::Zeroizing::new) else { return WebReturnType::success_empty() };
+    crate::server::browser_change::sent(state, &args.block_id, &args.origin, zeroize::Zeroizing::new(args.username), password);
     WebReturnType::success_empty()
 }
 

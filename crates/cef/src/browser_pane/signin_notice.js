@@ -65,6 +65,24 @@
     return [...group.querySelectorAll("button, input[type=submit]")].some((b) => SIGNUP_WORDS.test(b.textContent || b.value || ""));
   };
 
+  // The field for the new password of a password change (§7.3): a form that also holds a
+  // `current-password` field. It is the other password field marked `new-password`, else the first
+  // password field after the current one. The same rule as signup_probe.rs and signup_fill.rs.
+  const changeField = (group) => {
+    const passwords = inputsOf(group).filter((i) => i.type === "password");
+    const current = passwords.find((p) => autocomplete(p).includes("current-password"));
+    if (!current) return null;
+    const others = passwords.filter((p) => !autocomplete(p).includes("current-password"));
+    return others.find((p) => autocomplete(p).includes("new-password")) || others.find((p) => passwords.indexOf(p) > passwords.indexOf(current)) || null;
+  };
+  // The account's user name on a password change: its own field when the form has one for the password
+  // manager (often hidden), else the user name rules above.
+  const accountOf = (group, inputs, password) => {
+    const marked = [...group.querySelectorAll("input")].find((i) => isInput(i) && i.type !== "password" && /\b(username|email)\b/.test(autocomplete(i)) && i.value);
+    const user = marked || userIn(inputs, password);
+    return user ? user.value : "";
+  };
+
   const watchLeaving = (password) => {
     const until = performance.now() + WATCH_MS;
     const timer = setInterval(() => {
@@ -82,6 +100,16 @@
     if (now - lastAt < REPEAT_MS) return;
     const inputs = inputsOf(group);
     const passwords = inputs.filter((i) => i.type === "password");
+    // A password change (§7.3): srv confirms the password it made for it, or offers to save the one the
+    // person typed as the sign-in's new password.
+    const changed = changeField(group);
+    if (changed) {
+      if (!changed.value) return;
+      lastAt = now;
+      report({ kind: "change", username: accountOf(group, inputs, changed), password: changed.value });
+      watchLeaving(changed);
+      return;
+    }
     // A sign-up (§6): srv confirms the password it made for it, or offers to save
     // the one the person typed. The sign-in's user name rules find its user name.
     const fresh = passwords.find(newPasswordField);
@@ -93,7 +121,7 @@
       watchLeaving(fresh);
       return;
     }
-    // Other forms with two or three password fields, or one for a new password, are a password change (§7).
+    // Other forms with two or three password fields, or one for a new password, are not read.
     if (passwords.length > 1 || passwords.some((p) => autocomplete(p).includes("new-password"))) return;
     if (passwords.length === 1) {
       const password = passwords[0];

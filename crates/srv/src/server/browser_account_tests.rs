@@ -173,15 +173,100 @@ async fn a_no_makes_no_password_and_types_nothing() {
     assert!(activity.contains(&s.auth.agent_id) && activity.contains("denied"), "the refusal is recorded as the agent's: {activity}");
 }
 
+/// A password-change form on the site: the saved sign-in it changes, and a host that says the form is one.
+fn change_form(s: &Setup, saved_as: &str, saved_password: &str) -> String {
+    let space = crate::backend::vault::signins::Space { profile: "personal".into(), origin: s.site.clone(), realm: String::new(), proxy: false };
+    let id = crate::backend::vault::signins::save(&s.state.identity_store, &space, saved_as, saved_password).unwrap();
+    *s.host.probe.lock().unwrap() = json!({ "origin": s.site, "field": "t-1", "change": true, "minlength": 12, "username": saved_as });
+    id
+}
+
+fn password_of(s: &Setup, id: &str) -> String {
+    let row = s.state.identity_store.vault_get(id).unwrap().unwrap();
+    seal::open(&seal::key(false).unwrap(), &row.id, &row.sealed).unwrap().get("password").unwrap_or("").to_string()
+}
+
 #[tokio::test]
-async fn a_form_that_asks_for_the_current_password_is_refused_before_anyone_is_asked() {
+async fn a_password_change_asks_every_time_and_keeps_the_new_password_beside_the_saved_one_until_the_site_has_it() {
     let s = setup(None).await;
-    *s.host.probe.lock().unwrap() = json!({ "origin": s.site, "change": true });
+    let saved = change_form(&s, "alex@example.com", "the one that works");
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let (status, body) = generate(&s).await;
+    let asked = ask.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(asked.account && asked.change && !asked.offer_always && asked.entry_id.is_empty(), "no Always, and no entry for a grant to answer for");
+    assert_eq!(body["data"]["entry"].as_str(), Some(saved.as_str()), "the change is of the saved sign-in, not an entry of its own");
+
+    let typed = asked_of(&s, "signup_fill");
+    assert_eq!(typed.len(), 1);
+    let new = typed[0]["password"].as_str().unwrap().to_string();
+    assert!(new.chars().count() >= 20 && !body.to_string().contains(&new), "a strong password the agent is never told");
+    assert_eq!(kept(&s).len(), 1, "no second entry");
+    assert_eq!(password_of(&s, &saved), "the one that works", "the saved password is the one that works until the form is sent");
+    let versions = crate::backend::vault::versions::list(&s.state.identity_store, &saved).unwrap();
+    assert_eq!((versions.len(), versions[0].state.as_str(), versions[0].how.as_str()), (1, "pending", "password change"));
+
+    // The form is sent with it: the new password is the sign-in's, the old one kept 7 days.
+    super::super::browser_change::sent(&s.state, &s.block, &s.site, zeroize::Zeroizing::new("alex@example.com".into()), zeroize::Zeroizing::new(new.clone()));
+    assert_eq!(password_of(&s, &saved), new);
+    let versions = crate::backend::vault::versions::list(&s.state.identity_store, &saved).unwrap();
+    assert_eq!((versions.len(), versions[0].state.as_str()), (1, "previous"));
+
+    let activity = serde_json::to_string(&crate::backend::vault::activity(&s.state.identity_store, 50).unwrap()).unwrap();
+    assert!(activity.contains("filled on password change") && activity.contains("changed password") && activity.contains(&s.auth.agent_id), "{activity}");
+    assert!(!activity.contains(&new) && !activity.contains("the one that works"), "{activity}");
+}
+
+#[tokio::test]
+async fn an_always_for_new_accounts_never_answers_for_a_password_change() {
+    use crate::server::browser_site_permissions as perms;
+    let s = setup(None).await;
+    change_form(&s, "alex@example.com", "the one that works");
+    perms::add_kind(&s.state, &s.auth.agent_id, &s.site, perms::ACCOUNTS).unwrap();
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
+    let (status, body) = generate(&s).await;
+    ask.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(asked_of(&s, "signup_fill").is_empty(), "nothing typed");
+    assert!(crate::backend::vault::versions::list(&s.state.identity_store, &kept(&s)[0].0).unwrap().is_empty(), "no pending password kept");
+    let activity = serde_json::to_string(&crate::backend::vault::activity(&s.state.identity_store, 50).unwrap()).unwrap();
+    assert!(activity.contains("asked to change the password") && activity.contains("denied"), "{activity}");
+}
+
+#[tokio::test]
+async fn a_password_change_with_no_saved_sign_in_or_in_incognito_asks_nobody() {
+    let s = setup(None).await;
+    *s.host.probe.lock().unwrap() = json!({ "origin": s.site, "field": "t-1", "change": true });
     let (status, body) = generate(&s).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert!(body["error"].as_str().unwrap().contains("current password") && body["error"].as_str().unwrap().contains("ask the person"), "{body}");
+    assert!(body["error"].as_str().unwrap().contains("no saved sign-in"), "{body}");
+    change_form(&s, "alex@example.com", "the one that works");
+    let mut other = request(&s, Some("e12"), Some("change the test shop's password"));
+    other.username = Some("someone-else".into());
+    let (status, body) = generate_with(&s, other).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id), "nobody was asked");
-    assert!(asked_of(&s, "signup_fill").is_empty() && kept(&s).is_empty());
+    assert!(asked_of(&s, "signup_fill").is_empty());
+
+    let incognito = setup(Some("incognito:jar-3")).await;
+    *incognito.host.probe.lock().unwrap() = json!({ "origin": incognito.site, "field": "t-1", "change": true });
+    let (status, body) = generate(&incognito).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("Incognito"), "{body}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != incognito.auth.agent_id));
+}
+
+#[tokio::test]
+async fn the_forms_own_user_name_finds_the_sign_in_when_the_agent_names_none() {
+    let s = setup(None).await;
+    let saved = change_form(&s, "alex@example.com", "the one that works");
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let mut req = request(&s, Some("e12"), Some("change the test shop's password"));
+    req.username = None;
+    let (status, body) = generate_with(&s, req).await;
+    ask.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["entry"].as_str(), Some(saved.as_str()));
 }
 
 #[tokio::test]

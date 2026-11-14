@@ -21,9 +21,10 @@
 //! clicks the form's button, which asks as any committing click does.
 //!
 //! A form that also asks for the current password is a password change (§7.3):
-//! it is refused here, since a changed password locks the person out of their
-//! own account. In an Incognito tab, which keeps no sign-ins, the password is
-//! kept in Personal, tagged (§9.2).
+//! it goes to [`super::browser_change`], which asks the person every time and
+//! keeps the new password pending beside the saved one. In an Incognito tab,
+//! which keeps no sign-ins, a new account's password is kept in Personal,
+//! tagged (§9.2).
 
 use std::time::Duration;
 
@@ -87,15 +88,17 @@ fn probed(v: &Value, username: &str) -> Result<Probed, String> {
     let number = |k: &str| v.get(k).and_then(Value::as_u64).map(|n| n as usize);
     let origin = text("origin").filter(|o| !o.is_empty()).ok_or("the host didn't say which site the field is on, so no password was made")?;
     let change = v.get("change").and_then(Value::as_bool).unwrap_or(false);
+    // The agent's user name wins; a password change's form may carry the account's own.
+    let username = if username.is_empty() && change { text("username").unwrap_or_default() } else { username.to_string() };
     let field = Field {
         origin,
         field: text("field").unwrap_or_default(),
-        username: username.to_string(),
+        username: clip_username(Some(&username)),
         passwordrules: text("passwordrules"),
         minlength: number("minlength"),
         maxlength: number("maxlength"),
     };
-    if !change && field.field.is_empty() {
+    if field.field.is_empty() {
         return Err("the host found no field for a new password, so no password was made".to_string());
     }
     Ok(Probed { field, change })
@@ -146,16 +149,20 @@ async fn approve(state: &AppState, block_id: &str, agent: &str, agent_pane: Stri
             Ok(false)
         }
         Ended::WentAhead => Ok(true),
-        ended => {
-            let (how, code) = if ended == Ended::NoAnswer { (How::TimedOut, StatusCode::REQUEST_TIMEOUT) } else { (How::Declined, StatusCode::FORBIDDEN) };
-            let why = if ended == Ended::Expired {
-                "nobody said yes, and an agent makes an account only on the person's yes: no password was made; ask the person".to_string()
-            } else {
-                ended.refusal("no password was made")
-            };
-            Err((ended, code, how, why))
-        }
+        ended => Err(not_allowed(ended, "an agent makes an account")),
     }
+}
+
+/// What an answer that is not a yes means: the HTTP status, how the pane's note records it, and what the
+/// agent is told. `what` is what only the person's yes allows ("an agent makes an account").
+pub(super) fn not_allowed(ended: Ended, what: &str) -> (Ended, StatusCode, How, String) {
+    let (how, code) = if ended == Ended::NoAnswer { (How::TimedOut, StatusCode::REQUEST_TIMEOUT) } else { (How::Declined, StatusCode::FORBIDDEN) };
+    let why = if ended == Ended::Expired {
+        format!("nobody said yes, and {what} only on the person's yes: no password was made; ask the person")
+    } else {
+        ended.refusal("no password was made")
+    };
+    (ended, code, how, why)
 }
 
 /// An Activity line for a use that ended before any entry was made.
@@ -201,9 +208,19 @@ pub(crate) async fn handle_generate_password(
     };
     let origin = found.field.origin.clone();
     if found.change {
-        return refuse(format!(
-            "this form asks for the current password too: it changes the password of an account that already exists on {origin}, and a changed password locks the person out of it. No password was made: ask the person to change it"
-        ));
+        // The password of an account that already exists: asked every time, kept pending beside the saved one (§7.3).
+        let asked = super::browser_change::Asked {
+            block_id: &block_id,
+            agent: &agent,
+            agent_id: &req.auth.agent_id,
+            pane: req.pane.as_deref(),
+            agent_pane: super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth),
+            reason: &reason,
+            profile,
+            incognito,
+            field: found.field,
+        };
+        return super::browser_change::handle(&state, asked).await;
     }
     if !super::browser_signin_fill::fillable(&origin) {
         return refuse(format!("{origin} isn't https, so no password was made for it"));

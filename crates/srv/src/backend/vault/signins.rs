@@ -83,7 +83,7 @@ fn holds(row: &VaultRow, s: &Space) -> bool {
 /// Whether a sign-in may be offered for filling: not one the site refused, nor
 /// one made on a sign-up form and never sent (signups.rs), which the site may
 /// never have accepted. Both stay in the Vault for the person.
-fn offered(row: &VaultRow) -> bool {
+pub(super) fn offered(row: &VaultRow) -> bool {
     !tags_of(row).iter().any(|t| t == REFUSED || t == super::signups::UNCONFIRMED)
 }
 
@@ -98,7 +98,7 @@ pub fn vault_for(store: &Store, profile: &str) -> Result<String, String> {
 }
 
 /// The sign-ins kept for `s`, newest first.
-fn held(store: &Store, s: &Space) -> Result<Vec<VaultRow>, String> {
+pub(super) fn held(store: &Store, s: &Space) -> Result<Vec<VaultRow>, String> {
     let vault = vault_for(store, &s.profile)?;
     let mut rows: Vec<VaultRow> = store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| r.vault_id == vault && holds(r, s)).collect();
     rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
