@@ -66,6 +66,9 @@ pub struct UseRequest {
     /// An agent's sign-in with a saved `login` (`Browser` `signin`): `field` is
     /// then the masked user name, and "Always" is for this agent on this site.
     pub signin: bool,
+    /// An agent's new account on a sign-up form (`Browser` `generate_password`): the
+    /// Vault makes the password. There is no entry yet; `origin` is the site.
+    pub account: bool,
     #[ts(type = "number")]
     pub requested_ms: u64,
     /// When silence decides: it goes ahead then if `goes_ahead`, else it is
