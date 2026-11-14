@@ -49,6 +49,8 @@ pub struct Facts {
     /// Whether the port and the one after it can be bound now; `None` when it was not asked.
     pub port_free: Option<bool>,
     pub tools: Vec<(&'static str, bool)>,
+    /// The shared libraries the agent tools link that are not on this machine (Linux; empty elsewhere).
+    pub missing_libs: Vec<&'static str>,
     pub installed_version: &'static str,
     /// The service: whether its file exists, and whether it names this command's program.
     pub service_installed: bool,
@@ -100,6 +102,14 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
             check("tools", Level::Warn, format!("{tool} is not on the PATH"), Some("agent command-line tools are installed through npm: install Node.js and git with your package manager"))
         });
     }
+    if !f.missing_libs.is_empty() {
+        out.push(check(
+            "libraries",
+            Level::Warn,
+            format!("not found: {} (the agent tools link them)", f.missing_libs.join(", ")),
+            Some("install them with your package manager (Debian and Ubuntu: `apt install libdbus-1-3 libxcb1`; Fedora: `dnf install dbus-libs libxcb`)"),
+        ));
+    }
     if let Some(s) = &f.running {
         if s.version != f.installed_version {
             out.push(check("version", Level::Warn, format!("running {}, installed {}", s.version, f.installed_version), Some("`agentmux restart` runs the installed version")));
@@ -134,6 +144,20 @@ pub fn lines(checks: &[Check]) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// The shared libraries `agentmux-mcp` links that cannot be found in the usual library folders (Linux only).
+pub fn missing_libs() -> Vec<&'static str> {
+    if !cfg!(target_os = "linux") {
+        return Vec::new();
+    }
+    let mut dirs: Vec<PathBuf> = ["/lib", "/lib64", "/usr/lib", "/usr/lib64", "/usr/local/lib"].iter().map(PathBuf::from).collect();
+    for base in ["/lib", "/usr/lib"] {
+        if let Ok(entries) = std::fs::read_dir(base) {
+            dirs.extend(entries.flatten().map(|e| e.path()).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with("-linux-gnu"))));
+        }
+    }
+    ["libdbus-1.so.3", "libxcb.so.1"].into_iter().filter(|lib| !dirs.iter().any(|d| d.join(lib).exists())).collect()
 }
 
 /// Is `name` an executable file in a folder of the PATH?
@@ -189,6 +213,7 @@ mod tests {
             answering: false,
             port_free: Some(true),
             tools: vec![("node", true), ("npm", true), ("git", true)],
+            missing_libs: vec![],
             installed_version: "0.60.26",
             service_installed: false,
             service_names_exe: None,
@@ -251,6 +276,17 @@ mod tests {
         assert_eq!(level_of(&evaluate(&ours), "port"), vec![Level::Ok], "its own port in use is not a problem");
         let stuck = Facts { running: Some(running("0.60.26")), answering: false, ..good() };
         assert_eq!(level_of(&evaluate(&stuck), "port"), vec![Level::Warn]);
+    }
+
+    #[test]
+    fn a_missing_library_is_a_warning_that_names_the_packages() {
+        let mut f = good();
+        f.missing_libs = vec!["libdbus-1.so.3"];
+        let checks = evaluate(&f);
+        assert_eq!(level_of(&checks, "libraries"), vec![Level::Warn]);
+        assert!(!failed(&checks));
+        assert!(lines(&checks).iter().any(|l| l.contains("libdbus-1.so.3") && l.contains("libdbus-1-3")));
+        assert!(level_of(&evaluate(&good()), "libraries").is_empty(), "nothing missing, nothing said");
     }
 
     #[test]
