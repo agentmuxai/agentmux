@@ -38,8 +38,9 @@ vi.mock("@/app/element/confirm-modal", () => ({
 }));
 
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
-import { buildAtlasGraph, type AtlasAgent, type AtlasMachine } from "./atlas-graph";
+import { buildAtlasGraph, type AtlasAgent, type AtlasExtras, type AtlasMachine } from "./atlas-graph";
 import type { AtlasFlow } from "./atlas-flow";
+import { checksFlow, prServices, reviewFlow } from "./atlas-pr";
 import { layoutAtlas } from "./atlas-layout";
 import type { AtlasData } from "./atlas-model";
 import { AtlasView } from "./atlas-view";
@@ -107,8 +108,18 @@ function modelStub() {
     };
 }
 
-function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}, flows: AtlasFlow[] = []) {
-    const machines = [machine("local", "desk"), machine("lab", "lab-1")];
+/** What a test puts on the map besides agents, and what it says of this machine and of the cloud. */
+interface RigExtras extends AtlasExtras {
+    localNote?: string;
+    cloudUnavailable?: boolean;
+}
+
+function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}, flows: AtlasFlow[] = [], extras: RigExtras = {}) {
+    const machines = [
+        { ...machine("local", "desk"), note: extras.localNote },
+        machine("lab", "lab-1"),
+        { ...machine("far", "far-1"), badge: "cloud", cloud: true },
+    ];
     const model = modelStub();
     const selectable = agents.flatMap((a) => (a.remote ? [a.key] : a.blockId ? [a.blockId] : []));
     const [m, setM] = createSignal(meta);
@@ -116,7 +127,7 @@ function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}, flows: At
         setM((prev) => ({ ...prev, ...patch }));
     });
     const data: AtlasData = {
-        graph: () => buildAtlasGraph(machines, agents),
+        graph: () => buildAtlasGraph(machines, agents, extras),
         model: model as unknown as AtlasData["model"],
         swarm: {
             tree: () => agents.flatMap((a) => (a.blockId ? [{ blockId: a.blockId, agentName: a.name }] : [])),
@@ -134,6 +145,7 @@ function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}, flows: At
         agents: () => new Map(agents.map((a) => [a.key, a] as const)),
         machines: () => new Map(machines.map((x) => [x.key, x] as const)),
         flows: () => flows,
+        cloudUnavailable: () => !!extras.cloudUnavailable,
     };
     const ctx = { meta: m, setMeta } as unknown as PaneTabHostContext;
     const utils = render(() => <AtlasView data={data} ctx={ctx} />);
@@ -146,7 +158,7 @@ function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}, flows: At
     };
     /** Where a node stands in the test pane. */
     const at = (key: string): [number, number] => {
-        const p = layoutAtlas(buildAtlasGraph(machines, agents)).nodes.get(key)!;
+        const p = layoutAtlas(buildAtlasGraph(machines, agents, extras)).nodes.get(key)!;
         return [p.x + 16, p.y + 16];
     };
     return { ...utils, setMeta, model, drag, at };
@@ -435,5 +447,106 @@ describe("messages and tasks on the map", () => {
     it("marks a line in its last second as leaving", () => {
         const { container } = rig(fleet(), {}, [flow({ leaving: true })]);
         expect(marks(container)[0].classList.contains("atlas-flow--leaving")).toBe(true);
+    });
+});
+
+describe("what is not an agent", () => {
+    const fleet = () => [agent("Ann", "local", { blockId: "b1" }), agent("Bo", "local"), agent("Cy", "lab")];
+    const marks = (c: HTMLElement) => [...c.querySelectorAll<SVGGElement>("[data-testid=atlas-flow]")];
+    const pr = (number: number) => ({ repo_id: 9, number });
+    const lines = () => [
+        reviewFlow({ id: "r1", at_ms: 1_000, agent: "ann", pr: pr(64), state: "changes_requested", by: "codex" })!,
+        checksFlow({ id: "c1", at_ms: 2_000, agent: "bo", pr: pr(65), state: "passing" })!,
+    ];
+    const services = (flows: AtlasFlow[]) => prServices(flows, { lastNoticeAtMs: 2_000, paused: false }, () => "12:00");
+
+    it("frames a container agent with its container, in the container's state, and names it on the card", () => {
+        const container = { name: "agentmux-a1", state: "starting" as const, image: "agentmux/agent:1", sinceMs: 0 };
+        const { getAllByTestId, getByTestId } = rig([agent("Ann", "local", { runtime: "container", container }), agent("Bo", "local", { runtime: "host" })]);
+        const [ann, bo] = getAllByTestId("atlas-node");
+        expect(ann.classList.contains("atlas-node--container")).toBe(true);
+        expect(ann.dataset.container).toBe("starting");
+        expect(ann.getAttribute("aria-label")).toBe("Ann, Idle, in a container");
+        expect(bo.classList.contains("atlas-node--container")).toBe(false);
+        fireEvent.click(ann);
+        expect(getByTestId("atlas-card-container").textContent).toContain("agentmux-a1");
+    });
+
+    it("draws a container no agent uses as a node of its machine, with a card and no part in a selection", () => {
+        const orphans = [{ key: "container:agentmux-x", machine: "local", name: "agentmux-x", state: "stopped" as const, image: "i:1", sinceMs: 0 }];
+        const { getByTestId, getAllByTestId, model, drag } = rig(fleet(), {}, [], { orphans });
+        const node = getByTestId("atlas-orphan");
+        expect(node.textContent).toContain("agentmux-x");
+        expect(node.textContent).toContain("No agent · stopped");
+        expect(getAllByTestId("atlas-node")).toHaveLength(3);
+        fireEvent.click(node);
+        expect(getByTestId("atlas-card").textContent).toContain("no agent of this machine uses it");
+        // A box over the whole map takes the agents and leaves the container.
+        drag([0, 0], [2000, 2000], { shiftKey: true })();
+        expect(model.setManySelected.mock.calls.at(-1)![0]).toEqual(["b1", "lab/Cy"]);
+    });
+
+    it("draws the review bot and CI in a region of their own, with a line to each agent whose pull request they worked on", () => {
+        const flows = lines();
+        const { container, getAllByTestId, getByTestId } = rig(fleet(), {}, flows, { services: services(flows) });
+        expect(getByTestId("atlas-services").textContent).toContain("Pull requests");
+        expect(getAllByTestId("atlas-service").map((n) => n.getAttribute("aria-label"))).toEqual(["Review bot, 1 needs changes", "CI, 1 passing"]);
+        const [reviewed, checked] = marks(container);
+        expect(reviewed.dataset.kind).toBe("review");
+        expect(reviewed.classList.contains("atlas-flow--failed")).toBe(true);
+        expect(reviewed.querySelector(".atlas-flow__label")!.textContent).toBe("#64 Codex");
+        expect(reviewed.querySelector(".atlas-flow__line")!.hasAttribute("pathLength")).toBe(false);
+        expect(checked.dataset.kind).toBe("checks");
+        expect(checked.classList.contains("atlas-flow--passed")).toBe(true);
+    });
+
+    it("lists a service's pull requests on its card, with what became of each and whose it is", () => {
+        const flows = lines();
+        const { getAllByTestId, getByTestId, queryByTestId } = rig(fleet(), {}, flows, { services: services(flows) });
+        fireEvent.click(getAllByTestId("atlas-service")[0]);
+        const item = getByTestId("atlas-card-prs").querySelector("li")!;
+        expect(item.textContent).toContain("#64 Codex");
+        expect(item.textContent).toContain("changes requested");
+        expect(item.textContent).toMatch(/ann, \d\d:\d\d/);
+        fireEvent.keyDown(getByTestId("atlas"), { key: "Escape" });
+        expect(queryByTestId("atlas-card")).toBeNull();
+    });
+
+    it("dims a pull request's line past its first minutes, and draws none for an agent that is not on the map", () => {
+        const [reviewed] = lines();
+        const gone = reviewFlow({ id: "r9", at_ms: 1_000, agent: "zed", pr: pr(70), state: "approved", by: "bot" })!;
+        const flows = [{ ...reviewed, dim: true }, gone];
+        const { container } = rig(fleet(), {}, flows, { services: services(flows) });
+        expect(marks(container)).toHaveLength(1);
+        expect(marks(container)[0].classList.contains("atlas-flow--dim")).toBe(true);
+    });
+
+    it("has no region and no service nodes when no notice has come", () => {
+        const { queryByTestId } = rig(fleet());
+        expect(queryByTestId("atlas-services")).toBeNull();
+        expect(queryByTestId("atlas-service")).toBeNull();
+    });
+
+    it("keeps the review bot and CI in the By seat layout, with no region", () => {
+        const flows = lines();
+        const { getAllByTestId, queryByTestId, container } = rig(fleet(), { "atlas:layout": "seat" }, flows, { services: services(flows) });
+        expect(queryByTestId("atlas-services")).toBeNull();
+        expect(getAllByTestId("atlas-service")).toHaveLength(2);
+        expect(marks(container)).toHaveLength(2);
+    });
+
+    it("marks one of the account's other machines, and says when they could not be read", () => {
+        const { getAllByTestId, getByTestId } = rig([agent("Ann", "local"), agent("Zo", "far")], {}, [], { cloudUnavailable: true });
+        const [local, far] = getAllByTestId("atlas-region");
+        expect(local.classList.contains("atlas-region--cloud")).toBe(false);
+        expect(far.classList.contains("atlas-region--cloud")).toBe(true);
+        expect(far.textContent).toContain("cloud");
+        expect(getByTestId("atlas-cloud-note").textContent).toContain("could not be read");
+    });
+
+    it("says nothing of the cloud while it reads fine, and says what is wrong with this machine after its badge", () => {
+        const { queryByTestId, getAllByTestId } = rig([agent("Ann", "local")], {}, [], { localNote: "container runtime not running" });
+        expect(queryByTestId("atlas-cloud-note")).toBeNull();
+        expect(getAllByTestId("atlas-region")[0].textContent).toContain("this machine · container runtime not running");
     });
 });

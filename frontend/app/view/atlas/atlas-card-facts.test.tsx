@@ -106,3 +106,25 @@ describe("CardFacts", () => {
         expect(openLink).toHaveBeenCalledWith(url);
     });
 });
+
+describe("the container an agent runs in", () => {
+    it("is named, with its state, since when, and its image", () => {
+        const { getByTestId } = show(
+            agent("Ann", {
+                remote: false,
+                runtime: "container",
+                container: { name: "agentmux-a1", state: "running", image: "agentmux/agent:1", sinceMs: Date.UTC(2026, 10, 14, 12, 0) },
+            })
+        );
+        const row = getByTestId("atlas-card-container").textContent!;
+        expect(row).toContain("agentmux-a1");
+        expect(row).toMatch(/running since \d\d:\d\d/);
+        expect(row).toContain("agentmux/agent:1");
+    });
+
+    it("has no row for a container agent whose container is not listed", () => {
+        const { queryByTestId, getByTestId } = show(agent("Ann", { remote: false, runtime: "container", container: null }));
+        expect(queryByTestId("atlas-card-container")).toBeNull();
+        expect(getByTestId("atlas-card-runtime")).toBeTruthy();
+    });
+});

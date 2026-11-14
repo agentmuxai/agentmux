@@ -216,6 +216,47 @@ does not change.
 Branch and tasks are this instance's facts, so they show for its own agents only. They are read while a card is
 open and not otherwise: the work facts once and then every 20 seconds, the board through the Kanban's own model.
 
+### 6.4 After v1: containers, the review bot, CI and the cloud tier (#47607)
+
+Decision 4's second half and the cloud tier, on the data three srv builds added: this machine's agent containers
+(`SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14.md`), the review, checks and merge events
+(`SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14.md`) and the account's other machines
+(`SPEC_SWARM_CLOUD_TIER_2026_11_14.md`). All three carry names, numbers, states and times only.
+
+- **A container agent** has a dashed frame round its node and a box after its name, on this machine and on any
+  other that says where its agents run. For this machine's agents the frame is in the colour of the container's
+  state (muted while it runs, the accent while it starts, the warning colour when it has stopped under a running
+  agent), and the card names the container, its state and since when, and its image.
+- **A container no agent uses** (srv lists it as an orphan) is a node of its own in this machine's region, dashed,
+  after the agents: its card says its state and image. It is not an agent, so no box selects it, and with a filter
+  on it is not drawn.
+- **The container runtime not running** is said after this machine's badge, when the machine uses containers at
+  all (an agent of it runs in one, or one is listed).
+- **The review bot and CI** are two pill-shaped nodes in a region of their own, "Pull requests", on a row of its
+  own under the machines; in the By seat layout they stand in a row of their own under the agents. Beside the
+  agents, in their row, every line to an agent ran along that row behind the nodes between, and none could be
+  followed (the first look check); from under them a line crosses open map. Of several lines from one of them to
+  the same agent (two pull requests of one agent), each bows further out than the one before. A line's label
+  keeps inside the map, off a region's title and bottom line, and clear of the frame round a container agent as
+  it does of a node. Neither is drawn until a notice has
+  come, so a machine with no review bot has a map of agents only. Each node's second line is what needs attention
+  ("2 need changes", "1 failing"), else when the last notice came, else that cloud messages are paused (MuxBus needs
+  a sign-in, or has been out of reach for longer than the status bar stays quiet about). Its card lists the pull
+  requests it has a line for, newest first: the number, what became of it, whose it is, and when.
+- **A review, and a pull request's checks,** draw a dashed line from the node to the agent whose pull request it
+  is, with the number ("#64"; "#64 Codex" or "#64 person" when the bot was not the reviewer): green for approved or
+  passing, the warning colour for changes requested or failing, muted for anything else, a state this build does
+  not know included. The newest review and the newest checks of a pull request replace the ones before. A line is
+  bright for five minutes and then stays dim for as long as the pull request is open: its merge takes its lines
+  away, and one this machine never hears the end of goes after two hours. At most twelve of each kind show. The
+  agent is always one of this instance's own (srv reports the notices it delivered), so a line never lands on an
+  agent of another machine that has the same name; with that agent stopped or filtered out, no line is drawn.
+- **The cloud tier** needed no new drawing: srv now sends the account's other machines as hosts of the Swarm's
+  third tier, so they are regions after the LAN's, with the badge "cloud" and a cloud mark, and no surface of their
+  own (an outline). Their rows are thin: a state and a line, no seat, provider or account. They can be ticked as in
+  the Swarm, whose confirmation says what a broadcast or a stop cannot reach. When srv's last read of them failed,
+  the map says so in its bottom left corner.
+
 ## 7. Risks and notes
 
 - **"Steward" is not a stored seat role** (`ROLES` is leader, worker, specialist, platform_tester, analyst, super), so a
