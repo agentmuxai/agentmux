@@ -138,6 +138,7 @@ fn main() {
     if let Some(code) = version_flag::run_if_requested(&std::env::args().collect::<Vec<_>>()).or_else(|| verify_update::run_if_requested(&std::env::args().collect::<Vec<_>>())) {
         std::process::exit(code);
     }
+    agentmux_common::dev_home_guard::refuse_or_continue_current_exe(); // a dev build by hand has no isolated home
     // Before any thread or child exists: an instance key inherited from the shell that
     // started this launcher goes no further; the launcher mints its own for srv and the host.
     agentmux_common::secret_env::discard_startup_secrets();
