@@ -68,16 +68,11 @@
     min-width: 100%;
 }
 
+// As tall as the file's rows. The rows on screen sit in it by a top margin
+// (the viewer sets it), in the normal flow, so the sticky header paints over
+// them with no z-index; they never make it taller than the file's rows.
 .hex-spacer {
-    position: relative;
-    // The rows on screen never make the scrolled content taller than the file's rows.
     overflow: hidden;
-}
-
-.hex-rows {
-    position: absolute;
-    left: 0;
-    width: 100%;
 }
 
 .hex-row {
@@ -91,7 +86,6 @@
 .hex-head {
     position: sticky;
     top: 0;
-    z-index: 1;
     color: var(--secondary-text-color);
     background: var(--main-bg-color);
     border-bottom: 1px solid var(--border-color);

@@ -11,6 +11,7 @@
  */
 
 import { Button, IconButton, MenuTrigger, SegmentedControl, type MenuEntry } from "@/app/element/ui";
+import { tip } from "@/app/element/tip";
 import { keyLabel } from "@/app/keybindings";
 import { For, Show, type JSX } from "solid-js";
 import { ViewerBar } from "../viewer-bar";
@@ -63,9 +64,8 @@ function HexTools(props: { t: HexViewerState }): JSX.Element {
                 data-raw-text-field="the viewer bar's offset box: a short number beside the other bar controls, with its own mod+g focus and Enter to go, not a form field"
                 aria-label="Go to offset"
                 aria-invalid={t.badOffset()}
-                title={`Go to an offset (${keyLabel("mod+g")}): decimal, or hex as 0x1F`}
+                {...tip(`Go to an offset (${keyLabel("mod+g")}): decimal, or hex as 0x1F`)}
                 value={`0x${offsetText(t.cursor(), 1)}`}
-                disabled={t.size() === 0}
                 onInput={t.clearBadOffset}
                 onKeyDown={(e) => e.key === "Enter" && t.goToTyped(e.currentTarget.value)}
             />
@@ -119,7 +119,7 @@ function HexGrid(props: { t: HexViewerState }): JSX.Element {
                     </span>
                 </div>
                 <div class="hex-spacer" role="presentation" style={{ height: `${contentHeight(t.rows())}px` }}>
-                    <div class="hex-rows" role="presentation" style={{ top: `${t.layerTop()}px` }}>
+                    <div class="hex-rows" role="presentation" style={{ "margin-top": `${t.layerTop()}px` }}>
                         <For each={t.shownRows()}>{(row) => <HexRow t={t} row={row} />}</For>
                     </div>
                 </div>
