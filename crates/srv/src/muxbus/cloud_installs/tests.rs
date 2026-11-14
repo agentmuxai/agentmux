@@ -144,28 +144,60 @@ async fn two_asks_at_once_make_one_read() {
     let reader = Reader::new(Arc::clone(&fake));
     let (a, b) = tokio::join!(reader.view(1_000), reader.view(1_000));
     assert_eq!(fake.reads.load(Ordering::SeqCst), 1);
-    // The one that read has the list; the one that did not answered from the cache, which had none yet.
-    assert_eq!((a.installs.len(), b.installs.len()), (1, 0));
+    // Both wait for the one read, which is quicker than the budget.
+    assert_eq!((a.installs.len(), b.installs.len()), (1, 1));
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_ask_does_not_wait_for_a_slow_read() {
-    let fake = Arc::new(Fake { script: Mutex::new(vec![records("charlie")].into()), reads: AtomicUsize::new(0), takes: Duration::from_secs(30) });
+async fn an_ask_does_not_wait_for_a_slow_read_and_the_read_still_fills_the_cache() {
+    let fake = Arc::new(Fake { script: Mutex::new(vec![records("charlie")].into()), reads: AtomicUsize::new(0), takes: Duration::from_secs(4) });
     let reader = Reader::new(Arc::clone(&fake));
     let before = tokio::time::Instant::now();
     let view = reader.view(1_000).await;
     assert!(before.elapsed() <= READ_BUDGET + Duration::from_millis(10), "{:?}", before.elapsed());
     assert_eq!((view.state, view.installs.len()), (CloudState::Off, 0), "the old cache answers");
+    // The read went on after the ask gave up, and the cache has it now.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let later = reader.view(2_000).await;
+    assert_eq!((later.state, later.installs.len()), (CloudState::Ok, 1));
+    assert_eq!(fake.reads.load(Ordering::SeqCst), 1, "no second read for the same ask");
 }
 
-#[test]
-fn an_agent_in_a_record_has_its_state_by_name() {
-    let r = |seed, v| wire(&record(v, seed, "charlie", "stable"), 1);
-    let installs = verified(vec![r(7, PRESENCE_VERSION_LINES)], Some(1), 1);
-    let view = CloudView { installs, state: CloudState::Ok };
-    assert_eq!(view.agent_state("opaz"), Some("working"), "by name, whatever the case");
-    assert_eq!(view.agent_state("LARK"), Some("idle"));
-    assert_eq!(view.agent_state("nobody"), None);
-    let old = CloudView { installs: verified(vec![r(8, PRESENCE_VERSION_V1)], Some(1), 1), state: CloudState::Ok };
-    assert_eq!(old.agent_state("Opaz"), None, "a record from before states has none");
+#[tokio::test(start_paused = true)]
+async fn cached_answers_at_once_and_starts_the_read_for_the_next_ask() {
+    let fake = Arc::new(Fake { script: Mutex::new(vec![records("charlie")].into()), reads: AtomicUsize::new(0), takes: Duration::from_millis(200) });
+    let reader = Reader::new(Arc::clone(&fake));
+    let before = tokio::time::Instant::now();
+    let first = reader.cached(1_000);
+    assert_eq!((before.elapsed(), first.installs.len()), (Duration::ZERO, 0));
+    reader.cached(1_000);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(fake.reads.load(Ordering::SeqCst), 1, "one read however many asks");
+    assert_eq!(reader.cached(2_000).installs.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sign_in_change_drops_the_old_list_even_when_the_next_read_fails() {
+    let fake = Fake::new(vec![records("charlie"), Fetched::Failed]);
+    let reader = Reader::new(Arc::clone(&fake));
+    assert_eq!(reader.view(1_000).await.installs.len(), 1);
+    reader.invalidate();
+    let view = reader.view(2_000).await;
+    assert_eq!((view.state, view.installs.len()), (CloudState::Unavailable, 0), "the old account's machines are not kept");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_read_that_began_before_a_sign_in_change_is_not_let_in() {
+    let fake = Arc::new(Fake {
+        script: Mutex::new(vec![records("charlie"), records("starpower")].into()),
+        reads: AtomicUsize::new(0),
+        takes: Duration::from_secs(3),
+    });
+    let reader = Reader::new(Arc::clone(&fake));
+    reader.view(1_000).await; // gives up at the budget; the read goes on
+    reader.invalidate();
+    tokio::time::sleep(Duration::from_secs(4)).await; // the old read ends
+    assert_eq!(reader.cached(2_000).installs.len(), 0, "what the old sign-in read is dropped");
+    tokio::time::sleep(Duration::from_secs(4)).await; // the read the next ask started
+    assert_eq!(reader.cached(2_000).installs[0].record.hostname, "starpower");
 }

@@ -50,14 +50,33 @@ pub fn cloud_hosts(
     let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
     let mut hosts: Vec<RemoteHost> = installs
         .iter()
-        .filter(|c| own_wan_id != Some(c.record.instance_id.as_str()))
-        .filter(|c| now_ms.saturating_sub(c.seen_at_ms) <= HIDE_AFTER_MS)
+        .filter(|c| shown(c, own_wan_id, now_ms))
         .filter(|c| !(same(&c.record.hostname, hostname) && channels_here.iter().any(|ch| same(ch, &c.record.channel))))
         .filter(|c| !lan.iter().any(|p| !p.channel.is_empty() && same(&p.hostname, &c.record.hostname) && same(&p.channel, &c.record.channel)))
         .map(|c| host_of(c, now_ms))
         .collect();
     hosts.sort_by(|a, b| (a.display_name.to_lowercase(), &a.channels[0].channel).cmp(&(b.display_name.to_lowercase(), &b.channels[0].channel)));
     hosts
+}
+
+/// A record the tier shows at all: not this install's own, and not past [`HIDE_AFTER_MS`].
+fn shown(install: &CloudInstall, own_wan_id: Option<&str>, now_ms: u64) -> bool {
+    own_wan_id != Some(install.record.instance_id.as_str()) && now_ms.saturating_sub(install.seen_at_ms) <= HIDE_AFTER_MS
+}
+
+/// This install's own WAN instance id (public: a hash of its public key), when it has a WAN identity.
+pub fn own_wan_id() -> Option<String> {
+    let wan = super::storage::wan_identity::global()?;
+    wan.instance_ensure(&super::reactive::registry::local_host_label()).ok().map(|instance| instance.instance_id)
+}
+
+/// The state (`working`, `waiting`, `idle`, `stopped`, `error`) the list gives the agent called `name`, whatever
+/// the case, from the newest record that is shown (see [`shown`]) and has the agent. `None` when no such record
+/// has it, or that record says no state (one from before states).
+pub fn agent_state<'a>(view: &'a CloudView, name: &str, own_wan_id: Option<&str>, now_ms: u64) -> Option<&'a str> {
+    let seen = view.installs.iter().filter(|c| shown(c, own_wan_id, now_ms));
+    let with_agent = seen.filter_map(|c| c.record.agents.iter().find(|a| a.name.eq_ignore_ascii_case(name)).map(|a| (c.seen_at_ms, a)));
+    with_agent.max_by_key(|(seen_at_ms, _)| *seen_at_ms).and_then(|(_, a)| a.state.as_deref())
 }
 
 fn host_of(install: &CloudInstall, now_ms: u64) -> RemoteHost {

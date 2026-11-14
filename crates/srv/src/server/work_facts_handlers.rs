@@ -101,7 +101,7 @@ pub(super) fn split_caller(facts: Vec<WorkFacts>, caller_block: Option<&str>) ->
 
 /// LAN and WAN agents: name and liveness only. A WAN agent that the account's cloud list (`cloud_installs`) has
 /// says its state there (`working`, `idle`, ...) instead of a bare "online"; the Swarm reads the same list.
-fn remote_agents(state: &AppState, cloud: Option<&crate::muxbus::cloud_installs::CloudView>) -> Vec<serde_json::Value> {
+fn remote_agents(state: &AppState) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     for lan in state.lan_discovery.get_instances() {
         for name in &lan.agents {
@@ -109,8 +109,12 @@ fn remote_agents(state: &AppState, cloud: Option<&crate::muxbus::cloud_installs:
         }
     }
     if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+        // The cache as it is: `who` never waits on the relay, and an old cache starts a read for the next ask.
+        let cloud = crate::muxbus::cloud_installs::cached();
+        let own_wan_id = crate::backend::swarm_cloud::own_wan_id();
+        let now_ms = agentmux_common::time::now_ms_u64();
         for name in sub.subscribed_agents() {
-            out.push(json!({ "agent": name, "channel": "wan", "status": cloud.and_then(|c| c.agent_state(&name)).unwrap_or("online") }));
+            out.push(json!({ "agent": name, "channel": "wan", "status": cloud.as_ref().and_then(|c| crate::backend::swarm_cloud::agent_state(c, &name, own_wan_id.as_deref(), now_ms)).unwrap_or("online") }));
         }
     }
     out
@@ -154,13 +158,12 @@ pub(crate) async fn handle_who_is_working_on(
     let recent_posts = tokio::task::spawn_blocking(move || super::coord_channel_handlers::recent_posts(&store, &asked, pr, now))
         .await
         .unwrap_or_default();
-    let cloud = crate::muxbus::cloud_installs::view().await;
     Json(json!({
         "asked": target,
         "caller": me.as_ref().map(|m| json!({ "agent": m.agent, "repo": m.repo, "branch": m.branch })),
         "agents": agents,
         "recent_posts": recent_posts,
-        "remote_agents": remote_agents(&state, cloud.as_ref()),
+        "remote_agents": remote_agents(&state),
         "unreachable_channels": unreachable,
         "note": NOTE,
     }))

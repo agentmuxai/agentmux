@@ -138,3 +138,35 @@ fn another_channel_the_registry_lists_is_not_a_cloud_machine() {
     let cloud: Vec<&str> = snap.hosts.iter().filter(|h| h.tier == "cloud").map(|h| h.channels[0].channel.as_str()).collect();
     assert_eq!(cloud, ["unlisted"]);
 }
+
+fn with_agent_state(seed: u8, state: &str, age_ms: u64) -> CloudInstall {
+    let mut c = install(seed, "charlie", "stable", PRESENCE_VERSION_LINES, age_ms);
+    c.record.agents.iter_mut().find(|a| a.name == "Opaz").unwrap().state = Some(state.into());
+    c
+}
+
+#[test]
+fn an_agent_has_the_state_its_newest_shown_record_gives() {
+    let view = |installs| CloudView { installs, state: CloudState::Ok };
+    let one = view(vec![install(7, "charlie", "stable", PRESENCE_VERSION_LINES, 0)]);
+    assert_eq!(agent_state(&one, "opaz", None, NOW), Some("working"), "by name, whatever the case");
+    assert_eq!(agent_state(&one, "LARK", None, NOW), Some("idle"));
+    assert_eq!(agent_state(&one, "nobody", None, NOW), None);
+    let old = view(vec![install(8, "charlie", "stable", PRESENCE_VERSION_V1, 0)]);
+    assert_eq!(agent_state(&old, "Opaz", None, NOW), None, "a record from before states has none");
+
+    // The same name on two machines: the newer record's state.
+    let two = view(vec![with_agent_state(1, "idle", 90_000), with_agent_state(2, "waiting", 10_000)]);
+    assert_eq!(agent_state(&two, "Opaz", None, NOW), Some("waiting"));
+}
+
+#[test]
+fn a_record_the_swarm_does_not_show_gives_no_state() {
+    let hidden = CloudView { installs: vec![with_agent_state(1, "working", HIDE_AFTER_MS + 1)], state: CloudState::Ok };
+    assert_eq!(agent_state(&hidden, "Opaz", None, NOW), None, "too old");
+    let own = with_agent_state(2, "working", 0);
+    let id = own.record.instance_id.clone();
+    let view = CloudView { installs: vec![own], state: CloudState::Ok };
+    assert_eq!(agent_state(&view, "Opaz", Some(&id), NOW), None, "this install's own record");
+    assert_eq!(agent_state(&view, "Opaz", None, NOW), Some("working"));
+}

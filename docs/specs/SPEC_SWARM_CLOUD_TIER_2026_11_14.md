@@ -1,6 +1,6 @@
 # Spec: The cloud tier: agents on the account's other machines that are not on the LAN, listed by srv for the Swarm and Atlas
 
-**Status:** draft. For Camper's agreement (the Atlas side) and AgentY's (the relay side), then the build (#47600).
+**Status:** active. Built in #47600 (PR #7324): the cloud tier, the `cloud` field and the Presence `who` state, with the host-and-channel fallback for de-duplication. Left: the LAN advertisement's WAN instance id, for the exact match (section 3.3).
 
 Task #47599 (build: #47600, after this). Owner: AgentA (srv core). Requested by Camper (Atlas, #47554 part d); routed by
 AgentY. Written 2026-11-14 from origin/main `a87476e72`. Built in the PR that carries this file, except the LAN advertisement's WAN id
