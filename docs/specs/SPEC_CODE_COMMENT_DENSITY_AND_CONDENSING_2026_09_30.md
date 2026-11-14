@@ -623,7 +623,7 @@ The splits and renames since §7.1 was ranked moved most of its files (`agentmux
 
 | # | File | Comment tok | Commits | Status |
 |---|---|---:|---:|---|
-| 1 | `crates/srv/src/server/reactive.rs` | 11,374 | 74 | in progress: lines 1-700 first, then the rest |
+| 1 | `crates/srv/src/server/reactive.rs` | 11,374 | 74 | in progress: lines 1-700 in #7228, most of the rest in the next PR, the last ~110 lines after it |
 | 2 | `frontend/app/view/swarm/swarm-model.ts` | 13,958 | 51 | |
 | 3 | `frontend/app/store/agent-pane-state/types.ts` | 12,320 | 42 | |
 | 4 | `crates/srv/src/backend/storage/migrations.rs` | 13,143 | 37 | comments only, never code |

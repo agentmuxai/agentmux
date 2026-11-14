@@ -281,9 +281,8 @@
 238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event
 124 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_conversations
 118 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_find
-101 crates/srv/src/server/reactive.rs::handle_reactive_history_search
-203 crates/srv/src/server/reactive.rs::handle_reactive_register
-110 crates/srv/src/server/reactive.rs::try_cloud_relay
+170 crates/srv/src/server/reactive.rs::handle_reactive_register
+105 crates/srv/src/server/reactive.rs::try_cloud_relay
 110 crates/srv/src/server/remote_ops/receive.rs::receive
 130 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
