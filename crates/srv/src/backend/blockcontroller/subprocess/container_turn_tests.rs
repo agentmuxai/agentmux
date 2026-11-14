@@ -16,7 +16,7 @@ use crate::backend::blockcontroller::{STATUS_DONE, STATUS_RUNNING};
 use crate::backend::mps::Broker;
 
 #[path = "container_fake_docker.rs"]
-pub mod fake;
+mod fake;
 use fake::{FakeDocker, Kind, Turn};
 
 const INIT: &str = r#"{"type":"system","subtype":"init","session_id":"sid-one"}"#;

@@ -3,9 +3,9 @@
 
 //! What the tests of the layer above (`server::agent_move_here`) need from a persistent pane: to
 //! make it hold an agent's lease and to see how it is asked to stop. A child of the controller's
-//! module, so it reaches the controller's private state without widening it.
+//! module tree, so it reaches the controller's private state without widening it.
 
-use super::*;
+use super::super::*;
 
 /// The stop request a pane given a lease by `hold_lease_for_test` receives.
 pub struct StopRequest(tokio::sync::oneshot::Receiver<KillRequest>);

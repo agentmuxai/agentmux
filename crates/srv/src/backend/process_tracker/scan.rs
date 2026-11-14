@@ -273,7 +273,7 @@ impl Drop for ScanTracker {
 }
 
 #[cfg(all(test, unix))]
-pub mod tests {
+mod tests {
     use super::*;
 
     fn spawn(script: &str, block_id: Option<&str>) -> std::process::Child {

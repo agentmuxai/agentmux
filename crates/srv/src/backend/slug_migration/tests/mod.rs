@@ -5,14 +5,14 @@
 //! §6): the planner, each step, crash and resume, a full fixture home, and
 //! the preconditions.
 
-pub mod crash_tests;
-pub mod fixture;
-pub mod home_tests;
-pub mod journal_tests;
-pub mod permission_tests;
-pub mod plan_tests;
-pub mod precondition_tests;
-pub mod steps_tests;
+mod crash_tests;
+mod fixture;
+mod home_tests;
+mod journal_tests;
+mod permission_tests;
+mod plan_tests;
+mod precondition_tests;
+mod steps_tests;
 
 use super::run::{self, Options};
 

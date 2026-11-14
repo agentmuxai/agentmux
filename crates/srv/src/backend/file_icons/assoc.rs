@@ -62,7 +62,7 @@ pub(crate) fn registry_string(root: windows::Win32::System::Registry::HKEY, path
 }
 
 #[cfg(all(test, windows))]
-pub mod tests {
+mod tests {
     use super::*;
 
     fn req(kind: Kind, ext: &str) -> IconRequest {

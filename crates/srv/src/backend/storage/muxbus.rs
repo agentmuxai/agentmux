@@ -1032,7 +1032,7 @@ impl Store {
 
 #[cfg(all(test, not(windows)))]
 #[path = "muxbus_load_tests.rs"]
-pub mod load_tests;
+mod load_tests;
 
 #[cfg(test)]
 mod tests {

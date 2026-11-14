@@ -362,7 +362,7 @@ fn kimi_has_no_startup_instructions_filename() {
 // `paths_resolve_to_same_dir` takes the reference side pre-resolved
 // (not `get_home_dir()` itself) specifically so these tests don't
 // depend on the real $HOME/%USERPROFILE% — see its own doc comment.
-pub mod ambient_home_dir_tests {
+mod ambient_home_dir_tests {
     use super::*;
 
     #[test]
@@ -448,7 +448,7 @@ pub mod ambient_home_dir_tests {
     }
 }
 
-pub mod transcript_retention_tests {
+mod transcript_retention_tests {
     use super::*;
 
     fn seed(dir: &std::path::Path) -> bool {
@@ -545,7 +545,7 @@ pub mod transcript_retention_tests {
     }
 }
 
-pub mod claude_md_placeholder_tests {
+mod claude_md_placeholder_tests {
     use super::*;
 
     #[test]
@@ -608,7 +608,7 @@ pub mod claude_md_placeholder_tests {
     }
 }
 
-pub mod prepare_provider_auth_dir_tests {
+mod prepare_provider_auth_dir_tests {
     use super::*;
 
     // The default spawn path (agent_open.rs) previously did
@@ -732,7 +732,7 @@ fn a_terminal_tier_pane_is_a_terminal_started_at_once() {
     assert!(other.is_empty());
 }
 
-pub mod auto_compact_window_tests {
+mod auto_compact_window_tests {
     use super::*;
 
     fn seed(dir: &std::path::Path, compact_at: u64) -> bool {

@@ -1589,6 +1589,3 @@ pub mod stdout_reader;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(any(test, feature = "test-support"))]
-pub mod lease_hooks;

@@ -635,7 +635,7 @@ async fn without_a_publisher_publish_now_says_so() {
 
 // ── Goodbye, off and newest wins: the machine ────────────────────────────────
 
-pub mod rules {
+mod rules {
     use super::super::machine::{classify, Action, Answer, Event, Machine, Now, LIVE};
     use super::*;
     use crate::backend::rpc_types::PresenceOffReason as Off;

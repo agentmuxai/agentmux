@@ -723,7 +723,7 @@ impl ContainerRuntimeHandle {
 }
 
 #[cfg(all(test, unix))]
-pub mod tests {
+mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixListener;
