@@ -13,6 +13,7 @@ use super::lan::discovery::LanInstance;
 use super::runtime_adapter::RuntimeKind;
 use super::swarm_remote::{fnv1a32, RemoteAgent, RemoteChannel, RemoteHost, SwarmOtherInstancesResult};
 use crate::muxbus::cloud_installs::{CloudInstall, CloudView};
+use crate::muxbus::install_presence::InstallPresence;
 
 /// A record not heard from for this long is shown as stale: three missed beats of the one-minute publisher.
 pub const STALE_AFTER_MS: u64 = 3 * 60_000;
@@ -37,8 +38,7 @@ pub fn add_cloud(snapshot: &mut SwarmOtherInstancesResult, view: Option<&CloudVi
 }
 
 /// The hosts for `installs`, leaving out what is listed elsewhere: this install's own record, another channel of
-/// this machine (`channels_here`), and a LAN peer of the same host name and channel. A peer from before it
-/// advertised its channel is not matched.
+/// this machine (`channels_here`), and a LAN peer that is the same machine (see [`on_the_lan`]).
 pub fn cloud_hosts(
     installs: &[CloudInstall],
     own_wan_id: Option<&str>,
@@ -52,11 +52,25 @@ pub fn cloud_hosts(
         .iter()
         .filter(|c| shown(c, own_wan_id, now_ms))
         .filter(|c| !(same(&c.record.hostname, hostname) && channels_here.iter().any(|ch| same(ch, &c.record.channel))))
-        .filter(|c| !lan.iter().any(|p| !p.channel.is_empty() && same(&p.hostname, &c.record.hostname) && same(&p.channel, &c.record.channel)))
+        .filter(|c| !lan.iter().any(|p| on_the_lan(p, &c.record)))
         .map(|c| host_of(c, now_ms))
         .collect();
     hosts.sort_by(|a, b| (a.display_name.to_lowercase(), &a.channels[0].channel).cmp(&(b.display_name.to_lowercase(), &b.channels[0].channel)));
     hosts
+}
+
+/// Whether the LAN peer `peer` is the install `record` describes. The host name and channel must agree (a peer from
+/// before it advertised its channel matches nothing). Then, when the peer advertises its WAN instance id, the ids
+/// must agree too: two machines with one name and one channel are told apart, and the one the LAN lists no longer
+/// hides the other's cloud row. The id only narrows a host-and-channel match and never makes one: it is a public
+/// identifier the peer chose, not proof, so a peer that claims another install's id, with another host name or
+/// channel, hides nothing, and the cloud row stays that install's own.
+fn on_the_lan(peer: &LanInstance, record: &InstallPresence) -> bool {
+    let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+    !peer.channel.is_empty()
+        && same(&peer.hostname, &record.hostname)
+        && same(&peer.channel, &record.channel)
+        && (peer.install_id.is_empty() || peer.install_id == record.instance_id)
 }
 
 /// A record the tier shows at all: not this install's own, and not past [`HIDE_AFTER_MS`].

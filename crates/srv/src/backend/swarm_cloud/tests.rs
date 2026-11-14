@@ -170,3 +170,42 @@ fn a_record_the_swarm_does_not_show_gives_no_state() {
     assert_eq!(agent_state(&view, "Opaz", Some(&id), NOW), None, "this install's own record");
     assert_eq!(agent_state(&view, "Opaz", None, NOW), Some("working"));
 }
+
+fn peer_with_id(host: &str, channel: &str, install_id: &str) -> LanInstance {
+    let mut p = peer(host, channel);
+    p.install_id = install_id.to_string();
+    p
+}
+
+#[test]
+fn a_lan_peer_with_the_records_id_hides_that_machines_row() {
+    let record = install(7, "charlie", "stable", PRESENCE_VERSION_LINES, 0);
+    let id = record.record.instance_id.clone();
+    assert!(listed(std::slice::from_ref(&record), None, &[peer_with_id("charlie", "stable", &id)]).is_empty());
+}
+
+#[test]
+fn two_machines_with_one_name_and_channel_are_told_apart_by_id() {
+    let on_the_lan = install(7, "charlie", "stable", PRESENCE_VERSION_LINES, 0);
+    let elsewhere = install(8, "charlie", "stable", PRESENCE_VERSION_LINES, 0);
+    let lan = [peer_with_id("charlie", "stable", &on_the_lan.record.instance_id)];
+    let got = listed(&[on_the_lan, elsewhere.clone()], None, &lan);
+    assert_eq!(got.len(), 1, "only the machine the LAN lists is left out");
+    assert_eq!(got[0].host_id, format!("cloud:charlie#{:08x}", fnv1a32(&elsewhere.record.instance_id)));
+}
+
+#[test]
+fn a_claimed_id_alone_hides_nothing() {
+    let record = install(7, "charlie", "stable", PRESENCE_VERSION_LINES, 0);
+    let id = record.record.instance_id.clone();
+    // Another host name, another channel, or no channel: the id is a public identifier the peer chose, not proof.
+    for lan in [peer_with_id("area54", "stable", &id), peer_with_id("charlie", "dev", &id), peer_with_id("charlie", "", &id)] {
+        assert_eq!(listed(std::slice::from_ref(&record), None, &[lan]).len(), 1);
+    }
+}
+
+#[test]
+fn a_peer_with_no_id_is_matched_by_host_and_channel_as_before() {
+    let record = install(7, "charlie", "stable", PRESENCE_VERSION_LINES, 0);
+    assert!(listed(std::slice::from_ref(&record), None, &[peer("charlie", "stable")]).is_empty());
+}

@@ -1,6 +1,6 @@
 # Spec: The cloud tier: agents on the account's other machines that are not on the LAN, listed by srv for the Swarm and Atlas
 
-**Status:** active. Built in #47600 (PR #7324): the cloud tier, the `cloud` field and the Presence `who` state, with the host-and-channel fallback for de-duplication. Left: the LAN advertisement's WAN instance id, for the exact match (section 3.3).
+**Status:** active. Built in #47600 (PR #7324): the cloud tier, the `cloud` field and the Presence `who` state, with the host-and-channel fallback for de-duplication. The LAN peer's WAN instance id narrows the host-and-channel match (section 3.3, #2559).
 
 Task #47599 (build: #47600, after this). Owner: AgentA (srv core). Requested by Camper (Atlas, #47554 part d); routed by
 AgentY. Written 2026-11-14 from origin/main `a87476e72`. Built in the PR that carries this file, except the LAN advertisement's WAN id
@@ -88,11 +88,16 @@ A cloud record is left out when it is:
 3. **A LAN peer**: matched exactly by the WAN instance id when the peer's advertisement carries it, else by host name and
    channel (case-insensitively).
 
-**Built so far: the fallback only** (host name and channel, case-insensitively; a peer that did not advertise its channel
-hides nothing). For the exact match, the LAN advertisement gets one optional field, the install's WAN instance id (a public hash of a
-public key, not a secret). A peer on an older build does not send it, so it falls back to host name and channel. The
-fallback can hide a cloud machine that shares both with a LAN peer (two cloned VMs with one name and one channel), which
-is a smaller error than listing one machine in two sections, and it ends as peers update. *(Decision 3.)*
+**Built (#47600, then #2559).** The LAN advertisement already carries the install's WAN instance id (`install_id`, a public hash of a
+public key, not a secret: the mDNS TXT record and the UDP identity reply, which agentmux-mobile reads), so nothing is added to the
+protocol. srv now reads it from a peer on both routes, keeping only one shaped like an id (26 lowercase base32 characters), and a peer
+on an older build, or one that sends a malformed id, has none. A LAN peer hides a cloud row when host name and channel agree
+(case-insensitively; a peer that did not advertise its channel hides nothing) **and**, when the peer has an id, the ids agree too.
+So two machines with one name and one channel are told apart (the one the LAN lists no longer hides the other's cloud row), and a peer
+with no id is matched as before. The id only narrows a host-and-channel match and never makes one: it is an identifier the peer
+chose, never proof that it holds the key behind it, so a peer that claims another install's id, with another host name or channel,
+hides nothing and cannot take over or merge into that install's row. Nothing in trust (`TRUST`, `INSTANCE_STATUS`, pinning) reads it. A host that is
+renamed shows twice for up to a minute, until its next publish carries the new name. *(Decision 3.)*
 
 ### 3.4 Broadcast and stop
 

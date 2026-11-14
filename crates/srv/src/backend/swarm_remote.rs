@@ -758,6 +758,7 @@ mod tests {
             first_seen: 0,
             last_seen: NOW / 1000 - age_secs,
             last_polled_ok: 0,
+            install_id: String::new(),
             other_ttl_secs: 4500,
         }
     }

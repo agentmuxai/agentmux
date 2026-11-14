@@ -223,13 +223,13 @@ pub struct LanInstance {
     /// "stable"), so a host running two channels can be told apart in the
     /// Swarm (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md Phase 2). Empty
     /// for a peer on a build from before it was advertised.
-    #[serde(default)]
-    pub channel: String,
+    #[serde(default)] pub channel: String,
     /// The peer's operating system (`windows`, `macos`, `linux`), for the
     /// platform tag in the Swarm. Display only; empty for a peer that does not
     /// advertise it (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
-    #[serde(default)]
-    pub os: String,
+    #[serde(default)] pub os: String,
+    /// The install's WAN instance id as the peer advertises it, a well-formed one only; empty for a peer that predates it. An identifier, never proof (`peer_words::install_id_token`).
+    #[serde(default)] #[ts(skip)] pub install_id: String,
     /// How the peer is installed (`InstallKind::label`, e.g. `windows-store`); empty when it predates advertising it.
     #[serde(default)] pub install: String,
     /// The kind of build the peer says its binary is (`BuildKind::label`), never read off its channel; empty when it predates advertising it.
@@ -1190,7 +1190,7 @@ impl LanDiscovery {
                     .to_string();
                 let channel = info.get_property_val_str("channel").unwrap_or_default().to_string();
                 // Self-reported by the peer, so only a plain token is kept.
-                let (os, install, build) = crate::backend::lan::peer_words::advertised(&info);
+                let (os, install, build, install_id) = crate::backend::lan::peer_words::advertised(&info);
                 let other_ttl_secs = info.get_other_ttl();
 
                 let mut instances = self.instances.write();
@@ -1203,7 +1203,7 @@ impl LanDiscovery {
                     hostname: hostname.clone(),
                     version: version.clone(),
                     channel: channel.clone(),
-                    os: os.clone(), install: install.clone(), build: build.clone(),
+                    os: os.clone(), install: install.clone(), build: build.clone(), install_id: install_id.clone(),
                     address: address.clone(),
                     port: info.get_port(),
                     auth_key: auth_key.clone(),
@@ -1237,7 +1237,7 @@ impl LanDiscovery {
                 if !peer_id.is_empty() {
                     entry.instance_id = peer_id.clone();
                 }
-                crate::backend::lan::peer_words::keep_known(&mut entry.install, install); crate::backend::lan::peer_words::keep_known(&mut entry.build, build);
+                crate::backend::lan::peer_words::keep_known(&mut entry.install, install); crate::backend::lan::peer_words::keep_known(&mut entry.build, build); crate::backend::lan::peer_words::keep_known(&mut entry.install_id, install_id);
                 if !hostname.is_empty() {
                     entry.hostname = hostname;
                 }

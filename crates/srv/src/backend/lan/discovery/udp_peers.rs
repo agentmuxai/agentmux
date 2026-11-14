@@ -84,6 +84,8 @@ pub(super) struct UdpPeer {
     pub install: String,
     /// The kind of build the peer says it is (`release`, `local`, `dev`); empty for anything else.
     pub build: String,
+    /// The peer's advertised WAN instance id, a well-formed one only; empty when it predates advertising it.
+    pub install_id: String,
     pub address: IpAddr,
     pub port: u16,
     pub auth_key: String,
@@ -136,6 +138,7 @@ pub(super) fn parse_peer_reply(bytes: &[u8], src: &std::net::SocketAddr) -> Opti
         os,
         install,
         build: crate::backend::lan::peer_words::build_token(value.get("build").and_then(|v| v.as_str())),
+        install_id: crate::backend::lan::peer_words::install_id_token(value.get("install_id").and_then(|v| v.as_str())),
         address: src.ip(),
         port,
         auth_key,
@@ -206,6 +209,7 @@ pub(super) fn merge_udp_peer(
             if !peer.build.is_empty() {
                 existing.build = peer.build.clone();
             }
+            crate::backend::lan::peer_words::keep_known(&mut existing.install_id, peer.install_id.clone());
             existing.auth_key = peer.auth_key.clone();
         } else {
             if existing.auth_key.is_empty() {
@@ -222,6 +226,9 @@ pub(super) fn merge_udp_peer(
             }
             if existing.build.is_empty() {
                 existing.build = peer.build.clone();
+            }
+            if existing.install_id.is_empty() {
+                existing.install_id = peer.install_id.clone();
             }
         }
         return Merge::Refreshed;
@@ -245,6 +252,7 @@ pub(super) fn merge_udp_peer(
             os: peer.os.clone(),
             install: peer.install.clone(),
             build: peer.build.clone(),
+            install_id: peer.install_id.clone(),
             address,
             port: peer.port,
             auth_key: peer.auth_key.clone(),
@@ -476,6 +484,7 @@ mod tests {
             os: String::new(),
             install: String::new(),
             build: String::new(),
+            install_id: String::new(),
             address: addr.parse().unwrap(),
             port,
             auth_key: "k".into(),
@@ -505,6 +514,7 @@ mod tests {
             first_seen: 1,
             last_seen: 1,
             last_polled_ok: 0,
+            install_id: String::new(),
             other_ttl_secs: 4500,
         }
     }
@@ -542,6 +552,19 @@ mod tests {
                 .channel,
             ""
         );
+    }
+
+    #[test]
+    fn the_install_id_is_read_when_well_formed_and_optional_when_not() {
+        let mut v: serde_json::Value = serde_json::from_slice(&reply("abc", 29700)).unwrap();
+        let id_of = |v: &serde_json::Value| parse_peer_reply(&serde_json::to_vec(v).unwrap(), &src("10.0.0.26")).unwrap().install_id;
+        assert_eq!(id_of(&v), "", "an older peer sends none");
+        v["install_id"] = json!("mw3am46w5weex4a4fqrc3avnua");
+        assert_eq!(id_of(&v), "mw3am46w5weex4a4fqrc3avnua");
+        v["install_id"] = json!("not an id");
+        assert_eq!(id_of(&v), "", "malformed: dropped, the reply still counts");
+        v["install_id"] = json!(7);
+        assert_eq!(id_of(&v), "");
     }
 
     // The platform tag (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
