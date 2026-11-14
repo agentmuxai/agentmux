@@ -473,7 +473,7 @@ mod tests {
     }
 
     fn tail(fs: &std::sync::Arc<crate::backend::storage::filestore::FileStore>, ms: &std::sync::Arc<crate::backend::storage::store::Store>, block: &str) -> Vec<Value> {
-        crate::server::transcript_tail::tail_lines(ms, fs, block, 50)
+        crate::backend::transcript::tail::tail_lines(ms, fs, block, 50)
             .unwrap()
             .lines
             .iter()
