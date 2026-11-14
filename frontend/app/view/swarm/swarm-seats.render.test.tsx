@@ -161,7 +161,10 @@ describe("Swarm seats", () => {
         const badge = row.querySelector(".swarm-seat-badge")!;
         expect(badge.textContent).toBe("Leader · product");
         expect(badge.getAttribute("title")).toBe("Leader · product — reports to the operator — agent pane, identity");
-        expect(badge.previousElementSibling?.classList.contains("swarm-agent-label")).toBe(true);
+        // The row lays out the badge's slot, which comes right after the name.
+        const slot = badge.parentElement!;
+        expect(slot.classList.contains("swarm-seat-slot")).toBe(true);
+        expect(slot.previousElementSibling?.classList.contains("swarm-agent-label")).toBe(true);
         expect(container.querySelector('[data-swarm-key="b-free"] .swarm-seat-badge')).toBeNull();
     });
 

@@ -33,14 +33,19 @@ export function SwarmSeatBadge(props: { meta: Record<string, unknown> | undefine
     return <SwarmSeatPill seat={readSeatMeta(props.meta)} />;
 }
 
-/** The role badge for a seat in hand: an other instance's agent shows the seat it reports. */
+/**
+ * The role badge for a seat in hand: an other instance's agent shows the seat it reports.
+ * The slot around it is what the row lays out, so a badge with no room is not shown at all (swarm-seats.scss).
+ */
 export function SwarmSeatPill(props: { seat: SeatSummary | null | undefined }): JSX.Element {
     return (
         <Show when={props.seat}>
             {(s) => (
-                <Pill class="swarm-seat-badge" title={seatTooltipLine(s())}>
-                    {seatBadgeText(s())}
-                </Pill>
+                <span class="swarm-seat-slot">
+                    <Pill class="swarm-seat-badge" title={seatTooltipLine(s())}>
+                        {seatBadgeText(s())}
+                    </Pill>
+                </span>
             )}
         </Show>
     );

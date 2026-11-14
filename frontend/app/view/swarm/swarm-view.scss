@@ -146,15 +146,14 @@
     }
 }
 
-// Narrower, where the seat badge is down to a stub of its padding and the status word would be cut to keep it:
-// the badge goes, and the word has its room. The name then takes the room that is left, as a name with no badge
-// does, so the row's other parts stay at its end.
+// Narrower, where a seat badge would mostly be cut to its least width: the badge goes in every row. The name
+// then takes the room that is left, as a name with no badge does, so the row's other parts stay at its end.
 @container swarm-tree (max-width: 240px) {
-    .swarm-agent-row .swarm-seat-badge {
+    .swarm-tree .swarm-agent-row .swarm-seat-slot {
         display: none;
     }
 
-    .swarm-tree .swarm-agent-row .swarm-agent-label:has(+ .swarm-seat-badge) {
+    .swarm-tree .swarm-agent-row .swarm-agent-label:has(+ .swarm-seat-slot) {
         flex-grow: 1;
     }
 }
@@ -294,7 +293,9 @@
 
     // When the row's parts do not fit, at any width, they give way in turn and nothing leaves the card: what
     // only decorates the row first (the seat badge, then the age, then the context size), then the name down to
-    // its least width, then the status chip from its end, its seconds first.
+    // its least width, then the status chip from its end, its seconds first. The seat badge is cut with an
+    // ellipsis down to its least width and then goes whole (swarm-seats.scss), so a row short of room never
+    // spends it on a stub of a badge.
     // Flex shares a shortfall by these weights, so each is far enough from the next that the later part loses
     // less than a layout unit, and gets no ellipsis, while the earlier one still shrinks.
     //
@@ -309,14 +310,14 @@
         @include mixins.truncate;
         color: var(--main-text-color);
 
-        // With a seat badge the name does not grow: the badge sits right after it, and the badge's own margin
-        // (swarm-seats.scss) keeps the row's other parts at its end.
-        &:has(+ .swarm-seat-badge) {
+        // With a seat badge the name does not grow: the badge sits right after it, and the margin of the badge's
+        // slot (swarm-seats.scss) keeps the row's other parts at its end.
+        &:has(+ .swarm-seat-slot) {
             flex-grow: 0;
         }
     }
 
-    .swarm-seat-badge {
+    .swarm-seat-slot {
         flex-shrink: 100000000000000000000;
     }
 
