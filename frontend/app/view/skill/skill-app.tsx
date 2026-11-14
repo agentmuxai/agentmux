@@ -8,6 +8,7 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { Pill, SegmentedControl } from "@/app/element/ui";
+import type { AgentDefinition } from "@/types/rpc/AgentDefinition";
 import type { AppSkillHere } from "@/types/rpc/AppSkillHere";
 import type { SkillApp } from "@/types/rpc/SkillApp";
 import {
@@ -23,6 +24,7 @@ import {
     type AppFilter,
 } from "./skill-app-model";
 import { ExportSkill } from "./skill-app-export";
+import { RunTest } from "./skill-app-run-test";
 import { ScriptReview } from "./skill-app-scripts";
 import "./skill-app.scss";
 
@@ -75,7 +77,7 @@ function AppHereLine(p: { app: SkillApp; here: AppSkillHere | undefined; drift: 
 }
 
 /** The detail of a computer-use skill, below the usual skill facts. */
-export function SkillAppDetail(p: { skillId: string; app: SkillApp; here?: AppSkillHere }): JSX.Element {
+export function SkillAppDetail(p: { skillId: string; app: SkillApp; here?: AppSkillHere; agents?: AgentDefinition[] }): JSX.Element {
     const platform = appPlatform();
     const status = () => appStatus(p.app, platform, p.here);
     const drift = () => referenceDrift(p.app, platform);
@@ -104,6 +106,7 @@ export function SkillAppDetail(p: { skillId: string; app: SkillApp; here?: AppSk
                 ({platform}).
             </p>
             <AppHereLine app={p.app} here={p.here} drift={status().tone === "warn"} />
+            <RunTest skillId={p.skillId} app={p.app} here={p.here} agents={p.agents ?? []} />
             <Show when={p.app.ladder.length > 0}>
                 <span class="agent-primitive-modal-field-label">Routes, best first</span>
                 <ol class="skill-app-list skill-app-list--ordered" aria-label="Routes">

@@ -122,6 +122,32 @@ export function scriptState(f: { script: boolean; approved: boolean }): string |
 /** The tone a pill takes for a status (a status dot says "idle" where a pill says "neutral"). */
 export const pillTone = (tone: AppTone): "ok" | "warn" | "neutral" | "error" => (tone === "idle" ? "neutral" : tone);
 
+/** Whether the skill ships a test task (`test.json`) for this platform: the one thing Run test needs. */
+export function hasTestTask(app: SkillApp, platform: string): boolean {
+    const forHere = app.platforms.length === 0 || app.platforms.includes(platform);
+    return forHere && app.files.some((f) => f.path === "test.json");
+}
+
+/** The task Run test files: its title, and the instruction the agent that takes it acts on alone (SPEC_PACKS §7). */
+export function testTask(app: SkillApp, skillId: string, platform: string, here: AppSkillHere | undefined): { title: string; payload: string } {
+    const where = osNames([platform]);
+    const found =
+        here?.found && here.version
+            ? `AgentMux found ${app.name} ${here.version} on this computer; confirm the version in the app before you record it.`
+            : "Take the app's version from the app itself.";
+    return {
+        title: `Run the test of ${app.name} ${app.version} on ${where}`,
+        payload: [
+            `Run the test of the computer-use skill "${app.name}" ${app.version} on ${where}. This is a normal task: you drive the app with the Desktop tool and the person's own per-app grant, so their prompt and the audit log are the usual ones. Do not change the skill.`,
+            `1. Read the test: Skills get skill_id=${skillId} file=test.json. Read SKILL.md and the files it points at the same way (Skills get skill_id=${skillId}, then file=...).`,
+            `2. ${found}`,
+            "3. Do each step by the skill's ladder, best route first, and check every verify cue. Never mark a cue passed that you did not check.",
+            `4. Record the result: Skills record skill_id=${skillId} skill_version=${app.version} app_version=<the version you confirmed> platform=${platform} result=pass or fail route=<the rung you used> notes=<what you saw, short; no host or user name> evidence_sha256=<SHA-256 of the final screenshot or output file, never the file>.`,
+            "5. Say in your result what passed, what failed and where. The task is done whether the test passed or not. If the app is not installed, or Desktop is not enabled for it, say so and release the task instead of recording a result.",
+        ].join("\n"),
+    };
+}
+
 /**
  * The application itself on this computer, from `app_skills.here`: short for a card ("installed 12.2"), longer for the
  * detail. `null` while it is not known (the answer has not come, or the skill lists no executable for this platform).
