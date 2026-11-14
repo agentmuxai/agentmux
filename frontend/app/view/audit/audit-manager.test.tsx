@@ -340,6 +340,47 @@ describe("AuditManager", () => {
         }
     });
 
+    it("pages back to the row of a sound when a page or more of entries came after it", async () => {
+        const soundAt = Date.now() - 30_000;
+        const newer = (n: number, from: number) =>
+            Array.from({ length: n }, (_, i) =>
+                entry({ id: `n${from + i}`, kind: "tool", summary: `Read ${from + i}`, agent_id: "loap", ts_ms: Date.now() - i, links: { pane: { block_id: "blk-loap" } } })
+            );
+        const tool = entry({ id: "t", kind: "tool", summary: "Bash ls", agent_id: "korp", ts_ms: soundAt, links: { pane: { block_id: "blk-korp" } } });
+        query.mockImplementation((req) =>
+            Promise.resolve(
+                req.cursor === "c2" ? page([tool]) : req.cursor === "c1" ? page(newer(50, 50), { next_cursor: "c2" }) : page(newer(50, 0), { next_cursor: "c1" })
+            )
+        );
+        const scrolled = vi.fn();
+        const proto = Element.prototype as { scrollIntoView?: unknown };
+        const before = proto.scrollIntoView;
+        proto.scrollIntoView = scrolled;
+        try {
+            const sound = parseSoundRef(encodeSoundRef({ blockId: "blk-korp", event: "tool", tool: "Bash", at: soundAt }));
+            render(() => <AuditManager paneBlockId="pane-1" sound={sound} />);
+            await waitFor(() => expect(document.querySelector('[data-lit="true"]')?.textContent).toContain("Bash ls"));
+            expect(query.mock.calls.filter(([req]) => req.cursor).map(([req]) => req.cursor)).toEqual(["c1", "c2"]);
+            expect(scrolled).toHaveBeenCalledWith({ block: "center" });
+        } finally {
+            proto.scrollIntoView = before;
+        }
+    });
+
+    it("stops paging back once the list reaches past the sound, though its row is not there", async () => {
+        const soundAt = Date.now() - 30_000;
+        const old = entry({ id: "o", kind: "action", summary: "operator setconfig", ts_ms: soundAt - 10_000 });
+        query.mockImplementation((req) =>
+            Promise.resolve(req.cursor ? page([old], { next_cursor: "c9" }) : page([entry({ id: "n", kind: "tool", summary: "Read 1" })], { next_cursor: "c1" }))
+        );
+        const sound = parseSoundRef(encodeSoundRef({ blockId: "blk-korp", event: "tool", tool: "Bash", at: soundAt }));
+        render(() => <AuditManager paneBlockId="pane-1" sound={sound} />);
+        await waitFor(() => expect(screen.getByText("operator setconfig")).toBeInTheDocument());
+        await flush();
+        expect(query.mock.calls.filter(([req]) => req.cursor)).toHaveLength(1);
+        expect(document.querySelector('[data-lit="true"]')).toBeNull();
+    });
+
     it("drops an agent filter and a search that would leave the sound's row out, and resumes a paused list", async () => {
         const tool = entry({ id: "t", kind: "tool", summary: "Bash ls", agent_id: "korp", links: { pane: { block_id: "blk-korp" } } });
         const other = entry({ id: "a", kind: "action", summary: "operator setconfig" });

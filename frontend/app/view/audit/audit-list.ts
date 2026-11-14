@@ -16,6 +16,9 @@ import type { AuditTotals } from "@/types/rpc/AuditTotals";
 import { serial, useAuditLive } from "./audit-live";
 import { buildRequest, countNew, reuseRows, type AuditFilter } from "./audit-shared";
 
+/** The most pages `reachBack` adds for one ask (50 entries each). */
+const MAX_REACH_PAGES = 20;
+
 const fetchAuditPage = (req: AuditQueryReq): Promise<AuditQueryResult> => RpcApi.AuditQueryCommand(TabRpcClient, req);
 
 /** What the list shows, and how a page of the newest entries replaces it. */
@@ -71,7 +74,7 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
 
     // `refreshing`: the page is only the newest entries again, so if the list was paused while it was on its way,
     // it is kept as the newest page the pill counts, not shown.
-    const loadFirst = async (quiet = false, refreshing = false) => {
+    const loadFirstPage = async (quiet: boolean, refreshing: boolean) => {
         const mine = ++seq;
         if (!quiet) setLoading(true);
         try {
@@ -84,6 +87,16 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
         } finally {
             if (mine === seq) setLoading(false);
         }
+    };
+    // The newest first-page load on its way, so `reachBack` can wait for the list it would page from.
+    let firstLoad: Promise<void> | undefined;
+    const loadFirst = (quiet = false, refreshing = false) => {
+        const load = loadFirstPage(quiet, refreshing);
+        firstLoad = load;
+        void load.finally(() => {
+            if (firstLoad === load) firstLoad = undefined;
+        });
+        return load;
     };
 
     // The list holds still (paused, or scrolled back): look at the newest page without showing it.
@@ -126,6 +139,18 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
         }
     };
 
+    // Page older entries in, once the newest page is shown, until `done()` or `MAX_REACH_PAGES` or the last page.
+    // What the status bar's "last sound" needs when 50 or more entries were written between the sound and the click.
+    const reachBack = async (done: () => boolean) => {
+        for (let pages = 0; pages < MAX_REACH_PAGES; pages++) {
+            while (firstLoad) await firstLoad;
+            const next = untrack(cursor);
+            if (!next || done()) return;
+            await loadMore();
+            if (untrack(cursor) === next) return; // nothing was added: an error, or a newer look took over
+        }
+    };
+
     // A new filter starts over.
     createEffect(
         on(
@@ -157,5 +182,5 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
     useAuditLive(visible, () => void refresh());
 
     const { totals, notRecorded, loading, paused, newCount, channel } = state;
-    return { channel, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, showNewest };
+    return { channel, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, reachBack, showNewest };
 }
