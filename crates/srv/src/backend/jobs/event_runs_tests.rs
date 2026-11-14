@@ -212,3 +212,18 @@ async fn an_event_id_older_than_the_retention_is_forgotten_when_the_next_event_i
     assert!(rig.store.job_event_claim(&job.id, "ancient", "", 1).unwrap(), "its id was pruned, so it is new again");
     assert!(!rig.store.job_event_claim(&job.id, "fresh", "", 2).unwrap(), "a recent id is kept");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_waiting_runs_input_outlives_the_event_ids_pruning() {
+    use crate::backend::storage::job_events::{INPUT_KEEP_MS, KEEP_MS};
+    let rig = rig();
+    let job = event_job(&rig, "j-keep", |_| {});
+    drone_runner(&rig);
+    let now = agentmux_common::time::now_ms();
+    // A run held back by a long delay: its event is older than the ids are kept, its input is still needed.
+    rig.store.job_event_input_put("held-run", &job.id, &json!({ "n": 1 }), now - KEEP_MS - 1000).unwrap();
+    rig.store.job_event_input_put("ancient-run", &job.id, &json!({ "n": 2 }), now - INPUT_KEEP_MS - 1000).unwrap();
+    assert!(rig.sched.fire_event(&job, event("fresh", json!({}))).await.run_id.is_some(), "a new event prunes");
+    assert_eq!(rig.ledger.event_input("held-run"), Some(json!({ "n": 1 })), "an input a delay may still need stays");
+    assert_eq!(rig.ledger.event_input("ancient-run"), None, "one older than the longest delay plus the ids' week goes");
+}

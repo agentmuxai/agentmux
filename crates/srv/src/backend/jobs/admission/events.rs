@@ -24,7 +24,7 @@ use crate::backend::jobs::definition::MAX_EVENT_DELAY_MINUTES;
 use crate::backend::jobs::policy::Decision;
 use crate::backend::jobs::{Begin, RunLedger, BY_EVENT, SOURCE_CRON, TRIGGER_EVENT};
 use crate::backend::storage::cron::CronJob;
-use crate::backend::storage::job_events::KEEP_MS;
+use crate::backend::storage::job_events::{INPUT_KEEP_MS, KEEP_MS};
 use crate::backend::storage::job_runs::{reason, state, JobRun};
 
 impl RunLedger {
@@ -59,7 +59,7 @@ impl RunLedger {
         let id = uuid::Uuid::new_v4().to_string();
         match self.store.job_event_claim(&job.id, event_id, &id, now) {
             Ok(true) => {
-                if let Err(e) = self.store.job_events_forget_before(now - KEEP_MS) {
+                if let Err(e) = self.store.job_events_forget_before(now - KEEP_MS).and(self.store.job_event_inputs_forget_before(now - INPUT_KEEP_MS)) {
                     tracing::warn!(error = %e, "jobs: couldn't forget old event ids");
                 }
             }

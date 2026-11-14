@@ -35,6 +35,9 @@ pub(crate) const SCHEMA: &str = "
 
 /// How long a job remembers an event id.
 pub const KEEP_MS: i64 = 7 * 24 * 3600 * 1000;
+/// How long a run's input is kept, from the event: a run may be held back by a delay of up to a week and then wait
+/// further for its turn, so its input outlives the id by that week.
+pub const INPUT_KEEP_MS: i64 = 2 * KEEP_MS;
 
 impl Store {
     /// Record that `job_id` heard of `event_id` now, for run `run_id`. `Ok(true)` the first time, `Ok(false)` when it
@@ -48,11 +51,17 @@ impl Store {
         Ok(n > 0)
     }
 
-    /// Forget the ids heard, and the inputs held, before `before_ms`. How many ids went.
+    /// Forget the ids heard before `before_ms`. How many went.
     pub fn job_events_forget_before(&self, before_ms: i64) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
-        conn.execute("DELETE FROM db_job_event_inputs WHERE at_ms < ?1", params![before_ms])?;
         Ok(conn.execute("DELETE FROM db_job_trigger_events WHERE at_ms < ?1", params![before_ms])?)
+    }
+
+    /// Let go of the inputs kept before `before_ms` (event time). How many went. A run still waiting that long after
+    /// its event has lost its input, and says so when it starts.
+    pub fn job_event_inputs_forget_before(&self, before_ms: i64) -> Result<usize, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn.execute("DELETE FROM db_job_event_inputs WHERE at_ms < ?1", params![before_ms])?)
     }
 
     /// Keep `input` (what the graph reads as `{{trigger.*}}`) for run `run_id`.
@@ -142,6 +151,8 @@ mod tests {
         s.job_event_input_put("old", "job-a", &serde_json::json!({}), 100).unwrap();
         s.job_event_input_put("new", "job-a", &serde_json::json!({}), 900).unwrap();
         s.job_events_forget_before(500).unwrap();
+        assert_eq!(s.job_event_input_get("old").unwrap().is_some(), true, "forgetting ids does not take an input a run may still need");
+        s.job_event_inputs_forget_before(500).unwrap();
         assert_eq!((s.job_event_input_get("old").unwrap(), s.job_event_input_get("new").unwrap().is_some()), (None, true));
     }
 }
