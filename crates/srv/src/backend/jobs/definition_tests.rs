@@ -98,11 +98,19 @@ fn an_event_trigger_is_a_source_and_a_plain_filter_on_a_drone_job() {
     assert!(bad(json!({ "kind": "event", "source": "app_event", "filter": { "a": "x".repeat(MAX_EVENT_FILTER_TEXT + 1) } })).contains("event filter"));
     let many: serde_json::Map<String, Value> = (0..=MAX_EVENT_FILTER).map(|i| (format!("k{i}"), json!(i))).collect();
     assert!(bad(json!({ "kind": "event", "source": "app_event", "filter": many })).contains("at most"));
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "delay": MAX_EVENT_DELAY_MINUTES + 1 })).contains("delay is at most"), "a delay is at most a week");
+    assert!(bad(json!({ "kind": "event", "source": "app_event", "delay": -1 })).len() > 0, "and never negative");
     // Only a drone is handed an event.
     let e = refused(with(example(), "/trigger", json!({ "kind": "event", "source": "app_event" })));
     assert!(e.contains("the action is a drone"), "{e}");
     let e = refused(with(example(), "/policy/approval", json!("operator")));
     assert!(e.contains("policy.approval") && e.contains(LATER), "{e}");
+}
+
+fn example_drone() -> Value {
+    let mut ok = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" }));
+    ok["policy"] = json!({ "overlap": "skip" });
+    ok
 }
 
 /// An event job keeps its source and filter in the stored row, and reads back the same.
@@ -116,6 +124,12 @@ fn an_event_trigger_survives_the_stored_row() {
     assert_eq!(job.trigger_kind, trigger_kind::EVENT);
     assert_eq!(job.trigger_event, json!({ "source": "file_watch", "filter": { "glob": "*.log" } }));
     assert_eq!(JobDefinition::from_job(&job).trigger, def.trigger);
+    // A delay is stored with it, and read back; none is not written.
+    let delayed = JobDefinition::parse(&with(example_drone(), "/trigger", json!({ "kind": "event", "source": "app_event", "delay": 30 })), create()).unwrap();
+    let mut row = CronJob::default();
+    delayed.apply_to(&mut row, &|to| (to.to_string(), String::new()));
+    assert_eq!(row.trigger_event, json!({ "source": "app_event", "filter": {}, "delay": 30 }));
+    assert_eq!(JobDefinition::from_job(&row).trigger, delayed.trigger);
     // Edited to a timer, the event is gone from the row.
     let mut timer = def.clone();
     timer.trigger = Trigger::Every { seconds: 3600 };

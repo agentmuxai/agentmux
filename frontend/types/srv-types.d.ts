@@ -984,6 +984,8 @@ declare global {
         "kanban:lanes"?: boolean;
         /** The Kanban's columns folded to a strip, by column id (kanban-columns.ts). */
         "kanban:collapsed"?: string[];
+        /** The Kanban board the pane shows, by slug; the default board when absent (kanban-boards.ts). */
+        "kanban:board"?: string | null;
         // The Vault's own section, within the Vault pane.
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
         // The Vault the lists are narrowed to, by id; none for all of them (vault-model.ts).

@@ -325,6 +325,10 @@ impl RunLedger {
             if run.reason == reason::RETRY_WAIT && run.links["retry_at_ms"].as_i64().unwrap_or(0) > now {
                 continue;
             }
+            // An event's run held back by the trigger's `delay` is not due yet.
+            if run.reason == reason::DELAY_WAIT && run.links["due_at_ms"].as_i64().unwrap_or(0) > now {
+                continue;
+            }
             let decision = self.decide(&job, true);
             self.ask_remote_stops(&job, decision);
             match decision {

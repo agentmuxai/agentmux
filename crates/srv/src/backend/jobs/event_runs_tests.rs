@@ -9,8 +9,7 @@ use super::*;
 use crate::backend::cron::{ActionOutcome, JobEvent};
 use crate::backend::jobs::definition::{trigger_kind, Overlap};
 use crate::backend::storage::cron::CronJob;
-use crate::backend::jobs::admission::events::MAX_HELD_INPUTS as MAX_HELD;
-use crate::backend::storage::job_runs::{infra, reason};
+use crate::backend::storage::job_runs::{infra, reason, state};
 
 /// An event job (a drone on the `app_event` source) stored with `edit` applied.
 fn event_job(rig: &Rig, id: &str, edit: impl FnOnce(&mut CronJob)) -> CronJob {
@@ -150,15 +149,57 @@ async fn a_retry_of_an_events_run_reads_the_same_event() {
     assert_eq!((again.links["from_event"].clone(), rig.ledger.event_input(&again.id)), (json!(true), Some(json!({ "n": 7 }))));
 }
 
-#[test]
-fn held_inputs_drop_the_oldest_first() {
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delayed_event_is_a_scheduled_row_that_starts_when_due_with_its_event() {
     let rig = rig();
-    for i in 0..=MAX_HELD {
-        rig.ledger.put_event_input(&format!("r{i}"), json!({ "i": i }));
+    let job = event_job(&rig, "j-delay", |j| j.trigger_event = json!({ "source": "app_event", "filter": {}, "delay": 30 }));
+    let started = drone_runner(&rig);
+
+    let before = agentmux_common::time::now_ms();
+    let fired = rig.sched.fire_event(&job, event("e1", json!({ "n": 7 }))).await;
+    let run_id = fired.run_id.expect("a row");
+    assert_eq!((fired.outcome.is_none(), fired.waiting), (true, Some(reason::DELAY_WAIT)), "it did not start");
+    let row = rig.store.job_run_get(&run_id).unwrap().unwrap();
+    assert_eq!((row.trigger.as_str(), row.state.as_str(), row.reason.as_str()), ("event", state::SCHEDULED, reason::DELAY_WAIT));
+    let due = row.links["due_at_ms"].as_i64().unwrap();
+    assert!(due >= before + 30 * 60_000 && due <= agentmux_common::time::now_ms() + 30 * 60_000, "due at event time + 30 minutes");
+    assert_eq!(rig.ledger.event_input(&run_id), Some(json!({ "n": 7 })), "its data is kept for it");
+    let after_restart = RunLedger::new(rig.store.clone(), None, Arc::new(Broker::new()));
+    assert_eq!(after_restart.event_input(&run_id), Some(json!({ "n": 7 })), "and a restart does not lose it");
+
+    assert_eq!(rig.sched.run_policy_pass().await, 0, "not due yet");
+    assert!(started.lock().unwrap().is_empty());
+
+    let again = rig.sched.fire_event(&job, event("e1", json!({ "n": 7 }))).await;
+    assert_eq!((again.run_id, again.waiting), (None, None), "a repeat of the event is still nothing");
+    assert_eq!(rig.runs("j-delay").len(), 1);
+
+    rig.store.job_run_add_links(&run_id, &json!({ "due_at_ms": before - 1 })).unwrap();
+    assert_eq!(rig.sched.run_policy_pass().await, 1, "due: it starts");
+    assert_eq!(*started.lock().unwrap(), [run_id.clone()]);
+    assert_eq!(rig.store.job_run_get(&run_id).unwrap().unwrap().state, state::RUNNING);
+    assert_eq!(rig.ledger.event_input(&run_id), Some(json!({ "n": 7 })), "and reads its event");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delay_holds_the_decision_until_due_and_a_job_paused_meanwhile_skips_it() {
+    let rig = rig();
+    let job = event_job(&rig, "j-delay2", |j| j.trigger_event = json!({ "source": "app_event", "filter": {}, "delay": 5 }));
+    let started = drone_runner(&rig);
+    // Overlap is not asked at event time: two events in the delay window both wait, each with its own data.
+    let first = rig.sched.fire_event(&job, event("e1", json!({ "n": 1 }))).await.run_id.unwrap();
+    let second = rig.sched.fire_event(&job, event("e2", json!({ "n": 2 }))).await.run_id.unwrap();
+    assert_ne!(first, second);
+    assert_eq!((rig.ledger.event_input(&first), rig.ledger.event_input(&second)), (Some(json!({ "n": 1 })), Some(json!({ "n": 2 }))));
+
+    rig.store.cron_set_enabled(&job.id, false).unwrap();
+    for id in [&first, &second] {
+        rig.store.job_run_add_links(id, &json!({ "due_at_ms": 1 })).unwrap();
     }
-    assert_eq!(rig.ledger.event_input("r0"), None, "the oldest went");
-    assert!(rig.ledger.event_input("r1").is_some());
-    assert!(rig.ledger.event_input(&format!("r{}", MAX_HELD)).is_some(), "the newest stays");
+    rig.sched.run_policy_pass().await;
+    assert!(started.lock().unwrap().is_empty(), "a job paused while its event waited does not run it");
+    let skipped: Vec<_> = rig.runs("j-delay2").into_iter().map(|r| (r.state, r.reason, r.skip_count)).collect();
+    assert_eq!(skipped, [(state::SKIPPED.to_string(), reason::PAUSED.to_string(), 2)], "both are skipped, counted in one row");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -170,4 +211,19 @@ async fn an_event_id_older_than_the_retention_is_forgotten_when_the_next_event_i
     assert!(rig.sched.fire_event(&job, event("fresh", json!({}))).await.run_id.is_some());
     assert!(rig.store.job_event_claim(&job.id, "ancient", "", 1).unwrap(), "its id was pruned, so it is new again");
     assert!(!rig.store.job_event_claim(&job.id, "fresh", "", 2).unwrap(), "a recent id is kept");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_waiting_runs_input_outlives_the_event_ids_pruning() {
+    use crate::backend::storage::job_events::{INPUT_KEEP_MS, KEEP_MS};
+    let rig = rig();
+    let job = event_job(&rig, "j-keep", |_| {});
+    drone_runner(&rig);
+    let now = agentmux_common::time::now_ms();
+    // A run held back by a long delay: its event is older than the ids are kept, its input is still needed.
+    rig.store.job_event_input_put("held-run", &job.id, &json!({ "n": 1 }), now - KEEP_MS - 1000).unwrap();
+    rig.store.job_event_input_put("ancient-run", &job.id, &json!({ "n": 2 }), now - INPUT_KEEP_MS - 1000).unwrap();
+    assert!(rig.sched.fire_event(&job, event("fresh", json!({}))).await.run_id.is_some(), "a new event prunes");
+    assert_eq!(rig.ledger.event_input("held-run"), Some(json!({ "n": 1 })), "an input a delay may still need stays");
+    assert_eq!(rig.ledger.event_input("ancient-run"), None, "one older than the longest delay plus the ids' week goes");
 }

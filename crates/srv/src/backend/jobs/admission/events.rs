@@ -10,63 +10,56 @@
 //!   like a timer's, not a refusal: nobody pressed Run now, so there is nobody to tell.
 //! - **Pause all** skips it the same way (`paused_all`).
 //!
-//! The event's data is not in the ledger. It waits in memory for the run that starts ([`RunLedger::put_event_input`]):
-//! the Drone run keeps it as its input, a retry of the run takes it over, and the ledger row keeps only what every
-//! run's row does.
+//! - **A trigger's `delay`** makes the run a `scheduled` row (`delay_wait`) due at event time + delay, picked up by the
+//!   same wake that starts waiting runs; policy and the caps are asked when it is due, not when the event came.
+//!
+//! The event's data is not in the ledger row. It is kept beside it (`db_job_event_inputs`) for the run that starts: the
+//! Drone run reads it as its input, a retry of the run takes it over, and a restart in between does not lose it.
 
 use agentmux_common::time::now_ms;
 use serde_json::Value;
 
 use super::Admission;
+use crate::backend::jobs::definition::MAX_EVENT_DELAY_MINUTES;
 use crate::backend::jobs::policy::Decision;
 use crate::backend::jobs::{Begin, RunLedger, BY_EVENT, SOURCE_CRON, TRIGGER_EVENT};
 use crate::backend::storage::cron::CronJob;
-use crate::backend::storage::job_events::KEEP_MS;
+use crate::backend::storage::job_events::{INPUT_KEEP_MS, KEEP_MS};
 use crate::backend::storage::job_runs::{reason, state, JobRun};
 
-/// The most event inputs held for runs that have not started. A run that never ends cleanly (its job was deleted while it
-/// waited) leaves its input here until the process ends; the bound keeps a flood from growing it.
-pub(in crate::backend::jobs) const MAX_HELD_INPUTS: usize = 1000;
-
 impl RunLedger {
-    /// Hold `input` (what the graph reads as `{{trigger.*}}`) for run `run_id`. The oldest is dropped when the bound is
-    /// reached, so a flood costs the runs that have waited longest, not a newer one.
-    pub fn put_event_input(&self, run_id: &str, input: Value) {
-        let mut held = self.event_inputs.lock().unwrap_or_else(|e| e.into_inner());
-        if held.len() >= MAX_HELD_INPUTS {
-            held.pop_front();
-        }
-        held.push_back((run_id.to_string(), input));
-    }
-
-    /// The input held for run `run_id`. It stays held while the run lives, so a retry of the run can carry it on.
+    /// The input kept for run `run_id` (what the graph reads as `{{trigger.*}}`). It stays while the run lives, so a
+    /// run that waited through a delay, its turn or a restart, and a retry of it, read the same event.
     pub fn event_input(&self, run_id: &str) -> Option<Value> {
-        let held = self.event_inputs.lock().unwrap_or_else(|e| e.into_inner());
-        held.iter().find(|(id, _)| id == run_id).map(|(_, input)| input.clone())
+        self.store.job_event_input_get(run_id).unwrap_or_else(|e| {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't read an event's input");
+            None
+        })
     }
 
     /// The run is over for good (it was not retried): its input is no longer needed.
     pub(in crate::backend::jobs) fn drop_event_input(&self, run_id: &str) {
-        self.event_inputs.lock().unwrap_or_else(|e| e.into_inner()).retain(|(id, _)| id != run_id);
+        if let Err(e) = self.store.job_event_input_drop(run_id) {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't let go of an event's input");
+        }
     }
 
     /// A retry `to` takes over what `from` held, so the next attempt reads the same event.
     pub(in crate::backend::jobs) fn carry_event_input(&self, from: &str, to: &str) {
-        let mut held = self.event_inputs.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(entry) = held.iter_mut().find(|(id, _)| id == from) {
-            entry.0 = to.to_string();
+        if let Err(e) = self.store.job_event_input_carry(from, to) {
+            tracing::warn!(run_id = from, error = %e, "jobs: couldn't hand an event's input to its retry");
         }
     }
 
     /// Record the event `event_id` for `job` and decide whether its run starts. `Taken` is an event the job already
     /// heard of; `Skipped` is a fire that Pause all, overlap policy or a cap refused (it has its row).
-    pub fn admit_event(&self, job: &CronJob, event_id: &str, source: &str) -> Admission {
+    pub fn admit_event(&self, job: &CronJob, event_id: &str, source: &str, input: &Value) -> Admission {
         let _one_at_a_time = self.admission.lock().unwrap_or_else(|e| e.into_inner());
         let now = now_ms();
         let id = uuid::Uuid::new_v4().to_string();
         match self.store.job_event_claim(&job.id, event_id, &id, now) {
             Ok(true) => {
-                if let Err(e) = self.store.job_events_forget_before(now - KEEP_MS) {
+                if let Err(e) = self.store.job_events_forget_before(now - KEEP_MS).and(self.store.job_event_inputs_forget_before(now - INPUT_KEEP_MS)) {
                     tracing::warn!(error = %e, "jobs: couldn't forget old event ids");
                 }
             }
@@ -78,6 +71,10 @@ impl RunLedger {
         }
         if self.paused_all().is_some() {
             return self.skip_event(job, id, source, reason::PAUSED_ALL);
+        }
+        let delay_ms = event_delay_ms(job);
+        if delay_ms > 0 {
+            return self.hold_for_delay(job, id, source, input, now, delay_ms);
         }
         let decision = self.decide(job, false);
         if decision == Decision::SkipOverlap {
@@ -100,6 +97,7 @@ impl RunLedger {
             Begin::Unrecorded => return Admission::Unrecorded,
         };
         self.note_account(&run_id, &account);
+        self.keep_event_input(&run_id, &job.id, input, now);
         match decision {
             Decision::Wait(why) => {
                 if let Err(e) = self.store.job_run_set_wait(&run_id, why) {
@@ -117,12 +115,18 @@ impl RunLedger {
         }
     }
 
-    /// The `scheduled` row of an event's run, with the id it was recorded under.
-    fn begin_event(&self, job: &CronJob, run_id: &str, source: &str, now: i64) -> Begin {
+    /// The row of an event's run, `scheduled`, under the id the event was recorded with.
+    fn event_row(&self, job: &CronJob, run_id: &str, source: &str, now: i64) -> JobRun {
         let mut run = JobRun::new(run_id, &job.id, SOURCE_CRON, &job.name, TRIGGER_EVENT, state::SCHEDULED, now);
         run.recorded_by = self.recorded_by.clone();
         run.triggered_by = format!("{BY_EVENT}:{source}");
         run.target_agent_uid = job.target_uid.clone();
+        run
+    }
+
+    /// The `scheduled` row of an event's run, with the id it was recorded under.
+    fn begin_event(&self, job: &CronJob, run_id: &str, source: &str, now: i64) -> Begin {
+        let run = self.event_row(job, run_id, source, now);
         match self.store.job_run_insert(&run) {
             Ok(true) => Begin::Run(run.id),
             Ok(false) => Begin::SlotTaken,
@@ -130,6 +134,31 @@ impl RunLedger {
                 tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record an event's run");
                 Begin::Unrecorded
             }
+        }
+    }
+
+    /// An event whose trigger has a `delay`: its run waits as a `scheduled` row until `now + delay_ms`.
+    fn hold_for_delay(&self, job: &CronJob, run_id: String, source: &str, input: &Value, now: i64, delay_ms: i64) -> Admission {
+        let mut run = self.event_row(job, &run_id, source, now);
+        run.reason = reason::DELAY_WAIT.to_string();
+        run.links = serde_json::json!({ "due_at_ms": now + delay_ms });
+        match self.store.job_run_insert(&run) {
+            Ok(true) => {}
+            Ok(false) => return Admission::Taken,
+            Err(e) => {
+                tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record a delayed event's run");
+                return Admission::Unrecorded;
+            }
+        }
+        self.keep_event_input(&run_id, &job.id, input, now);
+        self.changed(&job.id);
+        Admission::Waiting(run_id, reason::DELAY_WAIT)
+    }
+
+    /// Keep the event's data for its run. A run that finds none when it starts fails saying so.
+    fn keep_event_input(&self, run_id: &str, job_id: &str, input: &Value, now: i64) {
+        if let Err(e) = self.store.job_event_input_put(run_id, job_id, input, now) {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't keep an event's input");
         }
     }
 
@@ -143,4 +172,10 @@ impl RunLedger {
         self.changed(&job.id);
         Admission::Skipped
     }
+}
+
+/// The trigger's `delay` in ms: 0 for none.
+fn event_delay_ms(job: &CronJob) -> i64 {
+    let minutes = job.trigger_event.get("delay").and_then(Value::as_u64).unwrap_or(0);
+    i64::try_from(minutes.min(u64::from(MAX_EVENT_DELAY_MINUTES))).unwrap_or(0) * 60_000
 }
