@@ -34,14 +34,14 @@ pub(crate) fn install(hooks: Arc<dyn TeardownHooks>) {
 
 /// The registered entries, or ones that stop and drop nothing. The sagas register them at the start of
 /// startup, before any controller runs, so [`NotReady`] is only what a caller reads if that registration is
-/// somehow lost. Under test, the sagas' own entries stand in until something registers.
+/// somehow lost. Under test, [`PlainEntries`] stand in until something registers.
 pub(crate) fn hooks() -> Arc<dyn TeardownHooks> {
     if let Some(h) = HOOKS.get() {
         return h.clone();
     }
     #[cfg(test)]
     {
-        crate::sagas::teardown_hooks::hooks()
+        Arc::new(PlainEntries)
     }
     #[cfg(not(test))]
     {
@@ -61,6 +61,22 @@ impl TeardownHooks for NotReady {
     fn discard(&self, _: &str) {}
 }
 
+/// What a controller test gets when nothing registered: a replace stops the old controller's own CLI process
+/// the way the agent teardown's replace does, and nothing else is stopped or dropped.
+#[cfg(test)]
+struct PlainEntries;
+
+#[cfg(test)]
+impl TeardownHooks for PlainEntries {
+    fn stop_now(&self, block_id: &str, _: bool) -> Result<(), String> {
+        Err(format!("NOT_RUNNING: no controller for block {block_id}"))
+    }
+    fn replace_now(&self, ctrl: &dyn Controller) -> Result<(), String> {
+        ctrl.stop_for_replace(crate::backend::blockcontroller::STATUS_DONE)
+    }
+    fn discard(&self, _: &str) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,7 +90,7 @@ mod tests {
     }
 
     #[test]
-    fn under_test_the_sagas_own_entries_stand_in_until_something_registers() {
+    fn under_test_plain_entries_stand_in_until_something_registers() {
         let err = hooks().stop_now("no-such-block-hook", false).unwrap_err();
         assert!(err.starts_with("NOT_RUNNING: no controller for block no-such-block-hook"), "{err}");
         hooks().discard("no-such-block-hook");
