@@ -234,6 +234,9 @@ fn lan_forward_routes(state: &AppState) -> Router<AppState> {
             state.clone(),
             lan_or_full_auth_middleware,
         ))
+        // Outermost, so a refusal by the layers above is seen too: a line for a request to a
+        // route a peer posts to that is refused, hangs or times out (`lan_watch`).
+        .route_layer(middleware::from_fn_with_state(state.clone(), super::lan_watch::watch))
 }
 
 /// Reactive routes. Previously registered without auth on the
