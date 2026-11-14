@@ -171,9 +171,10 @@ fn spawn_spend_services(state: &AppState) {
     crate::server::spend_watch::start(state.clone());
 }
 
-/// Background-task rows whose process is gone, or that nothing has reported on for a day, are ended
+/// Background-task rows end when their command exits, whose process is gone, or that nothing has reported on for a day
 /// (SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md §5).
 fn spawn_background_task_sweep(state: &AppState) {
+    backend::background_task_exit::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
     backend::background_task_sweep::start(Arc::clone(&state.mstore), Arc::clone(&state.broker));
 }
 
