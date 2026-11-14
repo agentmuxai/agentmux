@@ -284,7 +284,7 @@ pub fn render_with_frames(
     ref_prefix: &str,
     frames: &[FrameTree],
 ) -> Snapshot {
-    let nodes = super::shown_once::join_split(nodes);
+    let nodes = super::orphan_labels::prepared(nodes);
     let nodes: &[Value] = &nodes;
     let by_id: HashMap<&str, &Value> =
         nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
@@ -403,7 +403,7 @@ fn is_iframe_role(role: &str) -> bool {
 
 /// Render one frame's tree at `depth`, under its `<iframe>` line.
 fn render_frame(f: &FrameTree, frames: &[FrameTree], depth: usize, out: &mut Snapshot) {
-    let nodes = super::shown_once::join_split(&f.nodes);
+    let nodes = super::orphan_labels::prepared(&f.nodes);
     let by_id: HashMap<&str, &Value> =
         nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
     let root = nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| nodes.first());
@@ -670,7 +670,7 @@ fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
 /// input). In document order.
 pub fn find_candidates<'a>(nodes: &'a [Value], q: &ElementQuery) -> Vec<&'a Value> {
     // Matched with a split secret joined back together, as `find` shows it.
-    let joined = super::shown_once::join_split(nodes);
+    let joined = super::orphan_labels::prepared(nodes);
     let by_id = ids_of(&joined);
     let zones = super::shown_once::copy_zones(&joined);
     let ids: HashSet<String> = shown_nodes(&joined)
@@ -705,7 +705,7 @@ pub struct Found {
 /// are `{ref_prefix}e1`, `{ref_prefix}e2`, …; top frame only.
 pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, ref_prefix: &str) -> Found {
     let mut found = Found { text: String::new(), refs: Vec::new(), total: 0, frames: 0 };
-    let nodes = super::shown_once::join_split(nodes);
+    let nodes = super::orphan_labels::prepared(nodes);
     let by_id = ids_of(&nodes);
     let zones = super::shown_once::copy_zones(&nodes);
     for (node, context, in_zone) in shown_nodes(&nodes) {
