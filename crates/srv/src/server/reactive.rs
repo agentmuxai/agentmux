@@ -1651,14 +1651,12 @@ pub(super) struct MismatchAuditSummary {
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub(super) struct ReactiveRegistrationsResult {
-    /// This instance's own registration for the agent, if any — same data
-    /// `GET /agentmux/reactive/agent` exposes, reused here so the frontend
-    /// makes one call instead of two.
+    /// This instance's own registration for the agent, if any: the same data as
+    /// `GET /agentmux/reactive/agent`, reused so the frontend makes one call instead of two.
     local: Option<AgentRegistration>,
-    /// Every OTHER instance/channel on this host currently claiming this
-    /// same agent_id, freshest first — a non-empty list here is the actual
-    /// risk signal the Stash badge exists to surface (issue #2694's root
-    /// cause was exactly two panes racing to hold the same agent_id).
+    /// Every OTHER instance/channel on this host claiming this agent_id, freshest first. A
+    /// non-empty list is the risk signal the Stash badge surfaces (#2694's root cause was two
+    /// panes racing to hold one agent_id).
     remote: Vec<RemoteRegistrationEntry>,
     recent_mismatch: Option<MismatchAuditSummary>,
 }
@@ -1669,19 +1667,16 @@ pub(super) struct ReactiveRegistrationsParams {
     pub agent_id: String,
 }
 
-/// Registers `reactive.registrations`, called by the Stash "Registration"
-/// tab (`AgentIdentityLinksPanel`'s sibling — see `frontend/app/store/
-/// rpc-api/reactive.ts`) to answer "is this agent's jekt identity healthy
-/// right now": where it's registered locally, whether any OTHER
-/// instance/channel on this host also claims the same agent_id (the
-/// collision shape #2694 fixed one specific cause of), and whether a
-/// recent delivery hit the #2695 identity-mismatch guard.
+/// Registers `reactive.registrations`, called by the Stash "Registration" tab
+/// (`frontend/app/store/rpc-api/reactive.ts`) to answer "is this agent's jekt identity healthy
+/// right now": where it's registered locally, whether any OTHER instance/channel on this host
+/// also claims the same agent_id (the collision #2694 fixed one cause of), and whether a recent
+/// delivery hit the #2695 identity-mismatch guard.
 pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc::engine::WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    // Typed registration (SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.1): the
-    // params/result structs carry `#[derive(ts_rs::TS)]`, so the frontend
-    // consumes generated bindings instead of four hand-written interfaces
-    // that each said "mirrors agentmux-srv's ...".
+    // Typed registration (SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.1): the params/result
+    // structs derive `ts_rs::TS`, so the frontend consumes generated bindings, not
+    // hand-written interfaces.
     registration_flags::register(engine, state.clone());
     engine.register_typed(
         "reactive.registrations",
@@ -1703,28 +1698,22 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
     );
 }
 
-/// `verify_jekt_signature` unit tests (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
-/// §2.2, reagentx review on PR #2565). Deliberately test the extracted
-/// function directly rather than the full `handle_inject`/websocket
-/// handlers it's now called from: `server::tests::test_state()`'s
-/// `reactive_handler` is a *global* singleton shared across every test in
-/// the binary (`backend_reactive::get_global_handler()`), so exercising it
-/// end-to-end here risks cross-test interference on shared agent
-/// registrations. `verify_jekt_signature` itself only touches `state.mstore`
-/// (key lookup), not the handler, so it's safe to test in isolation with no
-/// such risk — and it's the one piece of logic actually being fixed here;
-/// the two call sites (messagebus.rs, websocket.rs) are a one-line "call
-/// this before inject_message" wiring, visible directly in their diffs.
+/// `verify_jekt_signature` unit tests (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2,
+/// #2565). They test the extracted function directly, not the full `handle_inject` / websocket
+/// handlers: `server::tests::test_state()`'s `reactive_handler` is a global singleton shared by
+/// every test in the binary (`backend_reactive::get_global_handler()`), so exercising it end to
+/// end risks cross-test interference on shared agent registrations. `verify_jekt_signature`
+/// touches only `state.mstore` (key lookup), so it is safe in isolation, and it is the logic
+/// that was fixed; the two call sites (messagebus.rs, websocket.rs) are a one-line "call this
+/// before inject_message" wiring.
 #[cfg(test)]
 #[path = "tests/reactive/verify_jekt_signature_tests.rs"]
 mod verify_jekt_signature_tests;
 
-/// `verify_reagent_signature` unit tests (reagentx P1 on PR #41 —
-/// `InjectionRequest` declared `reagent_sig`/`reagent_key_id` as
-/// deserializable input fields but nothing on the HTTP
-/// `/agentmux/reactive/inject` path ever verified them, so a reagent-signed
-/// notification delivered through `@agentmuxai/muxbus-client`'s
-/// `pollAndDeliverInjections` arrived unsigned in effect).
+/// `verify_reagent_signature` unit tests (#41): `InjectionRequest` declared `reagent_sig` /
+/// `reagent_key_id` as deserializable fields, but nothing on the HTTP
+/// `/agentmux/reactive/inject` path verified them, so a reagent-signed notification delivered
+/// through `@agentmuxai/muxbus-client`'s `pollAndDeliverInjections` arrived unsigned in effect.
 #[cfg(test)]
 #[path = "tests/reactive/verify_reagent_signature_tests.rs"]
 mod verify_reagent_signature_tests;
@@ -1737,12 +1726,11 @@ mod verify_lan_signature_tests;
 #[path = "tests/reactive/registration_flags_tests.rs"]
 mod registration_flags_tests;
 
-/// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §9 — the unit half of the
-/// test plan (items 1–8 and the D5 replay cases 9–10, driven through the
-/// verifier rather than the raw primitives). Entries are written straight to
-/// a temp shared-registry dir with an explicit public key, bypassing the
-/// process-global pubkey resolver (a `OnceLock` another test binary-wide
-/// test owns), so each test is hermetic and order-independent.
+/// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §9, the unit half of the test plan (items 1–8
+/// and the D5 replay cases 9–10, driven through the verifier). Entries are written straight to
+/// a temp shared-registry dir with an explicit public key, bypassing the process-global pubkey
+/// resolver (a `OnceLock` owned by another test), so each test is hermetic and
+/// order-independent.
 #[cfg(test)]
 #[path = "tests/reactive/verify_cross_channel_signature_tests.rs"]
 mod verify_cross_channel_signature_tests;
@@ -1755,18 +1743,14 @@ mod resolve_delivery_tier_tests;
 #[path = "tests/reactive/is_self_registration_tests.rs"]
 mod is_self_registration_tests;
 
-/// `forward_inject_to_peer` unit tests.
+/// `forward_inject_to_peer` unit tests. They exercise the real HTTP path against a throwaway
+/// loopback peer, not a mocked client, because the behaviour under test is the response
+/// classification: which peer answers count as delivery, which as evidence the candidate is
+/// stale, and which must never evict.
 ///
-/// These exercise the real HTTP path against a throwaway loopback peer rather
-/// than mocking the client, because the behaviour under test *is* the
-/// response-classification: which peer answers count as delivery, which count
-/// as evidence the candidate is stale, and which must never evict.
-///
-/// `source_agent` is left `None` throughout so `echo_jekt_to_sender` returns at
-/// its first guard. That keeps these tests off the *global* singleton
-/// `reactive_handler` (`test_state()` shares it across the whole test binary —
-/// see the `verify_jekt_signature_tests` module comment), so nothing here can
-/// interfere with another test's agent registrations.
+/// `source_agent` is `None` throughout so `echo_jekt_to_sender` returns at its first guard,
+/// keeping these tests off the global singleton `reactive_handler` (see the
+/// `verify_jekt_signature_tests` module comment).
 #[cfg(test)]
 #[path = "tests/reactive/forward_inject_tests.rs"]
 mod forward_inject_tests;
@@ -1783,31 +1767,24 @@ mod deliver_tiers_tests;
 #[path = "tests/reactive/absent_route_tests.rs"]
 mod absent_route_tests;
 
-/// Tier-4 (cloud relay) gating tests.
-///
-/// These cover the decisions `try_cloud_relay` makes *before* it would touch
-/// the network — the guards that keep it from firing when it must not. The
-/// wire contract itself (headers, body shape, status handling) is tested
-/// against a stub relay in `crate::muxbus::relay`'s own test module.
-///
-/// A `test_state()` has no muxbus credential, so any path that reaches token
-/// resolution returns `None` and no request is ever made — which is also why
-/// these assert `None` rather than mocking the relay: the point is *which*
-/// guard stopped it, and each test isolates one.
+/// Tier-4 (cloud relay) gating tests: the decisions `try_cloud_relay` makes before it would
+/// touch the network, the guards that keep it from firing when it must not. The wire contract
+/// (headers, body shape, status handling) is tested against a stub relay in
+/// `crate::muxbus::relay`'s own tests. A `test_state()` has no muxbus credential, so any path
+/// that reaches token resolution returns `None` and no request is made; the tests assert `None`
+/// rather than mock the relay, because the point is which guard stopped it, and each test
+/// isolates one.
 #[cfg(test)]
 #[path = "tests/reactive/cloud_relay_gate_tests.rs"]
 mod cloud_relay_gate_tests;
 
-/// Request-shape guard for `reactive.registrations`, added as part of the
-/// typed-registration migration.
-///
-/// `register_typed` deserializes the payload BEFORE the handler runs, so the
-/// Req type has to accept exactly what the frontend stub sends. On
-/// `bookmarks.list` that distinction shipped a P0 — a unit Req compiled fine
-/// and then rejected the stub's `{}` at runtime, because serde accepts `()`
-/// only from `null` (PR #3293). Neither `tsc` nor `check-rpc-bindings.sh`
-/// catches that class: they verify generated-type drift, not runtime payload
-/// shape. So every migrated command gets a test fed the real payload.
+/// Request-shape guard for `reactive.registrations` (typed-registration migration).
+/// `register_typed` deserializes the payload BEFORE the handler runs, so the Req type must
+/// accept exactly what the frontend stub sends. On `bookmarks.list` a unit Req compiled and
+/// then rejected the stub's `{}` at runtime, because serde accepts `()` only from `null`
+/// (#3293). Neither `tsc` nor `check-rpc-bindings.sh` catches that class (they verify
+/// generated-type drift, not runtime payload shape), so every migrated command gets a test fed
+/// the real payload.
 #[cfg(test)]
 #[path = "tests/reactive/reactive_registrations_req_tests.rs"]
 mod reactive_registrations_req_tests;
