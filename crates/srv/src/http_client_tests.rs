@@ -3,19 +3,26 @@
 
 //! A machine with no system certificates is made by pointing `SSL_CERT_FILE` at an empty file: reqwest's loader reads
 //! only what that variable names when it is set. The environment is read when a client is built, so these tests run
-//! in a child process (the test binary again, one test, the variables set) rather than change this process's.
+//! in a child process (the test binary again, one test, the variables set) rather than change this process's. They run
+//! on Linux only: on Windows and macOS the machine's certificates come from the system store, which that variable does
+//! not name.
 
+#[cfg(target_os = "linux")]
 use std::net::SocketAddr;
+#[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
 
 use super::*;
 
 /// Set by the parent test in the child's environment: the folder holding the fixture's certificate.
+#[cfg(target_os = "linux")]
 const CHILD_DIR: &str = "AGENTMUX_HTTP_CLIENT_TEST_DIR";
+#[cfg(target_os = "linux")]
 const FIXTURE_HOST: &str = "agentmux-viewer";
 
 /// Runs the test named `child` (by its path in this module) in a child process with `SSL_CERT_FILE` set to `cert_file`,
 /// and checks that it ran and passed.
+#[cfg(target_os = "linux")]
 fn run_child(child: &str, cert_file: &Path, dir: &Path) {
     let name = format!("{}::{child}", module_path!().split_once("::").map_or("", |(_, rest)| rest));
     let out = std::process::Command::new(std::env::current_exe().unwrap())
@@ -30,11 +37,13 @@ fn run_child(child: &str, cert_file: &Path, dir: &Path) {
     assert!(text.contains("1 passed"), "the child test {name} did not run:\n{text}");
 }
 
+#[cfg(target_os = "linux")]
 fn child_dir() -> Option<PathBuf> {
     std::env::var_os(CHILD_DIR).map(PathBuf::from)
 }
 
 /// An https server on the loopback with the fixture certificate, answering every request with "ok".
+#[cfg(target_os = "linux")]
 async fn tls_server(dir: &Path) -> SocketAddr {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let tls = crate::backend::viewer::cert::load_or_create(dir).unwrap();
@@ -57,6 +66,7 @@ async fn tls_server(dir: &Path) -> SocketAddr {
 }
 
 /// A plain http server on the loopback answering every request with "ok".
+#[cfg(target_os = "linux")]
 async fn http_server() -> SocketAddr {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -73,6 +83,7 @@ async fn http_server() -> SocketAddr {
     addr
 }
 
+#[cfg(target_os = "linux")]
 fn pem(der: &[u8]) -> String {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(der);
@@ -80,6 +91,7 @@ fn pem(der: &[u8]) -> String {
     format!("-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n", lines.join("\n"))
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn a_machine_with_no_certificates_gets_clients_that_trust_nothing() {
     let dir = tempfile::tempdir().unwrap();
@@ -88,6 +100,7 @@ fn a_machine_with_no_certificates_gets_clients_that_trust_nothing() {
     run_child("child_with_no_certificates", &empty, dir.path());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn a_machine_with_a_certificate_trusts_it_as_before() {
     let dir = tempfile::tempdir().unwrap();
@@ -98,6 +111,7 @@ fn a_machine_with_a_certificate_trusts_it_as_before() {
 }
 
 /// The child of `a_machine_with_no_certificates_gets_clients_that_trust_nothing`; passes at once when run on its own.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn child_with_no_certificates() {
     let Some(dir) = child_dir() else { return };
@@ -133,6 +147,7 @@ async fn child_with_no_certificates() {
     assert_eq!(with_cert.get(&url).send().await.unwrap().text().await.unwrap(), "ok");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn certificates_that_vanish_after_start_leave_every_site_with_a_client_that_trusts_nothing() {
     let dir = tempfile::tempdir().unwrap();
@@ -144,6 +159,7 @@ fn certificates_that_vanish_after_start_leave_every_site_with_a_client_that_trus
 
 /// The child of `certificates_that_vanish_after_start_leave_every_site_with_a_client_that_trusts_nothing`: the machine
 /// has a certificate when the server starts, and the bundle is replaced by an empty one while it runs.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn child_whose_certificates_vanish() {
     let Some(dir) = child_dir() else { return };
@@ -166,6 +182,7 @@ async fn child_whose_certificates_vanish() {
 }
 
 /// The child of `a_machine_with_a_certificate_trusts_it_as_before`; passes at once when run on its own.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn child_with_a_certificate() {
     let Some(dir) = child_dir() else { return };

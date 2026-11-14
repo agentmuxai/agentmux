@@ -128,3 +128,50 @@ describe("clickLabel: the accessible name", () => {
         expect(clickLabel(null, "", "", { submits: true }, "")).toMatchObject({ committing: true, why: "it submits a form" });
     });
 });
+
+describe("clickLabel: a brand or plan with Pay in its name is not a payment (#47625)", () => {
+    const asks = (name, el = button, ax) => clickLabel(null, "", name, el, ax).committing;
+
+    it("a payment-method row, link, tab or toggle does not commit", () => {
+        for (const name of ["Kakao Pay", "Cash App Pay", "Apple Pay", "Google Pay", "Amazon Pay", "APPLE PAY", "Samsung Pay"]) {
+            expect(asks(name), name).toBe(false);
+            expect(asks(name, link), `${name} (link)`).toBe(false);
+        }
+        expect(asks("Payment methods", link)).toBe(false);
+        expect(asks("Payment methods")).toBe(false);
+        expect(asks("Pay-as-you-go")).toBe(false);
+        expect(asks("Pay-as-you-go", link)).toBe(false);
+        expect(asks("Pay-per-use plan", link)).toBe(false);
+        expect(asks("Pay-as-you-go: Pay now")).toBe(true);
+        expect(asks("Pay-per-use - Pay $20", link)).toBe(true);
+        expect(asks("Pay-per-use plan")).toBe(false);
+    });
+
+    it("a row whose accessible name is the brand does not commit; a description with a pay word does", () => {
+        expect(asks("Kakao Pay", button, "Kakao Pay")).toBe(false);
+        expect(clickLabel(null, "", "Kakao Pay\nShow it to customers in Korea", button).committing).toBe(false);
+        expect(clickLabel(null, "", "Kakao Pay\nPay $20.00 now", button).committing).toBe(true);
+    });
+
+    it("a brand with a verb or more text after it still commits", () => {
+        for (const name of ["Kakao Pay $20", "Unsubscribe Apple Pay", "Post Kakao Pay", "Publish Kakao Pay", "Sign Up Apple Pay", "Kakao Pay now"]) {
+            expect(asks(name), name).toBe(true);
+        }
+    });
+
+    it("a command still commits", () => {
+        for (const name of [
+            "Pay", "Pay now", "Pay $5.46", "Place order", "Confirm and Pay", "Click to Pay", "Pay with Apple Pay", "Buy now", "Buy with Apple Pay",
+            "Confirm And Pay", "Proceed To Pay", "Continue To Pay", "Review And Pay", "Place Order And Pay", "CONFIRM AND PAY", "CLICK TO PAY",
+            "Complete Pay", "Confirm Pay", "Pay Pay", "Confirm Apple Pay",
+        ]) {
+            expect(asks(name), name).toBe(true);
+        }
+        expect(clickLabel(null, "", "Pay", button).why).toBe('its name says "Pay"');
+    });
+
+    it("a brand next to a command still commits", () => {
+        expect(asks("Kakao Pay", { submits: true })).toBe(true);
+        expect(asks("Apple Pay\nPay $20.00 now")).toBe(true);
+    });
+});
