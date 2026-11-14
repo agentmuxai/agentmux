@@ -116,10 +116,17 @@ export class AgentViewModel {
     // before AgentFooter mounts (or after it unmounts) it's a no-op.
     voiceTargetRef: { current: PaneVoiceHandle | null } = { current: null };
 
-    voiceHandle = (): PaneVoiceHandle => ({
-        appendFinal: (text: string) => this.voiceTargetRef.current?.appendFinal(text),
-        setInterim: (text: string) => this.voiceTargetRef.current?.setInterim(text),
-    });
+    voiceHandle = (): PaneVoiceHandle => {
+        const target = this.voiceTargetRef;
+        return {
+            appendFinal: (text: string) => target.current?.appendFinal(text),
+            setInterim: (text: string) => target.current?.setInterim(text),
+            // The composer says it, beside the mic (VoiceSetupNotice.tsx), while it is on screen.
+            get showsSetupNotice() {
+                return target.current != null;
+            },
+        };
+    };
 
     // Same shape as voiceTargetRef above: AgentFooter populates this on
     // mount with the live composer textarea and clears it on unmount.

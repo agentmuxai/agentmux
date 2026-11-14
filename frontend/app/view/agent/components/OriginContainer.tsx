@@ -128,7 +128,7 @@ function NoteVariant(props: { node: SystemNoteNode }): JSX.Element {
             <Show when={props.node.origin?.sig}>
                 {(sig) => (
                     <Tag tone={sig() === "verified" ? "neutral" : "warn"} detail={`Signature: ${sig()}`}>
-                        {sig() === "verified" ? "signed" : "signature invalid"}
+                        {sig() === "verified" ? "signed" : sig() === "expired" ? "signature expired" : "signature invalid"}
                     </Tag>
                 )}
             </Show>

@@ -164,11 +164,38 @@ export function countMenus(source) {
     return (stripScriptComments(source).match(/role="menu"|<(?:FlyoutMenu|PopoverMenu|MenuButton)\b|\bshowContextMenu\(/g) ?? []).length;
 }
 
-/** A ✕ drawn as a close, dismiss or remove control: an icon name, a Font Awesome class or a glyph. */
+/** The Font Awesome names a ✕ goes by (the `fa-` classes and the icon names the kit's IconButton takes). */
+const CLOSE_ICON_NAMES = "xmark|xmark-large|close|times|circle-xmark|square-xmark|rectangle-xmark|circle-x|square-x|window-close|x";
+
+/**
+ * A ✕ drawn as a close, dismiss or remove control: an icon name (as a prop or a data row), a Font Awesome class, a
+ * glyph (the ✕ and ✖ anywhere; the × and ⨯ and the entities where they stand alone in a tag or a string, so "×3",
+ * a size like "1.5×" and the ✗ that marks a failed state are not it), or a control that only says Close or Dismiss in
+ * its label (a CloseButton, which is the kit's, is taken out first).
+ */
 export function countCloseControls(source) {
-    return (
-        stripScriptComments(source).match(/\bicon="(?:xmark|close)"|\bfa-(?:xmark|close)\b|makeIconClass\("(?:xmark|close)"|[✕✖]|&times;/g) ?? []
-    ).length;
+    const code = stripScriptComments(source);
+    const marks = new RegExp(
+        [
+            `\\bicon\\s*[=:]\\s*\\{?\\s*["'](?:${CLOSE_ICON_NAMES})["']`,
+            `\\bfa-(?:${CLOSE_ICON_NAMES})(?![-\\w])`,
+            `makeIconClass\\(["'](?:${CLOSE_ICON_NAMES})["']`,
+            "[✕✖]",
+            "&(?:times|#215|#10005|#10006|#x2715|#x2716);",
+            "[>\"'`]\\s*[×⨯]\\s*[<\"'`]",
+        ].join("|"),
+        "g"
+    );
+    // A label that says Close or Dismiss on anything but the kit's own CloseButton, whose label is its name.
+    const labels = [...code.matchAll(/(?:aria-label|label)=(["'])\s*(?:Close|Dismiss)\b[^"']*\1/g)].filter(
+        (m) => !code.slice(code.lastIndexOf("<", m.index), m.index).startsWith("<CloseButton")
+    );
+    return (code.match(marks) ?? []).length + labels.length;
+}
+
+/** A host stylesheet that sets the hover or press of the kit's close button, which would take the red from it. */
+export function closeHoverOverrides(source) {
+    return (stripComments(source).match(/\.ui-close[^{}]*:(?:hover|active)[^{}]*\{/g) ?? []).length;
 }
 
 export function countButtons(source) {
@@ -391,6 +418,38 @@ export const CLOSE_CONTROLS_ALLOWLIST = {
     "frontend/app/view/settings/sections/recording-section.tsx": {
         max: 1,
         reason: "the icon that marks a recorder binary as not found: a state mark in a status line, not a control",
+    },
+    "frontend/app/modals/conntypeahead-items.ts": {
+        max: 1,
+        reason: "the icon beside the Disconnect row of the connection list: a row's picture, not a control",
+    },
+    "frontend/app/element/quicktips-state.ts": {
+        max: 1,
+        reason: "the icon beside the Close pane tip: a row's picture, not a control",
+    },
+    "frontend/app/store/command-registry.ts": {
+        max: 3,
+        reason: "the icons beside the palette rows Close Window, Close Tab and Close Pane: a row's picture, not a control",
+    },
+    "frontend/app/view/term/termViewModel.ts": {
+        max: 1,
+        reason: "the shell's exit-code mark, an icon button with no action (noAction): a state mark, nobody can click it",
+    },
+    "frontend/app/view/agent/defaults/cli-catalog.ts": {
+        max: 1,
+        reason: "the glyph that is a provider's logo in the catalog, not a control",
+    },
+    "frontend/app/view/browser/browser-reload-button.ts": {
+        max: 1,
+        reason: "the glyph of the reload button's stop state (Stop loading): it stops a load, it closes nothing",
+    },
+    "frontend/app/window/window-controls.darwin.tsx": {
+        max: 1,
+        reason: "the macOS traffic-light Close: the OS's own control, red at rest; its look is the platform's",
+    },
+    "frontend/app/window/window-controls.win32.tsx": {
+        max: 1,
+        reason: "the caption Close: the OS-style control, already red on hover through --window-close-hover-bg",
     },
 };
 
@@ -993,8 +1052,10 @@ export function collect(files) {
             countInto(disabledTips, path, tipsOnDisabledElements(source).length);
             countInto(rawFieldProblemCounts, path, rawFieldProblems(source).length);
             countInto(menus, path, countMenus(source));
-            countInto(closeControls, path, countCloseControls(source));
         }
+        // The close controls: any script outside the kit (a .ts data row too), and a host stylesheet's hover on the kit's button.
+        if (isScript && !path.endsWith(".d.ts") && !path.startsWith(UI_DIR)) countInto(closeControls, path, countCloseControls(source));
+        if (isStyle && !path.startsWith(UI_DIR)) countInto(closeControls, path, closeHoverOverrides(source));
         if (isStyle) {
             for (const selector of solidFills(source)) fills.add(`${path} :: ${selector}`);
             const n = badRadii(source).length;

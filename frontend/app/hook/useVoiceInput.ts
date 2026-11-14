@@ -8,6 +8,19 @@ import { createWhisperVoiceSession } from "./whisperVoiceEngine";
 export interface PaneVoiceHandle {
     appendFinal: (text: string) => void;
     setInterim: (text: string) => void;
+    /** The pane says itself, where the person is looking, that voice input is not set up
+     *  (`VoiceSession.notSetUp`). A pane without it gets the app's toast. */
+    showsSetupNotice?: boolean;
+}
+
+/** What the transcription engine still needs before the mic can be used, as srv says it. */
+export interface VoiceSetupGap {
+    /** The pane whose mic was asked for. */
+    blockId: string | null;
+    /** `groq-key`, `whisper-cli` or `whisper-model`. */
+    missing: string;
+    /** srv's own sentence for it. */
+    detail: string | null;
 }
 
 export interface VoiceSession {
@@ -30,6 +43,13 @@ export interface VoiceSession {
      *  engine (optional) — the Web Speech engine has no server round-trip to
      *  report a detail for. */
     lastErrorDetail?: SignalAtom<string | null>;
+    /** Set when a start was refused because the engine is not set up, with `lastError`
+     *  "not-configured": nothing was recorded. Cleared by the next start that records, and by the pane
+     *  when the person dismisses its line. Only the Whisper engine asks srv, so only it sets one. */
+    notSetUp?: SignalAtom<VoiceSetupGap | null>;
+    /** How loud the microphone is now, 0 to 1 (`micLevelOf`), while listening; 0 otherwise. The mic
+     *  button shows it, so a mic that hears the person looks different from one that hears nothing. */
+    level?: SignalAtom<number>;
     isAvailable: () => boolean;
     toggleListening: () => void;
     registerPane: (blockId: string, handle: PaneVoiceHandle) => void;
@@ -202,6 +222,8 @@ function ensureVoiceSession(): VoiceSession {
 }
 
 const NULL_STRING_SIGNAL: SignalAtom<string | null> = createSignalAtom<string | null>(null);
+const NO_GAP_SIGNAL: SignalAtom<VoiceSetupGap | null> = createSignalAtom<VoiceSetupGap | null>(null);
+const NO_LEVEL_SIGNAL: SignalAtom<number> = createSignalAtom(0);
 
 /** A SignalAtom that always reads/writes through to whichever session is
  * CURRENT at call time (via `ensureVoiceSession()`), rather than one fixed
@@ -238,6 +260,8 @@ export function getVoiceSession(): VoiceSession {
         currentTargetId: facadeSignal((s) => s.currentTargetId, createSignalAtom<string | null>(null)),
         lastError: facadeSignal((s) => s.lastError, NULL_STRING_SIGNAL),
         lastErrorDetail: facadeSignal((s) => s.lastErrorDetail, NULL_STRING_SIGNAL),
+        notSetUp: facadeSignal((s) => s.notSetUp, NO_GAP_SIGNAL),
+        level: facadeSignal((s) => s.level, NO_LEVEL_SIGNAL),
         isAvailable: () => ensureVoiceSession().isAvailable(),
         toggleListening: () => ensureVoiceSession().toggleListening(),
         registerPane: (blockId, handle) => ensureVoiceSession().registerPane(blockId, handle),

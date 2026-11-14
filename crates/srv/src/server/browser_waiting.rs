@@ -70,8 +70,6 @@ struct Rec {
     expires: Instant,
     state: State,
     ended: Option<Instant>,
-    /// The agent is taking it down: whoever settles it next reads the cancel, not the person's answer.
-    cancelling: bool,
 }
 
 fn table() -> &'static Mutex<HashMap<String, Rec>> {
@@ -89,7 +87,7 @@ pub(crate) fn open(id: &str, agent: &str, pane: &str, kind: &'static str, questi
     make_room(&mut t, KEEP);
     let now = Instant::now();
     let question: String = question.chars().take(300).collect();
-    t.insert(id.to_string(), Rec { agent: agent.to_string(), pane: pane.to_string(), kind, question, started: now, expires: now + wait, state: State::Open, ended: None, cancelling: false });
+    t.insert(id.to_string(), Rec { agent: agent.to_string(), pane: pane.to_string(), kind, question, started: now, expires: now + wait, state: State::Open, ended: None });
 }
 
 /// Fewer than `keep` records: those settled a day ago go, then the oldest settled ones. A request still open
@@ -201,32 +199,20 @@ pub(crate) fn status(agent: &str, id: Option<&str>, pane: Option<&str>) -> Resul
         .ok_or_else(|| "no such request of yours (srv may have restarted since: a request doesn't outlive it)".to_string())
 }
 
-/// `agent` takes its open request `id` down: the pane to answer the request on. Only a request still open can be
-/// taken back, and the caller then answers it as cancelled ([`crate::server::browser_attention::resolve`]): if
-/// that fails the person answered first, and the caller calls [`abort_cancel`]. Once it succeeds the task
-/// waiting on the request reads the cancel ([`was_cancelled`]) and settles it so, without waking the agent.
-pub(crate) fn begin_cancel(agent: &str, id: &str) -> Result<String, String> {
-    let mut t = lock();
-    let Some(r) = t.get_mut(id).filter(|r| r.agent.eq_ignore_ascii_case(agent)) else {
+/// The pane of `agent`'s own request `id`, if it is still open: the pane the agent's cancel answers it on
+/// ([`crate::server::browser_attention::withdraw`]). That call settles the request and marks it the agent's
+/// own doing in one step, and the task waiting on the request reads the mark from its answer
+/// ([`crate::server::browser_attention::Settled::by_agent`]) and settles it so, without waking the agent. If
+/// the call fails the person answered first and the request stands.
+pub(crate) fn open_pane_of(agent: &str, id: &str) -> Result<String, String> {
+    let t = lock();
+    let Some(r) = t.get(id).filter(|r| r.agent.eq_ignore_ascii_case(agent)) else {
         return Err("no such request of yours".to_string());
     };
-    if r.state != State::Open || r.cancelling {
-        return Err(format!("that request is already over or being taken down ({})", r.state.as_str()));
+    if r.state != State::Open {
+        return Err(format!("that request is already over ({})", r.state.as_str()));
     }
-    r.cancelling = true;
     Ok(r.pane.clone())
-}
-
-/// The person answered before the cancel could: the request stands, and the agent is told how it ends.
-pub(crate) fn abort_cancel(id: &str) {
-    if let Some(r) = lock().get_mut(id) {
-        r.cancelling = false;
-    }
-}
-
-/// Is `id` being taken down by its agent? Asked by the task that got a Cancelled answer for it.
-pub(crate) fn was_cancelled(id: &str) -> bool {
-    lock().get(id).is_some_and(|r| r.cancelling)
 }
 
 /// The text the agent is woken with: what became of `question`, and what to do next.
@@ -311,10 +297,10 @@ pub(crate) fn detach_handoff(
     tokio::spawn(async move {
         use crate::server::browser_attention::Answer;
         use crate::server::browser_actions::{note, How, Kind};
-        let (answer, waiting) = raised.answer(Some(wait.saturating_sub(started.elapsed()))).await;
+        let (crate::server::browser_attention::Settled { answer, by_agent }, waiting) =
+            raised.settled(Some(wait.saturating_sub(started.elapsed()))).await;
         drop(waiting);
         // An agent that took the request down itself knows: the Log says so, and nobody is woken.
-        let by_agent = answer == Answer::Cancelled && was_cancelled(&task_id);
         tracked.finish(crate::server::browser_handoffs::State::of_answer(answer));
         let how = if by_agent { How::Refused("taken back by the agent".to_string()) } else { How::from_answer(answer) };
         note(&block_id, &agent, Kind::Handoff).target(&reason).how(how).record(&state);
@@ -356,15 +342,12 @@ pub(crate) async fn handle_ui_browser_request(
         let Some(id) = id else {
             return err_response(StatusCode::BAD_REQUEST, "Browser cancel_request needs request (the id a waiting answer gave)".to_string());
         };
-        return match begin_cancel(agent, id) {
-            Ok(pane) => match crate::server::browser_attention::resolve(id, &pane, crate::server::browser_attention::Answer::Cancelled) {
+        return match open_pane_of(agent, id) {
+            Ok(pane) => match crate::server::browser_attention::withdraw(id, &pane) {
                 // The task waiting on it reads the cancel and ends; the banner comes down with its request.
                 Ok(()) => (StatusCode::OK, axum::Json(json!({ "ok": true, "data": { "request": id, "status": "cancelled" } }))).into_response(),
-                // The person got there first: the request stands, and you are told how it ends.
-                Err(e) => {
-                    abort_cancel(id);
-                    err_response(StatusCode::CONFLICT, format!("the person already answered it ({e}): end your turn, you are told how it ends, or call Browser request_status"))
-                }
+                // Answered before: by the person (the request stands, and you are told how it ends) or by your own cancel.
+                Err(e) => err_response(StatusCode::CONFLICT, format!("that request is already answered ({e}): end your turn, you are told how it ends, or call Browser request_status")),
             },
             Err(e) => err_response(StatusCode::NOT_FOUND, e),
         };
@@ -403,18 +386,12 @@ mod tests {
     fn only_the_agent_that_asked_can_read_or_cancel_its_request() {
         let id = fresh("agent-w2", "pane-w2");
         assert!(status("someone-else", Some(&id), None).is_err());
-        assert!(begin_cancel("someone-else", &id).is_err());
-        assert_eq!(begin_cancel("AGENT-W2", &id), Ok("pane-w2".to_string()), "ids are not case sensitive");
-        assert!(was_cancelled(&id));
-        assert!(begin_cancel("agent-w2", &id).unwrap_err().contains("being taken down"));
-        // The person answered first: the cancel is withdrawn and the request is open for its answer.
-        abort_cancel(&id);
-        assert!(!was_cancelled(&id));
+        assert!(open_pane_of("someone-else", &id).is_err());
+        assert_eq!(open_pane_of("AGENT-W2", &id), Ok("pane-w2".to_string()), "ids are not case sensitive");
         assert_eq!(status("agent-w2", None, Some("pane-w2")).unwrap().state, "open");
-        assert!(begin_cancel("agent-w2", &id).is_ok());
         assert!(finish(&id, State::Cancelled));
         assert_eq!(status("agent-w2", None, Some("pane-w2")).unwrap().state, "cancelled");
-        assert!(begin_cancel("agent-w2", &id).unwrap_err().contains("already over"));
+        assert!(open_pane_of("agent-w2", &id).unwrap_err().contains("already over"));
     }
 
     #[test]
@@ -502,7 +479,6 @@ mod tests {
             expires: Instant::now(),
             state: if ended.is_some() { State::Declined } else { State::Open },
             ended,
-            cancelling: false,
         };
         let mut t = HashMap::new();
         t.insert("open".to_string(), rec(None));
