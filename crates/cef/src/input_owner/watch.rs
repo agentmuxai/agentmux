@@ -82,6 +82,11 @@ unsafe extern "system" fn message_hook(code: i32, wparam: WPARAM, lparam: LPARAM
     // Only a message being taken off the queue, not one peeked at and left there.
     if code == HC_ACTION as i32 && wparam == PM_REMOVE as usize && lparam != 0 {
         let msg = &*(lparam as *const MSG);
+        // A button going down in a Views pane's page selects the pane before the click lands: the page's
+        // own window takes the click, so nothing else tells the input owner (`native_click`).
+        if let Some(state) = STATE.get() {
+            super::native_click::on_message(state, msg.message, msg.hwnd, msg.lParam);
+        }
         match msg.message {
             WM_MOUSEWHEEL | WM_MOUSEHWHEEL if take_sample(Kind::Wheel) => {
                 // The wheel's lParam is the pointer in screen coordinates.

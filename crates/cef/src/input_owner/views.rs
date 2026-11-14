@@ -64,6 +64,19 @@ pub fn pane_pointer_down(state: &Arc<AppState>, block: &str) {
     }
 }
 
+/// A native click in pane `block`'s page, seen by the UI thread's message hook before it is dispatched
+/// (Windows Views panes, `native_click`): the pane gets the keyboard before the click lands, and the
+/// window's page is told so it selects the pane too (`browser-pane-clicked`, as the child-window kind's
+/// click and macOS's do). Not through `on_set_focus`, which Chromium sends only when a click changes
+/// which window has focus (#47567).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn pane_clicked(state: &Arc<AppState>, block: &str) {
+    pane_pointer_down(state, block);
+    if let Some(window) = state.browser_pane_window_label(block) {
+        crate::events::emit_event_to_window(state, &window, "browser-pane-clicked", &serde_json::json!({ "block_id": block }));
+    }
+}
+
 /// The user gave pane `block`'s page focus where no click hook sees it: the same
 /// as a click in it, posted. That is Linux, and Windows with Views panes, by
 /// CEF's `on_set_focus` with a user source.
