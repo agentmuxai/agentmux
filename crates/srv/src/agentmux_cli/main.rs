@@ -170,10 +170,13 @@ fn dispatch(cli: Cli) -> i32 {
         Cmd::Run(args) => cmd_run(&paths, &args),
         Cmd::Start(args) => cmd_start(&paths, &args),
         Cmd::Stop { force } => cmd_stop(&paths, force),
-        Cmd::Restart(args) => match cmd_stop(&paths, false) {
-            0 => cmd_start(&paths, &args),
-            code => code,
-        },
+        Cmd::Restart(args) => {
+            let args = restart_args(running(&paths), args);
+            match cmd_stop(&paths, false) {
+                0 => cmd_start(&paths, &args),
+                code => code,
+            }
+        }
         Cmd::Setup(args) => cmd_setup(&paths, &args),
         Cmd::Doctor { json } => cmd_doctor(&paths, json),
         Cmd::Status { json } => cmd_status(&paths, json),
@@ -182,6 +185,15 @@ fn dispatch(cli: Cli) -> i32 {
         Cmd::Logs { lines, follow } => cmd_logs(&paths, lines, follow),
         Cmd::Version { .. } => unreachable!("answered above"),
     }
+}
+
+/// A restart keeps what the running server was started with (its port and program) unless a flag says otherwise.
+fn restart_args(was: Option<ServerState>, mut args: ServerArgs) -> ServerArgs {
+    if let Some(was) = was {
+        args.port = args.port.or(Some(was.web_port));
+        args.srv_bin = args.srv_bin.or_else(|| Some(was.srv.clone()).filter(|p| p.is_file()));
+    }
+    args
 }
 
 fn fail(message: &str) -> i32 {
@@ -229,7 +241,11 @@ fn path_with_dir(dir: Option<&Path>, existing: Option<std::ffi::OsString>) -> st
 
 fn find_srv_in(bin_dir: &Path, flag: Option<&Path>) -> Result<PathBuf, String> {
     let path = flag.map(Path::to_path_buf).unwrap_or_else(|| bin_dir.join(if cfg!(windows) { "agentmux-srv.exe" } else { "agentmux-srv" }));
-    if path.is_file() { Ok(path) } else { Err(format!("the server program is not at {} (--srv-bin names another)", path.display())) }
+    // Absolute, so the folder put first on the server's PATH is a real one and never the current folder.
+    match path.canonicalize() {
+        Ok(abs) if abs.is_file() => Ok(abs),
+        _ => Err(format!("the server program is not at {} (--srv-bin names another)", path.display())),
+    }
 }
 
 fn find_web_in(bin_dir: &Path, flag: Option<&Path>) -> Result<PathBuf, String> {
@@ -240,7 +256,7 @@ fn find_web_in(bin_dir: &Path, flag: Option<&Path>) -> Result<PathBuf, String> {
     candidates
         .iter()
         .find(|dir| dir.join("index.html").is_file())
-        .cloned()
+        .map(|dir| dir.canonicalize().unwrap_or_else(|_| dir.clone()))
         .ok_or_else(|| format!("the built web UI (a folder with index.html) is not at {} (--web-dir names another)", candidates[0].display()))
 }
 
@@ -832,11 +848,38 @@ mod tests {
         std::fs::write(bin.join(srv_name), b"").unwrap();
         std::fs::create_dir_all(root.path().join("web")).unwrap();
         std::fs::write(root.path().join("web").join("index.html"), b"<html>").unwrap();
-        assert_eq!(find_srv_in(&bin, None).unwrap(), bin.join(srv_name));
+        assert_eq!(find_srv_in(&bin, None).unwrap(), bin.join(srv_name).canonicalize().unwrap());
         assert!(find_web_in(&bin, None).is_ok(), "web is beside bin");
         let elsewhere = tempfile::tempdir().unwrap();
         assert!(find_web_in(&bin, Some(elsewhere.path())).is_err(), "a named folder without index.html is refused");
         assert!(find_srv_in(&bin, Some(&elsewhere.path().join("missing"))).is_err());
+    }
+
+    #[test]
+    fn a_relative_program_or_web_folder_is_made_absolute() {
+        let _lock = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let srv_name = if cfg!(windows) { "agentmux-srv.exe" } else { "agentmux-srv" };
+        std::fs::write(root.path().join(srv_name), b"").unwrap();
+        std::fs::create_dir_all(root.path().join("web")).unwrap();
+        std::fs::write(root.path().join("web").join("index.html"), b"<html>").unwrap();
+        let before = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root.path()).unwrap();
+        let srv = find_srv_in(Path::new("/nonexistent-bin"), Some(Path::new(srv_name)));
+        let web = find_web_in(Path::new("/nonexistent-bin"), Some(Path::new("web")));
+        std::env::set_current_dir(before).unwrap();
+        assert!(srv.unwrap().is_absolute(), "a bare name is not looked up on PATH or left relative");
+        assert!(web.unwrap().is_absolute());
+    }
+
+    #[test]
+    fn a_restart_keeps_the_port_and_program_the_server_was_started_with() {
+        let args = ServerArgs::default;
+        let kept = restart_args(Some(record(1)), args());
+        assert_eq!(kept.port, Some(record(1).web_port));
+        assert_eq!(restart_args(None, args()).port, None, "nothing running: the saved settings decide");
+        let flagged = restart_args(Some(record(1)), ServerArgs { port: Some(7500), ..args() });
+        assert_eq!(flagged.port, Some(7500), "a flag wins");
     }
 
     fn with_channel<T>(f: impl FnOnce(&DataPaths) -> T) -> T {
