@@ -10,6 +10,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const open = vi.hoisted(() => vi.fn());
 vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: open }));
 vi.mock("@/app/store/agent-runtime-live", () => ({ sharedAgentRuntime: () => ({ rows: () => [] }) }));
+// The live Kanban count would start the board's feed; a test that wants tasks passes `tasks`.
+vi.mock("@/app/view/kanban/kanban-held", () => ({ useKanbanNeeds: () => () => 0 }));
 const goTo = vi.hoisted(() => vi.fn());
 vi.mock("@/app/notification/attention-go", () => ({ goToAttention: goTo, isParkedItem: (i: { blockId: string }) => i.blockId === "parked" }));
 vi.mock("@/app/notification/attention-list", () => ({ attentionItems: () => [], attentionTint: (hex?: string) => hex }));
@@ -88,6 +90,47 @@ describe("AgentCountsStatus", () => {
     });
 
     // SPEC_ATTENTION_TOAST_WITH_LINK_TO_AGENT_2026_11_02.md §3.6.
+    describe("the Kanban's Needs-you tasks", () => {
+        it("keeps the entry while only tasks need the person, with no agent running", () => {
+            render(() => <AgentCountsStatus rows={() => []} items={() => []} tasks={() => 2} />);
+            expect(screen.getByText("2 tasks need you")).toBeTruthy();
+            expect(screen.getByRole("button").getAttribute("data-tip")).toBe(
+                "0 agents are running, 2 Kanban tasks need you. Click to see which"
+            );
+        });
+
+        it("adds the tasks to the agents' count, and says one task in the singular", () => {
+            render(() => (
+                <AgentCountsStatus rows={() => [agent("a", "waiting_on_user")]} items={() => []} tasks={() => 1} />
+            ));
+            expect(screen.getByText("1 waiting on you")).toBeTruthy();
+            expect(screen.getByText("· 1 task")).toBeTruthy();
+            expect(screen.getByRole("button").getAttribute("data-tip")).toBe(
+                "1 agent is running, 1 waiting on you, 1 Kanban task needs you. Click to see who"
+            );
+        });
+
+        it("lists them as one row that opens the Kanban, under the agents", () => {
+            render(() => <AgentCountsStatus rows={() => []} items={() => [item("b1", { name: "Korp" })]} tasks={() => 3} />);
+            fireEvent.click(screen.getByRole("button", { name: /waiting on you/ }));
+            expect(screen.getByText("Korp")).toBeTruthy();
+            expect(screen.getByText("3 tasks need you")).toBeTruthy();
+            fireEvent.click(screen.getByRole("button", { name: "Open the Kanban" }));
+            expect(open).toHaveBeenCalledWith("kanban");
+            expect(screen.queryByRole("dialog")).toBeNull();
+        });
+
+        it("opens the list for tasks alone, and closes it for good when they are done", () => {
+            const [n, setN] = createSignal(2);
+            render(() => <AgentCountsStatus rows={() => []} items={() => []} tasks={n} />);
+            fireEvent.click(screen.getByRole("button"));
+            expect(screen.getByRole("dialog", { name: "Waiting on you" })).toBeTruthy();
+            setN(0);
+            expect(screen.queryByRole("dialog")).toBeNull();
+            expect(screen.queryByRole("button")).toBeNull();
+        });
+    });
+
     describe("the list of who waits", () => {
         it("stays while something waits, even when no agent has a process, and counts what only the list knows", () => {
             const { container } = render(() => <AgentCountsStatus rows={() => []} items={() => [item("b1")]} />);
@@ -110,7 +153,7 @@ describe("AgentCountsStatus", () => {
             ));
             fireEvent.click(screen.getByRole("button", { name: /waiting on you/ }));
             expect(open).not.toHaveBeenCalled();
-            expect(screen.getByRole("dialog", { name: "Agents waiting on you" })).toBeTruthy();
+            expect(screen.getByRole("dialog", { name: "Waiting on you" })).toBeTruthy();
             expect(screen.getByText("Korp")).toBeTruthy();
             expect(screen.getByText("asks to approve a Bash call")).toBeTruthy();
             expect(screen.getByText("asks you a question (in another window)")).toBeTruthy();
