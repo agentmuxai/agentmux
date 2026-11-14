@@ -737,6 +737,7 @@ partial list.
 | [`SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14`](SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md) | SPEC: Google in Connectors: Gmail, Calendar and Drive for every agent |
 | [`SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01`](SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01.md) | SPEC: Google Phase B: AgentMux's own client, so a person clicks Connect, signs in and consents |
 | [`SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24`](SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24.md) | Spec: GPU Memory Tracing Scaffolding — a real trace, not another process-level guess |
+| [`SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12`](SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md) | Spec: AgentMux as a server-only package, with a free local web UI (task #2522, build #2523) |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |
 | [`SPEC_HELP_HIDDEN_TIPS_2026_10_10`](SPEC_HELP_HIDDEN_TIPS_2026_10_10.md) | Hidden tips in the Help pane: the gestures nobody would guess |
 | [`SPEC_HELP_PANE_FILTER_2026_10_08`](SPEC_HELP_PANE_FILTER_2026_10_08.md) | A filter for the Help pane, on one shared filter box |
