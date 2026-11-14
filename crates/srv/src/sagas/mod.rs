@@ -84,6 +84,8 @@ pub mod tear_off_tab;
 mod integration_tests;
 #[cfg(test)]
 mod shutdown_events_tests;
+#[cfg(test)]
+mod prompt_events_tests;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
