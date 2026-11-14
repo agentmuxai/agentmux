@@ -9,6 +9,8 @@ use super::*;
 /// What was checked about one claimed message: kept for the delivery and for noting it delivered.
 pub(super) struct Checked {
     reagent_verified: Option<bool>,
+    /// The signature is genuine and failed only the age rules: the marker says `SIG=expired`.
+    reagent_expired: bool,
     /// (signed message id, agent, delivery id) of a reagent-signed message that verified: recorded once it is delivered.
     reagent_delivery: Option<(String, String, String)>,
     /// The delivery a verified signed message already went to this agent as, when this is a second copy of it.
@@ -143,6 +145,7 @@ pub(super) async fn verify(
     mstore: &Arc<Store>,
 ) -> Checked {
     let reagent_verified = reagent_verdict(inj, agent_id, now_unix_secs());
+    let reagent_expired = reagent_expired(inj, agent_id, now_unix_secs());
     // A verified signed message that already reached this agent under another delivery id is a second copy (the
     // sender retried a call the relay had in fact taken, or a captured notice was sent again): not delivered again.
     let reagent_delivery = match (reagent_verified, &inj.reagent_msg_id) {
@@ -199,7 +202,7 @@ pub(super) async fn verify(
         (_, None) => crate::muxbus::wan_verify::WanVerdict::default(),
     };
     log_wan_outcome(inj, &wan_verdict);
-    Checked { reagent_verified, reagent_delivery, repeat_of, wan_row, wan_store, wan_verdict }
+    Checked { reagent_verified, reagent_expired, reagent_delivery, repeat_of, wan_row, wan_store, wan_verdict }
 }
 
 /// The verdict on a reagent-signed message; `None` when it carries no complete signature.
@@ -237,23 +240,36 @@ pub(super) fn reagent_verdict(inj: &PendingInj, agent_id: &str, now: i64) -> Opt
     // by delivery time alone, which read a genuine late notice as a
     // forgery. A second copy of one already delivered is dropped by the
     // caller (`Checked::repeat_of`), not rendered as a forgery.
+    reagent_checks(inj, agent_id, now).map(|(age_ok, signature_ok)| age_ok && signature_ok)
+}
+
+/// Whether a reagent-signed message's signature is genuine (under the trusted key) and fails only the age rules:
+/// it renders `SIG=expired`, not `SIG=invalid`. It is still `reagent_verified == Some(false)`, so it is still
+/// `TIER=sensitive` and still needs a stop.
+pub(super) fn reagent_expired(inj: &PendingInj, agent_id: &str, now: i64) -> bool {
+    reagent_checks(inj, agent_id, now) == Some((false, true))
+}
+
+/// What the age rules and the signature each say of a reagent-signed message, as (age ok, signature verifies
+/// under the trusted key); `None` when it carries no complete signature.
+fn reagent_checks(inj: &PendingInj, agent_id: &str, now: i64) -> Option<(bool, bool)> {
     match (&inj.reagent_sig, &inj.reagent_key_id, &inj.reagent_msg_id, inj.reagent_ts_secs) {
         (Some(sig), Some(key_id), Some(msg_id), Some(ts_secs)) => {
             // The relay's own record of when it accepted the message: a notice that waited for a host that
             // was off is judged by its age when it was accepted, within a bound at delivery, and once.
             let accepted_secs = inj.created_at.as_deref().and_then(delivery_status::notes::parse_created_at).map(|ms| ms / 1000);
-            Some(
-                reagent_age::age_ok(ts_secs, accepted_secs, now)
-                    && agentmux_common::jekt_sign::verify_trusted_reagent_jekt(
-                        key_id,
-                        msg_id,
-                        inj.source_agent.as_deref().unwrap_or(""),
-                        agent_id,
-                        ts_secs,
-                        &inj.message,
-                        sig,
-                    ),
-            )
+            Some((
+                reagent_age::age_ok(ts_secs, accepted_secs, now),
+                agentmux_common::jekt_sign::verify_trusted_reagent_jekt(
+                    key_id,
+                    msg_id,
+                    inj.source_agent.as_deref().unwrap_or(""),
+                    agent_id,
+                    ts_secs,
+                    &inj.message,
+                    sig,
+                ),
+            ))
         }
         _ => None,
     }
@@ -303,6 +319,7 @@ fn log_wan_outcome(inj: &PendingInj, wan_verdict: &crate::muxbus::wan_verify::Wa
 pub(super) fn request(inj: &PendingInj, target: &str, checked: &Checked, mstore: &Arc<Store>) -> InjectionRequest {
     let mut req = InjectionRequest {
         reagent_verified: checked.reagent_verified,
+        reagent_expired: checked.reagent_expired,
         wan_verified: checked.wan_verdict.verified,
         wan_instance: checked.wan_verdict.instance.clone(),
         wan_reason: checked.wan_verdict.reason.map(str::to_string),
@@ -352,7 +369,6 @@ pub(super) async fn attach_files(
     Ok(())
 }
 
-/// Note a signature as seen, once its message is delivered.
 /// A verified signed notice this agent already got under another delivery id: the sender signs once and may send
 /// twice (a retry of a call the relay had taken), and a replay looks the same. Neither is shown: one warning names
 /// both ids, and the caller delivers nothing. False for every other message.
@@ -367,6 +383,7 @@ pub(super) fn is_repeat(inj: &PendingInj, agent_id: &str, checked: &Checked) -> 
     true
 }
 
+/// Note a signature as seen, once its message is delivered.
 pub(super) fn record_delivered(checked: &Checked) {
     if let Some((msg_id, agent, inj_id)) = &checked.reagent_delivery {
         reagent_age::record_delivered(msg_id, agent, inj_id, now_unix_secs());
@@ -427,6 +444,25 @@ mod tests {
         let at_the_end = SIGNED_AT + reagent_age::SIG_MAX_HOLD_SECS;
         assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", at_the_end), Some(true));
         assert_eq!(reagent_verdict(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", at_the_end + 1), Some(false));
+    }
+
+    #[test]
+    fn a_genuine_signature_that_fails_only_the_age_rules_is_expired_not_invalid() {
+        let late = SIGNED_AT + 20 * 60;
+        // No time from the relay: past the delivery-time window, signature genuine. Still `Some(false)`, so still
+        // sensitive and stopped; only the label differs.
+        let held = notice("inj-1", None, SIG);
+        assert_eq!(reagent_verdict(&held, "agentx", late), Some(false));
+        assert!(reagent_expired(&held, "agentx", late));
+        // Past the longest hold, whatever the relay says.
+        assert!(reagent_expired(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", SIGNED_AT + reagent_age::SIG_MAX_HOLD_SECS + 1));
+        // Not expired: it verifies, or its signature is not genuine, or it carries none.
+        assert!(!reagent_expired(&notice("inj-1", Some(ACCEPTED), SIG), "agentx", late));
+        assert!(!reagent_expired(&notice("inj-1", None, "AAAA"), "agentx", late));
+        assert!(!reagent_expired(&notice("inj-1", None, SIG), "agenty", late));
+        let mut unsigned = notice("inj-1", None, SIG);
+        unsigned.reagent_sig = None;
+        assert!(!reagent_expired(&unsigned, "agentx", late));
     }
 
     #[test]
