@@ -102,3 +102,35 @@ describe("build-macos.yml", () => {
         expect(steps.findIndex((s, i) => i !== gate && runsCheckoutCode(s))).toBeGreaterThan(gate);
     });
 });
+
+// The release gate script checks only when node was started with it as the main file; if that comparison is ever
+// false node exits 0 having checked nothing. So each gate's tag branch must see the script say it ran, and it is the
+// same text in every build workflow: one gate.
+describe("the tag branch of the gate", () => {
+    const files = [
+        ["build-linux.yml", "build"],
+        ["build-windows.yml", "build"],
+        ["build-server-package.yml", "package"],
+        ["build-macos.yml", "build"],
+    ];
+    const tagBranch = ([file, job]) => {
+        const gate = stepsOf(read(file), job).find(isGate);
+        const from = gate.indexOf('if [ "$REF_TYPE" = "tag" ]; then');
+        const to = gate.indexOf("\n          else\n", from);
+        expect(from, `${file}: no tag branch`).toBeGreaterThan(-1);
+        return gate.slice(from, to);
+    };
+
+    it.each(files)("%s fails unless the release gate says it ran", (...file) => {
+        const branch = tagBranch(file);
+        expect(branch).toContain('--github-output "$out"');
+        expect(branch).toContain('grep -qx "sha=${RUN_SHA}" "$out"');
+        expect(branch.indexOf("grep -qx")).toBeGreaterThan(branch.indexOf("node \"$gate\""));
+        expect(branch).toContain("did not say it ran");
+    });
+
+    it("is the same text in all four workflows", () => {
+        const [first, ...rest] = files.map(tagBranch);
+        for (const other of rest) expect(other).toBe(first);
+    });
+});

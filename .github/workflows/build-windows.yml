@@ -134,8 +134,15 @@ jobs:
             tmp="$RUNNER_TEMP"
             if command -v cygpath > /dev/null 2>&1; then tmp="$(cygpath -m "$RUNNER_TEMP")"; fi
             gate="$tmp/release-gate.mjs"
+            out="$tmp/release-gate.out"
+            rm -f "$out"
             gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPO}/contents/scripts/release-gate.mjs?ref=main" > "$gate"
-            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO"
+            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO" --github-output "$out"
+            # The script checks only when node was started with it as the main file; if that comparison is ever false
+            # (a path form, a drive letter's case) node exits 0 having checked nothing. So it must say it ran.
+            if ! grep -qx "sha=${RUN_SHA}" "$out" 2> /dev/null; then
+              echo "::error::the release gate did not say it ran"; exit 1
+            fi
             if [ "$HEAD_SHA" != "$RUN_SHA" ]; then
               echo "::error::the checkout ($HEAD_SHA) is not the tagged commit ($RUN_SHA)"; exit 1
             fi
