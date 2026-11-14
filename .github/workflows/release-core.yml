@@ -585,19 +585,33 @@ jobs:
           echo "Release notes:"
           cat /tmp/release-notes.md
 
+      # The release is uploaded as a draft and published in one step: a published release can't be changed
+      # (its files are fixed, and so is its tag, once it is out), so every file is in place before it is.
+      # A draft left by an earlier attempt is finished; a release that is already published is not touched.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.gate.outputs.version }}
         run: |
-          if ! gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release create "v${VERSION}" \
-              --title "AgentMux v${VERSION}" \
-              --notes-file /tmp/release-notes.md \
-              dist-flat/*
+          set -euo pipefail
+          # The release list shows drafts too (a lookup by tag does not); one line per release of this tag: draft or published.
+          state="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | if .draft then \"draft\" else \"published\" end")"
+          if echo "$state" | grep -qx published; then
+            echo "::error::release ${TAG} is published and cannot be changed; cut a new version"
+            exit 1
+          elif echo "$state" | grep -qx draft; then
+            echo "Release ${TAG} exists as a draft -- uploading/overwriting artifacts, then publishing"
+            gh release upload "$TAG" dist-flat/* --clobber --repo "$GITHUB_REPOSITORY"
           else
-            echo "Release v${VERSION} already exists -- uploading/overwriting artifacts only"
-            gh release upload "v${VERSION}" dist-flat/* --clobber
+            gh release create "$TAG" \
+              --draft \
+              --verify-tag \
+              --title "AgentMux ${TAG}" \
+              --notes-file /tmp/release-notes.md \
+              --repo "$GITHUB_REPOSITORY" \
+              dist-flat/*
           fi
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
 
       # Replaces LANDING_DEPLOY_TOKEN, which fingerprinted as an `a5af`
       # account PAT. The dispatch below is fire-and-forget -- this job stays
