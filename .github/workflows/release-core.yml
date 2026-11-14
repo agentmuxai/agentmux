@@ -587,7 +587,9 @@ jobs:
 
       # The release is uploaded as a draft and published in one step: a published release can't be changed
       # (its files are fixed, and so is its tag, once it is out), so every file is in place before it is.
-      # A draft left by an earlier attempt is finished; a release that is already published is not touched.
+      # A draft left by an earlier attempt is finished. A release that is already published is not touched: if it
+      # holds exactly the files of this run (an earlier attempt of this run published them, and a later step of the
+      # job failed), the job goes on to the steps after this one; if it holds different files, the job stops.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -595,10 +597,28 @@ jobs:
         run: |
           set -euo pipefail
           # The release list shows drafts too (a lookup by tag does not); one line per release of this tag: draft or published.
-          state="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | if .draft then \"draft\" else \"published\" end")"
+          state="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate --jq ".[] | select(.tag_name == \"${TAG}\") | if .draft then \"draft\" else \"published\" end")"
+          publish=yes
           if echo "$state" | grep -qx published; then
-            echo "::error::release ${TAG} is published and cannot be changed; cut a new version"
-            exit 1
+            # Every file of this run, the signed manifest included, must be a published asset of the same name with the same digest.
+            same=yes
+            if [ -z "$(ls -A release-manifest 2> /dev/null)" ]; then
+              echo "This run has no signed manifest to compare with"
+              same=no
+            fi
+            assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.assets[] | "\(.name) \(.digest)"')"
+            for f in dist-flat/*; do
+              if ! echo "$assets" | grep -qxF "$(basename "$f") sha256:$(sha256sum "$f" | cut -d' ' -f1)"; then
+                echo "Not the same as the published file: $(basename "$f")"
+                same=no
+              fi
+            done
+            if [ "$same" = no ]; then
+              echo "::error::release ${TAG} is published and cannot be changed; cut a new version"
+              exit 1
+            fi
+            echo "Release ${TAG} was already published by an earlier attempt: nothing to upload"
+            publish=no
           elif echo "$state" | grep -qx draft; then
             echo "Release ${TAG} exists as a draft -- uploading/overwriting artifacts, then publishing"
             gh release upload "$TAG" dist-flat/* --clobber --repo "$GITHUB_REPOSITORY"
@@ -611,7 +631,9 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               dist-flat/*
           fi
-          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          if [ "$publish" = yes ]; then
+            gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          fi
 
       # Replaces LANDING_DEPLOY_TOKEN, which fingerprinted as an `a5af`
       # account PAT. The dispatch below is fire-and-forget -- this job stays

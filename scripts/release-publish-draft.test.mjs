@@ -32,10 +32,25 @@ describe("release-core.yml publish step", () => {
         expect(step.match(/--draft=false/g)).toHaveLength(1);
     });
 
-    it("stops with a clear message on a release that is already published", () => {
+    it("stops with a clear message on a release that is already published with different files", () => {
         const published = step.indexOf("cannot be changed; cut a new version");
         expect(published).toBeGreaterThan(-1);
         expect(published).toBeLessThan(step.indexOf("gh release upload"));
         expect(step.slice(published, published + 80)).toContain("exit 1");
+    });
+
+    it("goes on, with no write call, when the published files are this run's own", () => {
+        const same = step.indexOf("nothing to upload");
+        expect(same).toBeGreaterThan(-1);
+        expect(same).toBeLessThan(step.indexOf("gh release upload"));
+        // every file of the run, compared by digest with the published asset of the same name; no manifest is a mismatch
+        expect(step).toContain("sha256sum");
+        expect(step).toContain("release-manifest");
+        expect(step).toContain("publish=no");
+        expect(step).toMatch(/if \[ "\$publish" = yes \]; then\n\s+gh release edit/);
+    });
+
+    it("reads the release list a hundred to a page", () => {
+        expect(step).toContain("releases?per_page=100");
     });
 });
