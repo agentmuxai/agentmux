@@ -805,3 +805,6 @@ mod caps_runs;
 
 #[path = "event_runs_tests.rs"]
 mod event_runs;
+
+#[path = "app_event_runs_tests.rs"]
+mod app_event_runs;

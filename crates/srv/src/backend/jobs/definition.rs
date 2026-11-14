@@ -58,6 +58,9 @@ pub const MAX_EVENT_FILTER: usize = 8;
 pub const MAX_EVENT_FILTER_TEXT: usize = 200;
 /// The longest an event's run may be held back by `delay`: a week.
 pub const MAX_EVENT_DELAY_MINUTES: u32 = 7 * 24 * 60;
+/// How many runs an event job starts in an hour when its trigger does not say.
+pub const DEFAULT_EVENT_RATE_PER_HOUR: u32 = 30;
+pub const MAX_EVENT_RATE_PER_HOUR: u32 = 1000;
 
 /// Action kinds (`action.kind`).
 pub mod action_kind {
@@ -134,6 +137,18 @@ pub struct EventTrigger {
     /// does not lose it. 0 starts the run at once.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub delay: u32,
+    /// The most runs the trigger starts in any hour: a stuck source or a loop of events cannot run away. The events
+    /// beyond it are one collapsed `skipped (rate)` row, and the first raises the cap alert.
+    #[serde(default = "default_rate", skip_serializing_if = "is_default_rate")]
+    pub max_per_hour: u32,
+}
+
+fn default_rate() -> u32 {
+    DEFAULT_EVENT_RATE_PER_HOUR
+}
+
+fn is_default_rate(n: &u32) -> bool {
+    *n == DEFAULT_EVENT_RATE_PER_HOUR
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -148,6 +163,9 @@ impl EventTrigger {
         }
         if self.delay > MAX_EVENT_DELAY_MINUTES {
             return Err(format!("trigger: delay is at most {MAX_EVENT_DELAY_MINUTES} minutes (a week)"));
+        }
+        if !(1..=MAX_EVENT_RATE_PER_HOUR).contains(&self.max_per_hour) {
+            return Err(format!("trigger: max_per_hour is 1 to {MAX_EVENT_RATE_PER_HOUR}"));
         }
         if self.filter.len() > MAX_EVENT_FILTER {
             return Err(format!("trigger: an event filter has at most {MAX_EVENT_FILTER} entries"));
@@ -164,6 +182,9 @@ impl EventTrigger {
             if !plain {
                 return Err(format!("trigger: event filter {key:?} is text of at most {MAX_EVENT_FILTER_TEXT} characters, a number, or true or false"));
             }
+        }
+        if self.source == event_source::APP_EVENT {
+            super::app_events::validate_filter(&self.filter)?;
         }
         Ok(())
     }
@@ -352,7 +373,7 @@ fn trigger_keys(kind: &str) -> &'static [&'static str] {
         trigger_kind::CRON => &["kind", "cron", "tz"],
         trigger_kind::EVERY => &["kind", "seconds"],
         trigger_kind::ONCE => &["kind", "at"],
-        trigger_kind::EVENT => &["kind", "source", "filter", "delay"],
+        trigger_kind::EVENT => &["kind", "source", "filter", "delay", "max_per_hour"],
         _ => &["kind"],
     }
 }

@@ -14,6 +14,7 @@
 //! §5.2), which the scheduler delivers when the agent is back.
 
 pub mod admission;
+pub mod app_events;
 pub mod cap_alert;
 pub mod caps;
 pub mod cloud_events;

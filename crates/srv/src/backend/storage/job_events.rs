@@ -96,10 +96,22 @@ impl Store {
         Ok(())
     }
 
-    /// How many events `job_id` has heard of since `since_ms`.
+    /// An event the job heard of but did not start a run for (a skip, a cap, the rate limit): it stays heard, so a
+    /// repeat of it is nothing, but it no longer counts as one the job admitted.
+    pub fn job_event_unadmit(&self, job_id: &str, event_id: &str) -> Result<(), StoreError> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute("UPDATE db_job_trigger_events SET run_id = '' WHERE job_id = ?1 AND event_id = ?2", params![job_id, event_id])?;
+        Ok(())
+    }
+
+    /// How many events `job_id` admitted (started or queued a run for) since `since_ms`.
     pub fn job_events_since(&self, job_id: &str, since_ms: i64) -> Result<i64, StoreError> {
         let conn = self.conn().lock().unwrap();
-        Ok(conn.query_row("SELECT COUNT(*) FROM db_job_trigger_events WHERE job_id = ?1 AND at_ms >= ?2", params![job_id, since_ms], |r| r.get(0))?)
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM db_job_trigger_events WHERE job_id = ?1 AND at_ms >= ?2 AND run_id != ''",
+            params![job_id, since_ms],
+            |r| r.get(0),
+        )?)
     }
 }
 
@@ -132,6 +144,16 @@ mod tests {
         assert_eq!(s.job_events_forget_before(250).unwrap(), 2);
         assert_eq!(s.job_events_since("job-a", 0).unwrap(), 1);
         assert!(s.job_event_claim("job-a", "e0", "r", 400).unwrap(), "a forgotten id is a new event");
+    }
+
+    #[test]
+    fn an_unadmitted_event_stays_heard_but_is_not_counted() {
+        let s = store();
+        assert!(s.job_event_claim("job-a", "e1", "run-1", 100).unwrap());
+        assert!(s.job_event_claim("job-a", "e2", "run-2", 110).unwrap());
+        s.job_event_unadmit("job-a", "e2").unwrap();
+        assert_eq!(s.job_events_since("job-a", 0).unwrap(), 1, "only the admitted one counts");
+        assert!(!s.job_event_claim("job-a", "e2", "run-3", 120).unwrap(), "but it is still heard: a repeat is nothing");
     }
 
     #[test]

@@ -7,7 +7,8 @@ const open = vi.hoisted(() => vi.fn());
 vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: open }));
 vi.mock("@/app/store/global", () => ({ getSettingsKeyAtom: () => () => undefined }));
 
-import { openAuditAtSound } from "./open-audit";
+import { openAuditAtMessage, openAuditAtSound } from "./open-audit";
+import { parseMessageRef } from "./audit-message";
 import { parseSoundRef } from "./audit-sound";
 
 describe("openAuditAtSound", () => {
@@ -19,5 +20,17 @@ describe("openAuditAtSound", () => {
         expect(create.meta.view).toBe("audit");
         expect(existing).toEqual({ "audit:sound": create.meta["audit:sound"] });
         expect(parseSoundRef(existing["audit:sound"])).toMatchObject({ blockId: "blk-korp", event: "tool", at: 1234 });
+    });
+});
+
+describe("openAuditAtMessage", () => {
+    it("opens or switches the Audit with the message's id in its meta, new at every ask", async () => {
+        open.mockClear();
+        await openAuditAtMessage("m-77", 4321);
+        const [view, create, existing] = open.mock.calls[0];
+        expect(view).toBe("audit");
+        expect(create.meta.view).toBe("audit");
+        expect(existing).toEqual({ "audit:message": create.meta["audit:message"] });
+        expect(parseMessageRef(existing["audit:message"])).toMatchObject({ msgId: "m-77", at: 4321 });
     });
 });

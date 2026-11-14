@@ -20,7 +20,8 @@ use agentmux_common::time::now_ms;
 use serde_json::Value;
 
 use super::Admission;
-use crate::backend::jobs::definition::MAX_EVENT_DELAY_MINUTES;
+use crate::backend::jobs::definition::{DEFAULT_EVENT_RATE_PER_HOUR, MAX_EVENT_DELAY_MINUTES, MAX_EVENT_RATE_PER_HOUR};
+use crate::backend::jobs::caps::Refusal;
 use crate::backend::jobs::policy::Decision;
 use crate::backend::jobs::{Begin, RunLedger, BY_EVENT, SOURCE_CRON, TRIGGER_EVENT};
 use crate::backend::storage::cron::CronJob;
@@ -52,7 +53,8 @@ impl RunLedger {
     }
 
     /// Record the event `event_id` for `job` and decide whether its run starts. `Taken` is an event the job already
-    /// heard of; `Skipped` is a fire that Pause all, overlap policy or a cap refused (it has its row).
+    /// heard of; `Skipped` is a fire that Pause all, the rate limit, overlap policy or a cap refused (it has its row).
+    /// An event that starts no run stays heard but does not count toward the rate limit.
     pub fn admit_event(&self, job: &CronJob, event_id: &str, source: &str, input: &Value) -> Admission {
         let _one_at_a_time = self.admission.lock().unwrap_or_else(|e| e.into_inner());
         let now = now_ms();
@@ -69,8 +71,29 @@ impl RunLedger {
                 return Admission::Unrecorded;
             }
         }
+        let admission = self.admit_claimed(job, id, source, input, now);
+        if matches!(admission, Admission::Skipped | Admission::Capped(_) | Admission::Refused) {
+            if let Err(e) = self.store.job_event_unadmit(&job.id, event_id) {
+                tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't mark an event as not started");
+            }
+        }
+        admission
+    }
+
+    /// What becomes of an event the job has just recorded under run id `id`.
+    fn admit_claimed(&self, job: &CronJob, id: String, source: &str, input: &Value, now: i64) -> Admission {
         if self.paused_all().is_some() {
             return self.skip_event(job, id, source, reason::PAUSED_ALL);
+        }
+        // The count includes this event: it is the (limit + 1)th that is refused.
+        let heard = self.store.job_events_since(&job.id, now - HOUR_MS).unwrap_or(0);
+        if heard > event_rate_limit(job) {
+            let first = self.first_cap_skip_today(job);
+            let skipped = self.skip_event(job, id, source, reason::RATE);
+            if first {
+                self.alert_cap(job, Refusal::Rate);
+            }
+            return skipped;
         }
         let delay_ms = event_delay_ms(job);
         if delay_ms > 0 {
@@ -178,4 +201,12 @@ impl RunLedger {
 fn event_delay_ms(job: &CronJob) -> i64 {
     let minutes = job.trigger_event.get("delay").and_then(Value::as_u64).unwrap_or(0);
     i64::try_from(minutes.min(u64::from(MAX_EVENT_DELAY_MINUTES))).unwrap_or(0) * 60_000
+}
+
+const HOUR_MS: i64 = 3_600_000;
+
+/// How many runs the trigger starts in an hour: its `max_per_hour`, or the default.
+fn event_rate_limit(job: &CronJob) -> i64 {
+    let n = job.trigger_event.get("max_per_hour").and_then(Value::as_u64).unwrap_or(u64::from(DEFAULT_EVENT_RATE_PER_HOUR));
+    i64::try_from(n.clamp(1, u64::from(MAX_EVENT_RATE_PER_HOUR))).unwrap_or(1)
 }

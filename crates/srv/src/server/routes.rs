@@ -547,6 +547,9 @@ fn agent_api_routes() -> Router<AppState> {
         .route("/api/v1/tab/name", post(handle_tab_name))
         .route("/api/v1/pane/title", post(handle_pane_title))
         .route("/api/v1/workspace/name", post(handle_workspace_name))
+        // A file or folder renamed in its folder, so Editor tabs open on it follow
+        // (agentmux-mcp's Pane rename with target "file").
+        .route("/api/v1/file/rename", post(handle_file_rename))
         // Introspection verbs (SPEC §4.6): read-only views of the UI tree so an
         // agent can see what's around it. agentmux-mcp's GetLayout / ListWindows
         // / ListWorkspaces / ListTabs tools GET these.

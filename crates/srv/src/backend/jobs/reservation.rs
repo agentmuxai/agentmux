@@ -185,7 +185,7 @@ impl RunLedger {
     }
 
     /// Whether `job` has no cap skip yet today: the next one raises the alert.
-    fn first_cap_skip_today(&self, job: &CronJob) -> bool {
+    pub(super) fn first_cap_skip_today(&self, job: &CronJob) -> bool {
         self.store.job_cap_skips_since(&job.id, self.day_start(now_ms())).map(|v| v.is_empty()).unwrap_or(false)
     }
 

@@ -40,7 +40,7 @@ use agentmux_common::api_types::{
     UiBrowserFocusInfoRequest, UiBrowserHistoryRequest, UiBrowserNavigateRequest,
     UiBrowserOpenRequest, UiClickRequest, UiPressKeysRequest, UiQueryRequest, UiResetShortcutsRequest, UiRunCommandRequest, UiSetShortcutRequest,
     UiRecordRequest, UiRecordResponse, UiScreenshotRequest, UiScreenshotResponse, UiShortcutsListRequest, WindowFocusRequest,
-    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest, QuitSelfRequest,
+    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, FileRenameRequest, ClosePaneRequest, QuitSelfRequest,
     RegisterDevServerRequest, RegisterDevServerResponse,
 };
 use agentmux_common::AUTH_KEY_HEADER;
