@@ -163,6 +163,7 @@ impl LanDiscoveryController {
             agent_status: Default::default(),
             agent_lines: Default::default(),
             agent_providers: Default::default(),
+            agent_kinds: Default::default(),
             agent_accounts: Default::default(),
             agent_resets: Default::default(),
             agent_seats: Default::default(),

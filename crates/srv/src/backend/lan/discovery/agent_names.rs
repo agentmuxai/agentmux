@@ -7,6 +7,7 @@
 //! (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md §3.4 Phase 4).
 
 use super::*;
+use crate::backend::runtime_adapter::RuntimeKind;
 use std::collections::HashSet;
 
 /// This instance's `/agentmux/reactive/agent-names` answer. Readable with the
@@ -114,6 +115,9 @@ pub(crate) struct PeerAgents {
     /// this build knows (`providers::resolve_provider_alias`), so a peer can't
     /// put free text in a row (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
     pub providers: BTreeMap<String, String>,
+    /// Lower-cased name → where it runs, for listed names only, and only `host` or `container`
+    /// (`RuntimeKind::parse`), so a peer can't put free text in a row.
+    pub kinds: BTreeMap<String, RuntimeKind>,
     /// Lower-cased name → seat, for listed names only, bounded by
     /// `agent_seat::sanitize_peer_summary` (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5).
     pub seats: BTreeMap<String, crate::backend::rpc_types::SeatSummary>,
@@ -122,6 +126,15 @@ pub(crate) struct PeerAgents {
     pub accounts: BTreeMap<String, String>,
     /// Lower-cased name → when its usage limit lifts (unix ms), for listed names only.
     pub resets: BTreeMap<String, u64>,
+}
+
+/// The `agent_kinds` of an `agent-names` body: `host` or `container` for a listed name, nothing else.
+fn parse_kinds(value: &serde_json::Value, listed: &HashSet<String>) -> BTreeMap<String, RuntimeKind> {
+    let Some(map) = value.get("agent_kinds").and_then(|s| s.as_object()) else { return BTreeMap::new() };
+    map.iter()
+        .filter(|(name, _)| listed.contains(&name.to_lowercase()))
+        .filter_map(|(name, kind)| Some((name.to_lowercase(), RuntimeKind::parse(kind.as_str()?)?)))
+        .collect()
 }
 
 /// Reads an `agent-names` body: the names, capped as above, and each listed
@@ -184,6 +197,7 @@ pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
                 .collect()
         })
         .unwrap_or_default();
+    let kinds = parse_kinds(value, &listed);
     let seats = value
         .get("agent_seats")
         .and_then(|s| s.as_object())
@@ -220,7 +234,7 @@ pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
                 .collect()
         })
         .unwrap_or_default();
-    PeerAgents { names, status, lines, providers, seats, accounts, resets }
+    PeerAgents { names, status, lines, providers, kinds, seats, accounts, resets }
 }
 
 /// Applies one poll of a peer's `agent-names` route to its entry, and says
@@ -250,6 +264,7 @@ pub(super) fn apply_agent_names_poll(
         || entry.agent_status != peer.status
         || entry.agent_lines != peer.lines
         || entry.agent_providers != peer.providers
+        || entry.agent_kinds != peer.kinds
         || entry.agent_seats != peer.seats
         || entry.agent_accounts != peer.accounts
         || entry.agent_resets != peer.resets;
@@ -259,6 +274,7 @@ pub(super) fn apply_agent_names_poll(
     entry.agent_status = peer.status;
     entry.agent_lines = peer.lines;
     entry.agent_providers = peer.providers;
+    entry.agent_kinds = peer.kinds;
     entry.agent_seats = peer.seats;
     entry.agent_accounts = peer.accounts;
     entry.agent_resets = peer.resets;
@@ -385,6 +401,26 @@ mod tests {
         // A legacy alias resolves to its id; free text, a non-string and a name
         // the body doesn't list are dropped.
         assert_eq!(got, [("manoz", "claude"), ("opaz", "codex")]);
+    }
+
+    /// Where a peer's agents run: kept for listed agents with a known value, carried onto the entry,
+    /// and left out of its JSON when the peer said nothing (an older build).
+    #[test]
+    fn agent_kinds_keep_only_host_or_container_for_listed_agents() {
+        let body = serde_json::json!({
+            "agents": ["Manoz", "Opaz", "Loap", "Korp"],
+            "agent_kinds": { "Manoz": "host", "opaz": "container", "Loap": "wsl", "Korp": 7, "Ghost": "container" },
+        });
+        let peer = parse_agent_names_body(&body);
+        let got: Vec<(&str, RuntimeKind)> = peer.kinds.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+        assert_eq!(got, [("manoz", RuntimeKind::Host), ("opaz", RuntimeKind::Container)]);
+
+        let mut inst = instance();
+        assert!(apply_agent_names_poll(&mut inst, Some(peer.clone()), 1));
+        assert!(!apply_agent_names_poll(&mut inst, Some(peer), 2), "the same kinds change nothing");
+        assert_eq!(serde_json::to_value(&inst).unwrap()["agent_kinds"], serde_json::json!({ "manoz": "host", "opaz": "container" }));
+        assert!(serde_json::to_value(instance()).unwrap().get("agent_kinds").is_none());
+        assert!(parse_agent_names_body(&serde_json::json!({"agents": ["Manoz"]})).kinds.is_empty());
     }
 
     /// Seats on remote rows (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5): kept
@@ -583,6 +619,7 @@ mod tests {
             agent_status: Default::default(),
             agent_lines: Default::default(),
             agent_providers: Default::default(),
+            agent_kinds: Default::default(),
             agent_accounts: Default::default(),
             agent_resets: Default::default(),
             agent_seats: Default::default(),

@@ -30,10 +30,13 @@ use super::providers::ControllerType;
 /// The value of `agentMode` (a pane) and `agent_type` (a definition) that names a container agent.
 const CONTAINER: &str = "container";
 
-/// Where an agent runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Where an agent runs. On the wire it is `"host"` or `"container"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
 pub enum RuntimeKind {
     /// A process on this machine (`"host"`, the legacy `"standalone"`, empty or unknown).
+    #[default]
     Host,
     /// A Docker container.
     Container,

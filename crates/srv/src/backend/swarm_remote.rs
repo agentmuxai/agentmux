@@ -32,6 +32,7 @@ use std::net::IpAddr;
 use crate::backend::agent_state::AgentState;
 use crate::backend::lan::discovery::LanInstance;
 use crate::backend::reactive::registry::AgentEntry;
+use crate::backend::runtime_adapter::RuntimeKind;
 
 /// A registry entry not rewritten for this long is shown as stale. The registry
 /// heartbeat rewrites every live agent's entry every 20 s, so this is three
@@ -76,6 +77,10 @@ pub struct RemoteAgent {
     /// in here ([`fill_account_labels`]); absent otherwise. Display only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_label: Option<String>,
+    /// Where it runs, `host` or `container`, as its instance reported it (`agent_kinds`); absent when
+    /// that instance did not say (an older build). Never guessed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<RuntimeKind>,
 }
 
 /// What one channel of this machine said about its agents, by lower-cased name.
@@ -84,6 +89,7 @@ pub struct ChannelReport {
     pub status: BTreeMap<String, AgentState>,
     pub lines: BTreeMap<String, String>,
     pub providers: BTreeMap<String, String>,
+    pub kinds: BTreeMap<String, RuntimeKind>,
 }
 
 /// Each channel's report, by channel.
@@ -185,6 +191,7 @@ pub fn other_channels(
                     seat: None,
                     account: None,
                     account_label: None,
+                    runtime: report.and_then(|r| r.kinds.get(&key)).copied(),
                 }
             });
     }
@@ -240,6 +247,7 @@ fn lan_agent(p: &LanInstance, name: &str) -> RemoteAgent {
         seat: p.agent_seats.get(&key).cloned(),
         account: p.agent_accounts.get(&key).cloned(),
         account_label: None,
+        runtime: p.agent_kinds.get(&key).copied(),
     }
 }
 
@@ -433,6 +441,7 @@ pub async fn channel_statuses(
         report.status.extend(peer.status);
         report.lines.extend(peer.lines);
         report.providers.extend(peer.providers);
+        report.kinds.extend(peer.kinds);
     }
     out
 }
@@ -550,6 +559,7 @@ mod tests {
             seat: None,
             account: account.map(str::to_string),
             account_label: None,
+            runtime: None,
         }
     }
 
@@ -735,6 +745,7 @@ mod tests {
             agent_status: Default::default(),
             agent_lines: Default::default(),
             agent_providers: Default::default(),
+            agent_kinds: Default::default(),
             agent_accounts: Default::default(),
             agent_resets: Default::default(),
             agent_seats: Default::default(),
@@ -959,6 +970,7 @@ mod tests {
             status: [("korp".to_string(), AgentState::Waiting)].into_iter().collect(),
             lines: [("korp".to_string(), "Fixing the login race".to_string())].into_iter().collect(),
             providers: [("korp".to_string(), "codex".to_string())].into_iter().collect(),
+            kinds: Default::default(),
         };
         let statuses: ChannelStatuses = [("dev".to_string(), report)].into_iter().collect();
         let chans = other_channels(
@@ -1011,6 +1023,28 @@ mod tests {
                 (None, None, None)
             ]
         );
+    }
+
+    /// The Swarm and the map draw an agent as host or container: from what its instance said, and
+    /// nothing when it said nothing.
+    #[test]
+    fn remote_agents_carry_where_their_instance_says_they_run() {
+        let mut p = peer("Area54", "stable", "10.0.0.26", 29700, &["Manoz", "Opaz"], 5);
+        p.agent_kinds.insert("opaz".into(), RuntimeKind::Container);
+        let hosts = lan_hosts(&[p], &HashSet::new(), NOW);
+        let got: Vec<Option<RuntimeKind>> = hosts[0].channels[0].agents.iter().map(|a| a.runtime).collect();
+        assert_eq!(got, [None, Some(RuntimeKind::Container)]);
+        let json = serde_json::to_value(&hosts[0].channels[0].agents).unwrap();
+        assert!(json[0].get("runtime").is_none(), "{json}");
+        assert_eq!(json[1]["runtime"], "container");
+
+        // Another channel of this machine: from the same answer, over loopback.
+        let mut report = ChannelReport::default();
+        report.kinds.insert("korp".into(), RuntimeKind::Container);
+        let statuses: ChannelStatuses = [("dev".to_string(), report)].into();
+        let chans = other_channels(&[entry("Korp", "dev", 0), entry("Loap", "dev", 0)], &statuses, "stable", "", NOW);
+        let got: Vec<Option<RuntimeKind>> = chans[0].agents.iter().map(|a| a.runtime).collect();
+        assert_eq!(got, [Some(RuntimeKind::Container), None]);
     }
 
     #[test]

@@ -250,6 +250,10 @@ pub struct LanInstance {
     /// Each listed agent's provider id, a known one only (`agent_names.rs`).
     #[serde(default)]
     pub agent_providers: BTreeMap<String, String>,
+    /// Each listed agent's runtime, `host` or `container`, as the peer reported it (`agent_names.rs`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(as = "Option<BTreeMap<String, crate::backend::runtime_adapter::RuntimeKind>>", optional)]
+    pub agent_kinds: BTreeMap<String, crate::backend::runtime_adapter::RuntimeKind>,
     /// Each listed agent's account, as the peer's stable account id (`agent_names.rs`,
     /// SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md §4.4). Omitted when none has one.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -1206,7 +1210,7 @@ impl LanDiscovery {
                     agents: Vec::new(),
                     agent_status: Default::default(),
                     agent_lines: Default::default(),
-                    agent_providers: Default::default(),
+                    agent_providers: Default::default(), agent_kinds: Default::default(),
                     agent_accounts: Default::default(),
                     agent_resets: Default::default(),
                     agent_seats: Default::default(),

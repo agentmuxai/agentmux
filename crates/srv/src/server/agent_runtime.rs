@@ -39,6 +39,7 @@ use crate::backend::obj::Block;
 use crate::server::app_api::agent_attach::{self, DESIRED_RUNNING, DESIRED_STOPPED};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{COMMAND_AGENTRUNTIME_LIST, COMMAND_AGENT_START};
+use crate::backend::runtime_adapter::RuntimeKind;
 use crate::backend::storage::store::Store;
 
 use super::availability_view::{block_of_uid, status_of};
@@ -206,6 +207,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
                 .flatten();
             let (runtime_state, detail) = waiting_on_browser_request(runtime_state, detail, waiting_in.is_some());
             AgentRuntime {
+                runtime: runtime_of_agent(block.as_ref(), &d.agent_type),
                 blocked,
                 color,
                 agent_id: d.id,
@@ -221,6 +223,12 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             }
         })
         .collect()
+}
+
+/// Where an agent runs: its pane's mode is the current truth; a definition with no pane says it by its
+/// type, so a stopped agent has an answer too.
+fn runtime_of_agent(block: Option<&Block>, agent_type: &str) -> RuntimeKind {
+    block.map_or_else(|| RuntimeKind::of_agent_type(agent_type), |b| RuntimeKind::of_block_meta(&b.meta))
 }
 
 /// The agent a block belongs to, by the id its meta carries.
@@ -433,6 +441,7 @@ mod tests {
             icon: String::new(),
             color: None,
             blocked: None,
+            runtime: RuntimeKind::Host,
         }
     }
 
@@ -480,6 +489,21 @@ mod tests {
         assert_eq!(browser_flag_fix(&row("a", S::Idle), true), Some(false), "answered, or left by a stopped srv");
         assert_eq!(browser_flag_fix(&row("a", S::WaitingOnUser), true), Some(false), "a question in a turn is not a Browser request");
         assert_eq!(browser_flag_fix(&row("a", S::Working), false), None);
+    }
+
+    #[test]
+    fn an_agent_says_where_it_runs_from_its_pane_else_from_its_definition() {
+        let pane = |mode: &str| {
+            let mut meta = crate::backend::obj::MetaMapType::new();
+            meta.insert("agentMode".to_string(), serde_json::json!(mode));
+            Block { meta, ..Default::default() }
+        };
+        assert_eq!(runtime_of_agent(None, "container"), RuntimeKind::Container, "a stopped agent with no pane says it by its type");
+        assert_eq!(runtime_of_agent(None, "host"), RuntimeKind::Host);
+        assert_eq!(runtime_of_agent(Some(&pane("container")), "host"), RuntimeKind::Container, "the pane wins");
+        assert_eq!(runtime_of_agent(Some(&pane("host")), "container"), RuntimeKind::Host, "the pane wins");
+        assert_eq!(runtime_of_agent(None, "something-new"), RuntimeKind::Host, "unknown is the host");
+        assert_eq!(serde_json::to_value(row("a", AgentRuntimeState::Idle)).unwrap()["runtime"], "host");
     }
 
     #[test]
