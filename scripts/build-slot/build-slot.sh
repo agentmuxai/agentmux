@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-slot-version: 7
+# build-slot-version: 8
 # build-slot: run one heavy build or test command while holding the host-wide
 # build slot, so only one such command runs on this machine at a time.
 # Spec: docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md. AgentMux installs this file to
@@ -13,7 +13,8 @@
 # One run at a time by default; BUILD_SLOT_MAX, or a number in <locks>/build/limit, allows more
 # (a machine with the memory for two srv compiles). A slot is a directory created with mkdir (atomic). The holder refreshes a heartbeat
 # file every 20 s; a slot whose heartbeat is older than STALE_SECS belongs to a dead
-# process and is taken over. Waiters line up by ticket, oldest first.
+# process and is taken over. Waiters line up by ticket, oldest first; a waiter keeps its
+# place for as long as its process is alive, however slow the host makes its loop (see ticket_live).
 # The whole script is one function, called on the last line. Bash reads a script a piece
 # at a time, so a copy of this file replaced while a wait is still running it would break
 # that wait mid-line; a function is parsed in full before anything in it runs.
@@ -25,6 +26,8 @@ SLOT="$ROOT/slot"   # the slot this run holds (slot, slot-2, ...) once it has on
 QUEUE="$ROOT/queue"
 HISTORY="$ROOT/history.log"   # one line per run: epoch, agent, reason, waited, held, exit (tab-separated)
 STALE_SECS="${BUILD_SLOT_STALE_SECS:-90}"
+TICKET_STALE_SECS="${BUILD_SLOT_TICKET_STALE_SECS:-30}"   # a waiter touches its ticket every poll; older than this it may be gone
+TICKET_MAX_SECS="${BUILD_SLOT_TICKET_MAX_SECS:-300}"      # but a ticket untouched this long is dropped even if its pid answers
 MAX_WAIT="${BUILD_SLOT_MAX_WAIT:-3600}"
 LIMIT_FILE="$ROOT/limit"   # the number of runs allowed at once on this machine, if not 1
 POLL="${BUILD_SLOT_POLL:-3}"
@@ -74,6 +77,22 @@ slot_is_stale() { # the slot (the dir in $SLOT) exists but nobody is keeping it 
   [ "$age" -gt "$STALE_SECS" ]
 }
 
+# Whether the waiter that wrote the ticket $1 is still in the line. A waiter touches its ticket on
+# every poll, so a fresh one is live. An older one is live while its process is: on a host short of
+# memory one pass of the wait loop can take a minute, and a waiter that merely looks late must keep
+# its place (its ticket name, arrival second and pid, is its place). The age alone decides when the
+# process is not there (killed), when its pid can't be seen (a waiter in another pid space), and
+# past TICKET_MAX_SECS, in case the pid went to some other program.
+ticket_live() {
+  local t="$1" age pid
+  age=$(( $(now) - $(mtime "$t") ))
+  [ "$age" -le "$TICKET_STALE_SECS" ] && return 0
+  [ "$age" -gt "$TICKET_MAX_SECS" ] && return 1
+  pid="${t##*-}"
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null
+}
+
 status() {
   # Every slot there is room for: "slot" for the first, "slot-2", ... for the others.
   local lim i d free=0 saved="$SLOT"
@@ -96,11 +115,13 @@ status() {
   done
   SLOT="$saved"
   [ "$lim" -gt 1 ] && echo "slots: $((lim - free)) of $lim in use"
-  local n=0 t
+  local n=0 t who
   for t in "$QUEUE"/*; do
     [ -e "$t" ] || continue
-    [ $(( $(now) - $(mtime "$t") )) -gt 30 ] && continue
-    n=$((n+1)); echo "  queued #$n: $(cat "$t")"
+    ticket_live "$t" || continue
+    who=$(cat "$t" 2>/dev/null)
+    [ -n "$who" ] || who="(waiter pid ${t##*-})"   # a ticket being written
+    n=$((n+1)); echo "  queued #$n: $who"
   done
   [ "$n" -eq 0 ] && echo "  queue: empty"
   return 0
@@ -157,13 +178,21 @@ QUEUED_AT=$(now)
 TICKET="$QUEUE/$QUEUED_AT-$$"
 CMDLINE="$*"
 TOKEN="$$-$(now)-${RANDOM:-0}"   # tells our slot from one a later holder created
-printf '%s: %s\n' "$ME" "$CMDLINE" > "$TICKET"
+# The ticket is written whole and moved into place, so nobody reads it half written (the glob
+# skips the dot-file). Written again, under the same name and so in the same place in the line,
+# if another waiter's cleanup ever removed it.
+write_ticket() {
+  local tmp="$QUEUE/.$QUEUED_AT-$$.tmp"
+  { printf '%s: %s\n' "$ME" "$CMDLINE" > "$tmp"; } 2>/dev/null && mv -f "$tmp" "$TICKET" 2>/dev/null
+}
+refresh_ticket() { if [ -s "$TICKET" ]; then touch "$TICKET" 2>/dev/null; else write_ticket; fi; }
+write_ticket
 HOLDING=0
 LOGGED=0
 ACQUIRED_AT=0
 HB_PID=""
 release() {
-  rm -f "$TICKET"
+  rm -f "$TICKET" "$QUEUE/.$QUEUED_AT-$$.tmp"
   [ -n "$HB_PID" ] && kill "$HB_PID" 2>/dev/null
   # Remove the slot only if it is still ours: if our heartbeat died and a waiter
   # took the slot over, deleting it now would free it under the new holder.
@@ -185,7 +214,7 @@ first_in_line() {
   local t oldest=""
   for t in "$QUEUE"/*; do
     [ -e "$t" ] || continue
-    if [ $(( $(now) - $(mtime "$t") )) -gt 30 ] && [ "$t" != "$TICKET" ]; then rm -f "$t"; continue; fi
+    if [ "$t" != "$TICKET" ] && ! ticket_live "$t"; then rm -f "$t"; continue; fi
     oldest="$t"; break   # glob order is ticket order: epoch seconds, then pid
   done
   [ "$oldest" = "$TICKET" ]
@@ -216,7 +245,7 @@ try_slots() {
 
 waited=0; said=0; unusable=0
 while :; do
-  touch "$TICKET" 2>/dev/null
+  refresh_ticket
   if first_in_line; then
     try_slots; got=$?
     if [ "$got" -eq 0 ]; then HOLDING=1; ACQUIRED_AT=$(now); break; fi

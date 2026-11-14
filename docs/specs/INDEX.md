@@ -359,6 +359,7 @@ partial list.
 | [`SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29`](SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md) | SPEC: Floating-pane edge-resize (Win32) |
 | [`SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15`](SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15.md) | Spec: A Redock button in the floating pane's header |
 | [`SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03`](SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03.md) | Spec: Redock puts a floating pane back where it was torn from (best effort), else to the right as today |
+| [`SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16`](SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16.md) | Spec: Floating pane window controls: Redock placement and size, a real Restore when maximized, and drag-to-restore |
 | [`SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02`](SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02.md) | SPEC: `GlobalMemoryList` lists the system rows too, flagged and read-only |
 | [`SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) | SPEC: Global Memory "system" tier — an AgentMux-controlled, highest-priority entry |
 | [`SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15`](SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md) | Spec: Global Memory — unify "system" and "ordinary" into one Memory list (postmortem + refactor plan) |
@@ -390,6 +391,7 @@ partial list.
 | [`SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13`](SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md) | Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes |
 | [`SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17`](SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17.md) | SPEC: Linux Dock/Taskbar Instance Grouping Fix |
 | [`SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13`](SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) | SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection) |
+| [`SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16`](SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16.md) | Spec: Linux window controls that look like Linux |
 | [`SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24`](SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md) | SPEC — macOS browser pane: show AgentMux's right-click menu above the page |
 | [`SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24`](SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24.md) | SPEC — macOS browser pane: typing reaches the page |
 | [`SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24`](SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md) | SPEC: macOS DMG Per-Build Channel Isolation |
@@ -946,7 +948,6 @@ partial list.
 | [`SPEC_FLOATING_PANE_SOURCE_WINDOW_2026_10_13`](SPEC_FLOATING_PANE_SOURCE_WINDOW_2026_10_13.md) | Spec: "Open in Floating Pane" knows which window it came from |
 | [`SPEC_FLOATING_PANE_TEAROFF_2026_05_11`](SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) | Floating pane tear-off (subordinate window, owned by mother instance) |
 | [`SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26`](SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) | Floating pane tear-off — cross-platform recipes |
-| [`SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16`](SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16.md) | Spec: Floating pane window controls: Redock placement and size, a real Restore when maximized, and drag-to-restore |
 | [`SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20`](SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20.md) | Spec: Foreground/Background Process Abstraction for Agent-Run Commands |
 | [`SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24`](SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md) | SPEC — Global Identity, Memory, and Drone Definitions |
 | [`SPEC_GPU_PROCESS_MEMORY_2026_10_13`](SPEC_GPU_PROCESS_MEMORY_2026_10_13.md) | Spec: why the GPU process holds 394 MB in the field, and what stops it |
@@ -960,7 +961,6 @@ partial list.
 | [`SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25`](SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md) | SPEC: Linux AppImage Per-Build Channel Isolation |
 | [`SPEC_LINUX_DOCS_UPDATE_2026_06_06`](SPEC_LINUX_DOCS_UPDATE_2026_06_06.md) | SPEC — Linux documentation catch-up |
 | [`SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30`](SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md) | Linux floating-pane tear-off — implementation spec |
-| [`SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16`](SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16.md) | Spec: Linux window controls that look like Linux |
 | [`SPEC_LOCAL_BUILD_VERSIONING_2026_05_28`](SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) | SPEC: Local-build versioning — stop committing bumps for smoke builds (2026-05-28) |
 | [`SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24`](SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md) | SPEC — Long-Running Process UX: Working Stuck + Red X |
 | [`SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28`](SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md) | macOS CEF Framework Bundling for `task dev` and `task package:macos` |

@@ -888,6 +888,7 @@ impl Handler {
             delivery_tier,
             req.sig_verified,
             req.reagent_verified,
+            req.reagent_expired,
             req.lan_verified,
             req.channel_verified,
             req.wan_instance.as_ref().filter(|_| req.wan_verified == Some(true)),
@@ -903,11 +904,7 @@ impl Handler {
         // parse the JEKT block — the wrap_jekt_message output already includes
         // the source in the human-readable header so format_injected_message
         // is called with include_source=false here.
-        let final_msg = format_injected_message(
-            &wrapped,
-            req.source_agent.as_deref(),
-            false,
-        );
+        let final_msg = format_injected_message(&wrapped, req.source_agent.as_deref(), false);
 
         let delivery = deliver_steps::Delivery {
             req: &req,

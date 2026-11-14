@@ -65,6 +65,7 @@ pub(crate) mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;
 pub(crate) mod jekt_ack;
+pub(crate) mod muxbus_hooks;
 pub(crate) mod jekt_cloud;
 pub(crate) use crate::backend::jekt_seal;
 mod jekt_echo;
