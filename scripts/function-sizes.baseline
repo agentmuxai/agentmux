@@ -31,7 +31,7 @@
 417 crates/cef/src/client/crash_recovery.rs::AgentMuxHandler::on_render_process_terminated
 246 crates/cef/src/client/error_catalog.rs::describe
 139 crates/cef/src/client/handlers.rs::AgentMuxPanePermissionHandler::PermissionHandler::on_request_media_access_permission
-570 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_after_created
+567 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_after_created
 104 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_browse
 598 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_close
 167 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_popup
@@ -84,7 +84,7 @@
 130 crates/cef/src/state/mod.rs::log_host_event
 467 crates/cef/src/ui_tasks/drag.rs::Win32BeginMoveTask::Task::execute
 124 crates/cef/src/ui_tasks/drag.rs::run_macos_native_drag_loop
-787 crates/cef/src/ui_tasks/pane_geometry.rs::SetPaneBoundsViewsTask::Task::execute
+781 crates/cef/src/ui_tasks/pane_geometry.rs::SetPaneBoundsViewsTask::Task::execute
 176 crates/cef/src/ui_tasks/pane_hole_mask.rs::apply_pane_overlay_hole_mask
 293 crates/cef/src/ui_tasks/platform_macos.rs::swizzled_nsapp_send_event
 369 crates/cef/src/ui_tasks/window.rs::CloseWindowTask::Task::execute
@@ -218,6 +218,7 @@
 102 crates/srv/src/bootstrap/stores.rs::prepare_in_process
 113 crates/srv/src/bootstrap/watchers.rs::start_parent_watcher
 154 crates/srv/src/broker/state.rs::update
+106 crates/srv/src/identity/auth_dirs.rs::compute_and_ensure_account_dir
 134 crates/srv/src/identity/oauth_client.rs::start_code_flow
 125 crates/srv/src/identity/resolver/oauth_probe.rs::probe_oauth_status
 111 crates/srv/src/messaging/discord/gateway.rs::handle_dispatch
@@ -273,7 +274,6 @@
 147 crates/srv/src/server/http_shell.rs::try_attach_to_existing_shell
 146 crates/srv/src/server/http_viewer.rs::feed_stream
 133 crates/srv/src/server/http_viewer_input.rs::handle_viewer_input
-106 crates/srv/src/identity/auth_dirs.rs::compute_and_ensure_account_dir
 102 crates/srv/src/server/jekt_files.rs::receive
 104 crates/srv/src/server/jekt_hold.rs::hold_with_reason
 238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event

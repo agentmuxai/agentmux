@@ -323,10 +323,7 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
                 .browser_pane_overlays
                 .lock()
                 .iter()
-                .find(|(lbl, _)| {
-                    // label format: browser-pane-<block_id>-<seq>
-                    lbl.starts_with(&format!("browser-pane-{}-", block_id))
-                })
+                .find(|(lbl, _)| crate::browser_pane::label::is_pane_label_of(lbl, &block_id))
                 .map(|(_, (win_lbl, _))| win_lbl.clone());
 
             if let Some(win_label) = parent_window_label {
@@ -383,11 +380,7 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str, browser_
     // Step 2: drain the reducer's pane entry (idempotent).
     state.browser_panes.drain_closed_label(state, label);
 
-    // Labels are `browser-pane-<uuid>-<seq>`; strip prefix + trailing `-<seq>`
-    // to recover the block_id.
-    let block_id = label
-        .strip_prefix("browser-pane-")
-        .and_then(|rest| rest.rfind('-').map(|dash| &rest[..dash]));
+    let block_id = crate::browser_pane::label::pane_block_id(label);
 
     // Cross-platform: drop the stashed context-menu frame
     // (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) — also holds a
@@ -681,9 +674,7 @@ pub(crate) fn resolve_pane_label_and_block(state: &Arc<AppState>, browser: &Brow
             b_clone.is_same(Some(&mut browser_clone)) != 0
         })
         .and_then(|(label, _)| {
-            let rest = label.strip_prefix("browser-pane-")?;
-            let dash = rest.rfind('-')?;
-            let block_id = rest[..dash].to_string();
+            let block_id = crate::browser_pane::label::pane_block_id(&label)?.to_string();
             Some((label, block_id))
         })
 }

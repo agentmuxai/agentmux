@@ -163,7 +163,7 @@ pub fn close_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<s
     // already-removed labels, so an extra report (if on_before_close DOES fire,
     // e.g. a real destroy) is harmless. Skip browser-pane-* — same gate as
     // on_before_close (client/mod.rs).
-    if !label.starts_with("browser-pane-") {
+    if !crate::browser_pane::label::is_pane_label(label) {
         crate::launcher_ipc::report_window_closed(label.to_string());
     }
 

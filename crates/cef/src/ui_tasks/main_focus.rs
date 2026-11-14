@@ -22,7 +22,7 @@ pub(super) fn pane_outer_hwnds(state: &Arc<AppState>) -> Vec<*mut std::ffi::c_vo
     let mut hwnds: Vec<*mut std::ffi::c_void> = state
         .list_browsers()
         .into_iter()
-        .filter(|(k, _)| k.starts_with("browser-pane-"))
+        .filter(|(k, _)| crate::browser_pane::label::is_pane_label(k))
         .filter_map(|(_, b)| {
             b.host().and_then(|h| {
                 let wh = h.window_handle();

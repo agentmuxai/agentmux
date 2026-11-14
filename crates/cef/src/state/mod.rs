@@ -1226,7 +1226,7 @@ impl AppState {
             .browsers
             .keys()
             .filter(|k| {
-                !k.starts_with("browser-pane-")
+                !crate::browser_pane::label::is_pane_label(k)
                     && !k.starts_with("floating-pool-")
                     && !pool_inventory.contains(k.as_str())
             })

@@ -509,7 +509,7 @@ pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str)
     // just wasted launcher-side saga slots. Same gate as on_before_close's:
     // skip browser-pane-* (this function isn't reached for those anyway,
     // but mirrors the source of truth exactly rather than assuming).
-    if !label.starts_with("browser-pane-") {
+    if !crate::browser_pane::label::is_pane_label(label) {
         let was_last = out.request_drain.is_some();
         crate::launcher_ipc::report_pool_drain_decision(label.to_string(), was_last);
     }
