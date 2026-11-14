@@ -298,7 +298,7 @@
 
 .agent-activity-stop,
 .agent-activity-dismiss {
-    // Kit IconButtons (tone danger / quiet); only their place in the row is set here.
+    // A kit IconButton (Stop, tone danger) and a kit CloseButton (Dismiss); only their place in the row is set here.
     flex: 0 0 auto;
     margin-left: auto;
     align-self: stretch;
