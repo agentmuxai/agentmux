@@ -56,6 +56,8 @@ pub mod event_source {
 /// The most entries an event trigger's filter holds, and the longest a filter key or text value may be.
 pub const MAX_EVENT_FILTER: usize = 8;
 pub const MAX_EVENT_FILTER_TEXT: usize = 200;
+/// The longest an event's run may be held back by `delay`: a week.
+pub const MAX_EVENT_DELAY_MINUTES: u32 = 7 * 24 * 60;
 
 /// Action kinds (`action.kind`).
 pub mod action_kind {
@@ -128,6 +130,14 @@ pub struct EventTrigger {
     pub source: String,
     #[serde(default)]
     pub filter: Map<String, Value>,
+    /// Minutes between the event and the run: the run is a `scheduled` row due at event time + delay, so a restart
+    /// does not lose it. 0 starts the run at once.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub delay: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 impl EventTrigger {
@@ -135,6 +145,9 @@ impl EventTrigger {
     pub fn validate(&self) -> Result<(), String> {
         if !event_source::ALL.contains(&self.source.as_str()) {
             return Err(format!("trigger: event source {:?} is not one of {}", self.source, event_source::ALL.join(", ")));
+        }
+        if self.delay > MAX_EVENT_DELAY_MINUTES {
+            return Err(format!("trigger: delay is at most {MAX_EVENT_DELAY_MINUTES} minutes (a week)"));
         }
         if self.filter.len() > MAX_EVENT_FILTER {
             return Err(format!("trigger: an event filter has at most {MAX_EVENT_FILTER} entries"));
@@ -339,7 +352,7 @@ fn trigger_keys(kind: &str) -> &'static [&'static str] {
         trigger_kind::CRON => &["kind", "cron", "tz"],
         trigger_kind::EVERY => &["kind", "seconds"],
         trigger_kind::ONCE => &["kind", "at"],
-        trigger_kind::EVENT => &["kind", "source", "filter"],
+        trigger_kind::EVENT => &["kind", "source", "filter", "delay"],
         _ => &["kind"],
     }
 }

@@ -479,12 +479,11 @@ impl CronScheduler {
         }
         let Some(runs) = self.runs().cloned() else { return none };
         let admitted = {
-            let (runs, owned, id, source) = (runs.clone(), job.clone(), event.id.clone(), event.source.clone());
-            tokio::task::spawn_blocking(move || runs.admit_event(&owned, &id, &source)).await.unwrap_or(Admission::Unrecorded)
+            let (runs, owned, id, source, input) = (runs.clone(), job.clone(), event.id.clone(), event.source.clone(), event.input.clone());
+            tokio::task::spawn_blocking(move || runs.admit_event(&owned, &id, &source, &input)).await.unwrap_or(Admission::Unrecorded)
         };
         match admitted {
             Admission::Run(run_id) => {
-                runs.put_event_input(&run_id, event.input);
                 let fired = self.start_run(job, Some(run_id), true, None).await;
                 if matches!(fired.outcome, Some(FireOutcome::Delivered { .. })) {
                     self.stop_at_max_fires(&job.id);
@@ -492,7 +491,6 @@ impl CronScheduler {
                 fired
             }
             Admission::Waiting(run_id, why) => {
-                runs.put_event_input(&run_id, event.input);
                 self.publish_changed();
                 Fired { run_id: Some(run_id), outcome: None, waiting: Some(why) }
             }

@@ -136,6 +136,8 @@ pub mod reason {
     pub const GLOBAL_LIMIT: &str = "global_limit";
     /// An infrastructure failure's retry, waiting out its backoff.
     pub const RETRY_WAIT: &str = "retry_wait";
+    /// An event's run, waiting out the trigger's `delay` (`links.due_at_ms` is when it may start).
+    pub const DELAY_WAIT: &str = "delay_wait";
     /// The run was stopped at the job's `timeout_minutes`.
     pub const TIMEOUT: &str = "timeout";
     /// The job's spend today, with the run's own cap, would pass its daily
@@ -150,7 +152,7 @@ pub mod reason {
     /// The skips a cap makes: the once-a-day alert and "over cap today".
     pub const CAPS: [&str; 3] = [JOB_CAP, ACCOUNT_CAP, MESSAGE_CAP];
     /// The reasons a `scheduled` run waits to start with.
-    pub const WAITING: [&str; 4] = [OVERLAP, GROUP_BUSY, GLOBAL_LIMIT, RETRY_WAIT];
+    pub const WAITING: [&str; 5] = [OVERLAP, GROUP_BUSY, GLOBAL_LIMIT, RETRY_WAIT, DELAY_WAIT];
 }
 
 /// Infrastructure status (§3.1; the ones P1 writes).

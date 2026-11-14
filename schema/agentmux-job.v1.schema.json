@@ -89,6 +89,12 @@
               "maxProperties": 8,
               "additionalProperties": { "type": ["string", "number", "boolean"], "maxLength": 200 },
               "description": "Plain values the source matches an event against; each source says which keys it reads. Never an expression."
+            },
+            "delay": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10080,
+              "description": "Minutes between the event and the run (at most a week). The run is a scheduled row due at event time plus the delay, so a restart does not lose it. 0 starts it at once."
             }
           },
           "required": ["kind", "source"],
