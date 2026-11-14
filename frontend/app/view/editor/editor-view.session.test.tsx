@@ -927,6 +927,25 @@ describe("renaming a file from its tab", () => {
         expect(tabEl(v, id).classList.contains("editor-tab--saveas")).toBe(true);
     });
 
+    it("the tab's path tooltip is put away while its name box is open, so it can't sit on the line under the box", async () => {
+        const v = await mountView();
+        const id = await open(v.model, "/home/u/a.ts");
+        const tip = () => document.body.querySelector("[data-pane-overlay]");
+        // The pointer is on the tab, as it is after a double-click (a menu test above left the button held).
+        fireEvent.pointerUp(window);
+        fireEvent.mouseEnter(tabEl(v, id).closest(".pane-tab-tip")!);
+        expect(tip()?.textContent).toBe("/home/u/a.ts");
+        fireEvent.dblClick(tabEl(v, id));
+        await settle();
+        expect(box(v)).not.toBeNull();
+        expect(tip()).toBeNull();
+        // It is back when the box closes with the pointer still there.
+        fireEvent.keyDown(box(v)!, { key: "Escape" });
+        await settle();
+        expect(box(v)).toBeNull();
+        expect(tip()?.textContent).toBe("/home/u/a.ts");
+    });
+
     it("Enter renames the file under the same view: the text, the unsaved mark and the undo history stay, the language and the language server follow", async () => {
         const v = await mountView();
         const id = await open(v.model, "/home/u/a.ts");

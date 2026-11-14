@@ -119,6 +119,8 @@ export interface PaneTabStripProps<T> {
     getTooltipSeat?: (tab: T) => string | undefined;
     /** An agent tab's harness and the model answering, as a line of its tooltip. */
     getTooltipModel?: (tab: T) => string | undefined;
+    /** No tooltip for this tab now (its label is a text box, with its own line under it). */
+    getTooltipOff?: (tab: T) => boolean;
     /** "Attention" tabs (unsaved changes, needs-review, …) always show
      *  their close × instead of only on hover. */
     getAttention?: (tab: T) => boolean;
@@ -344,6 +346,7 @@ function StripTabs<T>(props: { strip: PaneTabStripProps<T> }): JSX.Element {
                     getTooltipDetail={p.getTooltipDetail}
                     getTooltipSeat={p.getTooltipSeat}
                     getTooltipModel={p.getTooltipModel}
+                    getTooltipOff={p.getTooltipOff}
                     getAttention={p.getAttention}
                     getTabClass={p.getTabClass}
                     getColor={p.getColor}
@@ -464,6 +467,7 @@ interface PaneTabStripItemProps<T> {
     getTooltipDetail?: (tab: T) => string | undefined;
     getTooltipSeat?: (tab: T) => string | undefined;
     getTooltipModel?: (tab: T) => string | undefined;
+    getTooltipOff?: (tab: T) => boolean;
     getAttention?: (tab: T) => boolean;
     getTabClass?: (tab: T) => Record<string, boolean>;
     getColor?: (tab: T) => PaneTabColors | undefined;
@@ -659,6 +663,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         <Tooltip
             placement="bottom"
             divClassName="pane-tab-tip"
+            disable={props.getTooltipOff?.(props.tab) ?? false}
             immediate={!!(props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab) || props.getTooltipModel?.(props.tab) || progressInfo())}
             content={pillTooltipContent(props, progressInfo)}
         >

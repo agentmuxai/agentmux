@@ -350,6 +350,8 @@ function EditorTabBar(props: {
                     </Show>
                 }
                 tooltipOf={(t) => t.payload.filePath}
+                // Not while one of its boxes is open: the path would sit on the line under the box.
+                tooltipOff={(t) => saveAs.saveAsTabId() === t.id || naming(t.id)}
                 addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}
                 // Not while one of its boxes is open: the drag would take
                 // the box's text selection.

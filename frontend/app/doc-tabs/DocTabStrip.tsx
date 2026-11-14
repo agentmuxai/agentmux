@@ -64,6 +64,8 @@ export function DocTabStrip<P>(props: {
     ctl: DocTabsModel<P>;
     /** Tooltip per tab (a full path); the title when omitted. */
     tooltipOf?: (tab: DocTab<P>) => string;
+    /** No tooltip for this tab now: its label is a text box (`renderLabel`). */
+    tooltipOff?: (tab: DocTab<P>) => boolean;
     addTitle?: string;
     /** The pane type ("media"): tabs move only between panes of one type. */
     docType: string;
@@ -104,6 +106,7 @@ export function DocTabStrip<P>(props: {
                             const base = props.tooltipOf?.(t) ?? t.title;
                             return t.preview ? `${base} (preview, double-click to keep)` : base;
                         }}
+                        getTooltipOff={props.tooltipOff}
                         getAttention={(t) => !!t.dirty}
                         getTabClass={(t) => ({
                             "doc-tab--preview": t.preview,
