@@ -52,6 +52,7 @@ pub mod bundle_use;
 pub mod bundle_widgets;
 pub mod bundle_validate;
 pub mod background_task_feed;
+pub mod background_task_sweep;
 pub mod desktop_gate;
 pub mod dock_snapshot;
 pub mod fleet_feed;

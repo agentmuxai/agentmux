@@ -133,6 +133,25 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// End a task that is still `running`, leaving a row that already ended as it is. For what has to
+    /// decide from a list it read earlier (the liveness sweep): a real `done` or `error` that arrived
+    /// since must not be overwritten. `false` when the row is gone or was no longer running.
+    pub fn background_task_end_if_running(
+        &self,
+        id: &str,
+        status: BackgroundTaskStatus,
+        ended_at_ms: i64,
+    ) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_background_tasks
+             SET status = ?1, ended_at_ms = ?2, last_seen_ms = ?2
+             WHERE id = ?3 AND status = 'running'",
+            params![status.as_str(), ended_at_ms, id],
+        )?;
+        Ok(rows > 0)
+    }
+
     pub fn background_task_get(&self, id: &str) -> Result<Option<BackgroundTask>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM db_background_tasks WHERE id = ?1"))?;
@@ -259,6 +278,21 @@ mod tests {
         let task = store.background_task_get("t1").unwrap().unwrap();
         assert_eq!(task.status, BackgroundTaskStatus::Done);
         assert_eq!(task.last_seen_ms, 2000);
+    }
+
+    #[test]
+    fn end_if_running_ends_a_running_row_and_leaves_an_ended_one_alone() {
+        let store = object_store();
+        store.background_task_observe("t1", "block-a", "task dev", 1000, 1000).unwrap();
+        assert!(store.background_task_end_if_running("t1", BackgroundTaskStatus::Stopped, 4000).unwrap());
+        let task = store.background_task_get("t1").unwrap().unwrap();
+        assert_eq!((task.status, task.ended_at_ms), (BackgroundTaskStatus::Stopped, Some(4000)));
+
+        store.background_task_observe("t2", "block-a", "build", 1000, 1000).unwrap();
+        store.background_task_complete("t2", BackgroundTaskStatus::Done, 2000).unwrap();
+        assert!(!store.background_task_end_if_running("t2", BackgroundTaskStatus::Stopped, 9000).unwrap());
+        assert_eq!(store.background_task_get("t2").unwrap().unwrap().status, BackgroundTaskStatus::Done);
+        assert!(!store.background_task_end_if_running("missing", BackgroundTaskStatus::Stopped, 9000).unwrap());
     }
 
     #[test]
