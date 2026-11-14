@@ -16,7 +16,7 @@ fn review() -> Value {
 }
 
 fn accepted(flow: &Value) -> Option<Accepted> {
-    accept(Some(flow), &notice("inj-1", TEXT, true), 7)
+    accept_one(Some(flow), &notice("inj-1", TEXT, true), 7)
 }
 
 /// `review()` with `field` set to `value`, or removed when `value` is null.
@@ -117,7 +117,7 @@ fn a_head_is_seven_to_forty_hex_characters_kept_to_twelve_and_a_bad_one_drops_th
 
 #[test]
 fn the_pr_must_be_the_one_in_the_first_line_of_the_signed_text() {
-    let ok = |text: &str| accept(Some(&review()), &notice("inj-1", text, true), 7).is_some();
+    let ok = |text: &str| accept_one(Some(&review()), &notice("inj-1", text, true), 7).is_some();
     assert!(ok("[review] PR #64: a title"));
     assert!(ok("PR #64"), "the number may end the line");
     assert!(!ok("[review] PR #65: a title"), "another PR");
@@ -130,17 +130,17 @@ fn the_pr_must_be_the_one_in_the_first_line_of_the_signed_text() {
 
 #[test]
 fn a_notice_that_is_not_genuine_and_fresh_makes_no_event() {
-    assert!(accept(Some(&review()), &notice("inj-1", TEXT, false), 7).is_none());
+    assert!(accept_one(Some(&review()), &notice("inj-1", TEXT, false), 7).is_none());
 }
 
 #[test]
 fn a_notice_with_no_object_or_a_non_object_or_no_id_or_no_agent_makes_no_event() {
-    assert!(accept(None, &notice("inj-1", TEXT, true), 7).is_none());
+    assert!(accept_one(None, &notice("inj-1", TEXT, true), 7).is_none());
     for flow in [json!(null), json!("review"), json!([1]), json!(3)] {
-        assert!(accept(Some(&flow), &notice("inj-1", TEXT, true), 7).is_none(), "{flow}");
+        assert!(accept_one(Some(&flow), &notice("inj-1", TEXT, true), 7).is_none(), "{flow}");
     }
-    assert!(accept(Some(&review()), &notice("", TEXT, true), 7).is_none());
-    assert!(accept(Some(&review()), &Notice { id: "inj-1", agent: "", text: TEXT, genuine: true }, 7).is_none());
+    assert!(accept_one(Some(&review()), &notice("", TEXT, true), 7).is_none());
+    assert!(accept_one(Some(&review()), &Notice { id: "inj-1", agent: "", text: TEXT, genuine: true }, 7).is_none());
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn a_field_the_app_does_not_know_is_ignored_and_never_reaches_the_event() {
 
 #[test]
 fn a_repeated_id_is_the_same_event_and_the_list_is_bounded() {
-    let event = |id: &str, at_ms: u64| match accept(Some(&review()), &notice(id, TEXT, true), at_ms) {
+    let event = |id: &str, at_ms: u64| match accept_one(Some(&review()), &notice(id, TEXT, true), at_ms) {
         Some(Accepted::Review(e)) => Accepted::Review(e),
         _ => panic!("no event"),
     };
@@ -181,8 +181,8 @@ fn the_bot_state_is_the_newest_accepted_notice_of_any_kind() {
     let mut recent = Recent::default();
     assert_eq!(recent.snapshot().bot.last_notice_at_ms, None);
     let merge = json!({ "kind": "merge", "repo_id": 5, "pr": 64, "state": "merged" });
-    recent.keep(&accept(Some(&merge), &notice("m-1", TEXT, true), 20).unwrap());
-    recent.keep(&accept(Some(&review()), &notice("m-2", TEXT, true), 10).unwrap());
+    recent.keep(&accept_one(Some(&merge), &notice("m-1", TEXT, true), 20).unwrap());
+    recent.keep(&accept_one(Some(&review()), &notice("m-2", TEXT, true), 10).unwrap());
     assert_eq!(recent.snapshot().bot.last_notice_at_ms, Some(20));
     assert_eq!(serde_json::to_value(recent.snapshot().bot).unwrap(), json!({ "last_notice_at_ms": 20 }));
 }
@@ -204,7 +204,7 @@ fn each_kind_is_published_as_its_own_event_once() {
     let flow = Flow { broker, recent: Mutex::default() };
     let of = |kind: &str, state: &str, id: &str| {
         let obj = json!({ "kind": kind, "repo_id": 5, "pr": 64, "state": state, "by": "bot" });
-        accept(Some(&obj), &notice(id, TEXT, true), 9).unwrap()
+        accept_one(Some(&obj), &notice(id, TEXT, true), 9).unwrap()
     };
     flow.record(&of("review", "approved", "m-1"));
     flow.record(&of("checks", "passing", "m-2"));
@@ -215,4 +215,33 @@ fn each_kind_is_published_as_its_own_event_once() {
     assert_eq!(names, ["review-flow", "checks-flow", "merge-flow"]);
     assert_eq!(published[0].1.as_ref().unwrap()["pr"]["number"], 64);
     assert_eq!(flow.recent.lock().unwrap().snapshot().merge.len(), 1);
+}
+
+#[test]
+fn a_list_makes_an_event_for_each_valid_object_and_at_most_three() {
+    let checks = json!({ "kind": "checks", "repo_id": 1234, "pr": 64, "state": "passing", "head": "abcdef0" });
+    let n = notice("inj-1", TEXT, true);
+    let two = accept(Some(&json!([review(), checks])), &n, 7);
+    assert_eq!(two.len(), 2);
+    assert!(matches!(two[0], Accepted::Review(_)) && matches!(two[1], Accepted::Checks(_)));
+    // One bad object does not spoil the other; one for another PR is not drawn.
+    let other_pr = with("pr", json!(65));
+    let mixed = accept(Some(&json!([with("state", json!("Bad")), checks, other_pr])), &n, 7);
+    assert_eq!(mixed.len(), 1);
+    // A single object is a list of one, and the list is bounded.
+    assert_eq!(accept(Some(&review()), &n, 7).len(), 1);
+    assert_eq!(accept(Some(&json!([review(), review(), review(), review()])), &n, 7).len(), OBJECTS_MAX);
+    assert!(accept(Some(&json!([])), &n, 7).is_empty());
+    assert!(accept(Some(&json!([review()])), &notice("inj-1", TEXT, false), 7).is_empty(), "a notice that is not genuine shows nothing");
+}
+
+#[test]
+fn the_events_of_one_notice_share_its_id_in_their_own_lists() {
+    let checks = json!({ "kind": "checks", "repo_id": 1234, "pr": 64, "state": "passing" });
+    let mut recent = Recent::default();
+    for accepted in accept(Some(&json!([review(), checks])), &notice("inj-1", TEXT, true), 7) {
+        assert!(recent.keep(&accepted));
+    }
+    let snapshot = recent.snapshot();
+    assert_eq!((snapshot.review.len(), snapshot.checks.len()), (1, 1));
 }

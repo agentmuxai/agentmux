@@ -83,7 +83,8 @@ pub(super) struct PendingInj {
     jekt_tier: Option<String>,
     // What a review, CI or merge notice is, as the relay sends it beside the text (spec
     // SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14.md). Not signed: kept as it came so a shape this build does
-    // not know cannot fail the pull, and read by `backend::pr_flow`, which applies it only with a verified notice.
+    // not know cannot fail the pull, and read by `backend::pr_flow` (one object, or a short list), which applies it only
+    // with a verified notice.
     #[serde(default)]
     flow: Option<serde_json::Value>,
 }
@@ -201,7 +202,7 @@ pub(super) async fn claim_and_deliver(
         if hooks.hold_wan_for_unavailable(mstore, handler, &req) || hooks.hold_relayed(&req).await {
             note_flow(&req, MessageFlowOutcome::Held);
             delivered_count += 1;
-            steps::record_delivered(&checked, pr_flow.as_ref());
+            steps::record_delivered(&checked, &pr_flow);
             continue;
         }
         // W3-S §2.5: only now, after it landed, is this signature "seen" —
@@ -209,7 +210,7 @@ pub(super) async fn claim_and_deliver(
         // a replay.
         if inject_or_release(base, http, &agent_token, agent_id, inj, &delivered_at, handler, req).await {
             delivered_count += 1;
-            steps::record_delivered(&checked, pr_flow.as_ref());
+            steps::record_delivered(&checked, &pr_flow);
         }
     }
 

@@ -188,12 +188,25 @@ fn pr_in_first_line(text: &str) -> Option<u64> {
     rest[..end].parse().ok()
 }
 
-/// The event `flow` makes for `notice`, at `at_ms`, or `None`: the notice carries no object, the notice is not
-/// genuine and fresh, the object is malformed in any field, or its PR is not the one the signed text names.
+/// The most objects one notice may carry: a "ready to merge" notice is both an approval and green checks.
+const OBJECTS_MAX: usize = 3;
+
+/// The events `flow` makes for `notice`, at `at_ms`: `flow` is one object, or a list of up to [`OBJECTS_MAX`]
+/// (the rest are ignored), each judged on its own by [`accept_one`]. None for a notice that has none, is not
+/// genuine and fresh, or whose objects are all malformed.
+pub fn accept(flow: Option<&Value>, notice: &Notice<'_>, at_ms: u64) -> Vec<Accepted> {
+    match flow {
+        Some(Value::Array(list)) => list.iter().take(OBJECTS_MAX).filter_map(|one| accept_one(Some(one), notice, at_ms)).collect(),
+        other => accept_one(other, notice, at_ms).into_iter().collect(),
+    }
+}
+
+/// The event one `flow` object makes for `notice`, at `at_ms`, or `None`: the notice carries no object, the notice
+/// is not genuine and fresh, the object is malformed in any field, or its PR is not the one the signed text names.
 ///
 /// The last check ties the unsigned object to the signed message: a wording change that moves the PR number
 /// out of the first line fails closed (no event) instead of drawing a wrong line.
-pub fn accept(flow: Option<&Value>, notice: &Notice<'_>, at_ms: u64) -> Option<Accepted> {
+fn accept_one(flow: Option<&Value>, notice: &Notice<'_>, at_ms: u64) -> Option<Accepted> {
     let flow = flow?.as_object().filter(|_| notice.genuine && !notice.id.is_empty() && !notice.agent.is_empty())?;
     let pr = PrRef { repo_id: positive(flow.get("repo_id")?)?, number: positive(flow.get("pr")?)? };
     if pr_in_first_line(notice.text) != Some(pr.number) {
@@ -290,8 +303,13 @@ pub fn note(accepted: &Accepted) {
 
 /// The event `flow` makes for a notice delivered now, if any, to be passed to [`note`] once the notice is
 /// accepted. See [`accept`].
-pub fn accept_now(flow: Option<&Value>, notice: &Notice<'_>) -> Option<Accepted> {
+pub fn accept_now(flow: Option<&Value>, notice: &Notice<'_>) -> Vec<Accepted> {
     accept(flow, notice, agentmux_common::time::now_ms() as u64)
+}
+
+/// [`note`] for each of `accepted`.
+pub fn note_all(accepted: &[Accepted]) {
+    accepted.iter().for_each(note);
 }
 
 /// The recent events, oldest first.

@@ -385,21 +385,19 @@ pub(super) fn is_repeat(inj: &PendingInj, agent_id: &str, checked: &Checked) -> 
 
 /// The review, checks or merge event `inj` makes once it is accepted (`backend::pr_flow`): only when its
 /// signature verified under the trusted key and is fresh, and it was pulled for the agent it is delivered to.
-pub(super) fn pr_flow(inj: &PendingInj, checked: &Checked, req: &InjectionRequest) -> Option<crate::backend::pr_flow::Accepted> {
+pub(super) fn pr_flow(inj: &PendingInj, checked: &Checked, req: &InjectionRequest) -> Vec<crate::backend::pr_flow::Accepted> {
     pr_flow_of(inj, checked.reagent_verified == Some(true), &req.target_agent)
 }
 
 /// [`pr_flow`] for a notice whose verdict is already read as `genuine`.
-fn pr_flow_of(inj: &PendingInj, genuine: bool, agent: &str) -> Option<crate::backend::pr_flow::Accepted> {
+fn pr_flow_of(inj: &PendingInj, genuine: bool, agent: &str) -> Vec<crate::backend::pr_flow::Accepted> {
     let notice = crate::backend::pr_flow::Notice { id: &inj.id, agent, text: &inj.message, genuine };
     crate::backend::pr_flow::accept_now(inj.flow.as_ref(), &notice)
 }
 
 /// Note a signature as seen, and the PR event the notice made, once its message is delivered.
-pub(super) fn record_delivered(checked: &Checked, pr_flow: Option<&crate::backend::pr_flow::Accepted>) {
-    if let Some(accepted) = pr_flow {
-        crate::backend::pr_flow::note(accepted);
-    }
+pub(super) fn record_delivered(checked: &Checked, pr_flow: &[crate::backend::pr_flow::Accepted]) {
+    crate::backend::pr_flow::note_all(pr_flow);
     if let Some((msg_id, agent, inj_id)) = &checked.reagent_delivery {
         reagent_age::record_delivered(msg_id, agent, inj_id, now_unix_secs());
     }
@@ -508,17 +506,17 @@ mod tests {
         let text = "[ci failed] PR #64: a title";
         // The pull still parses when the object is a shape this build does not know.
         for odd in [serde_json::json!("x"), serde_json::json!([1, 2]), serde_json::json!(null), serde_json::json!({ "kind": 3 })] {
-            assert!(pr_flow_of(&flow_notice(text, odd), true, "lazo").is_none());
+            assert!(pr_flow_of(&flow_notice(text, odd), true, "lazo").is_empty());
         }
-        assert!(pr_flow_of(&flow_notice(text, object.clone()), true, "lazo").is_some());
+        assert_eq!(pr_flow_of(&flow_notice(text, object.clone()), true, "lazo").len(), 1);
         // A forged, stale or unsigned notice (not `Some(true)`) shows nothing.
-        assert!(pr_flow_of(&flow_notice(text, object.clone()), false, "lazo").is_none());
+        assert!(pr_flow_of(&flow_notice(text, object.clone()), false, "lazo").is_empty());
         // Another PR's number in the signed text, or none in its first line: nothing.
-        assert!(pr_flow_of(&flow_notice("[ci failed] PR #65: a title", object.clone()), true, "lazo").is_none());
-        assert!(pr_flow_of(&flow_notice("hello", object), true, "lazo").is_none());
+        assert!(pr_flow_of(&flow_notice("[ci failed] PR #65: a title", object.clone()), true, "lazo").is_empty());
+        assert!(pr_flow_of(&flow_notice("hello", object), true, "lazo").is_empty());
         // A row with no object at all (an older relay, or a notice with no state) is an ordinary notice.
         let plain: PendingInj = serde_json::from_value(serde_json::json!({ "id": "inj-1", "message": text })).unwrap();
-        assert!(plain.flow.is_none() && pr_flow_of(&plain, true, "lazo").is_none());
+        assert!(plain.flow.is_none() && pr_flow_of(&plain, true, "lazo").is_empty());
     }
 
     #[test]
