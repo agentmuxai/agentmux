@@ -55,6 +55,8 @@ pub mod srv_binary;
 pub mod srv_estart_wait;
 pub mod srv_stderr;
 pub mod time;
+#[cfg(feature = "tls-provider")]
+pub mod tls_provider;
 pub mod tokens;
 pub mod toolchain_path;
 pub mod update_manifest;

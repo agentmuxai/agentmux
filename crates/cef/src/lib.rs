@@ -13,6 +13,8 @@
 
 mod app;
 mod dev_home_check;
+#[cfg(test)]
+mod tls_test_init;
 mod background_audit;
 mod start_hidden;
 mod browser_api;
@@ -202,6 +204,7 @@ mod launcher_parent_tests {
 /// `null_mut()` on all other platforms / sandbox-off builds.
 pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     agentmux_common::secret_env::stash_startup_secrets(); // first: no child inherits them
+    agentmux_common::tls_provider::install_ring_provider(); // reqwest 0.13 builds no client without it
     // Internal self-probe mode (Linux userns-sandbox detection) — must be
     // the very first check in this function, before anything else: a
     // probe-mode process does nothing but this one syscall and exits, so

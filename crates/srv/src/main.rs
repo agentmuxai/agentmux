@@ -40,10 +40,14 @@ mod test_support;
 
 use server::build_routers;
 
+#[cfg(test)]
+mod tls_test_init;
+
 fn main() {
     // Before anything is spawned or any thread exists: the launcher's secrets leave
     // the environment, so no child inherits them and /proc/<pid>/environ shows none.
     agentmux_common::secret_env::stash_startup_secrets();
+    agentmux_common::tls_provider::install_ring_provider(); // reqwest 0.13 builds no client without it
     // A bare environment has no SystemDrive, and the Windows shell then makes a
     // folder named "%SystemDrive%" in the current directory (#2524).
     system_drive::ensure();
