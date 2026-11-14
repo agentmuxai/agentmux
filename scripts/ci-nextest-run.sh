@@ -41,8 +41,17 @@
 #      under GAP_MEM_MB free counts as three strikes at once: the sampler found it was starved, which is the stall.
 #      Healthy runs never leave more than 8 seconds between samples. The trace says when it was starved.
 #
-# CI_ATTEMPT_CMD replaces the cargo commands, CI_MONITOR=0 turns the trace and watchdog off: both are for
-# scripts/ci-nextest-run.test.sh.
+#   6. The attempt runs in its own cgroup with a memory ceiling (CI_MEM_MAX, 14 GB of the runner's 15.6, and CI_SWAP_MAX,
+#      7 GB of swap): a build that wants more pages inside the ceiling, or is killed by the kernel when it passes it, and
+#      the rest of the machine (the runner's agent, the sampler, the step's own timeout) keeps its memory and keeps
+#      answering. That is the cut that does not depend on guessing a threshold: the freeze needs the whole machine to be
+#      short of memory. It needs sudo and systemd (the runner has both); when either is missing the step says so and runs
+#      without the ceiling (CI_CEILING=0 turns it off). A process the ceiling kills is reported by the sampler and
+#      counts as a stall, so the attempt is retried once. The trace lines gain `scope=` (the attempt's memory) and
+#      `oom_kill=` (what the kernel killed in it).
+#
+# CI_ATTEMPT_CMD replaces the cargo commands, CI_MONITOR=0 turns the trace and watchdog off, CI_CEILING=0 turns the
+# ceiling off: all three are for scripts/ci-nextest-run.test.sh.
 
 set -uo pipefail
 
@@ -51,6 +60,10 @@ TRACE="${CI_TRACE_FILE:-${RUNNER_TEMP:-/tmp}/resource-trace.log}"
 BUILD_LOG="${CI_BUILD_LOG:-${RUNNER_TEMP:-/tmp}/nextest-build.log}"
 FIRED="$TRACE.watchdog"
 CARGO_JOBS="${CI_CARGO_JOBS:-2}"
+CGROUP_ROOT="${CI_CGROUP_ROOT:-/sys/fs/cgroup}"
+CONFINE_BASE=()
+CEILING_RAM="${CI_MEM_MAX:-14G}"
+CEILING_SWAP="${CI_SWAP_MAX:-7G}"
 GAP_SECONDS=20
 GAP_MEM_MB=2048
 CRATES="-p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats"
@@ -122,6 +135,21 @@ top_process() {
     done
 }
 
+# The attempt's cgroup: the attempt writes its own path to $TRACE.cgroup when it starts. Sets SCOPE_FIELDS (" scope=…MB
+# oom_kill=N", or nothing before the first attempt or once its cgroup is gone) and SCOPE_OOM, the kernel's count of
+# processes it killed there.
+read_scope() {
+    local path cur key val
+    SCOPE_FIELDS="" SCOPE_OOM=0
+    [ -r "$TRACE.cgroup" ] || return 0
+    read -r path < "$TRACE.cgroup" || return 0
+    { read -r cur; } 2>/dev/null < "$CGROUP_ROOT$path/memory.current" || return 0
+    while read -r key val; do
+        [ "$key" = oom_kill ] && SCOPE_OOM=$val
+    done 2>/dev/null < "$CGROUP_ROOT$path/memory.events"
+    SCOPE_FIELDS=" scope=$((cur / 1048576))MB oom_kill=$SCOPE_OOM"
+}
+
 # Sets SAMPLE: one trace line. `demand` is memory used plus swap used: what the build wants, past what the machine has.
 sample() {
     local now
@@ -129,7 +157,8 @@ sample() {
     read_mem
     memory_psi
     top_process
-    SAMPLE="[resources] $now mem_avail=${MEM_AVAIL_MB}MB swap_free=${SWAP_FREE_MB}MB mem_used=${MEM_USED_MB}MB swap_used=${SWAP_USED_MB}MB demand=$((MEM_USED_MB + SWAP_USED_MB))MB top=${TOP_COMM}:${TOP_MB}MB psi_full10=$PSI"
+    read_scope
+    SAMPLE="[resources] $now mem_avail=${MEM_AVAIL_MB}MB swap_free=${SWAP_FREE_MB}MB mem_used=${MEM_USED_MB}MB swap_used=${SWAP_USED_MB}MB demand=$((MEM_USED_MB + SWAP_USED_MB))MB top=${TOP_COMM}:${TOP_MB}MB psi_full10=$PSI$SCOPE_FIELDS"
 }
 
 # Kill the process that holds the most memory, leaving the runner's own processes alone, and say what it was. The kill comes
@@ -155,7 +184,7 @@ judge() {
 }
 
 monitor() {
-    local strikes=0 now last=0 gap=0 fd="" tick="$TRACE.tick"
+    local strikes=0 now last=0 gap=0 fd="" tick="$TRACE.tick" oom_seen=0
     mkfifo "$tick" 2>/dev/null && exec {fd}<>"$tick"
     while true; do
         printf -v now '%(%s)T' -1
@@ -168,6 +197,12 @@ monitor() {
             echo "[watchdog] the sampler was starved for ${gap}s: the machine was paging"
             echo "[watchdog] the sampler was starved for ${gap}s: the machine was paging" >> "$TRACE"
         fi
+        if [ "$SCOPE_OOM" -gt "$oom_seen" ]; then
+            echo "[watchdog] the memory ceiling killed $((SCOPE_OOM - oom_seen)) process(es) in the build's cgroup"
+            echo "[watchdog] the memory ceiling killed $((SCOPE_OOM - oom_seen)) process(es) in the build's cgroup" >> "$TRACE"
+            : > "$FIRED"
+        fi
+        oom_seen=$SCOPE_OOM
         judge "$strikes" "$MEM_AVAIL_MB" "$SWAP_FREE_MB" "$gap"
         strikes=$STRIKES
         if [ "$strikes" -ge 3 ]; then
@@ -182,6 +217,8 @@ monitor() {
 # One attempt: the build and the tests. A failure of any command is the attempt's status.
 attempt() {
     set -o pipefail
+    local line=""
+    read -r line < /proc/self/cgroup 2>/dev/null && echo "${line#*::}" > "$TRACE.cgroup"
     if [ -n "${CI_ATTEMPT_CMD:-}" ]; then
         bash -c "$CI_ATTEMPT_CMD"
         return $?
@@ -202,6 +239,39 @@ attempt() {
     cargo nextest run --profile ci $CRATES 2>&1 | tee -a "$BUILD_LOG"
 }
 
+# The command prefix that runs the attempt in its own cgroup with the memory ceiling (sets CONFINE_BASE, an array; empty
+# when the ceiling is off or cannot be had) and says which. A trial scope first: no sudo, no systemd, or a scope that
+# will not start leaves the step as it was, with the reason in the log.
+confine_probe() {
+    CONFINE_BASE=()
+    if [ "${CI_CEILING:-1}" = 0 ]; then
+        echo "memory ceiling: off (CI_CEILING=0)"
+        return 0
+    fi
+    # sudo resets the environment, and `-E` is not honoured by every sudo (sudo-rs ignores it), so the names of the variables
+    # to keep are listed one by one; PATH and HOME are set for the build itself (sudo's secure_path replaces PATH).
+    export CI_NEXTEST_PROBE=1
+    local names
+    names=$(compgen -e | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | grep -vE '^(PATH|HOME|SUDO_.*)$' | paste -sd, -)
+    local cmd=(sudo -n "--preserve-env=$names" systemd-run --scope --quiet --collect "--uid=$(id -u)" "--gid=$(id -g)" -p "MemoryMax=$CEILING_RAM" -p "MemorySwapMax=$CEILING_SWAP" "--setenv=PATH=$PATH" "--setenv=HOME=$HOME")
+    local why status
+    # The trial also checks that the environment arrives, which the build cannot do without.
+    if why=$("${cmd[@]}" -- bash -c '[ "${CI_NEXTEST_PROBE:-}" = 1 ] || { echo "the environment did not arrive in the scope"; exit 3; }' 2>&1); then
+        CONFINE_BASE=("${cmd[@]}")
+        echo "memory ceiling: the build runs in its own cgroup, $CEILING_RAM of memory and $CEILING_SWAP of swap"
+    else
+        status=$?
+        echo "::warning::memory ceiling not available, the build runs without it: ${why:-no output} (exit $status)"
+    fi
+}
+
+# Whatever an attempt left in its cgroup is killed, so a retry never starts beside the remains of the first attempt (sudo
+# runs the build in a session of its own, which the timeout's signal to its process group does not reach).
+confine_cleanup() {
+    [ "${#CONFINE_BASE[@]}" -gt 0 ] || return 0
+    sudo -n systemctl kill --signal=KILL "ci-nextest-$$-$1.scope" > /dev/null 2>&1 || true
+}
+
 main() {
     : > "$TRACE"
     : > "$BUILD_LOG"
@@ -211,12 +281,16 @@ main() {
         monitor &
         monitor_pid=$!
         # shellcheck disable=SC2064
-        trap "kill $monitor_pid 2>/dev/null; rm -f '$TRACE.tick'" EXIT
+        trap "kill $monitor_pid 2>/dev/null; rm -f '$TRACE.tick' '$TRACE.cgroup'" EXIT
     fi
+    confine_probe
     local limits=("${CI_ATTEMPT1_SECONDS:-1500}" "${CI_ATTEMPT2_SECONDS:-900}") status=0 n
     for n in 1 2; do
-        timeout --kill-after=30 "${limits[$((n - 1))]}" bash "$SELF" --attempt
+        local confine=()
+        [ "${#CONFINE_BASE[@]}" -gt 0 ] && confine=("${CONFINE_BASE[@]}" "--unit=ci-nextest-$$-$n" --)
+        timeout --kill-after=30 "${limits[$((n - 1))]}" "${confine[@]}" bash "$SELF" --attempt
         status=$?
+        confine_cleanup "$n"
         [ "$status" -eq 0 ] && return 0
         if [ "$n" -eq 1 ] && stalled "$status"; then
             echo "::warning::The nextest step stalled (status $status after at most ${limits[0]} s); running it once more, which reuses what was built."

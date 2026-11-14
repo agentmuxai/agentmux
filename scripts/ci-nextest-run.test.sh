@@ -23,7 +23,7 @@ run() {
     local name=$1 want=$2 attempts=$3 cmd=$4 limit=${5:-30}
     local dir="$TMP/$name"
     mkdir -p "$dir"
-    out=$(STUB="$dir" CI_MONITOR=0 CI_TRACE_FILE="$dir/trace" CI_BUILD_LOG="$dir/build" \
+    out=$(STUB="$dir" CI_MONITOR=0 CI_CEILING=0 CI_TRACE_FILE="$dir/trace" CI_BUILD_LOG="$dir/build" \
         CI_ATTEMPT1_SECONDS=$limit CI_ATTEMPT2_SECONDS=$limit CI_ATTEMPT_CMD="$cmd" bash "$SCRIPT" 2>&1)
     local got=$? n
     n=$(cat "$dir/n" 2>/dev/null || echo 0)
@@ -114,6 +114,79 @@ for mode in pr queue; do
         if grep -q "CARGO_BUILD_JOBS=$want" "$log" && ! grep -q "CARGO_BUILD_JOBS=unset" "$log"; then ok "$mode lane builds with $want jobs"; else bad "$mode lane builds with $want jobs" "$(cat "$log")"; fi
     done
 done
+
+echo "the memory ceiling"
+# A stub sudo: it records its arguments, runs what follows "--" (the build) for systemd-run, and only records for
+# systemctl. SUDO_FAIL=1 makes it refuse.
+cat > "$STUB_BIN/sudo" <<'STUBEOF'
+#!/usr/bin/env bash
+echo "sudo $*" >> "$SUDO_LOG"
+[ -n "${SUDO_FAIL:-}" ] && { echo "sudo: a password is required" >&2; exit 1; }
+args=("$@")
+for i in "${!args[@]}"; do
+    if [ "${args[$i]}" = "--" ]; then
+        # SUDO_DROP_ENV: a sudo that keeps nothing of the environment.
+        [ -n "${SUDO_DROP_ENV:-}" ] && exec env -i "PATH=$PATH" "${args[@]:$((i + 1))}"
+        exec "${args[@]:$((i + 1))}"
+    fi
+done
+exit 0
+STUBEOF
+chmod +x "$STUB_BIN/sudo"
+ceiling() { # ceiling <name> [env assignments...]: the real script's main with a stub sudo; leaves $out and $SUDO_LOG
+    local name=$1; shift
+    local dir="$TMP/c-$name"
+    mkdir -p "$dir"
+    SUDO_LOG="$dir/sudo.log"
+    : > "$SUDO_LOG"
+    out=$(env PATH="$STUB_BIN:$PATH" SUDO_LOG="$SUDO_LOG" STUB="$dir" CI_MONITOR=0 CI_TRACE_FILE="$dir/trace" CI_BUILD_LOG="$dir/build" \
+        CI_ATTEMPT_CMD='n=$(cat "$STUB/n" 2>/dev/null || echo 0); echo $((n + 1)) > "$STUB/n"' "$@" bash "$SCRIPT" 2>&1)
+    CEILING_STATUS=$?
+}
+ceiling default
+[ "$CEILING_STATUS" -eq 0 ] && grep -q "MemoryMax=14G" "$SUDO_LOG" && grep -q "MemorySwapMax=7G" "$SUDO_LOG" && grep -q -- "--unit=ci-nextest-.*-1 " "$SUDO_LOG" \
+    && ok "the attempt runs in a scope with 14 GB and 7 GB of swap" || bad "the attempt runs in a scope with 14 GB and 7 GB of swap" "$out / $(cat "$SUDO_LOG")"
+echo "$out" | grep -q "memory ceiling: the build runs in its own cgroup, 14G" && ok "the log says the ceiling is on" || bad "the log says the ceiling is on" "$out"
+grep -q "systemctl kill --signal=KILL ci-nextest-.*-1.scope" "$SUDO_LOG" && ok "what the attempt left in its scope is killed" || bad "what the attempt left in its scope is killed" "$(cat "$SUDO_LOG")"
+grep -q -- "--setenv=PATH=" "$SUDO_LOG" && grep -q -- "--setenv=HOME=" "$SUDO_LOG" && ok "PATH and HOME reach the build through sudo" || bad "PATH and HOME reach the build through sudo" "$(cat "$SUDO_LOG")"
+grep -q -- "--preserve-env=[^ ]*CI_NEXTEST_PROBE" "$SUDO_LOG" && ok "the environment's variable names are passed to sudo" || bad "the environment's variable names are passed to sudo" "$(cat "$SUDO_LOG")"
+ceiling override CI_MEM_MAX=9G CI_SWAP_MAX=3G
+grep -q "MemoryMax=9G" "$SUDO_LOG" && grep -q "MemorySwapMax=3G" "$SUDO_LOG" && ok "CI_MEM_MAX and CI_SWAP_MAX set the ceiling" || bad "CI_MEM_MAX and CI_SWAP_MAX set the ceiling" "$(cat "$SUDO_LOG")"
+ceiling refused SUDO_FAIL=1
+{ [ "$CEILING_STATUS" -eq 0 ] && [ "$(cat "$TMP/c-refused/n")" = 1 ] && echo "$out" | grep -q "memory ceiling not available, the build runs without it: sudo: a password is required"; } \
+    && ok "a refused sudo leaves the step as it was, and says why" || bad "a refused sudo leaves the step as it was, and says why" "$out"
+ceiling dropenv SUDO_DROP_ENV=1
+{ [ "$CEILING_STATUS" -eq 0 ] && [ "$(cat "$TMP/c-dropenv/n")" = 1 ] && echo "$out" | grep -q "memory ceiling not available, the build runs without it: the environment did not arrive in the scope"; } \
+    && ok "a sudo that drops the environment is detected, and the build runs without the ceiling" || bad "a sudo that drops the environment is detected" "$out"
+ceiling off CI_CEILING=0
+{ echo "$out" | grep -q "memory ceiling: off" && [ ! -s "$SUDO_LOG" ]; } && ok "CI_CEILING=0 starts no sudo" || bad "CI_CEILING=0 starts no sudo" "$out / $(cat "$SUDO_LOG")"
+
+echo "the attempt's cgroup in the trace"
+CGROOT="$TMP/cgroot"
+mkdir -p "$CGROOT/system.slice/run-1.scope"
+echo 3221225472 > "$CGROOT/system.slice/run-1.scope/memory.current"
+printf 'low 0\nhigh 0\nmax 12\noom 2\noom_kill 1\n' > "$CGROOT/system.slice/run-1.scope/memory.events"
+TRACE="$TMP/scope.trace"
+echo /system.slice/run-1.scope > "$TRACE.cgroup"
+CGROUP_ROOT="$CGROOT"
+read_scope
+[ "$SCOPE_FIELDS" = " scope=3072MB oom_kill=1" ] && [ "$SCOPE_OOM" = 1 ] && ok "the scope's memory and kills are read" || bad "the scope's memory and kills are read" "$SCOPE_FIELDS / $SCOPE_OOM"
+echo /system.slice/gone.scope > "$TRACE.cgroup"
+read_scope
+[ -z "$SCOPE_FIELDS" ] && [ "$SCOPE_OOM" = 0 ] && ok "a scope that is gone reads as nothing" || bad "a scope that is gone reads as nothing" "$SCOPE_FIELDS"
+# The monitor notices a kill by the kernel, says so in the trace, and marks the attempt as stalled so it is retried.
+echo /system.slice/run-1.scope > "$TRACE.cgroup"
+FIRED="$TRACE.watchdog"
+rm -f "$FIRED"
+: > "$TRACE"
+monitor > /dev/null 2>&1 &
+mon=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -e "$FIRED" ] && break; read -r -t 0.3 <> <(:) || true; done
+kill "$mon" 2>/dev/null
+wait "$mon" 2>/dev/null
+{ [ -e "$FIRED" ] && grep -q "the memory ceiling killed 1 process" "$TRACE" && grep -q "scope=3072MB oom_kill=1" "$TRACE"; } \
+    && ok "a kill by the kernel in the scope is reported and counts as a stall" || bad "a kill by the kernel in the scope is reported and counts as a stall" "$(cat "$TRACE")"
+rm -f "$TRACE.tick"
 
 echo
 echo "$pass passed, $fail failed"
