@@ -81,14 +81,28 @@ fn insert_fills_the_root_before_descending() {
 }
 
 #[test]
-fn insert_skips_minimized_leaves_and_refuses_when_everything_is() {
+fn insert_into_a_tab_of_nothing_but_chips_goes_in_at_the_root_and_shows() {
+    // SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 C, item 8: no chip is an insert target, and a tab always shows
+    // one pane, so the new one lands after the chips, expanded, and they stay chips.
     let mut tree = Some(branch(
         "r",
         FlexDirection::Row,
         (0..5).map(|i| minimized(leaf(&format!("m{i}"), &format!("b{i}")))).collect(),
     ));
-    let err = apply(&mut tree, LayoutIntent::Insert { node: leaf("n", "bn"), magnified: false, focused: false });
-    assert!(matches!(err, Err(LayoutError::Refused(_))), "{err:?}");
+    apply(&mut tree, LayoutIntent::Insert { node: leaf("n", "bn"), magnified: false, focused: false }).unwrap();
+    assert_eq!(root_kids(&tree), ["m0", "m1", "m2", "m3", "m4", "n"]);
+    assert!(!min_of(&tree, "n"));
+    assert!((0..5).all(|i| min_of(&tree, &format!("m{i}"))));
+}
+
+#[test]
+fn insert_next_to_a_single_chip_promotes_it_and_it_stays_a_chip() {
+    let mut tree = Some(minimized(leaf("m", "bm")));
+    apply(&mut tree, LayoutIntent::Insert { node: leaf("n", "bn"), magnified: false, focused: false }).unwrap();
+    assert_eq!(root_kids(&tree), ["m", "n"]);
+    assert!(min_of(&tree, "m"), "the chip keeps its flag on the leaf it became");
+    assert!(!min_of(&tree, "n"));
+    assert!(!tree.as_ref().unwrap().minimized, "and the branch above it carries none");
 }
 
 #[test]

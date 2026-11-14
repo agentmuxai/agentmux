@@ -150,6 +150,31 @@ test("insertNode - missing node is a no-op (logs error, does not crash)", () => 
     assert(JSON.stringify(treeState) === before, "missing node should leave state unchanged");
 });
 
+// SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 C, item 8: no chip is an insert target and a tab always shows one pane.
+test("insertNode - a tab of nothing but chips takes the node at the root, expanded, and the chips stay chips", () => {
+    const chips = ["m0", "m1"].map((blockId) => newLayoutNode(undefined, undefined, undefined, { blockId }));
+    chips.forEach((chip) => (chip.minimized = true));
+    const treeState = newLayoutTreeState(newLayoutNode(undefined, undefined, [...chips]));
+    const newNode = newLayoutNode(undefined, undefined, undefined, { blockId: "new" });
+    insertNode(treeState, { type: LayoutTreeActionType.InsertNode, node: newNode });
+    expect(treeState.rootNode.children!.map((c) => c.data?.blockId)).toEqual(["m0", "m1", "new"]);
+    expect(treeState.rootNode.children!.map((c) => !!c.minimized)).toEqual([true, true, false]);
+});
+
+test("insertNode - a single chip is promoted, keeps its flag, and the node lands beside it", () => {
+    const chip = newLayoutNode(undefined, undefined, undefined, { blockId: "m" });
+    chip.minimized = true;
+    const treeState = newLayoutTreeState(chip);
+    const newNode = newLayoutNode(undefined, undefined, undefined, { blockId: "new" });
+    insertNode(treeState, { type: LayoutTreeActionType.InsertNode, node: newNode });
+    const root = treeState.rootNode;
+    expect(root.minimized).toBeFalsy();
+    expect(root.children!.map((c) => [c.data?.blockId, !!c.minimized])).toEqual([
+        ["m", true],
+        ["new", false],
+    ]);
+});
+
 // ── insertNodeAtIndex ─────────────────────────────────────────────────────────
 
 test("insertNodeAtIndex - missing indexArr is a no-op", () => {
