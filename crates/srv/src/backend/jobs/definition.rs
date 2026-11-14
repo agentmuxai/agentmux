@@ -186,6 +186,9 @@ impl EventTrigger {
         if self.source == event_source::APP_EVENT {
             super::app_events::validate_filter(&self.filter)?;
         }
+        if self.source == event_source::FILE_WATCH {
+            super::file_watch::validate_filter(&self.filter)?;
+        }
         Ok(())
     }
 }
