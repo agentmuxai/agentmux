@@ -198,10 +198,30 @@ describe("flowCurve", () => {
         expect(moved.x).toBeGreaterThan(from.x + NODE_W);
     });
 
-    it("keeps the middle for its label when every stretch is covered", () => {
+    it("puts its label beside the node it lands on when a row of nodes covers the whole line", () => {
+        // Three agents side by side, as the grid places them: the line from the third to the first runs behind the
+        // second, and the gap between two of them is too narrow for a number.
+        const row = [0, 154, 308].map((x) => ({ x, y: 0 }));
+        const [first, , third] = row;
+        // It bows down on its way left, so the number goes under the corner it lands on.
+        expect(flowCurve(third, first, row)!.label).toEqual({ x: NODE_W, y: NODE_H + 7 });
+        // The answer bows up, so its number goes over the corner it lands on.
+        expect(flowCurve(first, third, row)!.label).toEqual({ x: 308, y: -7 });
+        // A second row under the first leaves just the room a number needs.
+        const grid = [...row, ...row.map((p) => ({ x: p.x, y: NODE_H + 14 }))];
+        expect(flowCurve(third, first, grid)!.label).toEqual({ x: NODE_W, y: NODE_H + 7 });
+    });
+
+    it("takes the other side of the node it lands on when the first is covered", () => {
+        const row = [0, 154, 308].map((x) => ({ x, y: 0 }));
+        const under = { x: 70, y: NODE_H + 4 };
+        expect(flowCurve(row[2], row[0], [...row, under])!.label).toEqual({ x: NODE_W, y: -7 });
+    });
+
+    it("keeps the middle for its label when every stretch and both sides of where it lands are covered", () => {
         const from = { x: 0, y: 0 };
         const to = { x: 600, y: 0 };
-        const wall = [0, 100, 200, 300, 400, 500, 600].map((x) => ({ x, y: 0 }));
+        const wall = [-30, 0, 30].flatMap((y) => [0, 100, 200, 300, 400, 500, 600].map((x) => ({ x, y })));
         expect(flowCurve(from, to, wall)!.label).toEqual(flowCurve(from, to)!.label);
     });
 

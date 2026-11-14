@@ -171,23 +171,38 @@ const round = (n: number) => Math.round(n * 10) / 10;
 /** Half the room a label (a task's number) takes round its point. */
 const LABEL_HALF_W = 20;
 const LABEL_HALF_H = 9;
+/** Half the height of the label's own glyphs: what it needs with no room to spare, in the gap between two rows. */
+const LABEL_TIGHT_H = 7;
 /** Where along a line its label is tried: the middle first, then further out on either side. */
-const LABEL_STOPS = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8];
+const LABEL_STOPS = [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65, 0.3, 0.7, 0.25, 0.75, 0.2, 0.8, 0.15, 0.85];
 
 /** Whether a label at `p` would lie on `node`: lines run behind the nodes, so it would be hidden there. */
-function hidesLabel(node: Placed, p: Placed): boolean {
+function hidesLabel(node: Placed, p: Placed, halfH = LABEL_HALF_H): boolean {
     return (
         p.x > node.x - LABEL_HALF_W &&
         p.x < node.x + NODE_W + LABEL_HALF_W &&
-        p.y > node.y - LABEL_HALF_H &&
-        p.y < node.y + NODE_H + LABEL_HALF_H
+        p.y > node.y - halfH &&
+        p.y < node.y + NODE_H + halfH
     );
 }
 
 /**
+ * Where a label goes when no stretch of its line is clear (agents side by side, the line passing behind the ones
+ * between): just under or just over the node the line lands on, at the point it lands, on the side it comes from
+ * first. Null when both are covered too.
+ */
+function labelBesideEnd(to: Placed, end: Placed, fromBelow: boolean, nodes: readonly Placed[]): Placed | null {
+    const under = { x: end.x, y: to.y + NODE_H + LABEL_TIGHT_H };
+    const over = { x: end.x, y: to.y - LABEL_TIGHT_H };
+    const clear = (p: Placed) => !nodes.some((node) => hidesLabel(node, p, LABEL_TIGHT_H));
+    return (fromBelow ? [under, over] : [over, under]).find(clear) ?? null;
+}
+
+/**
  * The curve from one node's edge to another's, bowed a little to the left of its direction, so a line and its
- * answer do not lie on each other. Its label goes on the stretch nearest its middle that no node of `nodes` covers
- * (the middle itself when every stretch is covered). Null for two nodes on top of each other.
+ * answer do not lie on each other. Its label goes on the stretch nearest its middle that no node of `nodes` covers;
+ * when every stretch is covered, beside the node it lands on (`labelBesideEnd`), and failing that on its middle.
+ * Null for two nodes on top of each other.
  */
 export function flowCurve(from: Placed, to: Placed, nodes: readonly Placed[] = []): FlowCurve | null {
     const ax = from.x + NODE_W / 2;
@@ -211,10 +226,11 @@ export function flowCurve(from: Placed, to: Placed, nodes: readonly Placed[] = [
         x: round((1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t ** 2 * x2),
         y: round((1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t ** 2 * y2),
     });
+    const end = { x: round(x2), y: round(y2) };
     const clear = LABEL_STOPS.map(at).find((p) => !nodes.some((node) => hidesLabel(node, p)));
     return {
         d: `M${round(x1)},${round(y1)} Q${round(cx)},${round(cy)} ${round(x2)},${round(y2)}`,
-        end: { x: round(x2), y: round(y2) },
-        label: clear ?? at(0.5),
+        end,
+        label: clear ?? labelBesideEnd(to, end, cy >= y2, nodes) ?? at(0.5),
     };
 }
