@@ -97,6 +97,7 @@ fn exit_if_helper_child() {
 /// Prepares the process for headless or launcher-owned running; true when headless.
 fn prepare_process_mode() -> bool {
     let headless = headless::requested();
+    backend::startup_mode::set_headless(headless);
     agentmux_common::process_hardening::deny_memory_access(headless);
     if headless {
         match headless::prepare_env() {

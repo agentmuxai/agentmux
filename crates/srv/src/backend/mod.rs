@@ -3,6 +3,7 @@
 
 
 pub mod agent_admission;
+pub(crate) mod agent_route;
 pub mod agent_grants;
 pub mod agent_line;
 pub mod agent_seat;
@@ -228,6 +229,7 @@ pub mod sensitive_ops;
 /// The requests for those operations and what became of them.
 pub mod sensitive_requests;
 pub mod shutdown_events;
+pub mod startup_mode;
 pub mod sweep_stats;
 pub(crate) mod teardown_hooks;
 pub mod work_claims;

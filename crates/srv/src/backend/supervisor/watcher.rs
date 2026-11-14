@@ -628,9 +628,9 @@ fn turn_active(block_id: &str) -> bool {
 /// input. An agent whose process isn't running is not started (spec §3.5).
 fn deliver(block_id: &str, text: &str) -> Result<(), String> {
     use crate::backend::reactive::SenderDelivery;
-    use crate::bootstrap::AgentRoute;
+    use crate::backend::agent_route::AgentRoute;
     let input = TurnInput { from: crate::backend::message_origin::MessageOrigin::supervisor(), text: text.to_string(), joins_turn: None };
-    match crate::bootstrap::route_agent_message_from(block_id, text, Some(input), crate::backend::message_origin::MessageOrigin::supervisor(), &[], None) {
+    match crate::backend::agent_route::route_agent_message_from(block_id, text, Some(input), crate::backend::message_origin::MessageOrigin::supervisor(), &[], None) {
         Ok(AgentRoute::Sent(SenderDelivery::Delivered | SenderDelivery::Deferred)) => Ok(()),
         Ok(AgentRoute::Sent(SenderDelivery::Pty)) => Err("the pane is not an agent session".to_string()),
         Ok(AgentRoute::StartTurn { .. }) => Err("the agent isn't running".to_string()),
