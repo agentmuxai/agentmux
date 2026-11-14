@@ -24,6 +24,7 @@ static STATE: OnceLock<Arc<AppState>> = OnceLock::new();
 pub fn set_state(state: &Arc<AppState>) {
     let _ = STATE.set(state.clone());
     super::watch::install(state);
+    crate::ui_tasks::stall_watch::install();
 }
 
 /// The app state the top-level window hook was given, if it has been.

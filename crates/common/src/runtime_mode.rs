@@ -230,12 +230,39 @@ pub fn is_dev_build_exe(exe_dir: &Path) -> bool {
 /// menu name, the dev-only frontend fallback). For intra-instance plumbing
 /// that must agree with the launcher's already-made decision, use
 /// [`RuntimeMode::from_env`] instead.
+///
+/// Answered from the path alone and read once: the binary does not move under
+/// a running process. It must stay cheap, because the host asks it on its UI
+/// thread at every page load ([`exe_dir_is_dev`] says what it used to cost).
 pub fn is_dev_self() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .map(|d| matches!(RuntimeMode::current_path_only(&d), RuntimeMode::Dev { .. }))
-        .unwrap_or(false)
+    static IS_DEV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IS_DEV.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .is_some_and(|d| exe_dir_is_dev(&d))
+    })
+}
+
+/// Whether the binary in `exe_dir` is a source-tree build: what
+/// [`RuntimeMode::current_path_only`] answers `Dev` for, without building the
+/// mode. Building it finds the branch, which starts `git` and waits for it. A
+/// caller that only needs the yes or no must not pay for a process: the host
+/// asked through `current_path_only` on its UI thread at every page load, and
+/// a dev build froze for as long as `git` took to start (task #47585).
+pub fn exe_dir_is_dev(exe_dir: &Path) -> bool {
+    !is_portable_marker_present(exe_dir) && exe_dir_is_dev_build(exe_dir)
+}
+
+/// How many times the calling thread has started `git` to find a branch. For
+/// tests that a path stays free of process starts; per thread, so tests that
+/// run side by side do not count each other.
+pub fn git_branch_lookups() -> usize {
+    GIT_BRANCH_LOOKUPS.with(|n| n.get())
+}
+
+thread_local! {
+    static GIT_BRANCH_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn parse_mode_string(s: &str) -> Option<RuntimeMode> {
@@ -626,6 +653,7 @@ fn detect_branch(exe_dir: &Path) -> String {
 }
 
 fn run_git_branch(repo_dir: &Path) -> Option<String> {
+    GIT_BRANCH_LOOKUPS.with(|n| n.set(n.get() + 1));
     let mut cmd = Command::new("git");
     cmd.args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(repo_dir);
@@ -1091,6 +1119,36 @@ mod tests {
     /// `AGENTMUX_RUNTIME_MODE=dev:main`. Build identity (badge, menu name,
     /// dev-frontend fallback) goes through `current_path_only` / `is_dev_self`,
     /// which must ignore that env and classify purely by the binary's path.
+    #[test]
+    fn asking_whether_a_build_is_dev_starts_no_process() {
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        with_env("AGENTMUX_DEV_BRANCH", None, || {
+            let repo = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+            let dev = repo.path().join("dist").join("cef-dev-1").join("runtime");
+            std::fs::create_dir_all(&dev).unwrap();
+            let installed = repo.path().join("Programs").join("AgentMux").join("runtime");
+            std::fs::create_dir_all(&installed).unwrap();
+            let portable = repo.path().join("target").join("release");
+            std::fs::create_dir_all(&portable).unwrap();
+            std::fs::write(portable.join("agentmux-portable.marker"), "").unwrap();
+
+            let before = git_branch_lookups();
+            assert!(exe_dir_is_dev(&dev));
+            assert!(!exe_dir_is_dev(&installed));
+            assert!(!exe_dir_is_dev(&portable), "a portable folder is not a dev build, wherever it sits");
+            let _ = is_dev_self();
+            let _ = is_dev_self();
+            assert_eq!(git_branch_lookups(), before, "the yes or no must not start git");
+
+            // The same answers as the mode itself, which does look the branch up.
+            assert!(matches!(RuntimeMode::current_path_only(&dev), RuntimeMode::Dev { .. }));
+            assert_eq!(git_branch_lookups(), before + 1, "building the mode is what starts git");
+            assert!(matches!(RuntimeMode::current_path_only(&installed), RuntimeMode::Installed));
+            assert!(matches!(RuntimeMode::current_path_only(&portable), RuntimeMode::Portable));
+        });
+    }
+
     #[test]
     fn current_path_only_ignores_leaked_dev_env() {
         let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
