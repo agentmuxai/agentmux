@@ -55,7 +55,7 @@ export function HexFindBar(props: { find: HexFind }): JSX.Element {
                 disabled={!f.canSearch()}
                 onClick={f.next}
             />
-            <div class="hex-find-tail">
+            <div class="hex-find-tail" classList={{ "hex-find-tail-idle": f.canSearch() && !f.error() && !f.status() }}>
                 <span
                     class="hex-find-status"
                     role="status"

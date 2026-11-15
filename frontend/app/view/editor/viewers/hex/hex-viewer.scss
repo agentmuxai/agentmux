@@ -48,6 +48,12 @@
     min-width: 0;
 }
 
+/* Nothing to say yet (the strip just opened, or the box was cleared): only the close button, kept on the controls' line. */
+.hex-find-tail-idle {
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
 .hex-find-status {
     flex: 1 1 0;
     min-width: 0;

@@ -397,6 +397,8 @@ describe("the hex viewer", () => {
         await settle();
         const box = screen.getByLabelText("Find in the file", { selector: "input" }) as HTMLInputElement;
         expect(document.activeElement).toBe(box);
+        // Nothing said yet: the tail is just the close button, so it can stay on the controls' line.
+        expect(document.querySelector(".hex-find-tail")!.classList.contains("hex-find-tail-idle")).toBe(true);
         searchBytes.mockResolvedValue({ found: true, offset: 0x41, length: 3, done: false, next_from: 0 });
         fireEvent.input(box, { target: { value: "41 ?? 43" } });
         fireEvent.keyDown(box, { key: "Enter" });
@@ -404,6 +406,7 @@ describe("the hex viewer", () => {
         expect(searchBytes).toHaveBeenLastCalledWith({}, { path: "C:/bin/a.bin", pattern: "41 ?? 43", from: 1, backward: false });
         expect(selected()).toEqual([0x41, 0x42, 0x43]);
         expect(document.querySelector(".hex-find-status")!.textContent).toContain("Found at 0x41");
+        expect(document.querySelector(".hex-find-tail")!.classList.contains("hex-find-tail-idle")).toBe(false);
         // The next one starts past the selection; the previous one, before it.
         searchBytes.mockResolvedValue({ found: true, offset: 0x300, length: 3, done: false, next_from: 0 });
         fireEvent.keyDown(box, { key: "Enter" });
