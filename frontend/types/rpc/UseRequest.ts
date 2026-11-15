@@ -76,7 +76,12 @@ signin: boolean,
  * An agent's new account on a sign-up form (`Browser` `generate_password`): the
  * Vault makes the password. There is no entry yet; `origin` is the site.
  */
-account: boolean, requested_ms: number, 
+account: boolean, 
+/**
+ * With `account`: the form changes the password of an account that already exists (a
+ * `current-password` field, §7.3), so the Vault keeps the old one and the question has no "Always".
+ */
+change: boolean, requested_ms: number, 
 /**
  * When silence decides: it goes ahead then if `goes_ahead`, else it is
  * denied. Set by [`Uses::ask`]; a hold moves it.

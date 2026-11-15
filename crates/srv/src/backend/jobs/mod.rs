@@ -20,16 +20,19 @@ pub mod caps;
 pub mod cloud_events;
 pub mod cloud_hub;
 pub mod definition;
+pub mod expect;
 pub mod file_watch;
 pub mod follower;
 pub mod from_template;
 pub mod incidents;
 pub mod paused;
 pub mod policy;
+pub mod poll;
 pub mod remote;
 pub mod reporters;
 pub mod reservation;
 pub mod verdict;
+pub mod webhook_local;
 pub mod watchdog;
 
 use std::sync::Arc;
@@ -591,6 +594,17 @@ impl RunLedger {
     ) {
         let infra_status = if ok { infra::OK } else { infra::ERROR };
         self.turn_finished(run_id, infra_status, Some(drone_cost(block_states)), error);
+    }
+
+    /// A Drone run was cancelled: its row closes `interrupted` with the reason,
+    /// unless whoever stopped it (a timeout, `cancel_other`) closed it already.
+    pub fn drone_stopped(
+        &self,
+        run_id: &str,
+        block_states: &std::collections::HashMap<String, crate::backend::storage::drone_types::BlockState>,
+        reason: &str,
+    ) {
+        self.turn_finished(run_id, infra::INTERRUPTED, Some(drone_cost(block_states)), reason);
     }
 
     /// After a restart: close what this channel left open (§3.2). Cron runs

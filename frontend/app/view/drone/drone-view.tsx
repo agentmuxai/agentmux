@@ -1007,6 +1007,7 @@ const AppQueryFields = (p: { node: FlowNode; update: (patch: Record<string, unkn
                     onChange={(e) => p.update({ query: e.currentTarget.value })}
                 >
                     <option value="muxbus">MuxBus</option>
+                    <option value="agents">All agents</option>
                     <option value="agent">One agent</option>
                     <option value="tasks">Kanban tasks</option>
                     <option value="lan_peers">LAN peers</option>

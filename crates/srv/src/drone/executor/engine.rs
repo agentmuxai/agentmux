@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! A run's handle and its event stream. The scheduler that runs the graph is
-//! `scheduler.rs`.
+//! A run's handle, its event stream and the way to stop it. The scheduler that
+//! runs the graph is `scheduler.rs`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,6 +13,14 @@ use tokio::sync::mpsc;
 use crate::drone::types::{BlockState, DroneGraph};
 
 pub use crate::backend::drone_run_event::RunEvent;
+pub use crate::backend::drone_cancel::{cancel_run, Cancel};
+
+/// How the scheduler ended a run that did not finish.
+pub(super) enum RunEnd {
+    Failed(String),
+    Cancelled(String),
+}
+
 pub struct RunHandle {
     pub run_id: String,
     pub events: mpsc::UnboundedReceiver<RunEvent>,
@@ -36,6 +44,8 @@ pub async fn run_drone(
     let final_states: Arc<tokio::sync::Mutex<HashMap<String, BlockState>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
+    let cancel = Cancel::default();
+    crate::backend::drone_cancel::register_run(&run_id, &cancel);
     let states_for_task = final_states.clone();
     let drone_id_for_evt = drone_id.clone();
     let run_id_for_task = run_id.clone();
@@ -45,20 +55,14 @@ pub async fn run_drone(
             run_id: run_id_for_task.clone(),
             drone_id: drone_id_for_evt,
         });
-        match super::scheduler::execute(&run_id_for_task, (&graph, trigger, run_cap_usd, &drone_id), &tx_for_task, &states_for_task).await {
-            Ok(output) => {
-                let _ = tx_for_task.send(RunEvent::RunDone {
-                    run_id: run_id_for_task,
-                    output,
-                });
-            }
-            Err(e) => {
-                let _ = tx_for_task.send(RunEvent::RunFailed {
-                    run_id: run_id_for_task,
-                    error: e,
-                });
-            }
-        }
+        let limits = super::scheduler::Limits { run_cap_usd, cancel };
+        let ended = super::scheduler::execute(&run_id_for_task, (&graph, trigger, limits, &drone_id), &tx_for_task, &states_for_task).await;
+        crate::backend::drone_cancel::forget_run(&run_id_for_task);
+        let _ = tx_for_task.send(match ended {
+            Ok(output) => RunEvent::RunDone { run_id: run_id_for_task, output },
+            Err(RunEnd::Failed(error)) => RunEvent::RunFailed { run_id: run_id_for_task, error },
+            Err(RunEnd::Cancelled(reason)) => RunEvent::RunCancelled { run_id: run_id_for_task, reason },
+        });
     });
 
     Ok(RunHandle {
