@@ -183,6 +183,30 @@ describe("BackdropPicker", () => {
         expect(document.activeElement).toBe(container.querySelector("[role=dialog]"));
     });
 
+    it("gives focus back to where it was when it closes", () => {
+        const opener = document.createElement("input");
+        document.body.appendChild(opener);
+        opener.focus();
+        const t = mount();
+        expect(document.activeElement).toBe(t.container.querySelector("[role=dialog]"));
+        t.unmount();
+        expect(document.activeElement).toBe(opener);
+        opener.remove();
+    });
+
+    it("leaves focus where the user moved it, when it closes", () => {
+        const opener = document.createElement("input");
+        const other = document.createElement("input");
+        document.body.append(opener, other);
+        opener.focus();
+        const t = mount();
+        other.focus();
+        t.unmount();
+        expect(document.activeElement).toBe(other);
+        opener.remove();
+        other.remove();
+    });
+
     it("closes on Escape from anywhere in its own pane, ending any preview: a swatch, the panel, or the composer a click handed focus to", () => {
         for (const from of ["swatch", "panel", "composer"] as const) {
             const t = mount();
