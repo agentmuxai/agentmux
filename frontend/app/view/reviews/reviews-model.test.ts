@@ -3,7 +3,17 @@
 
 import type { ReviewRow } from "@/types/rpc/ReviewRow";
 import { describe, expect, it } from "vitest";
-import { ageText, filterRows, groupRows, NO_FILTER, rowKey, whyText } from "./reviews-model";
+import {
+    ageText,
+    filterRows,
+    groupRows,
+    inTaskRef,
+    kanbanIdOf,
+    NO_FILTER,
+    rowKey,
+    taskRefOf,
+    whyText,
+} from "./reviews-model";
 
 function row(over: Partial<ReviewRow> & { number: number }): ReviewRow {
     return {
@@ -28,7 +38,7 @@ describe("groupRows", () => {
             row({ number: 3, task: task(1, "A"), updated_at_ms: 900 }),
         ];
         const groups = groupRows(rows);
-        expect(groups.map((g) => g.key)).toEqual(["person", "task:1"]);
+        expect(groups.map((g) => g.key)).toEqual(["person", "task:#1"]);
         expect(groups[0].rows.map((r) => r.number)).toEqual([2, 1]);
         expect(groups[1].rows.map((r) => r.number)).toEqual([3]);
     });
@@ -40,7 +50,7 @@ describe("groupRows", () => {
             row({ number: 3, updated_at_ms: 2000 }),
         ];
         const groups = groupRows(rows);
-        expect(groups.map((g) => g.key)).toEqual(["task:2", "task:1", "none"]);
+        expect(groups.map((g) => g.key)).toEqual(["task:#2", "task:#1", "none"]);
         expect(groups[0].title).toBe("#2 new");
         expect(groups[0].state).toBe("claimed");
         expect(groups[2].title).toBe("No task");
@@ -51,6 +61,16 @@ describe("groupRows", () => {
         const groups = groupRows(rows);
         expect(groups).toHaveLength(1);
         expect(groups[0].rows).toHaveLength(2);
+    });
+
+    it("keeps tasks with one number on two boards apart", () => {
+        const rows = [
+            row({ number: 1, task: task(7, "default board") }),
+            row({ number: 2, task: { ref: "work#7", num: 7, title: "work board", state: "claimed" } }),
+        ];
+        const groups = groupRows(rows);
+        expect(groups.map((g) => g.key).sort()).toEqual(["task:#7", "task:work#7"]);
+        expect(groups.map((g) => g.rows.length)).toEqual([1, 1]);
     });
 
     it("has no group for no rows, and no 'Needs a person' when none waits on one", () => {
@@ -95,6 +115,29 @@ describe("filterRows", () => {
     it("narrows by what it waits on", () => {
         expect(filterRows(rows, { text: "", waitsOn: "author" }).map((r) => r.number)).toEqual([12]);
         expect(filterRows(rows, { text: "", waitsOn: "person" })).toEqual([]);
+    });
+});
+
+describe("task refs", () => {
+    const onWork = row({ number: 2, task: { ref: "work#7", num: 7, title: "x", state: "claimed" } });
+    const onDefault = row({ number: 1, task: task(7, "y") });
+
+    it("reads a bare number or #n as the default board's task, and a board ref as it is", () => {
+        expect(taskRefOf("7")).toBe("#7");
+        expect(taskRefOf(" #7 ")).toBe("#7");
+        expect(taskRefOf("Work#7")).toBe("work#7");
+    });
+
+    it("never matches another board's task by its bare number", () => {
+        expect(inTaskRef(onDefault, "7")).toBe(true);
+        expect(inTaskRef(onWork, "7")).toBe(false);
+        expect(inTaskRef(onWork, "work#7")).toBe(true);
+        expect(inTaskRef(row({ number: 3 }), "7")).toBe(false);
+    });
+
+    it("opens the Kanban by the ref without its leading #", () => {
+        expect(kanbanIdOf("#12")).toBe("12");
+        expect(kanbanIdOf("work#12")).toBe("work#12");
     });
 });
 

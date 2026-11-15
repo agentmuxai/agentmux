@@ -60,6 +60,13 @@ const ROWS: ReviewRow[] = [
     row({ number: 103, repo_id: 9, agent: "posa" }),
 ];
 
+const ON_WORK_BOARD = row({
+    number: 104,
+    repo: "o/r",
+    url: "https://github.com/o/r/pull/104",
+    task: { ref: "work#2", num: 2, title: "Same number, other board", state: "claimed" },
+});
+
 function mount(
     opts: {
         rows?: ReviewRow[];
@@ -126,7 +133,7 @@ describe("ReviewsView", () => {
     it("groups the rows with 'Needs a person' first, then the tasks, then the rows with no task", () => {
         const { container } = mount();
         const groups = [...container.querySelectorAll("[data-group]")].map((g) => g.getAttribute("data-group"));
-        expect(groups).toEqual(["person", "task:2", "none"]);
+        expect(groups).toEqual(["person", "task:#2", "none"]);
     });
 
     it("shows a row's number, title and what it waits on, and a failing check and a stale review as words", () => {
@@ -153,6 +160,13 @@ describe("ReviewsView", () => {
         expect(opened.tasks).toEqual(["2"]);
     });
 
+    it("opens a task of another board by its board-qualified id", () => {
+        const { getAllByTestId, getByText } = mount({ rows: [ON_WORK_BOARD] });
+        fireEvent.click(getAllByTestId("reviews-row")[0]);
+        fireEvent.click(getByText("Open the task"));
+        expect(opened.tasks).toEqual(["work#2"]);
+    });
+
     it("has nothing to open for a row with no address or task", () => {
         const { getAllByTestId, queryByText } = mount();
         fireEvent.click(getAllByTestId("reviews-row")[2]);
@@ -169,6 +183,12 @@ describe("ReviewsView", () => {
         fireEvent.input(getByTestId("reviews-filter-input"), { target: { value: "" } });
         fireEvent.click(getByText("Person"));
         expect(container.querySelectorAll("[data-testid=reviews-row]")).toHaveLength(1);
+    });
+
+    it("limits to the default board's task for a bare number, not another board's task of that number", () => {
+        const { getAllByTestId } = mount({ rows: [...ROWS, ON_WORK_BOARD], meta: { "reviews:task": 2 } });
+        expect(getAllByTestId("reviews-row")).toHaveLength(1);
+        expect(getAllByTestId("reviews-row")[0].textContent).toContain("#102");
     });
 
     it("shows only the task it was opened for, and shows every task again on request", () => {

@@ -70,22 +70,22 @@ export function filterRows(rows: readonly ReviewRow[], filter: ReviewsFilter): R
 export function groupRows(rows: readonly ReviewRow[]): ReviewsGroup[] {
     const person = rows.filter((r) => r.waits_on === "person").sort((a, b) => a.updated_at_ms - b.updated_at_ms);
     const rest = rows.filter((r) => r.waits_on !== "person");
-    const byTask = new Map<number, ReviewsGroup>();
+    const byTask = new Map<string, ReviewsGroup>();
     const none: ReviewRow[] = [];
     for (const row of rest) {
         if (!row.task) {
             none.push(row);
             continue;
         }
-        const group = byTask.get(row.task.num) ?? {
-            key: `task:${row.task.num}`,
+        const group = byTask.get(row.task.ref) ?? {
+            key: `task:${row.task.ref}`,
             kind: "task" as const,
             title: `${row.task.ref} ${row.task.title}`.trim(),
             state: row.task.state,
             rows: [],
         };
         group.rows.push(row);
-        byTask.set(row.task.num, group);
+        byTask.set(row.task.ref, group);
     }
     const newest = (g: ReviewsGroup) => Math.max(...g.rows.map((r) => r.updated_at_ms));
     const groups: ReviewsGroup[] = [];
@@ -93,6 +93,25 @@ export function groupRows(rows: readonly ReviewRow[]): ReviewsGroup[] {
     groups.push(...[...byTask.values()].sort((a, b) => newest(b) - newest(a)));
     if (none.length > 0) groups.push({ key: "none", kind: "none", title: "No task", rows: none });
     return groups;
+}
+
+/**
+ * The board-qualified ref a `reviews:task` value or a `?task=` names: `#12` for a bare number or `#12` (the default
+ * board's task), `work#12` as it is. Task numbers are per board, so a bare number never means another board's task.
+ */
+export function taskRefOf(value: string): string {
+    const v = value.trim().toLowerCase();
+    return /^#?\d+$/.test(v) ? `#${v.replace(/^#/, "")}` : v;
+}
+
+/** Whether `row` belongs to the task `value` names. */
+export function inTaskRef(row: ReviewRow, value: string): boolean {
+    return !!row.task && row.task.ref.toLowerCase() === taskRefOf(value);
+}
+
+/** The id the Kanban opens a task by: its ref without the leading `#` (`12`, or `work#12` off the default board). */
+export function kanbanIdOf(ref: string): string {
+    return ref.replace(/^#/, "");
 }
 
 /** How a waits-on is said. */

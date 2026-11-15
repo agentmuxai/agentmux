@@ -32,6 +32,8 @@ import {
     ageText,
     filterRows,
     groupRows,
+    inTaskRef,
+    kanbanIdOf,
     rowKey,
     WAITS_LABEL,
     WAITS_OPTIONS,
@@ -200,7 +202,7 @@ function Detail(props: { row: ReviewRow; now: number; narrow: boolean; onBack: (
                 </Show>
                 <Show when={row().task}>
                     {(task) => (
-                        <Button icon="list-check" onClick={() => void openKanbanTask(String(task().num))}>
+                        <Button icon="list-check" onClick={() => void openKanbanTask(kanbanIdOf(task().ref))}>
                             Open the task
                         </Button>
                     )}
@@ -233,7 +235,7 @@ function taskOf(ctx: PaneTabHostContext): string | null {
 
 /** The rows of the task the pane was opened for, or every row when it was opened for none. */
 function inTask(rows: readonly ReviewRow[], task: string | null): readonly ReviewRow[] {
-    return task ? rows.filter((r) => r.task && (String(r.task.num) === task || r.task.ref === task)) : rows;
+    return task ? rows.filter((r) => inTaskRef(r, task)) : rows;
 }
 
 function asOfText(atMs: number | undefined): string {

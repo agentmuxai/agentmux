@@ -135,9 +135,9 @@ fn another_agents_event_with_the_same_number_is_not_the_cards() {
 
 #[test]
 fn two_cards_with_one_number_in_two_repositories_are_told_apart_by_a_learned_repository_id() {
-    // lazo holds muxreview#100 and agentmux#100. Repository 55 is learned from camper's single card.
+    // lazo holds PR 100 of two repositories. Repository 55 is learned from camper's single card.
     let cards = [
-        card(1, "claimed", "lazo", "agentmuxai/muxreview", 100),
+        card(1, "claimed", "lazo", "agentmuxai/other", 100),
         card(2, "claimed", "lazo", "agentmuxai/agentmux", 100),
         card(3, "claimed", "camper", "agentmuxai/agentmux", 7),
     ];

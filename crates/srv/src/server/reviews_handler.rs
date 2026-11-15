@@ -60,10 +60,12 @@ fn cards_of(tasks: &[crate::backend::storage::work_board::BoardTask]) -> Vec<Car
         .collect()
 }
 
-/// Whether `task` (`12`, `#12`, `work#12`) names `row`'s task.
+/// Whether `task` names `row`'s task. Task numbers are per board, so a bare `12` or `#12` is the default board's
+/// task 12 and another board's is `work#12`.
 fn is_task(row: &ReviewRow, task: &str) -> bool {
     let want = task.trim().to_ascii_lowercase();
-    row.task.as_ref().is_some_and(|t| t.task_ref.to_ascii_lowercase() == want || format!("#{}", t.num) == want || t.num.to_string() == want)
+    let want = if !want.is_empty() && want.trim_start_matches('#').bytes().all(|b| b.is_ascii_digit()) { format!("#{}", want.trim_start_matches('#')) } else { want };
+    row.task.as_ref().is_some_and(|t| t.task_ref.to_ascii_lowercase() == want)
 }
 
 /// Narrows `list` to what `q` asks for.
