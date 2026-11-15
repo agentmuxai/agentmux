@@ -11,7 +11,7 @@
 // incident. A warning here means the generated type may not match the wire, so it fails the
 // build, unless its item is on ALLOWED with the reason it can't change the TypeScript.
 //
-//   node scripts/check-tsrs-serde-warnings.mjs                    runs `cargo check -p agentmux-srv --tests`
+//   node scripts/check-tsrs-serde-warnings.mjs                    runs `cargo check -p agentmux-srv-core -p agentmux-srv --tests`
 //   node scripts/check-tsrs-serde-warnings.mjs -- <cargo args>    runs `cargo <cargo args>` instead
 //   node scripts/check-tsrs-serde-warnings.mjs --log FILE         reads that build output instead
 //
@@ -57,7 +57,7 @@ function main() {
         output = readFileSync(process.argv[at + 1], "utf8");
     } else {
         const dashes = process.argv.indexOf("--");
-        const args = dashes >= 0 ? process.argv.slice(dashes + 1) : ["check", "-p", "agentmux-srv", "--tests"];
+        const args = dashes >= 0 ? process.argv.slice(dashes + 1) : ["check", "-p", "agentmux-srv-core", "-p", "agentmux-srv", "--tests"];
         const run = spawnSync("cargo", args, { encoding: "utf8", maxBuffer: 1 << 28 });
         output = `${run.stdout}\n${run.stderr}`;
         if (run.status !== 0) {

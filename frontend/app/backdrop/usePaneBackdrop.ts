@@ -1,0 +1,58 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
+import { isLightThemeActive } from "../block/pane-identity";
+import { currentWindowTheme } from "../store/window-appearance";
+import { resolveBackdrop, type ResolvedBackdrop } from "./meta";
+import { registerPaneScope, releasePaneScope, scopeVars } from "./scope";
+
+/** The app theme backdrops step aside for: it has its own fixed contrast (spec §8, §12). */
+export const BACKDROP_SUPPRESSED_THEME = "high-contrast";
+
+const FORCED_COLORS = "(forced-colors: active)";
+
+/** Whether the system's forced-colors mode is on, which overrides every colour a page sets (spec §12). Follows the system while the owner lives. */
+function createForcedColors(): Accessor<boolean> {
+    const list = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(FORCED_COLORS) : undefined;
+    const [on, setOn] = createSignal(!!list?.matches);
+    if (list && typeof list.addEventListener === "function") {
+        const onChange = (e: MediaQueryListEvent) => setOn(e.matches);
+        list.addEventListener("change", onChange);
+        onCleanup(() => list.removeEventListener("change", onChange));
+    }
+    return on;
+}
+
+/**
+ * A pane's backdrop, from its meta, kept registered as its scope (`registerPaneScope`) for as long as the pane
+ * lives. It follows the app theme: a switch re-derives the same backdrop for the other side. Returns the
+ * resolved backdrop (for the pane's `data-backdrop`), or undefined when the pane has none to show: no record, or
+ * `high-contrast` or forced colours are on, when the pane keeps the app's tokens.
+ *
+ * Reads only what it is given and writes only the registry: a pane with no backdrop and no plain-colour `bg`
+ * registers nothing and draws exactly as before.
+ *
+ * Only the pane's live frame owns its registry entry (`owner`, the default). A second frame for the same block, a
+ * drag preview, resolves the same backdrop for its own `data-backdrop` and reads the live scope, but never
+ * registers or releases it: its unmounting must not take the live pane's scope with it.
+ */
+export function usePaneBackdrop(
+    blockId: string,
+    meta: () => { backdrop?: unknown; bg?: unknown } | undefined,
+    { owner = true }: { owner?: boolean } = {}
+): () => ResolvedBackdrop | undefined {
+    const forced = createForcedColors();
+    const resolved = createMemo(() => {
+        if (currentWindowTheme() === BACKDROP_SUPPRESSED_THEME || forced()) return undefined;
+        return resolveBackdrop(meta(), isLightThemeActive() ? "light" : "dark");
+    });
+    if (owner) {
+        createEffect(() => {
+            const r = resolved();
+            registerPaneScope(blockId, r ? scopeVars(r.derived) : undefined);
+        });
+        onCleanup(() => releasePaneScope(blockId));
+    }
+    return resolved;
+}

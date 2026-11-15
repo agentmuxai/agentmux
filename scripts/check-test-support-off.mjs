@@ -4,8 +4,9 @@
 //
 // check-test-support-off.mjs: a shipped build never has the test-only feature.
 //
-// The `test-support` feature of agentmux-srv exists for test builds (the package turns it on for its own
-// tests through a dev-dependency). A build that ships must resolve without it. Two checks:
+// The `test-support` feature of agentmux-srv-core exists for test builds (the server layer, the agentmux-srv
+// package, turns it on for its own tests through a dev-dependency). A build that ships must resolve without
+// it. Two checks:
 //
 //   node scripts/check-test-support-off.mjs             no build or packaging command asks for it:
 //                                                       no `--all-features`, no `test-support`, in the
@@ -13,7 +14,7 @@
 //   node scripts/check-test-support-off.mjs --resolved  a normal (non-test) resolve of the workspace has it
 //                                                       off for every package here (needs cargo)
 //
-// The compile-time half is in crates/srv/src/lib.rs: a release build with the feature on does not compile.
+// The compile-time half is in crates/srv-core/src/lib.rs: a release build with the feature on does not compile.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -56,7 +57,7 @@ export function commandFiles(root) {
 
 /**
  * What a `cargo tree -f "{p} features=[{f}]" --prefix none` of the normal and build edges says about this
- * workspace: the packages (those with a local path) that have the feature on, and an error if agentmux-srv
+ * workspace: the packages (those with a local path) that have the feature on, and an error if agentmux-srv-core
  * is not in the output at all, so an empty answer cannot pass.
  */
 export function resolvedProblems(tree) {
@@ -65,10 +66,10 @@ export function resolvedProblems(tree) {
     for (const line of tree.split("\n")) {
         const m = /^(\S+) v\S+ \(([^)]+)\) features=\[([^\]]*)\]/.exec(line.trim());
         if (!m || m[2].includes("://")) continue;
-        if (m[1] === "agentmux-srv") sawSrv = true;
+        if (m[1] === "agentmux-srv-core") sawSrv = true;
         if (m[3].split(",").map((f) => f.trim()).includes(FEATURE)) out.push(`${m[1]} resolves with ${FEATURE} on in a normal build`);
     }
-    if (!sawSrv) out.push("the resolve did not list agentmux-srv: the check read nothing");
+    if (!sawSrv) out.push("the resolve did not list agentmux-srv-core: the check read nothing");
     return [...new Set(out)];
 }
 

@@ -4,7 +4,7 @@
 // The frontend predicts every layout edit with its own reducer, and srv stores
 // its own result for the same intent (layoutIntents.ts). The two must agree:
 // this replays srv's random intent sequences, generated with srv's results by
-// crates/srv/src/backend/layout/intent/tests.rs, through the frontend's tree
+// crates/srv-core/src/backend/layout/intent/tests.rs, through the frontend's tree
 // functions and balance pass. SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §8.
 
 import { readFileSync } from "node:fs";

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AttentionItem } from "@/app/notification/attention-list";
+import type { EndedAsk } from "@/app/notification/ended-asks";
 import type { WaitingApp } from "@/app/notification/waiting-for-you";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import type { UseRequest } from "@/types/rpc/UseRequest";
@@ -65,8 +66,20 @@ const use = (id: string, over: Partial<UseRequest> = {}): UseRequest =>
 const request = (id: string): VaultRequest => ({ id, agent: "builder", block_id: "", label: "", requested_ms: Date.now() - 60_000 }) as VaultRequest;
 
 /** The live inputs, empty unless a test says so. */
-const base = { rows: () => [] as AgentRuntime[], items: () => [] as AttentionItem[], apps: () => [] as WaitingApp[], uses: () => [] as UseRequest[], requests: () => [] as VaultRequest[], tasks: () => 0 };
+const base = { rows: () => [] as AgentRuntime[], items: () => [] as AttentionItem[], apps: () => [] as WaitingApp[], uses: () => [] as UseRequest[], requests: () => [] as VaultRequest[], tasks: () => 0, ended: () => [] as EndedAsk[] };
 const part = (c: HTMLElement, id: string) => c.querySelector(`[data-part="${id}"]`) as HTMLElement | null;
+
+const gone = (key: string, over: Partial<EndedAsk> = {}): EndedAsk => ({
+    key,
+    blockId: "p-" + key,
+    name: "Korp",
+    color: "#e8a33d",
+    what: "asks to approve a Bash call",
+    since: Date.now() - 80_000,
+    endedAt: Date.now() - 8_000,
+    how: "answered",
+    ...over,
+});
 
 describe("SummaryStatus", () => {
     it("draws nothing while no agent runs and nothing waits", () => {
@@ -326,5 +339,75 @@ describe("SummaryStatus", () => {
             setUses([use("u1"), use("u2")]);
             expect(motion.pulse).not.toHaveBeenCalled();
         });
+    });
+
+    describe("the asks that already ended", () => {
+        it("stays in the bar for them while nothing waits, as one quiet part with its count", () => {
+            const { container } = render(() => <SummaryStatus {...base} ended={() => [gone("a"), gone("b")]} />);
+            expect(container.querySelector(".status-summary")).not.toBeNull();
+            const recent = part(container, "ended")!;
+            expect(recent.textContent).toBe("2");
+            expect(recent.getAttribute("data-tip")).toBe("2 asks ended in the last 2 minutes");
+            expect(container.querySelector(".status-summary__badge"), "nothing waits, so no badge").toBeNull();
+        });
+
+        it("leaves the bar to what waits: the part is not drawn while anything waits", () => {
+            const { container } = render(() => <SummaryStatus {...base} items={() => [item("q1")]} ended={() => [gone("a")]} />);
+            expect(part(container, "ended")).toBeNull();
+            expect(part(container, "asks")?.textContent).toBe("1");
+        });
+
+        it("opens a list of them with nothing waiting: who, what, how it ended and how long it had waited, and no button", () => {
+            const { container } = render(() => (
+                <SummaryStatus {...base} ended={() => [gone("a"), gone("b", { name: "Clare", what: "asks you to confirm", how: "closed", since: Date.now() - 20_000, endedAt: Date.now() - 12_000 })]} />
+            ));
+            fireEvent.click(part(container, "ended")!);
+            const list = screen.getByRole("dialog", { name: "Waiting on you" });
+            expect(within(list).getByText("Nothing waits on you.")).toBeTruthy();
+            expect(within(list).getAllByRole("heading").map((h) => h.textContent)).toEqual(["Recently ended"]);
+            expect(within(list).getByText("answered after 1:12")).toBeTruthy();
+            expect(within(list).getByText("closed unanswered after 0:08")).toBeTruthy();
+            expect(within(list).getByText("Clare")).toBeTruthy();
+            expect(within(list).queryAllByRole("button", { name: /^(Go to|Answer|Open (?!the Swarm))/ })).toHaveLength(0);
+            // Only the Swarm is one click away.
+            fireEvent.click(within(list).getByRole("button", { name: "Open the Swarm" }));
+            expect(open).toHaveBeenCalledWith("swarm");
+        });
+
+        it("lists them under what waits, and a click on the agents part still opens it", () => {
+            const { container } = render(() => <SummaryStatus {...base} rows={() => [agent("a", "working")]} items={() => [item("q1")]} ended={() => [gone("a")]} />);
+            fireEvent.click(part(container, "agents")!);
+            const list = screen.getByRole("dialog");
+            expect(within(list).getAllByRole("heading").map((h) => h.textContent)).toEqual(["Asks", "Recently ended"]);
+        });
+
+        it("goes when the last one leaves its two minutes, and closes the list with it", () => {
+            const [ended, setEnded] = createSignal([gone("a")]);
+            const { container } = render(() => <SummaryStatus {...base} ended={ended} />);
+            fireEvent.click(part(container, "ended")!);
+            expect(screen.getByRole("dialog")).toBeTruthy();
+            setEnded([]);
+            expect(screen.queryByRole("dialog")).toBeNull();
+            expect(container.querySelector(".status-summary")).toBeNull();
+        });
+
+        it("does not open a list for an agent that merely runs when nothing waits or ended: it opens the Swarm", () => {
+            const { container } = render(() => <SummaryStatus {...base} rows={() => [agent("a", "working")]} />);
+            fireEvent.click(part(container, "agents")!);
+            expect(open).toHaveBeenCalledWith("swarm");
+            expect(screen.queryByRole("dialog")).toBeNull();
+        });
+    });
+
+    it("keeps the list's own total to the operator while a Vault request waits, or it gives the Vault count away by subtraction", () => {
+        const { container } = render(() => <SummaryStatus {...base} items={() => [item("q1")]} uses={() => [use("u1")]} />);
+        fireEvent.click(part(container, "asks")!);
+        const count = screen.getByRole("dialog").querySelector(".attention-list-count") as HTMLElement;
+        expect(count.textContent).toBe("2");
+        expect(count.hasAttribute("data-operator-only")).toBe(true);
+        cleanup();
+        const b = render(() => <SummaryStatus {...base} items={() => [item("q1")]} />);
+        fireEvent.click(part(b.container, "asks")!);
+        expect((screen.getByRole("dialog").querySelector(".attention-list-count") as HTMLElement).hasAttribute("data-operator-only")).toBe(false);
     });
 });

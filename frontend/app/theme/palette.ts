@@ -7,7 +7,7 @@
  * (docs/specs/SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md).
  *
  * The list is `schema/color-palette.json`, read here and by srv
- * (crates/srv/src/backend/palette.rs), so there is one copy. A slot is a hue:
+ * (crates/srv-core/src/backend/palette.rs), so there is one copy. A slot is a hue:
  * every surface derives its own tone from it per role and theme
  * (block/pane-color-scheme.ts), so sharing the palette never makes a tab
  * recolour a pane border. This module is the only place that knows the list;

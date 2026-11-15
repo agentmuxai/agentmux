@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The contract behind Connectors' list of what each agent runs
-// (`crates/srv/src/backend/mcp_observed.rs`): the real Claude Code CLI's
+// (`crates/srv-core/src/backend/mcp_observed.rs`): the real Claude Code CLI's
 // `system/init` frame lists every MCP server it loaded, with its status and
 // source, and names each server's tools `mcp__<server>__<tool>`. Run the
 // CLI against a fake Messages API (fake-anthropic.mjs: no model, no

@@ -591,6 +591,12 @@ function crossWindowDragApi() {
         stopTabDragTracking: async () => {
             await invokeCommand("stop_tab_drag_tracking");
         },
+    } satisfies Partial<AppApi>;
+}
+
+/** The picture of a dragged window tab or pane that the cursor carries (Windows; drag/live-follow.ts). */
+function liveFollowApi() {
+    return {
         liveFollowBegin: async (args) => {
             await invokeCommand("live_follow_begin", args);
         },
@@ -601,6 +607,12 @@ function crossWindowDragApi() {
             await invokeCommand("live_follow_resize", args);
         },
         liveFollowCapture: (args) => invokeCommand<{ staged: boolean }>("live_follow_capture", args),
+        liveFollowQuiet: async (args) => {
+            await invokeCommand("live_follow_quiet", args);
+        },
+        liveFollowFade: async (args) => {
+            await invokeCommand("live_follow_fade", args);
+        },
     } satisfies Partial<AppApi>;
 }
 
@@ -648,6 +660,7 @@ export function buildCefApi(): AppApi {
         ...appStateApi(),
         ...providerApi(),
         ...crossWindowDragApi(),
+        ...liveFollowApi(),
         ...dragHelperApi(),
     };
 

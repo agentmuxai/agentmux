@@ -144,7 +144,9 @@ function renderShellHeader(
     return (
         <PaneHeaderTabStrip
             tabs={t.tabIds()}
-            activeId={s.activeBlockId()}
+            // The tab whose content is in front: the active one, or the one that takes its place while the
+            // active one is dragged out of the pane.
+            activeId={(nodeModel.shownBlockId ?? s.activeBlockId)()}
             getId={(id) => id}
             getLabel={t.labelOf}
             getTooltipDetail={t.summaryOf}

@@ -2,7 +2,7 @@
 # check-rpc-bindings.sh — CI gate for the generated RPC type bindings.
 #
 # THE RULE: `frontend/types/rpc/*.ts` is generated from the Rust types in
-# `crates/srv/src/backend/rpc_types/` by `ts-rs`, and what is committed must
+# `crates/srv-core/src/backend/rpc_types/` by `ts-rs`, and what is committed must
 # match what the generator currently produces.
 #
 # WHY THIS EXISTS
@@ -32,7 +32,7 @@
 #
 # --check-only is for CI, after a `cargo test` that already ran the export
 # tests (any run that includes agentmux-srv's tests does). Regenerating again
-# there is not free: a `cargo test -p agentmux-srv` resolves features for a
+# there is not free: a `cargo test -p agentmux-srv-core -p agentmux-srv` resolves features for a
 # different package set than the job's multi-crate run, so it relinks the
 # whole srv test binary, about 3.4 min on the PR lane.
 #
@@ -78,9 +78,9 @@ regenerate() {
     fi
 
     echo "check-rpc-bindings: regenerating $GEN_DIR ..."
-    if ! cargo test -p agentmux-srv export_bindings >/dev/null 2>&1; then
+    if ! cargo test -p agentmux-srv-core -p agentmux-srv export_bindings >/dev/null 2>&1; then
         echo "check-rpc-bindings: regeneration FAILED — the export tests did not pass." >&2
-        echo "  Run: cargo test -p agentmux-srv export_bindings" >&2
+        echo "  Run: cargo test -p agentmux-srv-core -p agentmux-srv export_bindings" >&2
         exit 1
     fi
 }
@@ -101,7 +101,7 @@ echo "check-rpc-bindings: generated RPC bindings are STALE." >&2
 echo "  A Rust type behind a migrated RPC command changed without the" >&2
 echo "  committed TypeScript being regenerated." >&2
 echo "" >&2
-echo "  Fix: cargo test -p agentmux-srv export_bindings && git add $GEN_DIR" >&2
+echo "  Fix: cargo test -p agentmux-srv-core -p agentmux-srv export_bindings && git add $GEN_DIR" >&2
 echo "" >&2
 echo "  Difference (committed vs regenerated):" >&2
 # Status first: it is the only one of the two that shows a binding which is

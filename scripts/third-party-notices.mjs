@@ -473,9 +473,17 @@ export function chromiumCredits(repoRoot, rustPackages) {
 
 /**
  * Vite plugin: write licenses/ into the build output.
+ *
+ * `rust: false` (AGENTMUX_NOTICES_SKIP_RUST set) leaves `cargo metadata` out: the PR check that only proves the
+ * frontend bundles (ci-pr.yml) has no Rust toolchain or crates on its runner and no use for the list. The crates
+ * are then a problem like any other the notices have, so a release build still fails without them.
  * @returns {import("vite").Plugin}
  */
-export function thirdPartyNotices({ repoRoot, strict = Boolean(process.env.RELEASE_CHANNEL) }) {
+export function thirdPartyNotices({
+  repoRoot,
+  strict = Boolean(process.env.RELEASE_CHANNEL),
+  rust = !process.env.AGENTMUX_NOTICES_SKIP_RUST,
+}) {
   return {
     name: "agentmux-third-party-notices",
     apply: "build",
@@ -488,6 +496,7 @@ export function thirdPartyNotices({ repoRoot, strict = Boolean(process.env.RELEA
       let rustPackages = null;
       let rustError = null;
       try {
+        if (!rust) throw new Error("skipped (AGENTMUX_NOTICES_SKIP_RUST is set)");
         rustPackages = rustCrates(repoRoot);
       } catch (e) {
         rustError = String(e?.stderr ?? e?.message ?? e).split("\n")[0];

@@ -46,9 +46,9 @@ CSS can animate layer 1. It **cannot** touch layer 2 — the host moves the HWND
 
 ### Backend types & ops
 - [`crates/common/src/layout_types.rs`](../../crates/common/src/layout_types.rs) — `LayoutNode { id, flex_direction, size, children, data: Option<{block_id}> }`, `FlexDirection {Row,Column}`, `SplitPosition`; [`layout_intent.rs`](../../crates/common/src/layout_intent.rs) — `LayoutIntent`, the edits a window sends. Leaf = `data: Some`, no children; group = `data: None`, has children.
-- [`crates/srv/src/backend/layout/intent.rs`](../../crates/srv/src/backend/layout/intent.rs) — `apply_intent`: the frontend's tree algebra (`layoutTree.ts`) ported to Rust, followed by `balance_node` (`backend/layout/mod.rs`). Branch node ids derive from the intent's action id, as the frontend's do. **No geometry here.**
-- [`crates/srv/src/reducer/layout.rs`](../../crates/srv/src/reducer/layout.rs) + `reducer.rs` — command arms (`LayoutInsertNode`, `LayoutDeleteNode`, `LayoutMoveNode`, `LayoutResizeNodes`, `SetFocusedNode`, `SetMagnifiedNode`, …) → mutate `TabRecord` → emit versioned `Event::Layout*` (every event carries a monotonic `version`).
-- Persistence: [`crates/srv/src/backend/obj.rs`](../../crates/srv/src/backend/obj.rs) `LayoutState { rootnode, focusednodeid, magnifiednodeid, … }`, one row per `tab_id` in the wstore.
+- [`crates/srv-core/src/backend/layout/intent.rs`](../../crates/srv-core/src/backend/layout/intent.rs) — `apply_intent`: the frontend's tree algebra (`layoutTree.ts`) ported to Rust, followed by `balance_node` (`backend/layout/mod.rs`). Branch node ids derive from the intent's action id, as the frontend's do. **No geometry here.**
+- [`crates/srv-core/src/reducer/layout.rs`](../../crates/srv-core/src/reducer/layout.rs) + `reducer.rs` — command arms (`LayoutInsertNode`, `LayoutDeleteNode`, `LayoutMoveNode`, `LayoutResizeNodes`, `SetFocusedNode`, `SetMagnifiedNode`, …) → mutate `TabRecord` → emit versioned `Event::Layout*` (every event carries a monotonic `version`).
+- Persistence: [`crates/srv-core/src/backend/obj.rs`](../../crates/srv-core/src/backend/obj.rs) `LayoutState { rootnode, focusednodeid, magnifiednodeid, … }`, one row per `tab_id` in the wstore.
 
 ### Sync path (backend ↔ frontend)
 ```
@@ -161,8 +161,8 @@ A one-shot runtime diagnostic confirmed it (live app, `.tile-node`): `.animate` 
 ## 5. File map
 | Area | Files |
 |---|---|
-| Backend tree + ops | [`crates/common/src/layout_types.rs`](../../crates/common/src/layout_types.rs), [`crates/srv/src/backend/layout/mod.rs`](../../crates/srv/src/backend/layout/mod.rs) |
-| Backend reducer + persistence | [`crates/srv/src/reducer/layout.rs`](../../crates/srv/src/reducer/layout.rs), `reducer.rs`, `state.rs`, `backend/obj.rs` |
+| Backend tree + ops | [`crates/common/src/layout_types.rs`](../../crates/common/src/layout_types.rs), [`crates/srv-core/src/backend/layout/mod.rs`](../../crates/srv-core/src/backend/layout/mod.rs) |
+| Backend reducer + persistence | [`crates/srv-core/src/reducer/layout.rs`](../../crates/srv-core/src/reducer/layout.rs), `reducer.rs`, `state.rs`, `backend/obj.rs` |
 | Host browser-pane lifecycle | [`crates/cef/src/reducer/panes.rs`](../../crates/cef/src/reducer/panes.rs), `browser_panes.rs`, `browser_pane/*` |
 | Frontend model/geometry | `frontend/layout/lib/{layoutModel,layoutTree,layoutGeometry,layoutNodeModels,layoutModelHooks,layoutResize,layoutPersistence,utils}.ts` |
 | Frontend render + styles | [`frontend/layout/lib/TileLayout.win32.tsx`](../../frontend/layout/lib/TileLayout.win32.tsx) (+ darwin/linux), `tilelayout.scss`; [`frontend/app/block/block.tsx`](../../frontend/app/block/block.tsx), `block.scss` |

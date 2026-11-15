@@ -10,7 +10,7 @@
 // tracked in the launcher's live in-memory `WindowMirror.last_rect` — gone
 // the moment the launcher process exits.
 //
-// `Window.pos`/`Window.winsize` (crates/srv/src/backend/obj.rs) already
+// `Window.pos`/`Window.winsize` (crates/srv-core/src/backend/obj.rs) already
 // existed as fields, and the `SetWindowPosAndSize` RPC
 // (crates/srv/src/server/service/window_mutate.rs) already existed to
 // write them — this file is the first caller of that RPC.
@@ -51,6 +51,10 @@ static POSITION_WRITER: TrailingWriter =
 /// have no srv `Window` row, see SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_
 /// PERSISTENCE_2026_07_06.md §1.B).
 pub(crate) fn report_position_for_srv_writethrough(state: &Arc<AppState>, hwnd: HWND, rect: agentmux_common::ipc::Rect) {
+    // A test build's windows are off-screen on purpose: that place is never saved, for any window.
+    if agentmux_common::test_offscreen::active() {
+        return;
+    }
     let Some(label) = state.label_for_hwnd(hwnd) else {
         return;
     };

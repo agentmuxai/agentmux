@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // What srv says about itself on every WebSocket connect (the `srvinfo` event,
-// crates/srv/src/srv_info.rs): its version, and the machine it runs on. That
+// crates/srv-core/src/srv_info.rs): its version, and the machine it runs on. That
 // machine is the one whose names the UI shows and whose paths it builds; it is
 // only the same as the UI's own when the UI is the desktop app.
 //

@@ -17,6 +17,7 @@ import { batch } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { LayoutIntent } from "@/types/rpc/LayoutIntent";
+import { dropHeldIn } from "./heldDrop";
 import { healDuplicateBlocks } from "./layoutDuplicates";
 import { balanceNode, findNode, findNodeByBlockId } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
@@ -97,14 +98,15 @@ async function sendIntent(model: LayoutModel, actionId: string, intent: LayoutIn
 }
 
 /** Nothing of this model's is on its way to srv, and no drag or resize is
- *  holding a preview over the tree. */
+ *  holding a preview over the tree. A drop that is held for the pane srv
+ *  brings (heldDrop.ts) is no such preview: the stored tree is what ends it. */
 export function isLayoutQuiet(model: LayoutModel): boolean {
     return (
         !model.layoutOutbox.length &&
         !model.layoutSending &&
         !model.processingBackendActions &&
         !model.getter(model.activeDrag) &&
-        !model.pendingTreeAction?.currentValueAtom?.()
+        (!model.pendingTreeAction?.currentValueAtom?.() || dropHeldIn(model))
     );
 }
 

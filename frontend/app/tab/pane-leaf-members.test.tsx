@@ -17,6 +17,7 @@ import {
     resetWindowResizeForTests,
     WINDOW_RESIZE_SETTLE_MS,
 } from "@/app/platform/window-resize";
+import { resetTabLandingForTests, showTabLanding, tabMemberLands } from "@/layout/lib/tabLanding";
 import { renderPaneMembers } from "./pane-leaf-members";
 
 vi.mock("@/app/block/block", () => ({
@@ -92,5 +93,68 @@ describe("a dormant keep-alive slot during a window resize", () => {
         setActive("b");
         expect(slotOf(container, 1).style.contentVisibility).toBe("");
         expect(slotOf(container, 0).style.contentVisibility).toBe("hidden");
+    });
+});
+
+describe("a member whose tab is dragged out of the pane", () => {
+    afterEach(() => {
+        cleanup();
+        resetTabLandingForTests();
+    });
+
+    const memberOf = (slot: HTMLElement) => slot.querySelector<HTMLElement>(".pane-leaf-member");
+
+    it("stands in its landing place while the place is shown, and is back in its slot when the place goes", () => {
+        const { container } = mountSlots(["a", "b"], "b");
+        const member = memberOf(slotOf(container, 0))!;
+        expect(tabMemberLands("a")).toBe(true);
+        const place = document.createElement("div");
+        const hide = showTabLanding("a", place);
+        // The same element, moved: nothing is mounted twice.
+        expect(member.parentElement).toBe(place);
+        expect(memberOf(slotOf(container, 0))).toBeNull();
+        // The other member stays where it is, and the slot itself never moves.
+        expect(memberOf(slotOf(container, 1))).not.toBeNull();
+        expect(slotOf(container, 0).parentElement).toBe(slotOf(container, 1).parentElement);
+        hide();
+        expect(member.parentElement).toBe(slotOf(container, 0));
+    });
+
+    it("leaves the place with its slot when the tab leaves the pane while the place is shown", () => {
+        const [ids, setIds] = createSignal(["a", "b"]);
+        const { container } = render(() =>
+            renderPaneMembers({
+                keepAlive: () => true,
+                scopedNodeModel: () => ({}) as NodeModel,
+                mountedBlockIds: ids,
+                activeBlockId: () => "b",
+                keepAliveNodeModelFor: (id) => ({ blockId: id }) as unknown as NodeModel,
+            })
+        );
+        const place = document.createElement("div");
+        showTabLanding("a", place);
+        expect(place.childElementCount).toBe(1);
+        setIds(["b"]);
+        expect(place.childElementCount).toBe(0);
+        expect(container.querySelectorAll(".pane-leaf-keepalive-slot").length).toBe(1);
+        expect(tabMemberLands("a")).toBe(false);
+    });
+
+    it("does not move a member that cannot stand there (a native surface)", () => {
+        const { container } = render(() =>
+            renderPaneMembers({
+                keepAlive: () => true,
+                scopedNodeModel: () => ({}) as NodeModel,
+                mountedBlockIds: () => ["a"],
+                activeBlockId: () => "a",
+                keepAliveNodeModelFor: (id) => ({ blockId: id }) as unknown as NodeModel,
+                lands: () => false,
+            })
+        );
+        expect(tabMemberLands("a")).toBe(false);
+        const place = document.createElement("div");
+        showTabLanding("a", place);
+        expect(place.childElementCount).toBe(0);
+        expect(memberOf(slotOf(container, 0))).not.toBeNull();
     });
 });

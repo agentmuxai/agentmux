@@ -3,7 +3,7 @@
 
 /**
  * The notices for an agent whose model server was changed through `Agents env_set`
- * (`crates/srv/src/backend/endpoint_notice.rs`): who pointed it where, and an Undo for a short while. The
+ * (`crates/srv-core/src/backend/endpoint_notice.rs`): who pointed it where, and an Undo for a short while. The
  * event comes from srv's own record, never from an agent's words. The agent's pane shows it as a card
  * (`view/agent/endpoint-notice-cards.tsx`) and My Agents' Environment panel as a line.
  */

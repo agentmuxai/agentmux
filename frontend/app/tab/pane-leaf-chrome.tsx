@@ -3,16 +3,19 @@
 
 import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import type { NodeModel } from "@/layout/index";
+import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { Show, type JSX } from "solid-js";
 import { renderPaneMembers } from "./pane-leaf-members";
 import {
     createViewModelScopes,
     useAgentMountWatch,
     useChromeNodeModel,
+    useDraggedTab,
     useLatchedChromeVm,
     useMinimizedMembers,
     usePaneKinds,
     useScopedNodeModel,
+    useShownBlockId,
     useStackMembers,
 } from "./pane-leaf-state";
 
@@ -46,21 +49,29 @@ import {
 export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const nodeModel = props.nodeModel;
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
+    // The tab whose content is in front is not the layout's active tab while that one is dragged out of the
+    // pane (`useShownBlockId`). Only the members follow it, and the strip's mark of the tab in front. The
+    // chrome stays on the layout's active tab: its header is built again whenever its view model changes,
+    // and the pill in it is the live drag source, which must outlive the drag (a header rebuilt mid-drag
+    // lost the release: the tab dropped on another window tab did not land).
+    const shownBlockId = useShownBlockId(nodeModel);
+    const draggedTab = useDraggedTab(nodeModel);
 
-    const { hoisted, keepAlive } = usePaneKinds(activeBlockId);
+    const { hoisted, keepAlive } = usePaneKinds(activeBlockId, () => paneStackIds(nodeModel).length > 1);
     const scopes = createViewModelScopes(nodeModel, hoisted);
     const scopedNodeModel = useScopedNodeModel(nodeModel, activeBlockId, hoisted, scopes);
-    const members = useStackMembers(nodeModel, activeBlockId, scopes);
-    useAgentMountWatch(nodeModel, activeBlockId, members);
+    const members = useStackMembers(nodeModel, shownBlockId, scopes, draggedTab);
+    useAgentMountWatch(nodeModel, shownBlockId, members);
     useMinimizedMembers(nodeModel, members.stackBlockIds);
-    const chromeNodeModel = useChromeNodeModel(nodeModel, activeBlockId, scopes);
+    const chromeNodeModel = useChromeNodeModel(nodeModel, activeBlockId, scopes, shownBlockId);
 
     const content = renderPaneMembers({
         keepAlive,
         scopedNodeModel,
         mountedBlockIds: members.mountedBlockIds,
-        activeBlockId,
+        activeBlockId: shownBlockId,
         keepAliveNodeModelFor: scopes.keepAliveNodeModelFor,
+        lands: members.lands,
     });
 
     const chromeVm = useLatchedChromeVm(chromeNodeModel);

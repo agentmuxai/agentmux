@@ -4,7 +4,7 @@
 // AgentIdentityLinksPanel — read-only Provider/Account/Status table for
 // ONE agent's direct account links (`db_agent_identity_links`, the table
 // the spawn-time resolver actually reads —
-// crates/srv/src/identity/resolver/inject.rs). Given an `agentId`, this is the
+// crates/srv-core/src/identity/resolver/inject.rs). Given an `agentId`, this is the
 // same row shape the now-removed Armory "Identities" rail tab
 // (`AgentIdentitiesPanel`) rendered per selected agent — extracted here so
 // the agent-pane's own `view: "identity"` tab (`identity-pane-view.tsx`)

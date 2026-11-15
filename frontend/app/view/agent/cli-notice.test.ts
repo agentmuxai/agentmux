@@ -270,7 +270,7 @@ describe("a failed compaction", () => {
     });
 });
 
-// The MCP self-heal's row (crates/srv/src/backend/mcp_health.rs, notice_frame).
+// The MCP self-heal's row (crates/srv-core/src/backend/mcp_health.rs, notice_frame).
 const mcpHealth = (state: string, extra: Record<string, unknown> = {}) => ({
     type: "system",
     subtype: "agentmux_mcp_health",

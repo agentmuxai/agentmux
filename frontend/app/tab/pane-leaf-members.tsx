@@ -14,6 +14,7 @@ import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { AgentStalledBanner } from "@/app/tab/agent-stalled-banner";
 import { PaneStackMemberActiveProvider, usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
 import type { NodeModel } from "@/layout/index";
+import { registerTabMember, tabLandingMountOf } from "@/layout/lib/tabLanding";
 import { Key } from "@/util/keyed";
 import { createEffect, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
 
@@ -23,6 +24,8 @@ export interface PaneMembersInput {
     mountedBlockIds: Accessor<string[]>;
     activeBlockId: () => string;
     keepAliveNodeModelFor: (id: string) => NodeModel;
+    /** Whether a member's own content can stand in its landing place while its tab is dragged. Default: it can. */
+    lands?: (id: string) => boolean;
 }
 
 /** One kept-alive member: its dormant flag, its slot (visible or hidden) and its Block. */
@@ -61,8 +64,29 @@ function renderKeepAliveSlot(id: string, input: PaneMembersInput): JSX.Element {
     });
     const skipsLayout = () => id !== activeBlockId() && (windowResizing() || layoutBehind(behindKey));
 
+    // The member's content, in an element of its own inside the slot: while the tab is dragged out of the
+    // pane and its landing place is shown, the element stands in the place (layout/lib/tabLanding.ts), laid
+    // out for it, and comes back when the place goes. Moved, not mounted again, as a maximized pane's leaf is
+    // (TileLayout.core.tsx `useMagnifiedLeafMount`). The slot itself never moves: the list places its slots
+    // by their neighbours.
+    let slot: HTMLDivElement | undefined;
+    let member: HTMLDivElement | undefined;
+    const lands = () => input.lands?.(id) ?? true;
+    createEffect(() => {
+        if (lands()) onCleanup(registerTabMember(id));
+    });
+    createEffect(() => {
+        const home = (lands() && tabLandingMountOf(id)) || slot;
+        if (member && home && member.parentElement !== home) home.appendChild(member);
+    });
+    // The slot's own removal takes the member with it only while the member is in it.
+    onCleanup(() => {
+        if (member && member.parentElement !== slot) member.remove();
+    });
+
     return (
         <div
+            ref={slot}
             class="pane-leaf-keepalive-slot"
             // Overlays in a dormant member cut no hole through the
             // browser panes on screen (pane-overlay.ts DORMANT_SLOT_ATTR).
@@ -92,9 +116,11 @@ function renderKeepAliveSlot(id: string, input: PaneMembersInput): JSX.Element {
                 "content-visibility": skipsLayout() ? "hidden" : undefined,
             }}
         >
-            <PaneStackMemberActiveProvider value={memberActive}>
-                <Block nodeModel={keepAliveNodeModelFor(id)} preview={false} />
-            </PaneStackMemberActiveProvider>
+            <div ref={member} class="pane-leaf-member" style={{ position: "absolute", inset: "0" }}>
+                <PaneStackMemberActiveProvider value={memberActive}>
+                    <Block nodeModel={keepAliveNodeModelFor(id)} preview={false} />
+                </PaneStackMemberActiveProvider>
+            </div>
             <AgentStalledBanner blockId={id} />
         </div>
     );

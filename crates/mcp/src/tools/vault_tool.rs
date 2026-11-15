@@ -253,7 +253,7 @@ mod tests {
         assert_eq!(actions, &json!(["list", "request", "generate", "rotate", "history", "import", "check", "show", "update", "verify", "health"]));
         // srv's catalog (backend/vault/kinds.rs) is the source; this list
         // must name the same kinds.
-        let srv = include_str!("../../../srv/src/backend/vault/kinds.rs");
+        let srv = include_str!("../../../srv-core/src/backend/vault/kinds.rs");
         let mut srv_kinds: Vec<&str> = srv.split("name: \"").skip(1).filter_map(|rest| rest.split('"').next()).collect();
         let mut ours: Vec<&str> = schema["inputSchema"]["properties"]["kind"]["enum"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
         srv_kinds.sort_unstable();

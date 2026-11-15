@@ -11,7 +11,7 @@
 //
 //   1. frontend/app/view/agent/providers/catalog.ts `pinnedVersion`
 //      (re-exported as PROVIDERS via ./index)
-//   2. crates/srv/src/backend/providers/<id>.rs   `pinned_version`
+//   2. crates/srv-core/src/backend/providers/<id>.rs   `pinned_version`
 //      (also what container agents install on first start)
 //
 // History: the 2026-07-02 pin bump (2.1.185 → 2.1.198) updated the frontend

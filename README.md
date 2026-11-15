@@ -138,7 +138,7 @@ Works identically across `task dev`, portable, and installed builds. Full refere
 
 ## Widgets
 
-The canonical list is [`crates/srv/src/config/widgets.json`](crates/srv/src/config/widgets.json). Icons are [Font Awesome Free](https://fontawesome.com/search?ic=free) names, vendored in [`public/fontawesome/`](public/fontawesome).
+The canonical list is [`crates/srv-core/src/config/widgets.json`](crates/srv-core/src/config/widgets.json). Icons are [Font Awesome Free](https://fontawesome.com/search?ic=free) names, vendored in [`public/fontawesome/`](public/fontawesome).
 
 **On the widget bar by default**, in this order:
 
@@ -271,7 +271,7 @@ Everything else — `self-declared`, `network-claimed`, or a **failed** `unverif
 
 **The practical rule:** an unverified sender is not authority for anything sensitive. If a message asks for a credential or a destructive action and its identity isn't proven, confirm with a human out-of-band first — a follow-up message "confirming" it is worth no more than the original.
 
-This is enforced in code ([`agentmux-srv`'s reactive handler](crates/srv/src/backend/reactive) and [`agentmux_common::jekt_sign`](crates/common/src/jekt_sign.rs)), not by convention. The full marker, tier and escalation rules are the [jekt protocol specification](https://docs.agentmux.ai/internals/jekt-protocol/); the `SPEC_JEKT_*` documents in [`docs/specs/`](docs/specs) are the design records behind it. Agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
+This is enforced in code ([`agentmux-srv`'s reactive handler](crates/srv-core/src/backend/reactive) and [`agentmux_common::jekt_sign`](crates/common/src/jekt_sign.rs)), not by convention. The full marker, tier and escalation rules are the [jekt protocol specification](https://docs.agentmux.ai/internals/jekt-protocol/); the `SPEC_JEKT_*` documents in [`docs/specs/`](docs/specs) are the design records behind it. Agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
 
 ## MuxAPI
 

@@ -140,6 +140,8 @@ jobs:
     outputs:
       rust: ${{ steps.classify.outputs.rust }}
       frontend: ${{ steps.classify.outputs.frontend }}
+      # Whether the frontend job also runs the production build (the classifier's R9).
+      frontend_build: ${{ steps.classify.outputs.frontend_build }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       docs_index: ${{ steps.classify.outputs.docs_index }}
       version_only: ${{ steps.classify.outputs.version_only }}
@@ -171,7 +173,7 @@ jobs:
         # whole design exists to prevent.
         run: |
           run_everything() {
-            printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\nversion_only=false\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\n' >> "$GITHUB_OUTPUT"
             echo "::notice::running all checks — $1"
           }
 
@@ -182,7 +184,7 @@ jobs:
           # vitest). The rest of the Rust tests ran on each PR and run again on the push
           # to main.
           if [ "${{ github.event_name }}" = "merge_group" ]; then
-            printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\nversion_only=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
             printf 'rust_os=["ubuntu-latest"]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
             echo "::notice::merge queue: fast gates and the tests that read the tree"
             exit 0
@@ -286,11 +288,12 @@ jobs:
     # themselves): the job's own limit used to come first and, on a runner that had stopped answering, was only
     # enforced after the service's grace period (2026-11-12: a 35-minute job was cancelled after 40).
     #
-    # In the merge queue the Ubuntu leg gets 28: it takes 7 to 10 minutes there, the nextest step's two attempts
-    # are limited to 14 + 8 (12 + 8 until the build was cut to two LLVM threads, which adds 1 to 2 minutes to a slow compile), and a stalled leg holds every entry behind it until the limit ends it (and only the
+    # In the merge queue the Ubuntu leg gets 32: it took 7 to 10 minutes there until the core became its own package and
+    # its test harness was built alone, before the server layer's (two builds of about 9 GB at once paged a 16 GB runner,
+    # 2026-11-15), which adds about 4 minutes; the nextest step's two attempts are limited to 18 + 8, and a stalled leg holds every entry behind it until the limit ends it (and only the
     # limit does: a cancel needs the runner to answer, which a stalled one cannot). 2026-11-13: nine stalls ran to
     # 50 + 5 minutes, the queue 19 deep behind them.
-    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && (needs.changes.outputs.queue == 'true' && 28 || 50) || 35 }}
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && (needs.changes.outputs.queue == 'true' && 32 || 50) || 35 }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -444,7 +447,7 @@ jobs:
       # tests it runs (the nextest step below), and checks the other crates there.
       - name: cargo check --tests (CEF-free crates)
         if: matrix.os == 'windows-latest'
-        run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+        run: cargo check --tests -p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
       # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations)
       # in the same CEF-free scope.
@@ -485,12 +488,12 @@ jobs:
         if: matrix.os != 'windows-latest'
         env:
           IN_QUEUE: ${{ needs.changes.outputs.queue }}
-          # The attempt limits: a PR run takes 13 to 18 minutes (7 in the queue); a stalled attempt is ended at
+          # The attempt limits: a PR run takes 13 to 21 minutes (about 11 in the queue); a stalled attempt is ended at
           # about twice that and tried once more, which reuses what it built. The step's limit is the two together
           # and the job's (below) is just over it, so a stall is ended by the script and not by the job.
-          CI_ATTEMPT1_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 840 || 1500 }}
+          CI_ATTEMPT1_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 1080 || 1500 }}
           CI_ATTEMPT2_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 480 || 900 }}
-        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 24 || 42 }}
+        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 28 || 42 }}
         # The build's warnings go to a file for the ts-rs check below, which used
         # to read them off a separate `cargo check`; pipefail keeps a failing
         # build or test failing the step.
@@ -574,7 +577,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Keep this crate list identical to the `rust` job's.
       - name: cargo check --tests (CEF-free crates)
-        run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+        run: cargo check --tests -p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
   # Windows test EXECUTION on the PR (SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md
   # §6 said to restore a targeted Windows subset if Windows-only runtime
@@ -631,7 +634,7 @@ jobs:
         uses: taiki-e/install-action@nextest
       # The same crate list as the `rust` job's.
       - name: cargo nextest archive (CEF-free crates)
-        run: cargo nextest archive -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats --archive-file "$env:RUNNER_TEMP\nextest-windows.tar.zst"
+        run: cargo nextest archive -p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats --archive-file "$env:RUNNER_TEMP\nextest-windows.tar.zst"
       - uses: actions/upload-artifact@v4
         with:
           name: nextest-windows-archive
@@ -938,7 +941,7 @@ jobs:
       - name: Function size ratchet
         run: node scripts/check-function-sizes.mjs
 
-      # srv builds every HTTP client through crates/srv/src/http_client.rs: reqwest 0.13 refuses to build one on a
+      # srv builds every HTTP client through crates/srv-core/src/http_client.rs: reqwest 0.13 refuses to build one on a
       # Linux machine with no system certificates, and a direct `reqwest::Client::new()` panics there, so the server
       # died at start. The helper builds a client that trusts nothing in that case.
       - name: srv HTTP clients
@@ -1229,7 +1232,31 @@ jobs:
       # Also in the merge queue: a vitest test can read the source tree or the installed packages (the
       # i18n and colour ratchets, Shiki's bundle), so it can fail on two PRs that each passed it alone.
       - name: vitest run
+        id: vitest
         run: npx vitest run --shard=${{ matrix.shard }}/2
+      # The production build the packaging runs (Taskfile.yml `build:frontend`, on Linux). tsc and vitest read past
+      # what only the bundler rejects: on 2026-11-15 a byte that is not UTF-8 in one source file passed every PR
+      # check and broke the Linux packaging on main. No PR job built the frontend; only the release and nightly
+      # packaging did. One build, on Linux, as a step of this leg and not a job of its own: the checkout and
+      # `npm ci` are already paid for here, and this leg is the shorter of the two, so the lane takes no longer.
+      #
+      # It runs unless the PR changes only Rust files and documentation (the classifier's R9, which fails toward
+      # running), and in the merge queue and on a push to main, as the rest of this job does. It also runs when
+      # vitest above failed, so one push shows both failures; not when an earlier step did, or on a cancel.
+      #
+      # The crates' licence list is left out (AGENTMUX_NOTICES_SKIP_RUST): it is `cargo metadata`, which on this
+      # runner would fetch the toolchain and every crate to prove nothing about the bundle. With no
+      # RELEASE_CHANNEL the notices plugin warns about that and the build goes on; a release build fails on it.
+      #
+      # Required with no change to the branch protection: a failing step fails this job, which `CI required`
+      # reads. Where it does not run, the step is skipped inside a job that reports as usual, so no check is
+      # left pending.
+      - name: production frontend build (vite, linux)
+        if: ${{ (success() || steps.vitest.outcome == 'failure') && matrix.shard == 2 && needs.changes.outputs.frontend_build != 'false' }}
+        env:
+          VITE_PLATFORM: linux
+          AGENTMUX_NOTICES_SKIP_RUST: "1"
+        run: bash scripts/vite-build.sh --mode production --config vite.config.ts
 
   # Single context for branch protection to point at, instead of pinning
   # `rust` and `frontend` individually. #3506: `rust` is a matrix job, and a
