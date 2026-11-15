@@ -180,6 +180,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/agentmux/work/boards"), Audience::Everyone),
     (Match::Route("/agentmux/work/claim"), Audience::Everyone),
     (Match::Route("/agentmux/work/media"), Audience::Everyone),
+    (Match::Route("/agentmux/work/:id"), Audience::Everyone),
     (Match::Route("/api/bus/agents"), Audience::Everyone),
     (Match::Route("/api/bus/broadcast"), Audience::Everyone),
     (Match::Route("/api/bus/inject"), Audience::Everyone),

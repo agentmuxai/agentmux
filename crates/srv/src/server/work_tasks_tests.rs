@@ -382,3 +382,58 @@ async fn a_task_goes_to_the_work_store_not_the_identity_store() {
     assert!(state.identity_store.work_queue_get(&id).unwrap().is_none(), "the host's queue is untouched");
     assert!(state.identity_store.work_board_get(&id).unwrap().is_none(), "so is its board");
 }
+
+async fn get(app: &Api, uri: &str, agent: &str) -> (StatusCode, Value) {
+    let token = crate::server::tests::token_for(&app.state, agent);
+    let req = Request::builder()
+        .uri(uri)
+        .method("GET")
+        .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", token)
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+/// An agent that lost its context reads the brief again, whole, whoever holds the task.
+#[tokio::test]
+async fn a_task_is_read_back_whole_with_its_brief_card_and_history() {
+    let app = app();
+    let brief = format!("First paragraph.\n\n{}\nLast line.", "a long item of the brief. ".repeat(600));
+    let (s, v) = post(&app, "/agentmux/work", json!({"title": "t", "payload": brief})).await;
+    assert_eq!(s, StatusCode::OK);
+    let num = v["num"].as_i64().expect("a number");
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    let attempt = c["attempt"].as_i64().unwrap();
+    let update = json!({"agent_id": "a1", "attempt": attempt, "note": "halfway", "checklist": [{"text": "step", "status": "completed"}]});
+    let (s, _) = post(&app, &format!("/agentmux/work/{num}/update"), update).await;
+    assert_eq!(s, StatusCode::OK);
+
+    // By number, by `#number` and by id, and by an agent that does not hold it.
+    let id = v["id"].as_str().unwrap().to_string();
+    for key in [num.to_string(), format!("%23{num}"), id] {
+        let (s, t) = get(&app, &format!("/agentmux/work/{key}"), "a2").await;
+        assert_eq!(s, StatusCode::OK, "{key}: {t}");
+        assert_eq!(t["payload"], brief.as_str(), "{key}: the brief is not cut");
+        assert_eq!(t["title"], "t");
+        assert_eq!(t["state"], "claimed");
+        assert_eq!(t["claimed_by"], "a1");
+        assert_eq!(t["card"]["num"], num);
+        assert_eq!(t["card"]["note"], "halfway");
+        assert_eq!(t["card"]["checklist"][0]["text"], "step");
+        let kinds: Vec<&str> = t["history"].as_array().unwrap().iter().filter_map(|e| e["kind"].as_str()).collect();
+        assert!(kinds.contains(&"claimed") && kinds.contains(&"updated"), "{key}: {kinds:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_task_that_does_not_exist_is_not_found() {
+    let app = app();
+    let (s, v) = get(&app, "/agentmux/work/987654", "a1").await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    let (s, _) = get(&app, "/agentmux/work/no-such-id", "a1").await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}

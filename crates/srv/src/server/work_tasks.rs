@@ -577,6 +577,31 @@ pub(super) fn viewer(state: &AppState, caller: Option<&Caller>) -> Option<(Strin
     Some((reg.agent_id.clone(), reg.uid.clone().unwrap_or_default()))
 }
 
+/// The most history lines `GET /agentmux/work/:id` returns.
+const GET_HISTORY: usize = 30;
+
+/// `GET /agentmux/work/:id` (`Tasks` `get`): one task whole, for any agent that sees its board: the instruction
+/// it was filed with, who it is for and who holds it, its card (links, note, question, checklist, what it
+/// starts after) and its last history lines. A task on a board the caller can't see is refused like one that
+/// doesn't exist.
+pub(super) async fn handle_work_get(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    caller: Option<axum::Extension<Caller>>,
+) -> (StatusCode, Json<Value>) {
+    let none = || (StatusCode::NOT_FOUND, Json(json!({ "error": "no such task" })));
+    let id = resolve_id(&state, &id);
+    if !sees_task(&state, caller.as_deref(), &id) {
+        return none();
+    }
+    let _ = state.work_store.work_card_ensure(&id, now_ms());
+    let Ok(Some(task)) = state.work_store.work_board_get(&id) else { return none() };
+    let mut v = serde_json::to_value(&task).unwrap_or_default();
+    let history = state.work_store.work_events(&task.item.id, GET_HISTORY).unwrap_or_default();
+    v["history"] = serde_json::to_value(history).unwrap_or_default();
+    (StatusCode::OK, Json(v))
+}
+
 /// Whether the caller may see the board a task is on (a call with no token sees every board). A task
 /// on a board whose agent list leaves the caller out is refused like one that doesn't exist.
 pub(super) fn sees_task(state: &AppState, caller: Option<&Caller>, work_id: &str) -> bool {
