@@ -134,6 +134,11 @@ describe("mergeImport", () => {
     it("the preview counts a command whose entries the merge changes, and not one it only adds to", () => {
         const bare = { command: "tab:new", key: "ctrl+alt+n" };
         expect(previewImport([bare], [{ command: "tab:new", key: "meta+alt+t", platform: "mac" }]).replaced).toBe(1);
+        // A mac entry of the setting stays, and the import only adds an entry for the other platform.
+        const mac = { command: "tab:new", key: "meta+alt+t", platform: "mac" };
+        expect(previewImport([mac], [{ command: "tab:new", key: "ctrl+alt+t", platform: "other" }]).replaced).toBe(0);
+        // The same platform with another key is a replacement.
+        expect(previewImport([mac], [{ command: "tab:new", key: "meta+alt+n", platform: "mac" }]).replaced).toBe(1);
         expect(previewImport([{ command: "tab:next", key: "ctrl+alt+n", platform: "other" }], [{ command: "tab:new", key: "meta+alt+t", platform: "mac" }]).replaced).toBe(0);
     });
 });
