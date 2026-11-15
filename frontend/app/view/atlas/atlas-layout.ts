@@ -19,6 +19,8 @@ export const NODE_H = 48;
 export const CONTAINER_FRAME_OUT = 7;
 const GAP_X = 14;
 const GAP_Y = 40;
+/** Between the rows a lead's reports are wrapped into. */
+const REPORT_ROW_GAP = 24;
 const PAD = 16;
 const HEAD = 40;
 /** The strip at the top of a region that its title and badge are written in. */
@@ -88,30 +90,53 @@ interface RegionLayout {
     h: number;
 }
 
-/** One region's nodes at positions relative to its top left, and the size its nodes need. */
-function layoutRegion(keys: readonly string[], edges: readonly AtlasEdge[], gridCols = GRID_COLS): RegionLayout {
+/**
+ * One region's nodes at positions relative to its top left, and the size its nodes need. `reportCols` is the most
+ * reports a lead keeps in one row: a lead whose reports are all agents with none of their own, and more than that many,
+ * stands them in rows of `reportCols` under it (centred), so a machine with a wide lead need not be as wide as its
+ * reports side by side. Unlimited, a lead's reports are one row.
+ */
+function layoutRegion(
+    keys: readonly string[],
+    edges: readonly AtlasEdge[],
+    gridCols = GRID_COLS,
+    reportCols = Number.POSITIVE_INFINITY
+): RegionLayout {
     const { roots, loners, children } = treesOf(keys, edges);
     const nodes = new Map<string, Placed>();
     let slot = 0;
-    let depthMax = -1;
+    /** The lowest edge of a node the trees have placed. */
+    let bottom = 0;
+    const put = (k: string, x: number, y: number) => {
+        nodes.set(k, { x, y });
+        bottom = Math.max(bottom, y + NODE_H);
+    };
     const place = (k: string, depth: number, seen: Set<string>): number => {
         seen.add(k);
-        depthMax = Math.max(depthMax, depth);
         const kids = (children.get(k) ?? []).filter((c) => !seen.has(c));
         let x: number;
         if (kids.length === 0) {
             x = slot++ * (NODE_W + GAP_X);
+        } else if (kids.length > reportCols && kids.every((c) => (children.get(c) ?? []).length === 0)) {
+            const first = slot;
+            kids.forEach((c, i) => {
+                seen.add(c);
+                const row = Math.floor(i / reportCols);
+                put(c, (first + (i % reportCols)) * (NODE_W + GAP_X), (depth + 1) * (NODE_H + GAP_Y) + row * (NODE_H + REPORT_ROW_GAP));
+            });
+            slot += reportCols;
+            x = ((first + (first + reportCols - 1)) / 2) * (NODE_W + GAP_X);
         } else {
             const xs = kids.map((c) => place(c, depth + 1, seen));
             x = (xs[0] + xs[xs.length - 1]) / 2;
         }
-        nodes.set(k, { x, y: depth * (NODE_H + GAP_Y) });
+        put(k, x, depth * (NODE_H + GAP_Y));
         return x;
     };
     const seen = new Set<string>();
     for (const r of roots) place(r, 0, seen);
     const treeW = slot === 0 ? 0 : slot * (NODE_W + GAP_X) - GAP_X;
-    const treeH = depthMax < 0 ? 0 : (depthMax + 1) * (NODE_H + GAP_Y) - GAP_Y;
+    const treeH = bottom;
 
     // The agents with no lead and no reports, in a grid under the trees.
     const cols = Math.min(gridCols, Math.max(loners.length, 1));
@@ -141,6 +166,19 @@ export const FIT_MAX_K = 1.5;
 const FIT_PAD = 16;
 /** The columns the grid of agents with no lead may have, tried in turn. */
 const GRID_COLS_CHOICES = [2, 3, 4, 5, 6];
+/** The most reports of a lead one row may hold, tried in turn after the unwrapped row. */
+const REPORT_COLS_CHOICES = [6, 4, 3, 2];
+
+/**
+ * The widths a lead's reports may be wrapped at: unlimited first, then each of REPORT_COLS_CHOICES that some lead has
+ * more reports than (a wrap that changes nothing is not a candidate).
+ */
+function reportColsChoices(graph: AtlasGraph): number[] {
+    const reports = new Map<string, number>();
+    for (const e of graph.edges) reports.set(e.from, (reports.get(e.from) ?? 0) + 1);
+    const widest = Math.max(0, ...reports.values());
+    return [Number.POSITIVE_INFINITY, ...REPORT_COLS_CHOICES.filter((c) => widest > c)];
+}
 
 /** A region's box before it is placed: its inner layout and the size it needs. */
 interface Slot {
@@ -152,8 +190,15 @@ interface Slot {
     innerH: number;
 }
 
-function slotOf(key: string, keys: readonly string[], folds: boolean, edges: readonly AtlasEdge[], cols: number): Slot {
-    const inner = layoutRegion(keys, edges, cols);
+function slotOf(
+    key: string,
+    keys: readonly string[],
+    folds: boolean,
+    edges: readonly AtlasEdge[],
+    cols: number,
+    reportCols = Number.POSITIVE_INFINITY
+): Slot {
+    const inner = layoutRegion(keys, edges, cols, reportCols);
     const w = Math.max(MIN_REGION_W, inner.w + PAD * 2);
     const innerH = keys.length === 0 ? 0 : inner.h;
     const h = HEAD + PAD + innerH + (folds ? (innerH > 0 ? GAP_X : 0) + FOLD_H : 0) + PAD;
@@ -249,29 +294,36 @@ function wrapWidths(slots: readonly Slot[]): number[] {
  * ones that fit the pane best (docs/specs/SPEC_ATLAS_AGENT_MAP_2026_11_13.md §6.5). Without it, the fixed ones.
  */
 export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape): AtlasLayout {
-    const build = (cols: number) => {
+    const build = (cols: number, reportCols = Number.POSITIVE_INFINITY) => {
         const slots = graph.regions.map((r) =>
             slotOf(
                 r.key,
                 [...r.shown, ...r.orphans].map((n) => n.key),
                 r.folded.length > 0,
                 graph.edges,
-                cols
+                cols,
+                reportCols
             )
         );
         const svc = graph.services.map((s) => s.key);
-        return { slots, services: svc.length > 0 ? slotOf(SERVICES_REGION, svc, false, graph.edges, cols) : null };
+        return {
+            slots,
+            services: svc.length > 0 ? slotOf(SERVICES_REGION, svc, false, graph.edges, cols, reportCols) : null,
+        };
     };
     if (!pane || pane.w <= 0 || pane.h <= 0) {
         const { slots, services } = build(GRID_COLS);
         return shelfPack(slots, services, ROW_MAX_W);
     }
     const candidates: AtlasLayout[] = [];
-    for (const cols of GRID_COLS_CHOICES) {
-        const { slots, services } = build(cols);
-        // With no machine box (an empty or not-yet-loaded fleet, or only the services) there is no width to choose.
-        const wraps = slots.length > 0 ? wrapWidths(slots) : [ROW_MAX_W];
-        for (const wrapW of wraps) candidates.push(shelfPack(slots, services, wrapW));
+    // Unwrapped first: with nothing to gain from wrapping a lead's reports, the pick keeps the look it had.
+    for (const reportCols of reportColsChoices(graph)) {
+        for (const cols of GRID_COLS_CHOICES) {
+            const { slots, services } = build(cols, reportCols);
+            // With no machine box (an empty or not-yet-loaded fleet, or only the services) there is no width to choose.
+            const wraps = slots.length > 0 ? wrapWidths(slots) : [ROW_MAX_W];
+            for (const wrapW of wraps) candidates.push(shelfPack(slots, services, wrapW));
+        }
     }
     return pickBest(candidates, pane);
 }
@@ -286,18 +338,20 @@ export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape): AtlasLayout {
 export function layoutBySeat(graph: AtlasGraph, pane?: PaneShape): AtlasLayout {
     if (!pane || pane.w <= 0 || pane.h <= 0) return seatWithCols(graph, GRID_COLS);
     return pickBest(
-        GRID_COLS_CHOICES.map((cols) => seatWithCols(graph, cols)),
+        reportColsChoices(graph).flatMap((reportCols) =>
+            GRID_COLS_CHOICES.map((cols) => seatWithCols(graph, cols, reportCols))
+        ),
         pane
     );
 }
 
-function seatWithCols(graph: AtlasGraph, cols: number): AtlasLayout {
+function seatWithCols(graph: AtlasGraph, cols: number, reportCols = Number.POSITIVE_INFINITY): AtlasLayout {
     const keys = [
         ...graph.regions.flatMap((r) => r.shown.map((a) => a.key)),
         ...graph.regions.flatMap((r) => r.orphans.map((o) => o.key)),
     ];
     const services = graph.services.map((s) => s.key);
-    const inner = layoutRegion(keys, graph.edges, cols);
+    const inner = layoutRegion(keys, graph.edges, cols, reportCols);
     const nodes = new Map<string, Placed>();
     for (const [key, p] of inner.nodes) nodes.set(key, { x: PAD + p.x, y: PAD + p.y });
     const servicesTop = keys.length === 0 ? 0 : inner.h + SERVICES_GAP;
