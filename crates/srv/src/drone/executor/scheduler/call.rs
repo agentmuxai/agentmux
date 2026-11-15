@@ -104,8 +104,8 @@ impl<'a> Scheduler<'a> {
             };
             // What it spent is the caller, and if the caller has gone on without waiting (the call ran out
             // of its time) it is counted from here, at its next block.
+            let _ = parent_tx.send(RunEvent::ChildEnded { run_id, block_id, child_run_id: callee_run.clone(), status: status.to_string(), cost_usd: spent });
             late.finish(&callee_run, spent);
-            let _ = parent_tx.send(RunEvent::ChildEnded { run_id, block_id, child_run_id: callee_run, status: status.to_string(), cost_usd: spent });
             (ended, spent)
         });
         let (ended, spent) = task.await.map_err(|e| format!("{id}: the called drone stopped unexpectedly: {e}"))?;

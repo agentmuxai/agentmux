@@ -232,6 +232,8 @@ async fn finish(s: &mut Scheduler<'_>, started: Result<(), String>) -> Result<Va
         Ok(()) => s.drive().await,
         Err(e) => Err(e),
     };
+    // However it ended (a stop included), what callees it stopped were spending is its own.
+    s.settle_late_spend().await;
     match ran {
         Ok(()) => Ok(s.response.take().unwrap_or(Value::Null)),
         Err(_) if s.cancelled => Err(RunEnd::Cancelled(s.cancel.reason())),
@@ -515,7 +517,8 @@ impl<'a> Scheduler<'a> {
         let result = self.guarded(node, kind).await;
         // What a block spent and then failed (a callee that ran, then failed) was still spent: it
         // is on the block's state, which is what the ledger sums.
-        let failed_cost = ((self.spent - spent_before) > 0.0).then(|| json!({ "cost_usd": self.spent - spent_before }));
+        // Only a Drone block: a for-each's body has put its own spend on its own state.
+        let failed_cost = (matches!(kind, BlockKind::Drone) && self.spent > spent_before).then(|| json!({ "cost_usd": self.spent - spent_before }));
         match result {
             Ok(mut output) => {
                 self.keep_history(id, &mut output);

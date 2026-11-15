@@ -217,6 +217,35 @@ async fn what_a_stopped_callee_spent_is_taken_before_the_next_block_starts() {
     assert!(ended < next, "the stopped callee ended ({ended}) before the next block started ({next})");
 }
 
+#[tokio::test]
+async fn a_run_that_is_stopped_while_it_calls_waits_for_the_callee_to_end_before_it_says_so() {
+    let waits = DroneGraph { nodes: vec![node("hold", json!({ "kind": "wait", "on": "never" }))], edges: vec![] };
+    let graph = caller_of("waits");
+    let cancel = Cancel::default();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let limits = Limits { cancel: cancel.clone(), lookup: saved(vec![("waits", waits)]), ..Limits::default() };
+    let task = tokio::spawn(async move {
+        let ended = execute("run-1", (&graph, Value::Null, limits, "main"), &tx, &states).await;
+        (ended.is_err(), tx)
+    });
+    while let Some(ev) = rx.recv().await {
+        if matches!(ev, RunEvent::ChildStarted { .. }) {
+            break;
+        }
+    }
+    cancel.cancel("asked to stop");
+    let (cancelled, tx) = task.await.unwrap();
+    assert!(cancelled);
+    // By the time the run has ended, the callee it stopped has ended too: nothing is left to spend.
+    let mut seen = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        seen.push(ev);
+    }
+    drop(tx);
+    assert!(seen.iter().any(|e| matches!(e, RunEvent::ChildEnded { status, .. } if status == "cancelled")), "{}", seen.len());
+}
+
 #[test]
 fn what_a_stopped_callee_spent_waits_for_it_to_end_and_is_taken_once() {
     let late = super::LateSpend::default();
