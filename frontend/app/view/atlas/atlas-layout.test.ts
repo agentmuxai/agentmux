@@ -3,9 +3,27 @@
 
 import { describe, expect, it } from "vitest";
 import { buildAtlasGraph, type AtlasAgent, type AtlasExtras, type AtlasMachine } from "./atlas-graph";
-import { layoutAtlas, layoutBySeat, NODE_H, NODE_W, ROW_MAX_W, SERVICES_REGION } from "./atlas-layout";
+import {
+    FIT_MAX_K,
+    fitScale,
+    layoutAtlas,
+    layoutBySeat,
+    MIN_READABLE_K,
+    NODE_H,
+    NODE_W,
+    ROW_MAX_W,
+    SERVICES_REGION,
+    type PaneShape,
+} from "./atlas-layout";
 
-const machine = (key: string): AtlasMachine => ({ key, title: key, badge: "LAN", platform: null, stale: false, seenAtMs: null });
+const machine = (key: string): AtlasMachine => ({
+    key,
+    title: key,
+    badge: "LAN",
+    platform: null,
+    stale: false,
+    seenAtMs: null,
+});
 
 function agent(name: string, m: string, lead?: string, state: AtlasAgent["state"] = "idle"): AtlasAgent {
     return {
@@ -57,7 +75,8 @@ describe("layoutAtlas", () => {
         const tree = l.nodes.get("a/w")!;
         expect(l.nodes.get("a/solo0")!.y).toBeGreaterThan(tree.y);
         const all = [...l.nodes.values()];
-        for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) expect(overlap(all[i], all[j])).toBe(false);
+        for (let i = 0; i < all.length; i++)
+            for (let j = i + 1; j < all.length; j++) expect(overlap(all[i], all[j])).toBe(false);
     });
 
     it("gives the same layout for the same agents", () => {
@@ -170,5 +189,106 @@ describe("what is not an agent", () => {
         for (let i = 0; i < placed.length; i++) {
             for (let j = i + 1; j < placed.length; j++) expect(overlap(placed[i], placed[j])).toBe(false);
         }
+    });
+});
+
+/** A fleet like the operator's: five machines and about 35 agents, a lead with reports on the biggest. */
+function fleet(extra: { machine?: string; name?: string } = {}) {
+    const machines = ["narko", "area54", "starpower", "charlie", "laptop"].map(machine);
+    const agents: AtlasAgent[] = [agent("agentx", "narko"), agent("agenty", "narko")];
+    for (let i = 0; i < 4; i++) agents.push(agent(`w${i}`, "narko", i % 2 ? "agentx" : "agenty"));
+    for (let i = 0; i < 6; i++) agents.push(agent(`n${i}`, "narko"));
+    const counts: Record<string, number> = { area54: 6, starpower: 5, charlie: 5, laptop: 6 };
+    for (const [m, n] of Object.entries(counts)) for (let i = 0; i < n; i++) agents.push(agent(`${m}${i}`, m));
+    if (extra.name) agents.push(agent(extra.name, extra.machine ?? "laptop"));
+    return buildAtlasGraph(machines, agents);
+}
+
+/** The scale the fitted view shows a layout at, and the share of the pane its map then covers. */
+function shown(l: { width: number; height: number }, pane: PaneShape) {
+    const k = Math.max(MIN_READABLE_K, Math.min(FIT_MAX_K, fitScale(l, pane)));
+    return { k, cover: (Math.min(l.width * k, pane.w) * Math.min(l.height * k, pane.h)) / (pane.w * pane.h) };
+}
+
+describe("layoutAtlas for a pane", () => {
+    const panes: Record<string, PaneShape> = {
+        tall: { w: 640, h: 1700 },
+        square: { w: 1000, h: 1000 },
+        wide: { w: 1600, h: 700 },
+    };
+
+    it("fills a tall, a square and a wide pane with cards a person can read", () => {
+        const g = fleet();
+        for (const [name, pane] of Object.entries(panes)) {
+            const l = layoutAtlas(g, pane);
+            const s = shown(l, pane);
+            expect(s.k, `${name}: scale`).toBeGreaterThanOrEqual(MIN_READABLE_K);
+            expect(s.cover, `${name}: share of the pane`).toBeGreaterThan(0.55);
+        }
+    });
+
+    it("covers far more of a tall pane than the fixed-width layout did", () => {
+        const g = fleet();
+        const before = shown(layoutAtlas(g), panes.tall).cover;
+        const after = shown(layoutAtlas(g, panes.tall), panes.tall).cover;
+        expect(after).toBeGreaterThan(before * 1.5);
+    });
+
+    it("forms a taller picture for a tall pane than for a wide one, from the same agents", () => {
+        const g = fleet();
+        const tall = layoutAtlas(g, panes.tall);
+        const wide = layoutAtlas(g, panes.wide);
+        expect(tall.height / tall.width).toBeGreaterThan(wide.height / wide.width);
+    });
+
+    it("keeps the machines in their order, with no two nodes overlapping, in every pane", () => {
+        const g = fleet();
+        for (const pane of Object.values(panes)) {
+            const l = layoutAtlas(g, pane);
+            expect(l.regions.map((r) => r.key)).toEqual(g.regions.map((r) => r.key));
+            const all = [...l.nodes.values()];
+            for (let i = 0; i < all.length; i++)
+                for (let j = i + 1; j < all.length; j++) expect(overlap(all[i], all[j])).toBe(false);
+        }
+    });
+
+    it("moves no machine when an agent joins a box that has a free grid slot, or when an agent's state changes", () => {
+        const base = fleet({ name: "extra0" });
+        const more = fleet({ name: "extra0" });
+        // The same fleet again, one agent busy instead of idle, is the same picture.
+        const busy = buildAtlasGraph(
+            ["narko", "area54", "starpower", "charlie", "laptop"].map(machine),
+            [...base.regions.flatMap((r) => r.shown)].map((a, i) => (i === 3 ? { ...a, state: "working" as const } : a))
+        );
+        for (const pane of Object.values(panes)) {
+            const l = layoutAtlas(base, pane);
+            expect(layoutAtlas(more, pane).regions).toEqual(l.regions);
+            expect(layoutAtlas(busy, pane).regions).toEqual(l.regions);
+        }
+    });
+
+    it("keeps the machines' order when an agent joins and a box grows", () => {
+        const g = fleet();
+        const grown = fleet({ machine: "narko", name: "newcomer" });
+        for (const pane of Object.values(panes)) {
+            expect(layoutAtlas(grown, pane).regions.map((r) => r.key)).toEqual(
+                layoutAtlas(g, pane).regions.map((r) => r.key)
+            );
+        }
+    });
+
+    it("is the fixed layout when it has no pane to form for", () => {
+        const g = fleet();
+        expect(layoutAtlas(g, { w: 0, h: 0 }).regions).toEqual(layoutAtlas(g).regions);
+    });
+});
+
+describe("layoutBySeat for a pane", () => {
+    it("shapes the grid of agents with no lead to a tall and to a wide pane", () => {
+        const g = fleet();
+        const tall = layoutBySeat(g, { w: 640, h: 1700 });
+        const wide = layoutBySeat(g, { w: 1600, h: 700 });
+        expect(tall.height / tall.width).toBeGreaterThan(wide.height / wide.width);
+        expect(shown(tall, { w: 640, h: 1700 }).k).toBeGreaterThanOrEqual(MIN_READABLE_K);
     });
 });
