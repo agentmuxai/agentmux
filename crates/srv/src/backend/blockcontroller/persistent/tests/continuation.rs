@@ -199,7 +199,7 @@ fn packet_from(local: &FileStore, global: Option<(&FileStore, &str)>) -> Option<
         global,
         crate::backend::continuity::PACKET_TAIL_BYTES,
     )?;
-    crate::backend::continuity::build_continuation_packet(&tail, mid, None)
+    crate::backend::continuity::build_continuation_packet(&tail, mid, None, None)
 }
 
 /// The 2026-09-25 incident (REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md

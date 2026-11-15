@@ -96,7 +96,8 @@ describe("BrowserNavBar layout structure", () => {
         expect(nav.children).toHaveLength(4); // and Home
         expect(bar.querySelector('.browser-nav-group--bookmarks [title="Bookmarks"]')).toBeTruthy();
         const profile = bar.querySelector(".browser-nav-group--profile")!;
-        expect(profile.children).toHaveLength(1);
+        // The sign-in list's hidden anchor (display: none) takes no place in the row.
+        expect([...profile.children].filter((c) => !c.classList.contains("browser-signin-list-anchor"))).toHaveLength(1);
         expect(profile.querySelector(".browser-profile-btn")).toBeTruthy();
     });
 });
