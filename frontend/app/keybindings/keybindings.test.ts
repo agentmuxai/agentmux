@@ -21,6 +21,8 @@ describe("key syntax", () => {
         expect(formatKey("meta+shift+w", "mac")).toBe("⇧⌘W");
         expect(formatKey("mod+f", "mac")).toBe("⌘F");
         expect(formatKey("mod+f", "other")).toBe("Ctrl+F");
+        expect(formatKey("meta+shift+t", "linux")).toBe("Shift+Super+T");
+        expect(formatKey("meta+shift+t", "other")).toBe("Shift+Win+T");
         expect(formatKey("ctrl+shift+code:Backquote", "other")).toBe("Ctrl+Shift+`");
         expect(formatKey("ctrl+shift+s ArrowUp", "other")).toBe("Ctrl+Shift+S then ↑");
         expect(formatKey("shift+F6", "mac")).toBe("⇧F6");
