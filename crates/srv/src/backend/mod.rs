@@ -168,6 +168,7 @@ pub mod account_login_guard;
 pub mod pane_env;
 pub mod posix_shell;
 pub mod shellintegration;
+pub mod shellintegration_prune;
 pub mod shells;
 pub mod swarm_cloud;
 pub mod swarm_remote;

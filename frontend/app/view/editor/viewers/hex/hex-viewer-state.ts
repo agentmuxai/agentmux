@@ -404,7 +404,7 @@ export function createHexViewer(props: HexViewerProps) {
         offsetInput?.focus();
         offsetInput?.select();
     };
-    const find = createHexFind({ path: () => props.path, size, lo: sel.lo, hi: sel.hi, select: sel.select, focusGrid: scroll.focus });
+    const find = createHexFind({ path: () => props.path, size, revision: () => props.revision, lo: sel.lo, hi: sel.hi, select: sel.select, focusGrid: scroll.focus });
     const goToTyped = (text: string): void => {
         const offset = parseOffset(text, size());
         setBadOffset(offset == null);

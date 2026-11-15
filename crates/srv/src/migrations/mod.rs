@@ -18,6 +18,18 @@
 //! version first, so an install older than that is told to install the floor
 //! version before upgrading (`backend::update::check::upgrade_floor`).
 //!
+//! # A Global migration is additive
+//!
+//! Every AgentMux on the computer opens the shared stores at once, whatever its
+//! version or channel, so a `MigrationScope::Global` migration may only add:
+//! new tables, columns and rows. No drop, rename or delete until an
+//! `UPGRADE_FLOOR` raise has retired the old shape (expand now, remove later;
+//! decision D1 of `REPORT_STARTUP_ARCHITECTURE_AND_MIGRATIONS_AUDIT_2026_10_20`).
+//! Start its doc comment with a `//! Shared store: additive, ...` line saying
+//! what it adds. `additive_guard_tests` fails a Global migration with no such
+//! line, or one that declares itself additive and writes destructive SQL. A
+//! reviewer still has to read what a store helper does: the test cannot.
+//!
 //! # No private marker files
 //!
 //! `db_migrations` (plus a [`Migration::verify`] post-condition) is the sole
@@ -89,6 +101,8 @@ pub mod gate;
 pub mod prepare;
 pub mod runner;
 pub mod schema_probe;
+#[cfg(test)]
+mod additive_guard_tests;
 #[cfg(test)]
 mod phase5_tests;
 

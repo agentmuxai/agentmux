@@ -278,12 +278,10 @@ pub(super) const IDENTITY_STORE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS d
             user_sub       TEXT NOT NULL DEFAULT ''
         );
 
-        CREATE TABLE IF NOT EXISTS db_migrations (
-            id          TEXT PRIMARY KEY,
-            applied_at  TEXT NOT NULL,
-            duration_ms INTEGER NOT NULL DEFAULT 0,
-            scope       TEXT NOT NULL DEFAULT 'global'
-        );
+        -- No db_migrations here: data migrations are tracked in the shared store and
+        -- the channel store only (`tracking_store`). An identity store made before this
+        -- carries an empty one, left in place because dropping a table from a store
+        -- other versions share is not additive (migrations/mod.rs).
 
         CREATE TABLE IF NOT EXISTS db_cron_jobs (
             id            TEXT PRIMARY KEY,

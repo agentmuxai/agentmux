@@ -67,6 +67,8 @@
 //! own philosophy: one bundle's I/O error (e.g. a genuine name collision
 //! `ensure_history_link` refuses to resolve automatically) is logged and
 //! skipped, never aborts the sweep for every other bundle.
+//!
+//! Shared store: additive, it links history directories into the shared identities tree; no store schema change.
 
 use agentmux_common::ensure_history_link;
 
