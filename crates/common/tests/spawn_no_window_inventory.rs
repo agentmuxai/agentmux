@@ -84,6 +84,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window() in this file"),
     ("crates/srv/src/agentmux_cli/process.rs", "\"ps\"", 1,
      "no-window: calls no_window() in this file"),
+    ("crates/srv/src/agentmux_cli/doctor.rs", "\"node\"", 1,
+     "no-window: calls no_window() in this file"),
     ("crates/srv/src/agentmux_cli/service.rs", "program", 1,
      "no-window: calls no_window() in this file"),
     ("crates/srv/src/open_cli.rs", "\"open\"", 1,

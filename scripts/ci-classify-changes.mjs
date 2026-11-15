@@ -101,6 +101,7 @@ const RUST_READS_FRONTEND = [
     /^frontend\/app\/keybindings\/host-keys\.json$/,
     /^frontend\/app\/store\/rpc-api\//,
     /^frontend\/app\/store\/widget-singleton\.ts$/,
+    /^frontend\/app\/view\/agent\/providers\/catalog\.ts$/,
     /^frontend\/layout\/tests\/fixtures\//,
 ];
 
