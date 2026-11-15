@@ -258,7 +258,16 @@ export type EditorPaneCommand =
           doc: DocTabsState<EditorBuffer>;
           source?: EditorCommandSource;
       }
-    | { type: "RenameFile"; oldPath: string; newPath: string; source?: EditorCommandSource };
+    | {
+          /** The file behind a tab has a new name. `language` is the mapped
+           *  language of the new path (a changed extension); the tab keeps
+           *  its own when omitted. */
+          type: "RenameFile";
+          oldPath: string;
+          newPath: string;
+          language?: string;
+          source?: EditorCommandSource;
+      };
 
 // ─────────────────────────────────────────────────────────────────────
 // Events
@@ -703,12 +712,28 @@ function onPromoteScratch(state: EditorPaneState, command: Cmd<"PromoteScratch">
     return next(state, d, [{ type: "TabSaved", tabId: tab.id }]);
 }
 
+/**
+ * The file behind a tab was renamed: the tab keeps its id, its unsaved mark
+ * and everything else, and takes the new path (so its key and title) and,
+ * when given, the new language. A closed tab on the old path follows too, so
+ * reopening it finds the file. A pane that already has a tab on the new path
+ * leaves this one where it is: two tabs can't share a key.
+ */
 function onRenameFile(state: EditorPaneState, command: Cmd<"RenameFile">): ReducerResult {
-    const doc = state.doc;
     const canonOld = canonicalizePath(command.oldPath);
+    const canonNew = canonicalizePath(command.newPath);
+    const patch: Partial<EditorBuffer> = { filePath: canonNew, ...(command.language ? { language: command.language } : {}) };
+    let doc = state.doc;
+    if (doc.closed.some((t) => t.key === canonOld)) {
+        const renamed = (t: DocTab<EditorBuffer>): DocTab<EditorBuffer> => {
+            const payload = { ...t.payload, ...patch };
+            return { ...t, payload, key: canonNew, title: editorTabTitle(payload) };
+        };
+        doc = { ...doc, closed: doc.closed.map((t) => (t.key === canonOld ? renamed(t) : t)) };
+    }
     const tab = doc.tabs.find((t) => t.key === canonOld);
-    if (!tab) return same(state);
-    return next(state, patchBuffer(doc, tab.id, { filePath: canonicalizePath(command.newPath) }));
+    if (!tab || doc.tabs.some((t) => t.id !== tab.id && t.key === canonNew)) return next(state, doc);
+    return next(state, patchBuffer(doc, tab.id, patch));
 }
 
 /** The command of type `T`, from the union. */

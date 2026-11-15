@@ -27,6 +27,24 @@ fn bypass_pane(target: &str) -> String {
     banner_for(target).0
 }
 
+/// Does the committing click `ask` describes pay? The element's text after its name is judged with the
+/// name, so a payment word on any line asks (roadblocks report R7). A control that submits a form (it has an `action`, or
+/// that is why it asks) is judged on its name as it is.
+fn ask_is_payment(ask: &serde_json::Value) -> bool {
+    let text = |k: &str| ask.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    let submits = !text("action").is_empty() || text("why") == "it submits a form";
+    bypass::click_is_payment(text("what"), text("description"), submits)
+}
+
+/// The click `ask` asks although auto-approve is on for its site, because it pays: the words to add to the
+/// banner's "Asked because", so that it doesn't read as auto-approve being broken (#47625).
+pub(crate) fn payment_exception(block_id: &str, agent: &str, ask: &serde_json::Value) -> Option<&'static str> {
+    let g = bypass::active_for(&bypass_pane(block_id), agent)?;
+    let text = |k: &str| ask.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    (g.covers(text("page")) && ask_is_payment(ask))
+        .then_some("auto-approve is on for this site, but a payment always asks")
+}
+
 /// The address `target` (a pane or popup window) shows, as the host reports
 /// it from the browser's own record of the page: never block meta, which a
 /// client can write. Not the agent's `eval`: that scans the whole page for
@@ -74,16 +92,13 @@ pub(crate) async fn bypassed_click(
         return Some(log.asked(ask).fail(state, code, e));
     }
     let what = ask.get("what").and_then(|v| v.as_str()).unwrap_or("");
-    // The element's text after its name: shown apart from `what`, but judged
-    // with it, so a payment word on any line asks (roadblocks report R7).
-    let description = ask.get("description").and_then(|v| v.as_str()).unwrap_or("");
     let page = ask.get("page").and_then(|v| v.as_str()).unwrap_or("");
     let origin = agentmux_common::allowed_origins::target_origin(page).unwrap_or_default();
     if !g.covers(page) {
         tracing::info!(agent_id = %agent, block_id = %block_id, origin = %origin, "[browser-bypass] paused: the page is off the granted sites, so the click asks");
         return None;
     }
-    if bypass::is_payment(what) || bypass::is_payment(description) {
+    if ask_is_payment(ask) {
         tracing::info!(agent_id = %agent, block_id = %block_id, what = %what, "[browser-bypass] a payment still asks");
         return None;
     }
@@ -116,13 +131,28 @@ fn form_leaves_the_site(ask: &serde_json::Value, page_origin: &str) -> bool {
     agentmux_common::allowed_origins::target_origin(action).as_deref() != Some(page_origin)
 }
 
+/// A grant that was already there answers a request for it. It lasts what was asked or less: an ask for fewer
+/// minutes cuts it, and the answer says so.
+fn granted_asked_for(state: &AppState, pane: &str, agent: &str, asked: Option<u64>, g: bypass::Grant) -> Response {
+    match asked.and_then(|m| bypass::shorten(state, pane, agent, bypass::clamp_minutes(Some(m)))) {
+        Some((cut, was)) => granted_cut(&cut, Some(was)),
+        None => granted(&g),
+    }
+}
+
 /// The answer to a request that was granted.
 fn granted(g: &bypass::Grant) -> Response {
+    granted_cut(g, None)
+}
+
+/// A grant, and (when an earlier one was cut to what was asked) the minutes it had left before.
+fn granted_cut(g: &bypass::Grant, cut_from: Option<u64>) -> Response {
     (
         StatusCode::OK,
         Json(json!({ "ok": true, "data": {
             "answer": "granted", "origins": g.origins, "minutes": g.minutes, "powers": browser_powers::names(&g.powers),
             "minutes_left": g.minutes_left(), "expires_at": g.expires_at_ms, "always": g.standing.is_some(),
+            "cut_from": cut_from,
         } })),
     )
         .into_response()
@@ -158,7 +188,7 @@ pub(crate) async fn handle_ui_browser_request_bypass(
     // lacks a power the agent now asks for is not widened by asking: the
     // person is shown the banner for the larger set.
     if let Some(g) = bypass::active_for(&pane, &agent).filter(|g| powers.iter().all(|p| g.satisfies(*p))) {
-        return granted(&g);
+        return granted_asked_for(&state, &pane, &agent, req.minutes, g);
     }
     let (banner_at, in_window) = banner_for(&block_id);
     if !is_browser_pane(&state, &banner_at) || crate::server::browser_owner::owner_of(&pane).is_none() {

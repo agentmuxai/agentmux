@@ -16,7 +16,7 @@ use super::{steps_files, verify};
 use crate::backend::rpc_types::{ForkSlugCandidate, ForkSlugChoice, ForkSlugMigrated, ForkSlugReport};
 
 /// Where a test stops a run, as a crash would.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Crash {
     /// After the step's change, before its result is recorded.
@@ -27,11 +27,11 @@ pub(super) enum Crash {
 
 #[derive(Default)]
 pub(super) struct Options {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub crash: Option<(String, Crash)>,
     /// Runs just before an agent's target is checked again, as another
     /// channel creating an agent during the backup would.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub before_recheck: Option<Box<dyn Fn()>>,
 }
 
@@ -185,7 +185,7 @@ fn run_agent_reserved(ctx: &Ctx, journal: &mut Journal, a: &Agent, opts: &Option
     if journal.done(&a.uid, Step::S1) {
         return run_agent(ctx, journal, a, opts, &STEPS);
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(hook) = &opts.before_recheck {
         hook();
     }
@@ -230,12 +230,12 @@ fn run_agent(ctx: &Ctx, journal: &mut Journal, a: &Agent, opts: &Options, steps:
             }
         };
         let changes = steps::apply(ctx, a, step, &before).map_err(|e| format!("{} {step:?}: {e}", a.name))?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if opts.crash == Some((a.uid.clone(), Crash::BeforeDone(step))) {
             return Err(CRASHED.into());
         }
         journal.append(Record::Done { uid: a.uid.clone(), step, changes })?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if opts.crash == Some((a.uid.clone(), Crash::AfterDone(step))) {
             return Err(CRASHED.into());
         }

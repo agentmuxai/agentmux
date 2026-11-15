@@ -522,6 +522,34 @@ async fn a_run_past_its_timeout_is_interrupted_and_ends_with_infra_timeout() {
     assert!(!super::policy::infra_retryable(&done), "its own timeout isn't retried");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_run_past_its_jobs_timeout_is_closed_instead_of_taken_up_after_a_restart() {
+    let rig = rig();
+    let _stopped = interrupts(&rig);
+    let timed = make(&rig, "j-dr-to", |j| j.policy.timeout_minutes = Some(30));
+    let young = make(&rig, "j-dr-young", |j| j.policy.timeout_minutes = Some(30));
+    let unlimited = make(&rig, "j-dr-nolimit", |_| {});
+    let old = rig.sched.fire(&timed, slot(0)).await.run_id.unwrap();
+    let recent = rig.sched.fire(&young, slot(0)).await.run_id.unwrap();
+    let no_limit = rig.sched.fire(&unlimited, slot(0)).await.run_id.unwrap();
+    let long_ago = agentmux_common::time::now_ms() - 31 * 60_000;
+    for (run, drone_run) in [(&old, "dr-old"), (&recent, "dr-recent"), (&no_limit, "dr-nolimit")] {
+        rig.store.job_run_add_links(run, &serde_json::json!({ "drone_run_id": drone_run })).unwrap();
+    }
+    for id in [&old, &no_limit] {
+        rig.store.conn().lock().unwrap().execute("UPDATE db_job_runs SET started_at_ms = ?2 WHERE id = ?1", rusqlite::params![id, long_ago]).unwrap();
+    }
+
+    assert!(rig.ledger.close_if_past_timeout("dr-old"));
+    let done = rig.store.job_run_get(&old).unwrap().unwrap();
+    assert_eq!((done.state.as_str(), done.infra.as_str()), (state::FINISHED, infra::TIMEOUT));
+    assert!(!rig.ledger.close_if_past_timeout("dr-old"), "a closed run is not closed twice");
+    assert!(!rig.ledger.close_if_past_timeout("dr-recent"), "a run with time left is taken up");
+    assert!(!rig.ledger.close_if_past_timeout("dr-nolimit"), "a job with no timeout has none to pass");
+    assert!(!rig.ledger.close_if_past_timeout("dr-unknown"));
+    assert_eq!(rig.store.job_run_get(&recent).unwrap().unwrap().state, state::RUNNING);
+}
+
 // ── retries ─────────────────────────────────────────────────────────────
 
 const RATE_LIMITED: &str = r#"{"success": false, "error": "Rate limited by the API (429)"}"#;

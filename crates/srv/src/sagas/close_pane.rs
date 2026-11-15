@@ -333,57 +333,9 @@ async fn queue_member_deletes(state: &AppState, tab_id: &str, block_ids: &[Strin
     }
 }
 
-/// `agent:shutdown` — the shutdown log a closing pane shows
-/// (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5, §12.1).
-pub(crate) const EVENT_AGENT_SHUTDOWN: &str = "agent:shutdown";
-
-/// One `agent:shutdown` line (`mps_events::AgentShutdown`): its order, step and text, and what
-/// the step adds.
-#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct ShutdownLineEvent {
-    pub block_id: String,
-    #[ts(type = "number")]
-    pub seq: u64,
-    pub step: String,
-    pub text: String,
-    #[serde(flatten)]
-    pub extra: ShutdownExtra,
-}
-
-/// What a shutdown line can add beyond its step and text. Each is omitted when absent.
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct ShutdownExtra {
-    /// `kill`: how long the agent had before it was killed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional, type = "number")]
-    pub forced_after_ms: Option<u64>,
-    /// `error`: why the pane couldn't close.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub error: Option<String>,
-    /// `container`: a Compose container left running, and that it was left.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub container: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub outcome: Option<String>,
-    /// `process` / `survivor`: one of the agent's processes, and what became of it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub process: Option<ShutdownProcess>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct ShutdownProcess {
-    pub pid: u32,
-    pub name: String,
-    /// `killed`, `stopped`, `survived` or `escaped`.
-    pub outcome: String,
-}
+#[cfg(test)]
+pub(crate) use crate::backend::shutdown_events::EVENT_AGENT_SHUTDOWN;
+pub use crate::backend::shutdown_events::{ShutdownExtra, ShutdownLineEvent, ShutdownProcess};
 
 /// The extra for a line about one of the agent's processes.
 pub(crate) fn process_extra(pid: u32, command: &str, outcome: &str) -> ShutdownExtra {

@@ -875,7 +875,7 @@ pub(crate) fn capture_while_running(fs: &FileStore, uid: &str, dir: &Path, settl
 /// that folder holds: if the record changed the file elsewhere since, nothing
 /// is recorded and the next spawn's reconcile keeps both. Never fails the
 /// write: an error is logged, and a later capture records the file.
-pub(crate) fn record_agentmux_write(uid: &str, dir: &Path, file: &str, body: &[u8], source: &str, source_detail: &str) {
+pub fn record_agentmux_write(uid: &str, dir: &Path, file: &str, body: &[u8], source: &str, source_detail: &str) {
     use crate::backend::transcript::damage;
     // A memory record found corrupt is not written to again in this process.
     let zone = damage::memory_zone(uid);

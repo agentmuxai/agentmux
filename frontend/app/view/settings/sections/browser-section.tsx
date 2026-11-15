@@ -8,7 +8,7 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { t } from "@/app/i18n/i18n";
 import { PaletteSwatches } from "@/app/components/palette-swatches";
-import { Button, IconButton, Switch, TextInput } from "@/app/element/ui";
+import { Button, CloseButton, Switch, TextInput } from "@/app/element/ui";
 import { normalizeKeepAwakeSite } from "@/app/view/browser/hibernation";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 import {
@@ -99,7 +99,7 @@ function KeepAwakeSites(props: { sites: string[] }): JSX.Element {
                         {(site) => (
                             <li class="browser-keepawake-site">
                                 <span>{site}</span>
-                                <IconButton icon="xmark" label={t("settings.browser.keepAwake.letSleep", { site })} density="compact" onClick={() => remove(site)} />
+                                <CloseButton size="sm" label={t("settings.browser.keepAwake.letSleep", { site })} onClick={() => remove(site)} />
                             </li>
                         )}
                     </For>

@@ -172,12 +172,14 @@ fn row_in(state: AgentRuntimeState, desired: agent_runtime::AgentDesiredState) -
         detail: None,
         resets_at: None,
         block_id: None,
+        waiting_in: None,
         desired,
         name: "a".into(),
         provider: "claude".into(),
         icon: String::new(),
         color: None,
         blocked: None,
+        runtime: crate::backend::runtime_adapter::RuntimeKind::Host,
     }
 }
 

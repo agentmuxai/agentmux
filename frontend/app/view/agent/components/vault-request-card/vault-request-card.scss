@@ -73,6 +73,17 @@
         flex-wrap: wrap;
         justify-content: flex-end;
         gap: var(--space-2);
+        max-width: 100%;
+    }
+
+    // An answer that names an agent and a site ("Always for <agent> on <site>") can be longer than
+    // the card: it wraps inside it instead of running out of either edge.
+    .ui-button {
+        max-width: 100%;
+        min-width: 0;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        text-align: center;
     }
 }
 

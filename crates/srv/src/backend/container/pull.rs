@@ -7,7 +7,7 @@
 use bollard::image::CreateImageOptions;
 use futures_util::StreamExt as _;
 
-mod pinned;
+pub mod pinned;
 
 use super::{ContainerError, ContainerManager};
 use crate::backend::agent_image_digest::{pin_for_running_version, Pin, DEVELOPER_IMAGE_NAME, IMAGE_NAME};

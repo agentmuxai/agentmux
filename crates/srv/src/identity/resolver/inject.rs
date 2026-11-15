@@ -471,7 +471,7 @@ fn bound_oauth_config_dir(
 }
 
 /// The agent a block names (`agentId`, or legacy `agent:id`), if any.
-pub(crate) fn block_agent_id(mstore: &Store, block_id: &str) -> Option<String> {
+pub fn block_agent_id(mstore: &Store, block_id: &str) -> Option<String> {
     let block: crate::backend::obj::Block = mstore.get(block_id).ok().flatten()?;
     crate::backend::obj::block_meta_agent_id(&block.meta)
         .map(str::trim)
@@ -572,12 +572,12 @@ pub fn inject_identity_env_for_spawn(
 }
 
 #[path = "inject_steps.rs"]
-mod steps;
+pub mod steps;
 
 #[cfg(test)]
 mod tests {
     #[path = "../../inject_own_endpoint_tests.rs"]
-    mod own_endpoint;
+    pub mod own_endpoint;
     use super::*;
     use super::super::oauth_probe::oauth_status;
     use crate::backend::storage::store::{
@@ -1850,7 +1850,7 @@ mod tests {
 
     // #30077's tests live in their own file (inject/tests/blank_identity.rs) so this file,
     // over the size ratchet, does not grow.
-    mod blank_identity;
+    pub mod blank_identity;
 
     #[cfg(debug_assertions)]
     #[test]

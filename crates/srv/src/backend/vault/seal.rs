@@ -140,14 +140,14 @@ pub fn open(key: &Key, entry_id: &str, sealed: &[u8]) -> Result<Parts, String> {
     Ok(Parts(map))
 }
 
-#[cfg(test)]
-pub(crate) fn test_key() -> Key {
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_key() -> Key {
     Zeroizing::new([7u8; KEY_LEN])
 }
 
 /// Tests use [`test_key`] instead of the keychain.
-#[cfg(test)]
-pub(crate) fn use_test_key() {
+#[cfg(any(test, feature = "test-support"))]
+pub fn use_test_key() {
     *CACHED.lock().unwrap_or_else(|p| p.into_inner()) = Some(test_key());
 }
 

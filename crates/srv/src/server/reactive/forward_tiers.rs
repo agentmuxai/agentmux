@@ -6,6 +6,7 @@
 //! peer, then the cloud relay or a hold. Moved out of `deliver` without a change in behaviour.
 
 use super::*;
+use crate::backend::message_flow::{MessageFlowOutcome, MessageFlowVia};
 use crate::backend::reactive::types::InjectionResponse;
 
 /// What the tiers share while one jekt looks for its target.
@@ -89,15 +90,29 @@ impl<'a> Tiers<'a> {
         replay: &mut replay::Reservation,
     ) -> Option<serde_json::Value> {
         if let Some(body) = self.same_host_sidecar().await {
+            self.note_flow(MessageFlowVia::Channel, &body, None);
             return Some(body);
         }
         if let Some(body) = self.other_channels().await {
+            self.note_flow(MessageFlowVia::Channel, &body, None);
             return Some(body);
         }
         if let Some(body) = self.lan_peer().await {
+            let host = flow_notes::lan_host_of(self.state, &self.req.target_agent);
+            self.note_flow(MessageFlowVia::Lan, &body, host.as_deref());
             return Some(body);
         }
-        self.relay_or_hold(replay).await
+        let body = self.relay_or_hold(replay).await?;
+        // A queued message was reported where the relay took it; what is left here is held or refused.
+        if flow_notes::answer_outcome(&body) != MessageFlowOutcome::Delivered {
+            self.note_flow(flow_notes::arrival_via(self.req), &body, None);
+        }
+        Some(body)
+    }
+
+    /// Tells the Atlas map what `body`, the answer of a forwarding tier, made of the message.
+    fn note_flow(&self, via: MessageFlowVia, body: &serde_json::Value, to_host: Option<&str>) {
+        flow_notes::note(self.state, self.req, via, flow_notes::answer_outcome(body), to_host);
     }
 
     /// Tier 2a: same host, a different sidecar of this channel (file registry → HTTP loopback).

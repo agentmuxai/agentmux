@@ -22,6 +22,7 @@ const ANIMATION_SETTLE_MS = 420;
 const SMOOTH_REASONS: readonly StripRevealReason[] = ["selected", "focus", "interaction"];
 
 export interface StripRevealInput {
+    /** The box that scrolls: the strip, or a box around it that scrolls it with other content (strip-scroller.ts). */
     strip: Accessor<HTMLElement | undefined>;
     /** The selected tab, and the tabs in order, to find the first and last. */
     activeId: Accessor<string | null>;
@@ -30,6 +31,10 @@ export interface StripRevealInput {
     shown: Accessor<boolean>;
     /** `createScrollEdges`' signals: whether the strip overflows at all. */
     overflows: Accessor<boolean>;
+    /** Width of the fade over a scrollable edge, which a revealed tab stays clear of. Default: the strip's own. */
+    edgeClearance?: Accessor<number>;
+    /** False when the box holds more after the tabs (the header's range), so the last tab is not the box's end. Default true. */
+    lastTabEndsStrip?: Accessor<boolean>;
 }
 
 export interface StripReveal {
@@ -63,6 +68,8 @@ interface RevealCore {
     // A resize or rename arrived while a smooth reveal travelled: look again when it ends.
     layoutDeferred: boolean;
     waited: boolean;
+    // A selection, a mount or a layout change is waiting: the reveal runs wherever the keyboard focus is.
+    mustReveal: boolean;
     observedTabs: Set<Element>;
     tabListKey: string | undefined;
 }
@@ -80,6 +87,7 @@ function createRevealCore(input: StripRevealInput): RevealCore {
         recheckAfterWidth: false,
         layoutDeferred: false,
         waited: false,
+        mustReveal: false,
         observedTabs: new Set<Element>(),
         tabListKey: undefined,
     };
@@ -112,11 +120,17 @@ function run(c: RevealCore): void {
     const durationMs = scaledMs(DURATION_BASE_MS);
     const smooth = c.wantSmooth && !shouldReduceMotion("transition") && durationMs > 0;
     c.wantSmooth = false;
+    const must = c.mustReveal;
+    c.mustReveal = false;
     if (!strip || id == null || !c.input.shown()) return;
+    // A focus or an interaction alone never moves the box from under the keyboard focus: the person is
+    // working in it (a control they tabbed to, which the browser scrolled into view).
+    if (!must && strip.contains(document.activeElement)) return;
     // A just-landed or dragged tab is mid-animation: measure after it.
     if (!c.waited && strip.querySelector(".pane-tab--landing, .pane-tab--dragging")) {
         c.waited = true;
         c.wantSmooth = smooth;
+        c.mustReveal = must;
         c.settleTimer = setTimeout(() => schedule(c), scaledMs(ANIMATION_SETTLE_MS));
         return;
     }
@@ -124,9 +138,10 @@ function run(c: RevealCore): void {
     const item = findTab(strip, id);
     if (!item) return;
     const ids = c.input.tabIds();
-    const scrolled = revealInStrip(strip, item, ids[ids.length - 1] === id, {
+    const isLast = (c.input.lastTabEndsStrip?.() ?? true) && ids[ids.length - 1] === id;
+    const scrolled = revealInStrip(strip, item, isLast, {
         isFirst: ids[0] === id,
-        edgeClearance: STRIP_EDGE_FADE_PX,
+        edgeClearance: c.input.edgeClearance?.() ?? STRIP_EDGE_FADE_PX,
         behavior: smooth ? "smooth" : "instant",
         durationMs,
         onSettled: () => stopSmooth(c),
@@ -153,6 +168,7 @@ function request(c: RevealCore, reason: StripRevealReason): void {
         if ((reason === "interaction" || reason === "focus") && !c.input.overflows()) return;
     }
     if (SMOOTH_REASONS.includes(reason)) c.wantSmooth = true;
+    if (reason !== "interaction" && reason !== "focus") c.mustReveal = true;
     schedule(c);
 }
 
@@ -163,6 +179,7 @@ function setWidthAnimating(c: RevealCore, animating: boolean): void {
         if (c.userScrolled || !c.input.shown()) return;
         // A smooth reveal still travelling aims at the settled widths too.
         c.wantSmooth = c.smoothing;
+        c.mustReveal = true;
         schedule(c);
     }
 }
@@ -236,7 +253,7 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
     };
 }
 
-/** Registers a strip's reveal with its pane, once mounted (pane-strip-registry.ts). */
+/** Registers a strip's reveal with its pane, once mounted (pane-strip-registry.ts). `strip` is the box that scrolls. */
 export function registerStripWithPane(strip: Accessor<HTMLElement | undefined>, reveal: StripReveal): void {
     onMount(() => {
         const el = strip();

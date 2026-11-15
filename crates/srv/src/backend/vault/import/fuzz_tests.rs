@@ -162,6 +162,12 @@ fn seeds() -> Vec<(&'static str, Vec<u8>)> {
     s.push(("roboform.csv", super::second_wave_tests::ROBOFORM.as_bytes().to_vec()));
     s.push(("zoho.csv", super::second_wave_tests::ZOHO.as_bytes().to_vec()));
     s.push(("keeper.csv", super::second_wave_tests::KEEPER.as_bytes().to_vec()));
+    s.push(("proton.json", super::third_wave_tests::proton_json().into_bytes()));
+    s.push(("proton.zip", super::third_wave_tests::proton_zip()));
+    s.push(("proton.csv", super::third_wave_tests::proton_csv().into_bytes()));
+    s.push(("enpass.json", super::third_wave_tests::enpass_json().into_bytes()));
+    s.push(("enpass.csv", super::third_wave_tests::enpass_csv().into_bytes()));
+    s.push(("sticky.xml", super::third_wave_tests::STICKY.as_bytes().to_vec()));
     s.push(("bitwarden.json", super::tests::BITWARDEN.as_bytes().to_vec()));
     s.push(("bitwarden.csv", b"folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\nWork,0,login,GitHub,\"two\nlines\",,0,https://github.com,alex,\"pw, \"\"quoted\"\"\",JBSWY3DPEHPK3PXP\n,0,note,Wifi,ssid: home,,0,,,,\n".to_vec()));
     s.push(("chrome.csv", b"name,url,username,password,note\nExample,https://example.com/login,alex,hunter2,\nSecond,https://b.example,bob,\"p\"\"w\",hi\n".to_vec()));

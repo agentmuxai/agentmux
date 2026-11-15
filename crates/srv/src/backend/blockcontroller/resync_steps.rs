@@ -108,7 +108,7 @@ impl ResyncCtx<'_> {
             // down the block's shared process tracker — only the old
             // controller's own CLI process should die. See
             // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
-            let _ = crate::sagas::agent_teardown::replace_now(ctrl.as_ref());
+            let _ = crate::backend::teardown_hooks::hooks().replace_now(ctrl.as_ref());
             remove_controller_entry_only(block_id);
             return None;
         }

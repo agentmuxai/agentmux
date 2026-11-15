@@ -578,7 +578,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 let url = format!("http://127.0.0.1:{}{}", port, path);
-                let client = reqwest::Client::builder()
+                let client = crate::http_client::builder()
                     .timeout(std::time::Duration::from_secs(3))
                     .build()
                     .map_err(|e| e.to_string())?;
@@ -645,7 +645,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let headers_obj = data.get("headers").and_then(|v| v.as_object()).cloned();
 
                 let url = format!("http://127.0.0.1:{}{}", port, path);
-                let client = reqwest::Client::builder()
+                let client = crate::http_client::builder()
                     .timeout(std::time::Duration::from_secs(30))
                     .redirect(reqwest::redirect::Policy::none())
                     .build()
@@ -706,7 +706,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
                 let packages = req.packages;
 
-                let client = reqwest::Client::builder()
+                let client = crate::http_client::builder()
                     .timeout(std::time::Duration::from_secs(5))
                     .user_agent("agentmux/toolchain-versions")
                     .build()
@@ -929,6 +929,11 @@ async fn resolve_by_download(
 /// `None` for an unknown provider.
 pub(crate) async fn locate_provider_cli(provider_id: &str) -> Option<LocatedCli> {
     locate_provider_cli_with(provider_id, crate::backend::providers::uses_path_cli(provider_id)).await
+}
+
+/// [`locate_provider_cli`]'s path, for the ambient calls: registered once at startup (`ambient::cli_locator`).
+pub(crate) fn locate_for_ambient(provider_id: &str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + '_>> {
+    Box::pin(async move { locate_provider_cli(provider_id).await.map(|l| l.path) })
 }
 
 async fn locate_provider_cli_with(provider_id: &str, use_path: bool) -> Option<LocatedCli> {

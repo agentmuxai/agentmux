@@ -87,6 +87,9 @@ impl Act<'_> {
 
     pub(super) fn edit(&self) -> Result<Value, String> {
         let Act { state, req, actor, now, .. } = *self;
+        if req.agent.is_some() {
+            return Err("edit doesn't change who a task is for: use move with a target agent. Nothing was changed.".into());
+        }
         let store = &state.work_store;
         let t = self.task()?;
         let id = &t.item.id;
@@ -166,6 +169,7 @@ impl Act<'_> {
             if !store.work_assign(id, &name, &uid, now).map_err(|e| e.to_string())? {
                 return Err("only a waiting task can be moved to another agent".into());
             }
+            crate::server::task_flow_notes::note(state, id, crate::backend::task_flow::TaskFlowKind::Reassigned, &actor.name, &name);
             let to = if name.is_empty() { "anyone".to_string() } else { name };
             record(state, id, &actor.name, actor.kind(), "assigned", &t.item.state, &t.item.state, &format!("for {to}"));
         }
@@ -221,6 +225,7 @@ impl Act<'_> {
             return Err(format!("couldn't reach {}: {e}", reg.agent_id));
         }
         record(state, &t.item.id, &actor.name, actor.kind(), "started", &t.item.state, work_state::CLAIMED, &format!("on {}", reg.agent_id));
+        crate::server::task_flow_notes::note(state, &t.item.id, crate::backend::task_flow::TaskFlowKind::Started, &actor.name, &reg.agent_id);
         Ok(json!({ "ok": true, "attempt": started.attempts }))
     }
 
@@ -454,6 +459,9 @@ impl Act<'_> {
         };
         let kind = if reassign { "reassigned" } else { "taken_back" };
         record(state, &t.item.id, &actor.name, actor.kind(), kind, &t.item.state, work_state::OPEN, &format!("{reason}{to}"));
+        if let Some((name, _)) = &retarget {
+            crate::server::task_flow_notes::note(state, &t.item.id, crate::backend::task_flow::TaskFlowKind::Reassigned, &actor.name, name);
+        }
         // Cancel tells nobody, so the old holder is told here: it may still be
         // working on the task, or be about to hand it in.
         let note = format!(

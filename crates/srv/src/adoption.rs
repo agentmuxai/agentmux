@@ -496,7 +496,7 @@ pub(crate) fn adopt(target: &Store, inp: &Inputs) -> Report {
 }
 
 /// The boot entry point, for a channel running with shared auth.
-pub(crate) fn run_at_boot(target: &Store, target_path: &Path) {
+pub fn run_at_boot(target: &Store, target_path: &Path) {
     let Some(shared_dir) = crate::registry::resolve_global_shared_root() else { return };
     let Some(home) = shared_dir.parent().map(Path::to_path_buf) else { return };
     let channel = crate::backend::reactive::registry::local_channel_id();

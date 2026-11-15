@@ -13,7 +13,7 @@ requestAnimationFrame
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0
 -- open, 3 of 5
 <div class="search-container" style="position: absolute; left: 0px; top: 0px;">
@@ -25,7 +25,7 @@ state: open=true search="" index=0 count=0
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=2 count=5
 -- with all three toggles
 onSearch ""
@@ -44,7 +44,7 @@ requestAnimationFrame
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0
 -- only one toggle
 requestAnimationFrame
@@ -60,5 +60,5 @@ requestAnimationFrame
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0

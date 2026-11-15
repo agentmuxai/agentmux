@@ -740,7 +740,7 @@ impl Store {
     /// Derived wherever it's needed rather than stored: a Claude agent
     /// pointed at a custom endpoint is `"custom"`, not `"anthropic"`
     /// (#2587).
-    pub(crate) fn resolve_effective_vendor(provider: &str, model_vendor_base_url: &str) -> String {
+    pub fn resolve_effective_vendor(provider: &str, model_vendor_base_url: &str) -> String {
         if !model_vendor_base_url.trim().is_empty() {
             return "custom".to_string();
         }

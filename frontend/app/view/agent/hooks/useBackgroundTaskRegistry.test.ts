@@ -45,6 +45,21 @@ describe("resolveAttachedTaskObservation", () => {
         expect(resolveAttachedTaskObservation(tasks)).toBe(2000);
     });
 
+    it("does not count a row with no pid that nothing has confirmed for hours", () => {
+        const now = 100 * 60 * 60 * 1000;
+        const orphan = task({ id: "bg-orphan", pid: null, started_at_ms: now - 17 * 60 * 60 * 1000, last_seen_ms: now - 17 * 60 * 60 * 1000 });
+        expect(resolveAttachedTaskObservation([orphan], now)).toBeNull();
+        // The live row alone decides `since`; the orphan's older start doesn't pull it back.
+        const live = task({ id: "bg-live", pid: 4242, started_at_ms: now - 1000, last_seen_ms: now - 1000 });
+        expect(resolveAttachedTaskObservation([orphan, live], now)).toBe(now - 1000);
+    });
+
+    it("still counts a row with no pid seen recently, and a row with a pid however old", () => {
+        const now = 100 * 60 * 60 * 1000;
+        expect(resolveAttachedTaskObservation([task({ pid: null, started_at_ms: now - 5000, last_seen_ms: now - 5000 })], now)).toBe(now - 5000);
+        expect(resolveAttachedTaskObservation([task({ pid: 4242, started_at_ms: 1, last_seen_ms: 1 })], now)).toBe(1);
+    });
+
     it("ignores non-running tasks when computing the earliest start", () => {
         const tasks = [
             task({ id: "bg-1", status: "done", started_at_ms: 100 }),

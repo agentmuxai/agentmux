@@ -319,6 +319,13 @@ impl PersistentSubprocessController {
         Ok((child, generation, effects))
     }
 
+    /// This process is on the recorded model place: its first turn decides a model change waiting on it.
+    pub(super) fn arm_route_trial(&self) {
+        if let Some(mstore) = self.mstore.as_ref() {
+            crate::backend::model_gateway::trial::arm_for_block(mstore, &self.block_id);
+        }
+    }
+
     /// This fresh spawn can supersede a prior generation still awaiting its outcome with a held error line
     /// (`resolve_superseded_generation`, reachable via `respawn_once_for_leftover_queue`): flush it now,
     /// outside the lock, like every other `ResumeEffect` call site, or the error disappears (#2368).

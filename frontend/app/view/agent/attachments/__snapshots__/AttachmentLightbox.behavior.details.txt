@@ -37,7 +37,7 @@ initialFocus -> agent-attachment-lightbox__dialog
           "·"
           "1.1 MB"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- one page, macros
 Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
 useAttachmentUrl send id=undefined
@@ -75,7 +75,7 @@ initialFocus -> agent-attachment-lightbox__dialog
           "·"
           "2.0 KB"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- no details yet
 Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
 AttachmentsInfoCommand {"ids":["z1"]}
@@ -102,4 +102,4 @@ initialFocus -> agent-attachment-lightbox__dialog
             "1"
           "archive.zip"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">

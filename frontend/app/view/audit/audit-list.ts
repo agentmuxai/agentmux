@@ -16,7 +16,40 @@ import type { AuditTotals } from "@/types/rpc/AuditTotals";
 import { serial, useAuditLive } from "./audit-live";
 import { buildRequest, countNew, reuseRows, type AuditFilter } from "./audit-shared";
 
+/** The most pages `reachBack` adds for one ask (50 entries each). */
+const MAX_REACH_PAGES = 20;
+
 const fetchAuditPage = (req: AuditQueryReq): Promise<AuditQueryResult> => RpcApi.AuditQueryCommand(TabRpcClient, req);
+
+/** `load`, remembering the newest call still on its way (`onItsWay`), so `reachBack` can wait for the list it pages from. */
+function trackLatest(load: (quiet?: boolean, refreshing?: boolean) => Promise<void>) {
+    let latest: Promise<void> | undefined;
+    const run = (quiet = false, refreshing = false) => {
+        const mine = load(quiet, refreshing);
+        latest = mine;
+        void mine.finally(() => {
+            if (latest === mine) latest = undefined;
+        });
+        return mine;
+    };
+    return { run, onItsWay: () => latest };
+}
+
+/**
+ * Pages older entries in, once the newest page is shown, until `done()`, the last page, or `MAX_REACH_PAGES`: what
+ * the status bar's "last sound" needs when 50 or more entries were written between the sound and the click.
+ */
+function reachBackOf(onItsWay: () => Promise<void> | undefined, cursor: Accessor<string | undefined>, loadMore: () => Promise<void>) {
+    return async (done: () => boolean) => {
+        for (let pages = 0; pages < MAX_REACH_PAGES; pages++) {
+            for (let load = onItsWay(); load; load = onItsWay()) await load;
+            const next = untrack(cursor);
+            if (!next || done()) return;
+            await loadMore();
+            if (untrack(cursor) === next) return; // nothing was added: an error, or a newer look took over
+        }
+    };
+}
 
 /** What the list shows, and how a page of the newest entries replaces it. */
 function createListState() {
@@ -71,7 +104,7 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
 
     // `refreshing`: the page is only the newest entries again, so if the list was paused while it was on its way,
     // it is kept as the newest page the pill counts, not shown.
-    const loadFirst = async (quiet = false, refreshing = false) => {
+    const loadFirstPage = async (quiet = false, refreshing = false) => {
         const mine = ++seq;
         if (!quiet) setLoading(true);
         try {
@@ -85,6 +118,7 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
             if (mine === seq) setLoading(false);
         }
     };
+    const { run: loadFirst, onItsWay: firstLoad } = trackLatest(loadFirstPage);
 
     // The list holds still (paused, or scrolled back): look at the newest page without showing it.
     const peek = async () => {
@@ -157,5 +191,5 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
     useAuditLive(visible, () => void refresh());
 
     const { totals, notRecorded, loading, paused, newCount, channel } = state;
-    return { channel, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, showNewest };
+    return { channel, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, showNewest, reachBack: reachBackOf(firstLoad, cursor, loadMore) };
 }

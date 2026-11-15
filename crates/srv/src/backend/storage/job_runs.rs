@@ -84,6 +84,7 @@ pub(crate) fn apply_schema(conn: &rusqlite::Connection) -> Result<(), StoreError
     conn.execute_batch(SCHEMA)?;
     conn.execute_batch(super::job_incidents::SCHEMA)?;
     conn.execute_batch(super::job_cloud::SCHEMA)?;
+    conn.execute_batch(super::job_events::SCHEMA)?;
     super::migrations::apply_additive_columns(conn, JOB_RUNS_COLUMNS)
 }
 
@@ -135,6 +136,8 @@ pub mod reason {
     pub const GLOBAL_LIMIT: &str = "global_limit";
     /// An infrastructure failure's retry, waiting out its backoff.
     pub const RETRY_WAIT: &str = "retry_wait";
+    /// An event's run, waiting out the trigger's `delay` (`links.due_at_ms` is when it may start).
+    pub const DELAY_WAIT: &str = "delay_wait";
     /// The run was stopped at the job's `timeout_minutes`.
     pub const TIMEOUT: &str = "timeout";
     /// The job's spend today, with the run's own cap, would pass its daily
@@ -142,14 +145,16 @@ pub mod reason {
     pub const JOB_CAP: &str = "job_cap";
     /// The same for the account the run would use.
     pub const ACCOUNT_CAP: &str = "account_cap";
+    /// An event job already started its `max_per_hour` runs in the last hour: the event is skipped.
+    pub const RATE: &str = "rate";
     /// A `message` job reached its messages a day to another agent.
     pub const MESSAGE_CAP: &str = "message_cap";
     /// The run was stopped at its per-run cap.
     pub const RUN_CAP: &str = "run_cap";
     /// The skips a cap makes: the once-a-day alert and "over cap today".
-    pub const CAPS: [&str; 3] = [JOB_CAP, ACCOUNT_CAP, MESSAGE_CAP];
+    pub const CAPS: [&str; 4] = [JOB_CAP, ACCOUNT_CAP, MESSAGE_CAP, RATE];
     /// The reasons a `scheduled` run waits to start with.
-    pub const WAITING: [&str; 4] = [OVERLAP, GROUP_BUSY, GLOBAL_LIMIT, RETRY_WAIT];
+    pub const WAITING: [&str; 5] = [OVERLAP, GROUP_BUSY, GLOBAL_LIMIT, RETRY_WAIT, DELAY_WAIT];
 }
 
 /// Infrastructure status (§3.1; the ones P1 writes).
@@ -388,6 +393,43 @@ impl Store {
               ORDER BY started_at_ms DESC, rowid DESC LIMIT ?3"
         ))?;
         let rows = stmt.query_map(params![job_id, before, limit.max(0)], row_to_run)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// The newest run of `job_id` that finished and did its work (outcome `ok` or `findings`), however many newer runs
+    /// did not: a listing cut to the newest few can miss it.
+    pub fn job_run_last_good(&self, job_id: &str) -> Result<Option<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM db_job_runs
+              WHERE job_id = ?1 AND collapsed_into = '' AND state = 'finished' AND outcome IN ('ok', 'findings')
+              ORDER BY COALESCE(ended_at_ms, started_at_ms) DESC, rowid DESC LIMIT 1"
+        ))?;
+        let mut rows = stmt.query_map(params![job_id], row_to_run)?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// The newest run of every job the ledger has runs of, whatever its source (scheduled, Drone or cloud),
+    /// newest first, at most `limit`.
+    pub fn job_runs_latest_per_job(&self, limit: i64) -> Result<Vec<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM db_job_runs r
+              WHERE collapsed_into = ''
+                AND r.rowid = (SELECT rowid FROM db_job_runs
+                                WHERE job_id = r.job_id AND collapsed_into = ''
+                                ORDER BY started_at_ms DESC, rowid DESC LIMIT 1)
+              ORDER BY started_at_ms DESC, rowid DESC LIMIT ?1"
+        ))?;
+        let rows = stmt.query_map(params![limit.max(0)], row_to_run)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// The ids of the jobs the ledger has runs of that `text` names: by id, or by the name its runs carry.
+    pub fn job_ids_named(&self, text: &str) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare("SELECT DISTINCT job_id FROM db_job_runs WHERE job_id = ?1 OR job_name = ?1 ORDER BY job_id")?;
+        let rows = stmt.query_map(params![text], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 

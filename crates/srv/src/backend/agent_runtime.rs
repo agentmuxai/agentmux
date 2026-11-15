@@ -218,7 +218,7 @@ pub fn publish_agent_runtime(
     broker.publish_event::<crate::backend::mps_events::AgentRuntime>(&payload, vec![format!("block:{block_id}")], 1);
 }
 
-pub(crate) struct SeededLaunch {
+pub struct SeededLaunch {
     /// The argv to store as `cmd:args`.
     pub cli_args: Vec<String>,
     /// The value for `agent:runtime`, or `None` for a provider whose model the
@@ -286,7 +286,7 @@ fn without_owned_flags(base: Vec<String>) -> Vec<String> {
 /// on `db_agents`), already validated. Each setting is optional: only what was
 /// picked is here, and the rest keeps coming from the definition.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct Remembered {
+pub struct Remembered {
     pub permission_mode: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -303,7 +303,7 @@ impl Remembered {
     /// model namespace is known here (`opus` / `sonnet` / `haiku` or a concrete
     /// `claude-…` id), and anything else, or anything malformed, is dropped
     /// setting by setting.
-    pub(crate) fn parse(provider_id: &str, raw: &str) -> Remembered {
+    pub fn parse(provider_id: &str, raw: &str) -> Remembered {
         if provider_id != "claude" || raw.is_empty() {
             return Remembered::default();
         }
@@ -370,7 +370,7 @@ fn without_flags(flags: Vec<String>, names: &[&str]) -> Vec<String> {
 /// permission flags replaced when a mode is remembered), the flags to hand to
 /// [`seed_launch`] and to store as `agent:provider_flags`, and the mode the
 /// menu must show (`None` = leave what `seed_launch` says).
-pub(crate) fn apply_remembered(
+pub fn apply_remembered(
     provider_id: &str,
     base: Vec<String>,
     provider_flags: &str,
@@ -452,7 +452,7 @@ fn launch_default_model(provider_id: &str, listed: &[String]) -> Option<String> 
 /// frontend does, and a `--model` / `--effort` among them is the agent's own
 /// choice — it becomes the runtime the menu shows and no second flag is added,
 /// so the two cannot disagree.
-pub(crate) fn seed_launch(
+pub fn seed_launch(
     provider_id: &str,
     base: Vec<String>,
     provider_flags: &str,
@@ -562,7 +562,7 @@ fn is_claude_model(m: &str) -> bool {
 /// [`seed_launch`] put them there, and a definition's own `--model` is the
 /// agent's choice. Leaves alone a provider the menu does not wire, an unknown
 /// provider, and an empty argv (nothing to extend). Idempotent.
-pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<String> {
+pub fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<String> {
     let raw_provider = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
     let listed = account_listed_models(crate::backend::providers::resolve_provider_alias(&raw_provider));
     let args = with_runtime_flags_listed(meta, args, &listed);
@@ -701,7 +701,7 @@ fn with_runtime_flags_listed(meta: &MetaMapType, args: Vec<String>, listed: &[St
 /// starts from the catalog and would drop the definition's flags on the first
 /// send otherwise, #2872). One call, so no caller can write one without the
 /// others.
-pub(crate) fn apply_to_meta(meta: &mut MetaMapType, seeded: SeededLaunch, provider_flags: &str) {
+pub fn apply_to_meta(meta: &mut MetaMapType, seeded: SeededLaunch, provider_flags: &str) {
     meta.insert("cmd:args".to_string(), json!(seeded.cli_args));
     if let Some(runtime) = seeded.runtime {
         meta.insert("agent:runtime".to_string(), runtime);

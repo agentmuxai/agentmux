@@ -66,6 +66,9 @@ fn part_names(fields: &[CardField]) -> Vec<&'static str> {
 
 /// Takes the call when `vault` names a whole card, `None` for any other fill.
 pub(super) async fn whole_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, block_id: &str, agent: &str, reason: &str) -> Option<Response> {
+    if req.vault.is_none() && req.request_kind.as_deref().map(str::trim) == Some("card") {
+        return Some(typed::typed_card(state, caller, req, block_id, agent).await);
+    }
     let wanted = req.vault.clone()?;
     let (store, who) = (state.identity_store.clone(), agent.to_string());
     let found = tokio::task::spawn_blocking(move || {
@@ -90,6 +93,8 @@ struct Question<'a> {
     card: Option<&'a CardTarget>,
     picker: &'a [CardTarget],
     origin: &'a str,
+    /// The page's origin when the fields are in another site's frame, else empty.
+    page: &'a str,
     names: &'a [&'a str],
     offer_always: bool,
     why: &'a str,
@@ -104,6 +109,7 @@ fn card_question(agent: &str, pane: String, q: &Question, agent_reason: &str) ->
         entry_label: q.card.map(|c| c.fill.label.clone()).unwrap_or_else(|| "a card".to_string()),
         what: q.card.map(CardTarget::describe).unwrap_or_else(|| "card".to_string()),
         origin: q.origin.to_string(),
+        page: q.page.to_string(),
         field: format!("the card fields: {}", q.names.join(", ")),
         offer_always: q.offer_always,
         reason: q.why.to_string(),
@@ -174,15 +180,18 @@ async fn fill_all(state: &AppState, block_id: &str, origin: &str, fields: &[Card
     done
 }
 
-fn answer(card: &CardTarget, origin: &str, done: &Outcome, went_ahead: bool) -> Value {
+fn answer(entry: &str, origin: &str, page: &str, done: &Outcome, went_ahead: bool) -> Value {
     let mut out = json!({
         // The entry's id and part names only: the brand, last four and expiry are the person's to see.
-        "filled_from_vault": card.fill.id,
+        "filled_from_vault": entry,
         "parts_filled": done.filled,
         "value": "[secret: hidden]",
         "site": origin,
     });
     if let Some(o) = out.as_object_mut() {
+        if !page.is_empty() {
+            o.insert("in_a_frame_on".into(), json!(page));
+        }
         if !done.left.is_empty() {
             o.insert("parts_left".into(), json!(done.left));
         }
@@ -230,10 +239,12 @@ fn stand_in(card: &Option<CardTarget>, picker: &[CardTarget]) -> crate::backend:
 
 /// Asks the person, unless this card is granted on this site and current: the card they chose (the named one when
 /// they chose none), or the response that ends the call.
-async fn settle(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, call: (&str, &str, &str), place: (&str, &[&str]), (card, picker): (Option<CardTarget>, Vec<CardTarget>)) -> Result<Settled, Response> {
-    let ((block_id, agent, reason), (origin, names)) = (call, place);
-    let site = format!("{origin} (card form)");
-    let (store, grant_origin) = (state.identity_store.clone(), origin.to_string());
+async fn settle(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, call: (&str, &str, &str), place: (&str, &str, &[&str]), (card, picker): (Option<CardTarget>, Vec<CardTarget>)) -> Result<Settled, Response> {
+    let ((block_id, agent, reason), (origin, page, names)) = (call, place);
+    // A payment frame is asked about, and granted, with the page it is on.
+    let grant_key = grant_site(origin, page);
+    let site = format!("{grant_key} (card form)");
+    let (store, grant_origin) = (state.identity_store.clone(), grant_key);
     let granted_id = card.as_ref().filter(|c| !c.expired).map(|c| c.fill.id.clone());
     let granted = match granted_id {
         Some(entry) => tokio::task::spawn_blocking(move || store.vault_grant_check(&entry, &grant_origin).unwrap_or(false)).await.unwrap_or(false),
@@ -255,9 +266,10 @@ async fn settle(state: &AppState, caller: Option<&Caller>, req: &VaultFillReques
         Plan::Ask { offer_always, reason } if !expired => (offer_always, reason),
         _ => (false, "the card has expired"),
     };
-    let asked = Question { card: card.as_ref(), picker: if pick { &picker } else { &[] }, origin, names, offer_always, why };
+    let asked = Question { card: card.as_ref(), picker: if pick { &picker } else { &[] }, origin, page, names, offer_always, why };
     let question = card_question(agent, super::super::vault_ask::agent_pane(state, caller, &req.auth), &asked, reason);
-    let headline = format!("{agent} wants to fill your {} on {origin}", card.as_ref().map(CardTarget::describe).unwrap_or_else(|| "card".to_string()));
+    let what = card.as_ref().map(CardTarget::describe).unwrap_or_else(|| "card".to_string());
+    let headline = if page.is_empty() { format!("{agent} wants to fill your {what} on {origin}") } else { format!("{agent} wants to fill your {what} in a card field from {origin} on {page}") };
     let (ended, answer) = super::super::vault_ask::ask(state, block_id, question, ANSWER_WAIT, &headline).await;
     if !ended.allowed() {
         record(state, block_id, &stand_in(&card, &picker), agent, &site, ended.outcome(), reason);
@@ -279,29 +291,53 @@ async fn settle(state: &AppState, caller: Option<&Caller>, req: &VaultFillReques
     Ok(Settled { always: ended == Ended::Always && !card.expired, went_ahead: ended == Ended::WentAhead, card })
 }
 
-async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, block_id: &str, agent: &str, reason: &str, card: Option<CardTarget>, picker: Vec<CardTarget>) -> Response {
-    tracing::info!(agent = %agent, block_id = %block_id, entry = %card.as_ref().map(|c| c.fill.id.as_str()).unwrap_or("(the person picks)"), "[vault] a whole-card web form fill was asked for");
-    let form = match proxy_value(state, "card_form", json!({ "block_id": block_id, "ref": req.ref_ }), HOST_WAIT).await {
+/// What the host found of a card form: where it is, and the fields it matched to a card's parts.
+struct CardForm {
+    origin: String,
+    /// The page's origin when the fields are in another site's frame, else empty: the question and the grant carry both.
+    page: String,
+    grant_key: String,
+    fields: Vec<CardField>,
+    names: Vec<&'static str>,
+}
+
+/// Asks the host for the card form the field `ref_` is in, or says why there is none.
+async fn read_form(state: &AppState, block_id: &str, ref_: &str, instead: &str) -> Result<CardForm, Response> {
+    let form = match proxy_value(state, "card_form", json!({ "block_id": block_id, "ref": ref_ }), HOST_WAIT).await {
         Ok(v) => v,
-        Err((code, e)) => return err_response(code, e),
+        Err((code, e)) => return Err(err_response(code, e)),
     };
     let origin = form.get("origin").and_then(Value::as_str).unwrap_or("").to_string();
+    let page = framed_in(&origin, form.get("page_origin").and_then(Value::as_str).unwrap_or(""));
+    let grant_key = grant_site(&origin, &page);
     let fields = parse_fields(&form);
     if !fields.iter().any(|f| MAIN_SLOTS.contains(&f.shape.slot.as_str())) {
-        let named = card.as_ref().map(|c| c.fill.id.as_str()).unwrap_or("<id>");
-        return err_response(
-            StatusCode::BAD_REQUEST,
-            format!("no card number, expiry or security code field was found with that one: fill a single field with {named}.<part> (number, exp_month, exp_year, cvc, name, zip), or take a new snapshot"),
-        );
+        return Err(err_response(StatusCode::BAD_REQUEST, format!("no card number, expiry or security code field was found with that one: {instead}, or take a new snapshot")));
     }
     let names = part_names(&fields);
-    let site = format!("{origin} (card form)");
-    let Settled { mut card, always, went_ahead } = match settle(state, caller, req, (block_id, agent, reason), (&origin, &names), (card, picker)).await {
+    Ok(CardForm { origin, page, grant_key, fields, names })
+}
+
+/// Why nothing was filled, by part name: never a value.
+fn why_nothing(done: &Outcome) -> String {
+    done.failed.iter().chain(&done.left).map(|v| format!("{}: {}", v["part"].as_str().unwrap_or("?"), v["why"].as_str().unwrap_or("?"))).collect::<Vec<_>>().join("; ")
+}
+
+async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillRequest, block_id: &str, agent: &str, reason: &str, card: Option<CardTarget>, picker: Vec<CardTarget>) -> Response {
+    tracing::info!(agent = %agent, block_id = %block_id, entry = %card.as_ref().map(|c| c.fill.id.as_str()).unwrap_or("(the person picks)"), "[vault] a whole-card web form fill was asked for");
+    let named = card.as_ref().map(|c| c.fill.id.as_str()).unwrap_or("<id>");
+    let instead = format!("fill a single field with {named}.<part> (number, exp_month, exp_year, cvc, name, zip)");
+    let CardForm { origin, page, grant_key, fields, names } = match read_form(state, block_id, &req.ref_, &instead).await {
+        Ok(f) => f,
+        Err(response) => return response,
+    };
+    let site = format!("{grant_key} (card form)");
+    let Settled { mut card, always, went_ahead } = match settle(state, caller, req, (block_id, agent, reason), (&origin, &page, &names), (card, picker)).await {
         Ok(s) => s,
         Err(response) => return response,
     };
     if always {
-        let (store, entry, grant_origin, created) = (state.identity_store.clone(), card.fill.id.clone(), origin.clone(), card.fill.created_at);
+        let (store, entry, grant_origin, created) = (state.identity_store.clone(), card.fill.id.clone(), grant_key.clone(), card.fill.created_at);
         let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&entry, &grant_origin, agentmux_common::time::now_ms(), created)).await;
     }
 
@@ -322,14 +358,16 @@ async fn fill_card(state: &AppState, caller: Option<&Caller>, req: &VaultFillReq
     card.fill.what = format!("card ({})", if done.filled.is_empty() { "nothing".to_string() } else { done.filled.join(", ") });
     if done.filled.is_empty() {
         record(state, block_id, &card.fill, agent, &site, "failed", reason);
-        let why = done.failed.iter().chain(&done.left).map(|v| format!("{}: {}", v["part"].as_str().unwrap_or("?"), v["why"].as_str().unwrap_or("?"))).collect::<Vec<_>>().join("; ");
+        let why = why_nothing(&done);
         return err_response(StatusCode::BAD_REQUEST, format!("nothing was filled: {why}"));
     }
     record(state, block_id, &card.fill, agent, &site, "done", reason);
     let (store, entry) = (state.identity_store.clone(), card.fill.id.clone());
     let _ = tokio::task::spawn_blocking(move || store.vault_touch(&entry, agentmux_common::time::now_ms())).await;
-    (StatusCode::OK, Json(json!({ "ok": true, "data": answer(&card, &origin, &done, went_ahead) }))).into_response()
+    (StatusCode::OK, Json(json!({ "ok": true, "data": answer(&card.fill.id, &origin, &page, &done, went_ahead) }))).into_response()
 }
+
+mod typed;
 
 #[cfg(test)]
 mod tests {
@@ -343,10 +381,23 @@ mod tests {
     }
 
     #[test]
+    fn a_frame_and_the_page_it_is_on_are_one_site_for_the_grant_and_the_question() {
+        assert_eq!(grant_site("https://shop.example", ""), "https://shop.example", "a field of the page: its origin");
+        assert_eq!(grant_site("https://shop.example", "https://shop.example"), "https://shop.example", "a frame of the page's own site is the page's");
+        assert_eq!(grant_site("https://js.stripe.com", "https://shop.example"), "https://js.stripe.com on https://shop.example");
+        assert_ne!(grant_site("https://js.stripe.com", "https://shop.example"), grant_site("https://js.stripe.com", "https://other.example"), "the provider's frame on another page is another grant");
+        assert_eq!(framed_in("https://js.stripe.com", "https://shop.example"), "https://shop.example");
+        assert_eq!(framed_in("https://shop.example", "https://shop.example"), "");
+        assert_eq!(framed_in("", "https://shop.example"), "");
+        let framed = card_question("a", String::new(), &Question { card: Some(&a_card()), picker: &[], origin: "https://js.stripe.com", page: "https://shop.example", names: &["number"], offer_always: true, why: "x" }, "");
+        assert_eq!((framed.origin.as_str(), framed.page.as_str()), ("https://js.stripe.com", "https://shop.example"));
+    }
+
+    #[test]
     fn a_card_never_goes_ahead_on_silence_so_the_answer_carries_no_approval_note_unless_one_did() {
         let done = Outcome { filled: vec!["number"], ..Default::default() };
-        assert!(answer(&a_card(), "https://shop.example", &done, false).get("approval").is_none());
-        assert_eq!(answer(&a_card(), "https://shop.example", &done, true)["approval"], uses::WENT_AHEAD);
-        assert!(!uses::goes_ahead(&card_question("a", String::new(), &Question { card: Some(&a_card()), picker: &[], origin: "https://shop.example", names: &["number"], offer_always: false, why: "x" }, "")), "silence denies a card");
+        assert!(answer("card-a", "https://shop.example", "", &done, false).get("approval").is_none());
+        assert_eq!(answer("card-a", "https://shop.example", "", &done, true)["approval"], uses::WENT_AHEAD);
+        assert!(!uses::goes_ahead(&card_question("a", String::new(), &Question { card: Some(&a_card()), picker: &[], origin: "https://shop.example", page: "", names: &["number"], offer_always: false, why: "x" }, "")), "silence denies a card");
     }
 }

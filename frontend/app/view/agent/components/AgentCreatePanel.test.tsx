@@ -734,8 +734,9 @@ describe("AgentCreatePanel — the runtime decides the host steps", () => {
         expect(screen.queryByTestId("agent-create-container-offer")).toBeNull();
     });
 
-    it("offers a container on the install step when Docker is there, and taking it goes to Create", async () => {
+    it("offers a container on the install step when Docker is there and the person last chose Native, and taking it goes to Create", async () => {
         dockerForTest.set("available");
+        lastRuntimeForTest.value = "host";
         renderPanel({ installed: false });
         fireEvent.click(await screen.findByTestId("agent-create-use-container"));
         await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());

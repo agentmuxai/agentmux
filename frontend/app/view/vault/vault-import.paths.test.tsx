@@ -67,6 +67,7 @@ const PREVIEW = {
     source: "vault",
     source_label: "an AgentMux Vault file",
     plaintext_file: false,
+    browser_signins: 0,
 };
 const previewStep = (over: Partial<typeof PREVIEW> = {}, extra: Record<string, unknown> = {}) => ({
     preview: { ...PREVIEW, ...over },
@@ -590,6 +591,44 @@ describe("what to do with duplicates", () => {
         }
     });
 
+    it("asks which browser profile a browser export's logins belong to, and sends it", async () => {
+        vaultImport.mockResolvedValueOnce(previewStep({ browser_signins: 2, source: "chrome", source_label: "a browser's password export (Chrome, Edge, Brave)" }));
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import/);
+        const field = screen.getByLabelText("Browser profile for the sign-ins");
+        expect((field as HTMLSelectElement).value).toBe("personal");
+        expect(dialog().textContent).toContain("2 logins with a site go to this profile's sign-in Vault (Personal)");
+        fireEvent.click(btn("Import"));
+        await waitFor(() =>
+            expect(calls("import_commit")).toEqual([{ token: "tok-1", duplicates: "skip", vault: "personal", profile: "personal" }])
+        );
+    });
+
+    it("points at the Vault above only while that field is on screen", async () => {
+        const preview = { browser_signins: 2, source: "chrome", source_label: "a browser's password export (Chrome, Edge, Brave)" };
+        vaultImport.mockResolvedValueOnce(previewStep(preview));
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import/);
+        expect(screen.queryByText("Import into")).toBeNull();
+        expect(dialog().textContent).toContain("where its browser offers them.");
+        expect(dialog().textContent).not.toContain("Vault above");
+        cleanup();
+
+        vaults = VAULTS;
+        await refreshVault();
+        vaultImport.mockResolvedValueOnce(previewStep(preview));
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import/);
+        expect(dialog().textContent).toContain("whatever Vault is chosen above. The rest go to the Vault above.");
+    });
+
+    it("asks nothing about a profile for a file with no browser logins", async () => {
+        vaultImport.mockResolvedValueOnce(previewStep());
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import/);
+        expect(screen.queryByLabelText("Browser profile for the sign-ins")).toBeNull();
+    });
+
     it("sends the choice even where the question was not asked", async () => {
         vaultImport.mockResolvedValueOnce(previewStep({ duplicates: 0 }));
         render(() => <VaultImportDialog onClose={vi.fn()} />);
@@ -796,6 +835,16 @@ describe("after the import", () => {
         expect(dialog().textContent).not.toContain("a copy may already be in the cloud");
         expect(screen.queryByRole("alert")).toBeNull();
         expect(btn("Delete the file")).toBeInTheDocument();
+    });
+
+    it("says a browser's export is also still in the browser, and no other file does", async () => {
+        await imported({ plaintext_file: true, source: "chrome", source_label: "a browser's password export (Chrome, Edge, Brave)" });
+        expect(dialog().textContent).toContain("also still saved in the browser, and in Google Password Manager");
+    });
+
+    it("says nothing of the browser for a file from another source", async () => {
+        await imported({ plaintext_file: true, source: "lastpass" });
+        expect(dialog().textContent).not.toContain("Google Password Manager");
     });
 
     it("names the synced folder a plaintext file is in", async () => {

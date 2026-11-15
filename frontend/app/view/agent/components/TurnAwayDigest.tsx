@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Show, createEffect, createSignal, type Accessor, type JSX } from "solid-js";
-import { IconButton } from "@/app/element/ui";
+import { CloseButton } from "@/app/element/ui";
 import { markTurnsSeen, unseenTurnsFor } from "@/app/store/turn-awareness";
 import { awaySummary } from "../turn-trigger-text";
 
@@ -32,12 +32,15 @@ export function TurnAwayDigest(props: {
         if (busy && !wasBusy) setLine(null);
         wasBusy = busy;
     });
+    // Keyed: the line is cleared from effects that a window-focus change runs
+    // in the same flush, and a keyed Show hands the child the value, not an
+    // accessor that throws "Stale read from <Show>" once the line is gone.
     return (
-        <Show when={line()}>
+        <Show when={line()} keyed>
             {(text) => (
                 <div class="agent-away-digest" role="status">
-                    <span class="agent-away-digest-text">{text()}</span>
-                    <IconButton icon="xmark" label="Dismiss" class="agent-away-digest-dismiss" onClick={() => setLine(null)} />
+                    <span class="agent-away-digest-text">{text}</span>
+                    <CloseButton label="Dismiss" class="agent-away-digest-dismiss" onClick={() => setLine(null)} />
                 </div>
             )}
         </Show>

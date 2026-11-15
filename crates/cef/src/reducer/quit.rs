@@ -140,7 +140,7 @@ pub(crate) fn start_hidden_attention_transition(
 /// `is_live_user_window` (the `is_pool` flag), NOT by label — see its doc.
 fn is_background_pending_creation_label(label: &str) -> bool {
     label.starts_with("window-pool-")
-        || label.starts_with("browser-pane-")
+        || crate::browser_pane::label::is_pane_label(label)
         || label.starts_with("floating-")
 }
 

@@ -19,7 +19,7 @@ use crate::backend::blockcontroller::{core, session_stats, shell};
 use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
 #[path = "container_spawn_steps.rs"]
-mod steps;
+pub mod steps;
 
 #[cfg(test)]
 #[path = "container_turn_tests.rs"]

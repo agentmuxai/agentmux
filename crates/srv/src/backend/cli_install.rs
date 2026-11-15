@@ -428,7 +428,7 @@ const NPM_REGISTRY: &str = "https://registry.npmjs.org/";
 /// 404), proxy and script policy then cannot change what is installed, or from where. A proxy
 /// in the environment (`HTTPS_PROXY`) still applies. The empty files are made in `dir`, the
 /// install folder, which is created if need be.
-pub(crate) fn npm_isolation_args(dir: &Path) -> std::io::Result<Vec<String>> {
+pub fn npm_isolation_args(dir: &Path) -> std::io::Result<Vec<String>> {
     std::fs::create_dir_all(dir)?;
     let mut args = vec![format!("--registry={NPM_REGISTRY}")];
     for (flag, name) in [("--userconfig", ".agentmux-empty-user.npmrc"), ("--globalconfig", ".agentmux-empty-global.npmrc")] {

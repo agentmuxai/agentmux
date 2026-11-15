@@ -179,7 +179,7 @@ fn worker_of_block(mstore: &Store, block_id: &str) -> Option<Worker> {
 }
 
 /// The open panes (in a tab) of definition `def_id`.
-pub(crate) fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
+pub fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
     let Ok(tabs) = mstore.get_all::<Tab>() else {
         return Vec::new();
     };
@@ -251,7 +251,7 @@ static REPORTS: LazyLock<parking_lot::Mutex<HashMap<(String, String), u64>>> = L
 const REPORTS_MAX: usize = 4096;
 
 /// Copy the successful deliveries in `audit` into `REPORTS`.
-pub(crate) fn absorb(audit: &[crate::backend::reactive::AuditLogEntry]) {
+pub fn absorb(audit: &[crate::backend::reactive::AuditLogEntry]) {
     let mut reports = REPORTS.lock();
     for e in audit.iter().filter(|e| e.success && e.event_kind == "delivery") {
         let Some(source) = e.source_agent.as_deref().filter(|s| !s.is_empty()) else { continue };
@@ -267,7 +267,7 @@ pub(crate) fn absorb(audit: &[crate::backend::reactive::AuditLogEntry]) {
 }
 
 /// When `worker` (its agent id) last messaged one of `leader_panes`.
-pub(crate) fn last_report(worker: &str, leader_panes: &[String]) -> Option<u64> {
+pub fn last_report(worker: &str, leader_panes: &[String]) -> Option<u64> {
     let reports = REPORTS.lock();
     let worker = worker.to_lowercase();
     leader_panes.iter().filter_map(|p| reports.get(&(worker.clone(), p.clone())).copied()).max()
@@ -393,7 +393,7 @@ fn leader_pane_of(mstore: &Store, def_id: &str) -> Option<String> {
 
 /// Like [`tell_leader`], for a note that asks nothing: it joins the leader's turn if one is running, else waits under
 /// `key` for the next one (a second note under the same key replaces the first). It never starts a turn.
-pub(crate) fn tell_leader_held(mstore: &Store, def_id: &str, body: &str, key: &str) -> bool {
+pub fn tell_leader_held(mstore: &Store, def_id: &str, body: &str, key: &str) -> bool {
     let Some(leader_block) = leader_pane_of(mstore, def_id) else {
         return false;
     };
@@ -405,7 +405,7 @@ pub(crate) fn tell_leader_held(mstore: &Store, def_id: &str, body: &str, key: &s
 /// Tell the lead of the agent `def_id` something about it, as an `[AgentMux]` note: its seat's lead (a
 /// spawned worker's is its leader) when that agent is on this machine and has a pane open. `false` when
 /// nobody was told: it reports to the operator, its lead is on another machine, or its pane is not open.
-pub(crate) fn tell_leader(mstore: &Store, def_id: &str, body: &str) -> bool {
+pub fn tell_leader(mstore: &Store, def_id: &str, body: &str) -> bool {
     let Some(leader_block) = leader_pane_of(mstore, def_id) else {
         return false;
     };

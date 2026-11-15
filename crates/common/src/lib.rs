@@ -5,6 +5,7 @@
 
 pub mod agent_create_types;
 pub mod api_types;
+pub mod file_rename_types;
 pub mod browser_control_types;
 pub mod build_kind;
 pub mod build_slot;
@@ -13,6 +14,7 @@ pub mod client_events;
 mod cli;
 pub mod copy_into_dir;
 pub mod data_paths;
+pub mod dev_home_guard;
 mod data_home;
 pub mod disk_space;
 pub mod mcp_config_path;
@@ -41,9 +43,14 @@ pub mod pii_mask;
 pub mod quit_question;
 pub mod redact;
 pub mod runtime_mode;
+pub mod capture_shape;
+pub mod secret_shape;
 pub mod shown_once;
 pub mod secret_eq;
 pub mod secret_env;
+pub mod system_certs;
+#[cfg(feature = "local-http")]
+pub mod local_http;
 pub mod settings_file;
 mod settings_patch;
 pub mod settings_jsonc;
@@ -54,6 +61,8 @@ pub mod srv_binary;
 pub mod srv_estart_wait;
 pub mod srv_stderr;
 pub mod time;
+#[cfg(feature = "tls-provider")]
+pub mod tls_provider;
 pub mod tokens;
 pub mod toolchain_path;
 pub mod update_manifest;

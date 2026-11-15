@@ -18,7 +18,7 @@ pub const START_SLACK_SECS: u64 = 5;
 /// Whether `pid` is still an srv, and, given when its claim was `written`,
 /// the one that wrote it. The name rule is the launcher's (`stale_srv.rs`).
 pub fn srv_alive(pid: u32, written: Option<SystemTime>) -> bool {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(srv) = test_srv::is_srv(pid) {
         return srv && crate::backend::reactive::registry::pid_alive(pid);
     }
@@ -38,7 +38,7 @@ pub fn is_srv_that_wrote(name: &str, started_secs: u64, written_secs: Option<u64
 
 /// Tests stand in for an srv with their own process, which isn't one by
 /// name: each test thread says which pids count.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_srv {
     use std::cell::RefCell;
     use std::collections::HashSet;

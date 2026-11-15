@@ -6,7 +6,14 @@ import { describe, expect, it } from "vitest";
 import type { Account } from "@/app/view/identity/identity-model";
 
 import { modeLabel } from "./accounts-catalog";
-import { githubActsAs, githubKindLabel, githubKindShort, githubStatusLine, isGithubToken } from "./github-account-copy";
+import {
+    GITHUB_GH_AGENT_STATUS,
+    githubActsAs,
+    githubKindLabel,
+    githubKindShort,
+    githubStatusLine,
+    isGithubToken,
+} from "./github-account-copy";
 
 type Probe = Pick<Account, "provider" | "kind" | "context">;
 const acct = (kind: Account["kind"], context: Record<string, unknown> = {}, provider = "github"): Probe =>
@@ -73,6 +80,13 @@ describe("the GitHub section's status line", () => {
         expect(githubStatusLine([own])).toContain("Connected with your own GitHub sign-in");
         expect(githubStatusLine([own])).not.toContain("Not connected");
         expect(githubStatusLine([acc("pat"), own])).toContain("personal access token");
+    });
+
+    it("is gh-agent's identity on a computer that has it, whichever account is connected", () => {
+        expect(githubStatusLine([], true)).toBe(GITHUB_GH_AGENT_STATUS);
+        expect(githubStatusLine([acc("pat"), acc("oauth", { broker: true })], true)).toBe(GITHUB_GH_AGENT_STATUS);
+        expect(githubStatusLine([acc("pat")], false)).toContain("Using your personal access token");
+        expect(githubStatusLine([])).not.toContain("gh-agent");
     });
 
     it("ignores other providers' accounts", () => {

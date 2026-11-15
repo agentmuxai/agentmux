@@ -137,6 +137,7 @@ impl PersistentSubprocessController {
         // collide across controller instances.
         let my_registration_nonce = next_registration_nonce();
         self.flush_superseded_effects(superseded_effects);
+        self.arm_route_trial();
 
         let continuation =
             self.disclose_fresh_start(&attempted_resume_sid, my_generation, had_retry_payload);

@@ -14,20 +14,25 @@
 //! §5.2), which the scheduler delivers when the agent is back.
 
 pub mod admission;
-mod cap_alert;
+pub mod app_events;
+pub mod cap_alert;
 pub mod caps;
 pub mod cloud_events;
 pub mod cloud_hub;
 pub mod definition;
+pub mod expect;
+pub mod file_watch;
 pub mod follower;
 pub mod from_template;
 pub mod incidents;
 pub mod paused;
 pub mod policy;
+pub mod poll;
 pub mod remote;
 pub mod reporters;
 pub mod reservation;
 pub mod verdict;
+pub mod webhook_local;
 pub mod watchdog;
 
 use std::sync::Arc;
@@ -39,7 +44,7 @@ use crate::backend::cron::{FireOutcome, MissReason};
 use crate::backend::mps::Broker;
 use crate::backend::storage::job_runs::{infra, reason, state, JobFlag, JobRun, RunCost};
 use crate::backend::storage::store::Store;
-use crate::drone::storage::DroneStore;
+use crate::backend::storage::drone_store::DroneStore;
 
 /// Job kinds in `job_source` (§3.1).
 pub const SOURCE_CRON: &str = "cron";
@@ -51,10 +56,13 @@ pub const TRIGGER_SCHEDULE: &str = "schedule";
 pub const TRIGGER_CATCH_UP: &str = "catch_up";
 pub const TRIGGER_MANUAL: &str = "manual";
 pub const TRIGGER_RETRY: &str = "retry";
+pub const TRIGGER_EVENT: &str = "event";
 
 /// `triggered_by` for runs the scheduler starts, and for the operator.
 pub const BY_SCHEDULER: &str = "scheduler";
 pub const BY_OPERATOR: &str = "operator";
+/// `triggered_by` for an event's run is this, then `:` and the source (`event:app_event`).
+pub const BY_EVENT: &str = "event";
 
 /// A cron job's catch-up policy (§5.2): what an undelivered fire leaves.
 pub const CATCH_UP_SKIP: &str = "skip";
@@ -184,10 +192,10 @@ pub struct RunLedger {
     /// (`reservation.rs`).
     caps: std::sync::OnceLock<reservation::CapSources>,
     /// Tests: the start of the day, as a fixed clock gives it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     day_start: std::sync::Mutex<Option<Arc<dyn Fn(i64) -> i64 + Send + Sync>>>,
     /// Tests: the cap alerts raised, as `(job id, reason)`.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     cap_alerts: std::sync::Mutex<Vec<(String, String)>>,
 }
 
@@ -200,7 +208,7 @@ impl RunLedger {
 
     /// [`Self::new`] as the instance of `channel`: tests run two channels'
     /// ledgers in one process.
-    pub(crate) fn new_in(store: Arc<Store>, mstore: Option<Arc<Store>>, broker: Arc<Broker>, channel: &str) -> Arc<Self> {
+    pub fn new_in(store: Arc<Store>, mstore: Option<Arc<Store>>, broker: Arc<Broker>, channel: &str) -> Arc<Self> {
         if let Err(e) = store.job_runs_ensure_schema() {
             tracing::warn!(error = %e, "jobs: couldn't create the run ledger table");
         }
@@ -219,9 +227,9 @@ impl RunLedger {
             worker_stop: std::sync::OnceLock::new(),
             remote_stop: std::sync::OnceLock::new(),
             caps: std::sync::OnceLock::new(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             day_start: std::sync::Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             cap_alerts: std::sync::Mutex::new(Vec::new()),
         })
     }
@@ -504,7 +512,7 @@ impl RunLedger {
     }
 
     /// The followed turn ended (or never showed up).
-    pub(crate) fn turn_finished(&self, run_id: &str, infra_status: &str, cost: Option<RunCost>, summary: &str) {
+    pub fn turn_finished(&self, run_id: &str, infra_status: &str, cost: Option<RunCost>, summary: &str) {
         // Only the call that closes the row retries and reaps: a run stopped on
         // purpose (overlap, timeout) is already closed, and its turn ending later
         // must not file a retry of a run nobody wants again.
@@ -581,11 +589,22 @@ impl RunLedger {
         &self,
         run_id: &str,
         ok: bool,
-        block_states: &std::collections::HashMap<String, crate::drone::types::BlockState>,
+        block_states: &std::collections::HashMap<String, crate::backend::storage::drone_types::BlockState>,
         error: &str,
     ) {
         let infra_status = if ok { infra::OK } else { infra::ERROR };
         self.turn_finished(run_id, infra_status, Some(drone_cost(block_states)), error);
+    }
+
+    /// A Drone run was cancelled: its row closes `interrupted` with the reason,
+    /// unless whoever stopped it (a timeout, `cancel_other`) closed it already.
+    pub fn drone_stopped(
+        &self,
+        run_id: &str,
+        block_states: &std::collections::HashMap<String, crate::backend::storage::drone_types::BlockState>,
+        reason: &str,
+    ) {
+        self.turn_finished(run_id, infra::INTERRUPTED, Some(drone_cost(block_states)), reason);
     }
 
     /// After a restart: close what this channel left open (§3.2). Cron runs
@@ -596,7 +615,27 @@ impl RunLedger {
     /// stay: they wait for their agent across a restart. Call before the
     /// scheduler starts.
     pub fn recover_after_restart(&self) -> usize {
+        self.recover_after_restart_except(&std::collections::HashSet::new())
+    }
+
+    /// The open ledger row of Drone run `drone_run_id`, written by this channel:
+    /// the one a run taken up again after a restart goes on under.
+    pub fn open_run_of_drone(&self, drone_run_id: &str) -> Option<String> {
+        let sources: [(&str, &[&str]); 2] = [(SOURCE_CRON, &[state::SCHEDULED, state::RUNNING]), (SOURCE_DRONE, &[state::RUNNING])];
+        sources
+            .into_iter()
+            .flat_map(|(source, states)| self.store.job_runs_open_recorded_by(&self.channel, source, states).unwrap_or_default())
+            .find(|r| r.links["drone_run_id"].as_str() == Some(drone_run_id))
+            .map(|r| r.id)
+    }
+
+    /// [`recover_after_restart`](Self::recover_after_restart), except that the
+    /// Drone runs in `resuming` (by Drone run id) are being taken up again from
+    /// their checkpoints: their rows stay open, in the ledger and in
+    /// `db_drone_runs`, and they finish as any run does.
+    pub fn recover_after_restart_except(&self, resuming: &std::collections::HashSet<String>) -> usize {
         let now = now_ms();
+        let is_resuming = |r: &JobRun| r.links["drone_run_id"].as_str().is_some_and(|d| resuming.contains(d));
         let open = |source: &str, states: &[&str]| {
             self.store.job_runs_open_recorded_by(&self.channel, source, states).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "jobs: couldn't read open runs");
@@ -617,7 +656,7 @@ impl RunLedger {
         for run in &followed_elsewhere {
             self.follower.watch(&run.id, now);
         }
-        let stale = ours.into_iter().chain(open(SOURCE_DRONE, &[state::RUNNING])).chain(followed_here);
+        let stale = ours.into_iter().chain(open(SOURCE_DRONE, &[state::RUNNING])).chain(followed_here).filter(|r| !is_resuming(r));
         let mut jobs = std::collections::BTreeSet::new();
         for run in stale {
             if self.store.job_run_finish(&run.id, infra::INTERRUPTED, None, "AgentMux restarted during this run", now).unwrap_or(false) {
@@ -626,7 +665,8 @@ impl RunLedger {
             }
         }
         if let Some(mstore) = &self.mstore {
-            match mstore.drone_runs_mark_interrupted(DRONE_STATUS_INTERRUPTED, now) {
+            let except: Vec<String> = resuming.iter().cloned().collect();
+            match mstore.drone_runs_mark_interrupted(DRONE_STATUS_INTERRUPTED, now, &except) {
                 Ok(n) if n > 0 => tracing::info!(count = n, "jobs: Drone runs interrupted by the restart marked"),
                 Ok(_) => {}
                 Err(e) => tracing::warn!(error = %e, "jobs: couldn't mark interrupted Drone runs"),
@@ -670,7 +710,7 @@ fn add_trigger_digest(links: &mut Value, trigger: &Value) {
 /// The summed `cost_usd` of a Drone run's blocks: only Agent blocks report
 /// one, in their output (`drone/executor/blocks/agent.rs`). Known only when
 /// at least one block reported a cost.
-pub fn drone_cost(block_states: &std::collections::HashMap<String, crate::drone::types::BlockState>) -> RunCost {
+pub fn drone_cost(block_states: &std::collections::HashMap<String, crate::backend::storage::drone_types::BlockState>) -> RunCost {
     let mut cost = RunCost::default();
     for b in block_states.values() {
         let Some(out) = &b.output else { continue };

@@ -32,6 +32,7 @@ use std::net::IpAddr;
 use crate::backend::agent_state::AgentState;
 use crate::backend::lan::discovery::LanInstance;
 use crate::backend::reactive::registry::AgentEntry;
+use crate::backend::runtime_adapter::RuntimeKind;
 
 /// A registry entry not rewritten for this long is shown as stale. The registry
 /// heartbeat rewrites every live agent's entry every 20 s, so this is three
@@ -72,6 +73,14 @@ pub struct RemoteAgent {
     /// when none was, and for this machine's other channels. Display only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// This machine's own label for that account, when the same account is signed
+    /// in here ([`fill_account_labels`]); absent otherwise. Display only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_label: Option<String>,
+    /// Where it runs, `host` or `container`, as its instance reported it (`agent_kinds`); absent when
+    /// that instance did not say (an older build). Never guessed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<RuntimeKind>,
 }
 
 /// What one channel of this machine said about its agents, by lower-cased name.
@@ -80,6 +89,7 @@ pub struct ChannelReport {
     pub status: BTreeMap<String, AgentState>,
     pub lines: BTreeMap<String, String>,
     pub providers: BTreeMap<String, String>,
+    pub kinds: BTreeMap<String, RuntimeKind>,
 }
 
 /// Each channel's report, by channel.
@@ -138,6 +148,10 @@ pub struct SwarmOtherInstancesResult {
     pub hostname: String,
     pub channel: String,
     pub hosts: Vec<RemoteHost>,
+    /// How the read of the account's other installs went: `off`, `ok` or `unavailable` (`swarm_cloud`).
+    /// Absent until the cloud has been asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloud: Option<&'static str>,
 }
 
 /// Group the shared registry's entries into this machine's other channels.
@@ -180,6 +194,8 @@ pub fn other_channels(
                     provider: report.and_then(|r| r.providers.get(&key)).cloned(),
                     seat: None,
                     account: None,
+                    account_label: None,
+                    runtime: report.and_then(|r| r.kinds.get(&key)).copied(),
                 }
             });
     }
@@ -223,6 +239,22 @@ fn label_repeated_channels(by_instance: BTreeMap<String, RemoteChannel>) -> Vec<
         .collect()
 }
 
+/// One agent of LAN peer `p`, with what the peer reported about it, by lower-cased name.
+fn lan_agent(p: &LanInstance, name: &str) -> RemoteAgent {
+    let key = name.to_lowercase();
+    RemoteAgent {
+        name: name.to_string(),
+        block_id: String::new(),
+        status: p.agent_status.get(&key).copied(),
+        line: p.agent_lines.get(&key).cloned(),
+        provider: p.agent_providers.get(&key).cloned(),
+        seat: p.agent_seats.get(&key).cloned(),
+        account: p.agent_accounts.get(&key).cloned(),
+        account_label: None,
+        runtime: p.agent_kinds.get(&key).copied(),
+    }
+}
+
 /// LAN hosts from the discovery peer list. A peer at one of this machine's own
 /// addresses is another channel on this host, which the registry already lists
 /// (with more detail), so it is left out here. A peer that did not advertise its
@@ -255,19 +287,7 @@ pub fn lan_hosts(
         };
         // Heard from by mDNS or answered a poll, whichever is later.
         let seen_at_ms = p.last_seen.max(p.last_polled_ok).saturating_mul(1000);
-        let mut agents: Vec<RemoteAgent> = p
-            .agents
-            .iter()
-            .map(|name| RemoteAgent {
-                name: name.clone(),
-                block_id: String::new(),
-                status: p.agent_status.get(&name.to_lowercase()).copied(),
-                line: p.agent_lines.get(&name.to_lowercase()).cloned(),
-                provider: p.agent_providers.get(&name.to_lowercase()).cloned(),
-                seat: p.agent_seats.get(&name.to_lowercase()).cloned(),
-                account: p.agent_accounts.get(&name.to_lowercase()).cloned(),
-            })
-            .collect();
+        let mut agents: Vec<RemoteAgent> = p.agents.iter().map(|name| lan_agent(p, name)).collect();
         agents.sort_by_key(|a| a.name.to_lowercase());
         agents.dedup_by(|a, b| a.name.eq_ignore_ascii_case(&b.name));
         // A machine is its hostname AND its address: two machines that share a
@@ -425,6 +445,7 @@ pub async fn channel_statuses(
         report.status.extend(peer.status);
         report.lines.extend(peer.lines);
         report.providers.extend(peer.providers);
+        report.kinds.extend(peer.kinds);
     }
     out
 }
@@ -456,6 +477,7 @@ pub fn snapshot(
         hostname: hostname.to_string(),
         channel: own_channel.to_string(),
         hosts,
+        cloud: None,
     }
 }
 
@@ -514,9 +536,57 @@ pub fn fill_defined_providers(result: &mut SwarmOtherInstancesResult, entries: &
     }
 }
 
+/// This machine's label for each account signed in on it, by the id every
+/// machine agrees on (`identity::stable_account`).
+pub type AccountLabels = HashMap<String, String>;
+
+/// Name each remote agent's account when the same account is signed in on this
+/// machine: two machines' sign-ins of one provider account share the stable id,
+/// and the label is this machine's own. An account that is not signed in here
+/// keeps its id and gets no label.
+pub fn fill_account_labels(result: &mut SwarmOtherInstancesResult, labels: &AccountLabels) {
+    for agent in result.hosts.iter_mut().flat_map(|h| &mut h.channels).flat_map(|c| &mut c.agents) {
+        agent.account_label = agent.account.as_ref().and_then(|id| labels.get(id)).cloned();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn remote_agent(name: &str, account: Option<&str>) -> RemoteAgent {
+        RemoteAgent {
+            name: name.into(),
+            block_id: String::new(),
+            status: None,
+            line: None,
+            provider: None,
+            seat: None,
+            account: account.map(str::to_string),
+            account_label: None,
+            runtime: None,
+        }
+    }
+
+    #[test]
+    fn an_account_signed_in_here_too_gets_this_machines_label() {
+        let agents = vec![
+            remote_agent("Opaz", Some("claude:0123456789abcdef")),
+            remote_agent("Parlo", Some("claude:fedcba9876543210")),
+            remote_agent("Maricon", None),
+        ];
+        let channel = RemoteChannel { channel: "stable".into(), seen_at_ms: NOW, stale: false, os: String::new(), agents, route: None };
+        let mut snap = SwarmOtherInstancesResult {
+            hostname: "narko".into(),
+            channel: "stable".into(),
+            hosts: vec![RemoteHost { host_id: "lan:charlie".into(), display_name: "charlie".into(), tier: "lan", channels: vec![channel] }],
+            cloud: None,
+        };
+        let labels: AccountLabels = [("claude:0123456789abcdef".to_string(), "Work".to_string())].into();
+        fill_account_labels(&mut snap, &labels);
+        let got: Vec<Option<&str>> = snap.hosts[0].channels[0].agents.iter().map(|a| a.account_label.as_deref()).collect();
+        assert_eq!(got, [Some("Work"), None, None], "one signed in here, one that is not, one with no account");
+    }
 
     const NOW: u64 = 1_000_000_000;
 
@@ -681,12 +751,14 @@ mod tests {
             agent_status: Default::default(),
             agent_lines: Default::default(),
             agent_providers: Default::default(),
+            agent_kinds: Default::default(),
             agent_accounts: Default::default(),
             agent_resets: Default::default(),
             agent_seats: Default::default(),
             first_seen: 0,
             last_seen: NOW / 1000 - age_secs,
             last_polled_ok: 0,
+            install_id: String::new(),
             other_ttl_secs: 4500,
         }
     }
@@ -905,6 +977,7 @@ mod tests {
             status: [("korp".to_string(), AgentState::Waiting)].into_iter().collect(),
             lines: [("korp".to_string(), "Fixing the login race".to_string())].into_iter().collect(),
             providers: [("korp".to_string(), "codex".to_string())].into_iter().collect(),
+            kinds: Default::default(),
         };
         let statuses: ChannelStatuses = [("dev".to_string(), report)].into_iter().collect();
         let chans = other_channels(
@@ -957,6 +1030,28 @@ mod tests {
                 (None, None, None)
             ]
         );
+    }
+
+    /// The Swarm and the map draw an agent as host or container: from what its instance said, and
+    /// nothing when it said nothing.
+    #[test]
+    fn remote_agents_carry_where_their_instance_says_they_run() {
+        let mut p = peer("Area54", "stable", "10.0.0.26", 29700, &["Manoz", "Opaz"], 5);
+        p.agent_kinds.insert("opaz".into(), RuntimeKind::Container);
+        let hosts = lan_hosts(&[p], &HashSet::new(), NOW);
+        let got: Vec<Option<RuntimeKind>> = hosts[0].channels[0].agents.iter().map(|a| a.runtime).collect();
+        assert_eq!(got, [None, Some(RuntimeKind::Container)]);
+        let json = serde_json::to_value(&hosts[0].channels[0].agents).unwrap();
+        assert!(json[0].get("runtime").is_none(), "{json}");
+        assert_eq!(json[1]["runtime"], "container");
+
+        // Another channel of this machine: from the same answer, over loopback.
+        let mut report = ChannelReport::default();
+        report.kinds.insert("korp".into(), RuntimeKind::Container);
+        let statuses: ChannelStatuses = [("dev".to_string(), report)].into();
+        let chans = other_channels(&[entry("Korp", "dev", 0), entry("Loap", "dev", 0)], &statuses, "stable", "", NOW);
+        let got: Vec<Option<RuntimeKind>> = chans[0].agents.iter().map(|a| a.runtime).collect();
+        assert_eq!(got, [Some(RuntimeKind::Container), None]);
     }
 
     #[test]
@@ -1127,12 +1222,13 @@ mod tests {
     fn lan_hosts_are_left_as_they_are() {
         let entries = [with_uid("Camper", "dev", "uid-camper")];
         let defined: DefinedProviders = [("uid-camper".to_string(), "claude".to_string())].into();
-        let agent = RemoteAgent { name: "Camper".into(), block_id: String::new(), status: None, line: None, provider: None, seat: None, account: None };
+        let agent = remote_agent("Camper", None);
         let channel = RemoteChannel { channel: "dev".into(), seen_at_ms: NOW, stale: false, os: String::new(), agents: vec![agent], route: None };
         let mut snap = SwarmOtherInstancesResult {
             hostname: "narko".into(),
             channel: "stable".into(),
             hosts: vec![RemoteHost { host_id: "lan:x".into(), display_name: "x".into(), tier: "lan", channels: vec![channel] }],
+            cloud: None,
         };
         fill_defined_providers(&mut snap, &entries, &defined);
         assert_eq!(snap.hosts[0].channels[0].agents[0].provider, None, "another machine's agent isn't this machine's definition");

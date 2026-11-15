@@ -10,6 +10,7 @@ import { Button, FilterInput, IconButton, Select, Switch } from "@/app/element/u
 import { tip } from "@/app/element/tip";
 
 import { KanbanBoard, useCardDrop } from "./kanban-board";
+import { KanbanBoardPicker } from "./kanban-board-picker";
 import { AgentChip, agentStateWords } from "./kanban-card";
 import { columnOf, isFinishedColumn, repoLabel } from "./kanban-columns";
 import { KanbanDrawer } from "./kanban-drawer";
@@ -26,12 +27,15 @@ export function KanbanToolbar(props: Part): JSX.Element {
     const s = props.s;
     return (
         <div class="kanban-toolbar">
-            <FilterInput
-                value={s.query()}
-                onInput={s.setQuery}
-                placeholder="Find a task, #number, agent or repository"
-                ariaLabel="Find a task"
-            />
+            <KanbanBoardPicker s={s} />
+            <div class="kanban-toolbar__find">
+                <FilterInput
+                    value={s.query()}
+                    onInput={s.setQuery}
+                    placeholder="Find a task, #number, agent or repository"
+                    ariaLabel="Find a task"
+                />
+            </div>
             <Show when={s.repos().length > 1}>
                 <Select
                     density="compact"
@@ -70,7 +74,14 @@ export function KanbanToolbar(props: Part): JSX.Element {
                 />
                 Reminders
             </label>
-            <Button density="compact" tone="accent" icon="plus" onClick={() => s.setAdding(true)}>
+            <Button
+                density="compact"
+                tone="accent"
+                icon="plus"
+                disabled={s.readOnly()}
+                title={s.readOnly() ? "This board is archived: it is read-only" : undefined}
+                onClick={() => s.setAdding(true)}
+            >
                 New task
             </Button>
             <IconButton icon="rotate" label="Refresh" onClick={() => void s.model.refresh()} />
@@ -214,6 +225,7 @@ export function OpenDrawer(props: Part): JSX.Element {
                     model={s.model}
                     task={t()}
                     agents={s.agents()}
+                    boards={s.boards()}
                     now={s.now()}
                     onClose={() => s.setOpenId(null)}
                     onOpenAgent={s.openAgent}

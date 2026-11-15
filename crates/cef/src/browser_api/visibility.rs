@@ -26,21 +26,34 @@ const STYLES: [&str; 3] = ["opacity", "overflow-x", "overflow-y"];
 const MAX_NODES: usize = 60_000;
 
 /// The backend ids of the nodes the page hides with CSS, from a `DOMSnapshot.captureSnapshot`
-/// result asked for [`STYLES`]. Only the top document: a frame's content is read separately.
-pub(super) fn hidden_backend_ids(result: &Value) -> HashSet<i64> {
+/// result asked for [`STYLES`], in every document it holds (the top one and the frames of its process).
+/// `None` when the layout can't be read (nothing in the answer, or a document too big to read).
+pub(super) fn hidden_ids(result: &Value) -> Option<HashSet<i64>> {
+    let strings = result.get("strings").and_then(Value::as_array)?;
     let mut out = HashSet::new();
-    let (Some(strings), Some(doc)) = (result.get("strings").and_then(Value::as_array), result.pointer("/documents/0")) else {
-        return out;
-    };
+    for doc in result.get("documents").and_then(Value::as_array)? {
+        hidden_in_document(strings, doc, &mut out)?;
+    }
+    Some(out)
+}
+
+/// What the page hides, or nothing when the layout can't be read.
+#[cfg(test)]
+pub(super) fn hidden_backend_ids(result: &Value) -> HashSet<i64> {
+    hidden_ids(result).unwrap_or_default()
+}
+
+fn hidden_in_document(strings: &[Value], doc: &Value, out: &mut HashSet<i64>) -> Option<()> {
     let text = |i: &Value| i.as_i64().and_then(|i| usize::try_from(i).ok()).and_then(|i| strings.get(i)).and_then(Value::as_str).unwrap_or("");
     let ints = |p: &str| -> Vec<i64> { doc.pointer(p).and_then(Value::as_array).map(|a| a.iter().map(|v| v.as_i64().unwrap_or(-1)).collect()).unwrap_or_default() };
     let (parents, backends) = (ints("/nodes/parentIndex"), ints("/nodes/backendNodeId"));
     let layout_nodes = ints("/layout/nodeIndex");
     let (Some(styles), Some(bounds)) = (doc.pointer("/layout/styles").and_then(Value::as_array), doc.pointer("/layout/bounds").and_then(Value::as_array)) else {
-        return out;
+        // A document with no layout at all (an empty one) hides nothing.
+        return Some(());
     };
     if parents.len() > MAX_NODES || parents.len() != backends.len() {
-        return out;
+        return None;
     }
     let layout_of: HashMap<usize, usize> = layout_nodes.iter().enumerate().filter_map(|(l, n)| Some((usize::try_from(*n).ok()?, l))).collect();
     // Parents come before their children, so one pass carries a hidden ancestor down.
@@ -59,7 +72,7 @@ pub(super) fn hidden_backend_ids(result: &Value) -> HashSet<i64> {
             out.insert(backends[i]);
         }
     }
-    out
+    Some(())
 }
 
 /// Cut the hidden subtrees with nothing to act on out of `nodes`, returning how many were cut.
@@ -111,16 +124,28 @@ pub(super) fn prune(nodes: &mut [Value], hidden: &HashSet<i64>) -> usize {
 pub(super) struct Layout {
     /// What the page hides with CSS.
     pub hidden: HashSet<i64>,
+    /// The layout could not be read, so what is hidden is not known (`hidden_secrets`).
+    pub unknown: bool,
     /// What responds to a click (`clickable.rs`).
     pub clickable: HashSet<i64>,
+    /// What each control the page gives no name looks like (`icon_hints.rs`).
+    pub hints: HashMap<i64, String>,
 }
 
 /// The layout, or an empty one when it can't be read (then nothing is left out and nothing is
 /// added: showing the accessibility tree as it is, is the safe answer).
 pub(super) async fn capture(cdp: &mut CdpSession) -> Layout {
     match cdp.call("DOMSnapshot.captureSnapshot", json!({ "computedStyles": STYLES, "includeDOMRects": false })).await {
-        Ok(r) => Layout { hidden: hidden_backend_ids(&r), clickable: super::clickable::clickable_backend_ids(&r) },
-        Err(_) => Layout::default(),
+        Ok(r) => {
+            let hidden = hidden_ids(&r);
+            Layout {
+                unknown: hidden.is_none(),
+                hidden: hidden.unwrap_or_default(),
+                clickable: super::clickable::clickable_backend_ids(&r),
+                hints: super::icon_hints::hints(&r),
+            }
+        }
+        Err(_) => Layout { unknown: true, ..Layout::default() },
     }
 }
 
@@ -128,11 +153,21 @@ pub(super) async fn capture(cdp: &mut CdpSession) -> Layout {
 /// `include_hidden`) out of `nodes`; how many were cut.
 pub(super) fn apply(nodes: &mut [Value], layout: &Layout, include_hidden: bool) -> usize {
     super::clickable::mark(nodes, &layout.clickable, &layout.hidden);
+    guard(nodes, layout);
     if include_hidden {
         0
     } else {
         prune(nodes, &layout.hidden)
     }
+}
+
+/// What every read of a page's tree does before an agent sees it, in a frame as on the top page: whatever is
+/// left of the hidden text (all of it with `include_hidden`) never carries a secret, and a control the page
+/// gives no name is named for what it looks like. The names come first, so a tooltip that repeats a secret
+/// withheld elsewhere in its row is cleaned with every other repeat of it.
+pub(super) fn guard(nodes: &mut [Value], layout: &Layout) {
+    super::icon_hints::mark(nodes, &layout.hints);
+    super::hidden_secrets::withhold(nodes, &layout.hidden, layout.unknown);
 }
 
 /// The line a snapshot ends with when it left hidden text out.

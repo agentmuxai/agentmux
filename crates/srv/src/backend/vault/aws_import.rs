@@ -253,7 +253,10 @@ pub async fn read_secret<R: Runner>(runner: &R, source: &Source, via: Via<'_>) -
     let Some(program) = runner.which("aws") else {
         return Err("this computer has no AWS CLI (v2.9 or newer), which an import reads with".into());
     };
-    let mut env = vec![("AWS_PAGER".to_string(), String::new())];
+    // The CLI is Python: on Windows it writes its output in the console's code page, which fails on a character outside
+    // it ('charmap' codec can't encode) in any field of the secret, before the one wanted is picked. The child's
+    // environment is rebuilt from an allowlist, so UTF-8 is set here, and stdout is read as UTF-8 below.
+    let mut env = vec![("AWS_PAGER".to_string(), String::new()), ("PYTHONUTF8".to_string(), "1".to_string()), ("PYTHONIOENCODING".to_string(), "utf-8".to_string())];
     if let Via::Session(s) = &via {
         env.push(("AWS_ACCESS_KEY_ID".into(), s.access_key_id.to_string()));
         env.push(("AWS_SECRET_ACCESS_KEY".into(), s.secret_access_key.to_string()));

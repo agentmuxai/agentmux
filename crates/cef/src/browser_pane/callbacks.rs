@@ -70,6 +70,8 @@ wrap_task! {
 /// A redirect hop of an ALREADY-armed navigation must NOT call this — see
 /// `update_pane_load_watchdog_url` for why.
 pub(crate) fn arm_pane_load_watchdog(state: &Arc<AppState>, block_id: &str, browser: Browser, url: String) {
+    // A fresh navigation of the pane starts here too: its timing (browser_pane::open_timing).
+    crate::browser_pane::open_timing::begin_navigation(block_id);
     let epoch = PANE_LOAD_WATCHDOG_NEXT_EPOCH.fetch_add(1, Ordering::Relaxed);
     state
         .browser_pane_load_watchdog
@@ -321,10 +323,7 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
                 .browser_pane_overlays
                 .lock()
                 .iter()
-                .find(|(lbl, _)| {
-                    // label format: browser-pane-<block_id>-<seq>
-                    lbl.starts_with(&format!("browser-pane-{}-", block_id))
-                })
+                .find(|(lbl, _)| crate::browser_pane::label::is_pane_label_of(lbl, &block_id))
                 .map(|(_, (win_lbl, _))| win_lbl.clone());
 
             if let Some(win_label) = parent_window_label {
@@ -381,11 +380,7 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str, browser_
     // Step 2: drain the reducer's pane entry (idempotent).
     state.browser_panes.drain_closed_label(state, label);
 
-    // Labels are `browser-pane-<uuid>-<seq>`; strip prefix + trailing `-<seq>`
-    // to recover the block_id.
-    let block_id = label
-        .strip_prefix("browser-pane-")
-        .and_then(|rest| rest.rfind('-').map(|dash| &rest[..dash]));
+    let block_id = crate::browser_pane::label::pane_block_id(label);
 
     // Cross-platform: drop the stashed context-menu frame
     // (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) — also holds a
@@ -456,6 +451,7 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str, browser_
 /// already fired/disarmed via some other path.
 pub fn on_load_start_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     if let Some(block_id) = resolve_pane_block_id(state, browser) {
+        crate::browser_pane::open_timing::mark(&block_id, crate::browser_pane::open_timing::Phase::Committed);
         if state.browser_pane_load_watchdog.lock().remove(&block_id).is_some() {
             crate::browser_pane::trace::pane_trace(
                 &block_id,
@@ -482,6 +478,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     if let Some(block_id) = &pane_block_id {
         let url = main_frame_url(browser);
         crate::browser_pane::trace::pane_trace(block_id, "load-end", &format!("url={url}"));
+        crate::browser_pane::open_timing::loaded(block_id, if browser_is_views_pane(state, browser) { "views" } else { "hwnd" });
 
         // Main-frame load actually finished — clear the loading-spinner
         // tracker (layer 1, SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md).
@@ -677,9 +674,7 @@ pub(crate) fn resolve_pane_label_and_block(state: &Arc<AppState>, browser: &Brow
             b_clone.is_same(Some(&mut browser_clone)) != 0
         })
         .and_then(|(label, _)| {
-            let rest = label.strip_prefix("browser-pane-")?;
-            let dash = rest.rfind('-')?;
-            let block_id = rest[..dash].to_string();
+            let block_id = crate::browser_pane::label::pane_block_id(&label)?.to_string();
             Some((label, block_id))
         })
 }

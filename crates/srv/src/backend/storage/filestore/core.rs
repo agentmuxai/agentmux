@@ -44,7 +44,7 @@ const SLOW_CONN: std::time::Duration = std::time::Duration::from_millis(500);
 /// the process waits for this one lock — on the global transcript store, every
 /// agent's appends and every pane's history reads — so a long hold stalls
 /// them all (REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md).
-pub(crate) struct TimedConn<'a> {
+pub struct TimedConn<'a> {
     guard: std::sync::MutexGuard<'a, Connection>,
     site: &'static std::panic::Location<'static>,
     got: std::time::Instant,
@@ -163,7 +163,7 @@ pub struct FileStore {
     /// Background WAL checkpoints for a file-backed store (checkpointer.rs);
     /// `None` in memory, or if it couldn't start (SQLite's automatic
     /// checkpoints stay on then).
-    pub(super) _checkpointer: Option<super::checkpointer::Checkpointer>,
+    pub(super) checkpointer: Option<super::checkpointer::Checkpointer>,
     /// Read-only connections for a file-backed store (`ReaderPool`); `None` in
     /// memory, where every connection is its own database.
     pub(super) readers: Option<ReaderPool>,
@@ -208,7 +208,7 @@ impl FileStore {
         // started — otherwise SQLite's automatic checkpoints stay.
         if let Some(checkpointer) = super::checkpointer::Checkpointer::start(path) {
             store.conn.lock().unwrap().execute_batch("PRAGMA wal_autocheckpoint=0;")?;
-            store._checkpointer = Some(checkpointer);
+            store.checkpointer = Some(checkpointer);
         }
         store.readers = Some(ReaderPool::new(path));
         Ok(store)
@@ -228,7 +228,7 @@ impl FileStore {
             cache: Mutex::new(HashMap::new()),
             cache_total_bytes: Mutex::new(0),
             cache_max_bytes: MAX_CACHE_BYTES,
-            _checkpointer: None,
+            checkpointer: None,
             readers: None,
         })
     }
@@ -253,7 +253,7 @@ impl FileStore {
     /// the caller's location. `#[track_caller]` on the store methods that take
     /// it carries the site out to the code that called the store.
     #[track_caller]
-    pub(crate) fn lock_conn(&self) -> TimedConn<'_> {
+    pub fn lock_conn(&self) -> TimedConn<'_> {
         self.lock_conn_at(std::panic::Location::caller())
     }
 
@@ -277,14 +277,14 @@ impl FileStore {
 
     /// Raw connection access for tests that need to force a specific
     /// failure mode (e.g. dropping a table) — mirrors `Store::conn()`.
-    #[cfg(test)]
-    pub(crate) fn conn(&self) -> &Mutex<Connection> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn conn(&self) -> &Mutex<Connection> {
         &self.conn
     }
 
     /// Forgets every cached file, so the next read goes to the database: a test that
     /// damages the database file under a store that has just written to it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn drop_cache_for_test(&self) {
         self.cache.lock().unwrap().clear();
         *self.cache_total_bytes.lock().unwrap() = 0;
@@ -372,7 +372,7 @@ impl FileStore {
             cache: Mutex::new(HashMap::new()),
             cache_total_bytes: Mutex::new(0),
             cache_max_bytes: MAX_CACHE_BYTES,
-            _checkpointer: None,
+            checkpointer: None,
             readers: None,
         })
     }

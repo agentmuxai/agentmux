@@ -170,3 +170,6 @@ pub(super) fn publish_runtime_event(
 ) {
     announce_runtime(broker, block_id, &inner.lock().unwrap());
 }
+
+#[cfg(any(test, feature = "test-support"))]
+pub mod lease_hooks;

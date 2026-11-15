@@ -15,6 +15,7 @@ import { Show, type JSX } from "solid-js";
 import type { JektMessageNode } from "@/app/agent-model/node-types";
 import { Button } from "@/app/element/ui";
 import type { PaneRequestProps } from "@/app/store/pane-requests";
+import { trustLine, trustState } from "./jekt-trust-wording";
 import "./JektNeedsYouCard.scss";
 
 export interface JektNeedsYouProps {
@@ -28,19 +29,14 @@ export interface JektNeedsYouProps {
     onDismiss: () => void;
 }
 
-/** Whether the marker's trust label means a signature proved the sender. */
-const proven = (trust: string): boolean => trust.endsWith("-verified");
-
 export function JektNeedsYouCard(props: JektNeedsYouProps & PaneRequestProps): JSX.Element {
     const sender = () => props.jekt.from;
     return (
         <section class="jekt-needs-you-card" aria-label={`A message from ${sender()} needs you`}>
             <h3 class="jekt-needs-you-title">A sensitive message from {sender()} needs you</h3>
             <div class="jekt-needs-you-body">
-                <p class="jekt-needs-you-trust" data-proven={proven(props.jekt.trust)}>
-                    {proven(props.jekt.trust)
-                        ? `Sender proven (${props.jekt.trust})`
-                        : `Sender not proven (${props.jekt.trust})`}
+                <p class="jekt-needs-you-trust" data-trust={trustState(props.jekt.trust, props.jekt.sig)}>
+                    {trustLine(props.jekt.trust, props.jekt.sig)}
                 </p>
                 <Show when={props.earlier > 0}>
                     <p class="jekt-needs-you-more">{`${props.earlier} earlier ${props.earlier === 1 ? "message waits" : "messages wait"} too.`}</p>

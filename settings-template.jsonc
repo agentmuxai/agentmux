@@ -336,9 +336,10 @@
     // builds — never reaches the backend). See docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md.
     // "voice:engine": "groq",
 
-    // Groq API key for the hosted Whisper backend (voice:engine = 'groq', the default). Read
-    // server-side only, never sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes
-    // precedence.
+    // The Groq API key for the hosted Whisper backend (voice:engine = 'groq', the default),
+    // kept in the Vault: this names the entry as vault:<entry id>, chosen in Settings >
+    // Recording. Read server-side only, never sent to the renderer. The AGENTMUX_GROQ_API_KEY
+    // env var takes precedence.
     // Secret: stored here as typed. Never paste this file into a chat or a ticket without
     // removing it.
     // "voice:groqApiKey": "",
@@ -894,6 +895,9 @@
     // notify:sound:agent.shutdown.pending: Play the falling shutdown chime when something other
     // than you asked to shut an agent down and you have 15 seconds to keep it running. Default
     // true.
+    // voice:groqApiKeyMoved: Set when AgentMux moved a Groq key that sat in settings.json as
+    // plain text into the Vault, so Settings > Recording can say so once. Dismissing the notice
+    // removes it.
     // voice:inputDeviceId: Preferred microphone input device (from
     // navigator.mediaDevices.enumerateDevices). Absent or 'default' means the OS default input.
     // See docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md §5.

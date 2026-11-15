@@ -169,6 +169,10 @@ pub struct DispatchKeyData {
     /// Focus moved to another element.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focus_moved: Option<bool>,
+    /// What the keys changed on the control that still has focus, as it was before: its `text` (a custom
+    /// list's chosen option) and whether it was `expanded`. Absent when neither changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub was: Option<serde_json::Value>,
 }
 
 // ── browser.click_element ───────────────────────────────────────────────

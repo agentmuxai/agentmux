@@ -166,7 +166,7 @@ fn wsl_target() -> &'static str {
 
 /// The Linux helper running inside `distro`, started if it isn't (also a
 /// WSL pane's stats badge's, `blockstats.detail`).
-pub(crate) async fn wsl_helper(distro: &str) -> Result<Arc<RemoteFiles>, String> {
+pub async fn wsl_helper(distro: &str) -> Result<Arc<RemoteFiles>, String> {
     let mut pool = wsl_pool().lock().await;
     if let Some(h) = pool.get(distro).filter(|h| h.files.is_open()) {
         *h.last_used.lock().unwrap() = Instant::now();

@@ -13,7 +13,7 @@ autoUpdate SECTION search-container
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0
 computePosition top-end offset={"mainAxis":-42,"crossAxis":-10}
 -- after computePosition
@@ -26,7 +26,7 @@ computePosition top-end offset={"mainAxis":-42,"crossAxis":-10}
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0
 -- a reference near the left edge and the bottom
 computePosition top-end offset={"mainAxis":-10,"crossAxis":155}
@@ -50,7 +50,7 @@ requestAnimationFrame
   <div class="right-buttons">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-up" title="Previous Result (Shift+Enter)" disabled="">
     <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="chevron-down" title="Next Result (Enter)" disabled="">
-    <button data-stand="DeclIconButton" data-elemtype="iconbutton" data-icon="xmark" title="Close (Esc)">
+    <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0
 auto-update started: false
 -- the anchor is not an element

@@ -190,6 +190,8 @@ export const answerUse = (id: string, decision: UseDecision, typed?: { value: st
 export const holdUse = (id: string) => call<unknown>("hold_use", { id });
 /** Stops an agent filling an entry on a site without asking. */
 export const revokeGrant = (entryId: string, origin: string) => call<unknown>("revoke_grant", { entry_id: entryId, origin });
+/** The person's pick of the entry a setting reads its key from: the grant that lets srv read it for that setting. */
+export const allowSetting = (entryId: string, setting: string) => call<unknown>("allow_setting", { entry_id: entryId, setting });
 
 /** What the host needs to export: which entries (all when left out) and the
  *  passphrase; the host asks where to save. `null` if the person closed the dialog. */
@@ -288,8 +290,8 @@ export async function deleteImportFile(pickId: string): Promise<void> {
     await relay({ pick_id: pickId });
 }
 
-export const commitImport = (token: string, duplicates: Duplicates, vault?: string) =>
-    call<{ result: ImportResult }>("import_commit", { token, duplicates, ...(vault ? { vault } : {}) }).then((r) => r.result);
+export const commitImport = (token: string, duplicates: Duplicates, vault?: string, profile?: string) =>
+    call<{ result: ImportResult }>("import_commit", { token, duplicates, ...(vault ? { vault } : {}), ...(profile ? { profile } : {}) }).then((r) => r.result);
 export const cancelImport = (token: string) => call<unknown>("import_cancel", { token }).catch(() => {});
 export const suggestPassphrase = () => call<{ passphrase: string }>("suggest_passphrase").then((r) => r.passphrase);
 

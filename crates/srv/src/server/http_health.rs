@@ -8,10 +8,14 @@ use super::*;
 
 // ---- Health ----
 
+/// `status` is `ok`, or `degraded` when the messaging path is stuck or srv is panicking in bulk (`messaging_health`). The HTTP
+/// status stays 200 either way: `agentmux`'s `health_ok` reads anything else as "no server here".
 pub(super) async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let messaging = super::messaging_health::MessagingHealth::probe(state.reactive_handler).await;
     Json(json!({
-        "status": "ok",
+        "status": messaging.status(),
         "version": state.version,
+        "messaging": messaging.to_json(),
     }))
 }
 

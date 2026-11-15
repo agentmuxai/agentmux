@@ -1,46 +1,38 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Regenerate the *.golden files from the ORIGINAL shell generator, so the
-// tests compare the Node port against the implementation it replaced.
+// Regenerate the *.golden files from the generator as it is now, over the
+// fixture trees in fixtures.mjs.
 //
-//   node scripts/test-fixtures/gen-docs-index/make-goldens.mjs [<git-rev>]
+//   node scripts/test-fixtures/gen-docs-index/make-goldens.mjs
 //
-// <git-rev> defaults to the last commit whose scripts/gen-docs-index.sh was
-// the full shell implementation. Needs bash >= 4 on PATH (Git Bash on
-// Windows; Homebrew bash on macOS). Run from the repository root.
+// The goldens used to come from the ORIGINAL shell generator, so the Node port
+// could be compared with what it replaced. They stopped matching it on
+// 2026-11-14, when the index began grouping by area with a Status column
+// (task #47664), so they are now this generator's own output. Run this only
+// when the output is meant to change, and read the diff of the goldens before
+// committing it: they are what the tests hold the output to.
 //
-// The goldens were produced on Windows (Git Bash). For these fixtures that
-// is equivalent to Linux: none contains CR, and every path is ASCII — the two
-// inputs where the shell version's output depended on the platform
-// (docs/specs/SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md §2.2–2.3).
+// Run from the repository root.
 
-import { execFileSync } from "node:child_process";
-import { copyFileSync, writeFileSync } from "node:fs";
+import { copyFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { main } from "../../gen-docs-index.mjs";
 import { GOLDEN_CASES, fixtureEnv, makeDir, removeDir } from "./fixtures.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REV = process.argv[2] ?? "3258b0575f4a8c";
 
-const shell = execFileSync("git", ["show", `${REV}:scripts/gen-docs-index.sh`]);
-const scratch = makeDir();
-const oldScript = join(scratch, "gen-docs-index.old.sh");
-writeFileSync(oldScript, shell);
-
-try {
-    for (const [name, build] of Object.entries(GOLDEN_CASES)) {
-        const root = makeDir();
-        try {
-            build(root);
-            execFileSync("bash", [oldScript], { cwd: root, env: fixtureEnv(root), stdio: ["ignore", "pipe", "pipe"] });
-            copyFileSync(join(root, "docs/specs/INDEX.md"), join(HERE, `${name}.golden`));
-            console.log(`wrote ${name}.golden`);
-        } finally {
-            removeDir(root);
-        }
+for (const [name, build] of Object.entries(GOLDEN_CASES)) {
+    const root = makeDir();
+    try {
+        build(root);
+        const code = main([], { root, env: fixtureEnv(root), out: () => {}, err: () => {} });
+        if (code !== 0) throw new Error(`${name}: the generator exited ${code}`);
+        copyFileSync(join(root, "docs/specs/INDEX.md"), join(HERE, `${name}.golden`));
+        console.log(`wrote ${name}.golden`);
+    } finally {
+        removeDir(root);
     }
-} finally {
-    removeDir(scratch);
 }

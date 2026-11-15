@@ -568,8 +568,9 @@ declare global {
         page?: string;
         /** Approval: where the form is sent. */
         action?: string;
-        /** Approval: the form's values, secrets masked. */
-        fields?: [string, string][];
+        /** Approval: the form's values, secrets masked. The third is false for a value the page already
+         *  had (the agent changed nothing there). */
+        fields?: [string, string, boolean?][];
         /** When the request is about one of this pane's popup windows: its address. */
         window?: string | null;
         /** Navigation: where the page tried to go, and that address's site. */
@@ -901,6 +902,8 @@ declare global {
         "agent:spend_today"?: { day: number; spent: number; cap: number | null } | null;
         /** From 80% of the daily spend cap: a line above the composer. Cleared (null) when the stop shows or the cap is raised. */
         "agent:spend_warning"?: { at: number; scope: "agent" | "route"; cap: number; spent: number; route: string; place: string } | null;
+        /** The context stayed far over its compaction budget after srv sent /compact twice: a line above the composer, until it is back under. */
+        "agent:context_warning"?: { at: number; context: number } | null;
         /** The daily spend cap is used and the gateway refuses the agent's requests: the stop card. Cleared (null) by a raise, a reset or a new UTC day. */
         "agent:spend_stopped"?: { at: number; scope: "agent" | "route"; cap: number; spent: number; route: string; place: string } | null;
         /** The `at` of the stop whose card the person dismissed (the stop itself stays). */
@@ -982,6 +985,8 @@ declare global {
         "kanban:lanes"?: boolean;
         /** The Kanban's columns folded to a strip, by column id (kanban-columns.ts). */
         "kanban:collapsed"?: string[];
+        /** The Kanban board the pane shows, by slug; the default board when absent (kanban-boards.ts). */
+        "kanban:board"?: string | null;
         // The Vault's own section, within the Vault pane.
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
         // The Vault the lists are narrowed to, by id; none for all of them (vault-model.ts).

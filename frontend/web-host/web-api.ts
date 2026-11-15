@@ -209,6 +209,18 @@ function identityAndEnvApi(platform: NodeJS.Platform) {
                 return undefined;
             }
         },
+        signOutThisBrowser: async () => {
+            const token = window.sessionStorage.getItem("amx-session") ?? "";
+            // The cookie goes with the request; srv ends this session only and tells the browser to drop it.
+            const resp = await fetch("/auth/signout", { method: "POST", headers: { "X-AM-Session": token }, credentials: "same-origin" });
+            if (!resp.ok) throw new Error("this browser's sign-in was not ended: srv did not accept the request");
+            try {
+                window.sessionStorage.removeItem("amx-session");
+            } catch {
+                // The session is already ended on srv's side; the token is no use without it.
+            }
+            window.location.replace("/auth/enter");
+        },
         reloadWindow: () => window.location.reload(),
         getIsDev: () => false,
         getCursorPoint: () => lastPointer,

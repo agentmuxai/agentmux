@@ -15,6 +15,7 @@
 import { formatAgoPrecise } from "@/util/format-time";
 import type { UnavailableReason } from "@/app/store/agent-status";
 import type { AgentDisplayStatus } from "./swarm-view";
+import type { RuntimeKind } from "@/types/rpc/RuntimeKind";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
 
 /** An agent's state as its own instance reports it (srv `agent_state::AgentState`). */
@@ -36,6 +37,14 @@ export interface RemoteAgent {
      *  (docs/specs/SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5). Self-reported:
      *  read it through `readSeatMeta`, which drops an unknown role. */
     seat?: SeatSummary;
+    /** The account it runs on, as the id every machine agrees on (srv `identity::stable_account`: a provider
+     *  and a hash, never an email). A LAN peer's agents only; absent when its instance reported none. */
+    account?: string;
+    /** This computer's own label for that account, when the same account is signed in here. */
+    account_label?: string;
+    /** Where it runs, as its instance reports it (`agent_kinds`). Absent when that instance said
+     *  nothing (an older build): show no kind then, never a guess. */
+    runtime?: RuntimeKind;
 }
 
 export interface RemoteChannel {
@@ -60,6 +69,9 @@ export interface SwarmOtherInstances {
     hostname: string;
     channel: string;
     hosts: RemoteHost[];
+    /** How srv's read of the account's other installs went: `off` (signed out, or the relay has no list), `ok`, or
+     *  `unavailable` (the last read failed). Absent from an older srv. */
+    cloud?: "off" | "ok" | "unavailable";
 }
 
 /** One section the view renders. */

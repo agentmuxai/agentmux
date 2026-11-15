@@ -14,7 +14,8 @@
 use serde::Serialize;
 
 use crate::backend::storage::cron::CronJob;
-use crate::backend::storage::work_queue::{work_state, WorkItem};
+pub use crate::backend::work_claims::holds_claim;
+pub(crate) use crate::backend::work_claims::claims_held_by;
 use crate::server::AppState;
 
 /// One process the agent started (the CLI or a descendant), from its
@@ -242,15 +243,6 @@ fn same_start(recorded_ms: u64, now_ms: u64) -> bool {
 }
 
 /// Does a claim held by (`claimed_by`, `claimed_by_uid`) belong to the agent?
-/// Same holder rule as the store's release (`HOLDER_BY_UID`): by UID when
-/// both sides have one, else by name.
-pub fn holds_claim(claimed_by: &str, claimed_by_uid: &str, agent_id: &str, uid: Option<&str>) -> bool {
-    match uid.filter(|u| !u.is_empty()) {
-        Some(u) if !claimed_by_uid.is_empty() => claimed_by_uid == u,
-        _ => !agent_id.is_empty() && claimed_by == agent_id,
-    }
-}
-
 /// Does a cron job aimed at (`target`, `target_uid`) deliver to the agent?
 /// By UID when the job has one, else by name (case-insensitive, like agent
 /// addressing).
@@ -259,14 +251,6 @@ pub fn cron_targets(target: &str, target_uid: &str, agent_id: &str, uid: Option<
         Some(u) if !target_uid.is_empty() => target_uid == u,
         _ => !agent_id.is_empty() && target.eq_ignore_ascii_case(agent_id),
     }
-}
-
-/// The agent's claimed work items (R7).
-pub(crate) fn claims_held_by<'a>(items: &'a [WorkItem], agent_id: &str, uid: Option<&str>) -> Vec<&'a WorkItem> {
-    items
-        .iter()
-        .filter(|w| w.state == work_state::CLAIMED && holds_claim(&w.claimed_by, &w.claimed_by_uid, agent_id, uid))
-        .collect()
 }
 
 /// Names of the cron jobs targeting the agent (R8).

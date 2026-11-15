@@ -25,10 +25,15 @@ pub(super) fn granted_text(d: &Value) -> String {
     } else {
         "eval and Enter/Space stay refused"
     };
+    // An auto-approve already on this pane, with more time than the ask, was cut to the ask.
+    let cut = match (d["cut_from"].as_u64(), d["minutes"].as_u64()) {
+        (Some(was), Some(now)) => format!(" Auto-approve was already on this pane with {was} more min; it was cut to the {now} you asked for."),
+        _ => String::new(),
+    };
     format!(
         "Auto-approve on {how_long} on {}: committing clicks (action click) run without asking. Nobody \
          checks them now, so check each one yourself. A payment still asks, {keys}, and on any other site clicks ask as \
-         before.{}{} Stop it with action stop_auto_approve when the job is done.",
+         before.{}{}{} Stop it with action stop_auto_approve when the job is done.",
         sites.join(", "),
         if terminal {
             " You may also type and run commands in a web terminal on these sites with action terminal: \
@@ -44,6 +49,7 @@ pub(super) fn granted_text(d: &Value) -> String {
              paths (files in your own workspace); a chooser nobody fills in time is cancelled."
         } else {
             ""
-        }
+        },
+        cut
     )
 }

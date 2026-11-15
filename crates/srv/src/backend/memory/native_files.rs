@@ -28,7 +28,7 @@ use crate::backend::base::expand_home_dir_safe;
 /// memory is keyed by ([`crate::backend::claude_layout::memory_project_root`]
 /// — the repository's main checkout, for a subdirectory or a linked
 /// worktree), sanitized by [`crate::backend::claude_layout::project_dir_name`].
-pub(crate) fn memory_dir_for_cwd(claude_config_dir: &str, working_directory: &str) -> PathBuf {
+pub fn memory_dir_for_cwd(claude_config_dir: &str, working_directory: &str) -> PathBuf {
     // Claude names the project folder from the absolute cwd, so `~` must be
     // expanded first — a spawn segment records the block's `cmd:cwd`
     // unexpanded (`~/.agentmux/agents/<slug>` for an agent.open default),
@@ -46,7 +46,7 @@ pub(crate) fn memory_dir_for_cwd(claude_config_dir: &str, working_directory: &st
 }
 
 /// Extract `CLAUDE_CONFIG_DIR` from a `KEY=VALUE\n…` env blob.
-pub(crate) fn parse_claude_config_dir(env_blob: &str) -> String {
+pub fn parse_claude_config_dir(env_blob: &str) -> String {
     for line in env_blob.lines() {
         if let Some(val) = line.strip_prefix("CLAUDE_CONFIG_DIR=") {
             return val.to_string();
@@ -64,7 +64,7 @@ static IDENTITY_STORES: std::sync::OnceLock<(
     std::sync::Arc<crate::backend::storage::store::Store>,
 )> = std::sync::OnceLock::new();
 
-pub(crate) fn attach_identity_stores(
+pub fn attach_identity_stores(
     id_store: std::sync::Arc<crate::backend::storage::store::Store>,
     identity_store: std::sync::Arc<crate::backend::storage::store::Store>,
 ) {
@@ -77,7 +77,7 @@ pub(crate) fn attach_identity_stores(
 /// its env override, else `""`, the shared default. #3603: an agent with no
 /// env override and a linked account resolved to the shared default, so
 /// `MemoryList` listed nothing while its memories sat in the account's dir.
-pub(crate) fn agent_claude_config_dir(mstore: &crate::backend::storage::store::Store, agent_id: &str) -> String {
+pub fn agent_claude_config_dir(mstore: &crate::backend::storage::store::Store, agent_id: &str) -> String {
     let linked = IDENTITY_STORES.get().and_then(|(id_store, identity_store)| {
         // Only an agent with a binding — its own, or its template's (the
         // spawn's fallback) — reaches the resolver, which logs a warning for
@@ -108,7 +108,7 @@ pub(crate) fn agent_claude_config_dir(mstore: &crate::backend::storage::store::S
 /// the inline note below; that short-circuit was a real bug).
 ///
 /// Shared by `native_memory_handlers` and the `memory.*` MuxAPI handlers.
-pub(crate) fn memory_dir_for_agent(
+pub fn memory_dir_for_agent(
     mstore: &crate::backend::storage::store::Store,
     agent_id: &str,
 ) -> Result<std::path::PathBuf, String> {
@@ -196,7 +196,7 @@ pub(crate) fn memory_dir_for_agent(
 ///   the registry record's `definition_id` field is the one that matches
 ///   `agent_def_get`'s namespace — its sibling `instance_id` is a
 ///   different, launch-scoped identity, not what `write_file` keys by.
-pub(crate) fn resolve_agent_uuid(
+pub fn resolve_agent_uuid(
     mstore: &crate::backend::storage::store::Store,
     agent_id: &str,
 ) -> Result<String, String> {
@@ -214,7 +214,7 @@ pub(crate) fn resolve_agent_uuid(
 /// consistent with how the slug was actually derived in the first place.
 /// Shared so callers outside this module (e.g. `app_api::mod::
 /// bundle_self_get_impl`) don't reimplement the same lookup.
-pub(crate) fn find_active_registry_record_by_slug(
+pub fn find_active_registry_record_by_slug(
     agent_id: &str,
 ) -> Option<crate::registry::NamedAgentRecord> {
     // Thin alias. The implementation moved to
@@ -232,7 +232,7 @@ pub(crate) fn find_active_registry_record_by_slug(
 /// to `source_agents_base` (the channel/dev instance it lives in) and an
 /// `identity_id` that determines its `CLAUDE_CONFIG_DIR` root. Returns `None`
 /// when the registry is unavailable or no active record matches the slug.
-pub(crate) fn memory_dir_from_registry(agent_id: &str) -> Option<std::path::PathBuf> {
+pub fn memory_dir_from_registry(agent_id: &str) -> Option<std::path::PathBuf> {
     let rec = find_active_registry_record_by_slug(agent_id)?;
     memory_dir_for_registry_record(&rec)
 }
@@ -261,7 +261,7 @@ pub(crate) fn memory_dir_from_registry(agent_id: &str) -> Option<std::path::Path
 /// records — for `db_agents`, the consolidated definition+instance table,
 /// the instance row's `id` already IS that id (see `memory_dir_for_agent`'s
 /// own note).
-pub(crate) fn memory_dir_for_blank_working_dir(
+pub fn memory_dir_for_blank_working_dir(
     mstore: &crate::backend::storage::store::Store,
     definition_id: &str,
     agent_name: &str,
@@ -305,7 +305,7 @@ pub(crate) fn memory_dir_for_blank_working_dir(
 ///
 /// The working directory comes from
 /// [`crate::backend::agent_registry_lookup::working_dir_from_record`].
-pub(crate) fn memory_dir_for_registry_record(rec: &crate::registry::NamedAgentRecord) -> Option<std::path::PathBuf> {
+pub fn memory_dir_for_registry_record(rec: &crate::registry::NamedAgentRecord) -> Option<std::path::PathBuf> {
     let working_directory = crate::backend::agent_registry_lookup::working_dir_from_record(rec)?;
 
     let config_dir = claude_config_dir_for_identity(rec.data.identity_id.as_deref());
@@ -322,14 +322,14 @@ pub(crate) fn memory_dir_for_registry_record(rec: &crate::registry::NamedAgentRe
 /// once made this list attribute one agent's files to another. A directory
 /// two agents resolve to is left out too — its files can't be attributed to
 /// either — until the memory record's claims decide it (phase M3).
-pub(crate) fn list_all_memory_targets(
+pub fn list_all_memory_targets(
     mstore: &crate::backend::storage::store::Store,
 ) -> Vec<(String, std::path::PathBuf)> {
     let gfs = crate::backend::agent_session::global_transcript_store().map(|a| a.as_ref());
     list_memory_targets_with(mstore, gfs)
 }
 
-pub(crate) fn list_memory_targets_with(
+pub fn list_memory_targets_with(
     mstore: &crate::backend::storage::store::Store,
     segments_fs: Option<&crate::backend::storage::filestore::FileStore>,
 ) -> Vec<(String, std::path::PathBuf)> {
@@ -369,7 +369,7 @@ pub(crate) fn list_memory_targets_with(
 ///     returned as an empty string so `memory_dir_for_cwd` applies its own
 ///     identical fallback)
 ///   - an account → `<shared>/identities/<id>/claude`
-pub(crate) fn claude_config_dir_for_identity(identity_id: Option<&str>) -> String {
+pub fn claude_config_dir_for_identity(identity_id: Option<&str>) -> String {
     match identity_id {
         Some(id) if !id.is_empty() && id != "default" => {
             let shared = std::env::var_os("AGENTMUX_SHARED_DIR")
@@ -390,17 +390,17 @@ pub(crate) fn claude_config_dir_for_identity(identity_id: Option<&str>) -> Strin
 }
 
 /// Validate a memory filename.
-pub(crate) fn validate_memory_filename(filename: &str) -> Result<(), String> {
+pub fn validate_memory_filename(filename: &str) -> Result<(), String> {
     validate_filename(filename)
 }
 
 /// Parse `metadata.type` from YAML frontmatter (re-exported for MuxAPI).
-pub(crate) fn parse_memory_frontmatter_type(content: &str) -> Option<String> {
+pub fn parse_memory_frontmatter_type(content: &str) -> Option<String> {
     parse_frontmatter_type(content)
 }
 
 /// Validate a filename: alphanumeric + `-_`, must end with `.md`, no path separators.
-pub(crate) fn validate_filename(filename: &str) -> Result<(), String> {
+pub fn validate_filename(filename: &str) -> Result<(), String> {
     if filename.is_empty() {
         return Err("filename must not be empty".to_string());
     }
@@ -432,7 +432,7 @@ pub(crate) fn validate_filename(filename: &str) -> Result<(), String> {
 ///   metadata:
 ///     type: user
 /// A top-level `type:` key is NOT the correct field.
-pub(crate) fn parse_frontmatter_type(content: &str) -> Option<String> {
+pub fn parse_frontmatter_type(content: &str) -> Option<String> {
     let content = content.trim_start();
     if !content.starts_with("---") {
         return None;
@@ -465,7 +465,7 @@ pub(crate) fn parse_frontmatter_type(content: &str) -> Option<String> {
 
 /// Cap for both live-FS reads and mirror upserts — one shared limit so a
 /// file that's readable stays within the size the mirror can also store.
-pub(crate) const MAX_MEMORY_FILE_BYTES: u64 = 10 * 1024 * 1024;
+pub const MAX_MEMORY_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
 /// Refresh `db_agent_native_memory` from the live filesystem for `agent_id`
 /// — the same read-then-upsert-if-changed logic `agent:memory:list`
@@ -503,7 +503,7 @@ pub(crate) const MAX_MEMORY_FILE_BYTES: u64 = 10 * 1024 * 1024;
 /// unchanged — still generous for any legitimate memory file), but now
 /// reports which files it happened to, so a caller that surfaces
 /// warnings (like `bundle.export_for_agent`) can tell the user.
-pub(crate) fn refresh_memory_mirror_from_live_fs(
+pub fn refresh_memory_mirror_from_live_fs(
     agent_id: &str,
     memory_dir: &std::path::Path,
     id_store: &crate::backend::storage::store::Store,
@@ -599,7 +599,7 @@ pub(crate) fn refresh_memory_mirror_from_live_fs(
 /// [`memory_dir_for_agent`]'s slug-based lookup, used by different, App-API
 /// callers). Shared by those three handlers and `bundle.export_for_agent`/
 /// `bundle.import_for_agent` (ABF v0.2 §2.3) so all five resolve identically.
-pub(crate) fn memory_dir_for_agent_by_id(
+pub fn memory_dir_for_agent_by_id(
     mstore: &crate::backend::storage::store::Store,
     agent: &crate::backend::storage::AgentDefinition,
 ) -> Option<std::path::PathBuf> {
@@ -609,7 +609,7 @@ pub(crate) fn memory_dir_for_agent_by_id(
 /// How an agent's memory directory was found
 /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2, phase M1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MemoryDirProvenance {
+pub enum MemoryDirProvenance {
     /// The config dir and working dir the agent's own latest spawn used,
     /// from its continuity segment.
     Spawn,
@@ -622,14 +622,14 @@ pub(crate) enum MemoryDirProvenance {
     Unverified,
 }
 
-pub(crate) struct ResolvedMemoryDir {
-    pub(crate) path: std::path::PathBuf,
-    pub(crate) provenance: MemoryDirProvenance,
+pub struct ResolvedMemoryDir {
+    pub path: std::path::PathBuf,
+    pub provenance: MemoryDirProvenance,
 }
 
 /// The memory dir of the agent's latest Claude spawn, from its continuity
 /// segments in the global transcript store.
-pub(crate) fn memory_dir_from_latest_segment(
+pub fn memory_dir_from_latest_segment(
     fs: Option<&crate::backend::storage::filestore::FileStore>,
     agent_uid: &str,
 ) -> Option<std::path::PathBuf> {
@@ -643,7 +643,7 @@ pub(crate) fn memory_dir_from_latest_segment(
 /// Resolve an agent's memory dir with how it was found: its latest spawn
 /// first, then its explicit working directory, then the blank-working-dir
 /// guess (read-only).
-pub(crate) fn resolve_memory_dir_by_id(
+pub fn resolve_memory_dir_by_id(
     mstore: &crate::backend::storage::store::Store,
     agent: &crate::backend::storage::AgentDefinition,
 ) -> Option<ResolvedMemoryDir> {
@@ -651,7 +651,7 @@ pub(crate) fn resolve_memory_dir_by_id(
     resolve_memory_dir_with(mstore, agent, gfs)
 }
 
-pub(crate) fn resolve_memory_dir_with(
+pub fn resolve_memory_dir_with(
     mstore: &crate::backend::storage::store::Store,
     agent: &crate::backend::storage::AgentDefinition,
     segments_fs: Option<&crate::backend::storage::filestore::FileStore>,
@@ -664,13 +664,13 @@ pub(crate) fn resolve_memory_dir_with(
 
 /// The memory dir of `agent_uid`'s latest spawn, if one is on record — for a
 /// caller that knows the agent's id but has no local row for it.
-pub(crate) fn memory_dir_from_spawn(agent_uid: &str) -> Option<std::path::PathBuf> {
+pub fn memory_dir_from_spawn(agent_uid: &str) -> Option<std::path::PathBuf> {
     let gfs = crate::backend::agent_session::global_transcript_store().map(|a| a.as_ref());
     memory_dir_from_latest_segment(gfs, agent_uid)
 }
 
 /// The memory dir an AgentMux write may go to: never an unverified guess.
-pub(crate) fn memory_dir_for_write_by_id(
+pub fn memory_dir_for_write_by_id(
     mstore: &crate::backend::storage::store::Store,
     agent: &crate::backend::storage::AgentDefinition,
 ) -> Result<std::path::PathBuf, String> {
@@ -687,7 +687,7 @@ pub(crate) fn memory_dir_for_write_by_id(
 
 /// Today's resolution without spawn records: explicit working directory,
 /// else the blank-working-dir guess.
-pub(crate) fn legacy_memory_dir_by_id(
+pub fn legacy_memory_dir_by_id(
     mstore: &crate::backend::storage::store::Store,
     agent: &crate::backend::storage::AgentDefinition,
 ) -> Option<(std::path::PathBuf, MemoryDirProvenance)> {
@@ -726,7 +726,7 @@ pub(crate) fn legacy_memory_dir_by_id(
 /// `base_sha256` check, which must hash exactly what the caller's draft was
 /// based on (the frontend hashes the `read_file` response), or every
 /// conditional save of a large or non-UTF-8 file would look like a conflict.
-pub(crate) fn current_memory_content(
+pub fn current_memory_content(
     id_store: &crate::backend::storage::store::Store,
     agent_id: &str,
     path: &std::path::Path,
@@ -757,7 +757,7 @@ pub(crate) fn current_memory_content(
 /// marker the frontend keys its "changed since you started editing" banner
 /// on. A file that no longer exists is a conflict too: the draft's base is
 /// gone, and silently re-creating it would undo someone else's delete.
-pub(crate) fn check_memory_base_sha256(filename: &str, base: &str, current: Option<&str>) -> Result<(), String> {
+pub fn check_memory_base_sha256(filename: &str, base: &str, current: Option<&str>) -> Result<(), String> {
     match current {
         None => Err(format!(
             "conflict: {filename} no longer exists (your edit was based on {base}); not written"

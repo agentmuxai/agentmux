@@ -7,7 +7,7 @@
 
 import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 
-import { Button, Field, TextInput } from "@/app/element/ui";
+import { Button, CloseButton, Field, TextInput } from "@/app/element/ui";
 import type { JobReporterInfo } from "@/types/rpc/JobReporterInfo";
 import type { JobReportersResult } from "@/types/rpc/JobReportersResult";
 
@@ -138,9 +138,7 @@ export function CloudReporters(props: {
                     <span class="warden-manager-dim">A pinned key lets no event in by itself: an approved cloud job has to name the same key.</span>
                 </div>
                 <div class="warden-jobs-actions">
-                    <Button density="compact" tone="quiet" icon="xmark" onClick={() => props.onClose()}>
-                        Close
-                    </Button>
+                    <CloseButton size="sm" text="Close" onClick={() => props.onClose()} />
                 </div>
             </header>
             <Show when={note()}>

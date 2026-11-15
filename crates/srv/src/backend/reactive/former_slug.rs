@@ -70,7 +70,7 @@ pub(super) fn note_delivery(name: &str, uid: &str) {
 /// slug can't sign. `is_live` says whether a live registration holds the
 /// name (a live name is its holder's, never an alias); `owner_of` gives the
 /// UID it is a former slug of. `true` when it refused the claim.
-pub(crate) fn refuse_former_slug_sender(
+pub fn refuse_former_slug_sender(
     req: &mut InjectionRequest,
     is_live: impl FnOnce(&str) -> bool,
     owner_of: impl FnOnce(&str) -> Option<String>,
@@ -96,7 +96,7 @@ pub(crate) fn refuse_former_slug_sender(
 /// not a live name (`is_live`, lowercased), and a former slug (`owner_of`).
 /// The rule [`refuse_former_slug_sender`] applies to a jekt, for any other
 /// "verify a signature, then act as its signer" path (UI automation).
-pub(crate) fn former_slug_claim(
+pub fn former_slug_claim(
     claimed: &str,
     is_live: impl FnOnce(&str) -> bool,
     owner_of: impl FnOnce(&str) -> Option<String>,
@@ -189,28 +189,28 @@ impl Handler {
 impl ReactiveHandler {
     /// See the inner [`Handler::get_delivery_target`].
     pub fn get_delivery_target(&self, name: &str) -> Option<AgentRegistration> {
-        self.inner.lock().unwrap().get_delivery_target(name).cloned()
+        self.inner.lock().get_delivery_target(name).cloned()
     }
 
     /// See the inner [`Handler::lookup_delivery_target`].
     pub fn lookup_delivery_target(&self, name: &str) -> LookupOutcome {
-        self.inner.lock().unwrap().lookup_delivery_target(name)
+        self.inner.lock().lookup_delivery_target(name)
     }
 
     /// See the inner [`Handler::set_former_slug_resolver`].
     pub fn set_former_slug_resolver(&self, resolver: FormerSlugResolver) {
-        self.inner.lock().unwrap().set_former_slug_resolver(resolver);
+        self.inner.lock().set_former_slug_resolver(resolver);
     }
 
     /// See the inner [`Handler::set_display_route_resolver`].
     pub fn set_display_route_resolver(&self, resolver: FormerSlugResolver) {
-        self.inner.lock().unwrap().set_display_route_resolver(resolver);
+        self.inner.lock().set_display_route_resolver(resolver);
     }
 }
 
 #[path = "display_rename.rs"]
-mod display_rename;
-pub(crate) use display_rename::renamed;
+pub mod display_rename;
+pub use display_rename::renamed;
 
 #[cfg(test)]
 #[path = "former_slug_tests.rs"]

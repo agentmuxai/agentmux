@@ -156,6 +156,9 @@ if [ -z "${RELEASE_CHANNEL:-}" ]; then
     export AGENTMUX_BUILD_LABEL="$LABEL"
 fi
 
+# Time each phase and print the table on exit (and into the job summary in CI).
+. "$REPO_ROOT/scripts/phase-times.sh"
+
 task build:frontend
 
 # Release portables strip source maps (~28 MB). Local builds keep them so
@@ -165,13 +168,18 @@ if [ "${STRIP_MAPS:-0}" = "1" ]; then
     echo "  maps    : stripping .map files (release portable)"
     find dist/frontend -name "*.map" -delete
 fi
+phase_done "frontend"
 
 task build:backend
+phase_done "srv (cargo build --release)"
 task build:host
+phase_done "host"
 task bundle
+phase_done "bundle"
 
 if [ -n "$OUTDIR" ]; then
     bash scripts/package-portable.sh "$OUTDIR"
 else
     bash scripts/package-portable.sh
 fi
+phase_done "portable (package-portable.sh, its own table above)"

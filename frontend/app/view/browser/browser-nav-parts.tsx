@@ -16,6 +16,7 @@ import { MENU_ICON } from "@/app/util/menu-icons";
 import { ToolbarBookmarkIcon, ToolbarHomeIcon } from "./browser-toolbar-icons";
 import { reloadButtonState } from "./browser-reload-button";
 import type { BrowserViewModel } from "./browser-model";
+import { carriedCompletion } from "./address-autocomplete";
 import { AddressSuggestions } from "./address-suggestions";
 import type { AddressBarState, AddressNavigation, BrowserNavBarProps } from "./browser-nav-address";
 
@@ -136,13 +137,23 @@ export function BookmarksButton(props: {
 function addressInputHandlers(bar: BrowserNavBarProps, address: AddressBarState) {
     const diag = bar.diag;
     const windowLabel = bar.windowLabel;
-    const { addressBar, setAddressBar, setTyped, autocomplete, flags, firstClickSelectAll } = address;
+    const { addressBar, setAddressBar, typed, setTyped, autocomplete, flags, firstClickSelectAll } = address;
     return {
         onInput: (e: InputEvent & { currentTarget: HTMLInputElement }) => {
-            const value = e.currentTarget.value;
+            const el = e.currentTarget;
+            const value = el.value;
+            const shown = addressBar();
             setAddressBar(value);
             if (flags.composing || e.isComposing) return;
             flags.deleting = e.inputType?.startsWith("delete") ?? false;
+            // A character typed over the completion that it begins with: the rest of the
+            // completion stays, selected, while the engine is asked about the new text.
+            const typedOn = e.inputType === "insertText" && el.selectionStart === value.length;
+            const rest = typedOn ? carriedCompletion(shown, typed(), value) : "";
+            if (rest) {
+                address.showInInput(value + rest);
+                el.setSelectionRange(value.length, el.value.length);
+            }
             setTyped(value);
             autocomplete.update(value);
         },

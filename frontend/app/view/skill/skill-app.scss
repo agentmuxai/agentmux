@@ -48,6 +48,32 @@
     color: var(--secondary-text-color);
 }
 
+// Run test: the button, and under it what it asks and what it did.
+// A skill card's facts report how it was tested and which version is installed, so they wrap instead of being cut off
+// by the kit Card's one-line ellipsis: a long version ("12.1.5 (2024-12-11_18e1550166)") would hide the very thing the
+// card says.
+.skill-card .ui-card-meta {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.skill-app-crop {
+    display: block;
+    max-width: 100%;
+    margin-top: var(--space-1);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.skill-app-run-test {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+}
+
 .skill-app-warn {
     color: var(--warning-text-color);
 }

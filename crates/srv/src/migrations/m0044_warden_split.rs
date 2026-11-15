@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 use crate::backend::config_watcher_fs::resolve_settings_dir;
 use crate::backend::storage::store::Store;
 use crate::backend::wconfig;
@@ -93,11 +93,11 @@ impl Migration for M0044WardenSplit {
 
 /// Where settings.json lives. Not under test: the runner tests apply every migration, and the
 /// real resolver would point them at the developer's own settings.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn settings_dir() -> Option<std::path::PathBuf> {
     Some(resolve_settings_dir())
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn settings_dir() -> Option<std::path::PathBuf> {
     None
 }

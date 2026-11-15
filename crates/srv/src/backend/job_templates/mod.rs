@@ -77,7 +77,7 @@ macro_rules! builtin_drone {
 }
 
 /// The Drone templates AgentMux ships: graphs that run on the blocks this build has, each easy to build off.
-pub static DRONE_BUILTINS: &[Builtin] = &[builtin_drone!("scheduled-report"), builtin_drone!("check-and-file-task"), builtin_drone!("two-agent-handoff")];
+pub static DRONE_BUILTINS: &[Builtin] = &[builtin_drone!("scheduled-report"), builtin_drone!("check-and-file-task"), builtin_drone!("two-agent-handoff"), builtin_drone!("after-upgrade-check")];
 
 /// Every template AgentMux ships: the job templates, then the Drone ones.
 fn all_builtins() -> &'static [Builtin] {
@@ -163,7 +163,7 @@ pub struct ApprovedTemplate {
     pub manifest: JobTemplateManifest,
     pub brief: Option<String>,
     /// A Drone template's graph, exactly as approved.
-    pub graph: Option<crate::drone::types::DroneGraph>,
+    pub graph: Option<crate::backend::storage::drone_types::DroneGraph>,
     /// When the operator approved it, in ms.
     pub approved_at_ms: i64,
 }
@@ -253,7 +253,7 @@ impl JobTemplates {
 
     /// The process-wide service for tests, in a temp folder that lives as
     /// long as the process; each test uses its own template ids.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn for_tests() -> &'static Arc<JobTemplates> {
         static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
         let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());

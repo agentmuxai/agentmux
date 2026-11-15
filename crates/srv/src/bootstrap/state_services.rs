@@ -12,6 +12,12 @@ use std::future::IntoFuture;
 /// Wires delivery and the restart-time resumers to the app state, and starts the native
 /// memory watchers.
 pub fn install_state_hooks(state: &AppState) {
+    // The relay's delivery path reaches the server's holds and file steps through this, before anything is claimed.
+    crate::server::muxbus_hooks::install();
+    // The controller code reaches the agent teardown through this, before any controller runs.
+    crate::sagas::teardown_hooks::install();
+    // The ambient calls find a provider's CLI through the server's lookup.
+    crate::ambient::cli_locator::set_locator(crate::server::cli_handlers::locate_for_ambient);
     // Upgrade reactive message delivery now that AppState exists, so agents on a
     // SubprocessController (every container agent, plus codex/gemini/qwen/kimi/
     // muxcode/antigravity on the host) can actually receive inter-agent
@@ -113,15 +119,24 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
     if let Some(templates) = backend::job_templates::service() {
         backend::jobs::watchdog::start(run_ledger.clone(), std::sync::Arc::new(templates.clone()));
     }
+    // Drone runs that kept checkpoints go on from their newest; the rest of what the
+    // old process left open is closed as interrupted.
+    let resuming = crate::server::drone_resume::resume_runs(state, Some(&run_ledger)).await;
     {
         let ledger = run_ledger.clone();
-        let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart()).await;
+        let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart_except(&resuming)).await;
     }
     // A paused job's slots are counted as skips (jobs spec §3.3).
     if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
         backend::jobs::paused::spawn(jobs_store, run_ledger.clone());
     }
     state.cron_scheduler.install_runs(run_ledger);
+    // An `app_event` job's runs start when the broker reports the event it names; a `file_watch` job's, when its folder changes; a `poll` job's, when its query finds something new.
+    if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
+        backend::jobs::app_events::spawn(&state.broker, state.mstore.clone(), jobs_store.clone(), state.cron_scheduler.clone());
+        backend::jobs::file_watch::spawn(&state.broker, state.fs_watch_pool.clone(), jobs_store.clone(), state.cron_scheduler.clone());
+        backend::jobs::poll::spawn(jobs_store, state.cron_scheduler.clone(), crate::drone::executor::blocks::app_query::poll_check());
+    }
 
     // Start persistent cron scheduler — load enabled jobs from DB, fire any
     // that missed their window (FIRE_ONCE_NOW), schedule all for future fires.
@@ -169,7 +184,46 @@ fn spawn_spend_services(state: &AppState) {
     crate::server::spend_watch::start(state.clone());
 }
 
+/// Background-task rows end when their command exits, whose process is gone, or that nothing has reported on for a day
+/// (SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md §5).
+fn spawn_background_task_sweep(state: &AppState) {
+    backend::background_task_exit::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
+    backend::background_task_pid::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
+    backend::background_task_sweep::start(Arc::clone(&state.mstore), Arc::clone(&state.broker));
+}
+
 /// Starts the services that run beside the server and need the app state.
+/// The panes that watch messages are told as they happen: the Audit when a row is written, the Atlas map when
+/// a message goes between two agents.
+fn install_message_brokers(state: &AppState) {
+    backend::audit_live::install_broker(Arc::clone(&state.broker));
+    backend::message_flow::install(Arc::clone(&state.broker));
+    backend::task_flow::install(Arc::clone(&state.broker));
+    backend::pr_flow::install(Arc::clone(&state.broker));
+    start_container_status(state);
+}
+
+/// The Atlas map and the Swarm show this machine's agent containers as they change (`backend::container_status`).
+/// A machine with no container runtime is looked at once.
+fn start_container_status(state: &AppState) {
+    let mstore = Arc::clone(&state.mstore);
+    let hub = backend::container_status::install(Arc::clone(&state.broker), move || {
+        mstore.agent_def_list().unwrap_or_default().into_iter().filter(|d| d.is_seeded != 1).map(|d| (d.id, d.name)).collect()
+    });
+    let source = backend::container_status::DockerSource::new(Arc::clone(&state.container_manager));
+    tokio::spawn(backend::container_status::run(source, hub, Default::default()));
+}
+
+/// Lists this instance for the other AgentMux instances on this machine (`muxspect instances`).
+pub fn publish_instance_record(state: &AppState) {
+    backend::instance_registry::spawn(backend::instance_registry::Identity {
+        version: state.version.clone(),
+        local_url: state.local_web_url.clone(),
+        auth_key: state.auth_key.clone(),
+        started_at: agentmux_common::time::now_ms_u64(),
+    });
+}
+
 pub fn spawn_state_services(state: &AppState) {
     // Keeps the host's copy of which panes agents own current (for its popup
     // decisions; docs/specs/SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
@@ -177,6 +231,7 @@ pub fn spawn_state_services(state: &AppState) {
     // Every agent's runtime state is looked at and each change published (`agentruntime:changed:<id>`).
     crate::server::agent_runtime::spawn(state.clone());
     spawn_spend_services(state);
+    spawn_background_task_sweep(state);
     // Overlap notes (an agent editing a file another agent is also changing
     // is told who): the progress watcher's edits are checked from here on.
     backend::work_facts::overlap_notes::install(
@@ -243,8 +298,7 @@ pub fn spawn_state_services(state: &AppState) {
     backend::supervisor::settings::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::framer::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::damage::install_broker(Arc::clone(&state.broker));
-    // The open Audit panes are told when a row is written.
-    backend::audit_live::install_broker(Arc::clone(&state.broker));
+    install_message_brokers(state);
     crate::identity::accounts_changed::install_broker(Arc::clone(&state.broker));
     // The open workspace saves itself as it changes (SPEC_WORKSPACES_2026_10_23.md §4.1).
     crate::server::service::user_workspace::spawn_saver(Arc::clone(&state.mstore));
@@ -409,6 +463,7 @@ pub fn spawn_serving_loops(
     // while signed in (`muxbus::wan_presence`). Here rather than beside
     // `wan_publish::spawn` because the feed exists only once AppState does.
     // A headless srv doesn't publish unless forced (`wan_presence::policy`).
+    crate::muxbus::cloud_installs::install(Arc::clone(&state.id_store), state.http_client.clone());
     crate::muxbus::wan_presence::spawn(
         Arc::clone(&state.fleet_feed),
         Arc::clone(&state.id_store),
@@ -425,6 +480,8 @@ pub async fn shut_down(
 ) {
     // This host's other LAN channels stop listing this one as a sibling.
     lan_discovery.withdraw_instance_record();
+    backend::instance_registry::withdraw();
+    crate::headless::withdraw_port_file();
 
     // Shutdown cleanup: close every agent through the one teardown
     // (SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md, `Policy::app_exit()`),

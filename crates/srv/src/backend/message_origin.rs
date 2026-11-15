@@ -88,6 +88,8 @@ pub enum OriginDelivery {
 pub enum OriginSig {
     Verified,
     Invalid,
+    // A genuine signature that failed only the age rules.
+    Expired,
 }
 
 /// Who or what a message is from, set by srv from typed values.

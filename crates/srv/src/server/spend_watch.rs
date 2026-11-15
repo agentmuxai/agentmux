@@ -142,7 +142,10 @@ fn drop_stale(state: &AppState, def_id: &str, on_route: bool, now: i64) {
 fn handle(state: &AppState, event: Event) {
     let now = agentmux_common::time::now_ms();
     match event {
-        Event::Settled(grant) => on_settled(state, &grant, now),
+        Event::Settled(grant) => {
+            on_settled(state, &grant, now);
+            crate::server::compact_backstop::after_settled(state, &grant);
+        }
         Event::Refused(grant, hit) => {
             if spend::alerted(&grant.agent, now) < 100 {
                 spend::set_alerted(&grant.agent, 100, now);
@@ -217,7 +220,7 @@ fn card(state: &AppState, grant: &Grant, hit: &Hit, now: i64) -> Value {
     json!({ "at": now, "scope": scope, "cap": hit.cap, "spent": hit.spent, "route": grant.route, "place": place_of(state, grant) })
 }
 
-fn set_meta(state: &AppState, block_id: &str, key: &str, value: Value) {
+pub(crate) fn set_meta(state: &AppState, block_id: &str, key: &str, value: Value) {
     let mut update = obj::MetaMapType::new();
     update.insert(key.to_string(), value);
     match crate::server::service::update_object_meta(&state.mstore, &format!("block:{block_id}"), &update) {

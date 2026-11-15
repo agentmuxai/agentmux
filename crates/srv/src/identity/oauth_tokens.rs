@@ -655,6 +655,6 @@ fn revoke_failed(account: &IdentityAccount, detail: String) -> serde_json::Value
     serde_json::json!({ "outcome": "failed", "detail": detail })
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[path = "oauth_tokens_tests.rs"]
-pub(crate) mod tests;
+pub mod tests;

@@ -34,7 +34,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "variables",
         emoji: "🔢",
         label: "Variables",
-        description: "Declare drone-scope variables. Read via {{var.name}}.",
+        description: "Declare drone-scope variables. Read via {{var.name}}; any {{reference}} takes filters: {{a.log | tail:20 | lower}} (tail, head, json:path, lower, trunc, default).",
         color: "#a855f7",
         defaultData: {
             entries: [{ name: "example", value: "hello" }],
@@ -107,7 +107,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "app_query",
         emoji: "🔎",
         label: "App query",
-        description: "Read AgentMux's own state: MuxBus, one agent, or Kanban tasks. Read-only.",
+        description: "Read AgentMux's own state: MuxBus, one agent, Kanban tasks, LAN peers or recent job runs. Read-only.",
         color: "#14b8a6", // colour: fixed (the block's identity colour)
         defaultData: {
             query: "muxbus",
@@ -115,6 +115,22 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
             holder: "",
             state: "",
             pr: "",
+            job: "",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    spawn: {
+        kind: "spawn",
+        emoji: "🚀",
+        label: "Spawn",
+        description: "Start a worker of an agent with a brief. The leader is fixed; every {{...}} value in the brief is put in as quoted data. The person is told first unless their settings allow it.",
+        color: "#8b5cf6", // colour: fixed (the block's identity colour)
+        defaultData: {
+            leader: "",
+            brief: "",
+            model: "",
+            account: "",
         },
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],
@@ -138,7 +154,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "condition",
         emoji: "🔀",
         label: "Condition",
-        description: "Boolean expression. Output `result` is true / false.",
+        description: "Boolean expression: a == b, or combine with && || ! ( ) and contains, matches, in_set, exists. Output `result` is true / false.",
         color: "#eab308",
         defaultData: {
             expr: "",
@@ -148,6 +164,71 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
             { id: "true", label: "true", type: "any" },
             { id: "false", label: "false", type: "any" },
         ],
+    },
+    transform: {
+        kind: "transform",
+        emoji: "🧮",
+        label: "Transform",
+        description: "Shape a list or object with a chain of operations (map, filter, pick, sort, group, count, sum...). No code runs.",
+        color: "#14b8a6", // colour: fixed (the block's identity colour)
+        defaultData: {
+            input: "",
+            ops: [],
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    wait: {
+        kind: "wait",
+        emoji: "⏳",
+        label: "Wait",
+        description: "Stop the run for a time (for: 30m, until: 2026-12-01T09:00:00Z) or for an event (on: a name; the run's Waiting event gives the key that ends it). It holds no process while it waits.",
+        color: "#64748b", // colour: fixed (the block's identity colour)
+        defaultData: {
+            for: "30m",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    join: {
+        kind: "join",
+        emoji: "🔀",
+        label: "Join",
+        description: "Bring branches that split back together. mode: all (default), any or n_of_m (with n). on_branch_error: fail (default) or skip, which leaves a failed branch out. What each branch said is {{this.outputs.<block>}}.",
+        color: "#64748b", // colour: fixed (the block's identity colour)
+        defaultData: {
+            mode: "all",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    drone: {
+        kind: "drone",
+        emoji: "🧩",
+        label: "Drone",
+        description: "Call another drone as a step. It runs on this run's remaining budget and is stopped with it. Inputs are read by the callee as {{trigger.name}}; what its Response says is {{this.value}}. A drone cannot call itself, and calls nest at most 4 deep.",
+        color: "#0ea5e9", // colour: fixed (the block's identity colour)
+        defaultData: {
+            drone: "",
+            inputs: {},
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    foreach: {
+        kind: "foreach",
+        emoji: "🔁",
+        label: "For each",
+        description: "Run one block once per item of a list. Reads {{item}} and {{index}}; results come out as a list.",
+        color: "#6366f1", // colour: fixed (the block's identity colour)
+        defaultData: {
+            items: "",
+            body: "",
+            max_items: 100,
+            on_item_error: "stop",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
     },
     response: {
         kind: "response",
@@ -171,6 +252,7 @@ export const BLOCK_KINDS: BlockKind[] = [
     "task",
     "notify",
     "app_query",
+    "spawn",
     "api",
     "condition",
     "response",

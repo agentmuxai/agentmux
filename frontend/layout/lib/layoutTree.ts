@@ -329,19 +329,20 @@ export function insertNode(layoutState: LayoutTreeState, action: LayoutTreeInser
         layoutState.rootNode = action.node;
     } else {
         const insertLoc = findNextInsertLocation(layoutState.rootNode, DEFAULT_MAX_CHILDREN);
-        // findNextInsertLocation already skips minimize-locked candidates;
-        // this only fires in the degenerate case where every node in the
-        // tree is locked (last-expanded-pane guard prevents that globally,
-        // but not per-subtree — see resolveRowSlipTargets's equivalent note).
+        // findNextInsertLocation skips minimize-locked candidates, so it finds
+        // none only when every pane in the tab is minimized. The new pane then
+        // goes in at the root, after the chips, and shows: a tab always shows
+        // one pane (SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 C, item 8). srv
+        // does the same (`insert_node`, backend/layout/intent.rs).
         if (!insertLoc?.node) {
-            console.warn("insertNode: no unlocked insert location available, dropping");
-            return;
-        }
-        if (isEffectivelyMinimized(insertLoc.node)) {
+            const root = layoutState.rootNode;
+            addChildAt(root, Math.max(root.children?.length ?? 0, 1), action.node);
+        } else if (isEffectivelyMinimized(insertLoc.node)) {
             console.warn("insertNode rejected: resolved location is minimize-locked", insertLoc.node.id);
             return;
+        } else {
+            addChildAt(insertLoc.node, insertLoc.index, action.node);
         }
-        addChildAt(insertLoc.node, insertLoc.index, action.node);
         if (action.magnified) {
             layoutState.magnifiedNodeId = action.node.id;
             layoutState.focusedNodeId = action.node.id;

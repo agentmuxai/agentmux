@@ -428,6 +428,9 @@ pub struct SettingsType {
     // sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes precedence.
     #[serde(rename = "voice:groqApiKey", default, skip_serializing_if = "Option::is_none")]
     pub voice_groq_api_key: Option<String>,
+    // Set once when a plain Groq key was moved into the Vault, so Settings can tell the person.
+    #[serde(rename = "voice:groqApiKeyMoved", default, skip_serializing_if = "Option::is_none")]
+    pub voice_groq_api_key_moved: Option<bool>,
 
     // Local whisper.cpp backend (voice:engine = "whisper-local"). Both are
     // user-provided paths in v1 (auto-download is a follow-up). Env overrides:

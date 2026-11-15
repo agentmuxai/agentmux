@@ -28,21 +28,21 @@
 //! every channel and version and runs the same from the CLI
 //! (`agentmux-srv migrate-fork-slugs`) and from `agents.migrateForkSlugs`.
 
-mod backup;
-mod duplicates;
-mod holders;
-mod home;
-mod journal;
-mod locations;
-mod plan;
-mod preconditions;
-mod run;
-mod running;
+pub mod backup;
+pub mod duplicates;
+pub mod holders;
+pub mod home;
+pub mod journal;
+pub mod locations;
+pub mod plan;
+pub mod preconditions;
+pub mod run;
+pub mod running;
 pub mod stamp;
-mod steps;
-mod steps_db;
-mod steps_files;
-mod verify;
+pub mod steps;
+pub mod steps_db;
+pub mod steps_files;
+pub mod verify;
 
 #[cfg(test)]
 mod tests;

@@ -48,7 +48,7 @@ Spaces,,,\"User Name:sam\nPassword:  pw with spaces  \",,,,,,,\n";
 pub(super) const KEEPER: &str = "\"Foo\\Baz\",\"Example\",\"bob@example.test\",\"pw\",\"https://example.test/\",\"a note\",\"\",\"Account ID\",\"12345\",\"TFC:Keeper\",\"otpauth://totp/x?secret=ABC\"\n\
 \"\",\"Note only\",\"\",\"\",\"\",\"just text\",\"\",\n";
 
-fn read_ok(text: &str, name: &str) -> Imported {
+pub(super) fn read_ok(text: &str, name: &str) -> Imported {
     match read(text.as_bytes(), name, None) {
         Ok(i) => i,
         Err(ReadError::Other(e)) => panic!("{e}"),
@@ -57,11 +57,11 @@ fn read_ok(text: &str, name: &str) -> Imported {
     }
 }
 
-fn find<'a>(i: &'a Imported, label: &str) -> &'a Incoming {
+pub(super) fn find<'a>(i: &'a Imported, label: &str) -> &'a Incoming {
     i.entries.iter().find(|e| e.label == label).unwrap_or_else(|| panic!("no entry {label:?} in {:?}", i.entries.iter().map(|e| &e.label).collect::<Vec<_>>()))
 }
 
-fn text_of<'a>(i: &'a Imported, label: &str) -> &'a str {
+pub(super) fn text_of<'a>(i: &'a Imported, label: &str) -> &'a str {
     &find(i, label).parts["text"]
 }
 

@@ -147,6 +147,8 @@ pub(super) fn echo_jekt_to_sender_with_files(
         // verification signals the original decision was made from keeps
         // the echoed marker internally consistent with its own `ESCALATE=`.
         reagent_verified,
+        // The echo does not carry the late-signature word: a late genuine notice echoes as `SIG=invalid`.
+        false,
         lan_verified,
         channel_verified,
         // The sender-side echo never has a WAN verdict: WAN verification

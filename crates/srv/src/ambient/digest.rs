@@ -37,7 +37,7 @@ static HIDDEN_REINJECTION_BLOCKS: std::sync::LazyLock<std::sync::RwLock<std::col
 /// they can't accidentally clear it either — the same class of bug finding
 /// #7 fixed for the byte-scanning heuristic doesn't exist here by
 /// construction.
-pub(crate) fn set_hidden_reinjection_active(block_id: &str, hidden: bool) {
+pub fn set_hidden_reinjection_active(block_id: &str, hidden: bool) {
     let mut set = HIDDEN_REINJECTION_BLOCKS.write().unwrap();
     if hidden {
         set.insert(block_id.to_string());
@@ -46,7 +46,7 @@ pub(crate) fn set_hidden_reinjection_active(block_id: &str, hidden: bool) {
     }
 }
 
-pub(crate) fn is_hidden_reinjection_active(block_id: &str) -> bool {
+pub fn is_hidden_reinjection_active(block_id: &str) -> bool {
     HIDDEN_REINJECTION_BLOCKS.read().unwrap().contains(block_id)
 }
 

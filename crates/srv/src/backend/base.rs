@@ -311,7 +311,7 @@ pub fn is_dev_mode() -> bool {
 /// stored `~/.agentmux/agents/<slug>` workspace expanded against `$HOME` and
 /// was created under the real `~/.agentmux/agents/`. Every `~` expander that
 /// can see such a path goes through this first.
-pub(crate) fn expand_under_home_override(path: &str) -> Option<PathBuf> {
+pub fn expand_under_home_override(path: &str) -> Option<PathBuf> {
     let root = PathBuf::from(env::var_os("AGENTMUX_HOME_OVERRIDE").filter(|v| !v.is_empty())?);
     let rest = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"))?;
     let below = if rest == ".agentmux" {

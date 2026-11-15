@@ -142,6 +142,12 @@ fn keep_last_good(settings_path: &std::path::Path) {
     }
 }
 
+/// Refreshes the last-good copy from settings.json as it is now, at once. A key that moved out of the file
+/// (into the Vault) is gone from the copy too, not only after the watcher next reloads the file.
+pub fn refresh_last_good() {
+    keep_last_good(&resolve_settings_dir().join(wconfig::SETTINGS_FILE));
+}
+
 /// Whether a raw fs_watch event refers to a `settings.json` save specifically
 /// — the pool's broadcast stream carries events for every currently-watched
 /// path in the process, not just this module's. Matches the pre-migration
@@ -719,6 +725,38 @@ mod tests {
         // would reset the live config and broadcast defaults to every client.
         assert!(!is_settings_file_event(&evt("/some/dir/settings.json", FsWatchEventKind::Removed)));
         assert!(!is_settings_file_event(&evt("/some/dir/settings.json", FsWatchEventKind::Other)));
+    }
+
+    /// A key moved out of settings.json leaves no copy of itself beside the file: the write goes through a
+    /// temp file that is renamed over it (no backup is kept), and the last-good copy is refreshed from the
+    /// new file. The folder holds `settings.json` and its `.lastgood` and nothing else.
+    #[test]
+    fn a_key_moved_out_of_settings_leaves_no_copy_of_itself_in_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(wconfig::SETTINGS_FILE);
+        let plain = "gsk_plain_key_0123456789";
+        std::fs::write(&path, format!("{{
+  // the voice key
+  \"voice:groqApiKey\": \"{plain}\",
+  \"term:fontsize\": 14
+}}
+")).unwrap();
+        keep_last_good(&path);
+        assert!(std::fs::read_to_string(last_good_path(&path)).unwrap().contains(plain), "the copy held it before the move");
+
+        let mut keys = serde_json::Map::new();
+        keys.insert("voice:groqApiKey".into(), serde_json::json!("vault:entry-1"));
+        agentmux_common::settings_file::update(&path, wconfig::SETTINGS_TEMPLATE, |current| current.extend(keys.clone())).unwrap();
+        keep_last_good(&path);
+
+        let mut names: Vec<String> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, [wconfig::SETTINGS_FILE.to_string(), format!("{}.lastgood", wconfig::SETTINGS_FILE)], "no .bak, no temp file");
+        for name in &names {
+            let text = std::fs::read_to_string(dir.path().join(name)).unwrap();
+            assert!(!text.contains(plain), "{name} still holds the plain key");
+            assert!(text.contains("vault:entry-1") && text.contains("\"term:fontsize\": 14"), "{name}: {text}");
+        }
     }
 
     /// `setconfig {"widget:pinned": null}` (Settings → Widgets → Reset) must drop the key from

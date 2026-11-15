@@ -15,7 +15,8 @@ import { AuditKindChips } from "./audit-kind-chips";
 import { AuditLiveBar } from "./audit-live-bar";
 import { createAuditList } from "./audit-list";
 import { followAgentProp } from "./audit-agent-prop";
-import { createAuditSoundsAt } from "./audit-focus";
+import { createAuditSoundsAt, messageAsk, newestAsk, soundAsk } from "./audit-focus";
+import type { MessageRef } from "./audit-message";
 import { revealSoundRow } from "./audit-reveal";
 import type { SoundRef } from "./audit-sound";
 import {
@@ -33,7 +34,7 @@ import "./audit-manager.scss";
 
 const TYPING_PAUSE_MS = 250;
 
-export const AuditManager = (props: { paneBlockId: string; visible?: boolean; agent?: string; sound?: SoundRef }): JSX.Element => {
+export const AuditManager = (props: { paneBlockId: string; visible?: boolean; agent?: string; sound?: SoundRef; message?: MessageRef }): JSX.Element => {
     const [filter, setFilter] = createSignal<AuditFilter>(emptyFilter(props.agent ?? ""));
     // What is typed in the two text boxes shows at once; the filter (and so a query, which makes srv rescan the
     // file for totals) follows once typing pauses.
@@ -51,9 +52,9 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
 
     followAgentProp(() => props.agent, filter, setFilter, setAgentText);
     const set = (patch: Partial<AuditFilter>) => setFilter({ ...filter(), ...patch });
-    const sounds = createAuditSoundsAt(list.entries, now, () => props.sound, {
+    const sounds = createAuditSoundsAt(list.entries, now, () => newestAsk(soundAsk(props.sound), messageAsk(props.message)), {
         showKind: revealSoundRow(filter, setFilter, () => (setAgentText(""), setSearchText("")), list.showNewest),
-        body: () => body,
+        body: () => body, reachBack: list.reachBack,
     });
     const typed = () => {
         if (typing !== undefined) clearTimeout(typing);

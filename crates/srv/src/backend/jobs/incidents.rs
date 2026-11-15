@@ -114,13 +114,13 @@ pub struct Incidents {
     broker: Arc<Broker>,
     queue: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<String>>,
     /// Tests: applying this run fails, as a store error would.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fail_on: std::sync::Mutex<Option<String>>,
     /// Tests: run once when this run is applied, after the walk read it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     on_apply: std::sync::Mutex<Option<(String, Box<dyn FnOnce() + Send>)>>,
     /// Tests: the notification router, once there is one: what it was sent.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     router: std::sync::Mutex<Option<Vec<(String, String, String)>>>,
 }
 
@@ -133,11 +133,11 @@ impl Incidents {
             jobs,
             broker,
             queue: std::sync::OnceLock::new(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             fail_on: std::sync::Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             on_apply: std::sync::Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             router: std::sync::Mutex::new(None),
         })
     }
@@ -309,7 +309,7 @@ impl Incidents {
 
     /// What one decisive run does to the job's incident.
     fn apply(&self, job: &CronJob, run: &JobRun, now: i64) -> Result<Option<Step>, crate::backend::storage::StoreError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         {
             if self.fail_on.lock().unwrap().as_deref() == Some(run.id.as_str()) {
                 return Err(crate::backend::storage::StoreError::NotFound);
@@ -518,7 +518,7 @@ impl Incidents {
     /// Hand a `JobFailed` notification to this instance's router. `false`
     /// when there is none yet.
     fn notify(&self, key: &str, job_name: &str, body: String) -> bool {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         {
             let mut router = self.router.lock().unwrap();
             return match router.as_mut() {
@@ -529,7 +529,7 @@ impl Incidents {
                 None => false,
             };
         }
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "test-support")))]
         match crate::backend::notify::router::get(&self.broker) {
             Some(router) => {
                 router.job_failed(key, job_name, body);

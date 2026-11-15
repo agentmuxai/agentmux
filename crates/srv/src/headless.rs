@@ -44,6 +44,9 @@ static PORTS: OnceLock<(Option<u16>, Option<u16>)> = OnceLock::new();
 /// `--frontend-dir` / `--allowed-origin`, held in-process like the ports.
 static WEB: OnceLock<WebOptions> = OnceLock::new();
 
+/// The file the key was read from or written to, when it came from a file (not the environment).
+static KEY_FILE: OnceLock<PathBuf> = OnceLock::new();
+
 #[derive(Debug, Default)]
 struct WebOptions {
     frontend_dir: Option<PathBuf>,
@@ -103,6 +106,9 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     let cli = <CliArgs as clap::Parser>::try_parse_from(std::env::args_os()).map_err(|e| e.to_string())?;
     // Checked before anything is written, so a typo leaves no lock or key behind.
     let web = web_options(cli.frontend_dir.clone(), &cli.allowed_origins, cli.public_origin.as_deref())?;
+    // A key srv did not generate is held to a floor when a browser can sign in: checked before anything is written.
+    let serves_ui = web.frontend_dir.is_some();
+    check_env_key(env_key().as_deref(), serves_ui)?;
 
     let paths = match agentmux_common::DataPaths::from_env() {
         Some(p) => p,
@@ -141,9 +147,14 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     if !agentmux_common::secret_env::is_set("AGENTMUX_AUTH_KEY") {
         let key_file = cli.auth_key_file.clone().or_else(|| std::env::var_os("AGENTMUX_AUTH_KEY_FILE").map(PathBuf::from));
         let key = match key_file {
-            Some(file) => read_key_file(&file)?,
+            Some(file) => {
+                let key = read_provided_key_file(&file, serves_ui)?;
+                let _ = KEY_FILE.set(file);
+                key
+            }
             None => {
                 let (key, path) = write_generated_key(&data_dir)?;
+                let _ = KEY_FILE.set(path.clone());
                 generated = Some(path);
                 key
             }
@@ -265,6 +276,87 @@ pub fn key_file_path(wavedata: Option<&Path>) -> Result<PathBuf, String> {
         }
     };
     Ok(effective_data_dir(wavedata, &paths.data_dir).join(AUTH_KEY_FILE_NAME))
+}
+
+/// The file that holds a headless srv's web port, beside its key file: `<key file>.port`. One name per
+/// key file, so the port is read for the server that key belongs to.
+pub(crate) fn port_file_path(key_file: &Path) -> PathBuf {
+    let mut name = key_file.file_name().unwrap_or_default().to_os_string();
+    name.push(".port");
+    key_file.with_file_name(name)
+}
+
+/// Write the web port beside the key file (owner-only), so `agentmux-srv open` finds this server
+/// without being told the port. Only a headless srv that serves its own UI and whose key came from a
+/// file. The file is replaced at every start and removed at a clean exit; after a crash it can name a
+/// port nobody listens on, or one another program now holds, which `open` meets with its proof of the
+/// key and refuses.
+pub(crate) fn publish_port(port: u16) {
+    let Some(key_file) = KEY_FILE.get().filter(|_| local_sign_in()) else { return };
+    let path = port_file_path(key_file);
+    let _ = std::fs::remove_file(&path);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    use std::io::Write;
+    if let Err(e) = opts.open(&path).and_then(|mut f| f.write_all(format!("{port}\n").as_bytes())) {
+        tracing::warn!(file = %path.display(), error = %e, "could not write the web port file; `agentmux-srv open` needs --port");
+    }
+}
+
+/// Remove the port file at a clean exit.
+pub(crate) fn withdraw_port_file() {
+    if let Some(key_file) = KEY_FILE.get().filter(|_| local_sign_in()) {
+        let _ = std::fs::remove_file(port_file_path(key_file));
+    }
+}
+
+/// The web port the server that owns `key_file` wrote beside it.
+pub(crate) fn read_port_file(key_file: &Path) -> Result<u16, String> {
+    let path = port_file_path(key_file);
+    let text = std::fs::read_to_string(&path).map_err(|_| format!("no {} (is the server running with its own UI? or pass --port)", path.display()))?;
+    text.trim().parse::<u16>().ok().filter(|p| *p != 0).ok_or_else(|| format!("{} does not hold a port (pass --port)", path.display()))
+}
+
+/// The fewest characters a key srv did not generate may have when srv serves its own UI. The
+/// sign-in's proof (`/auth/hello`) is a MAC under the key over values anyone can send, so a short
+/// key could be guessed offline from it; a generated key is 64 characters.
+pub(crate) const MIN_PROVIDED_KEY_CHARS: usize = 32;
+
+/// `AGENTMUX_AUTH_KEY`, as the launcher or the operator gave it (stashed at start, or still in the environment).
+fn env_key() -> Option<String> {
+    const NAME: &str = "AGENTMUX_AUTH_KEY";
+    agentmux_common::secret_env::stashed()
+        .into_iter()
+        .find(|(k, _)| k == NAME)
+        .map(|(_, v)| v)
+        .or_else(|| std::env::var(NAME).ok())
+        .filter(|v| !v.is_empty())
+}
+
+fn check_key_floor(key: &str, source: &str, serves_ui: bool) -> Result<(), String> {
+    if serves_ui && key.chars().count() < MIN_PROVIDED_KEY_CHARS {
+        return Err(format!(
+            "{source}: with --frontend-dir the key must be at least {MIN_PROVIDED_KEY_CHARS} characters; leave the key file out and srv generates one"
+        ));
+    }
+    Ok(())
+}
+
+/// The key from the environment, when there is one, held to the floor.
+fn check_env_key(key: Option<&str>, serves_ui: bool) -> Result<(), String> {
+    key.map_or(Ok(()), |k| check_key_floor(k, "AGENTMUX_AUTH_KEY", serves_ui))
+}
+
+/// A key file the operator provided, held to the floor.
+fn read_provided_key_file(path: &Path, serves_ui: bool) -> Result<String, String> {
+    let key = read_key_file(path)?;
+    check_key_floor(&key, &format!("--auth-key-file {}", path.display()), serves_ui)?;
+    Ok(key)
 }
 
 /// Read a key from a file the operator provided; surrounding whitespace is ignored.
@@ -517,6 +609,33 @@ mod tests {
         std::fs::write(&p, "\n").unwrap();
         assert!(read_key_file(&p).is_err());
         assert!(read_key_file(&dir.path().join("missing")).is_err());
+    }
+
+    /// With a UI served, a key srv did not generate needs a floor, from a file and from the environment alike.
+    #[test]
+    fn a_provided_key_has_a_floor_when_srv_serves_its_own_ui() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("k");
+        let long = "k".repeat(MIN_PROVIDED_KEY_CHARS);
+        let short = "k".repeat(MIN_PROVIDED_KEY_CHARS - 1);
+
+        std::fs::write(&p, &short).unwrap();
+        let err = read_provided_key_file(&p, true).unwrap_err();
+        assert!(err.contains("at least 32") && err.contains("leave the key file out") && err.contains("--auth-key-file"), "{err}");
+        assert_eq!(read_provided_key_file(&p, false).unwrap(), short, "no UI served: no floor");
+        std::fs::write(&p, format!("{long}\n")).unwrap();
+        assert_eq!(read_provided_key_file(&p, true).unwrap(), long);
+
+        let err = check_env_key(Some(&short), true).unwrap_err();
+        assert!(err.contains("AGENTMUX_AUTH_KEY") && err.contains("at least 32"), "{err}");
+        assert!(check_env_key(Some(&short), false).is_ok());
+        assert!(check_env_key(Some(&long), true).is_ok());
+        assert!(check_env_key(None, true).is_ok(), "no environment key: srv generates one");
+        // Characters, not bytes.
+        assert!(check_key_floor(&"é".repeat(MIN_PROVIDED_KEY_CHARS), "x", true).is_ok());
+        assert!(check_key_floor(&"é".repeat(MIN_PROVIDED_KEY_CHARS - 1), "x", true).is_err());
+        // What srv generates itself passes.
+        assert!(format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple()).chars().count() >= MIN_PROVIDED_KEY_CHARS);
     }
 
     #[test]

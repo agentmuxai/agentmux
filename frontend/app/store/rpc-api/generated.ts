@@ -61,6 +61,7 @@ import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 import type { AppSkillInstallResult } from "@/types/rpc/AppSkillInstallResult";
 import type { AppSkillsCatalog } from "@/types/rpc/AppSkillsCatalog";
+import type { AppSkillsHere } from "@/types/rpc/AppSkillsHere";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
@@ -119,6 +120,7 @@ import type { CommandAgentTakeoverData } from "@/types/rpc/CommandAgentTakeoverD
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
 import type { CommandAppSkillsCatalogData } from "@/types/rpc/CommandAppSkillsCatalogData";
 import type { CommandAppSkillsCatalogInstallData } from "@/types/rpc/CommandAppSkillsCatalogInstallData";
+import type { CommandAppSkillsHereData } from "@/types/rpc/CommandAppSkillsHereData";
 import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
 import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
 import type { CommandAttachmentsCancelData } from "@/types/rpc/CommandAttachmentsCancelData";
@@ -509,15 +511,17 @@ import type { ReactiveRegistrationsResult } from "@/types/rpc/ReactiveRegistrati
 import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
 import type { RemoteSshLocation } from "@/types/rpc/RemoteSshLocation";
 import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
-import type { RenameEditorFileReq } from "@/types/rpc/RenameEditorFileReq";
-import type { RenameEditorFileResult } from "@/types/rpc/RenameEditorFileResult";
 import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
 import type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";
 import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
 import type { ResolveInstallCommandResult } from "@/types/rpc/ResolveInstallCommandResult";
 import type { ResolvePrereqsReq } from "@/types/rpc/ResolvePrereqsReq";
 import type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
+import type { ResolveRunReq } from "@/types/rpc/ResolveRunReq";
+import type { ResolveRunResp } from "@/types/rpc/ResolveRunResp";
 import type { RestoreOtherBuildLayoutResult } from "@/types/rpc/RestoreOtherBuildLayoutResult";
+import type { ResumeWaitReq } from "@/types/rpc/ResumeWaitReq";
+import type { ResumeWaitResp } from "@/types/rpc/ResumeWaitResp";
 import type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
 import type { RunDroneReq } from "@/types/rpc/RunDroneReq";
 import type { RunDroneResp } from "@/types/rpc/RunDroneResp";
@@ -1825,7 +1829,7 @@ export const GeneratedApi = {
   // command "kanban.list"
   KanbanListCommand(
     client: RpcClient,
-    data: Record<string, never>,
+    data: { board?: string },
     opts?: RpcOpts
   ): Promise<import("@/app/view/kanban/kanban-types").KanbanBoard> {
     return client.rpcCall("kanban.list", data, opts);
@@ -2424,14 +2428,6 @@ export const GeneratedApi = {
   ): Promise<AgentDefinition> {
     return client.rpcCall("renameagentdefinitiontitle", data, opts);
   },
-  // command "renameeditorfile"
-  RenameEditorFileCommand(
-    client: RpcClient,
-    data: RenameEditorFileReq,
-    opts?: RpcOpts
-  ): Promise<RenameEditorFileResult> {
-    return client.rpcCall("renameeditorfile", data, opts);
-  },
   // command "reorderglobalbrain"
   ReorderGlobalBundlesCommand(
     client: RpcClient,
@@ -2471,6 +2467,14 @@ export const GeneratedApi = {
   // command "rundrone"
   RunDroneCommand(client: RpcClient, data: RunDroneReq, opts?: RpcOpts): Promise<RunDroneResp> {
     return client.rpcCall("rundrone", data, opts);
+  },
+  // command "resolvedronerun"
+  ResolveDroneRunCommand(client: RpcClient, data: ResolveRunReq, opts?: RpcOpts): Promise<ResolveRunResp> {
+    return client.rpcCall("resolvedronerun", data, opts);
+  },
+  // command "resumedronewait"
+  ResumeDroneWaitCommand(client: RpcClient, data: ResumeWaitReq, opts?: RpcOpts): Promise<ResumeWaitResp> {
+    return client.rpcCall("resumedronewait", data, opts);
   },
   // command "layout.save"
   SaveLayoutCommand(client: RpcClient, data: CommandLayoutSaveData, opts?: RpcOpts): Promise<LayoutSaveResult> {
@@ -2583,6 +2587,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AppSkillInstallResult> {
     return client.rpcCall("app_skills.catalog.install", data, opts);
+  },
+  // command "app_skills.here"
+  AppSkillsHereCommand(client: RpcClient, data?: CommandAppSkillsHereData, opts?: RpcOpts): Promise<AppSkillsHere> {
+    return client.rpcCall("app_skills.here", data ?? {}, opts);
   },
   // command "skill.catalog.app_file"
   SkillCatalogAppFileCommand(

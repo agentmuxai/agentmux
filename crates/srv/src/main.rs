@@ -1,48 +1,40 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-mod adoption;
-mod agents;
-mod ambient;
-mod backend;
-mod boot_timing;
 mod bootstrap;
-mod broker;
 mod config;
-mod connectivity;
-mod event_log;
 mod headless;
-mod identity;
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 mod malloc_arenas;
-mod migrations;
-mod persist;
-mod persist_subscriber;
 mod proc_name;
-mod reducer;
-mod registry;
 mod sagas;
 mod server;
 #[cfg(target_os = "windows")]
 mod srv_ipc;
-mod srv_info;
-mod state;
+mod system_drive;
 mod drone;
 mod messaging;
-mod muxbus;
 mod open_cli;
-mod util;
 #[cfg(windows)]
 mod crash_monitor;
-#[cfg(test)]
-mod test_support;
 
+use agentmux_srv::{adoption, agents, ambient, backend, boot_timing, broker, connectivity, event_log, http_client, identity, migrations, muxbus, persist, persist_subscriber, reducer, registry, srv_info, state, util};
 use server::build_routers;
+
+#[cfg(test)]
+use agentmux_srv::test_support;
+
+#[cfg(test)]
+mod tls_test_init;
 
 fn main() {
     // Before anything is spawned or any thread exists: the launcher's secrets leave
     // the environment, so no child inherits them and /proc/<pid>/environ shows none.
     agentmux_common::secret_env::stash_startup_secrets();
+    agentmux_common::tls_provider::install_ring_provider(); // reqwest 0.13 builds no client without it
+    // A bare environment has no SystemDrive, and the Windows shell then makes a
+    // folder named "%SystemDrive%" in the current directory (#2524).
+    system_drive::ensure();
     // Linux (glibc): cap malloc arenas before any thread exists, so the runtime's
     // workers below share them (malloc_arenas.rs).
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -89,6 +81,7 @@ fn exit_if_helper_child() {
 /// Prepares the process for headless or launcher-owned running; true when headless.
 fn prepare_process_mode() -> bool {
     let headless = headless::requested();
+    backend::startup_mode::set_headless(headless);
     agentmux_common::process_hardening::deny_memory_access(headless);
     if headless {
         match headless::prepare_env() {
@@ -145,6 +138,14 @@ async fn app_main() {
     // 1. Init tracing (stderr + rolling file)
     let _log_guard = bootstrap::init_logging();
 
+    // 1'. Count every panic from here on (`backend::panic_watch`): the log keeps its lines, and the status bar, `/health` and the
+    //     agents hear of a storm (2026-11-15: 30,000 panics in two hours, and nothing said so).
+    backend::panic_watch::install_hook();
+
+    // 1a'. What the machine's certificates allow: with none, https requests fail and the log says so here, once
+    //      (http_client.rs); the server starts and runs either way.
+    http_client::no_system_certs();
+
     // 1a. Start the boot-path stopwatch. Logged as one summary line at
     //     ESTART below — see `boot_timing`'s module doc for why these numbers
     //     go to the log rather than the splash.
@@ -179,6 +180,7 @@ async fn app_main() {
 
     let viewer_router = server::build_viewer_router(state.clone());
     bootstrap::spawn_state_services(&state);
+    bootstrap::publish_instance_record(&state);
     // A headless srv that serves its own UI signs a browser in on its web port.
     server::local_session_routes::enable(net.web_addr.port(), &config.instance_id);
     let routers = build_routers(state.clone());

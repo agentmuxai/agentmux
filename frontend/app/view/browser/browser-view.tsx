@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { ELEMENT_DRAG_KINDS, isAnyUnderway } from "@/app/drag/drag-session";
 import { beginPageCut } from "@/app/drag/page-cut-gate";
 import { hostHas } from "@/util/host-caps";
@@ -54,10 +54,12 @@ const DRAG_SNAPSHOT_CAP_MS = 500;
  *
  * The hole is the page's own rect (`pageRect`), not this element's: the page is held where it was for the
  * drag (use-pane-rect-sync.ts `held`) while the live reflow draws the pane's tile, picture and all, wherever
- * the drop would put it. The reflow waits for the cut (page-cut-gate.ts), two frames after the hole is asked
- * for, which is when the host has applied it.
+ * the drop would put it. The reflow waits for the cut (page-cut-gate.ts): until the host has answered the clip
+ * that carries the hole (pane-overlay.ts `usePaneOverlayRect`). Counting frames from when the hole was asked
+ * for was not enough: where the host hides the whole page for a hole (macOS, Linux, Windows panes that cannot
+ * be clipped), the clip waits up to 300 ms for the page's freeze-frame before it is sent (#47510).
  */
-function BrowserDragCatcher(props: {
+export function BrowserDragCatcher(props: {
     takeSnapshot: () => Promise<DragSnapshot | null>;
     pageRect: Accessor<OverlayRect | undefined>;
 }): JSX.Element {
@@ -66,18 +68,10 @@ function BrowserDragCatcher(props: {
     const cap = setTimeout(() => setHoleOpen(true), DRAG_SNAPSHOT_CAP_MS);
     const cut = beginPageCut();
     let disposed = false;
-    let cutFrame = 0;
     onCleanup(() => {
         disposed = true;
         clearTimeout(cap);
-        cancelAnimationFrame(cutFrame);
         cut();
-    });
-    createEffect(() => {
-        if (!holeOpen()) return;
-        cutFrame = requestAnimationFrame(() => {
-            cutFrame = requestAnimationFrame(cut);
-        });
     });
     void props.takeSnapshot().then((s) => {
         if (disposed) return;
@@ -98,16 +92,17 @@ function BrowserDragCatcher(props: {
                 />
             </Show>
             <Show when={holeOpen()}>
-                <BrowserDragHole pageRect={props.pageRect} />
+                <BrowserDragHole pageRect={props.pageRect} onCut={cut} />
             </Show>
         </div>
     );
 }
 
 /** The hole itself: the page's own rect, registered through `usePaneOverlayRect` rather than
- *  `data-pane-overlay` so it also works off Windows. It draws nothing. */
-function BrowserDragHole(props: { pageRect: Accessor<OverlayRect | undefined> }): JSX.Element {
-    usePaneOverlayRect(props.pageRect);
+ *  `data-pane-overlay` so it also works off Windows. It draws nothing. `onCut` is called once the host has
+ *  cut the page away, or at once for a page that is not on screen. */
+function BrowserDragHole(props: { pageRect: Accessor<OverlayRect | undefined>; onCut: () => void }): JSX.Element {
+    usePaneOverlayRect(props.pageRect, props.onCut);
     return null;
 }
 

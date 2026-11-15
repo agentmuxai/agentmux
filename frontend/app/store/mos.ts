@@ -206,6 +206,10 @@ function startFetch<T extends MuxObj>(wov: MuxObjectValue<T>, oref: string): Pro
             if ((val as any)["oid"] != oid) throw new Error("GetObject returned wrong id");
         }
         wov.pendingPromise = null;
+        // An update that arrived while the fetch was on its way may be newer than
+        // what the fetch read: the older one must not replace it.
+        const cur = wov.getData().value;
+        if (val != null && cur != null && cur.version >= val.version) return;
         wov.setData({ value: val, loading: false });
         console.log("MuxObj resolved", oref, Date.now() - startTs + "ms");
     }).catch((err) => {
@@ -359,15 +363,22 @@ function loadAndPinMuxObject<T extends MuxObj>(oref: string): Promise<T> {
 function updateMuxObject(update: MuxObjUpdate) {
     if (update == null) return;
     const oref = makeORef(update.otype, update.oid);
-    const wov = getMuxObjectValue(oref);
+    if (update.updatetype != "delete" && !isValidMuxObj(update.obj)) {
+        console.log("invalid wave object update", update);
+        return;
+    }
+    // An object first heard of through an update (a block the backend just
+    // created) needs no fetch: the update carries it. Fetching it anyway cost a
+    // backend call per new pane, tab and layout.
+    let wov = muxObjectValueCache.get(oref);
+    if (wov === undefined) {
+        wov = createMuxValueObject(oref, false);
+        muxObjectValueCache.set(oref, wov);
+    }
     if (update.updatetype == "delete") {
         console.log("MuxObj deleted", oref);
         wov.setData({ value: null, loading: false });
     } else {
-        if (!isValidMuxObj(update.obj)) {
-            console.log("invalid wave object update", update);
-            return;
-        }
         const curValue = wov.getData();
         if (curValue.value != null && curValue.value.version >= update.obj.version) {
             return;

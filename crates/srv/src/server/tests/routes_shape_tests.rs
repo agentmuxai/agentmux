@@ -33,9 +33,9 @@ fn method_paths() -> Vec<(Method, String)> {
     out
 }
 
-/// Routes that answer without the key: the health check, the WhatsApp webhook and the widget files,
-/// which authenticate themselves.
-const OPEN: [&str; 5] = ["/", "/health", "/webhook/whatsapp", "/agentmux/widget-files/x/x/x/x", "/agentmux/widget-sdk/x"];
+/// Routes that answer without the key: the health check, the WhatsApp webhook, the widget files and a job's
+/// local hook, which authenticate themselves (the hook by its own secret, from this computer only).
+const OPEN: [&str; 6] = ["/", "/health", "/webhook/whatsapp", "/agentmux/widget-files/x/x/x/x", "/agentmux/widget-sdk/x", "/agentmux/hook/x"];
 
 /// What the LAN router answers at all, by path: the peer routes, which want a key, and the open routes
 /// that are not widget files.

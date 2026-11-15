@@ -157,6 +157,12 @@ shows your real agents, that is a bug: stop it, check the `[dev] home:` line, an
   migrations. Two ways out: use an isolated home (`task dev` without the variable), or start the installed
   AgentMux build first and let it migrate the shared stores. A migration of the build's own data doesn't
   count.
+- **Starting the binaries by hand.** A launcher or host run by hand from `dist/cef-dev*` or `target/debug|release`
+  (not through `task dev`) has no isolated home, so it refuses at once with one line and exit code 2, and creates
+  no folder and starts no srv. Do not start it by hand: run `task dev`, which sets the home up. A home of your own
+  also works (`AGENTMUX_HOME_OVERRIDE=<empty folder> ./agentmux-launcher`), and the real home only with
+  `AGENTMUX_DEV_USE_REAL_HOME=1`. (A Windows release-profile dev launcher has no console of its own: run from a
+  shell you see its line, double-clicked it just exits.)
 - A bare `agentmux-srv` given only a data folder (`AGENTMUX_DATA_DIR`, `--wavedata`) outside the home also
   refuses to start: its shared folder would be the real one. Give it `AGENTMUX_HOME_OVERRIDE=<dir>`, or
   `AGENTMUX_SHARED_DIR` to say where shared data goes. It does not move `HOME`: an agent's workspace

@@ -139,7 +139,7 @@ fn the_brief_line_names_the_run_and_a_late_one_says_so() {
 
 #[test]
 fn a_drone_runs_cost_is_the_sum_of_its_agent_blocks() {
-    use crate::drone::types::BlockState;
+    use crate::backend::storage::drone_types::BlockState;
     let block = |out: Option<serde_json::Value>| BlockState {
         status: "done".into(),
         output: out,
@@ -722,7 +722,7 @@ async fn two_schedulers_count_the_same_downtime_once() {
 /// pending fire keeps waiting.
 #[tokio::test(flavor = "multi_thread")]
 async fn interrupted_runs_are_closed_after_a_restart() {
-    use crate::drone::types::DroneRun;
+    use crate::backend::storage::drone_types::DroneRun;
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap());
     let mstore = Arc::new(Store::open_in_memory().unwrap());
@@ -768,7 +768,7 @@ async fn interrupted_runs_are_closed_after_a_restart() {
 /// summed cost of its Agent blocks.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_drone_run_is_written_to_the_ledger_with_its_cost() {
-    use crate::drone::types::BlockState;
+    use crate::backend::storage::drone_types::BlockState;
     let rig = rig();
     let id = rig.ledger.drone_started("dr-9", "d-9", "Nightly graph", 100, &Value::Null).unwrap();
     let r = rig.store.job_run_get(&id).unwrap().unwrap();
@@ -802,3 +802,55 @@ mod policy_runs;
 
 #[path = "caps_runs_tests.rs"]
 mod caps_runs;
+
+#[path = "event_runs_tests.rs"]
+mod event_runs;
+
+#[path = "app_event_runs_tests.rs"]
+mod app_event_runs;
+
+#[path = "file_watch_runs_tests.rs"]
+mod file_watch_runs;
+
+#[path = "poll_runs_tests.rs"]
+mod poll_runs;
+
+#[path = "expect_runs_tests.rs"]
+mod expect_runs;
+
+/// A Drone run that is being taken up again from its checkpoints is not closed
+/// by the restart: its ledger row and its `db_drone_runs` row stay open.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_run_that_is_resuming_is_left_open_by_the_restart() {
+    use crate::backend::storage::drone_types::DroneRun;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap());
+    let mstore = Arc::new(Store::open_in_memory().unwrap());
+    let ledger = RunLedger::new(store.clone(), Some(mstore.clone()), Arc::new(Broker::new()));
+    let row = |id: &str| DroneRun {
+        id: id.into(),
+        drone_id: "d1".into(),
+        status: "running".into(),
+        started_at: 1,
+        ended_at: 0,
+        block_states: Default::default(),
+        output: String::new(),
+        error: String::new(),
+    };
+    for id in ["dr-resume", "dr-lost"] {
+        mstore.drone_run_insert(&row(id)).unwrap();
+    }
+    let resumed = ledger.drone_started("dr-resume", "d1", "My drone", 1, &Value::Null).unwrap();
+    let lost = ledger.drone_started("dr-lost", "d1", "My drone", 2, &Value::Null).unwrap();
+    assert_eq!(ledger.open_run_of_drone("dr-resume"), Some(resumed.clone()));
+    assert_eq!(ledger.open_run_of_drone("dr-none"), None);
+
+    let resuming: std::collections::HashSet<String> = ["dr-resume".to_string()].into();
+    assert_eq!(ledger.recover_after_restart_except(&resuming), 1);
+    assert_eq!(store.job_run_get(&resumed).unwrap().unwrap().state, state::RUNNING);
+    let lost_row = store.job_run_get(&lost).unwrap().unwrap();
+    assert_eq!((lost_row.state.as_str(), lost_row.infra.as_str()), (state::FINISHED, infra::INTERRUPTED));
+    let drone: std::collections::HashMap<String, String> = mstore.drone_runs_for("d1", 10).unwrap().into_iter().map(|r| (r.id, r.status)).collect();
+    assert_eq!((drone["dr-resume"].as_str(), drone["dr-lost"].as_str()), ("running", DRONE_STATUS_INTERRUPTED));
+    assert_eq!(ledger.open_run_of_drone("dr-lost"), None, "a closed row is not open");
+}

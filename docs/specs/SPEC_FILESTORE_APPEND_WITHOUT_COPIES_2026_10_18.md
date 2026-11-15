@@ -1,5 +1,7 @@
 # Spec: A transcript append without whole-part copies
 
+**Area:** history store
+
 **Date:** 2026-10-18
 **Author:** Maricon@charlie
 **Type:** Spec (less allocation in the store's append path; no behaviour change)

@@ -5,7 +5,7 @@
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { tip } from "@/app/element/tip";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, CloseButton } from "@/app/element/ui";
 import clsx from "clsx";
 import { createEffect, For, Show, type JSX } from "solid-js";
 import type { DropupAgreement } from "./runtime-dropup-agreement";
@@ -221,11 +221,9 @@ function DropupPanel(props: DropupViewProps): JSX.Element {
                 listbox structure for assistive tech. Placed first
                 (matching Modal's showCloseButton convention) so
                 it's the first Tab stop after the trigger. */}
-            <IconButton
-                icon="xmark"
-                label="Close"
+            <CloseButton
+                size="sm"
                 tooltip={false}
-                density="compact"
                 class="agent-runtime-dropup-close-btn"
                 onClick={() => s.setOpen(false)}
             />

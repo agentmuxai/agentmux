@@ -30,7 +30,7 @@ use crate::backend::storage::store::Store;
 /// of racing, and each one's merge is always built from the other's
 /// already-committed result. See
 /// REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md.
-pub(crate) fn update_object_meta(
+pub fn update_object_meta(
     store: &Store,
     oref_str: &str,
     meta_update: &MetaMapType,

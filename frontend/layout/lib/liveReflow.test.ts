@@ -147,7 +147,7 @@ const futureSize = (m: LayoutModel, id: string) => laidOutAt(rawFutureOf(m, id))
 beforeEach(() => {
     rows.clear();
     setFlag(true);
-    // Windows, where every pane moves with a drag's reflow; a test of the other platforms sets its own.
+    // One test walks the platforms: back to the first for the rest.
     setPlatform("win32");
     resetPaneCaptureGateForTests();
     resetPageCutGateForTests();
@@ -514,39 +514,24 @@ describe("the live reflow of a pane drag", () => {
         for (const id of ["a", "b", "c", "d"]) expect(m.reflowFor(id)).toMatchObject({ rect: own(m, id), moved: false });
     });
 
-    it("leaves a browser pane where it is while another pane is dragged, off Windows: the host has no cut for its page", () => {
-        for (const platform of ["linux", "darwin"] as const) {
+    it("moves a browser pane like any other on every platform, dragged or not: its page is cut away or hidden for the drag, its tile is DOM", () => {
+        for (const platform of ["win32", "linux", "darwin"] as const) {
             setPlatform(platform);
             const m = modelOf(row("r", 10, leaf("browser-x"), col("col", 10, leaf("b"), leaf("c"))));
             drag(m, "b", "browser-x", DropDirection.Left);
-            // The drop is shown and the other panes go to it; the browser pane keeps its own rect.
-            expect(m.liveReflowActive()).toBe(true);
-            expect(m.reflowFor("b")).toMatchObject({ moved: true });
-            expect(m.reflowFor("browser-x")).toMatchObject({ rect: own(m, "browser-x"), moved: false, leaving: false });
-            // The browser pane as the dragged one goes to its landing rect, as on Windows.
+            const got = entries(m, ["browser-x", "b", "c"]);
+            expect(got["browser-x"]).toMatchObject({ rect: futureOf(m, "browser-x"), moved: false, leaving: false });
+            expect(got["browser-x"]!.rect).not.toEqual(own(m, "browser-x"));
+            expect(got.b).toMatchObject({ moved: true });
+            expect(got.c).toBeDefined();
+            // The browser pane as the dragged one: it goes to its landing rect too.
             const m2 = modelOf(three());
             m2.treeState.rootNode!.children![0].data!.blockId = "browser-a";
             m2.updateTree();
             drag(m2, "a", "c", DropDirection.Bottom);
             expect(m2.reflowFor("a")).toMatchObject({ rect: shownPx(landingRectOf(m2)!), moved: true });
+            expect(m2.reflowFor("b")).toBeDefined();
         }
-    });
-
-    it("moves a browser pane like any other, dragged or not: its page is cut away for the drag, its tile is DOM", () => {
-        const m = modelOf(row("r", 10, leaf("browser-x"), col("col", 10, leaf("b"), leaf("c"))));
-        drag(m, "b", "browser-x", DropDirection.Left);
-        const got = entries(m, ["browser-x", "b", "c"]);
-        expect(got["browser-x"]).toMatchObject({ rect: futureOf(m, "browser-x"), moved: false, leaving: false });
-        expect(got["browser-x"]!.rect).not.toEqual(own(m, "browser-x"));
-        expect(got.b).toMatchObject({ moved: true });
-        expect(got.c).toBeDefined();
-        // The browser pane as the dragged one: it goes to its landing rect too.
-        const m2 = modelOf(three());
-        m2.treeState.rootNode!.children![0].data!.blockId = "browser-a";
-        m2.updateTree();
-        drag(m2, "a", "c", DropDirection.Bottom);
-        expect(m2.reflowFor("a")).toMatchObject({ rect: shownPx(landingRectOf(m2)!), moved: true });
-        expect(m2.reflowFor("b")).toBeDefined();
     });
 
     it("shows no drop while a browser page is still on screen at the drag's start, and never waits for one for long", () => {

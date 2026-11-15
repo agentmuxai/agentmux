@@ -5,7 +5,7 @@
  */
 export type DroneSummary = { nodes: number, 
 /**
- * Nodes that start an agent, each of which spends money.
+ * Nodes that start an agent (an Agent node, or a Spawn node that opens a worker), each of which spends money.
  */
 agents: number, 
 /**

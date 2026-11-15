@@ -64,6 +64,19 @@ pub fn pane_pointer_down(state: &Arc<AppState>, block: &str) {
     }
 }
 
+/// A native click in pane `block`'s page, seen by the UI thread's message hook before it is dispatched
+/// (Windows Views panes, `native_click`): the pane gets the keyboard before the click lands, and the
+/// window's page is told so it selects the pane too (`browser-pane-clicked`, as the child-window kind's
+/// click and macOS's do). Not through `on_set_focus`, which Chromium sends only when a click changes
+/// which window has focus (#47567).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn pane_clicked(state: &Arc<AppState>, block: &str) {
+    pane_pointer_down(state, block);
+    if let Some(window) = state.browser_pane_window_label(block) {
+        crate::events::emit_event_to_window(state, &window, "browser-pane-clicked", &serde_json::json!({ "block_id": block }));
+    }
+}
+
 /// The user gave pane `block`'s page focus where no click hook sees it: the same
 /// as a click in it, posted. That is Linux, and Windows with Views panes, by
 /// CEF's `on_set_focus` with a user source.
@@ -269,6 +282,12 @@ fn focus_pane_browser(state: &Arc<AppState>, block: &str) {
     }
 }
 
+/// What Views says about focus in `window`, for a log line: which view has it (#47567). Views panes only.
+#[cfg(not(target_os = "macos"))]
+pub fn focus_report(state: &Arc<AppState>, window: &str) -> String {
+    platform::report(state, window)
+}
+
 // ── Per platform ─────────────────────────────────────────────────────────
 
 /// macOS: a pane has the keyboard while its overlay NSWindow is the key window
@@ -353,7 +372,7 @@ mod platform {
             .iter()
             .filter(|(_, (w, _))| w == window)
             .filter_map(|(label, (_, controller))| {
-                let block = label.strip_prefix("browser-pane-")?.rsplit_once('-')?.0.to_string();
+                let block = crate::browser_pane::label::pane_block_id(label)?.to_string();
                 Some((block, controller.contents_view()?))
             })
             .collect()
@@ -382,6 +401,14 @@ mod platform {
             return Surface::App;
         }
         Surface::Elsewhere
+    }
+
+    /// Which views of `window` hold Views focus right now, for the log: each pane's `has_focus()` and the app's.
+    pub fn report(state: &Arc<AppState>, window: &str) -> String {
+        let panes: Vec<String> =
+            pane_views(state, window).into_iter().map(|(block, v)| format!("pane:{}={}", &block[..block.len().min(8)], v.has_focus() != 0)).collect();
+        let app = window_view(state, window).map(|v| v.has_focus() != 0);
+        format!("app={app:?} {}", panes.join(" "))
     }
 
     /// Panes are views inside the window here: a deactivation is the window's.

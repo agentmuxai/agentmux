@@ -69,7 +69,7 @@ impl ClaudeHistoryAdapter {
         Self::with_roots(dirs::home_dir(), shared_dir, agentmux_home)
     }
 
-    pub(crate) fn with_roots(
+    pub fn with_roots(
         user_home: Option<PathBuf>,
         shared_dir: Option<PathBuf>,
         agentmux_home: Option<PathBuf>,

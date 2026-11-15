@@ -259,7 +259,7 @@ impl AttachedLog {
 }
 
 static ATTACHED: LazyLock<Mutex<AttachedLog>> = LazyLock::new(|| {
-    let path = if cfg!(test) {
+    let path = if cfg!(any(test, feature = "test-support")) {
         None
     } else {
         agentmux_common::DataPaths::from_env().map(|p| p.instance_dir.join(ATTACHED_FILE))
@@ -357,7 +357,7 @@ impl ReactiveHandler {
     /// (a note held under it is replaced). Never input of its own: see the
     /// module doc. Audited as `system_note_held` from `agentmux`.
     pub fn hold_system_note(&self, target_agent: &str, key: &str, text: &str) -> Result<(), String> {
-        let mut handler = self.inner.lock().unwrap();
+        let mut handler = self.inner.lock();
         let block_id = handler.note_target(target_agent)?;
         held().hold(&block_id, key, text);
         handler.audit_note(target_agent, &block_id, text, "system_note_held");
@@ -367,7 +367,7 @@ impl ReactiveHandler {
     /// [`Self::hold_system_note`] in place of the note held under `old_key`;
     /// `Ok(false)`, holding nothing, when none is held under it any more.
     pub fn replace_held_system_note(&self, target_agent: &str, old_key: &str, key: &str, text: &str) -> Result<bool, String> {
-        let mut handler = self.inner.lock().unwrap();
+        let mut handler = self.inner.lock();
         let block_id = handler.note_target(target_agent)?;
         let replaced = held().replace(&block_id, old_key, key, text);
         if replaced {
@@ -381,12 +381,12 @@ impl ReactiveHandler {
     /// when it joined the running turn, else as `system_note_held`.
     pub fn audit_system_note(&self, target_agent: &str, block_id: &str, text: &str, joined: bool) {
         let outcome = if joined { "system_note" } else { "system_note_held" };
-        self.inner.lock().unwrap().audit_note(target_agent, block_id, text, outcome);
+        self.inner.lock().audit_note(target_agent, block_id, text, outcome);
     }
 
     /// Whether a note is held for `target_agent` under `key`.
     pub fn holds_system_note(&self, target_agent: &str, key: &str) -> bool {
-        let block_id = self.inner.lock().unwrap().note_target(target_agent);
+        let block_id = self.inner.lock().note_target(target_agent);
         block_id.is_ok_and(|b| held().holds(&b, key))
     }
 }

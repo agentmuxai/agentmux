@@ -28,7 +28,7 @@ initialFocus -> agent-attachment-lightbox__dialog
             ","
             "391 KB"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- pending
 Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
 useAttachmentUrl send id=undefined
@@ -47,7 +47,7 @@ initialFocus -> agent-attachment-lightbox__dialog
             "1"
           "shot.png"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- no id
 Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
 useAttachmentUrl send id=undefined
@@ -66,7 +66,7 @@ initialFocus -> agent-attachment-lightbox__dialog
             "1"
           "scan.pdf"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- the transcript only knows the id
 Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
 AttachmentsInfoCommand {"ids":["a1"]}
@@ -85,7 +85,7 @@ initialFocus -> agent-attachment-lightbox__dialog
             "1"
           "shot.png"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 useAttachmentUrl send id=a1
 useAttachmentText thumb id=undefined
 -- after the details arrive
@@ -113,7 +113,7 @@ useAttachmentText thumb id=undefined
             ","
             "391 KB"
         <span class="agent-attachment-lightbox__actions">
-          <span data-stand="IconButton" data-icon="xmark" data-label="Close preview" data-tooltip="false" data-title="Close (Esc)">
+          <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- an item with its info asks for nothing
 Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
 useAttachmentUrl send id=a1

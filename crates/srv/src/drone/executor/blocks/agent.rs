@@ -21,6 +21,12 @@
 //!                      instanceName, workingDirectory. All fields
 //!                      optional; missing = blank agent.
 //!   * `max_turns`    — optional. Hard cap on claude turns.
+//!   * `output_schema` — optional. The few short fields the reply must carry
+//!                      (agent_output.rs): the reply format is added to the
+//!                      prompt, and the reply is checked against it. The
+//!                      validated fields are the block's `output`, read as
+//!                      `{{<this_block_id>.output.<field>}}`; a reply that does
+//!                      not fit fails the block.
 //!
 //! Output (snake_case to match other drone blocks — see spec
 //! §4.5):
@@ -30,7 +36,8 @@
 //!     "response": "<text>",
 //!     "tokens": { "input": .., "output": .., "cache_creation": .., "cache_read": .. },
 //!     "cost_usd": 0.001,
-//!     "status": "done"
+//!     "status": "done",
+//!     "output": { "<field>": .. }   // only with `output_schema`
 //!   }
 //!   ```
 //!
@@ -40,21 +47,15 @@
 use serde_json::{json, Value};
 
 use crate::agents::runner::{run_agent, AgentError};
-use crate::agents::types::{AgentRef, AgentTask};
+use crate::agents::types::{AgentRef, AgentRunResult, AgentTask};
 use crate::drone::data_flow::ExecutionScope;
+use crate::drone::executor::blocks::agent_output::Schema;
 use crate::drone::types::FlowNode;
 
-pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
-    let task_raw = node
-        .data
-        .get("task")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "agent block missing `task`".to_string())?;
-    let prompt = scope.resolve(task_raw);
-
-    let agent_ref: AgentRef = match node.data.get("agent_ref") {
-        Some(v) => serde_json::from_value(v.clone())
-            .map_err(|e| format!("agent block: invalid agent_ref: {e}"))?,
+/// The node's `agent_ref`: its identity and memory, or a blank agent when it has none.
+fn agent_ref_of(node: &FlowNode) -> Result<AgentRef, String> {
+    match node.data.get("agent_ref") {
+        Some(v) => serde_json::from_value(v.clone()).map_err(|e| format!("agent block: invalid agent_ref: {e}")),
         None => {
             // Pre-Phase-1.5 nodes persisted a single `forge_agent_id`
             // string; the runner can't honor it because identity and
@@ -70,9 +71,31 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
                     );
                 }
             }
-            AgentRef::default()
+            Ok(AgentRef::default())
         }
+    }
+}
+
+pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
+    let task_raw = node
+        .data
+        .get("task")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "agent block missing `task`".to_string())?;
+    let mut prompt = scope.resolve(task_raw);
+
+    // A schema that cannot be used is found before an agent is started, not after its tokens are spent.
+    let schema = match node.data.get("output_schema") {
+        Some(declared) if !declared.is_null() => {
+            Some(Schema::parse(declared).map_err(|e| format!("agent block: {e}"))?)
+        }
+        _ => None,
     };
+    if let Some(schema) = &schema {
+        prompt.push_str(&schema.instructions());
+    }
+
+    let agent_ref = agent_ref_of(node)?;
 
     let max_turns = node
         .data
@@ -113,11 +136,24 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
         .map_err(|e| format!("agent block: runner cancelled: {e}"))?
         .map_err(|e| format!("agent block: agent run failed: {e}"))?;
 
-    // Manually flatten to snake_case to match other drone block
-    // outputs (the AgentRunResult's serde camelCase is for the IPC
-    // seam with the frontend, NOT for drone templates — see spec
-    // §4.5 NOTE).
-    Ok(json!({
+    // The fields the next node branches on. What the agent wrote is not in the error: it is the agent's text.
+    let output = match &schema {
+        Some(schema) => Some(
+            schema
+                .extract(&result.response)
+                .map_err(|e| format!("agent block: the reply did not fit `output_schema`: {e}"))?,
+        ),
+        None => None,
+    };
+
+    Ok(flatten(&result, output))
+}
+
+/// The block's output, flattened to snake_case to match other drone block outputs (the AgentRunResult's serde camelCase
+/// is for the IPC seam with the frontend, NOT for drone templates — see spec §4.5 NOTE), with the validated `output`
+/// fields when the node declared a schema.
+fn flatten(result: &AgentRunResult, output: Option<Value>) -> Value {
+    let mut out = json!({
         "response": result.response,
         "tokens": {
             "input": result.tokens.input,
@@ -127,7 +163,11 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
         },
         "cost_usd": result.cost_usd,
         "status": "done",
-    }))
+    });
+    if let Some(output) = output {
+        out["output"] = output;
+    }
+    out
 }
 
 #[cfg(test)]
@@ -162,6 +202,14 @@ mod tests {
         let scope = ExecutionScope::new();
         let err = run(&node, &scope).await.expect_err("must error");
         assert!(err.contains("invalid agent_ref"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn rejects_an_unusable_output_schema_before_any_agent_starts() {
+        let node = mk_node(json!({ "kind": "agent", "task": "hi", "output_schema": { "Bad Name": "string" } }));
+        let scope = ExecutionScope::new();
+        let err = run(&node, &scope).await.expect_err("must error");
+        assert!(err.starts_with("agent block: field `Bad Name`"), "got: {err}");
     }
 
     // The spawn-failure → "agent block: spawn failed: ..." mapping is

@@ -353,6 +353,7 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
         "attempt": attempt,
         "result": result_text,
         "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
+        "handback": segment == "release" && arguments.get("handback").and_then(|v| v.as_bool()).unwrap_or(false),
     });
     let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
         .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
@@ -381,6 +382,11 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
             // agent can pick it up when nobody ever will (Codex P2 on
             // PR #2902). The server reports the resulting state; trust
             // it rather than re-deriving the attempts rule here.
+            if segment == "release" && arguments.get("handback").and_then(|v| v.as_bool()).unwrap_or(false) {
+                return Ok(format!(
+                    "Handed {id} back to the pool: no attempt used, and an unnamed claim won't offer it to you again."
+                ));
+            }
             let resulting = serde_json::from_str::<Value>(&text)
                 .ok()
                 .and_then(|v| v.get("state").and_then(|s| s.as_str()).map(str::to_string))
@@ -389,8 +395,9 @@ async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> 
                 format!(
                     "Released {id}, and it has now used its final attempt — the item is \
                      parked as FAILED and will not be offered to any agent again. If it \
-                     still needs doing, enqueue a fresh item (ideally with what you \
-                     learned about why it kept failing)."
+                     still needs doing, Tasks retry reopens it (or enqueue a fresh item, ideally \
+                     with what you learned about why it kept failing). A task that is simply \
+                     outside your area is handed back with handback: true, which never parks it."
                 )
             } else {
                 format!("Released {id} back to the queue for another agent.")
@@ -463,6 +470,53 @@ async fn run_work_accept(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     Ok(decision_text(id, accept, &v))
 }
 
+/// The fields each of the Kanban's moves takes, as the tool's description lists them (not `board`: with a
+/// bare `id` it says which board the id is on, for every move). A field that only
+/// other moves take is refused by name: answered "done", it would be dropped and the task left as it was.
+const MOVE_FIELDS: &[(&str, &[&str])] = &[
+    ("title", &["edit"]),
+    ("payload", &["edit"]),
+    ("kind", &["edit"]),
+    ("priority", &["edit"]),
+    ("repo", &["edit"]),
+    ("review", &["edit"]),
+    ("after", &["edit"]),
+    ("target_agent", &["move", "start", "reassign"]),
+    ("hold", &["move"]),
+    ("rank", &["move"]),
+    ("drop_deps", &["move"]),
+    ("confirm", &["take_back", "reassign"]),
+    ("followers", &["cancel"]),
+];
+
+/// The tool-facing name of a move: what the agent passes as `action`.
+fn move_action_name(tool: &str) -> &'static str {
+    match tool {
+        "WorkEdit" => "edit",
+        "WorkMove" => "move",
+        "WorkStart" => "start",
+        "WorkAnswer" => "answer",
+        "WorkCancel" => "cancel",
+        "WorkReopen" => "reopen",
+        "WorkRetry" => "retry",
+        "WorkTakeBack" => "take_back",
+        _ => "reassign",
+    }
+}
+
+/// Refuse a field this move doesn't take, naming the moves that do.
+fn refuse_unused_fields(tool: &str, arguments: &Value) -> Result<()> {
+    let action = move_action_name(tool);
+    for (field, takers) in MOVE_FIELDS {
+        if takers.contains(&action) || arguments.get(*field).map_or(true, Value::is_null) {
+            continue;
+        }
+        let hint = if *field == "target_agent" { "to change who a task is for, use move with target_agent".to_string() } else { format!("{field} belongs to {}", takers.join(", ")) };
+        anyhow::bail!("Tasks {action} doesn't take {field}: {hint}. Nothing was changed.");
+    }
+    Ok(())
+}
+
 /// The Kanban's other moves, made by this agent (`POST /agentmux/work/act`).
 async fn run_work_edit(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
@@ -470,6 +524,7 @@ async fn run_work_edit(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Resul
     let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
     let id = task_id(arguments)?;
+    refuse_unused_fields(name, arguments)?;
     let action = match name {
         "WorkEdit" => "edit",
         "WorkMove" => "move",
@@ -571,8 +626,18 @@ async fn run_work_list(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         let st = it.get("state").and_then(|x| x.as_str()).unwrap_or("");
         let title = it.get("title").and_then(|x| x.as_str()).unwrap_or("");
         let holder = it.get("claimed_by").and_then(|x| x.as_str()).unwrap_or("");
-        let who = if holder.is_empty() { String::new() } else { format!(" [{holder}]") };
-        out.push_str(&format!("  {id}  {st}{who}  {title}\n"));
+        let target = it.get("target_agent").and_then(|x| x.as_str()).unwrap_or("");
+        let group = it.get("target_group").and_then(|x| x.as_str()).unwrap_or("");
+        // Who it is for (a started task is for its holder: said once), and who holds it.
+        let for_who = if !target.is_empty() && target != holder {
+            format!(", for {target}")
+        } else if target.is_empty() && !group.is_empty() {
+            format!(", for group {group}")
+        } else {
+            String::new()
+        };
+        let held = if holder.is_empty() { String::new() } else { format!(", held by {holder}") };
+        out.push_str(&format!("  {id}  {st}{for_who}{held}  {title}\n"));
         // `result` is the completion trace for a done item, and the
         // reason for a failed/released one — the very thing
         // WorkComplete calls "the only record". Omitting it here left
@@ -580,7 +645,14 @@ async fn run_work_list(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         // tool (Codex P2 on PR #2902).
         let result = it.get("result").and_then(|x| x.as_str()).unwrap_or("");
         if !result.is_empty() {
-            out.push_str(&format!("      -> {result}\n"));
+            // A task with a holder (claimed, or blocked on a question) is not finished: what it carries
+            // is why a PREVIOUS holder handed it back ("agent stopped", "agent quit"), which its current
+            // holder was told when it claimed. Printed as a verdict, it reads as if this holder stopped.
+            if matches!(st, "claimed" | "blocked") {
+                out.push_str(&format!("      (handed back earlier: {result})\n"));
+            } else {
+                out.push_str(&format!("      -> {result}\n"));
+            }
         }
     }
     out.push_str(note.trim_start_matches('\n'));

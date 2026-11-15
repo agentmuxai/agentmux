@@ -1,5 +1,7 @@
 # Spec: an agent's transcript is written once, to the agent's own zone
 
+**Area:** history store
+
 **Date:** 2026-10-19
 **Author:** Maricon@charlie
 **Type:** Spec (a storage contract change; behaviour for the user is unchanged)

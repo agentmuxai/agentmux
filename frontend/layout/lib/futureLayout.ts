@@ -21,6 +21,8 @@ import {
     type LayoutTreeAction,
     type LayoutTreeDeleteNodeAction,
     type LayoutTreeMoveNodeAction,
+    type LayoutTreeSplitHorizontalAction,
+    type LayoutTreeSplitVerticalAction,
     type LayoutTreeStayAction,
     type LayoutTreeSwapNodeAction,
 } from "./types";
@@ -50,29 +52,36 @@ function leavesOf(node: LayoutNode | undefined, out: LayoutNode[] = []): LayoutN
     return out;
 }
 
-/** The node a move, swap or stay action carries, by its id, and none for any other action. */
+/** Whether `action` splits a pane in two for a new one (the drop of a tab pill, placementPreview.ts `pillSplit`). */
+const isSplit = (action: LayoutTreeAction): action is LayoutTreeSplitHorizontalAction | LayoutTreeSplitVerticalAction =>
+    action.type === LayoutTreeActionType.SplitHorizontal || action.type === LayoutTreeActionType.SplitVertical;
+
+/** The node a move, swap, stay or split action carries, by its id, and none for any other action. */
 function movedIdOf(action: LayoutTreeAction): string | undefined {
     if (action.type === LayoutTreeActionType.Move) return (action as LayoutTreeMoveNodeAction).node?.id;
+    if (isSplit(action)) return action.newNode?.id;
     if (action.type === LayoutTreeActionType.Swap) return (action as LayoutTreeSwapNodeAction).node2Id;
     if (action.type === LayoutTreeActionType.Stay) return (action as LayoutTreeStayAction).nodeId;
     return undefined;
 }
 
 /**
- * The layout `action` (a pending Move, Swap or Stay) leaves, or undefined for anything else, for an empty
- * layout, or when the reducer refuses it. A Stay leaves the layout as it is, with the pane in its own rect.
- * The model's own tree is not touched.
+ * The layout `action` (a pending Move, Swap, Stay or split) leaves, or undefined for anything else, for an
+ * empty layout, or when the reducer refuses it. A Stay leaves the layout as it is, with the pane in its own
+ * rect. The model's own tree is not touched.
  */
 export function futureLayoutOf(model: LayoutModel, action: LayoutTreeAction | undefined): FutureLayout | undefined {
     const movedId = action ? movedIdOf(action) : undefined;
     const root = model.treeState.rootNode;
     if (!action || !movedId || !root) return undefined;
     try {
-        // A moved node that is not in the tree (a tab pill's stand-in) is inserted as a copy.
-        const run: LayoutTreeAction =
+        // A node that is not in the tree (a pane from another tab, a tab pill's stand-in) is inserted as a copy.
+        const run: LayoutTreeAction | LayoutTreeSplitHorizontalAction | LayoutTreeSplitVerticalAction =
             action.type === LayoutTreeActionType.Move
                 ? { ...action, node: copyLayoutNode((action as LayoutTreeMoveNodeAction).node) } as LayoutTreeMoveNodeAction
-                : action;
+                : isSplit(action)
+                  ? { ...action, newNode: copyLayoutNode(action.newNode) }
+                  : action;
         const after = laidOutAfter(model, root, run);
         return after?.rects[movedId] ? { movedId, ...after } : undefined;
     } catch (e) {

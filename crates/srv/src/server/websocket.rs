@@ -134,7 +134,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: O
     let mut pending_priority: std::collections::VecDeque<serde_json::Value> =
         std::collections::VecDeque::new();
 
-    let session_ended = super::local_session_routes::session_ended(session);
+    let session_ended = { super::operator_proof::vouch_for_signed_in_browser(&engine, session.as_ref()); super::local_session_routes::session_ended(session) };
     tokio::pin!(session_ended);
     'ws: loop {
         tokio::select! {

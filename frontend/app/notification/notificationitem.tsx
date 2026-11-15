@@ -5,6 +5,7 @@
 import { fadeOutCopy } from "@/app/element/exit-copy";
 import { useMotion } from "@/app/motion/solid";
 import { Button } from "@/element/button";
+import { CloseButton } from "@/element/ui";
 import { makeIconClass } from "@/util/util";
 import clsx from "clsx";
 import { For, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -70,16 +71,15 @@ const NotificationItem = ({
             );
         }
         return (
-            <Button
-                className="close-btn ghost grey py-[10px]"
+            <CloseButton
+                size="sm"
+                class="close-btn"
+                tooltip={false}
                 onClick={(e) => {
                     e.stopPropagation();
                     onRemove(id);
                 }}
-                aria-label="Close"
-            >
-                <i class={clsx(makeIconClass("close", false), color)}></i>
-            </Button>
+            />
         );
     };
 

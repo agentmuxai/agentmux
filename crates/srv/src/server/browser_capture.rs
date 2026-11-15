@@ -37,51 +37,70 @@ use crate::backend::vault::capture::{self, Found, Target};
 use crate::backend::vault::uses::{Ended, UseRequest};
 
 use super::browser_actions::{note, How, Kind};
-use super::browser_click_approval::{approve_click, ClickRefused};
+use super::browser_capture_read::{begin, check_shape, read_page, what_to_read};
 use super::ui_handlers::{err_response, proxy_value, target_block_id};
 use super::AppState;
 
-const HOST_WAIT: Duration = Duration::from_secs(30);
+pub(super) const HOST_WAIT: Duration = Duration::from_secs(30);
 /// How long the person has to allow a capture that replaces a value.
 const ANSWER_WAIT: Duration = Duration::from_secs(120);
 /// The longest the host waits for a download after its click (2 minutes), and
 /// time for the click and the reply.
-const DOWNLOAD_WAIT: Duration = Duration::from_secs(150);
+pub(super) const DOWNLOAD_WAIT: Duration = Duration::from_secs(150);
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct CaptureRequest {
-    auth: UiAutomationAuth,
+    pub(super) auth: UiAutomationAuth,
     #[serde(default)]
-    pane: Option<String>,
+    pub(super) pane: Option<String>,
     #[serde(rename = "ref", default)]
-    ref_: Option<String>,
+    pub(super) ref_: Option<String>,
+    /// A card shown on the page: each part's key (`number`, `exp`, `exp_month`, `exp_year`, `cvc`, `name`, `zip`) and the
+    /// ref of the element that shows it. Saved whole as a new card (`as`), instead of `ref`.
+    #[serde(default)]
+    pub(super) card: Option<BTreeMap<String, String>>,
     /// A new entry: its kind (`api-key` by default), label, and plain fields.
     #[serde(rename = "as", default)]
-    into: Option<CaptureAs>,
+    pub(super) into: Option<CaptureAs>,
     /// Or an existing entry, whose value this replaces.
     #[serde(default)]
-    entry: Option<String>,
+    pub(super) entry: Option<String>,
     /// The file the element downloads, instead of the element's text.
     #[serde(default)]
-    download: bool,
+    pub(super) download: bool,
     /// How long to wait for the download after the click (at most 2 minutes).
     #[serde(default)]
-    timeout_ms: Option<u64>,
+    pub(super) timeout_ms: Option<u64>,
     /// Why the agent keeps what the page shows: one line of 8 to 300 characters, required.
     #[serde(default)]
-    reason: Option<String>,
+    pub(super) reason: Option<String>,
+    /// Text with no reference of its own: the value shown beside this label. Instead of `ref`.
+    #[serde(default)]
+    pub(super) near: Option<String>,
+    /// What the value must be, or nothing is saved: a short prefix, one of the named shapes, a length range.
+    #[serde(default)]
+    pub(super) prefix: Option<String>,
+    #[serde(default)]
+    pub(super) shape: Option<String>,
+    #[serde(default)]
+    pub(super) min_length: Option<u32>,
+    #[serde(default)]
+    pub(super) max_length: Option<u32>,
+    /// The reference is the page's own copy button: its value is taken from the page's copy, never the clipboard.
+    #[serde(default)]
+    pub(super) copy: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct CaptureAs {
     #[serde(default)]
-    kind: Option<String>,
+    pub(super) kind: Option<String>,
     #[serde(default)]
-    label: String,
+    pub(super) label: String,
     #[serde(default)]
-    fields: BTreeMap<String, String>,
+    pub(super) fields: BTreeMap<String, String>,
     #[serde(default)]
-    expires: Option<String>,
+    pub(super) expires: Option<String>,
 }
 
 /// The plain field a kind keeps a page's origin in.
@@ -154,14 +173,26 @@ async fn ask_to_replace(who: &Asking<'_>, entry: &(String, String, &'static str,
 }
 
 /// `POST /api/v1/ui/browser/capture`.
-pub(crate) async fn handle_browser_capture(
+/// `POST /api/v1/ui/browser/capture`: a card the page shows is saved whole, anything else is one value.
+pub(crate) async fn handle_capture(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<CaptureRequest>,
 ) -> Response {
-    let Some(ref_) = req.ref_.clone().filter(|r| !r.trim().is_empty()) else {
-        let what = if req.download { "the button or link that downloads the file" } else { "the element that shows the secret" };
-        return err_response(StatusCode::BAD_REQUEST, format!("capture needs the ref of {what} (from snapshot or find)"));
+    if req.card.is_some() {
+        return super::browser_capture_card::capture_card(state, caller, req).await;
+    }
+    handle_browser_capture(State(state), caller, Json(req)).await
+}
+
+async fn handle_browser_capture(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<CaptureRequest>,
+) -> Response {
+    let (ref_, shape) = match what_to_read(&req) {
+        Ok(r) => r,
+        Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
     let reason = match crate::backend::vault::history::require_reason(req.reason.as_deref()) {
         Ok(r) => r,
@@ -172,6 +203,9 @@ pub(crate) async fn handle_browser_capture(
         Err((code, e)) => return err_response(code, e),
     };
     let agent: String = req.auth.agent_id.chars().take(64).collect();
+    if let Err(e) = begin(shape.as_ref(), &agent) {
+        return err_response(StatusCode::TOO_MANY_REQUESTS, e);
+    }
     let agent_pane = super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth);
     let rule = match rule_of(&req) {
         Ok(r) => r,
@@ -192,41 +226,20 @@ pub(crate) async fn handle_browser_capture(
     };
 
     // Held until the approved click is made, if one waits for the person.
-    let mut _approved_click = None;
-    let read = if req.download {
-        let body = |approved: Option<&Value>| json!({ "block_id": block_id, "ref": ref_, "timeout_ms": req.timeout_ms, "approved_as": approved });
-        match proxy_value(&state, "capture_download", body(None), DOWNLOAD_WAIT).await {
-            Ok(first) => match first.get("needs_approval").cloned() {
-                Some(ask) => {
-                    let log = note(&block_id, &agent, Kind::Capture).target(&ref_);
-                    match approve_click(&state, &block_id, &agent, &ask).await {
-                        Ok((waiting, _)) => {
-                            _approved_click = Some(waiting);
-                            proxy_value(&state, "capture_download", body(Some(&ask)), DOWNLOAD_WAIT).await
-                        }
-                        Err(ClickRefused::NotAsked(code, e)) => return err_response(code, e),
-                        Err(ClickRefused::Asked(how, code, e)) => {
-                            log.how(how.unwrap_or(How::Refused(e.clone()))).record(&state);
-                            return err_response(code, format!("nothing was clicked or saved: {e}"));
-                        }
-                    }
-                }
-                None => Ok(first),
-            },
-            Err(e) => Err(e),
-        }
-    } else {
-        proxy_value(&state, "capture_value", json!({ "block_id": block_id, "ref": ref_ }), HOST_WAIT).await
-    };
-    let read = match read {
-        Ok(v) => v,
-        Err((code, e)) => return err_response(code, e),
+    let (read, _approved_click) = match read_page(&state, &req, &block_id, &agent, (&ref_, shape.as_ref())).await {
+        Ok(r) => r,
+        Err(refused) => return super::browser_capture_read::counted(refused, shape.as_ref(), &agent),
     };
     let file = read.get("name").and_then(Value::as_str).map(|n| n.chars().take(200).collect::<String>());
+    // Text found beside a label has a reference now, which marks it once it is saved.
+    let ref_ = read.get("ref").and_then(Value::as_str).map(str::to_string).unwrap_or(ref_);
     let (value, origin) = match take_read(read) {
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::BAD_GATEWAY, e),
     };
+    if let Err(e) = check_shape(shape.as_ref(), &value, &agent) {
+        return err_response(StatusCode::UNPROCESSABLE_ENTITY, e);
+    }
     if origin.is_empty() {
         return err_response(StatusCode::BAD_REQUEST, "AgentMux can't tell which site this page is, so nothing was saved".into());
     }
@@ -245,8 +258,8 @@ pub(crate) async fn handle_browser_capture(
     // Only now that it is stored is the element marked: a refused capture leaves no
     // mark (one that would keep eval refused on the tab for nothing).
     let mut marked = false;
-    // A downloaded file is on no element to mark.
-    if matches!(stored, Ok(Ok(_))) && !req.download {
+    // A downloaded file, and what a copy button copied, are on no element to mark.
+    if matches!(stored, Ok(Ok(_))) && !req.download && !req.copy {
         match proxy_value(&state, "capture_mark", json!({ "block_id": block_id, "ref": ref_ }), HOST_WAIT).await {
             Ok(_) => marked = true,
             Err((_, e)) => tracing::warn!(error = %e, "[vault] a captured element couldn't be marked"),
@@ -264,8 +277,8 @@ pub(crate) async fn handle_browser_capture(
     }
     match stored {
         Ok(Ok((id, label))) => {
-            let note = if file.is_some() { DOWNLOADED_NOTE } else { captured_note(marked) };
-            let out = json!({ "ok": true, "id": id, "label": label, "captured_from": origin, "file": file, "marked": marked, "note": note });
+            let note = if file.is_some() { DOWNLOADED_NOTE } else if req.copy { COPIED_NOTE } else { captured_note(marked) };
+            let out = json!({ "ok": true, "id": id, "label": label, "captured_from": origin, "file": file, "marked": marked, "copied": req.copy, "note": note });
             (StatusCode::OK, Json(super::vault_ask::with_approval(out, went_ahead))).into_response()
         }
         Ok(Err(e)) => err_response(StatusCode::BAD_REQUEST, format!("nothing was saved: {e}")),
@@ -276,9 +289,12 @@ pub(crate) async fn handle_browser_capture(
 /// What the agent is told once a downloaded file is saved.
 const DOWNLOADED_NOTE: &str = "Saved in the Vault; you never see the file. It was never written to disk: give it to a command with Terminal run's secret_files.";
 
+/// What the agent is told once a value taken from the page's copy button is saved.
+const COPIED_NOTE: &str = "Saved in the Vault; you never see the value. It was taken from the page's own copy action: the system clipboard was never written, and nothing was left on it.";
+
 /// What the agent is told about the page once the value is saved: what keeps
 /// hiding it there depends on whether the element could be marked.
-fn captured_note(marked: bool) -> &'static str {
+pub(super) fn captured_note(marked: bool) -> &'static str {
     if marked {
         "Saved in the Vault; you never see the value. While it is on the page, screenshots black it out and eval is refused on this tab; snapshots keep hiding it while it shows as a secret, and always in a field."
     } else {
@@ -307,7 +323,7 @@ pub(crate) fn store_captured(
             fields.entry(f.to_string()).or_insert_with(|| origin.to_string());
         }
     }
-    let ids = plan.store(store, &[Found { value, printed: None }])?;
+    let ids = plan.store(store, &[Found { value, printed: None, also: Vec::new() }])?;
     let label = match &plan.rules[0].into {
         Target::New { label, .. } | Target::Existing { label, .. } => label.clone(),
     };
@@ -316,7 +332,7 @@ pub(crate) fn store_captured(
 
 /// The value and origin from the host's answer, the value moved out of the JSON
 /// into memory that is wiped when dropped.
-fn take_read(mut v: Value) -> Result<(Zeroizing<String>, String), String> {
+pub(super) fn take_read(mut v: Value) -> Result<(Zeroizing<String>, String), String> {
     let origin = v.get("origin").and_then(Value::as_str).unwrap_or("").to_string();
     match v.get_mut("value").map(Value::take) {
         Some(Value::String(s)) => Ok((Zeroizing::new(s), origin)),

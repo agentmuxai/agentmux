@@ -81,6 +81,8 @@ fn a_graph_this_build_cannot_hold_is_refused_and_says_where() {
     // A node kind a later AgentMux has: named, so the author knows which one.
     refused(json!({ "nodes": [node("loop1", json!({ "kind": "for_each" }))], "edges": [] }), "\"loop1\" is a \"for_each\" node");
     refused(json!({ "nodes": [node("a", json!({ "task": "x" }))], "edges": [] }), "\"a\" is a \"\" node");
+    // A call to another drone: what that drone does could not be shown in the prompt.
+    refused(json!({ "nodes": [node("call", json!({ "kind": "drone", "drone": "other" }))], "edges": [] }), "a template cannot");
     let mut dangling = graph();
     dangling["edges"] = json!([{ "id": "e9", "source": "ask", "target": "nowhere" }]);
     refused(dangling, "\"nowhere\"");
@@ -97,11 +99,12 @@ fn the_prompt_lists_what_the_graph_does_outside_agentmux() {
             node("read", json!({ "kind": "api", "url": "https://example.com/a" })),
             node("post", json!({ "kind": "api", "method": "post", "url": "https://example.com/hook" })),
             node("note", json!({ "kind": "task", "title": "t" })),
+            node("worker", json!({ "kind": "spawn", "leader": "agenty", "brief": "x" })),
         ],
         "edges": []
     });
     let summary = graph::summarize(&parse(&manifest(json!({})), Some(&g), None).unwrap().graph.unwrap());
-    assert_eq!((summary.nodes, summary.agents), (4, 1));
+    assert_eq!((summary.nodes, summary.agents), (5, 2), "a Spawn node starts an agent, so the prompt counts it");
     assert_eq!(summary.writes_outside, vec!["post: POST https://example.com/hook".to_string()], "a plain read and an inside write are not listed");
 }
 
@@ -216,6 +219,7 @@ fn example(id: &str) -> Map<String, Value> {
         "agentmux.scheduled-report" => json!({ "question": "What changed this week?", "owner": "loap" }),
         "agentmux.check-and-file-task" => json!({ "check": "Is the build green?" }),
         "agentmux.two-agent-handoff" => json!({ "first": "Name three colours.", "second": "Sort them.", "owner": "loap" }),
+        "agentmux.after-upgrade-check" => json!({ "leader": "agenty", "steward": "masty" }),
         other => panic!("no example for {other}"),
     };
     v.as_object().cloned().unwrap()
@@ -224,7 +228,7 @@ fn example(id: &str) -> Map<String, Value> {
 #[test]
 fn the_built_in_drone_templates_are_valid_and_render_with_example_parameters() {
     let ids: Vec<&str> = DRONE_BUILTINS.iter().map(|b| b.id).collect();
-    assert_eq!(ids, ["agentmux.scheduled-report", "agentmux.check-and-file-task", "agentmux.two-agent-handoff"]);
+    assert_eq!(ids, ["agentmux.scheduled-report", "agentmux.check-and-file-task", "agentmux.two-agent-handoff", "agentmux.after-upgrade-check"]);
     for b in DRONE_BUILTINS {
         let pkg = package::load_embedded(b.id, b.files).unwrap_or_else(|e| panic!("{}: {e}", b.id));
         assert_eq!(pkg.manifest.kind, manifest::JobTemplateKind::Drone, "{}", b.id);
@@ -240,6 +244,8 @@ fn the_built_in_drone_templates_are_valid_and_render_with_example_parameters() {
                 "message" => &["to", "body"],
                 "condition" => &["expr"],
                 "task" => &["title"],
+                "app_query" => &["query"],
+                "notify" => &["title"],
                 other => panic!("{}: node {} is a {other} node", b.id, node.id),
             };
             for key in needs {
@@ -284,4 +290,26 @@ fn the_service_lists_the_built_in_drone_templates_for_approval_beside_the_job_on
         assert_eq!((info.state, info.source, info.error.clone()), (JobTemplateState::NeedsApproval, JobTemplateSource::Builtin, None));
         assert!(info.drone.is_some());
     }
+}
+
+#[test]
+fn the_after_upgrade_check_tells_the_leader_when_all_is_up_and_files_a_task_when_not() {
+    let b = DRONE_BUILTINS.iter().find(|b| b.id == "agentmux.after-upgrade-check").unwrap();
+    let pkg = package::load_embedded(b.id, b.files).unwrap();
+    let g = graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &example(b.id)).unwrap();
+
+    // It starts on an upgrade only, after the agents have had time to come back, and the filter is one the app events accept.
+    let t = pkg.manifest.trigger.clone().unwrap();
+    assert_eq!((t["kind"].clone(), t["source"].clone(), t["delay"].clone()), (json!("event"), json!("app_event"), json!(5)));
+    crate::backend::jobs::app_events::validate_filter(t["filter"].as_object().unwrap()).unwrap();
+    assert_eq!(t["filter"]["upgraded"], json!(true), "a plain restart starts nothing");
+
+    // The branches: all well tells the leader and nothing else; not well files the task, then notifies.
+    let to = |from: &str, handle: Option<&str>| g.edges.iter().filter(|e| e.source == from && e.source_handle.as_deref() == handle).map(|e| e.target.clone()).collect::<Vec<_>>();
+    assert_eq!(to("healthy", Some("true")), ["allclear"]);
+    assert_eq!(to("healthy", Some("false")), ["file"]);
+    assert_eq!(to("file", None), ["alert"]);
+    assert!(to("allclear", None).is_empty());
+    let data = |id: &str| g.nodes.iter().find(|n| n.id == id).unwrap().data.clone();
+    assert_eq!((data("allclear")["to"].clone(), data("file")["target"].clone()), (json!("agenty"), json!("masty")), "the parameters land where the messages go");
 }

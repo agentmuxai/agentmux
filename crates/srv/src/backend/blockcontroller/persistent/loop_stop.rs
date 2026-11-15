@@ -14,6 +14,19 @@ pub(super) fn interrupt_turn(inner: &Mutex<PersistentInner>) -> bool {
     tx.is_some_and(|tx| tx.try_send(interrupt_control_request_line()).is_ok())
 }
 
+/// The same, for the turn of one process: the interrupt goes out only if that process is still the current one. A
+/// replaced process's reader still sees frames for a moment, and `stdin_tx` already belongs to its successor.
+fn interrupt_turn_of(inner: &Mutex<PersistentInner>, generation: u64) -> bool {
+    let tx = {
+        let g = inner.lock().unwrap();
+        if g.spawn_generation != generation {
+            return false;
+        }
+        g.stdin_tx.clone()
+    };
+    tx.is_some_and(|tx| tx.try_send(interrupt_control_request_line()).is_ok())
+}
+
 /// The turns the spend cap ended, by block, and when: the interrupted turn's `is_error` result is the end that was asked
 /// for, not a failure, and the reader must not read it as one.
 fn cap_ends() -> &'static Mutex<std::collections::HashMap<String, std::time::Instant>> {
@@ -45,12 +58,25 @@ pub(in super::super) fn take_cap_end(block_id: &str) -> bool {
 }
 
 /// End the turn for `stuck`. The interrupt's `error_during_execution` result is the end we asked for, which
-/// the reader must not read as a failure. `false` when the interrupt could not be sent (the process is gone or its
-/// stdin is full), in which case nobody is told: the turn did not end.
-pub(super) fn end_the_turn(inner: &Mutex<PersistentInner>, block_id: &str, mstore: Option<&Arc<Store>>, stuck: &Stuck) -> bool {
-    if !interrupt_turn(inner) {
-        return false;
+/// the reader must not read as a failure. What the agent was stuck doing when the turn ended; `None` when the
+/// interrupt could not be sent (the process is gone or its stdin is full, or `generation` is no longer the current
+/// process), in which case nobody is told: the turn did not end.
+pub(in super::super) fn end_the_turn(inner: &Mutex<PersistentInner>, generation: u64, block_id: &str, mstore: Option<&Arc<Store>>, stuck: &Stuck) -> Option<String> {
+    if !interrupt_turn_of(inner, generation) {
+        return None;
     }
     crate::backend::blockcontroller::loop_stop::after_ending(block_id, mstore, stuck);
-    true
+    Some(stuck.describe())
+}
+
+/// Why a turn the spend cap ended stopped, as the transcript says it.
+pub(in super::super) const CAP_ENDED: &str = "the model route's daily spend cap was used";
+
+/// `line`, the `result` frame of a turn we ended, with our reason as its text: the CLI's own words for an interrupt
+/// are a generic "Agent encountered an error". The frame stays an error result, so the pane shows it as the turn's end.
+pub(in super::super) fn plain_end_frame(line: &str, why: &str) -> String {
+    let Ok(mut frame) = serde_json::from_str::<serde_json::Value>(line) else { return line.to_string() };
+    let Some(obj) = frame.as_object_mut() else { return line.to_string() };
+    obj.insert("result".to_string(), serde_json::Value::String(format!("Stopped by AgentMux: {why}.")));
+    frame.to_string()
 }

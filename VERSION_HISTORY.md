@@ -1,5 +1,289 @@
 # AgentMux Version History
 
+## 0.60.29 — 2026-11-15
+
+- A Drone run can be cancelled, which stops its Agent block's process, and a block can have its own timeout; a drone job can use a timeout and cancel_other
+- A drone block can retry infrastructure failures, route a failure down an error edge, and a run announces each loop pass and each limit it meets
+- An event-triggered job starts at most max_per_hour runs in any hour (default 30): the events beyond it are one collapsed skipped row with reason rate, and the first raises the usual alert.
+- Compact in the narrow composer strip has its own icon (four arrows in to a dot) instead of the size glyph the tool panel uses.
+- Auto-approve lasts what was asked for or less, a Save or Update click asks in or out of a form, a click answer says when no approval was asked, and the Save prompt marks values the page already had
+- Pane rename takes target "file": an agent renames a file or folder in its folder and every Editor tab open on it follows (spec: docs/specs/SPEC_EDITOR_TAB_RENAME_2026_11_14.md, section 14)
+- A drone job can start when AgentMux reports an agent's turn ended or an agent failed (the app_event trigger)
+- Browser generate_password on a password-change form: asks the person every time, keeps the new password beside the saved one until the form is sent, and the old one 7 days
+- A drone job can start when files in a folder change (the file_watch trigger): one run per burst of changes, names only
+- Editor: a hex viewer for any file (offset, bytes and text, go to offset, selection and copy, data inspector), Show As on a tab's menu, and srv serves parts of files past 500 MB
+- A file_watch test no longer expects two folders made in the same clock tick to differ on Windows
+- Drone jobs can start from a local script: a webhook_local trigger runs on a POST to this computer's own address, checked by a secret, and the run reads the JSON body
+- Drone jobs can start when AgentMux starts: an app_event on app.started, with upgraded and the version it came from, so a health check can run after an upgrade
+- A file_watch trigger on Windows notices a folder that was removed and made again at once, by its file id and not its creation time
+- A release tag is built only when the push run of CI on main for its own commit has finished green
+- A Drone template checks the machine after an upgrade: agents running, MuxBus connected, LAN peers answering, then one line to the leader or a task for the steward; the App query block can list all agents
+- Vault: choosing another Vault key for a setting takes the setting off the key it used before, and the Vault's history says so
+- A window whose tab display stops no longer stays blank: the display check repairs it and offers Reload Window, errors in a window-focus handler no longer stop the screen from updating, Reload Window is in the menu and the command palette, and an agent pane that has not started says so with a Reload button
+- The specs index groups by area, shows each spec's status and what replaces it, and lists the history and compaction specs under their areas
+- A job can poll AgentMux's own state: a poll trigger asks the tasks, jobs, agents or LAN peers question every so often and starts one run for each new item.
+- A job can be a dead man's switch: an expect trigger starts a run when a watched job has had no good run within a set time.
+- A poll trigger's first look claims its marker and the items already there in one step, so a crash or a second instance cannot start runs for them.
+- fix(srv): one panic under the message handler's lock no longer stops all agent messaging until a restart; the build-slot idle note is delivered inside the runtime
+- A notification bubble is no longer drawn behind a native browser pane: the toast stack cuts a hole in the pane like a menu does
+- The status panel's channel row is labelled Channel again (it read Data in); the build kind stays
+- A pasted, dropped or picked attachment in the agent composer now always shows its remove (x) button, not only while the mouse is over its tile.
+- The command palette's search row is balanced: the magnifier has the same room on its left as ESC has on its right.
+- Browser capture can save text that has no ref of its own: by the label beside it (near), with a prefix or pattern guard, or from the page's own copy button without the system clipboard; a revealed secret in a secret row is listed as unread with a ref; unnamed icon buttons get a hint from their tooltip or icon
+- Drone runs keep a checkpoint after every block, so a run's state is stored step by step (first step towards resuming a run after a restart)
+- An expect trigger finds a watched job's last good run even behind many newer failed runs, and a gap that lasts past a week does not start a second run.
+- The hex viewer shows full rows again when a file gets shorter while scrolled to its end, and leaves a sideways swipe to the browser in a large file
+- A Drone run notes in its checkpoint that a step with effects is running, so a restart can tell it may already have acted
+- feat(srv): srv counts its own panics and the app shows a storm (status bar dot and notice, a note to agents); /health and app.health report the messaging path as ok or degraded
+- The status bar's backend dot turns amber or red, with a notice, when srv is panicking repeatedly (it can leave agents unable to hear each other)
+- A Drone run left running when AgentMux restarts goes on from its last checkpoint instead of being marked interrupted
+- srv: a panic storm while the message handler's lock is stuck no longer stops the panic reports (the note to the agents is delivered on a thread of its own)
+- The status bar's srv panics warning clears when the backend restarts, instead of staying until AgentMux is restarted
+- A Drone run stopped inside a step with effects waits for an answer: run the step again, skip it with an output, or cancel the run
+- Drone: an API request that times out is no longer retried, and a loop left at its limit no longer takes its guard's error edge
+- Drone: the cost a person or agent supplies when skipping an interrupted step counts against the run's cap
+- Drone: a Wait block stops a run for a time or for an event, keeps where it waits, and goes on after a restart
+- Drone: a Wait block's own time limit is kept across a restart instead of starting over
+- Drone: a Drone block calls another drone as a step, on the caller's remaining budget
+- Drone: an event wait whose limit already passed fails before it opens its key again
+- Drone: a Join block brings branches back together (all, any, n of m), and can leave a failed branch out
+- Drone: branches that are ready together run together, up to four at once with one agent at a time, and a restart asks about each block that was running
+
+## 0.60.28 — 2026-11-14
+
+- Kanban: pick, create and manage several boards from the pane, move a task to another board, and copy a task's full ref
+- the release builds the AgentMux server package: a tarball per platform for Linux and macOS, x64 and arm64
+- Comment density Phase 1: condense most of the second half of server/reactive.rs (code unchanged)
+- Importing a Chrome or Google Password Manager export makes its logins usable in the browser: each site becomes an exact origin, you pick the browser profile, and the logins go to that profile's sign-in Vault
+- Drone Condition: tests pin that a {{reference | filter}} reads its filters in the expression and simple forms
+- Comment density Phase 1: condense the schema version history comments in storage/migrations.rs, second part (code unchanged)
+- Core tests: route_credits and worker_notes tests run commands through the core fixture's reducer state instead of server::AppState, and the worker-of content type comes from backend::agent_seat (prep for the srv-core split)
+- Internal: the transcript tail reader moves from the server to backend::transcript::tail so the modules below the server can use it (prep for the srv-core split)
+- Update the HTTP client (reqwest) from 0.12 to 0.13: outbound HTTPS now checks server certificates against the operating system's trusted roots instead of a bundled list, on the same ring crypto
+- Comment density Phase 1: condense the last comments in swarm-model.ts (code unchanged)
+- srv: the identity and ambient code reach the sign-in hook, the CLI locator and the auth-dir helper through the core, not the server layer
+- Browser address bar: the completion shown after what you type stays highlighted while you type its next letters, instead of blinking off and on at every key
+- task dev's Vite file watcher skips every directory it never serves (crates, docs, any target-<name> build dir) instead of holding a handle per file in them
+- Skill cards and details show the installed version of the app and flag drift from the version the skill was last tested on
+- Atlas: select agents on the map (Shift and drag a box, or the Select toggle) and Broadcast, Stop or set the Supervisor mode on them, with the Swarm's own confirmation and results
+- srv: the agent message route and the headless start flag live in the core, so the supervisor and the build cache cleaner no longer reach into the startup code
+- the .deb and .rpm require ca-certificates, and agentmux doctor says plainly when a Linux machine has no system certificates
+- Atlas: a message between two agents draws a line from its sender to its receiver as it happens, and a task one agent hands another a dotted, numbered line
+- Internal: the container listener's router tests and the Docker listener and turn checks move from backend::container to the server's tests, since they build the whole router (prep for the srv-core split)
+- muxspect instances lists the AgentMux instances running on this machine, and muxspect --channel <name> reads another one's list, describe, dock, layout and verify-sender
+- srv: the held-jekt request, the session snapshot and two RPC request types live in the core, and the route-table tests live in the server layer
+- scripts/release.sh reads every pending changeset in one awk process instead of two per file, so a release with 150 changesets no longer spends minutes starting processes on Windows (output unchanged, pinned by a new byte-for-byte test)
+- Run test on an installed computer-use skill files its test task for an agent you pick
+- Comment density Phase 1: condense the last comments in server/reactive.rs (code unchanged)
+- Internal: the Tower viewer-pairing test and the move-here tests move to the server's tests, with test-only helpers on the persistent controller and the peers module (prep for the srv-core split)
+- Comment density: move the storage schema version history out of migrations.rs into docs/architecture/STORAGE_SCHEMA_VERSION_HISTORY.md (code unchanged)
+- Host: the browser pane label format is read and written in one place (no change in behaviour)
+- The Vault imports Proton Pass (zip, JSON, CSV), Enpass (JSON, CSV) and Sticky Password (XML) exports
+- A computer-use skill's reference crops are checked against the installed app version, not only the last test
+- Comment density: move the reasoning behind agent-pane-state fields, commands and events out of types.ts into docs/architecture/AGENT_PANE_STATE_NOTES.md (code unchanged)
+- Atlas: an agent's card shows host or container, its branch, the tasks it holds with their pull requests, and for an agent on another machine its account and who else is on it
+- srv: the relay delivery and controller teardown tests get plain stand-in hooks defined in the core, not the server layer's
+- Tests: the page's new-password rules and the agent's signup probe are run on the same forms and must agree
+- Memory > Skills: a computer-use skill's detail can show each reference crop image
+- A pane dropped on, or opened in, a tab whose panes are all minimized now arrives expanded there; before, the drop was refused and the pane went back
+- Agents and the other instances' agents now say whether they run on the host or in a container (the Atlas map and the Swarm read it)
+- Internal: a release builds the server package only for Linux x64, Linux arm64 and macOS arm64, so it never waits on a scarce runner; the Linux build runs under the memory guard, the no-certificates check pulls from Amazon's public mirror by digest, and the programs carry a build time stamp
+- Vault: an agent's new account can be allowed with Always for that agent on that site, kept in Settings > Browser with Revoke
+- Atlas: two task numbers that would land on the same spot (two tasks handed to one agent, or a task and one handed back) now sit next to each other instead of one hiding the other
+- Release builds no longer restore or save a build cache; they use their own
+- Atlas: reviews, check results and merges of agents' PRs arrive as review-flow, checks-flow and merge-flow events and GET /api/v1/pr-flow (ids, states and times only)
+- Swarm: in a narrow pane a row no longer pushes its Supervisor button past the pane's edge when the status chip is long (a question, with its seconds); the context size, then the name, give way first
+- A late notice (SIG=expired) reads 'signature expired (arrived late)' in muted tone on the Needs-you card and the message tags, not 'Sender not proven'
+- Memory > Skills: a skill card's facts wrap instead of cutting off the installed version
+- Hand-started builds build main's history only, as the macOS build already does
+- This machine's agent containers and the container runtime's state reach the frontend: a container-status and a container-runtime event, and GET /api/v1/containers (names and states only)
+- Atlas: a review, CI or merge notice may carry a short list of flow objects, so a ready-to-merge notice shows both the approval and the passing checks
+- Swarm: a seat badge sits right after the agent's name, and a wide row's parts give way so its Supervisor button stays inside the pane
+- The release is uploaded as a draft and published in one step
+- srv: the server's core is its own library target, so the core's tests and the server layer's tests are compiled apart (no behaviour change)
+- A resumed agent is told truthfully that a tool it loaded before an upgrade keeps its old description until a new session (loading it again returns the old one), instead of being told to load it again
+- Swarm: a seat badge with too little room is cut with an ellipsis, then not shown at all, never as a stub that costs the status word its room
+- The Swarm lists the account's other machines that are not on this network as a cloud tier (read from the relay, verified, display only), and Presence who reports their agents' states
+- The updater's install-kind test no longer fails on a host whose umask makes new folders group-writable
+- Release builds print a phase table and a memory line
+- CI: a shipped build never has the test-only feature (a check on the build commands, a check on the resolved features, and a release build with it on does not compile)
+- Pane header: focusing a pane or working in it brings its active tab back into view after the header was scrolled away, and a revealed tab no longer lands under the edge fade
+- Atlas: a container agent has its container as a frame round it, the review bot and CI are nodes with a line to each agent whose pull request they worked on, and the account's other machines are marked as the cloud tier
+- A LAN peer's advertised WAN instance id tells apart two machines with one name and channel in the Swarm's cloud tier
+- Fix: the server and the MCP server no longer crash at start on a Linux machine with no system certificates; https requests fail with a message that says to install ca-certificates
+- Browser hand-off: the answer, handoff_status and the pane Log say how long the banner was up and who answered, and a Done within 5 seconds tells the agent to check the page really changed
+- The status bar's last-sound click now pages back to the sound's row when 50 or more entries were written since it
+- Tasks: an edit that names who a task is for is refused, a refused claim by id says where its target stands and how to go on, and the list says who a task is for and who holds it
+- Browser snapshot: the text of a label that no field is named by (a sentence beside a Yes, update button) is shown, not hidden
+- Jobs can now be triggered by events: a job definition accepts an event trigger (source and filter), and a firing event starts the job's drone run once per event id through the normal admission checks.
+- Browser: a click on a brand or plan with Pay in its name (Kakao Pay, Apple Pay, Pay-as-you-go) no longer asks as a payment; a real payment under auto-approve says why it asks
+- Files: renaming on an SSH host can no longer replace a file made at the new name at the same moment; the rename itself now refuses a taken name
+- Browser key: the answer says when a custom list closed or took an option, instead of reporting that the focused field did not change
+- Editor: double-click a document tab to rename its file in place (also F2 and the tab's menu); an untitled document is saved under the typed name. Every Editor tab on a renamed file follows, in any pane or window. Spec: docs/specs/SPEC_EDITOR_TAB_RENAME_2026_11_14.md
+- Internal: the HTTP client's certificate tests run on Linux only, where the SSL_CERT_FILE variable names the certificates
+- An event-triggered job can carry a delay of up to a week: its run waits as a scheduled row and starts when due, and an event's data is now kept with its run, so a delay, a wait for its turn or a restart does not lose it.
+- Voice input reads its Groq key from a Vault entry instead of plain text in settings.json; a key already there moves into the Vault
+- Test: the agent pane's first-screen history tests run on fake timers, so a loaded CI runner can no longer time them out
+- Browser snapshot no longer repeats a label's text when the label wraps a field that has a value
+- Browser reads never return secret-shaped or secret-labelled hidden text; capture saves it
+- Status bar: the Kanban's Needs-you tasks show in the waiting count and as a row in the list of what waits on you
+- Test: the composer strip's compact-form choice counts the anchor row's own wrap
+- The Messages panel's unread count now also shows on the pane's Swarm row and its tab, and a message in the panel has an Open in Audit link that opens the Audit at its row.
+- Vault import from AWS no longer fails on Windows when a secret's fields hold characters outside the console code page
+
+## 0.60.27 — 2026-11-13
+
+- ci(release): the winget job opens the AgentMux.AI version-bump PR in winget-pkgs per release, off until WINGET_SUBMIT_ENABLED is set
+- A registry lookup keeps refusing two launches of one template as a collision (#46578)
+- The add-account form's Name and Display name hints now follow the chosen provider instead of staying GitHub's
+- fix(drone): save a numbered graph version on every drone save
+- A template package can carry a Drone graph (graph.json): the graph is checked when read, and the approval prompt gets a summary of it
+- A Drone template can be made into a drone (jobs.templates.make_drone), and a job made from one runs that drone
+- Drone module B: run state reducers and checkpoint diff encoding
+- AgentMux ships three Drone templates: a scheduled report, a check that files a task only on a problem, and a two-agent hand-off
+- Claude sign-in: a pasted code no longer hangs up the login helper before it can finish, and a sign-in that ended says so instead of reporting a timeout
+- A container agent's gh command is read after a leading -R/--repo, so gh -R owner/repo pr merge, release and api commands take the same container steps and text check as without it
+- A container agent's push sends the remote ref it updates and whether the push creates it, so the host's guard also checks the name of a new branch or tag
+- Drone: write the Transform evaluator (module A)
+- A container agent's gh merge reads the whole repository named with -R, --repo or GH_REPO and takes only OWNER/REPO or github.com/OWNER/REPO, and the attached -Ro/r form names the repository for the token and owner-tag steps
+- The macOS packaging test follows srv's helper-app signing step again
+- Linux: after an in-app upgrade of a local-build channel the AppImage registers its desktop entry under the recorded channel, so the taskbar shows the AgentMux icon instead of the generic cog
+- A drone's Notify block tells the operator with an OS notification: a fixed title and a text whose outside values are quoted
+- Dragging a single pane tab over another pane's body now reflows the layout live, as dragging a whole pane does, and the tab lands where it was shown
+- A guard test keeps every pane view under the one Suspense boundary that leaves it in place while a read is pending
+- Splitting the agent-CLI install task into named steps and testing it against a fake npm changes nothing a user sees
+- dev-seed prints its usage for --help and -h and refuses an unknown option, instead of seeding an agent
+- The dev-seed home guard refuses a home it cannot resolve, and falls back to the JS realpath before it, so a Windows junction alias of the real data folder is not let through
+- A floating pane's edge-resize cursor no longer restyles the whole document when the pointer crosses the edge band
+- Connectors' GitHub section says this computer's gh-agent gives agents their GitHub identity when it does, instead of a note under every status
+- A registry lookup keeps refusing two launches of one template as a collision
+- The network popover keeps its header and MuxBus section on a short window: it fits the window and the LAN peer list scrolls inside it
+- A headless srv that serves its own UI signs a browser in on loopback: agentmux-srv open mints a one-time code, shows a check phrase and asks the person to confirm it before the session goes live
+- The MCP config ownership check follows symlinks and junctions before it collapses .. in a working directory, so a project reached through link/.. is not read as AgentMux's own folder
+- i18n: the Keyboard, Notifications, Sounds and Recording settings and the Advanced placeholder read from the dictionary
+- Dragging the Editor's tree divider in a narrow pane starts from the width the column is drawn at, so the divider follows the pointer
+- A drone's App query block reads AgentMux's own state: MuxBus delivery, one agent's availability, and Kanban tasks by holder, state and PR link
+- The overlap note when you open a PR no longer names agents whose branch is already merged, and ignores the changesets a release PR deletes
+- App logs: a contains text keeps its spaces, so " store " no longer matches "storefront", and a text of only spaces is a real filter
+- A pane that is fading in keeps fading when another pane opens, closes or is swapped during its fade, instead of disappearing and fading in again
+- Settings > Advanced has a field for the model route's daily spend cap, and the stop card says where to raise it
+- i18n: the history usage popover, the history search in the composer and the AgentMux connect panel read from the dictionary
+- The agent view keeps the topmost visible row, or the hidden-rows line that now holds it, in place when you change what the pane shows
+- Drone module B follow-ups: exact mixed-sign sums, declaration cap, diff round-trip guard and step ceiling
+- An agent stopped at its route cap that leaves the route and returns the same day gets its stop card again
+- Splitting the MuxBus sign-in token loader into named steps, with tests first, changes nothing a user sees
+- fix(drone): serialize drone version saves and the definition write
+- A failed title-recovery call waits its back-off from when the call ends, not from when it started
+- A Drone Condition splits its expression at the operator it was written with, so a reply or field that holds == or < can no longer change what is compared
+- The spend cap ends an agent's turn with the harness's interrupt, so its process stays up, instead of killing it
+- The container push guard reads an annotated tag's message by what is pushed, whatever the ref is called, including a tag wrapped in tags
+- Hardening: a Windows srv started with a bare environment gives itself and its children a SystemDrive, so the shell no longer has a literal %SystemDrive% folder to make (#2524, not yet reproduced)
+- Vault cards: a card field in a payment provider's frame (Stripe, Braintree, Adyen) is filled in the frames of that provider, asked about and granted as that frame on that page, and typed key by key when the field ignores a set value
+- Tasks: an update or submit without an attempt on a task that was asked about is told the attempt it holds
+- A Claude sign-in's PTY writer is put back only while its own login is still the current one
+- Browser: a click on a page that is not being shown (a minimized or covered window) no longer answers "done" when nothing was clicked; a click the page never receives is reported as not delivered
+- Compact, then switch: the switch is cancelled when its compaction fails or is interrupted, instead of waiting for any later compaction
+- Archiving or clearing an agent's conversation now forgets its cached image count, so a new conversation in the same zone is counted from its top
+- A Drone can loop: a cycle must pass through a Condition, which limits it by iterations, cost and time, and a run now goes block by block through a step scheduler
+- Two drones that each have a Task block with the same node id, target and dedupe key no longer share one open task
+- A drone's Message block sends the way an ordinary message does: to an agent in another instance, over the LAN or the relay, or held for an agent that is out of quota or not running, instead of failing the run
+- Splitting the stale-resume state machine's update into one function per event, with its whole transition table tested first, changes nothing a user sees
+- CI: the Ubuntu test step's watchdog also ends the step when the runner is out of memory with swap to spare, and the merge queue's tests are killed after 2 minutes
+- The container push guard refuses a push whose object is not a commit
+- Tasks release takes handback: a task outside your area goes back to the pool with no attempt used, is never parked as failed, and an unnamed claim won't offer it to you again
+- A drone's Spawn block starts a worker of an agent with a brief, through the same path an agent's own spawn takes
+- i18n: the History pane's Storage tab reads from the dictionary
+- A terminal that prints without end no longer lets the store's write-ahead log grow on a slow disk: the writer's own checkpoint waits for the background one instead of being skipped
+- The Drone pane's node types and buttons no longer clip in a thin pane: they get their own rows and the types collapse to icons
+- Message-flow event and recent list: srv reports which agent messaged which (ids and times only) for the Atlas map
+- The loop guard's interrupt goes only to the process whose reader saw the loop, so a replaced process can no longer interrupt its successor's turn
+- A browser the person signed in to a headless srv can close an agent pane: it counts as their window for the window-only actions, until it registers as an agent
+- agentmux-srv open proves it holds the key to a headless srv, and the srv proves itself to open at its own address, before open sends anything; the key is never sent, and open finds the web port beside the key file
+- Split the stale-subagent reconcile pass into named steps, with its outcomes pinned by tests first (no behaviour change)
+- A drone's App query block can read the LAN peers and the recent runs of a job
+- A Drone can keep state with reducers (append, merge, add), shape lists with a Transform block, run a block once per item with a for-each, and a graph where two parallel branches replace one variable is refused
+- Dragging a pane over a tab with a browser page no longer shows the page for a moment on top of the moving panes: the layout waits until the page is really hidden, not for two frames
+- A signed notice that waited at the relay for a host that was off is no longer read as forged, and a signed message is accepted once
+- On macOS and Linux a browser pane now moves with the other panes while a pane is dragged, and a dragged browser pane shows its TEAR OFF sign as soon as its page is out of the way
+- Vault cards: a command's output can be captured into a whole card (number, expiry, security code, name, ZIP) or into the expiry of a card that exists, and the output is cleaned of every part
+- New Atlas pane: every agent on every machine as a map, by machine or by seat, with lines from each lead to its reports
+- CI: the merge queue's Ubuntu test job is ended after 28 minutes, not 50, so a stalled one holds the queue for 33 minutes at most
+- A turn the loop guard or the spend cap ended now shows why it stopped in the transcript, instead of a generic agent error
+- A model route agent whose context stays more than 1.5 times its compaction budget is sent /compact between turns, and its pane and leader are told if two tries do not bring it down
+- Task-flow event and recent list: srv reports tasks filed, reassigned, started and handed back (names and numbers only) for the Atlas map
+- Every close or dismiss control is one kit CloseButton that turns red on hover, press and keyboard focus, in the pane header, tabs, panels, banners, lightboxes and dialogs; a repo check keeps a hand-built close control from coming back
+- A pane's dialog backdrop fades out when it closes instead of vanishing in one frame, so the conversation behind a sign-in panel no longer flashes bright when the agent moves to the new account
+- Move the agent shutdown event types and the reason cleaner into the srv core, the first step of splitting the srv crate (no behaviour change)
+- The headless web UI's served policy allows the code highlighter's WebAssembly engine (and nothing else of the kind) and base addresses on its own origin; index.html's two inline scripts are a file; a session also ends a week after it was confirmed; a signed-in browser can sign itself out (command palette: Sign Out of This Browser)
+- A click on a system-info chart (CPU, memory, disk, network) now gives its pane focus; uPlot was swallowing it
+- The detail line under a session divider (Session continued, reconstructed context) and the day chip in history read in every theme: they use the secondary text colour instead of a white wash that was invisible on light themes
+- Voice input: clicking the mic with no transcription engine set up now says so in the pane, with a button to Settings > Recording, instead of turning red and doing nothing; while it listens, the mic shows how loud it hears you, and srv logs once when voice is asked for with no engine.
+- A message to a running pane no longer takes a model change's trial from the pane that relaunched on the new model
+- Windows: the input-watch no longer warns that keys "went to the app" for every key typed with an overlay pane selected, and the log shows which view Views gives the focus when a pane page takes it or a click lands
+- Browser: a click that starts a navigation answers, and wakes a waiting agent, with the page it landed on, not the page it left; the MCP says the signing key is still being fetched in the first seconds after it starts
+- The New agent form defaults to a container when nobody chose, following the agents:defaultruntime setting like spawns do
+- Internal: the drone types and the drone store move into the storage layer, as step 2 of splitting the srv crate
+- Vault cards: Browser capture can save a card a page shows (a virtual card, a bank's show card details) as one new card entry, each part read from its own element and never returned
+- The status bar keeps the token count's red dot, which says AgentMux's own model calls are failing, at the narrowest fit tiers: the counts go first and the dot is left
+- The Memory pane's token strip toggles end a too-long option in an ellipsis in a narrow pane
+- Internal: the jekt seal and the arrival check move into the backend layer, as step 3 of splitting the srv crate
+- agentmux, a command that runs and manages the AgentMux server on the headless channel (start, stop, status, open, logout, logs), and agentmux-srv logout
+- A Swarm agent row in a very narrow pane shrinks its name and end chips instead of overflowing, and its summary line stays on one line
+- A pane dragged over a browser pane on Linux gets its landing zones: a hole that covers the whole page now hides the pane instead of leaving a one-pixel strip that kept the page as the drag target
+- agentmux setup, doctor and a systemd or launchd user service, so the AgentMux server can start at login
+- Tests: the muxbus wan_lease holder tests no longer fail on a machine whose host name is the literal they used (#2550)
+- A signed notice whose genuine signature failed only the age rules now reads SIG=expired, not SIG=invalid; it keeps TIER=sensitive and the stop
+- The build slot keeps the order in which waiters arrived on a slow machine: a waiter whose process is alive is no longer dropped from the line for being slow to touch its ticket, and a ticket removed by mistake is written again in its place
+- Tasks list and the Kanban drawer no longer show a claimed task's earlier hand-back reason (agent stopped, agent quit) as if its running holder stopped
+- Internal: the relay's delivery path reaches the server's holds and file steps through a hook registered at startup, as step 4 of splitting the srv crate
+- A request an agent takes back records who ended it in the same step that settles it, so a person's Cancel is never read as the agent's own
+- The composer strip's account never shows a shorter form in a wider strip: once collapsed it takes the widest address form that collapsing the view chip makes room for
+- Vault cards: when no card is saved, an agent can ask the person to type one (Browser request_value, kind card): the approval question shows a card form, fills every card field of the page, and keeps the card only if the person says so
+- The close-button check also covers .ts files, more icon names and glyphs, controls labelled Close or Dismiss, and a stylesheet overriding the red hover, and widgets get an am-close button class that goes red on hover
+- Tests: a chip redocked to another tab, run through the whole redock on one app state, stays a chip, arrives expanded in an empty tab, and takes the pane's state when dropped as its tab
+- The agent pane's Activity Dock shows a background task with no process id that nothing has confirmed for two hours as unknown instead of running, and it no longer keeps the pane's progress ring in its background-work state
+- AgentMux ends a background task that nothing reports on any more: one whose process has gone, or one with no process id that nothing has seen for a day, now shows as stopped instead of running forever
+- The restart splash shows why a stage warned or failed under its row on Windows, macOS and Linux, and the Window paint row's final time covers the whole wait
+- Comment density Phase 1: condense the comments in the first half of server/reactive.rs (code unchanged)
+- Swarm: an agent that ended its turn with a Browser request still open (a click to allow, a hand-off) shows as waiting for you, in its Swarm row, the status bar's count and the list of who waits, which points at the Browser pane where you answer
+- srv writes one rate-limited WARN line for an incoming LAN request that is refused, hangs or times out, naming where it stopped, and App health counts them
+- Browser panes on Windows are child-window panes again by default, as before 0.60.26 (AGENTMUX_PANE_BACKEND=views selects the overlay panes); a page may trail the window border for a frame during a resize again
+- The attachment tile's remove button sits inside the tile's corner (it was cut to a quarter circle) and now goes red on hover and press like the other close buttons; a stale comment in the activity row styles is fixed (#47571)
+- A drone's Agent block can declare the few short fields its reply must carry, and the next block reads them as fields instead of prose
+- Internal: four more copies of the SHA-256 hex helper in agentmux-srv now call the one in memory::record (same output)
+- A build-slot holder whose process tree has used no CPU for 10 minutes shows in build-slot status as idle and its agent is told once
+- Internal: the events that put a countdown or question in front of the person, and a drone run's event stream, move down into backend/ so the core no longer names the sagas or the drone layer for them; wire shape unchanged
+- Internal: three hand-written double animation-frame waits (search reveal, tab reveal, spring-loaded tab switch) call one afterTwoFrames helper
+- Browser pane: a page's location request is refused at once instead of timing out; Linux: Copy Link Address works without a clipboard tool or says it can't, and a pane placed at a display scale above 1 sits where it should
+- Browse shows whether each skill's app is on this computer and which version, against the version it was tested on
+- AgentMux ends a background task's row as soon as its command exits, with the real exit code, even when no agent pane is open
+- Drone Condition blocks accept && || ! grouping, contains, matches, in_set and exists, reading each reference as a typed value
+- An agent can make the password for an account it signs up for: the Vault makes it, keeps it, and types it, after the person says yes
+- Drone templates take filters on any reference: {{a.log | tail:20}}, head, json:path, lower, trunc, default
+- Comment density Phase 1: condense the comments in the first part of the Swarm view model (code unchanged)
+- The New activity pill in the agent pane keeps an opaque fill on hover, so the transcript text no longer shows through it (#47581)
+- Comment density Phase 1: condense the comments in the first part of the agent pane state types (code unchanged)
+- Help: tips for the Files column edge, the Memory editor divider, and the Atlas and Drone canvases
+- A dev launcher or host started by hand without an isolated data home now refuses with one line instead of running on your real AgentMux home
+- A background task's process id now reaches AgentMux even when the agent's pane is closed or parked, so a task that stops without telling anyone is noticed and ended sooner
+- Split pane.open's metadata builder into one helper per view, with tests pinning each view's keys (no behaviour change)
+- CI: the Linux test build uses two LLVM threads, and the memory sampler reads /proc without starting processes
+- CI: the Linux test build runs in a cgroup with a memory ceiling so a runaway compile cannot freeze the runner
+- Windows overlay browser panes: a click in a pane's page selects the pane and gives it the keyboard (docs/reports/REPORT_BROWSER_PANE_TYPING_REGRESSION_RCA_2026_11_14.md)
+- npm and npx builds queue for the build slot only in a Rust tree: a site-style repo's build runs at once and is noted in the slot's unqueued.log
+- Browser panes: every pane open and navigation logs one [pane-open] line with its phases (queue, create, engine, load), so a slow open shows which part was slow
+- A source-tree (task dev) build no longer freezes for seconds at every page load in a browser pane, and the host log now warns when its UI thread stalls (Windows)
+- Comment density Phase 1: condense the schema version history comments in storage/migrations.rs, first part (code unchanged)
+- Internal: the shared-folder guard and the previous-version carry-forward move out of bootstrap into registry and migrations, so the core no longer reaches up into startup code; behaviour unchanged
+- A computer-use skill that is exactly what the AgentMux catalog listed says so in its detail and in each script's review
+- Comment density Phase 1: condense the comments in AgentDocumentVirtualList.tsx (code unchanged)
+- Core tests: card_target, native_drift, upgrade_notice and durable_ssh tests build the store, file store, event bus and broker they need through a shared core fixture instead of server::tests::test_state (prep for the srv-core split)
+- agentmux doctor names the command as it was run and checks the libraries the agent tools need; setup --no-start leaves the macOS service stopped
+- Internal: the claim-release helpers, the orphan-sweep counters and the controller code's calls into the agent teardown move down so the core no longer names sagas or the server for them; behaviour unchanged
+- Comment density Phase 1: condense the comments in the second part of swarm-model.ts (code unchanged)
+- Comment density Phase 1: condense the comments in the second part of agent-pane-state/types.ts (code unchanged)
+- Opening a pane is quicker and cleaner: a pane type's code loads when the pointer reaches its widget, a new browser pane's address bar no longer blanks for a moment, a new pane is no longer fetched from the backend a second time, and the log times the window's part of an open ([pane-open:fe])
+
 ## 0.60.26 — 2026-11-12
 
 - A Claude Code agent pointed at its own model server launches without a linked Claude account

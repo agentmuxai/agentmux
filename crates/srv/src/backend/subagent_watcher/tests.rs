@@ -2805,3 +2805,201 @@ fn a_description_becomes_a_one_line_capped_name() {
     assert!(capped.chars().count() <= 80, "{capped}");
     assert!(capped.ends_with('…'));
 }
+
+// ── reconcile_stale_subagents_impl: what each member resolves to, and what is announced ──
+//
+// Written against the one-piece function before it was split into steps, so the same
+// scenarios pin the behaviour on both sides of the split.
+
+/// `<root>/<session>.jsonl` holding one `tool_result` line per `(tool_use_id, is_error)`, and
+/// the `<root>/<session>/subagents` directory. Returns that directory.
+fn reconcile_layout(root: &Path, session: &str, results: &[(&str, bool)]) -> std::path::PathBuf {
+    let mut parent = String::new();
+    for (id, is_error) in results {
+        parent.push_str(&format!(
+            "{{\"type\":\"user\",\"message\":{{\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"{id}\",\"is_error\":{is_error}}}]}}}}\n"
+        ));
+    }
+    std::fs::write(root.join(format!("{session}.jsonl")), parent).unwrap();
+    let subagents = root.join(session).join("subagents");
+    std::fs::create_dir_all(&subagents).unwrap();
+    subagents
+}
+
+/// An `Active` member of `block_id` whose transcript lives in `dir`, with a sidecar naming
+/// `tool_use_id` when one is given.
+fn reconcile_member(block_id: &str, dir: &Path, agent_id: &str, tool_use_id: Option<&str>) -> SubagentState {
+    let jsonl = dir.join(format!("agent-{agent_id}.jsonl"));
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(&jsonl, "{\"type\":\"assistant\",\"message\":{\"content\":[]}}\n").unwrap();
+    if let Some(id) = tool_use_id {
+        std::fs::write(dir.join(format!("agent-{agent_id}.meta.json")), format!("{{\"toolUseId\":\"{id}\"}}")).unwrap();
+    }
+    let mut state = fixture_state_for_block(block_id, agent_id, "s1");
+    state.info.jsonl_path = jsonl.to_string_lossy().into_owned();
+    state.info.event_count = 7;
+    state
+}
+
+fn drain_events(rx: &mut tokio::sync::mpsc::Receiver<serde_json::Value>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        if let Some(name) = msg.pointer("/data/data/event").and_then(|v| v.as_str()) {
+            out.push((name.to_string(), msg.to_string()));
+        }
+    }
+    out
+}
+
+fn insert_members(watcher: &SubagentWatcher, members: Vec<SubagentState>) {
+    let mut sessions = watcher.sessions.lock().unwrap();
+    let mut s1 = SessionWatch { subagents: HashMap::new() };
+    for m in members {
+        s1.subagents.insert(m.info.agent_id.clone(), m);
+    }
+    sessions.insert("s1".to_string(), s1);
+}
+
+#[test]
+fn reconcile_resolves_each_member_from_the_parents_tool_results_and_announces_both_outcomes() {
+    let block_id = format!("recon-mixed-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let (_scratch, root) = temp_scratch("amx-recon-mixed-");
+    std::fs::create_dir_all(&root).unwrap();
+    let dir = reconcile_layout(&root, "sess", &[("toolu_ok", false), ("toolu_err", true)]);
+
+    let watcher = fixture_watcher();
+    let mut rx = watcher.event_bus.register_ws("test-conn", "test-tab").priority;
+    let mut flat = fixture_state_for_block(&block_id, "sub-flat", "s1");
+    flat.info.jsonl_path = String::new();
+    insert_members(
+        &watcher,
+        vec![
+            reconcile_member(&block_id, &dir, "sub-ok", Some("toolu_ok")),
+            reconcile_member(&block_id, &dir, "sub-err", Some("toolu_err")),
+            reconcile_member(&block_id, &dir, "sub-cut", Some("toolu_never_returned")),
+            reconcile_member(&block_id, &dir, "sub-nosidecar", None),
+            flat,
+        ],
+    );
+
+    watcher.reconcile_stale_subagents_impl(&block_id, "s1", 0);
+
+    let status = |id: &str| watcher.get_info(id).unwrap().status;
+    assert_eq!(status("sub-ok"), SubAgentStatus::Completed);
+    assert_eq!(status("sub-err"), SubAgentStatus::Completed, "an errored result still returned");
+    assert_eq!(status("sub-cut"), SubAgentStatus::Abandoned);
+    assert_eq!(status("sub-nosidecar"), SubAgentStatus::Abandoned);
+    assert_eq!(status("sub-flat"), SubAgentStatus::Abandoned, "no `subagents` ancestor: the historical inference");
+
+    let events = drain_events(&mut rx);
+    let completed: Vec<&String> = events.iter().filter(|(n, _)| n == "subagent:completed").map(|(_, m)| m).collect();
+    assert_eq!(completed.len(), 2, "one completed event per resolved member: {events:?}");
+    assert!(completed.iter().any(|m| m.contains("sub-ok")) && completed.iter().any(|m| m.contains("sub-err")));
+    assert!(completed.iter().all(|m| m.contains(&block_id) && m.contains("\"totalEvents\":7")), "{completed:?}");
+    let abandoned: Vec<&String> = events.iter().filter(|(n, _)| n == "subagent:abandoned").map(|(_, m)| m).collect();
+    assert_eq!(abandoned.len(), 1, "the abandoned ones go out in one batch: {events:?}");
+    for id in ["sub-cut", "sub-nosidecar", "sub-flat"] {
+        assert!(abandoned[0].contains(id), "{id} missing from {}", abandoned[0]);
+    }
+    assert!(!abandoned[0].contains("sub-ok") && !abandoned[0].contains("sub-err"));
+}
+
+#[test]
+fn reconcile_resolves_a_workflow_member_through_its_deeper_layout() {
+    let block_id = format!("recon-wf-deep-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let (_scratch, root) = temp_scratch("amx-recon-wf-deep-");
+    std::fs::create_dir_all(&root).unwrap();
+    let dir = reconcile_layout(&root, "sess", &[("toolu_wf", false)]);
+    let wf_dir = dir.join("workflows").join("run-1");
+
+    let watcher = fixture_watcher();
+    insert_members(&watcher, vec![reconcile_member(&block_id, &wf_dir, "wf-member", Some("toolu_wf"))]);
+
+    watcher.reconcile_stale_subagents_impl(&block_id, "s1", 0);
+
+    assert_eq!(watcher.get_info("wf-member").unwrap().status, SubAgentStatus::Completed);
+}
+
+#[test]
+fn reconcile_abandons_a_workflow_dispatch_counting_the_members_it_just_completed() {
+    // Two members: one resolves Completed, one Abandoned. If the completed member's status
+    // were not counted, the dispatch would see 1 of 2 members and be left alone.
+    let block_id = format!("recon-wf-count-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let (_scratch, root) = temp_scratch("amx-recon-wf-count-");
+    std::fs::create_dir_all(&root).unwrap();
+    let dir = reconcile_layout(&root, "sess", &[("toolu_a", false)]);
+    let dispatch_id = "wf-recon-count";
+
+    let watcher = fixture_watcher();
+    let mut rx = watcher.event_bus.register_ws("test-conn", "test-tab").priority;
+    {
+        let mut state = fixture_dispatch_state(dispatch_id, &block_id);
+        state.info.member_count = 2;
+        watcher.dispatches.lock().unwrap().insert(dispatch_id.to_string(), state);
+    }
+    let mut a = reconcile_member(&block_id, &dir, "wf-a", Some("toolu_a"));
+    a.info.dispatch_id = dispatch_id.to_string();
+    let mut b = reconcile_member(&block_id, &dir, "wf-b", Some("toolu_missing"));
+    b.info.dispatch_id = dispatch_id.to_string();
+    insert_members(&watcher, vec![a, b]);
+
+    watcher.reconcile_stale_subagents_impl(&block_id, "s1", 0);
+
+    let d = watcher.list_dispatches().into_iter().find(|d| d.dispatch_id == dispatch_id).unwrap();
+    assert_eq!(d.status, DispatchStatus::Abandoned);
+    let names: Vec<String> = drain_events(&mut rx).into_iter().map(|(n, _)| n).collect();
+    assert_eq!(names.iter().filter(|n| *n == "dispatch:updated").count(), 1, "{names:?}");
+
+    // A second pass finds nothing Active and the dispatch already Abandoned: no second update.
+    watcher.reconcile_stale_subagents_impl(&block_id, "s1", 0);
+    let names: Vec<String> = drain_events(&mut rx).into_iter().map(|(n, _)| n).collect();
+    assert!(!names.contains(&"dispatch:updated".to_string()), "{names:?}");
+}
+
+#[test]
+fn reconcile_leaves_a_workflow_dispatch_running_when_every_member_returned() {
+    let block_id = format!("recon-wf-allok-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let (_scratch, root) = temp_scratch("amx-recon-wf-allok-");
+    std::fs::create_dir_all(&root).unwrap();
+    let dir = reconcile_layout(&root, "sess", &[("toolu_a", false), ("toolu_b", false)]);
+    let dispatch_id = "wf-recon-allok";
+
+    let watcher = fixture_watcher();
+    let mut rx = watcher.event_bus.register_ws("test-conn", "test-tab").priority;
+    {
+        let mut state = fixture_dispatch_state(dispatch_id, &block_id);
+        state.info.member_count = 2;
+        watcher.dispatches.lock().unwrap().insert(dispatch_id.to_string(), state);
+    }
+    let mut a = reconcile_member(&block_id, &dir, "wf-a", Some("toolu_a"));
+    a.info.dispatch_id = dispatch_id.to_string();
+    let mut b = reconcile_member(&block_id, &dir, "wf-b", Some("toolu_b"));
+    b.info.dispatch_id = dispatch_id.to_string();
+    insert_members(&watcher, vec![a, b]);
+
+    watcher.reconcile_stale_subagents_impl(&block_id, "s1", 0);
+
+    assert_eq!(watcher.get_info("wf-a").unwrap().status, SubAgentStatus::Completed);
+    assert_eq!(watcher.get_info("wf-b").unwrap().status, SubAgentStatus::Completed);
+    let d = watcher.list_dispatches().into_iter().find(|d| d.dispatch_id == dispatch_id).unwrap();
+    assert_eq!(d.status, DispatchStatus::Running, "nothing was abandoned");
+    let names: Vec<String> = drain_events(&mut rx).into_iter().map(|(n, _)| n).collect();
+    assert!(!names.contains(&"dispatch:updated".to_string()), "{names:?}");
+    assert!(!names.contains(&"subagent:abandoned".to_string()), "{names:?}");
+}
+
+#[test]
+fn reconcile_with_an_idle_parent_and_no_such_session_does_nothing() {
+    let block_id = format!("recon-no-session-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let watcher = fixture_watcher();
+    let mut rx = watcher.event_bus.register_ws("test-conn", "test-tab").priority;
+
+    watcher.reconcile_stale_subagents_impl(&block_id, "no-such-session", 0);
+
+    assert!(drain_events(&mut rx).is_empty());
+}

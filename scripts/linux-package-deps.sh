@@ -51,6 +51,8 @@ case "${1:-}" in
         entries | cut -d'|' -f2- | sed 's/|/ | /g' | sort -u
         floor="$(glibc_floor "$root")"
         [ -z "$floor" ] || echo "libc6 (>= $floor)"
+        # Not a library, so nothing in the tree names it: the server's https trusts the system certificates.
+        echo "ca-certificates"
         ;;
     rpm)
         root="${2:?usage: linux-package-deps.sh rpm <root>}"
@@ -58,6 +60,8 @@ case "${1:-}" in
         entries | cut -d'|' -f1 | sort -u | sed 's/$/()(64bit)/'
         floor="$(glibc_floor "$root")"
         [ -z "$floor" ] || echo "libc.so.6(GLIBC_$floor)(64bit)"
+        # Not a library: the package that holds the system certificates, named alike on Fedora and openSUSE.
+        echo "ca-certificates"
         ;;
     check)
         root="${2:?usage: linux-package-deps.sh check <root>}"

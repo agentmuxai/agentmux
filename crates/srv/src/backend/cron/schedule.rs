@@ -107,7 +107,8 @@ impl JobSchedule {
                 Ok(JobSchedule::Every { anchor_ms: job.created_at.saturating_mul(1000), period_ms: secs.saturating_mul(1000) })
             }
             trigger_kind::ONCE => Ok(JobSchedule::Once { at_ms: job.once_at_ms.ok_or("a once trigger needs at")? }),
-            trigger_kind::MANUAL => Ok(JobSchedule::Manual),
+            // An event job fires when a source says so (`CronScheduler::fire_event`), never at a time.
+            trigger_kind::MANUAL | trigger_kind::EVENT => Ok(JobSchedule::Manual),
             other => Err(format!("trigger kind {other} can't be scheduled")),
         }
     }

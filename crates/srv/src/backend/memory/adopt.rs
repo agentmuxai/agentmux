@@ -71,7 +71,7 @@ pub(crate) struct Candidate {
 
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NativeMemoryAdoptionList")]
-pub(crate) struct AdoptionList {
+pub struct AdoptionList {
     pub list_id: String,
     pub agent_uid: String,
     pub candidates: Vec<Candidate>,
@@ -79,7 +79,7 @@ pub(crate) struct AdoptionList {
 
 #[derive(Debug, Default, PartialEq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NativeMemoryAdoptReport")]
-pub(crate) struct AdoptReport {
+pub struct AdoptReport {
     /// Files the record didn't have, now adopted.
     pub files_added: usize,
     /// Other bodies kept as history.
@@ -89,7 +89,7 @@ pub(crate) struct AdoptReport {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum AdoptError {
+pub enum AdoptError {
     /// Unknown or expired list, or one issued for another agent.
     UnknownList,
     BadChoice,
@@ -237,7 +237,7 @@ pub(crate) fn list_in(fs: &FileStore, mstore: &Store, agent_uid: &str, own_dir: 
 
 /// The candidates for an agent, from its verified memory folder. `None`
 /// when the agent has none yet (no spawn, no working directory).
-pub(crate) fn list(fs: &FileStore, mstore: &Store, agent: &crate::backend::storage::AgentDefinition) -> Result<Option<AdoptionList>, StoreError> {
+pub fn list(fs: &FileStore, mstore: &Store, agent: &crate::backend::storage::AgentDefinition) -> Result<Option<AdoptionList>, StoreError> {
     use crate::backend::memory::native_files::{resolve_memory_dir_by_id, MemoryDirProvenance};
     let Some(own) = resolve_memory_dir_by_id(mstore, agent).filter(|r| r.provenance != MemoryDirProvenance::Unverified) else {
         return Ok(None);
@@ -284,7 +284,7 @@ fn union_index(base: &str, others: &[&str]) -> (String, usize) {
 /// Adopt the chosen folders of list `list_id` into `agent_uid`'s record.
 /// Choices are `(index, dir_hash)` from the list; nothing else from the
 /// caller is trusted.
-pub(crate) fn adopt(
+pub fn adopt(
     fs: &FileStore,
     mstore: &Store,
     agent_uid: &str,

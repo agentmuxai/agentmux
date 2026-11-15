@@ -47,6 +47,11 @@ export function attentionLook(a: BrowserAttention): AttentionLook {
         // Why a navigation didn't load; nothing waits on it
         // (REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md §6.2).
         case "notice":
+            // The host's own line about something the person just did in this pane (a link that
+            // could not be copied): its words, nothing to go back from.
+            if (a.local && a.message) {
+                return { agent: false, tone: "accent", density: "compact", icon: "fa-circle-info", answer: "approve", no: "Dismiss", text: a.message };
+            }
             if (a.chooser) {
                 return { agent: false, tone: "accent", density: "compact", icon: "fa-circle-info", answer: "approve", no: "Dismiss", text: chooserNoticeText(a) };
             }

@@ -284,7 +284,7 @@ impl reqwest::dns::Resolve for PublicOnlyResolver {
 /// One `SKILL.md` fetched from an HTTPS URL.
 pub async fn fetch_url(raw: &str) -> Result<Scan, String> {
     let parsed = https_url(raw)?;
-    let client = reqwest::Client::builder()
+    let client = crate::http_client::builder()
         .timeout(URL_TIMEOUT)
         .dns_resolver(std::sync::Arc::new(PublicOnlyResolver))
         .redirect(reqwest::redirect::Policy::custom(|attempt| {

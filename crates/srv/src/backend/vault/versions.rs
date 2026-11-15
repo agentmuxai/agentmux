@@ -150,6 +150,9 @@ pub fn restore(store: &Store, id: &str, seq: i64) -> Result<(), String> {
 pub struct Rotation {
     pub seq: i64,
     pub label: String,
+    /// Who started it, and what it is called in the entry's history ("rotated", "password change").
+    pub by: String,
+    how: String,
     created_at: i64,
     /// The entry's value when the rotation started: if anything else writes it
     /// meanwhile, the rotation doesn't overwrite that.
@@ -159,6 +162,12 @@ pub struct Rotation {
 /// Starts a rotation of entry `id`: `value` goes into its main part as a pending
 /// version that nothing is given yet. Refused while another rotation of it runs.
 pub fn start_rotation(store: &Store, id: &str, value: &str, agent: &str) -> Result<Rotation, String> {
+    start_pending(store, id, value, agent, "rotated")
+}
+
+/// [`start_rotation`] for a value that is called `how` in the entry's history: a password change on a site
+/// (`changes.rs`) keeps its new password the same way, pending until the site was sent it.
+pub(super) fn start_pending(store: &Store, id: &str, value: &str, agent: &str, how: &str) -> Result<Rotation, String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
     let key = seal::key(false)?;
@@ -174,12 +183,12 @@ pub fn start_rotation(store: &Store, id: &str, value: &str, agent: &str) -> Resu
         sealed: seal::seal(&key, &row.id, &parts)?,
         replaced_at: now,
         replaced_by: agent.to_string(),
-        how: "rotated".to_string(),
+        how: how.to_string(),
         state: PENDING.to_string(),
     };
     prune(store);
     match store.vault_version_pending(&pending, now - ROTATION_MS, INTERRUPTED).map_err(|e| e.to_string())? {
-        Some(seq) => Ok(Rotation { seq, label: row.label, created_at: row.created_at, was: row.sealed }),
+        Some(seq) => Ok(Rotation { seq, label: row.label, by: agent.to_string(), how: how.to_string(), created_at: row.created_at, was: row.sealed }),
         None => Err(format!("{} is being rotated already: wait for that rotation to finish", row.label)),
     }
 }
@@ -197,13 +206,37 @@ pub fn finish_rotation(store: &Store, id: &str, r: &Rotation, outcome: Result<()
     let row = store.vault_get(id).map_err(|e| e.to_string())?.filter(|row| row.created_at == r.created_at).ok_or_else(changed)?;
     let now = now_ms();
     // Swapped only if the entry still holds the value the rotation started from.
-    let previous = VaultVersionRow { sealed: r.was.clone(), ..of(&row, agent, "rotated") };
+    let previous = VaultVersionRow { sealed: r.was.clone(), ..of(&row, agent, &r.how) };
     if !store.vault_version_swap(&row.id, r.seq, &previous, now, now - KEEP_MS).map_err(|e| e.to_string())? {
         let _ = store.vault_version_mark(r.seq, OVERTAKEN);
         return Err(changed());
     }
     if let Err(e) = super::resettle_card(store, &row.id) {
         tracing::warn!(entry = %row.id, error = %e, "vault: a rotated card's brand and expiry date could not be worked out again");
+    }
+    Ok(())
+}
+
+/// A pending value of entry `row` that is exactly `value`, started as `how`: the change a site was just sent.
+/// Found in the Vault, not in memory, so it counts across an srv restart. The pending value is never given back.
+pub(super) fn pending_is(store: &Store, row: &VaultRow, value: &str, how: &str) -> Result<Option<Rotation>, String> {
+    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
+    let versions = store.vault_versions(&row.id, row.created_at).map_err(|e| e.to_string())?;
+    let Some(pending) = versions.into_iter().find(|v| v.state == PENDING && v.how == how) else { return Ok(None) };
+    let parts = seal::open(&seal::key(false)?, &row.id, &pending.sealed)?;
+    if parts.get(kind.parts[0]) != Some(value) {
+        return Ok(None);
+    }
+    Ok(Some(Rotation { seq: pending.seq, label: row.label.clone(), by: pending.replaced_by, how: pending.how, created_at: row.created_at, was: row.sealed.clone() }))
+}
+
+/// Entry `row`'s earlier pending values started as `how` that no site is known to hold any longer: kept 7 days
+/// for the person to put in, as an interrupted rotation's is, so a new one can start.
+pub(super) fn set_aside_pending(store: &Store, row: &VaultRow, how: &str) -> Result<(), String> {
+    for v in store.vault_versions(&row.id, row.created_at).map_err(|e| e.to_string())? {
+        if v.state == PENDING && v.how == how {
+            store.vault_version_mark(v.seq, INTERRUPTED).map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }

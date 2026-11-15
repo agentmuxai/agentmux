@@ -189,19 +189,18 @@ pub fn build_app_state(
         // could otherwise hang a request indefinitely. The hop-count guard
         // in server/reactive.rs bounds the CYCLE; this bounds each
         // individual HOP (reagent P1 on PR #2350).
-        http_client: reqwest::Client::builder()
+        http_client: crate::http_client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "failed to build http_client with timeout, using default");
-                reqwest::Client::new()
+                crate::http_client::client()
             }),
         host_ipc: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         host_reg_secret: config.host_reg_secret.clone(),
         process_tracker: net.process_tracker.clone(),
         process_broker: net.process_broker.clone(),
         dock_snapshots: std::sync::Arc::new(crate::backend::dock_snapshot::DockSnapshotCache::new()),
-        pending_background_pids: std::sync::Arc::new(crate::backend::pending_background_pids::PendingBackgroundPids::new()),
         narrated_events: Arc::new(crate::backend::narrated_events::NarratedEvents::new()),
         // Phase E.2c.2 — reducer state + event bus exposed to HTTP/WS
         // dispatch handlers. Workspace handlers route through the
@@ -249,7 +248,7 @@ pub fn build_app_state(
         shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
         cron_scheduler: crate::backend::cron::CronScheduler::new(
             jobs_store,
-            reqwest::Client::new(),
+            crate::http_client::client(),
             net.local_web_url.clone(),
             config.auth_key.clone(),
             Arc::clone(&broker),

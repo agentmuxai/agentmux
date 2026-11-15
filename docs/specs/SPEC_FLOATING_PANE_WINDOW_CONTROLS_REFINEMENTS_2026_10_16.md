@@ -3,7 +3,7 @@
 **Date:** 2026-10-16
 **Author:** Maricon@charlie
 **Type:** Spec (refinements to the floating pane's header controls and its maximize)
-**Status:** proposed
+**Status:** implemented — PR #5037.
 **Decisions applied (operator: "proceed with best recommendations", 2026-10-16):** D1 yes, D2 the block meta, D3 "Restore", D4 yes, D5 macOS is in this change after all: Clare on starpower checks it on a Mac, and Posa on Area54 checks Windows.
 **Requested by:** the operator, after #4956: *"The new redock button on floaters should be to the immediately left of the maximize (right to the pin) ..its part of the primary. currently it appears too small, it should be the same size as the other 2 standard window controls. Second thing is that when a floating pane is maximized, we need to get proper icons ... like the 2 overlapping squares since that represents the restore in this point. we should also offer the normal restore to the maximized floater (skip minimize). Finally, when dragging a maximized floater, it should revert back to its window size before it was maximized, which is normal windows behavior."*
 **Related:** `SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15.md` (#4956, the Redock button), `SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12.md` (the tile Restore glyph, and where `window-restore` is still right), `SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md` (the pin), `SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §2.6 (restore-under-cursor for the main window), `docs/retro/retro-linux-wayland-tearoff-drag-2026-10-14.md` (Wayland floater drag).

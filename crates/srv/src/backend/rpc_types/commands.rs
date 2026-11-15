@@ -453,6 +453,8 @@ pub const COMMAND_UPSERT_DRONE: &str = "upsertdrone";
 pub const COMMAND_DELETE_DRONE: &str = "deletedrone";
 pub const COMMAND_RUN_DRONE: &str = "rundrone";
 pub const COMMAND_LIST_DRONE_RUNS: &str = "listdroneruns";
+pub const COMMAND_RESOLVE_DRONE_RUN: &str = "resolvedronerun";
+pub const COMMAND_RESUME_DRONE_WAIT: &str = "resumedronewait";
 
 // MuxAPI Tier 1 — agent lifecycle commands
 pub const COMMAND_AGENT_OPEN: &str = "agent.open";
@@ -833,6 +835,7 @@ pub const COMMAND_SKILL_CATALOG_APP_SCRIPT: &str = "skill.catalog.app_script";
 pub const COMMAND_SKILL_CATALOG_EXPORT: &str = "skill.catalog.export";
 pub const COMMAND_APP_SKILLS_CATALOG: &str = "app_skills.catalog";
 pub const COMMAND_APP_SKILLS_CATALOG_INSTALL: &str = "app_skills.catalog.install";
+pub const COMMAND_APP_SKILLS_HERE: &str = "app_skills.here";
 
 // Bundle-scoped siblings of the three above (composable model v2,
 // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024 item

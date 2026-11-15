@@ -11,7 +11,9 @@ import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { paneTabItemType } from "@/app/drag/drag-types";
-import { clearPillGhost, pillZone, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
+import { clearPillGhost, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
+import { pillPlacingIn } from "@/layout/lib/pillDragState";
+import { beginPillPlacement, dropPill, followPill, panePillZone, registerPillPane, type PillRelease } from "@/layout/lib/pillPlacement";
 import type { DropDirection } from "@/layout/lib/types";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { edgeFlashArea } from "./drop-blink-clock";
@@ -132,7 +134,9 @@ type HoverControl = { hovering: () => boolean; begin: (source: PillArgs["source"
 
 /**
  * A single pill over this pane, with `bodyDrop`: what the pointer is over decides the feedback (the
- * header glow, or the placement ghost), read again as it moves.
+ * header glow, or the placement ghost), read again as it moves. A tab of this layout over a placing zone is
+ * handed to the layout, which shows the drop by reflowing the panes and reads the pointer itself from then on
+ * (pillPlacement.ts); the ghost here is left for a tab from another window tab.
  */
 function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey: string; headerEl: HTMLElement; hover: HoverControl }) {
     const { body, paneKey, headerEl, hover } = opts;
@@ -157,7 +161,13 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
         if (!force && now - lastFollow < 30) return;
         lastFollow = now;
         const input = zoneInput(args);
-        zone = pillZone(input);
+        // The layout has the drag, and this pane still gets its events until the browser has sent the layout's
+        // catcher one: they are the layout's samples. The pane reads again once the layout gives the drag back.
+        if (pillPlacingIn(input.model)) {
+            followPill(input.model, input.pointer);
+            if (pillPlacingIn(input.model)) return;
+        }
+        zone = panePillZone(input);
         // The header glows where the pill would join, and nowhere else.
         if (zone.kind === "join") {
             if (!hover.hovering()) hover.begin(args.source);
@@ -165,6 +175,7 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
             hover.end();
         }
         if (zone.kind === "place") {
+            if (beginPillPlacement(input.model, input.blockId, input.pointer)) return;
             body!.model.showOverlay._set(true);
             if (zone.direction !== ghost) {
                 ghost = zone.direction;
@@ -180,14 +191,34 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
         if (!body) return;
         if (ghost !== undefined) clearPillGhost(body.model);
         ghost = undefined;
-        body.model.showOverlay._set(false);
+        // The layout's own while it places the pill: leaving this pane is how the pointer got to its catcher.
+        if (!pillPlacingIn(body.model)) body.model.showOverlay._set(false);
+    };
+    /**
+     * The release came to this pane while the layout has the drag (a quick drag: the layout's catcher has had no
+     * event yet). The layout takes it; false when it places nothing there and the release is this pane's.
+     */
+    const dropInLayout = (args: PillArgs): boolean => {
+        if (!singlePill(args) || !pillPlacingIn(body!.model)) return false;
+        const { clientX, clientY } = args.location.current.input;
+        return dropPill(body!.model, { x: clientX, y: clientY });
     };
     /** Where the pointer was released, not where the throttled drag last looked. */
-    const zoneAtDrop = (args: PillArgs): PillZone => (singlePill(args) ? pillZone(zoneInput(args)) : zone);
-    return { singlePill, follow, end, zoneAtDrop };
+    const zoneAtDrop = (args: PillArgs): PillZone => {
+        if (!singlePill(args)) return zone;
+        return panePillZone(zoneInput(args));
+    };
+    return { singlePill, follow, end, zoneAtDrop, dropInLayout };
 }
 
 type Placement = ReturnType<typeof createPillPlacement>;
+
+/** Place the pill beside a pane and mark where it landed, for the bounce. */
+const placeAndMark = (body: PaneTabBodyDrop) => (blockId: string, zone: Extract<PillZone, { kind: "place" }>): string | false => {
+    const landedIn = body.place(blockId, zone);
+    if (landedIn !== false) markLanded(blockId, landedIn);
+    return landedIn;
+};
 
 /** Whether this pane takes the dragged tab(s). */
 function canDropForeign<T>(props: ForeignTabDropProps<T>, paneKey: string, data: Record<string | symbol, unknown>): boolean {
@@ -211,8 +242,9 @@ function canDropForeign<T>(props: ForeignTabDropProps<T>, paneKey: string, data:
 function dropForeign<T>(props: ForeignTabDropProps<T>, paneKey: string, placement: Placement, endHover: () => void, args: any): void {
     const { source } = args;
     endHover();
-    const dropZone = placement.zoneAtDrop(args);
+    const dropZone = placement.dropInLayout(args) ? undefined : placement.zoneAtDrop(args);
     placement.end();
+    if (!dropZone) return;
     const blockId = source.data.blockId as string | undefined;
     const body = props.bodyDrop;
     if (body && blockId && !multiIdsOf(source.data)) {
@@ -221,10 +253,7 @@ function dropForeign<T>(props: ForeignTabDropProps<T>, paneKey: string, placemen
         if (dropZone.kind === "place") {
             setCurrentDragPayload(null);
             // Next task, like a join: the move unmounts the dragged pill.
-            setTimeout(() => {
-                const landedIn = body.place(blockId, dropZone);
-                if (landedIn !== false) markLanded(blockId, landedIn);
-            }, 0);
+            setTimeout(() => placeAndMark(body)(blockId, dropZone), 0);
             return;
         }
     }
@@ -308,6 +337,14 @@ export function useForeignTabDrop<T>(props: ForeignTabDropProps<T>, stripEl: () 
             hover: { hovering, begin: beginForeignHover, end: endForeignHover },
         });
         onCleanup(placement.end);
+        const body = props.bodyDrop;
+        if (body) {
+            // A release the layout's catcher got where the tab joins a pane: this pane's drop, under its own rule.
+            const release = (drop: PillRelease) => {
+                if (canDropForeign(props, paneKey, drop.source.data)) dropForeign(props, paneKey, placement, endForeignHover, drop);
+            };
+            onCleanup(registerPillPane(body.model, paneKey, { headerEl: highlightEl, hasBody: body.hasBody, place: placeAndMark(body), release }));
+        }
         const { singlePill, follow } = placement;
         const cleanup = dropTargetForElements({
             element: el,

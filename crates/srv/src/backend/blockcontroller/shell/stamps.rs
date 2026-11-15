@@ -49,7 +49,7 @@ fn parse(line: &[u8]) -> Option<(u64, i64)> {
 /// sidecar of `size` bytes through `read(offset, len)` — `None` from `read`
 /// means those bytes aren't all stored (a writer mid-append), and so no stamps.
 /// `Ok(None)`: no sidecar records near the range at all.
-pub(crate) fn stamps_for(
+pub fn stamps_for(
     read: &dyn Fn(i64, i64) -> Result<Option<Vec<u8>>, StoreError>,
     size: i64,
     line_offsets: &[u64],
@@ -128,7 +128,7 @@ pub(crate) fn stamps_for(
 /// when every record is at or before it; `Ok(None)` when bytes it needs aren't
 /// stored. Records rise in time as they do in offset, so a binary search finds
 /// the region; a scan from there finds the record.
-pub(crate) fn byte_after_time(
+pub fn byte_after_time(
     read: &dyn Fn(i64, i64) -> Result<Option<Vec<u8>>, StoreError>,
     size: i64,
     at_ms: i64,

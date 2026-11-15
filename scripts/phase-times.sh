@@ -28,10 +28,11 @@ phase_summary() {
     [ -n "$PHASE_ROWS" ] || return 0
     local table
     table="| phase | time |"$'\n'"|---|---|"$'\n'"${PHASE_ROWS}| total | $(phase_fmt $((SECONDS - PHASE_START))) |"
-    echo "==> phase times"
+    # PHASE_NAME (optional) names a second table in the same job, from a script another script runs.
+    echo "==> phase times${PHASE_NAME:+ ($PHASE_NAME)}"
     echo "$table"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-        { echo "### Build phases"; echo; echo "$table"; echo; } >> "$GITHUB_STEP_SUMMARY" || true
+        { echo "### Build phases${PHASE_NAME:+ ($PHASE_NAME)}"; echo; echo "$table"; echo; } >> "$GITHUB_STEP_SUMMARY" || true
     fi
 }
 

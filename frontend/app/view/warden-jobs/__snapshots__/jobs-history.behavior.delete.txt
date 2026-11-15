@@ -35,9 +35,10 @@ loadRuns j1 before=- limit=50
         <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-vial">
           "Dry run"
-        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <button type="button" class="ui-close ui-close--sm ui-close--text">
           <i aria-hidden="true" class="fa-solid fa-xmark">
-          "Close"
+          <span class="ui-close__text">
+            "Close"
     <table class="warden-manager-table warden-jobs-runs">
       <thead>
         <tr>
@@ -126,9 +127,10 @@ loadRuns j1 before=- limit=50
         <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-vial">
           "Dry run"
-        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <button type="button" class="ui-close ui-close--sm ui-close--text">
           <i aria-hidden="true" class="fa-solid fa-xmark">
-          "Close"
+          <span class="ui-close__text">
+            "Close"
     <table class="warden-manager-table warden-jobs-runs">
       <thead>
         <tr>
@@ -219,9 +221,10 @@ onClose
         <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-vial">
           "Dry run"
-        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <button type="button" class="ui-close ui-close--sm ui-close--text">
           <i aria-hidden="true" class="fa-solid fa-xmark">
-          "Close"
+          <span class="ui-close__text">
+            "Close"
     <table class="warden-manager-table warden-jobs-runs">
       <thead>
         <tr>
@@ -311,9 +314,10 @@ act {"action":"delete","job_id":"j1"}
         <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-vial">
           "Dry run"
-        <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
+        <button type="button" class="ui-close ui-close--sm ui-close--text">
           <i aria-hidden="true" class="fa-solid fa-xmark">
-          "Close"
+          <span class="ui-close__text">
+            "Close"
     <div class="warden-manager-error">
       "Error: locked"
     <table class="warden-manager-table warden-jobs-runs">

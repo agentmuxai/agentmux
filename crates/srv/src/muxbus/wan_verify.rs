@@ -113,7 +113,7 @@ impl WanVerdict {
 
 /// Where the directory is and how to reach it. Tests point `base_url` at a
 /// stub and bring their own budget.
-pub(crate) struct Directory<'a> {
+pub struct Directory<'a> {
     pub base_url: &'a str,
     pub http: &'a reqwest::Client,
     pub token: &'a str,
@@ -131,7 +131,7 @@ enum Fetched<T> {
 }
 
 /// A fixed-window request budget ([`FETCHES_PER_MINUTE`]).
-pub(crate) struct FetchBudget {
+pub struct FetchBudget {
     limit: u32,
     window: Mutex<Option<(Instant, u32)>>,
 }
@@ -158,7 +158,7 @@ impl FetchBudget {
 }
 
 /// The one budget every production verification shares.
-pub(crate) static GLOBAL_BUDGET: FetchBudget = FetchBudget::new(FETCHES_PER_MINUTE);
+pub static GLOBAL_BUDGET: FetchBudget = FetchBudget::new(FETCHES_PER_MINUTE);
 
 /// One GET with the §2.3 retry rule: an unavailable directory gets one
 /// immediate retry; a 404 is an answer, not a failure.
@@ -387,7 +387,7 @@ async fn fetch_listed(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
 /// Whether `instance_id` is a live, unrevoked install of the signed-in account:
 /// listed in its presence list and not revoked (the standard a WAN sender's
 /// install is held to). `None` when that can't be told.
-pub(crate) async fn instance_is_live_install(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
+pub async fn instance_is_live_install(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
     if fetch_listed(dir, instance_id).await? {
         fetch_revoked(dir, instance_id).await.map(|revoked| !revoked)
     } else {
@@ -397,14 +397,14 @@ pub(crate) async fn instance_is_live_install(dir: &Directory<'_>, instance_id: &
 
 /// Whether the directory holds a revocation `instance_id` signed itself (the
 /// standard WAN verification applies). `None` when that can't be told.
-pub(crate) async fn instance_is_revoked(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
+pub async fn instance_is_revoked(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
     fetch_revoked(dir, instance_id).await
 }
 
 /// The install `from` handed over to: the successor named in the revocation `from` signed with its own
 /// key, which the directory serves. `None` when `from` is not revoked, the directory holds no revocation
 /// it signed, or the directory could not be read.
-pub(crate) async fn instance_handed_over_to(dir: &Directory<'_>, from: &str) -> Option<String> {
+pub async fn instance_handed_over_to(dir: &Directory<'_>, from: &str) -> Option<String> {
     let url = format!("{}/wan-instances/{}", dir.base_url.trim_end_matches('/'), from);
     match get_json::<InstanceStatusResp>(dir, &url).await {
         Fetched::Found(s) if s.revoked => s.revocation.filter(|r| r.old_instance_id == from && r.verify()).map(|r| r.new_instance_id),
@@ -599,7 +599,7 @@ pub(crate) async fn verify(
 /// never one of a revoked install. `Err` says why not, to follow the agent's
 /// name.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn recipient_record(
+pub async fn recipient_record(
     wan: &WanIdentityStore,
     own_instance_id: &str,
     dir: &Directory<'_>,

@@ -299,7 +299,7 @@ pub(crate) struct ImportSource {
 
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/", rename = "GlobalMemoryImportSources")]
-pub(crate) struct ImportSources {
+pub struct ImportSources {
     pub list_id: String,
     /// This channel's scope. Sources are offered only to an isolated one.
     pub scope: String,
@@ -308,7 +308,7 @@ pub(crate) struct ImportSources {
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/", rename = "GlobalMemoryImportReport")]
-pub(crate) struct ImportReport {
+pub struct ImportReport {
     pub added: usize,
     /// Added under a new name: another entry here already had theirs.
     pub renamed: usize,
@@ -460,7 +460,7 @@ fn process(fs: &FileStore, store: &Store, scope: &str, job: Job) {
 const DAMAGED: &str = "Global Memory's shared record is damaged (see the notice); it is not read or written for now";
 
 /// [`import_sources`] for the RPC: a record found corrupt is refused in plain words, and a corrupt answer marks it.
-pub(crate) fn import_sources_checked(fs: &FileStore, store: &Store) -> Result<ImportSources, String> {
+pub fn import_sources_checked(fs: &FileStore, store: &Store) -> Result<ImportSources, String> {
     use crate::backend::transcript::damage;
     if damage::is_damaged(damage::GLOBAL_MEMORY_ZONE) {
         return Err(DAMAGED.to_string());
@@ -470,7 +470,7 @@ pub(crate) fn import_sources_checked(fs: &FileStore, store: &Store) -> Result<Im
 }
 
 /// [`import`] for the RPC; see [`import_sources_checked`].
-pub(crate) fn import_checked(fs: &FileStore, store: &Store, list_id: &str, index: usize) -> Result<ImportReport, String> {
+pub fn import_checked(fs: &FileStore, store: &Store, list_id: &str, index: usize) -> Result<ImportReport, String> {
     use crate::backend::transcript::damage;
     if damage::is_damaged(damage::GLOBAL_MEMORY_ZONE) {
         return Err(DAMAGED.to_string());
@@ -479,21 +479,21 @@ pub(crate) fn import_checked(fs: &FileStore, store: &Store, list_id: &str, index
 }
 
 /// Handle for queueing the start-up comparison once seeding is done.
-pub(crate) struct Recorder {
+pub struct Recorder {
     tx: mpsc::Sender<Job>,
 }
 
 impl Recorder {
     /// Queue the start-up comparison (after this start's own seeding, so
     /// seeded entries keep their seeder's attribution).
-    pub(crate) fn sync_all(&self) {
+    pub fn sync_all(&self) {
         let _ = self.tx.send(Job::SyncAll);
     }
 }
 
 /// Start recording `store`'s Global Memory into `fs`: attach the observer
 /// and start the worker thread.
-pub(crate) fn attach(fs: Arc<FileStore>, store: Arc<Store>) -> Recorder {
+pub fn attach(fs: Arc<FileStore>, store: Arc<Store>) -> Recorder {
     let (tx, rx) = mpsc::channel::<Job>();
     let scope = scope();
     let worker_store = store.clone();

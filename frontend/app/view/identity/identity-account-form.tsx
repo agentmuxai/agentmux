@@ -19,7 +19,7 @@ import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
 import { isBrokeredGithub, isServiceOAuthAccount, reconnectScopes } from "@/app/view/accounts/oauth-account-state";
 import "./identity-view.scss";
 import "@/app/view/accounts/oauth-connect.scss";
-import { Button, IconButton, TextInput } from "@/app/element/ui";
+import { Button, CloseButton, TextInput } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 
 // Per-provider validation endpoint, surfaced in the egress help note next to
@@ -304,7 +304,7 @@ export function AccountForm({ model, inline }: { model: IdentityViewModel; inlin
         <div class={inline ? "identity-form identity-form--inline" : "identity-form"}>
             <div class="identity-form-header">
                 <span>{isEdit() ? "Edit Account" : "Add Account"}</span>
-                <IconButton icon="xmark" label="Close" tooltip={false} onClick={() => model.cancelForm()} />
+                <CloseButton tooltip={false} onClick={() => model.cancelForm()} />
             </div>
 
             <div class="identity-form-body">

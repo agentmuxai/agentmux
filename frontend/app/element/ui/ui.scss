@@ -476,17 +476,9 @@
         }
     }
 
+    // The clear button is the kit's CloseButton; this only places it inside the field.
     .ui-filter-clear {
-        padding: 0 var(--space-1);
-        font: inherit;
-        color: var(--secondary-text-color);
-        background: transparent;
-        border: 0;
-        cursor: var(--cursor-interactive);
-
-        &:hover {
-            color: var(--main-text-color);
-        }
+        margin-right: var(--space-0-5);
     }
 }
 

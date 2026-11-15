@@ -242,6 +242,13 @@ function registerOpenViewCommands(): void {
         execute: () => openPane({ meta: { view: "help" } }, true),
     });
     commandRegistry.register({
+        id: "open:atlas",
+        label: "Open Atlas",
+        category: "Open",
+        icon: "map",
+        execute: (opts) => openPane({ meta: { view: "atlas" } }, opts?.forceNew),
+    });
+    commandRegistry.register({
         id: "open:swarm",
         label: "Open Swarm",
         category: "Open",
@@ -300,6 +307,16 @@ function registerSplitCommands(): void {
 
 /** The "Window" commands. */
 function registerWindowCommands(): void {
+    // Only a browser signed in to a headless srv has a session of its own to end.
+    commandRegistry.register({
+        id: "window:sign-out-this-browser",
+        label: "Sign Out of This Browser",
+        category: "Window",
+        icon: "right-from-bracket",
+        keywords: "log out logout session headless sign out",
+        when: () => typeof getApi().signOutThisBrowser === "function",
+        execute: () => fireAndForget(async () => getApi().signOutThisBrowser?.()),
+    });
     commandRegistry.register({
         id: "window:new",
         label: "New Window",
@@ -355,6 +372,16 @@ function registerWorkspaceCommands(): void {
     workspaceCommand("workspace:delete", "Delete Workspace…", "trash-can", (m) => m.deleteWorkspacePrompt());
     workspaceCommand("workspace:export", "Export Workspace…", "file-export", (m) => m.exportWorkspace());
     workspaceCommand("workspace:import", "Import Workspace…", "file-import", (m) => m.importWorkspace());
+    // The way out of a window that shows nothing or has stopped following its tabs:
+    // it reloads at once, where "Free Memory" waits for what a reload would lose.
+    commandRegistry.register({
+        id: "window:reload",
+        label: "Reload Window",
+        category: "Window",
+        icon: "rotate-right",
+        keywords: "reload refresh blank stuck frozen empty broken",
+        execute: () => getApi().reloadWindow(),
+    });
     commandRegistry.register({
         id: "window:recycle",
         label: "Reload Window (Free Memory)",

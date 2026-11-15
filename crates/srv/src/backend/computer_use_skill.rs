@@ -19,6 +19,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::backend::agent_config::AgentConfigFile;
+use crate::backend::memory::record::sha256_hex;
 use crate::backend::skill_import::parse_skill_md;
 use crate::backend::skill_slugs::agent_skill_slugs;
 use crate::backend::storage::skill_app::{LadderStep, ReferenceInfo, SkillAppInfo, SkillFileInput, VerifiedRecord};
@@ -293,10 +294,6 @@ pub fn script_infos(manifest_json: &str) -> Vec<crate::backend::storage::skill_a
                 .collect()
         })
         .unwrap_or_default()
-}
-
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The catalog's content hash of `files` (path to bytes), without `skill.sig` and `verified.json`.

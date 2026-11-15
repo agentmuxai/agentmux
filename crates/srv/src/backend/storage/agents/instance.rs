@@ -577,8 +577,8 @@ impl Store {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn test_force_slug(&self, id: &str, slug: &str) -> Result<(), StoreError> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_force_slug(&self, id: &str, slug: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute("UPDATE db_agents SET slug = ?2 WHERE id = ?1", params![id, slug])?;
         Ok(())

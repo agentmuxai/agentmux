@@ -153,7 +153,7 @@ fn run_with_deadline(mut cmd: std::process::Command, deadline: Duration) -> Chil
 }
 
 /// `srv __extract <mode> <kind> <path> <name>` with the deadline.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn run_isolated(mode: &str, kind: FileKind, path: &Path, name: &str) -> ChildRun {
     let Ok(exe) = std::env::current_exe() else {
         return ChildRun::Failed;
@@ -171,7 +171,7 @@ fn run_isolated(mode: &str, kind: FileKind, path: &Path, name: &str) -> ChildRun
 
 /// Under `cargo test` the current executable is the test harness, which
 /// would read `__extract …` as test filters: run the child's code in-process.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn run_isolated(mode: &str, kind: FileKind, path: &Path, name: &str) -> ChildRun {
     match child_output(mode, kind.as_str(), path, name) {
         Some(json) => ChildRun::Output(json.into_bytes()),

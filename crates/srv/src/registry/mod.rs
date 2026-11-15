@@ -17,22 +17,23 @@
 
 #![allow(dead_code, unused_imports)]
 
-mod atomic;
-mod complete_enumeration;
-mod def_migrate;
-mod def_record_lock;
-mod def_schema;
-mod def_slug_index;
-mod def_store;
-mod leases;
+pub mod atomic;
+pub mod complete_enumeration;
+pub mod def_migrate;
+pub mod def_record_lock;
+pub mod def_schema;
+pub mod def_slug_index;
+pub mod def_store;
+pub mod leases;
 /// Blocking, exclusive, cross-process file lock (flock / LockFileEx), also
 /// used by `backend::cli_install` to serialize installs into the shared CLI dir.
 pub(crate) use leases::{lock_exclusive, try_lock_exclusive};
-mod migrate;
-mod paths;
-mod schema;
-mod store;
-pub(crate) mod work_store;
+pub mod migrate;
+pub mod paths;
+pub mod schema;
+pub mod shared_guard;
+pub mod store;
+pub mod work_store;
 
 #[cfg(test)]
 mod tests;
@@ -42,14 +43,14 @@ pub use migrate::{
     SourceBackfillStats,
 };
 pub use paths::{
-    resolve_identity_store_path, resolve_isolated_work_store_path, resolve_shared_definitions_dir, resolve_shared_lan_instances_dir,
+    resolve_identity_store_path, resolve_isolated_work_store_path, resolve_shared_definitions_dir, resolve_shared_instances_dir, resolve_shared_lan_instances_dir,
     resolve_shared_reactive_dir, resolve_shared_registry_dir, resolve_shared_store_path,
     resolve_shared_transcripts_dir,
 };
 // crate-internal only — see resolve_global_shared_root's doc comment for why
 // migrations/runner.rs must call this directly instead of deriving `home`
 // from resolve_shared_store_path()'s (isolation-aware) return value.
-pub(crate) use paths::{resolve_global_shared_root, shared_root_ignoring_deferral};
+pub use paths::{resolve_global_shared_root, shared_root_ignoring_deferral};
 pub use complete_enumeration::enumerate_objects_dbs_complete;
 pub use def_migrate::{migrate_definitions_global_once, DefMigrateStats};
 pub use def_schema::{

@@ -36,7 +36,7 @@ use agentmux_common::time::now_secs;
 /// A key older than this is rotated at its agent's next spawn (the next
 /// `agent_jekt_key_ensure` call), not invalidated in place — see
 /// docs/specs/SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md §2.
-pub(crate) const JEKT_KEY_TTL_SECS: i64 = 24 * 60 * 60;
+pub const JEKT_KEY_TTL_SECS: i64 = 24 * 60 * 60;
 
 impl Store {
     /// Load this agent's signing key if one has already been minted, without

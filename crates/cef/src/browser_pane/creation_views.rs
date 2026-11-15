@@ -71,9 +71,8 @@ use cef::ImplPanel;
 use crate::state::AppState;
 
 /// A pane's rect, as the page sends it (physical pixels), in the units Views
-/// sizes and places an overlay in. Windows divides by the window's display scale
-/// (Views works in DIP, the page's CSS pixels); Linux and macOS use the rect as
-/// sent, as they always have.
+/// sizes and places an overlay in. Windows and Linux divide by the window's display scale
+/// (Views works in DIP, the page's CSS pixels); macOS uses the rect as sent, as it always has.
 pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
     let scale = views_scale(window);
     let dip = |v: i32| (v as f64 / scale).round() as i32;
@@ -81,9 +80,11 @@ pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
 }
 
 /// How many of the page's physical pixels one Views unit is in `window`: its display's scale on
-/// Windows, 1 on Linux and macOS (and for a window with no display).
+/// Windows and Linux, 1 on macOS (and for a window with no display). On Linux the page measures in
+/// physical pixels too (`bounds::window_client_px` multiplies the client area by the same scale), so a
+/// pane placed with the rect as sent sat 1.5 times too far out at a display scale of 1.5.
 pub(crate) fn views_scale(window: Option<&Window>) -> f64 {
-    #[cfg(target_os = "windows")]
+    #[cfg(not(target_os = "macos"))]
     if let Some(scale) = window
         .and_then(|w| w.display())
         .map(|d| cef::ImplDisplay::device_scale_factor(&d) as f64)

@@ -270,7 +270,7 @@ use crate::backend::memory::delivery::COMPACTION_CLAUSE;
 /// provider's own compaction summary can drop commitments, and this is the
 /// backstop. Any other message, or an agent with no summary yet, comes back
 /// unchanged.
-pub(crate) fn with_state_after_compaction(mstore: &Store, block_id: &str, message: String) -> String {
+pub fn with_state_after_compaction(mstore: &Store, block_id: &str, message: String) -> String {
     if !(crate::ambient::digest::is_hidden_reinjection_text(&message) && message.contains(COMPACTION_CLAUSE)) {
         return message;
     }
@@ -283,7 +283,7 @@ pub(crate) fn with_state_after_compaction(mstore: &Store, block_id: &str, messag
 /// The agent's running summary as the section a compaction delivery carries
 /// last — the `SessionStart` hook's (`memory_delivery`), formatted exactly as
 /// the hidden reinjection's. `None` when the agent has no summary yet.
-pub(crate) fn running_summary_section(mstore: &Store, block_id: &str) -> Option<String> {
+pub fn running_summary_section(mstore: &Store, block_id: &str) -> Option<String> {
     latest_state_for_block(mstore, block_id).map(|state| summary_section(&state))
 }
 

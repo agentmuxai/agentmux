@@ -1,5 +1,7 @@
 # SPEC: Unified Agent Conversation-History Store
 
+**Area:** history store
+
 **Date:** 2026-06-10
 **Status:** Draft / proposal
 **Author:** AgentA

@@ -123,7 +123,7 @@ static HELPER_DIR_ENV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(()
 
 /// A durable pane's run for a test: pane `block` on host `conn`, reached
 /// by `ssh_path`, its session `session`.
-fn test_run(state: &crate::server::AppState, block: &str, conn: &str, session: &str, ssh_path: std::path::PathBuf) -> Run {
+fn test_run(state: &crate::test_support::CoreParts, block: &str, conn: &str, session: &str, ssh_path: std::path::PathBuf) -> Run {
     Run {
         block_id: block.to_string(),
         conn: conn.to_string(),
@@ -159,7 +159,7 @@ async fn a_dropped_link_reattaches_at_its_offset_and_appends_nothing_twice() {
     std::env::set_var("FAKE_SSH_STATE", dir.path().join("state"));
     std::env::set_var("FAKE_SSH_LOG", dir.path().join("log"));
 
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let block = "durable-test-block";
     let run = test_run(&state, block, "fakehost", "amx-test", ssh_path);
     let (_input_tx, input_rx) = mpsc::unbounded_channel();
@@ -238,7 +238,7 @@ async fn closing_while_disconnected_still_ends_the_session() {
     let log = dir.path().join("log2");
     std::env::set_var("FAKE_SSH_LOG2", &log);
 
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let run = test_run(&state, "durable-down-block", "downhost", "amx-down", ssh_path);
     let (_input_tx, input_rx) = mpsc::unbounded_channel();
     let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
@@ -290,7 +290,7 @@ async fn closing_while_still_connecting_ends_the_session() {
     let log = dir.path().join("log_slow");
     std::env::set_var("FAKE_SSH_LOG_SLOW", &log);
 
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let run = test_run(&state, "durable-slow-block", "slowhost", "amx-slow", ssh_path);
     let (_input_tx, input_rx) = mpsc::unbounded_channel();
     let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
@@ -368,7 +368,7 @@ async fn a_host_without_the_helper_gets_it_installed_then_attaches() {
     let _env = HELPER_DIR_ENV.lock().await;
     std::env::set_var("AGENTMUX_REMOTE_HELPER_DIR", &builds);
 
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let run = test_run(&state, "durable-fresh-block", "freshhost", "amx-fresh", ssh_path);
     let (_input_tx, input_rx) = mpsc::unbounded_channel();
     let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
@@ -432,7 +432,7 @@ async fn a_helper_that_cant_be_installed_leaves_a_plain_terminal_unless_durable_
     };
     std::env::set_var("FAKE_SSH_LOG_NO_BUILD", dir.path().join("log"));
     crate::backend::remote::helper_consent::install_answering_yes();
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let meta = |conn: &str, durable: Option<bool>| {
         let mut m = MetaMapType::new();
         m.insert(super::super::META_KEY_CONNECTION.into(), serde_json::json!(conn));
@@ -506,7 +506,7 @@ async fn a_windows_host_turns_the_pane_into_a_plain_ssh_terminal() {
     };
     std::env::set_var("FAKE_SSH_LOG4", dir.path().join("log"));
 
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let block = "durable-windows-block";
     let plain = Arc::new(AtomicBool::new(false));
     let mut run = test_run(&state, block, "windowshost", "amx-windows", ssh_path);
@@ -555,7 +555,7 @@ async fn a_windows_host_in_another_language_is_found_by_asking_it() {
     };
     std::env::set_var("FAKE_SSH_LOG5", dir.path().join("log"));
 
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let plain = Arc::new(AtomicBool::new(false));
     let mut run = test_run(&state, "durable-windows-de-block", "windowshost-de", "amx-windows-de", ssh_path);
     run.plain = plain.clone();
@@ -618,7 +618,7 @@ async fn a_refused_login_stops_the_pane_and_keeps_its_session() {
     };
     std::env::set_var("FAKE_SSH_LOG3", dir.path().join("log"));
 
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let block = "durable-refused-block";
     let run = test_run(&state, block, "fakehost", "amx-refused", ssh_path);
     let (_input_tx, input_rx) = mpsc::unbounded_channel();
@@ -720,7 +720,7 @@ async fn a_helper_removed_after_attaching_is_installed_again() {
     std::fs::write(builds.join(name), b"the helper").unwrap();
     let _env = HELPER_DIR_ENV.lock().await;
     std::env::set_var("AGENTMUX_REMOTE_HELPER_DIR", &builds);
-    let run = test_run(&crate::server::tests::test_state(), "durable-removed-block", "removedhost", "amx-removed", ssh_path);
+    let run = test_run(&crate::test_support::core_parts(), "durable-removed-block", "removedhost", "amx-removed", ssh_path);
     let (_input_tx, input_rx) = mpsc::unbounded_channel();
     let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
     let ended = tokio::time::timeout(Duration::from_secs(30), run.run(input_rx, leave_rx, Box::new(|_| {})))
@@ -771,7 +771,7 @@ async fn a_helper_still_missing_after_installing_leaves_a_plain_terminal_by_defa
     std::fs::write(builds.join(name), b"the helper").unwrap();
     let _env = HELPER_DIR_ENV.lock().await;
     std::env::set_var("AGENTMUX_REMOTE_HELPER_DIR", &builds);
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let mut run = test_run(&state, "durable-never-block", "neverhost", "amx-never", ssh_path);
     run.by_default = true;
     let plain = run.plain.clone();
@@ -811,7 +811,7 @@ async fn a_new_host_never_reached_becomes_a_plain_terminal_by_default() {
     };
     let log = dir.path().join("log");
     std::env::set_var("FAKE_SSH_LOG_UNREACHABLE", &log);
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let mut run = test_run(&state, "durable-unreachable-block", "nosuchhost", "amx-unreachable", ssh_path);
     run.by_default = true;
     let plain = run.plain.clone();
@@ -859,7 +859,7 @@ async fn a_host_already_declined_or_failed_isnt_asked_or_tried_again() {
     std::env::set_var("FAKE_SSH_LOG_NO_HELPER", &log);
     crate::backend::remote::helper_consent::install_answering_yes();
     crate::backend::remote::helper_consent::note_not_installed("failed-before-host");
-    let state = crate::server::tests::test_state();
+    let state = crate::test_support::core_parts();
     let ssh_path_again = ssh_path.clone();
     let mut run = test_run(&state, "durable-failed-before-block", "failed-before-host", "amx-failed-before", ssh_path);
     run.by_default = true;

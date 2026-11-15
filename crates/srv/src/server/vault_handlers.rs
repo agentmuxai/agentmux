@@ -113,7 +113,8 @@ fn vault_agents(body: &Value) -> Result<vault::vaults::VaultAgents, String> {
 }
 
 /// `import_commit`: writes what the person previewed. `vault` (a name or an id) is where the new entries go;
-/// Personal when left out.
+/// Personal when left out. `profile` is the browser profile a browser export's logins with a site belong to
+/// (`personal` when left out): they go to its sign-in Vault, which is where the browser offers them from.
 fn import_commit(store: &crate::backend::storage::store::Store, body: &Value) -> Result<(Value, bool), String> {
     let token = body.get("token").and_then(Value::as_str).unwrap_or("");
     let duplicates: vault::transfer::Duplicates = serde_json::from_value(body.get("duplicates").cloned().unwrap_or(json!("skip")))
@@ -122,7 +123,8 @@ fn import_commit(store: &crate::backend::storage::store::Store, body: &Value) ->
         Some(v) => vault::vaults::resolve(store, v, None)?.id,
         None => crate::backend::storage::vault::PERSONAL_VAULT.to_string(),
     };
-    Ok((json!({ "result": vault::transfer::commit(store, token, duplicates, &vault)? }), true))
+    let profile = body.get("profile").and_then(Value::as_str);
+    Ok((json!({ "result": vault::transfer::commit_for(store, token, duplicates, &vault, profile)? }), true))
 }
 
 /// The host ops on Vaults and on an entry's earlier values.
@@ -147,6 +149,12 @@ fn entry_ops(store: &crate::backend::storage::store::Store, op: &str, body: &Val
         // The Vault a browser profile saves its sign-ins to and offers them from.
         "signin_vault" => {
             vault::vaults::set_signin_vault(store, &s("profile"), &s("vault_id"))?;
+            Ok((json!({}), true))
+        }
+        // The person's pick in Settings of the entry a setting reads its key from: the grant that lets srv
+        // read it for that setting (a setting that only names an entry reads nothing).
+        "allow_setting" => {
+            vault::setting_key::allow(store, &s("entry_id"), &s("setting"), vault::PERSON)?;
             Ok((json!({}), true))
         }
         // An entry's earlier values, and putting one back (spec §4.4 of the generate spec).
@@ -226,7 +234,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "versions" | "restore" | "history" | "history_check" => entry_ops(&store, &op, &body),
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "allow_setting" | "versions" | "restore" | "history" | "history_check" => entry_ops(&store, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {

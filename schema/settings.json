@@ -593,11 +593,17 @@
         },
         "voice:groqApiKey": {
           "type": "string",
-          "description": "Groq API key for the hosted Whisper backend (voice:engine = 'groq', the default). Read server-side only, never sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes precedence.",
+          "description": "The Groq API key for the hosted Whisper backend (voice:engine = 'groq', the default), kept in the Vault: this names the entry as vault:<entry id>, chosen in Settings > Recording. Read server-side only, never sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes precedence.",
           "x-section": "Voice input",
           "x-secret": true,
-          "x-example": "gsk_...",
+          "x-example": "vault:<entry id>",
           "x-nodefault": "or set AGENTMUX_GROQ_API_KEY"
+        },
+        "voice:groqApiKeyMoved": {
+          "type": "boolean",
+          "description": "Set when AgentMux moved a Groq key that sat in settings.json as plain text into the Vault, so Settings > Recording can say so once. Dismissing the notice removes it.",
+          "x-section": "Voice input",
+          "x-nodefault": "unset until a key is moved"
         },
         "voice:whisperCliPath": {
           "type": "string",

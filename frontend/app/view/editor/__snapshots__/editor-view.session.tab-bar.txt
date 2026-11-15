@@ -23,7 +23,7 @@ lsp#1 dispose
 <span class="pane-tab-icon">
 </span>
 <span class="pane-tab-label">a.ts</span>
-<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<button data-hover-tip="Close" aria-description="Close" type="button" class="ui-close ui-close--tab pane-tab-close" aria-label="Close tab">
 <i aria-hidden="true" class="fa-solid fa-xmark">
 </i>
 </button>
@@ -34,7 +34,7 @@ lsp#1 dispose
 <span class="pane-tab-icon">
 </span>
 <span class="pane-tab-label">b.ts</span>
-<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<button data-hover-tip="Close" aria-description="Close" type="button" class="ui-close ui-close--tab pane-tab-close" aria-label="Close tab">
 <i aria-hidden="true" class="fa-solid fa-xmark">
 </i>
 </button>
@@ -45,7 +45,7 @@ lsp#1 dispose
 <span class="pane-tab-icon">
 </span>
 <span class="pane-tab-label">Untitled-1</span>
-<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<button data-hover-tip="Close" aria-description="Close" type="button" class="ui-close ui-close--tab pane-tab-close" aria-label="Close tab">
 <i aria-hidden="true" class="fa-solid fa-xmark">
 </i>
 </button>
@@ -70,7 +70,7 @@ run editor:saveAs -> true
 <span class="pane-tab-icon">
 </span>
 <span class="pane-tab-label">a.ts</span>
-<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<button data-hover-tip="Close" aria-description="Close" type="button" class="ui-close ui-close--tab pane-tab-close" aria-label="Close tab">
 <i aria-hidden="true" class="fa-solid fa-xmark">
 </i>
 </button>
@@ -81,7 +81,7 @@ run editor:saveAs -> true
 <span class="pane-tab-icon">
 </span>
 <span class="pane-tab-label">b.ts</span>
-<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<button data-hover-tip="Close" aria-description="Close" type="button" class="ui-close ui-close--tab pane-tab-close" aria-label="Close tab">
 <i aria-hidden="true" class="fa-solid fa-xmark">
 </i>
 </button>
@@ -92,7 +92,7 @@ run editor:saveAs -> true
 <span class="pane-tab-icon">
 </span>
 <input class="editor-tab-saveas-input" data-raw-text-field="the Save As path box in the editor tab: it replaces the tab's name in place and ends on Enter, Escape or blur, not a form field" aria-label="Save as path" type="text" placeholder="~/path/to/file.md" title="Type a path and press Enter to save (Esc to cancel)">
-<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<button data-hover-tip="Close" aria-description="Close" type="button" class="ui-close ui-close--tab pane-tab-close" aria-label="Close tab">
 <i aria-hidden="true" class="fa-solid fa-xmark">
 </i>
 </button>

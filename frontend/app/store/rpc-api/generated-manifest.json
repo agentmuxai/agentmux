@@ -847,7 +847,7 @@
         {
             "command": "kanban.list",
             "method": "KanbanListCommand",
-            "dataType": "Record<string, never>",
+            "dataType": "{ board?: string }",
             "returns": "import(\"@/app/view/kanban/kanban-types\").KanbanBoard"
         },
         {
@@ -1289,10 +1289,6 @@
             "method": "RenameAgentDefinitionTitleCommand"
         },
         {
-            "command": "renameeditorfile",
-            "method": "RenameEditorFileCommand"
-        },
-        {
             "command": "reorderglobalbrain",
             "method": "ReorderGlobalBundlesCommand"
         },
@@ -1329,6 +1325,14 @@
         {
             "command": "rundrone",
             "method": "RunDroneCommand"
+        },
+        {
+            "command": "resolvedronerun",
+            "method": "ResolveDroneRunCommand"
+        },
+        {
+            "command": "resumedronewait",
+            "method": "ResumeDroneWaitCommand"
         },
         {
             "command": "layout.save",
@@ -1408,6 +1412,11 @@
         {
             "command": "app_skills.catalog.install",
             "method": "AppSkillsCatalogInstallCommand"
+        },
+        {
+            "command": "app_skills.here",
+            "method": "AppSkillsHereCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "skill.catalog.app_file",

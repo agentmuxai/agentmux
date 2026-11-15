@@ -7,6 +7,7 @@
 use serde_json::{json, Value};
 
 use super::{AppState, RemoteCaller, RemoteResult};
+use crate::server::messaging_health::MessagingHealth;
 
 /// What the last release check found, field by field: the status struct also holds the release
 /// asset's URL and the download's folder, installer path and error text, none of which leaves
@@ -67,24 +68,30 @@ pub(super) async fn activity(state: &AppState, _caller: &RemoteCaller, _params: 
 }
 
 pub(super) async fn health(state: &AppState, _caller: &RemoteCaller, _params: Value) -> RemoteResult {
-    Ok(health_report(state))
+    let messaging = MessagingHealth::probe(state.reactive_handler).await;
+    Ok(health_report(state, &messaging))
 }
 
 /// The upgrade spec's health report, on demand: the identity above, and what a steward checks
 /// after an upgrade (MuxBus, LAN peers, free disk, how many agents are in which state). Also
-/// what `GET /api/v1/app/health` gives this machine's own agents.
-pub(crate) fn health_report(state: &AppState) -> Value {
+/// what `GET /api/v1/app/health` gives this machine's own agents. `status` is `ok` or `degraded` (the messaging path stuck, or srv
+/// panicking in bulk), with the detail under `messaging`.
+pub(crate) fn health_report(state: &AppState, messaging: &MessagingHealth) -> Value {
     let mut report = identity(state);
     let disk = agentmux_common::data_paths::DataPaths::from_env()
         .and_then(|paths| agentmux_common::disk_space::volume_free_total_bytes(&paths.data_dir))
         .map(|(free, total)| json!({ "free_bytes": free, "total_bytes": total }));
     let agents = agents_by_state(&state.fleet_feed.snapshot().agent_status);
     if let Value::Object(map) = &mut report {
+        map.insert("status".into(), json!(messaging.status()));
+        map.insert("messaging".into(), messaging.to_json());
         map.insert("lan_peers".into(), json!(state.lan_discovery.get_instances().len()));
         map.insert("muxbus".into(), muxbus_summary());
         map.insert("disk".into(), disk.unwrap_or(Value::Null));
         map.insert("agents".into(), agents);
         map.insert("remote_ops".into(), json!(if super::enabled(state) { "on" } else { "off" }));
+        // Incoming LAN requests refused, still unanswered after a few seconds, or timed out since this srv started.
+        map.insert("lan_refusals".into(), crate::server::lan_watch::counts());
     }
     report
 }
@@ -102,7 +109,8 @@ fn agents_by_state(status: &std::collections::BTreeMap<String, crate::backend::a
 
 /// `GET /api/v1/app/health`: `App` with action `health`, for this machine.
 pub(crate) async fn handle_health(axum::extract::State(state): axum::extract::State<AppState>) -> axum::Json<Value> {
-    axum::Json(health_report(&state))
+    let messaging = MessagingHealth::probe(state.reactive_handler).await;
+    axum::Json(health_report(&state, &messaging))
 }
 
 #[cfg(test)]

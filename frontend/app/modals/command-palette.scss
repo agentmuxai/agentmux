@@ -30,17 +30,20 @@
 }
 
 .command-palette-input-row {
+    // The kit's magnifier is a square cell of (--ui-height - 2px), so the glyph has the same room on all four sides.
+    // The row sets --ui-height to its own height (the input's line, 14px x 1.5, and its 10px of padding above and
+    // below, plus the divider), so the cell is as tall as the row and the row has nothing else to size it by.
+    --ui-height: 42px;
     display: flex;
     align-items: center;
-    padding: 0 14px 0 0;
+    box-sizing: border-box;
+    min-height: var(--ui-height);
+    // As much room right of ESC as the cell leaves left of the glyph: (40px cell - the glyph's 10px) / 2.
+    padding: 0 15px 0 0;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
 
-    // The kit's magnifier, as tall as the row and as wide: the room on its four sides is the same.
     .ui-search-icon {
-        width: auto;
-        min-height: 0;
-        aspect-ratio: 1;
         font-size: var(--text-base);
     }
 }

@@ -1,0 +1,91 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The close control (CloseButton.tsx). Colours only from theme tokens; the hover is the
+// standard close red every window already uses (`--window-close-*`, theme.scss).
+
+@use "../../mixins.scss";
+
+.ui-close {
+    // reset.scss gives every native <button> `appearance: auto`; without this Chromium draws its own button
+    // chrome under the reset.
+    appearance: none;
+    @include mixins.button-reset;
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: var(--ui-close-size);
+    height: var(--ui-close-size);
+    border-radius: var(--radius-sm);
+    // At rest the ✕ takes the colour of what it sits in unless the host sets `--ui-close-fg`.
+    color: var(--ui-close-fg, var(--secondary-text-color));
+    font: inherit;
+    font-size: var(--ui-close-icon);
+    line-height: 1;
+    cursor: default;
+    @include mixins.control-transition;
+
+    i {
+        width: 1em;
+        font-size: inherit;
+        text-align: center;
+    }
+
+    &:hover:not(:disabled) {
+        background: var(--window-close-hover-bg);
+        color: var(--window-close-fg);
+    }
+
+    &:active:not(:disabled) {
+        background: var(--window-close-press-bg);
+        color: var(--window-close-fg);
+    }
+
+    // A host that shows the ✕ only on hover must not hide it from the keyboard.
+    &:focus-visible {
+        @include mixins.focus-ring;
+        opacity: 1;
+        visibility: visible;
+    }
+
+    &:disabled:not([aria-busy="true"]) {
+        opacity: 0.45;
+    }
+
+    // With words beside the ✕: as wide as its text, its height from the size.
+    &--text {
+        width: auto;
+        gap: var(--space-1);
+        padding: 0 var(--space-1-5);
+
+        .ui-close__text {
+            font-size: var(--text-xs);
+            line-height: 1;
+        }
+    }
+
+    &--sm {
+        --ui-close-size: 18px;
+        --ui-close-icon: 10px;
+    }
+
+    &--md {
+        --ui-close-size: 26px;
+        --ui-close-icon: 12px;
+    }
+
+    &--tab {
+        --ui-close-size: 16px;
+        --ui-close-icon: var(--text-base);
+    }
+
+    // The pane header's ✕: Font Awesome Free has no `xmark-large`, so 25px of font gives the
+    // ~15.6px ✕ the Pro glyph had.
+    // It takes the header's own text colour, which a custom pane colour may have changed.
+    &--header {
+        --ui-close-size: 26px;
+        --ui-close-icon: 25px;
+        --ui-close-fg: currentColor;
+    }
+}

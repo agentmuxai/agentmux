@@ -355,8 +355,8 @@ pub fn agent_status_of_block(mstore: &Store, block_id: &str) -> Option<AgentStat
     TRACKER.record(block_id, current_state(mstore, block_id), agentmux_common::time::now_ms_u64())
 }
 
-#[cfg(test)]
-pub(crate) mod test_support {
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
     use std::any::Any;
     use std::sync::Arc;
 

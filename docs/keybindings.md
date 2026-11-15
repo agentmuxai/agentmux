@@ -91,6 +91,7 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 |---|---|---|
 | Save | ⌘S | Ctrl+S |
 | Save as (scratch documents) | ⇧⌘S | Ctrl+Shift+S |
+| Rename file (an untitled document is saved under the name) | F2 | F2 |
 | Find and replace | ⌘F | Ctrl+F |
 | Toggle markdown preview | ⇧⌘V | Ctrl+Shift+V |
 | Switch between the file tree and the editor | ⇧⌘E | Ctrl+Shift+E |
@@ -155,6 +156,19 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Close the tab | on a pane, document or editor tab | middle-click | middle-click |
 | Keep it open instead of letting the next preview replace it | on a preview tab (italic) | double-click | double-click |
 
+### Editor
+
+| What it does | Where | macOS | Windows / Linux |
+|---|---|---|---|
+| Rename its file in place; an untitled document is saved under the name (Enter renames, Esc or a click elsewhere cancels) | on a document tab in the editor | double-click | double-click |
+| A click opens a preview tab, a double-click a tab that stays; F2 renames | on a file in the editor's file tree | click or double-click | click or double-click |
+| Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it | in the editor's file tree | ↑ or ↓ or Enter or Space or Escape | ↑ or ↓ or Enter or Space or Escape |
+| Add another cursor | in an editor | ⌘ + click | Ctrl + click |
+| Make a column (block) selection | in an editor | ⌥ + drag | Alt + drag |
+| Select the next match of the selected text | in an editor | ⌘ + D | Ctrl + D |
+| Zoom in a step about the pointer / zoom out a step / pan / zoom smoothly; + − 0 1 and the arrows too; [ ] the previous or next image in the folder; B the background | on an image in the Editor | click or ⌥ + click or drag or scroll | click or Alt + click or drag or scroll |
+| Zoom out a step about the pointer | on an image in the Editor | — | Ctrl + click |
+
 ### Terminal
 
 | What it does | Where | macOS | Windows / Linux |
@@ -167,18 +181,6 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Select a word / a whole line | in a terminal | double-click or triple-click | double-click or triple-click |
 | Find in a terminal (⌃F / Ctrl+F there goes to the shell) |  | — | Ctrl + Shift + F |
 
-### Editor
-
-| What it does | Where | macOS | Windows / Linux |
-|---|---|---|---|
-| A click opens a preview tab, a double-click a tab that stays; F2 renames | on a file in the editor's file tree | click or double-click | click or double-click |
-| Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it | in the editor's file tree | ↑ or ↓ or Enter or Space or Escape | ↑ or ↓ or Enter or Space or Escape |
-| Add another cursor | in an editor | ⌘ + click | Ctrl + click |
-| Make a column (block) selection | in an editor | ⌥ + drag | Alt + drag |
-| Select the next match of the selected text | in an editor | ⌘ + D | Ctrl + D |
-| Zoom in a step about the pointer / zoom out a step / pan / zoom smoothly; + − 0 1 and the arrows too; [ ] the previous or next image in the folder; B the background | on an image in the Editor | click or ⌥ + click or drag or scroll | click or Alt + click or drag or scroll |
-| Zoom out a step about the pointer | on an image in the Editor | — | Ctrl + click |
-
 ### Files
 
 | What it does | Where | macOS | Windows / Linux |
@@ -189,6 +191,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Open it in a new tab | on a folder in the Files pane | middle-click | middle-click |
 | Type a path | on the Files pane's folder path | double-click | double-click |
 | Send files to an agent, editor or terminal pane; dropping copies here, or into the folder under the pointer | Files rows onto a pane, or files onto the list | drag or drop | drag or drop |
+| Drag to resize that column; double-click to give it its default width back | on the right edge of a column header | drag or double-click | drag or double-click |
 
 ### Agent
 
@@ -215,6 +218,27 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 |---|---|---|---|
 | Address bar / reload / back / forward | in a browser pane | ⌘ + L or ⌘ + R or ⌥ + ← or ⌥ + → | Ctrl + L or Ctrl + R or Alt + ← or Alt + → |
 | Back / forward in that page (a plain side button re-selects panes) | over a browser pane | ⌃ + sidebutton | Ctrl + sidebutton |
+
+### Memory
+
+| What it does | Where | macOS | Windows / Linux |
+|---|---|---|---|
+| Drag to resize the toolbar against the text (the arrow keys step it once the line has keyboard focus); double-click resets it | on the line between an open entry's toolbar and its text | drag or double-click or ↑ or ↓ | drag or double-click or ↑ or ↓ |
+
+### Atlas
+
+| What it does | Where | macOS | Windows / Linux |
+|---|---|---|---|
+| Zoom in or out around the pointer | over the map | scroll | scroll |
+| Pan the map | on the map's empty background | drag | drag |
+
+### Drone
+
+| What it does | Where | macOS | Windows / Linux |
+|---|---|---|---|
+| Zoom the graph around the pointer | over the graph | scroll | scroll |
+| Pan the graph | the graph's empty background, or anywhere with the middle button | drag or middle-click + drag | drag or middle-click + drag |
+| Remove it (Esc only clears the selection) | with a node selected | Delete or Backspace | Delete or Backspace |
 
 ## Your own shortcuts
 

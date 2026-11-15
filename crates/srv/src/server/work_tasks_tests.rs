@@ -244,7 +244,9 @@ async fn a_named_claim_takes_a_held_task_and_says_why_when_it_cant() {
     let theirs = theirs["num"].as_i64().unwrap();
     let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1", "id": theirs.to_string()})).await;
     assert_eq!(c["claimed"], false);
-    assert!(c["why"].as_str().unwrap().contains("a2"), "{c}");
+    let why = c["why"].as_str().unwrap();
+    assert!(why.contains("is for a2 (not running: stopped, parked or gone), not you"), "{c}");
+    assert!(why.contains("Tasks move with id and target_agent"), "it says how to go on: {c}");
     let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1", "id": num.to_string()})).await;
     assert!(c["why"].as_str().unwrap().contains("claimed"), "already taken: {c}");
     let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;

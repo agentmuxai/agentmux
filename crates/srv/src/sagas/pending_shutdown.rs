@@ -14,12 +14,16 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
-use serde::Serialize;
-
 use crate::server::AppState;
 
 mod batch;
-pub use batch::{request_batch, BatchBlock, BlockOutcome};
+pub use batch::request_batch;
+pub use crate::backend::shutdown_events::{clean_reason, BatchBlock, BlockOutcome, PendingClearedEvent, PendingView};
+#[cfg(test)]
+pub use crate::backend::shutdown_events::{EVENT_SHUTDOWN_PENDING, EVENT_SHUTDOWN_PENDING_CLEARED, REASON_HIDDEN};
+use crate::backend::shutdown_events::clean_line;
+#[cfg(test)]
+use crate::backend::shutdown_events::REASON_MAX;
 
 /// How long the user has to keep what another agent asked to stop or close: 30 s, the
 /// default for a human override.
@@ -43,8 +47,6 @@ pub fn close_window(state: &AppState, block_ids: &[String]) -> std::time::Durati
         OVERRIDE_WINDOW
     }
 }
-pub const EVENT_SHUTDOWN_PENDING: &str = "agent:shutdown-pending";
-pub const EVENT_SHUTDOWN_PENDING_CLEARED: &str = "agent:shutdown-pending-cleared";
 /// Finished requests stay answerable this long, then are dropped.
 const KEEP_FINISHED_MS: i64 = 10 * 60 * 1000;
 
@@ -143,59 +145,6 @@ impl Action {
 /// How long a caller should wait, at least, for a request with this deadline.
 pub fn wait_at_least_ms(deadline_ms: i64) -> u64 {
     (deadline_ms - now_ms()).max(0) as u64
-}
-
-/// A request as the caller and the frontend see it (§12.2).
-#[derive(Clone, Debug, Serialize, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct PendingView {
-    pub request_id: String,
-    pub block_id: String,
-    /// Who asked: an agent id, or `cron` etc.
-    pub by: String,
-    /// The agent being shut down, resolved when asked (it may be gone after).
-    pub target: String,
-    /// The tool: `QuitSelf`, `ClosePane`, `FleetBulkStop`.
-    pub via: String,
-    /// Why, in the asker's words, cleaned for display (`clean_reason`): never
-    /// the raw text. Shown on the pane banner only; an OS toast leaves it out.
-    pub reason: String,
-    /// What happens if the window runs out: `stop` (the agent stops, its pane
-    /// stays), `close_tab` (it stops and its tab closes) or `close_pane`.
-    #[ts(type = r#""stop" | "close_tab" | "close_pane""#)]
-    pub effect: &'static str,
-    #[ts(type = "number")]
-    pub deadline_ms: i64,
-    /// `pending` → `kept_by_user`, or `proceeding` → `shut_down` / `failed` /
-    /// `superseded` (the user closed it themselves meanwhile).
-    #[ts(type = r#""pending" | "kept_by_user" | "proceeding" | "shut_down" | "failed" | "superseded""#)]
-    pub status: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub error: Option<String>,
-    /// A request for several agents at once (`Stop agents`): the ones still waiting. Absent for one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub blocks: Option<Vec<BatchBlock>>,
-    /// What became of each agent of such a request: kept by the user, or how its close ended. Filled as
-    /// the user keeps one, and once the request settles.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub outcomes: Option<Vec<BlockOutcome>>,
-    /// This caller joined a request already open for the block rather than
-    /// opening one. Never stored; set on the view `request` returns.
-    #[serde(skip)]
-    #[ts(skip)]
-    pub joined: bool,
-}
-
-/// `agent:shutdown-pending-cleared`: the request ended, and how.
-#[derive(Clone, Debug, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct PendingClearedEvent {
-    pub block_id: String,
-    pub request_id: String,
-    pub outcome: String,
 }
 
 struct Entry {
@@ -590,28 +539,6 @@ pub fn toast_body(v: &PendingView) -> String {
     }
 }
 
-/// The longest reason the banner shows.
-const REASON_MAX: usize = 120;
-/// Shown in place of a reason that looks like it holds a credential or asks
-/// for something destructive.
-pub const REASON_HIDDEN: &str = "Reason hidden: it looks sensitive.";
-
-/// A caller's reason, cleaned for the user to read (spec §3.11). Replaced
-/// wholesale by `REASON_HIDDEN` when it trips the keyword list the jekt tier
-/// gate and notification previews use; otherwise its first line, control and
-/// bidi-override characters removed, whitespace collapsed, cut at
-/// `REASON_MAX`. Markup is not interpreted here: the banner renders it as
-/// text and a toast never carries it.
-pub fn clean_reason(raw: &str) -> String {
-    if crate::backend::reactive::sanitize::is_sensitive_message(raw) {
-        return REASON_HIDDEN.to_string();
-    }
-    let Some(first) = raw.lines().map(str::trim).find(|l| !l.is_empty()) else {
-        return String::new();
-    };
-    clean_line(first, REASON_MAX)
-}
-
 /// The longest asker name the banner and toast show.
 const BY_MAX: usize = 64;
 
@@ -634,22 +561,6 @@ pub(crate) fn asker_name(state: &AppState, by: &str) -> String {
 pub(crate) fn clean_by(raw: &str) -> String {
     let line = clean_line(raw, BY_MAX);
     if line.is_empty() { "An agent".to_string() } else { line }
-}
-
-/// One line for display: bidi-override characters removed, control characters
-/// turned into spaces, whitespace collapsed, cut at `max` characters.
-fn clean_line(raw: &str, max: usize) -> String {
-    let cleaned: String = raw
-        .chars()
-        .filter(|c| !crate::backend::notify::router::is_bidi_control(*c))
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    let line = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut out: String = line.chars().take(max).collect();
-    if line.chars().count() > max {
-        out.push('…');
-    }
-    out
 }
 
 /// The outcome, once per requester, each as its own source (§6.5 step 8).

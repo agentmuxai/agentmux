@@ -101,7 +101,7 @@ pub struct AgentFailure {
 }
 
 /// The title of a `UsageLimit` failure whose cause is a model route with no credits left (HTTP 402).
-pub(crate) const ROUTE_CREDITS_TITLE: &str = "The model route is out of credits";
+pub const ROUTE_CREDITS_TITLE: &str = "The model route is out of credits";
 
 /// How long a route that answered 402 is held before a message may probe it again.
 pub(crate) const ROUTE_CREDITS_RETRY_MS: u64 = 10 * 60 * 1000;
@@ -404,7 +404,7 @@ pub fn open_in_other_pane_holder(text: &str) -> Option<String> {
 }
 
 #[path = "failure_rules.rs"]
-mod rules;
+pub mod rules;
 
 #[cfg(test)]
 #[path = "failure_order_tests.rs"]

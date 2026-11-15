@@ -99,13 +99,13 @@ impl RpcBinding {
     /// Kept alongside the full path rather than replacing it: the short name
     /// is what a binding is called in TypeScript, but two modules can hold
     /// same-named types, so the full path stays authoritative.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn request_name(&self) -> &str {
         short_name(self.request)
     }
 
     /// Last path segment of `response`.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn response_name(&self) -> &str {
         short_name(self.response)
     }
@@ -113,7 +113,7 @@ impl RpcBinding {
 
 /// `a::b::Foo` -> `Foo`; also strips a generic tail so `Vec<a::B>` reads as
 /// `Vec<a::B>` rather than being truncated at a `::` inside the parameter.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn short_name(path: &str) -> &str {
     match path.find('<') {
         // Generic: leave it whole. Truncating `Vec<crate::x::Y>` at the last
@@ -205,7 +205,7 @@ impl RpcSchema {
     }
 
     /// Stable JSON, sorted by command, for the dump + CI gate.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::Value::Array(
             self.bindings

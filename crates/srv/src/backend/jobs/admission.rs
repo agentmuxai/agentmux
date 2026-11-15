@@ -13,6 +13,8 @@
 //! can still both see room for one more for an instant; the limits are for
 //! the providers' rate limits and for tidiness, not safety.
 
+pub(super) mod events;
+
 use std::sync::Arc;
 
 use agentmux_common::time::now_ms;
@@ -21,7 +23,7 @@ use serde_json::json;
 use super::caps::Refusal;
 use super::definition::Overlap;
 use super::policy::{self, Decision, Occupancy};
-use super::{Begin, RunLedger, BY_SCHEDULER, SOURCE_CRON, TRIGGER_RETRY};
+use super::{Begin, RunLedger, BY_SCHEDULER, SOURCE_CRON, TRIGGER_EVENT, TRIGGER_RETRY};
 use crate::backend::storage::cron::CronJob;
 use crate::backend::storage::job_runs::{infra, reason, state, JobRun};
 use crate::backend::storage::store::Store;
@@ -66,7 +68,7 @@ impl RunLedger {
 
     /// Tests: how to interrupt the turn in a pane (a timeout, `cancel_other`).
     /// Otherwise the pane's controller is asked, as the Stop button does.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn install_interrupt(&self, interrupt: super::BlockHook) {
         let _ = self.interrupt.set(interrupt);
     }
@@ -212,7 +214,7 @@ impl RunLedger {
     /// instance follows isn't closed here: that instance is asked to stop it
     /// (`remote.rs`), so the row closes only once its agent's turn is
     /// interrupted. `false` for it too.
-    pub(crate) fn stop_run(&self, run: &JobRun, infra_status: &str, why: &str, summary: &str) -> bool {
+    pub fn stop_run(&self, run: &JobRun, infra_status: &str, why: &str, summary: &str) -> bool {
         if self.run_followed_elsewhere(run) {
             self.request_remote_stop(run, infra_status, why, summary);
             return false;
@@ -220,6 +222,9 @@ impl RunLedger {
         match self.store.job_run_stop(&run.id, infra_status, why, summary, now_ms()) {
             Ok(true) => {
                 self.interrupt_block(&run.block_id);
+                if let Some(drone_run) = run.links["drone_run_id"].as_str() {
+                    crate::backend::drone_cancel::cancel_run(drone_run, summary);
+                }
                 self.reap_worker(&run.id);
                 self.run_changed(&run.id);
                 super::pending_wake().notify_one();
@@ -250,6 +255,18 @@ impl RunLedger {
             }
         }
         stopped
+    }
+
+    /// A Drone run a restart left open, that a job started and whose job's
+    /// `timeout_minutes` ran out while AgentMux was down: close it as timed out
+    /// (the way the timeout pass does) and say so, so it is not taken up again
+    /// and able to act before the first pass. `false` for a run with no such
+    /// timeout, or one that has time left.
+    pub fn close_if_past_timeout(&self, drone_run_id: &str) -> bool {
+        let Some(run) = self.open_run_of_drone(drone_run_id).and_then(|id| self.store.job_run_get(&id).ok().flatten()) else { return false };
+        let Some(minutes) = self.job(&run.job_id).and_then(|j| j.policy.timeout_minutes) else { return false };
+        now_ms() - run.started_at_ms >= i64::from(minutes) * 60_000
+            && self.stop_run(&run, infra::TIMEOUT, reason::TIMEOUT, &format!("stopped after {minutes} minutes (timeout_minutes)"))
     }
 
     /// [`policy::decide`] for `job` now.
@@ -323,6 +340,10 @@ impl RunLedger {
             if run.reason == reason::RETRY_WAIT && run.links["retry_at_ms"].as_i64().unwrap_or(0) > now {
                 continue;
             }
+            // An event's run held back by the trigger's `delay` is not due yet.
+            if run.reason == reason::DELAY_WAIT && run.links["due_at_ms"].as_i64().unwrap_or(0) > now {
+                continue;
+            }
             let decision = self.decide(&job, true);
             self.ask_remote_stops(&job, decision);
             match decision {
@@ -385,13 +406,22 @@ impl RunLedger {
     /// then 15 minutes). The failed run is marked `retried_by`, so it isn't
     /// an incident of its own; the last attempt decides.
     pub(super) fn maybe_retry(&self, run_id: &str) {
-        let Some(run) = self.store.job_run_get(run_id).ok().flatten() else { return };
-        if run.job_source != SOURCE_CRON || !policy::infra_retryable(&run) || !run.links["retried_by"].is_null() {
-            return;
+        match self.file_retry(run_id) {
+            // The next attempt reads the same event the first one did; a run that is over for good has no more use for it.
+            Some(next) => self.carry_event_input(run_id, &next),
+            None => self.drop_event_input(run_id),
         }
-        let Some(job) = self.job(&run.job_id) else { return };
+    }
+
+    /// The retry of `run_id`, filed if it has one coming: its id.
+    fn file_retry(&self, run_id: &str) -> Option<String> {
+        let run = self.store.job_run_get(run_id).ok().flatten()?;
+        if run.job_source != SOURCE_CRON || !policy::infra_retryable(&run) || !run.links["retried_by"].is_null() {
+            return None;
+        }
+        let job = self.job(&run.job_id)?;
         if run.attempt > i64::from(job.policy.retries) {
-            return;
+            return None;
         }
         let now = now_ms();
         let mut next = self.row(&job.id, SOURCE_CRON, &job.name, TRIGGER_RETRY, now);
@@ -401,13 +431,21 @@ impl RunLedger {
         next.triggered_by = BY_SCHEDULER.to_string();
         next.target_agent_uid = run.target_agent_uid.clone();
         next.links = json!({ "retry_of": run.id, "retry_at_ms": now + policy::retry_delay_ms(run.attempt) });
+        // A retry of an event's run reads the event too, and must not start without it.
+        if run.trigger == TRIGGER_EVENT || run.links["from_event"] == json!(true) {
+            next.links["from_event"] = json!(true);
+        }
         match self.store.job_run_insert(&next) {
             Ok(true) => {
                 let _ = self.store.job_run_add_links(&run.id, &json!({ "retried_by": next.id }));
                 tracing::info!(job_id = %job.id, attempt = next.attempt, "jobs: an infrastructure failure will be retried");
+                Some(next.id)
             }
-            Ok(false) => {}
-            Err(e) => tracing::warn!(run_id, error = %e, "jobs: couldn't file a retry"),
+            Ok(false) => None,
+            Err(e) => {
+                tracing::warn!(run_id, error = %e, "jobs: couldn't file a retry");
+                None
+            }
         }
     }
 

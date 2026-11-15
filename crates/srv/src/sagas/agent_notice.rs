@@ -31,12 +31,11 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::agent_grants::{self, Topic};
+pub use crate::backend::prompt_events::{GrantsEvent, NoticeView, EVENT_AGENT_GRANTS, EVENT_AGENT_NOTICE};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::server::AppState;
 use agentmux_common::time::now_ms;
 
-pub const EVENT_AGENT_NOTICE: &str = "agent:notice";
-pub const EVENT_AGENT_GRANTS: &str = "agent:grants";
 /// The person's Stop it, Start now or Always for a countdown.
 pub const COMMAND_AGENT_NOTICE_DECIDE: &str = "agent.notice.decide";
 /// The person's switch of one agent's "Always" (the pane menu and Settings).
@@ -156,42 +155,6 @@ impl Outcome {
             Outcome::Gone => "gone",
         }
     }
-}
-
-/// A notice as the pane draws it: a one-line `line`, a `pending` card with a countdown, or the end
-/// of a card (`cleared`, with its `outcome`).
-#[derive(Clone, Debug, Serialize, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct NoticeView {
-    pub id: String,
-    #[ts(type = r#""spawn" | "ssh" | "google" | "memory""#)]
-    pub kind: &'static str,
-    pub block_id: String,
-    pub agent: String,
-    pub headline: String,
-    pub body: String,
-    /// The agent's own words, for the quote.
-    pub quote: String,
-    /// The Always button's words; empty when there is none.
-    pub always_label: String,
-    /// When the countdown ends; 0 for a line.
-    #[ts(type = "number")]
-    pub deadline_ms: i64,
-    #[ts(type = "number")]
-    pub opened_ms: i64,
-    #[ts(type = r#""pending" | "line" | "cleared""#)]
-    pub status: &'static str,
-    /// For `cleared`: `stopped`, `now`, `always`, `deadline` or `gone`.
-    pub outcome: String,
-}
-
-/// `agent:grants`: the agents with an "Always" for `topic`, after a change.
-#[derive(Clone, Debug, Serialize, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct GrantsEvent {
-    #[ts(type = r#""spawn" | "google" | "memory""#)]
-    pub topic: &'static str,
-    pub agents: Vec<String>,
 }
 
 /// Data for `agent.notice.decide`: the card's `id` (from `agent:notice`).

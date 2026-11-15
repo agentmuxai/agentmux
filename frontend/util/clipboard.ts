@@ -13,5 +13,32 @@ export async function readAttachments(): Promise<{ text: string; paths: string[]
 }
 
 export async function writeText(text: string): Promise<void> {
-    await getApi().writeClipboardText(text);
+    try {
+        await getApi().writeClipboardText(text);
+    } catch (err) {
+        // The host reaches the OS clipboard through a tool (wl-copy, xclip or xsel on Linux). With none
+        // installed, the page's own clipboard still takes a copy that a click started.
+        if (!writeThroughPage(text)) throw err;
+    }
+}
+
+/** Copy `text` with the page's own clipboard (a selection copy, which a click may start). */
+function writeThroughPage(text: string): boolean {
+    if (typeof document === "undefined" || typeof document.execCommand !== "function") return false;
+    const box = document.createElement("textarea");
+    box.value = text;
+    box.setAttribute("readonly", "");
+    box.style.position = "fixed";
+    box.style.opacity = "0";
+    const holder = document.activeElement as HTMLElement | null;
+    document.body.appendChild(box);
+    try {
+        box.select();
+        return document.execCommand("copy");
+    } catch {
+        return false;
+    } finally {
+        box.remove();
+        holder?.focus?.();
+    }
 }

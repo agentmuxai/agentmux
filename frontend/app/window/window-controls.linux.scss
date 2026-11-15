@@ -7,7 +7,8 @@
 //     full-height tiles of window-controls.win32.scss)
 //   - a 16 px symbolic glyph in the text colour on a faint round fill of the
 //     same colour: about 10% at rest, 15% on hover, 30% pressed
-//   - Close looks like the others: GNOME's close is neutral, not red
+//   - Close looks like the others at rest, and turns the app's close red on hover and press, like every
+//     close control in AgentMux (element/ui/CloseButton.tsx); GNOME's own is neutral
 //   - dimmed while the window is not focused (GNOME's backdrop state)
 // Everything derives from the theme's text colour, so the same rules work on
 // dark and light AgentMux themes with no per-theme values.
@@ -71,6 +72,17 @@
 
         &:active:not(:disabled) {
             background: color-mix(in srgb, var(--gnome-btn-fg) 30%, transparent);
+        }
+
+        // Close is the one that goes red, as everywhere else in the app (theme.scss, `--window-close-*`).
+        &.close-btn:hover:not(:disabled) {
+            --gnome-btn-fg: var(--window-close-fg);
+            background: var(--window-close-hover-bg);
+        }
+
+        &.close-btn:active:not(:disabled) {
+            --gnome-btn-fg: var(--window-close-fg);
+            background: var(--window-close-press-bg);
         }
     }
 

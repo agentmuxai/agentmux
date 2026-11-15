@@ -367,7 +367,7 @@ impl Store {
 
     /// Returns 1 if a row was actually inserted, 0 if `OR IGNORE` found one
     /// already there — see `Skill::skill_insert_raw`'s doc comment.
-    pub(crate) fn mcp_server_insert_raw(&self, server: &McpServer) -> Result<usize, StoreError> {
+    pub fn mcp_server_insert_raw(&self, server: &McpServer) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
             "INSERT OR IGNORE INTO db_mcp_servers

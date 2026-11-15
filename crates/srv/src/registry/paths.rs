@@ -100,6 +100,14 @@ pub fn resolve_shared_lan_instances_dir() -> Option<PathBuf> {
     resolve_global_shared_root().map(|h| h.join("lan").join("instances"))
 }
 
+/// Resolve the GLOBAL `<home>/shared/instances/` directory: one record per running srv on this
+/// machine, agents or not, so one instance can name and reach another
+/// (`backend::instance_registry`). Not the LAN sibling directory above, which lists only
+/// LAN-enabled instances and holds the LAN key instead of the auth key.
+pub fn resolve_shared_instances_dir() -> Option<PathBuf> {
+    resolve_global_shared_root().map(|h| h.join("instances"))
+}
+
 /// Resolve the GLOBAL `<home>/shared/agents/transcripts/` directory.
 ///
 /// Sibling of [`resolve_shared_registry_dir`] / [`resolve_shared_definitions_dir`]:
@@ -158,9 +166,9 @@ pub fn resolve_isolated_work_store_path(fallback_dir: &std::path::Path) -> Optio
 /// `~/.agentmux` home (e.g. `migrations/runner.rs`'s `MigrationContext.home`)
 /// must call this directly rather than deriving it from
 /// `resolve_shared_store_path()`, which DOES vary with isolation.
-pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
+pub fn resolve_global_shared_root() -> Option<PathBuf> {
     // A srv that gave the folder up to an earlier srv of another version runs as if there were none.
-    if crate::bootstrap::shared_guard::deferred() {
+    if crate::registry::shared_guard::deferred() {
         return None;
     }
     shared_root_ignoring_deferral()
@@ -168,7 +176,7 @@ pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
 
 /// The same root while this srv has given the folder up: only for a plain file it reads and never
 /// writes (the jekt audit file), where an earlier srv's lines are still the account's record.
-pub(crate) fn shared_root_ignoring_deferral() -> Option<PathBuf> {
+pub fn shared_root_ignoring_deferral() -> Option<PathBuf> {
     // `var_os` throughout: a path that isn't valid UTF-8 must not read as unset.
     if let Some(s) = std::env::var_os("AGENTMUX_HOME_OVERRIDE") {
         if !s.is_empty() {

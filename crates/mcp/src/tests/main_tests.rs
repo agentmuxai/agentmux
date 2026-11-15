@@ -932,7 +932,7 @@ fn consolidated_tools_expose_their_discriminators() {
     let target = pane["inputSchema"]["properties"]["target"]["enum"]
         .as_array()
         .expect("Pane.target.enum is an array");
-    assert_eq!(target.len(), 4, "rename's target folds the 4 naming verbs");
+    assert_eq!(target.len(), 5, "rename's target folds the 4 naming verbs, and a file");
 }
 
 #[test]

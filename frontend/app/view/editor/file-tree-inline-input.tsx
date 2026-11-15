@@ -51,6 +51,8 @@ export function InlineInput(props: InlineInputProps): JSX.Element {
             onInput={(e) => setValue(e.currentTarget.value)}
             onKeyDown={(e) => {
                 e.stopPropagation();
+                // Enter that confirms an input-method composition is not a commit (Safari: key code 229).
+                if (e.isComposing || e.keyCode === 229) return;
                 if (e.key === "Enter") confirm();
                 if (e.key === "Escape") cancel();
             }}

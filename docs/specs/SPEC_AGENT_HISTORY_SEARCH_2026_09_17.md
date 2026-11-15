@@ -1,5 +1,7 @@
 # SPEC: agent-facing conversation history search
 
+**Area:** history store
+
 **Date:** 2026-09-17
 **Status:** implemented — Phase 1 shipped in PR #3321 (first released in
 v0.56.4). Re-verified against `agentmux` @ `90aa773` on 2026-09-18:

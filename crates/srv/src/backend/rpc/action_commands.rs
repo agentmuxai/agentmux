@@ -48,8 +48,8 @@ pub const ALWAYS: &[&str] = &[
     "mcp.probe", "mcp.unbind", "mcp.upsert", "memory.write", "movescratchfile", "muxbus.cloudconfig",
     "muxbus.disconnect", "muxbus.login", "muxbus.login.cancel", "openinshell", "pins.adopt", "pins.forget",
     "provider.ensureauthdir", "remoteadd", "remoteagentrevoke", "remoteforget", "remotehelperremove",
-    "remotesetconfig", "remotetest", "renameagentdefinitiontitle", "renameeditorfile", "reorderglobalbrain",
-    "reseedagents", "routeannounce", "routeunannounce", "runclilogin", "rundrone", "sensitive.decide", "session:archive",
+    "remotesetconfig", "remotetest", "renameagentdefinitiontitle", "reorderglobalbrain",
+    "reseedagents", "resolvedronerun", "resumedronewait", "routeannounce", "routeunannounce", "runclilogin", "rundrone", "sensitive.decide", "session:archive",
     "session:restore", "setagentbundles", "setagentcontent", "setconfig", "shellexec", "shellstop", "skill.bind",
     "skill.catalog.app_script", "skill.catalog.bind", "skill.catalog.bind_all", "skill.catalog.bind_to_bundle", "skill.catalog.delete", "skill.catalog.export",
     "skill.catalog.import_commit", "skill.catalog.import_preview", "skill.catalog.set_opt_out", "skill.catalog.set_reach",
@@ -85,7 +85,7 @@ pub const LIVE_INPUT: &[&str] = &[
 
 /// Returns data and changes nothing.
 pub const READ_ONLY: &[&str] = &[
-    "account.oauth.client.get", "account.oauth.poll", "app_skills.catalog", "agent.input-history",
+    "account.oauth.client.get", "account.oauth.poll", "app_skills.catalog", "app_skills.here", "agent.input-history",
     "agent.input-history-search", "agent.list", "agent.model.panel", "agent.notice.grants", "agent.open-panes", "agent.output", "agent.peer-labels", "agent.process-list",
     "agent.project_instructions", "agent.status", "agent.tracked-blocks", "agent:memory:adoption_list",
     "agent:memory:claims", "agent:memory:diff", "agent:memory:history", "agent:memory:list", "agent:memory:read_file",

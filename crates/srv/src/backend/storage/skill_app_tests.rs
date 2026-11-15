@@ -71,9 +71,9 @@ fn a_manifest_and_its_files_are_stored_listed_and_read() {
     assert_eq!(
         app.files,
         vec![
-            SkillFileInfo { path: "controls.md".into(), bytes: 11, script: false, approved: false, image: false, sha256: hex_sha256(b"# controls
+            SkillFileInfo { path: "controls.md".into(), bytes: 11, script: false, approved: false, image: false, sha256: sha256_hex(b"# controls
 ") },
-            SkillFileInfo { path: "scripts/run.py".into(), bytes: 9, script: true, approved: false, image: false, sha256: hex_sha256(b"print(1)
+            SkillFileInfo { path: "scripts/run.py".into(), bytes: 9, script: true, approved: false, image: false, sha256: sha256_hex(b"print(1)
 ") },
         ]
     );
@@ -139,7 +139,7 @@ fn a_reference_crop_is_stored_as_bytes_and_listed_as_an_image() {
     let files = [SkillFileInput { path: "references/fader.png".into(), content: String::new(), image: Some(png.clone()), script: false }];
     c.skill_app_set("s1", &info("1.0.0"), &manifest("1.0.0"), "h", &files, 1).unwrap();
     let app = c.skill_app_get("s1").unwrap().unwrap();
-    assert_eq!(app.files, vec![SkillFileInfo { path: "references/fader.png".into(), bytes: 9, script: false, approved: false, image: true, sha256: hex_sha256(&png) }]);
+    assert_eq!(app.files, vec![SkillFileInfo { path: "references/fader.png".into(), bytes: 9, script: false, approved: false, image: true, sha256: sha256_hex(&png) }]);
     let f = c.skill_file_get("s1", "references/fader.png").unwrap().unwrap();
     assert_eq!((f.image, f.content.as_str()), (Some(png), ""));
 }

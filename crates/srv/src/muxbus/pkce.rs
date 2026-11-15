@@ -207,7 +207,7 @@ async fn run_pkce_login_inner(
 
     // 6. Open browser (suppressed under test — the supersede test drives
     //    real flows that would otherwise launch real browser windows)
-    if !cfg!(test) {
+    if !cfg!(any(test, feature = "test-support")) {
         open_browser(&auth_url);
     }
 
@@ -487,7 +487,7 @@ fn extract_jwt_claims(token: &str) -> (String, String) {
 /// Serializes every test that touches process-global state: the login statics
 /// above and the `AGENTMUX_MUXBUS_REST_URL` / `AGENTMUX_MUXBUS_WS_URL`
 /// environment overrides (`cloud_subscriber`'s session test shares it).
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]

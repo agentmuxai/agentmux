@@ -3,7 +3,7 @@
 
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message_with_files};
 use super::types::*;
@@ -12,9 +12,9 @@ use super::{now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 pub(super) use super::rate_limiter::RateLimiter;
 
 #[path = "former_slug.rs"]
-mod former_slug;
+pub mod former_slug;
 pub use former_slug::FormerSlugResolver;
-pub(crate) use former_slug::{former_slug_claim, refuse_former_slug_sender, renamed};
+pub use former_slug::{former_slug_claim, refuse_former_slug_sender, renamed};
 
 // ---- Handler ----
 
@@ -101,9 +101,9 @@ pub struct Handler {
 }
 
 #[path = "name_bindings.rs"]
-mod name_bindings;
+pub mod name_bindings;
 #[path = "deliver_steps.rs"]
-mod deliver_steps;
+pub mod deliver_steps;
 pub use name_bindings::NameBindings;
 
 /// What a by-name unregister did (identity M2, spec §4.4.4 Q7). A name held
@@ -231,7 +231,7 @@ impl Handler {
     /// Name-only registration. Every production site now goes through
     /// [`register_agent_full`] with its UID and counter site; this is the
     /// test-facing form (and the shape the pre-M2 API had).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn register_agent(
         &mut self,
         agent_id: &str,
@@ -260,7 +260,7 @@ impl Handler {
     /// ([`NameBindings::stable`]): kept when a later call replaces the
     /// display binding, so a jekt addressed to `AGENTMUX_AGENT_ID` still
     /// resolves after the display name has moved on post-rename.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn register_agent_with_nonce(
         &mut self,
         agent_id: &str,
@@ -888,6 +888,7 @@ impl Handler {
             delivery_tier,
             req.sig_verified,
             req.reagent_verified,
+            req.reagent_expired,
             req.lan_verified,
             req.channel_verified,
             req.wan_instance.as_ref().filter(|_| req.wan_verified == Some(true)),
@@ -903,11 +904,7 @@ impl Handler {
         // parse the JEKT block — the wrap_jekt_message output already includes
         // the source in the human-readable header so format_injected_message
         // is called with include_source=false here.
-        let final_msg = format_injected_message(
-            &wrapped,
-            req.source_agent.as_deref(),
-            false,
-        );
+        let final_msg = format_injected_message(&wrapped, req.source_agent.as_deref(), false);
 
         let delivery = deliver_steps::Delivery {
             req: &req,
@@ -1050,7 +1047,8 @@ impl Default for Handler {
 
 /// Thread-safe wrapper around Handler.
 pub struct ReactiveHandler {
-    pub(super) inner: Mutex<Handler>,
+    /// Recovers from a poisoning panic instead of passing it on: `handler_lock.rs`.
+    pub(super) inner: super::handler_lock::HandlerLock,
     /// Called with the target block_id after a successful delivery whose
     /// marker says `ESCALATE=required` — the notification Router turns it
     /// into a "needs your review" OS notification (fixed text, no content).
@@ -1067,7 +1065,7 @@ pub type NeedsReviewHook = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
 impl ReactiveHandler {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(Handler::new()),
+            inner: super::handler_lock::HandlerLock::new(Handler::new()),
             needs_review_hooks: std::sync::RwLock::new(Vec::new()),
         }
     }
@@ -1090,17 +1088,16 @@ impl ReactiveHandler {
     }
 
     pub fn set_input_sender(&self, sender: InputSender) {
-        self.inner.lock().unwrap().set_input_sender(sender);
+        self.inner.lock().set_input_sender(sender);
     }
 
     pub fn set_message_sender(&self, sender: MessageSender) {
-        self.inner.lock().unwrap().set_message_sender(sender);
+        self.inner.lock().set_message_sender(sender);
     }
 
     pub fn set_agent_identity_confirmer(&self, confirmer: AgentIdentityConfirmer) {
         self.inner
             .lock()
-            .unwrap()
             .set_agent_identity_confirmer(confirmer);
     }
 
@@ -1108,7 +1105,6 @@ impl ReactiveHandler {
     pub fn set_stable_agent_identity_confirmer(&self, confirmer: AgentIdentityConfirmer) {
         self.inner
             .lock()
-            .unwrap()
             .set_stable_agent_identity_confirmer(confirmer);
     }
 
@@ -1116,13 +1112,12 @@ impl ReactiveHandler {
     pub fn set_uid_identity_confirmer(&self, confirmer: AgentIdentityConfirmer) {
         self.inner
             .lock()
-            .unwrap()
             .set_uid_identity_confirmer(confirmer);
     }
 
     /// See the inner [`Handler::set_block_liveness`] (identity M2).
     pub fn set_block_liveness(&self, probe: BlockLivenessProbe) {
-        self.inner.lock().unwrap().set_block_liveness(probe);
+        self.inner.lock().set_block_liveness(probe);
     }
 
     /// See the inner [`Handler::register_agent_full`] (identity M2).
@@ -1137,7 +1132,7 @@ impl ReactiveHandler {
         uid: Option<&str>,
         no_uid_counter: &'static str,
     ) -> Result<(), String> {
-        self.inner.lock().unwrap().register_agent_full(
+        self.inner.lock().register_agent_full(
             display,
             block_id,
             tab_id,
@@ -1175,7 +1170,7 @@ impl ReactiveHandler {
 
     /// Every name `block_id` is bound under — see [`Handler::names_for_block`].
     pub fn names_for_block(&self, block_id: &str) -> Vec<String> {
-        self.inner.lock().unwrap().names_for_block(block_id)
+        self.inner.lock().names_for_block(block_id)
     }
 
     /// Bounded `try_lock`, shared by the spawn-path entry points — see
@@ -1185,8 +1180,8 @@ impl ReactiveHandler {
         const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(2);
         for attempt in 1..=MAX_ATTEMPTS {
             match self.inner.try_lock() {
-                Ok(guard) => return Ok(guard),
-                Err(std::sync::TryLockError::WouldBlock) => {
+                Some(guard) => return Ok(guard),
+                None => {
                     if attempt == MAX_ATTEMPTS {
                         return Err(
                             "reactive handler lock busy after retrying — skipping \
@@ -1199,9 +1194,6 @@ impl ReactiveHandler {
                     }
                     std::thread::sleep(RETRY_DELAY);
                 }
-                Err(std::sync::TryLockError::Poisoned(e)) => {
-                    return Err(format!("reactive handler mutex poisoned: {e}"));
-                }
             }
         }
         unreachable!("loop always returns on its final attempt");
@@ -1209,11 +1201,11 @@ impl ReactiveHandler {
 
     #[allow(dead_code)]
     pub fn set_include_source(&self, include: bool) {
-        self.inner.lock().unwrap().set_include_source(include);
+        self.inner.lock().set_include_source(include);
     }
 
     /// Test-facing name-only form — see [`Handler::register_agent`].
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn register_agent(
         &self,
         agent_id: &str,
@@ -1222,12 +1214,11 @@ impl ReactiveHandler {
     ) -> Result<(), String> {
         self.inner
             .lock()
-            .unwrap()
             .register_agent(agent_id, block_id, tab_id)
     }
 
     /// See the inner [`Handler::register_agent_with_nonce`].
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn register_agent_with_nonce(
         &self,
         agent_id: &str,
@@ -1238,7 +1229,6 @@ impl ReactiveHandler {
     ) -> Result<(), String> {
         self.inner
             .lock()
-            .unwrap()
             .register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce, alias)
     }
 
@@ -1289,7 +1279,7 @@ impl ReactiveHandler {
     /// skip left in place (if any) still belongs to whichever nonce is
     /// actually on record, not to this spawn's own unwritten one. See
     /// `spawn_process`'s handling of `try_register_agent_full`'s `Err` arm.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub fn try_register_agent_with_nonce(
         &self,
         agent_id: &str,
@@ -1323,19 +1313,19 @@ impl ReactiveHandler {
     /// See the inner [`Handler::unregister_agent`] — by name, refusing an
     /// ambiguous one (identity M2).
     pub fn unregister_agent(&self, agent_id: &str) -> UnregisterOutcome {
-        self.inner.lock().unwrap().unregister_agent(agent_id)
+        self.inner.lock().unregister_agent(agent_id)
     }
 
     /// The live blocks `unregister_agent` would remove for `name`.
     pub fn blocks_named(&self, name: &str) -> Vec<String> {
         let key = super::sanitize::route_name(name).unwrap_or_default().to_lowercase();
-        self.inner.lock().unwrap().live_blocks_for_key(&key)
+        self.inner.lock().live_blocks_for_key(&key)
     }
 
     /// See the inner [`Handler::unregister_block`]. Returns the names the
     /// block was bound under.
     pub fn unregister_block(&self, block_id: &str) -> Vec<String> {
-        self.inner.lock().unwrap().unregister_block(block_id)
+        self.inner.lock().unregister_block(block_id)
     }
 
     /// See the inner [`Handler::unregister_block_if_nonce`] — atomic
@@ -1343,27 +1333,26 @@ impl ReactiveHandler {
     pub fn unregister_block_if_nonce(&self, block_id: &str, expected_nonce: u64) -> bool {
         self.inner
             .lock()
-            .unwrap()
             .unregister_block_if_nonce(block_id, expected_nonce)
     }
 
     #[allow(dead_code)]
     pub fn update_last_seen(&self, agent_id: &str) {
-        self.inner.lock().unwrap().update_last_seen(agent_id);
+        self.inner.lock().update_last_seen(agent_id);
     }
 
     pub fn get_agent(&self, agent_id: &str) -> Option<AgentRegistration> {
-        self.inner.lock().unwrap().get_agent(agent_id).cloned()
+        self.inner.lock().get_agent(agent_id).cloned()
     }
 
     /// See the inner [`Handler::has_live_name`].
     pub fn has_live_name(&self, name: &str) -> bool {
-        self.inner.lock().unwrap().has_live_name(name)
+        self.inner.lock().has_live_name(name)
     }
 
     /// See the inner [`Handler::lookup_by_name`] (identity M2).
     pub fn lookup_by_name(&self, name: &str) -> LookupOutcome {
-        self.inner.lock().unwrap().lookup_by_name(name)
+        self.inner.lock().lookup_by_name(name)
     }
 
     /// Used by `server/app_api/fleet.rs`'s ordinary (non-reentrant) request
@@ -1372,7 +1361,6 @@ impl ReactiveHandler {
     pub fn get_agent_by_block(&self, block_id: &str) -> Option<AgentRegistration> {
         self.inner
             .lock()
-            .unwrap()
             .get_agent_by_block(block_id)
             .cloned()
     }
@@ -1402,53 +1390,52 @@ impl ReactiveHandler {
         const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(2);
         for attempt in 1..=MAX_ATTEMPTS {
             match self.inner.try_lock() {
-                Ok(guard) => return guard.get_agent_by_block(block_id).cloned(),
-                Err(std::sync::TryLockError::WouldBlock) => {
+                Some(guard) => return guard.get_agent_by_block(block_id).cloned(),
+                None => {
                     if attempt == MAX_ATTEMPTS {
                         return None;
                     }
                     std::thread::sleep(RETRY_DELAY);
                 }
-                Err(std::sync::TryLockError::Poisoned(_)) => return None,
             }
         }
         unreachable!("loop always returns on its final attempt");
     }
 
     pub fn list_agents(&self) -> Vec<AgentRegistration> {
-        self.inner.lock().unwrap().list_agents()
+        self.inner.lock().list_agents()
     }
 
     pub fn inject_message(&self, req: InjectionRequest) -> InjectionResponse {
-        let resp = self.inner.lock().unwrap().inject_message(req);
+        let resp = self.inner.lock().inject_message(req);
         self.after_delivery(&resp);
         resp
     }
 
     /// See [`Handler::deliver_system_note`].
     pub fn deliver_system_note(&self, target_agent: &str, text: &str) -> Result<(), String> {
-        self.inner.lock().unwrap().deliver_system_note(target_agent, &super::sanitize::with_system_note_marker(text))
+        self.inner.lock().deliver_system_note(target_agent, &super::sanitize::with_system_note_marker(text))
     }
 
     /// See [`Handler::inject_held`].
     pub fn inject_held(&self, req: InjectionRequest) -> InjectionResponse {
-        let resp = self.inner.lock().unwrap().inject_held(req);
+        let resp = self.inner.lock().inject_held(req);
         self.after_delivery(&resp);
         resp
     }
 
     /// See [`Handler::has_uid_registration`].
     pub fn has_uid_registration(&self, uid: &str) -> bool {
-        self.inner.lock().unwrap().has_uid_registration(uid)
+        self.inner.lock().has_uid_registration(uid)
     }
 
     /// See [`Handler::block_for_uid`].
     pub fn block_for_uid(&self, uid: &str) -> Option<String> {
-        self.inner.lock().unwrap().block_for_uid(uid)
+        self.inner.lock().block_for_uid(uid)
     }
 
     pub fn get_audit_log(&self, limit: usize) -> Vec<AuditLogEntry> {
-        self.inner.lock().unwrap().get_audit_log(limit)
+        self.inner.lock().get_audit_log(limit)
     }
 
     /// Records an action that isn't a jekt injection (fleet bulk-stop,
@@ -1478,7 +1465,7 @@ impl ReactiveHandler {
         request_id: &str,
         reason: Option<&str>,
     ) {
-        self.inner.lock().unwrap().log_audit(
+        self.inner.lock().log_audit(
             source_agent,
             target_agent,
             block_id,
