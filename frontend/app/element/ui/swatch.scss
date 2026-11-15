@@ -21,7 +21,8 @@
     min-width: 0;
     min-height: 2.5rem;
     padding: var(--space-1);
-    border: 1px solid var(--border-color);
+    // A line in the swatch's own ink, so a row of colours isn't ringed by one theme colour.
+    border: 1px solid color-mix(in srgb, var(--swatch-ink, var(--main-text-color)) 35%, transparent);
     border-radius: var(--radius-sm);
     background: var(--swatch-surface, transparent);
     color: var(--swatch-ink, var(--main-text-color));
@@ -39,6 +40,16 @@
     &[aria-checked="true"] {
         border-color: var(--accent-color);
         box-shadow: 0 0 0 2px var(--accent-color);
+    }
+
+    // A mark besides the ring, so the chosen one doesn't rest on a colour alone.
+    &[aria-checked="true"]::after {
+        content: "✓";
+        position: absolute;
+        inset-block-start: var(--space-0-5);
+        inset-inline-end: var(--space-1);
+        font-size: var(--text-xs);
+        line-height: 1;
     }
 
     &:disabled {
