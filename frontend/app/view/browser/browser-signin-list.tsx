@@ -10,6 +10,7 @@
 // on a row is the person's pick, as for the key button: the panel is marked operator-only, so no
 // agent's UI click or key press reaches it. It is not in any Browser tool answer or page screenshot:
 // it is the app's own UI, outside the page.
+// reactive-coverage: one-shot nothing is fetched on mount: the list is the block's live meta, and the RPC calls are the person's clicks
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { RpcApi } from "@/app/store/rpc-api";
