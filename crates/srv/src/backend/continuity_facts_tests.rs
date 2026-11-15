@@ -39,7 +39,7 @@ fn nothing_known_writes_nothing() {
 fn only_what_is_known_is_written() {
     let facts = Facts { tasks: vec![HeldTask { reference: "#1".into(), title: "t".into() }], ..Facts::default() };
     let out = render(&facts, NOW);
-    assert_eq!(out, "- Kanban tasks you hold (claimed): #1 t");
+    assert_eq!(out, "- Kanban tasks you hold (claimed): #1 t. Re-read a task's brief with Tasks get (id), not from a summary.");
 }
 
 #[test]

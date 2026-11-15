@@ -913,6 +913,7 @@ fn forward_messaging_and_work_routes() -> Router<AppState> {
         .route("/agentmux/quit-question", get(super::quit_question::handle_quit_question))
         .route("/agentmux/work", get(work_queue::handle_work_list))
         .route("/agentmux/work/boards", get(work_boards::handle_boards_list))
+        .route("/agentmux/work/:id", get(work_tasks::handle_work_get))
         // Kanban: an agent's decision on a task in review (signed, not a token).
         .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
         .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
