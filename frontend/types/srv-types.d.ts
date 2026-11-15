@@ -752,6 +752,20 @@ declare global {
         "frame:activebordercolor"?: string;
         /** The "Pane Color" pick, a palette slot id (`"azure"`); `null` after "Default". */
         "frame:color"?: string | null;
+        /**
+         * The pane's backdrop: a background that brings its own readable foreground
+         * (docs/specs/SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §9). Read it through `parseBackdrop`
+         * (app/backdrop/meta.ts); `null` or absent when the pane has none.
+         */
+        backdrop?: {
+            kind: "builtin" | "color" | "image";
+            id?: string;
+            hex?: string;
+            imageId?: string;
+            polarity?: "follow" | "dark" | "light";
+            version?: number;
+            [key: string]: unknown;
+        } | null;
         /** Legacy "Pane Color" pick, an HSL hue 0–360, read as the slot nearest it; no longer written. */
         "frame:hue"?: number | null;
         "frame:title"?: string;
