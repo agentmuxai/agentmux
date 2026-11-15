@@ -7,8 +7,10 @@
 //! When a block has several successors they are ready together, and the ones that only
 //! read the run and give an output (an Agent, an API call, a Message, a Task, a Notify, an
 //! App query, a Spawn, a Transform, a Condition) run together as a *batch*: up to
-//! [`PARALLELISM`] blocks, of which at most [`MAX_AGENTS`] start an agent, so a wide graph
-//! waits its turn instead of flooding a provider. Each block of a batch reads the run as it
+//! [`PARALLELISM`] blocks, of which at most [`MAX_AGENTS`] start an agent. The fleet's limit of
+//! three unattended agent runs counts a drone run as one run, so a run starts one agent at a
+//! time, as before, until a run can reserve shared agent capacity; the other blocks of a batch
+//! only read, call or send. Each block of a batch reads the run as it
 //! was when the batch began; their outputs are taken up one by one in the order they were
 //! readied, so what the run does next does not depend on which finished first. A block that
 //! writes the run (Variables, Response), waits, calls or loops is not batched: it runs by
@@ -30,8 +32,9 @@ use crate::drone::types::{BlockKind, FlowNode};
 /// The most blocks that run at once.
 pub(super) const PARALLELISM: usize = 4;
 
-/// The most blocks that start an agent at once: the fleet's limit of unattended agent runs.
-pub(super) const MAX_AGENTS: usize = 3;
+/// The most blocks that start an agent at once in one run. The fleet's limit of unattended agent
+/// runs counts each drone run as one, so a run that started more would exceed it with the others.
+pub(super) const MAX_AGENTS: usize = 1;
 
 /// The kinds that only read the run and give an output.
 fn is_pure(kind: BlockKind) -> bool {

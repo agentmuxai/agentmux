@@ -91,7 +91,7 @@ async fn no_more_than_the_parallelism_run_at_once_and_the_rest_wait_their_turn()
 }
 
 #[tokio::test]
-async fn no_more_agents_than_the_fleet_allows_start_at_once() {
+async fn a_run_starts_one_agent_at_a_time_as_the_fleets_limit_counts_a_run_as_one() {
     // An Agent block with no task fails the moment it runs, which is enough to see how many started.
     let (result, events) = run(fan(MAX_AGENTS + 2, |id| node(id, json!({ "kind": "agent" })))).await;
     assert!(result.unwrap_err().contains("block c1 failed"));
