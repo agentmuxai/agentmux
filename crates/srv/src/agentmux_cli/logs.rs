@@ -49,6 +49,14 @@ fn stamp(line: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(head.split_whitespace().next()?).ok().map(|t| t.with_timezone(&Utc))
 }
 
+/// The time `age` before now. An age past the calendar's range is "from the start", never a panic.
+pub fn cutoff(age: Duration) -> DateTime<Utc> {
+    chrono::Duration::from_std(age)
+        .ok()
+        .and_then(|age| Utc::now().checked_sub_signed(age))
+        .unwrap_or(DateTime::<Utc>::MIN_UTC)
+}
+
 /// The lines from the first one stamped at or after `cutoff` on, each with the lines under it that carry no time of their own.
 pub fn since(text: &str, cutoff: DateTime<Utc>) -> Vec<&str> {
     let mut keep = false;
@@ -65,6 +73,14 @@ pub fn since(text: &str, cutoff: DateTime<Utc>) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_age_past_the_calendar_shows_everything_and_does_not_panic() {
+        let huge = parse_age("100000000000d").unwrap();
+        assert_eq!(cutoff(huge), DateTime::<Utc>::MIN_UTC);
+        let hour = cutoff(Duration::from_secs(3600));
+        assert!(hour < Utc::now() && Utc::now() - hour < chrono::Duration::seconds(3700));
+    }
 
     #[test]
     fn an_age_is_a_number_and_a_unit() {

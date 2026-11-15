@@ -152,9 +152,9 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
     out
 }
 
-/// The Node.js the new-agent panel asks for (`minVersion` of NODE_PREREQ in
-/// `frontend/app/view/agent/providers/catalog.ts`; a test keeps the two the same).
-pub const NODE_MIN: &str = "22.0.0";
+/// The least Node.js any agent of the new-agent panel asks for: the lowest `minVersion` in
+/// `frontend/app/view/agent/providers/catalog.ts` (a test keeps the two the same). Some agents ask for more.
+pub const NODE_MIN: &str = "20.0.0";
 
 /// `v22.1.0` or `22.1.0` as numbers; `None` for anything else.
 fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
@@ -170,12 +170,12 @@ fn node_version_check(found: Option<&str>) -> Option<Check> {
     let need = parse_version(NODE_MIN)?;
     let shown = found.trim_start_matches('v');
     Some(if have >= need {
-        check("node version", Level::Ok, format!("Node.js {shown}, the new-agent panel needs {NODE_MIN} or newer"), None)
+        check("node version", Level::Ok, format!("Node.js {shown}; the new-agent panel needs at least {NODE_MIN}, and some agents need a newer one"), None)
     } else {
         check(
             "node version",
             Level::Warn,
-            format!("Node.js {shown} is older than the {NODE_MIN} the new-agent panel needs"),
+            format!("Node.js {shown} is older than the {NODE_MIN} that is the least any agent in the new-agent panel needs"),
             Some(&format!("install Node.js {NODE_MIN} or newer (nodejs.org, or your package manager's NodeSource repository), then run this again")),
         )
     })
@@ -458,8 +458,8 @@ mod tests {
         let checks = evaluate(&old);
         assert_eq!(level_of(&checks, "node version"), vec![Level::Warn]);
         let text = lines(&checks).join("\n");
-        assert!(text.contains("Node.js 18.20.4 is older than the 22.0.0 the new-agent panel needs") && text.contains("install Node.js 22.0.0 or newer"), "{text}");
-        for fine in ["v22.0.0", "v22.1.0", "v24.9.0", "23.0.0-nightly"] {
+        assert!(text.contains("Node.js 18.20.4 is older than the 20.0.0 that is the least any agent in the new-agent panel needs") && text.contains("install Node.js 20.0.0 or newer"), "{text}");
+        for fine in ["v20.0.0", "v22.1.0", "v24.9.0", "23.0.0-nightly"] {
             let ok = Facts { node_version: Some(fine.into()), ..good() };
             assert_eq!(level_of(&evaluate(&ok), "node version"), vec![Level::Ok], "{fine}");
         }
@@ -471,8 +471,14 @@ mod tests {
     #[test]
     fn the_minimum_node_is_the_one_the_agent_panel_names() {
         let catalog = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../frontend/app/view/agent/providers/catalog.ts")).unwrap();
-        let named = format!("{{ ...NODE_PREREQ, minVersion: \"{NODE_MIN}\" }}");
-        assert!(catalog.contains(&named), "catalog.ts no longer asks for Node.js {NODE_MIN}: change NODE_MIN in doctor.rs with it");
+        let mut lowest: Option<(u64, u64, u64)> = None;
+        for part in catalog.split("minVersion: \"").skip(1) {
+            let version = part.split('"').next().unwrap_or("");
+            if let Some(v) = parse_version(version) {
+                lowest = Some(lowest.map_or(v, |l| l.min(v)));
+            }
+        }
+        assert_eq!(lowest, parse_version(NODE_MIN), "the lowest Node.js catalog.ts asks for is no longer {NODE_MIN}: change NODE_MIN in doctor.rs with it");
     }
 
     #[test]

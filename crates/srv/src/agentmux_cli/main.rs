@@ -830,8 +830,7 @@ fn cmd_logs(paths: &DataPaths, lines: Option<usize>, since: Option<Duration>, fo
     // With `--since` the whole window is shown unless `--lines` also caps it; without it, the last 50 lines.
     let shown: Vec<&str> = match since {
         Some(age) => {
-            let cutoff = chrono::Utc::now() - chrono::Duration::from_std(age).unwrap_or_else(|_| chrono::Duration::days(36_500));
-            let window = logs::since(&text, cutoff);
+            let window = logs::since(&text, logs::cutoff(age));
             window[window.len().saturating_sub(lines.unwrap_or(usize::MAX))..].to_vec()
         }
         None => state::last_lines(&text, lines.unwrap_or(50)),
