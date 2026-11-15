@@ -441,3 +441,92 @@ async fn a_task_that_does_not_exist_is_not_found_and_takes_no_number() {
     let (_, next) = post(&app, "/agentmux/work", json!({"title": "t2", "payload": "p"})).await;
     assert_eq!(next["num"].as_i64().unwrap(), first["num"].as_i64().unwrap() + 1, "{first} then {next}");
 }
+
+/// What a holder is handed is the brief as it was written, however it got there.
+#[tokio::test]
+async fn a_long_brief_reaches_the_claimer_whole_filed_or_edited() {
+    let app = app();
+    let long = |tag: &str| {
+        let items = (1..=15).map(|i| format!("{i}. {}", "item text ".repeat(70))).collect::<Vec<_>>().join("\n");
+        format!("{tag}\n{items}").trim().to_string()
+    };
+    let (filed, edited) = (long("filed"), long("edited"));
+    assert!(filed.chars().count() > 10_000);
+
+    let (s, _) = post(&app, "/agentmux/work", json!({"title": "a", "payload": filed, "kind": "long-filed"})).await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, b) = post(&app, "/agentmux/work", json!({"title": "b", "payload": "short at first", "kind": "long-edited"})).await;
+    let num = b["num"].as_i64().unwrap();
+    let (s, v) = post(&app, "/agentmux/work/act", json!({"agent_id": "a3", "action": "edit", "id": num.to_string(), "payload": edited})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    for (kind, want) in [("long-filed", &filed), ("long-edited", &edited)] {
+        let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1", "kind": kind})).await;
+        assert_eq!(c["item"]["payload"], want.as_str(), "{kind}: the claimer gets all of it");
+        let n = c["num"].as_i64().unwrap();
+        let (s, t) = get(&app, &format!("/agentmux/work/{n}"), "a2").await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(t["payload"], want.as_str(), "{kind}: so does a later read");
+    }
+}
+
+/// A brief past the limit is refused with the limit named, never stored cut.
+#[tokio::test]
+async fn a_brief_over_the_limit_is_refused_by_filing_and_by_editing() {
+    let app = app();
+    let over = "x".repeat(100_001);
+    let (s, v) = post(&app, "/agentmux/work", json!({"title": "t", "payload": over})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("100000"), "{v}");
+
+    let (_, made) = post(&app, "/agentmux/work", json!({"title": "t", "payload": "kept"})).await;
+    let num = made["num"].as_i64().unwrap();
+    let (s, v) = post(&app, "/agentmux/work/act", json!({"agent_id": "a3", "action": "edit", "id": num.to_string(), "payload": over})).await;
+    assert_ne!(s, StatusCode::OK, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("100000"), "{v}");
+    let (_, t) = get(&app, &format!("/agentmux/work/{num}"), "a1").await;
+    assert_eq!(t["payload"], "kept", "a refused edit changes nothing");
+}
+
+/// A note, a question and a result longer than a card keeps are refused with the limit named; one at the limit is kept whole.
+#[tokio::test]
+async fn card_text_over_the_limit_is_refused_and_nothing_changes() {
+    let app = app();
+    post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    let (num, attempt) = (c["num"].as_i64().unwrap(), c["attempt"].as_i64().unwrap());
+    let over = "y".repeat(4_001);
+
+    let (s, v) = post(&app, &format!("/agentmux/work/{num}/update"), json!({"agent_id": "a1", "attempt": attempt, "note": over})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("4000"), "{v}");
+    for step in ["ask", "submit"] {
+        let (s, v) = post(&app, &format!("/agentmux/work/{num}/{step}"), json!({"agent_id": "a1", "attempt": attempt, "text": over})).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{step}: {v}");
+        assert!(v["error"].as_str().unwrap().contains("4000"), "{step}: {v}");
+    }
+    let (_, t) = get(&app, &format!("/agentmux/work/{num}"), "a1").await;
+    assert_eq!(t["state"], "claimed", "nothing was asked or handed in");
+    assert_eq!(t["card"]["note"], "", "the long note was not kept cut");
+
+    let exact = "z".repeat(4_000);
+    let (s, v) = post(&app, &format!("/agentmux/work/{num}/update"), json!({"agent_id": "a1", "attempt": attempt, "note": exact})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, t) = get(&app, &format!("/agentmux/work/{num}"), "a1").await;
+    assert_eq!(t["card"]["note"], exact.as_str(), "a note at the limit is whole");
+}
+
+/// The limit counts what a card would keep: text that sanitizes down to the limit is not refused.
+#[tokio::test]
+async fn card_text_is_counted_after_it_is_cleaned() {
+    let app = app();
+    post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    let (num, attempt) = (c["num"].as_i64().unwrap(), c["attempt"].as_i64().unwrap());
+    // 4,000 visible characters and 500 invisible ones (zero-width spaces), which are stripped.
+    let note = format!("{}{}", "n".repeat(4_000), "\u{200b}".repeat(500));
+    let (s, v) = post(&app, &format!("/agentmux/work/{num}/update"), json!({"agent_id": "a1", "attempt": attempt, "note": note})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, t) = get(&app, &format!("/agentmux/work/{num}"), "a1").await;
+    assert_eq!(t["card"]["note"], "n".repeat(4_000).as_str());
+}

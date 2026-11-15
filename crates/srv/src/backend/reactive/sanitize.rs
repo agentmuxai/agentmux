@@ -15,6 +15,25 @@ use super::{MAX_MESSAGE_LENGTH, TRUNCATION_SUFFIX};
 ///    content check runs, so the text scanned is the text delivered
 /// 6. Truncates to MAX_MESSAGE_LENGTH with UTF-8 safety
 pub fn sanitize_message(msg: &str) -> String {
+    let mut result = sanitize_text(msg);
+    // Truncate to max length, preserving UTF-8
+    if result.len() > MAX_MESSAGE_LENGTH {
+        let suffix_len = TRUNCATION_SUFFIX.len();
+        let target = MAX_MESSAGE_LENGTH - suffix_len;
+        // Find a valid UTF-8 boundary
+        let mut end = target;
+        while end > 0 && !result.is_char_boundary(end) {
+            end -= 1;
+        }
+        result.truncate(end);
+        result.push_str(TRUNCATION_SUFFIX);
+    }
+    result
+}
+
+/// Steps 1 to 5 of [`sanitize_message`], with no length cap: for text kept whole (a task's brief) where the caller
+/// applies its own limit.
+pub fn sanitize_text(msg: &str) -> String {
     let normalized: String = msg
         .replace("\r\n", "\n")
         .chars()
@@ -109,19 +128,6 @@ pub fn sanitize_message(msg: &str) -> String {
                 i += 1;
             }
         }
-    }
-
-    // Truncate to max length, preserving UTF-8
-    if result.len() > MAX_MESSAGE_LENGTH {
-        let suffix_len = TRUNCATION_SUFFIX.len();
-        let target = MAX_MESSAGE_LENGTH - suffix_len;
-        // Find a valid UTF-8 boundary
-        let mut end = target;
-        while end > 0 && !result.is_char_boundary(end) {
-            end -= 1;
-        }
-        result.truncate(end);
-        result.push_str(TRUNCATION_SUFFIX);
     }
 
     result
