@@ -97,7 +97,7 @@ pub const READ_ONLY: &[&str] = &[
     "connectivity.status", "connlist", "connlistaws", "connsessions", "containerimagecheck",
     "containerruntimeavailable", "eventreadhistory", "exportagents", "fileprobe", "filesearchbytes", "fleet.group.list",
     "forkagentdefinitionsuggest", "fs.git_status", "fs.list", "fs.places", "getagentbundles", "getagentcontent",
-    "getagentinstance", "getallagentcontent", "getbuildslot", "getclaudeglobalconfig", "getcontainercaches", "getcontainerlimits", "getdrone", "geteditorhome",
+    "getagentinstance", "getallagentcontent", "getbuildslot", "getclaudeglobalconfig", "getcontainercaches", "getcontainerlimits", "getdrone", "getdronepayloadschema", "geteditorhome",
     "geteditorroots", "getfullconfig", "getidentityaccount", "getmemory", "getmeta", "gettoolstatus",
     "getwaveairatelimit", "globalmemory:diff", "globalmemory:history", "globalmemory:import_sources",
     "globalmemory:reach_list", "globalmemory:removed", "globalmemory:sections", "history.agent_sessions", "history.agents", "history.locate",
