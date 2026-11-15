@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 
 use crate::backend::jobs::definition::{action_kind, trigger_kind};
 use crate::backend::storage::cron::CronJob;
-use crate::drone::payload_schema::{fields_of, PayloadField};
+use crate::drone::payload_schema::{by_hand_fields, fields_of, PayloadField};
 use crate::server::AppState;
 
 /// What `getdronepayloadschema` is asked.
@@ -61,7 +61,7 @@ fn job_payload(job: &CronJob) -> JobPayload {
 pub(crate) fn get_payload_schema(state: &AppState, cmd: PayloadSchemaReq) -> Result<PayloadSchemaResp, String> {
     let jobs = state.mstore.cron_list().map_err(|e| format!("getdronepayloadschema: {e}"))?;
     let runs_it = |j: &CronJob| j.action.get("kind").and_then(Value::as_str) == Some(action_kind::DRONE) && j.action.get("drone_id").and_then(Value::as_str) == Some(cmd.drone_id.as_str());
-    Ok(PayloadSchemaResp { jobs: jobs.iter().filter(|j| runs_it(j)).map(job_payload).collect(), by_hand: fields_of(None, &Map::new()) })
+    Ok(PayloadSchemaResp { jobs: jobs.iter().filter(|j| runs_it(j)).map(job_payload).collect(), by_hand: by_hand_fields() })
 }
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ import { Button, CloseButton, TextArea, TextInput } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
 import { isModKey } from "@/util/platformutil";
 import { tip } from "@/app/element/tip";
-import { judge, triggerPathsIn } from "./payload-schema";
+import { describeRef, judge, triggerPathsIn } from "./payload-schema";
 import { apiAuthFields, apiAuthPatch, type ApiAuthFields, type ApiAuthHow } from "./api-auth";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
@@ -906,7 +906,7 @@ const TriggerRefsNote = (p: { model: DroneViewModel; node: FlowNode }): JSX.Elem
                 <For each={refs()}>
                     {(r) => (
                         <span class="drone-trigger-ref" classList={{ "drone-trigger-ref--outside": r.outside }}>
-                            trigger.{r.path}: {r.outside ? "outside text" : "typed"}
+                            {describeRef(r)}
                         </span>
                     )}
                 </For>

@@ -55,3 +55,8 @@ export function judge(schema: PayloadSchemaResp | null, paths: string[]): Trigge
     const sets: PayloadField[][] = schema && schema.jobs.length > 0 ? schema.jobs.map((j) => j.fields) : [schema?.by_hand ?? []];
     return paths.map((path) => ({ path, outside: sets.some((fields) => isOutsideText(fields, path)) }));
 }
+
+/** What the node says of a reference, in words (the colour only reinforces it). */
+export function describeRef(r: TriggerRef): string {
+    return `trigger.${r.path}: ${r.outside ? "outside text" : "typed"}`;
+}

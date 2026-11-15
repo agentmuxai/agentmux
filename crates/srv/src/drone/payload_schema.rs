@@ -109,6 +109,12 @@ fn poll_fields(query: &str) -> Vec<PayloadField> {
     out
 }
 
+/// What a run started by hand or by an agent (`fire`) reads: whatever the caller gave. Not even the framing is AgentMux's
+/// here, because only a job's run has it (`job_actions::drone_trigger`); a caller can send or leave out any of it.
+pub fn by_hand_fields() -> Vec<PayloadField> {
+    vec![field("*", "any", false, "what the caller gave: outside text")]
+}
+
 /// The fields a run reads, for a job started by `source` (an `event_source`, or `None` for a timer or a hand run) with
 /// the trigger's own `filter`. The framing fields come first.
 pub fn fields_of(source: Option<&str>, filter: &Map<String, Value>) -> Vec<PayloadField> {
@@ -174,10 +180,18 @@ mod tests {
     }
 
     #[test]
-    fn a_hand_run_or_timer_reads_only_outside_text_besides_the_framing() {
+    fn a_timer_reads_only_outside_text_besides_the_framing() {
         let f = fields_of(None, &Map::new());
         assert!(is_tainted(&f, "run"), "a field the sender chose");
         assert!(is_tainted(&f, "run.conclusion"));
+    }
+
+    #[test]
+    fn a_hand_run_has_no_framing_a_caller_could_not_send_itself() {
+        let f = by_hand_fields();
+        for p in ["kind", "run_id", "job.id", "fired_at_ms", "anything"] {
+            assert!(is_tainted(&f, p), "{p}: a caller gives this text");
+        }
     }
 
     #[test]

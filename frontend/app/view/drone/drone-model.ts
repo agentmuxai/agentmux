@@ -168,6 +168,7 @@ export class DroneViewModel {
     private _payloadSchema = createSignal<PayloadSchemaResp | null>(null);
     payloadSchemaAtom: Accessor<PayloadSchemaResp | null> = this._payloadSchema[0];
     setPayloadSchema = this._payloadSchema[1];
+    private payloadSchemaAsk = 0;
 
     private _error = createSignal<string | null>(null);
     errorAtom: Accessor<string | null> = this._error[0];
@@ -260,6 +261,7 @@ export class DroneViewModel {
         this.setSelected(null);
         this.setViewport(defaultViewport());
         this.setRuns([]);
+        this.payloadSchemaAsk++;
         this.setPayloadSchema(null);
         this.dispatchIfAlive({ type: "Reset" }, "user");
         if (this.activeRunUnsub) {
@@ -454,9 +456,12 @@ export class DroneViewModel {
 
     /** What this drone can read of what starts it: one answer per job that runs it. A hint only, so a failure shows nothing. */
     async refreshPayloadSchema(droneId: string): Promise<void> {
+        // Another drone opened, or a blank one, while this was asked: its answer is not for the canvas now.
+        const ask = ++this.payloadSchemaAsk;
+        this.setPayloadSchema(null);
         try {
             const schema = await RpcApi.GetDronePayloadSchemaCommand(TabRpcClient, { drone_id: droneId });
-            if (!this.disposed) this.setPayloadSchema(schema);
+            if (!this.disposed && ask === this.payloadSchemaAsk) this.setPayloadSchema(schema);
         } catch {
             // non-fatal
         }
