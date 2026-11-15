@@ -49,6 +49,7 @@ pub(super) async fn dispatch_scoped(node: &FlowNode, kind: BlockKind, scope: &mu
         BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
         BlockKind::Spawn => blocks::spawn::run(node, scope).await,
         BlockKind::Transform => blocks::transform::run(node, scope).await,
+        BlockKind::Run => blocks::run::run(node, scope).await,
         BlockKind::ForEach | BlockKind::Wait | BlockKind::Drone | BlockKind::Join => unreachable!("the scheduler runs these"),
     }
 }
@@ -78,7 +79,7 @@ pub(super) struct Limits {
 fn default_timeout(kind: BlockKind) -> Option<Duration> {
     match kind {
         BlockKind::Agent => Some(Duration::from_secs(15 * 60)),
-        BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery | BlockKind::Spawn => Some(Duration::from_secs(5 * 60)),
+        BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery | BlockKind::Spawn | BlockKind::Run => Some(Duration::from_secs(5 * 60)),
         // A wait is for as long as it says, and its own `timeout_seconds` may cut it short.
         BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait | BlockKind::Join => None,
         // The callee has the limits of its own blocks, and the caller may set one for the whole call.
@@ -598,7 +599,8 @@ impl<'a> Scheduler<'a> {
     fn mark_bits(&mut self, node: &FlowNode, kind: BlockKind) {
         let read = |key: &str| node.data.get(key).and_then(Value::as_str).map(|t| self.scope.bits_of(t)).unwrap_or((false, false));
         let bits = match kind {
-            BlockKind::Agent | BlockKind::Api | BlockKind::Message | BlockKind::AppQuery => (true, false),
+            // What a command printed is outside text, as an API response is.
+            BlockKind::Agent | BlockKind::Api | BlockKind::Message | BlockKind::AppQuery | BlockKind::Run => (true, false),
             BlockKind::Condition => {
                 let (tainted, derived) = read("expr");
                 (false, tainted || derived)

@@ -87,7 +87,12 @@ function () {
     return false;
   };
   const labels = Array.from(this.labels || []);
-  const related = at => within(at, this) || within(this, at) || labels.some(l => within(at, l));
+  // A <label> is related to the control it names: nested (already caught by within(at, this)) or by `for`, a
+  // sibling the DOM walk above can't see. `.control` is the one standard way to ask either direction (HTML
+  // Living Standard, HTMLLabelElement.control); a ref on the label itself must still name its own input, not
+  // treat it as an unrelated thing covering the label.
+  const myControl = this.tagName === "LABEL" ? this.control : null;
+  const related = at => within(at, this) || within(this, at) || labels.some(l => within(at, l)) || (myControl && within(at, myControl));
   const hit = (x, y) => {
     let at = doc.elementFromPoint(x, y);
     while (at && at.shadowRoot) {

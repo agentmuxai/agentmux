@@ -156,6 +156,12 @@ pub fn prepare_from(
     }
 }
 
+/// The decoded pictures among `items`, as the paths of their send-copies, in the order of the tray: what a
+/// provider that takes a picture by path (Codex's `localImage`) is given, besides the list in the text.
+pub fn image_paths(items: &[Resolved]) -> Vec<String> {
+    items.iter().filter(|i| i.is_image()).map(|i| i.path.to_string_lossy().into_owned()).collect()
+}
+
 /// Base64 bytes carried by inline blocks, for the session budget.
 pub fn inline_bytes(blocks: &[serde_json::Value]) -> u64 {
     blocks
@@ -361,6 +367,18 @@ mod tests {
             page_count: pages,
             note: note.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn the_pictures_a_provider_takes_by_path_are_the_decoded_images_in_tray_order() {
+        let items = vec![
+            item(1, "a.png", "/s/aa.send.png"),
+            file(2, "notes.pdf", "/s/named/bb/notes.pdf", "application/pdf", Some(3), None),
+            file(3, "logo.svg", "/s/named/cc/logo.svg", "image/svg+xml", None, None),
+            item(4, "b.jpg", "/s/dd.send.jpg"),
+        ];
+        assert_eq!(image_paths(&items), vec!["/s/aa.send.png".to_string(), "/s/dd.send.jpg".to_string()]);
+        assert!(image_paths(&[]).is_empty());
     }
 
     #[test]

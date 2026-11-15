@@ -36,13 +36,26 @@ use crate::backend::mps;
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10);
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// A message waiting for its turn: the words, and the pictures that go with them (paths of files on this machine).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QueuedMessage {
+    text: String,
+    images: Vec<String>,
+}
+
+impl From<String> for QueuedMessage {
+    fn from(text: String) -> Self {
+        Self { text, images: Vec::new() }
+    }
+}
+
 struct AppServerInner {
     proc_status: String,
     proc_exit_code: i32,
     status_version: i32,
     process: Option<Arc<AppServerProcess>>,
     session: Option<Arc<CodexAppServerSession>>,
-    pending_messages: VecDeque<String>,
+    pending_messages: VecDeque<QueuedMessage>,
 }
 
 /// Controller for one isolated `codex app-server --listen stdio://` child.
@@ -293,7 +306,7 @@ impl AppServerController {
         });
     }
 
-    fn spawn_turn(&self, session: Arc<CodexAppServerSession>, message: String) {
+    fn spawn_turn(&self, session: Arc<CodexAppServerSession>, message: QueuedMessage) {
         let health = self.health_monitor.clone();
         let weak = self.self_ref.lock().unwrap().clone();
         health.set_active_turn(true);
@@ -302,7 +315,7 @@ impl AppServerController {
         // `TurnAlreadyActive` rejection can be requeued instead of lost.
         let requeue_message = message.clone();
         tokio::spawn(async move {
-            if let Err(error) = session.start_turn(message, OPERATION_TIMEOUT).await {
+            if let Err(error) = session.start_turn(message.text, message.images, OPERATION_TIMEOUT).await {
                 // `TurnAlreadyActive` means a DIFFERENT turn is still running —
                 // this attempt (queued via `send_message`, which already returned
                 // `Ok` to its caller) was rejected, but the original turn and the
@@ -342,16 +355,18 @@ impl AppServerController {
     }
 
     pub fn send_message(&self, message: String) -> Result<(), String> {
-        self.send_message_from(message, false, None)
+        self.send_message_from(message, Vec::new(), false, None)
     }
 
     /// [`send_message`](Self::send_message), saying where the message came from. The App Server puts
     /// the user's words in no frame of its own, so srv stores them as a user record with that origin
     /// (`prompt_record`) once the controller has them; with no `record` nothing is stored. `shown_by_pane`:
     /// the pane typed it and already shows it.
-    pub fn send_message_from(&self, message: String, shown_by_pane: bool, record: Option<&RecordOrigin>) -> Result<(), String> {
+    /// `images`: the pictures the message carries, as paths of files on this machine; the App Server's model
+    /// sees each one (`localImage`), besides the numbered path list the words already hold.
+    pub fn send_message_from(&self, message: String, images: Vec<String>, shown_by_pane: bool, record: Option<&RecordOrigin>) -> Result<(), String> {
         let words = record.map(|_| message.clone());
-        self.queue_or_start_turn(message)?;
+        self.queue_or_start_turn(QueuedMessage { text: message, images })?;
         if let Some(words) = words {
             let records = super::prompt_record::PromptRecords { broker: self.broker.clone(), filestore: self.filestore.clone(), mstore: self.mstore.clone() };
             records.write(&self.block_id, &words, shown_by_pane, record);
@@ -359,7 +374,7 @@ impl AppServerController {
         Ok(())
     }
 
-    fn queue_or_start_turn(&self, message: String) -> Result<(), String> {
+    fn queue_or_start_turn(&self, message: QueuedMessage) -> Result<(), String> {
         let session = {
             let mut inner = self.inner.lock().unwrap();
             match inner.session.clone() {
