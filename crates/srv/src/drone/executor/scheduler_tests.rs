@@ -64,7 +64,7 @@ async fn run(graph: DroneGraph) -> Outcome {
 }
 
 async fn run_with(graph: DroneGraph, trigger: Value) -> Outcome {
-    let mut handle = run_drone("d".to_string(), graph, trigger, None).await.unwrap();
+    let mut handle = run_drone("d".to_string(), graph, trigger, (None, None)).await.unwrap();
     let mut done = Vec::new();
     let mut result = Err("no end".to_string());
     while let Some(ev) = handle.events.recv().await {
@@ -255,7 +255,8 @@ async fn the_run_marks_what_came_from_outside_as_tainted_for_the_state() {
     let plan = schedule::analyze(&graph).unwrap();
     let scope = ExecutionScope::with_trigger(json!({ "title": "hi" }));
     let mut s = Scheduler::new("r", &graph, plan, scope, Limits::default(), &tx, &states);
-    s.run().await.unwrap();
+    s.seed_roots();
+    s.drive().await.unwrap();
     assert!(s.scope.state.get("x").unwrap().tainted);
     assert_eq!(s.scope.bits["c"], (false, true), "a boolean made from tainted text is derived, not tainted");
     assert_eq!(s.scope.bits["r"], (true, false), "a response reading the tainted variable is tainted");
@@ -369,7 +370,7 @@ async fn end_of(mut handle: crate::drone::executor::engine::RunHandle) -> (Strin
 #[tokio::test]
 async fn a_cancelled_run_runs_no_more_blocks_and_ends_with_the_reason() {
     // The run is spawned but cannot start until this test awaits.
-    let handle = run_drone("d".to_string(), counting_loop("never", json!({ "max_iterations": 1000 }), "unreached"), Value::Null, None).await.unwrap();
+    let handle = run_drone("d".to_string(), counting_loop("never", json!({ "max_iterations": 1000 }), "unreached"), Value::Null, (None, None)).await.unwrap();
     assert!(crate::drone::executor::cancel_run(&handle.run_id, "stopped by a person"));
     assert!(!crate::drone::executor::cancel_run(&handle.run_id, "again"), "a stopped run is stopped once");
     let states = handle.final_states.clone();
@@ -382,7 +383,7 @@ async fn a_cancelled_run_runs_no_more_blocks_and_ends_with_the_reason() {
 #[tokio::test]
 async fn a_run_that_is_not_going_cannot_be_cancelled() {
     assert!(!crate::drone::executor::cancel_run("no-such-run", "x"));
-    let handle = run_drone("d".to_string(), counting_loop("xx", json!({}), "{{var.n}}"), Value::Null, None).await.unwrap();
+    let handle = run_drone("d".to_string(), counting_loop("xx", json!({}), "{{var.n}}"), Value::Null, (None, None)).await.unwrap();
     let run_id = handle.run_id.clone();
     let (ended, _) = end_of(handle).await;
     assert_eq!(ended, "done");
@@ -455,7 +456,7 @@ async fn a_failed_block_with_no_error_edge_fails_the_run() {
 }
 
 async fn events_of(graph: DroneGraph) -> Vec<RunEvent> {
-    let mut handle = run_drone("d".to_string(), graph, Value::Null, None).await.unwrap();
+    let mut handle = run_drone("d".to_string(), graph, Value::Null, (None, None)).await.unwrap();
     let mut events = Vec::new();
     while let Some(ev) = handle.events.recv().await {
         events.push(ev);

@@ -31,6 +31,15 @@ pub enum RunEvent {
         output: Value,
     },
     RunFailed { run_id: String, error: String },
+    /// The run's state was kept as checkpoint `step` (0 is the start, before any
+    /// block); `block_id` is the block it follows.
+    StepCheckpointed {
+        run_id: String,
+        step: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        block_id: Option<String>,
+    },
     /// A loop's guard sent the run round again: `iteration` is the pass that is
     /// starting (the first pass has no event).
     LoopIteration { run_id: String, block_id: String, iteration: u32 },
