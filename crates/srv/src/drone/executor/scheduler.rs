@@ -50,7 +50,7 @@ pub(super) struct Limits {
 fn default_timeout(kind: BlockKind) -> Option<Duration> {
     match kind {
         BlockKind::Agent => Some(Duration::from_secs(15 * 60)),
-        BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery => Some(Duration::from_secs(5 * 60)),
+        BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery | BlockKind::Spawn => Some(Duration::from_secs(5 * 60)),
         BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach => None,
     }
 }
