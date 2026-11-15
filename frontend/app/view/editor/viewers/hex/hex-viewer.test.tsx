@@ -330,6 +330,37 @@ describe("the hex viewer", () => {
         }
     });
 
+    it("shows full rows again when the file got shorter while scrolled to its end", async () => {
+        const [revision, setRevision] = createSignal(0);
+        const [size, setSize] = createSignal(FILE.length);
+        render(() => (
+            <HexViewer path="C:/bin/a.bin" revision={revision()} size={size()} memoryKey="C:/bin/a.bin" bar={{ viewer: "hex", options: ["hex"], onReopenWith: () => {} }} />
+        ));
+        await settle();
+        key("End", { ctrlKey: true });
+        await settle();
+        serve(FILE.slice(0, 100_000));
+        setSize(100_000);
+        setRevision(1);
+        await settle();
+        // Not one last row: the rows a view holds, ending at the new end.
+        expect(rowTexts().length).toBeGreaterThanOrEqual(VIEW_ROWS);
+        expect(rowTexts().at(-1)).toBe("00018690");
+        expect(cursorAt()).toBe(99_999);
+    });
+
+    it("leaves a sideways wheel to the browser in a file that scrolls in proportion, and takes the vertical one", async () => {
+        const big = new Uint8Array(8_000_000);
+        serve(big);
+        await mount({ size: big.length });
+        const sideways = new WheelEvent("wheel", { deltaX: 40, deltaY: 0, bubbles: true, cancelable: true });
+        grid().dispatchEvent(sideways);
+        expect(sideways.defaultPrevented).toBe(false);
+        const down = new WheelEvent("wheel", { deltaX: 0, deltaY: 40, bubbles: true, cancelable: true });
+        grid().dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(true);
+    });
+
     it("goes to an offset from a toolbar button's focus too", async () => {
         await mount();
         const button = screen.getByRole("radio", { name: "32" }) as HTMLElement;
