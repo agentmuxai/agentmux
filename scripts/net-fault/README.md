@@ -112,7 +112,7 @@ Limits, said plainly:
 - **Claude CLI: yes.** Verified: with the API host refused, every request
   showed up in the proxy log as `CONNECT api.anthropic.com:443` and failed as in
   the table. Agent panes inherit srv's environment; srv strips only
-  `AGENTMUX_*` variables from it (`crates/srv/src/backend/pane_env.rs`), so
+  `AGENTMUX_*` variables from it (`crates/srv-core/src/backend/pane_env.rs`), so
   `HTTPS_PROXY` and `NO_PROXY` set on the dev instance reach every agent CLI it
   starts. Other CLIs (Codex, Gemini, …) were not checked.
 - **srv's HTTP clients: yes, read once.** srv uses reqwest 0.12, which reads
@@ -207,7 +207,7 @@ the proxy in `pass`.
 
 The final error of a refused turn depends on the CLI build: 2.1.112 ends it
 with `Unable to connect to API (ConnectionRefused)` when the connect itself is
-refused (the proxy's every-host `refuse`), and `crates/srv/src/agents/failure.rs`
+refused (the proxy's every-host `refuse`), and `crates/srv-core/src/agents/failure.rs`
 does not match that text today (it matches `connection refused` with a space,
 and `econnrefused`). Expect an unknown failure there until it does; the
 `ECONNRESET` and `Request timed out` endings are matched.

@@ -18,7 +18,7 @@ Two separate faults, both affecting every Codex agent, not only Coddy.
 
 Coddy's turns failed with `The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.`
 
-- AgentMux hard-codes Codex's models: `gpt-5.5` (default), `gpt-5.4`, `gpt-5.1-codex-max`, `gpt-5.3-codex` (`frontend/app/view/agent/providers/catalog.ts`, the `codex` entry's `models`). srv repeats the default in `default_model_for` (`crates/srv/src/backend/providers.rs`).
+- AgentMux hard-codes Codex's models: `gpt-5.5` (default), `gpt-5.4`, `gpt-5.1-codex-max`, `gpt-5.3-codex` (`frontend/app/view/agent/providers/catalog.ts`, the `codex` entry's `models`). srv repeats the default in `default_model_for` (`crates/srv-core/src/backend/providers.rs`).
 - The account's own model list, which the Codex CLI fetches from OpenAI and caches in `$CODEX_HOME/models_cache.json`, now lists `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-5.6-luna` (plus hidden internal entries). None of the four AgentMux offers is on it.
 - `/model` only accepts values from the catalog (`commands/dispatch.ts`, enum args), so a user can't pick a working model from the pane.
 
@@ -26,7 +26,7 @@ Coddy's turns failed with `The 'gpt-5.5' model is not supported when using Codex
 
 ### 2.2 Every Codex account is marked "needs re-auth" at its first spawn
 
-- The spawn-time probe (`crates/srv/src/identity/resolver/oauth_probe.rs`) reads `<dir>/.credentials.json` for `claude`, `codex` and `openclaw` alike.
+- The spawn-time probe (`crates/srv-core/src/identity/resolver/oauth_probe.rs`) reads `<dir>/.credentials.json` for `claude`, `codex` and `openclaw` alike.
 - A ChatGPT sign-in through `codex login` writes `$CODEX_HOME/auth.json`, never `.credentials.json`.
 - So the probe finds nothing and `inject.rs` persists `needs_reauth`. The srv log shows Coddy's account going `valid` → `needs_reauth` at 06:47:35, seconds after a working sign-in.
 - The spawn is not refused, so the agent still runs, but the account then:

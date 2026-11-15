@@ -83,7 +83,7 @@ The Kanban spec's §6.5 "Stopping it" names putting tasks on hold as one of thes
 
 - **`enqueue`'s `hold`:** "on hold: no one takes it until it is taken off hold (`unhold`, by you, another agent or the operator)".
 - **The `Tasks` tool's description** gains: "hold / unhold: put a waiting task on hold, or take it off. Use hold when a task waits on something outside your control (a reply, a decision), and unhold it yourself when that arrives. claim with id takes that task."
-- **The operator-config guidance** (`crates/srv/operator-config-seed.json`, the Tasks paragraph) gains one sentence to the same effect.
+- **The operator-config guidance** (`crates/srv-core/operator-config-seed.json`, the Tasks paragraph) gains one sentence to the same effect.
 - **Kanban spec:**
   - §6.4's row becomes "hold, unhold | operator or agent".
   - §6.12 gains the two actions and `claim`'s `id`.
@@ -102,9 +102,9 @@ The queue is shared by every AgentMux on the computer (Kanban spec §10). An old
 - `crates/srv/src/server/work_tasks.rs`: `handle_work_hold`, `handle_work_unhold`; holding one's own claimed task (§3.2).
 - `crates/srv/src/server/routes.rs`: the two routes.
 - `crates/srv/src/server/work_queue.rs`: `ClaimRequest.id`; `handle_work_claim` calls `work_claim_one` when it is set.
-- `crates/srv/src/backend/storage/work_board.rs`: `work_claim_one`; `work_hold_own` (claimed → held for its holder, fenced; its attempt limit grows by one).
+- `crates/srv-core/src/backend/storage/work_board.rs`: `work_claim_one`; `work_hold_own` (claimed → held for its holder, fenced; its attempt limit grows by one).
 - `crates/mcp/src/tool_schemas.rs`, `crates/mcp/src/tools/work.rs`: the actions, `claim`'s `id`, the wording (§3.5).
-- `crates/srv/operator-config-seed.json`: the guidance sentence.
+- `crates/srv-core/operator-config-seed.json`: the guidance sentence.
 - `frontend/app/view/warden-kanban/`: no change; the drawer's history already renders `held` and `unheld` rows with an agent actor by name.
 - `docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md`: §6.4, §6.5, §6.12, §6.13 (§3.5).
 - agentmux-docs: the MuxAPI page is generated from `tool_schemas.rs`; the Kanban page's "who moves what" gets the same change.

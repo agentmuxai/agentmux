@@ -30,8 +30,8 @@
 | Fill and typing refusals | `crates/cef/src/browser_api/act.rs:901-927`, `act.rs:554-579`, text at `act.rs:581` | `fill` and `key` refuse a secret field, before and after focusing it |
 | Masking | `act.rs:1051` (`redact_secret`); `crates/cef/src/browser_api/routes.rs:392` (#5089) | Read-backs never return a secret value; screenshots black out secret fields |
 | Action log | `crates/srv/src/server/browser_actions.rs:13` | A fill names its field, never its value |
-| Keychain store | `crates/srv/src/identity/secret_store.rs` | OS keychain, or a `0600` file store when headless; `Zeroizing` reads |
-| Secrets already stored | `SecretRef::Keychain` (provider account API keys, OAuth, MuxBus), `crates/srv/src/identity/browser_credential_store.rs` (browser Basic-Auth logins) | Managed in the Identity and Accounts panes and the browser's auth prompt; there is no single view of them |
+| Keychain store | `crates/srv-core/src/identity/secret_store.rs` | OS keychain, or a `0600` file store when headless; `Zeroizing` reads |
+| Secrets already stored | `SecretRef::Keychain` (provider account API keys, OAuth, MuxBus), `crates/srv-core/src/identity/browser_credential_store.rs` (browser Basic-Auth logins) | Managed in the Identity and Accounts panes and the browser's auth prompt; there is no single view of them |
 | Command env | `crates/srv/src/server/http_shell.rs:93-118` (`POST /api/v1/shell/create`) | A command runs with srv's env, the agent's `cmd:env`, then the caller's `env`; `gh_guard` applied last |
 | Pane types | `frontend/app/block/block-registry.test.ts:18-22`; `frontend/app/view/<view>/`; `openOrFocusPaneByView` (e.g. `frontend/app/view/warden/open-warden.ts`) | Memory, Identity, Warden and the others are views with their own folder and a registry manifest |
 | Driven-pane limits | bypass spec §4.1 | `eval`, UI click by selector, and `key` Enter/Space are refused on a pane an agent opened |

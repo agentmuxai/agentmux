@@ -5,7 +5,7 @@
  * What a restart into a staged release says while it waits: who it waits for,
  * in words a person can act on, and what "Restart anyway" would cut short.
  * srv waits for agents in the middle of a turn and for nothing else
- * (`crates/srv/src/backend/update/restart.rs`), and says so for each one.
+ * (`crates/srv-core/src/backend/update/restart.rs`), and says so for each one.
  */
 
 import type { WaitingOn } from "@/types/rpc/WaitingOn";

@@ -83,11 +83,11 @@ Pin locations, enforced by [`frontend/app/view/agent/providers/pin-consistency.t
 | Location | claude | gemini | qwen | openclaw | copilot |
 |---|---|---|---|---|---|
 | [`frontend/app/view/agent/providers/catalog.ts`](../../frontend/app/view/agent/providers/catalog.ts) `pinnedVersion` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| [`crates/srv/src/backend/providers.rs`](../../crates/srv/src/backend/providers.rs) `pinned_version` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [`crates/srv-core/src/backend/providers.rs`](../../crates/srv-core/src/backend/providers.rs) `pinned_version` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | [`.github/workflows/container-image.yml`](../../.github/workflows/container-image.yml) `claude_version` | ✅ | — | — | — | — |
 | [`docker/Dockerfile.agent-agentmux`](../../docker/Dockerfile.agent-agentmux) `ARG CLAUDE_VERSION` | ✅ | — | — | — | — |
 
-A version string isn't the whole contract. [`crates/srv/src/backend/blockcontroller/subprocess/argv.rs`](../../crates/srv/src/backend/blockcontroller/subprocess/argv.rs) records, for each provider, which flags were "checked against the pinned CLI". For each bumped provider, install the new version into a scratch prefix (`npm install --prefix <tmp> <pkg>@<new>`) and confirm that every flag and subcommand AgentMux passes still appears in `--help`. Update the "checked against" comments to the new version. Test fixtures that only illustrate a version string (`cli-notice.test.ts`, `version-drift.test.ts`) stay as they are, because they test parsing, not the pin.
+A version string isn't the whole contract. [`crates/srv-core/src/backend/blockcontroller/subprocess/argv.rs`](../../crates/srv-core/src/backend/blockcontroller/subprocess/argv.rs) records, for each provider, which flags were "checked against the pinned CLI". For each bumped provider, install the new version into a scratch prefix (`npm install --prefix <tmp> <pkg>@<new>`) and confirm that every flag and subcommand AgentMux passes still appears in `--help`. Update the "checked against" comments to the new version. Test fixtures that only illustrate a version string (`cli-notice.test.ts`, `version-drift.test.ts`) stay as they are, because they test parsing, not the pin.
 
 **Done for this PR on 2026-10-01.** I installed the old and new version of each CLI side by side and compared their help output for every flag and subcommand that `providers.rs`, `catalog.ts`, `argv.rs` and `buildRuntimeArgs.ts` pass:
 

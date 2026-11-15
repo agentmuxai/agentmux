@@ -12,7 +12,7 @@ The operator, 2026-10-22, after an agent waiting on the operator's decision rece
 
 ## 2. Today
 
-- **What it is.** srv's reminder loop (`crates/srv/src/backend/kanban.rs`, `run_reminder_loop`) looks every 30 s. An agent that has been idle for 2 minutes (`IDLE_MS`) with tasks waiting in its backlog gets one system note, once per idle period: `[AgentMux] You have 16 tasks waiting in your backlog in the Kanban: #6 "…", … Take the next with Tasks claim when you're ready.`
+- **What it is.** srv's reminder loop (`crates/srv-core/src/backend/kanban.rs`, `run_reminder_loop`) looks every 30 s. An agent that has been idle for 2 minutes (`IDLE_MS`) with tasks waiting in its backlog gets one system note, once per idle period: `[AgentMux] You have 16 tasks waiting in your backlog in the Kanban: #6 "…", … Take the next with Tasks claim when you're ready.`
 - **Default.** On. `reminders_enabled` reads the setting `kanban:reminders` and treats a missing value as `true`. A test pins that (`reminders_are_on_unless_turned_off`).
 - **Turning it off.**
   - For everyone: write `"kanban:reminders": false` into `settings.json` by hand. The setting is in neither `schema/settings.json` nor the Settings pane.

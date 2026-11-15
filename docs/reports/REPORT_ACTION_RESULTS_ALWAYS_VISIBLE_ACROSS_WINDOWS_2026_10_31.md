@@ -122,7 +122,7 @@ outcome = shown_here | opened_here | went_to{windowId} | moved_here | opened_in_
 
 ### Files and types to change
 
-- **srv:** `CommandPaneOpenData` (`crates/srv/src/backend/rpc_types/block.rs`) gains `origin_tab_id` and a window id; `open_pane` (`pane.rs:1114`) resolves the tab from it before any fallback; `PaneOpenResult` returns `window_id` and `visible`; the "first workspace" fallback in `resolve_tab_id` (`mod.rs:293`) becomes an error for window callers; `pane.open` gets an idempotent singleton rule (`new: true` to force).
+- **srv:** `CommandPaneOpenData` (`crates/srv-core/src/backend/rpc_types/block.rs`) gains `origin_tab_id` and a window id; `open_pane` (`pane.rs:1114`) resolves the tab from it before any fallback; `PaneOpenResult` returns `window_id` and `visible`; the "first workspace" fallback in `resolve_tab_id` (`mod.rs:293`) becomes an error for window callers; `pane.open` gets an idempotent singleton rule (`new: true` to force).
 - **srv, agent open:** `agent_attach.rs:228-234` (`focus_shown`) honours `focus` and an agent-caller flag so it doesn't switch the user's tab.
 - **Host:** `focus_window` (`meta.rs:155`) returns `{ raised, restored, foreground }`; `FocusWindowTask` restores minimized ordinary windows and brings an off-screen window onto a display.
 - **Frontend:** `reveal-block.ts` gets `revealOrOpen` and `RevealOutcome`; `block-component-registry.ts` delegates to it; `widget-singleton.ts` gets `scope`; `usenotification.tsx` and the toast container get a live region; `custom.d.ts` gets optional `live: "status" | "alert"`.

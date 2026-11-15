@@ -104,7 +104,7 @@ describe("stylesheet: each class uses its theme colour", () => {
 
 describe("Operator Config tells agents exactly the classes that render", () => {
     const manifest = JSON.parse(
-        readFileSync(join(__dirname, "../../../crates/srv/operator-config-seed.json"), "utf8")
+        readFileSync(join(__dirname, "../../../crates/srv-core/operator-config-seed.json"), "utf8")
     ) as { version: number; entries: { id: string; instructions: string }[] };
     const entry = manifest.entries.find((e) => e.id === "operator-config-rich-output");
 

@@ -1,4 +1,4 @@
-# Files under crates/srv/src/backend/ that name crate::server, and how many times
+# Files under crates/srv-core/src/backend/ that name crate::server, and how many times
 # (scripts/check-import-ratchets.mjs). A file may not name it more often than this, and a file not listed may not name it at all.
 # Run `node scripts/check-import-ratchets.mjs --update` after fixing some; adding
 # an entry is a hand edit that the PR has to justify.

@@ -3,7 +3,7 @@
 //
 // What the card form knows about a number as it is typed: its brand, whether
 // it passes the Luhn check, how it is grouped, how long the security code is.
-// srv's crates/srv/src/backend/vault/card.rs is the source (it works the brand
+// srv's crates/srv-core/src/backend/vault/card.rs is the source (it works the brand
 // out again on every save); vault-card.test.ts holds both to the same table.
 
 export const CARD_BRANDS: Record<string, string> = {

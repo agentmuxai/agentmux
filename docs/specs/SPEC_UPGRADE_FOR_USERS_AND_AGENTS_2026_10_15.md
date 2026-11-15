@@ -431,7 +431,7 @@ object, a Linux cgroup) that nothing can leave, so a quit, an upgrade's
 included, stops it with the pane. That stays: letting processes escape a
 pane was rejected on purpose (`SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md`
 §0). What changes is that it no longer happens silently
-(`crates/srv/src/backend/background_work.rs`):
+(`crates/srv-core/src/backend/background_work.rs`):
 
 - **Listed before.** While an upgrade's restart waits or is asked for, the
   version panel lists what agents left running, one line each ("Agent-1: an

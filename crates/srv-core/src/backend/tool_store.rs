@@ -1,0 +1,686 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Tool store: ensures CLI tools (jq, rg, etc.) are available to agent
+//! subprocesses. Reads a bundled catalog JSON, checks system/bundled/managed
+//! install paths, and can download + verify tools on demand.
+
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+// Embedded catalog — path is relative to THIS FILE's location.
+// File: crates/srv-core/src/backend/tool_store.rs
+// Catalog: crates/srv-core/src/config/tool-catalog.json
+const CATALOG_JSON: &str = include_str!("../config/tool-catalog.json");
+
+// ---- Catalog structs ----
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToolCatalog {
+    pub tools: Vec<ToolSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToolSpec {
+    pub id: String,
+    pub display: String,
+    pub description: String,
+    pub tier: u8,
+    pub version: String,
+    pub check_cmd: String,
+    /// Flag (e.g. `"--version"`) to pass to the binary to get its version string.
+    /// If absent, version probing is skipped and the catalog version is reported.
+    #[serde(default)]
+    pub version_arg: Option<String>,
+    pub platforms: HashMap<String, PlatformSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlatformSpec {
+    pub url: String,
+    pub sha256: String,
+    /// "none" | "zip" | "tar_gz"
+    pub extract: String,
+    /// Final filename placed in the bin/ directory.
+    pub bin: String,
+    /// Path of the target file inside the archive (zip/tar_gz only).
+    pub bin_in_archive: Option<String>,
+}
+
+// ---- Status types ----
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub enum ToolStatus {
+    InstalledSystem,
+    InstalledBundled,
+    InstalledManaged,
+    Missing,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ToolStatusEntry {
+    pub id: String,
+    pub display: String,
+    pub description: String,
+    pub tier: u8,
+    pub status: ToolStatus,
+    pub version: Option<String>,
+    pub path: Option<String>,
+}
+
+// ---- Directory helpers ----
+
+/// Returns the bundled tools bin dir: `<exe_dir>/tools/bin/`.
+///
+/// In development (binary lives under `target/debug/` or `target/release/`)
+/// we return `None` so dev builds don't accidentally depend on a non-existent
+/// bundled dir.
+pub fn bundled_tools_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+
+    // Skip if we're running from a Cargo target directory.
+    let exe_str = exe_dir.to_string_lossy();
+    if exe_str.contains("target/debug")
+        || exe_str.contains("target/release")
+        || exe_str.contains("target\\debug")
+        || exe_str.contains("target\\release")
+    {
+        return None;
+    }
+
+    let bundled = exe_dir.join("tools").join("bin");
+    // A Store (MSIX) install can't run its tools from inside the package, so
+    // they run from a copy (see `packaged_tools`); anything else is unchanged.
+    Some(crate::backend::packaged_tools::runnable(bundled))
+}
+
+/// Returns `~/.agentmux/tools/bin/`.
+pub fn user_tools_dir() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join(".agentmux").join("tools").join("bin"))
+}
+
+/// Where the user tools dir goes relative to the existing PATH. The bundled
+/// dir always goes first: it is app-owned and version-locked, and a stale
+/// system copy shadowing it is the exit-130 trap
+/// (RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UserToolsPrecedence {
+    /// Before the existing PATH. Agent CLIs: in `task dev` there is no
+    /// bundled dir and the wrapper lives in the user dir, so a system copy
+    /// must not win.
+    BeforeExisting,
+    /// After the existing PATH. Interactive shells: the user's own system
+    /// PATH wins for tools they installed via /tools.
+    AfterExisting,
+}
+
+/// `existing` with the given tool dirs added (bundled first, user per
+/// `user_precedence`). `None` when neither dir is given, so the caller can
+/// leave PATH untouched.
+pub fn compose_tools_path(
+    existing: &str,
+    bundled: Option<&std::path::Path>,
+    user: Option<&std::path::Path>,
+    user_precedence: UserToolsPrecedence,
+) -> Option<String> {
+    if bundled.is_none() && user.is_none() {
+        return None;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(d) = bundled {
+        parts.push(d.to_string_lossy().into_owned());
+    }
+    if let (Some(d), UserToolsPrecedence::BeforeExisting) = (user, user_precedence) {
+        parts.push(d.to_string_lossy().into_owned());
+    }
+    if !existing.is_empty() {
+        parts.push(existing.to_string());
+    }
+    if let (Some(d), UserToolsPrecedence::AfterExisting) = (user, user_precedence) {
+        parts.push(d.to_string_lossy().into_owned());
+    }
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    Some(parts.join(sep))
+}
+
+/// [`compose_tools_path`] over the tool dirs that exist on this machine.
+pub fn tools_path(existing: &str, user_precedence: UserToolsPrecedence) -> Option<String> {
+    let bundled = bundled_tools_dir().filter(|d| d.exists());
+    let user = user_tools_dir().filter(|d| d.exists());
+    compose_tools_path(existing, bundled.as_deref(), user.as_deref(), user_precedence)
+}
+
+/// Puts the tool dirs ahead of the PATH in `env_vars` (else the process's own) for an agent's
+/// process: the bundled dir, then the user dir, so the build-slot shims in the user dir
+/// (`agentmux_common::build_slot`) and the app's own tools beat anything on the system PATH.
+/// Every agent spawn calls this: a spawn that skips it never reaches the shims.
+pub fn prepend_agent_tools_path(env_vars: &mut HashMap<String, String>) {
+    let bundled = bundled_tools_dir().filter(|d| d.exists());
+    let user = user_tools_dir().filter(|d| d.exists());
+    prepend_tools_path_with(env_vars, bundled.as_deref(), user.as_deref());
+}
+
+fn prepend_tools_path_with(env_vars: &mut HashMap<String, String>, bundled: Option<&std::path::Path>, user: Option<&std::path::Path>) {
+    let existing = env_vars.get("PATH").cloned().or_else(|| std::env::var("PATH").ok()).unwrap_or_default();
+    if let Some(path) = compose_tools_path(&existing, bundled, user, UserToolsPrecedence::BeforeExisting) {
+        env_vars.insert("PATH".to_string(), path);
+    }
+}
+
+/// The `agentmux-bashwrap` agents' Bash commands run through: the bundled
+/// copy, else the user tools dir's (where `task dev` puts it), in the order
+/// [`tools_path`] puts them on PATH. An absolute path, so a stale copy
+/// elsewhere on PATH can never be the one that runs
+/// (RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md).
+pub fn bashwrap_path() -> Option<PathBuf> {
+    use crate::backend::agent_tools::{find_in_tool_dirs, ToolDir};
+    find_in_tool_dirs("agentmux-bashwrap", &[ToolDir::Bundled, ToolDir::User])
+}
+
+/// Returns `~/.agentmux/tools/downloads/`.
+fn downloads_dir() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join(".agentmux").join("tools").join("downloads"))
+}
+
+// ---- Catalog ----
+
+/// Load and parse the embedded catalog.
+pub fn load_catalog() -> Result<ToolCatalog, String> {
+    serde_json::from_str(CATALOG_JSON).map_err(|e| format!("parse tool-catalog.json: {e}"))
+}
+
+// ---- Platform detection ----
+
+/// Returns the platform key for the current compile target.
+pub fn current_platform() -> Result<&'static str, String> {
+    // Use std::env::consts at runtime so this compiles on every platform
+    // without unreachable-expression warnings.
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => Ok("windows-x64"),
+        ("macos", "aarch64") => Ok("macos-arm64"),
+        ("macos", "x86_64") => Ok("macos-x64"),
+        ("linux", "x86_64") => Ok("linux-x64"),
+        ("linux", "aarch64") => Ok("linux-arm64"),
+        (os, arch) => Err(format!("unsupported platform: os={os} arch={arch}")),
+    }
+}
+
+// ---- System PATH probe ----
+
+/// Returns true if `name` can be found on the system PATH.
+fn probe_system_path(name: &str) -> bool {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("where")
+            .arg(name)
+            .no_window()
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("which")
+            .arg(name)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+}
+
+/// Returns the system PATH location of `name`, or None.
+fn system_path_of(name: &str) -> Option<String> {
+    #[cfg(windows)]
+    let output = {
+        std::process::Command::new("where")
+            .arg(name)
+            .no_window()
+            .output()
+            .ok()?
+    };
+    #[cfg(not(windows))]
+    let output = std::process::Command::new("which").arg(name).output().ok()?;
+
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !path.is_empty() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Run `cmd --version-arg` and extract the first version-looking token.
+/// Returns `Some(version_string)` on success, `None` if the command fails or
+/// the output contains no recognisable version token.
+pub fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<String> {
+    probe_version_with_env(cmd, version_arg, &[])
+}
+
+/// [`probe_version`] with extra environment for the child, for a CLI that must not start its own
+/// update on a probe.
+pub(crate) fn probe_version_with_env(cmd: &str, version_arg: &Option<String>, env: &[(&str, &str)]) -> Option<String> {
+    probe_version_inner(cmd, version_arg, env, false)
+}
+
+/// [`probe_version_with_env`] for "does this program run": a non-zero exit gives `None`, so an
+/// error message that happens to contain a number (macOS runs a file that is not a program through
+/// `sh`, which prints its path and 127) is never read as a version.
+pub(crate) fn probe_version_when_it_runs(cmd: &str, version_arg: &Option<String>, env: &[(&str, &str)]) -> Option<String> {
+    probe_version_inner(cmd, version_arg, env, true)
+}
+
+fn probe_version_inner(cmd: &str, version_arg: &Option<String>, env: &[(&str, &str)], must_succeed: bool) -> Option<String> {
+    let arg = version_arg.as_deref()?;
+    let mut command = std::process::Command::new(cmd);
+    // `cmd` is a third-party binary, so it gets the strict policy for the same
+    // reason `open_browser` does (invariant I7) — short-lived and output-parsed
+    // is a weaker argument than "does not need our identity at all".
+    crate::backend::pane_env::sanitize_external_std_command(&mut command);
+    command.arg(arg);
+    command.envs(env.iter().copied());
+    #[cfg(windows)]
+    {
+        command.no_window();
+    }
+    let output = command.output().ok()?;
+    if must_succeed && !output.status.success() {
+        return None;
+    }
+    // Some tools write version to stderr (e.g. older jq), try both.
+    let text = if !output.stdout.is_empty() {
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    } else {
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    // Extract first token that looks like a semver number.
+    for word in text.split_whitespace() {
+        let candidate = word.trim_matches(|c: char| !c.is_ascii_digit() && c != '.');
+        if candidate.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+            && candidate.contains('.')
+        {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+// ---- Status query ----
+
+/// Get the install status of every tool in the catalog.
+///
+/// Priority: system PATH > bundled dir > user-managed dir.
+pub fn get_tool_statuses() -> Vec<ToolStatusEntry> {
+    let catalog = match load_catalog() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to load tool catalog");
+            return Vec::new();
+        }
+    };
+
+    let platform = current_platform().ok();
+
+    catalog
+        .tools
+        .iter()
+        .map(|spec| {
+            // Check platform availability first so we can return Unavailable early.
+            let platform_key = match &platform {
+                Some(k) => *k,
+                None => {
+                    return ToolStatusEntry {
+                        id: spec.id.clone(),
+                        display: spec.display.clone(),
+                        description: spec.description.clone(),
+                        tier: spec.tier,
+                        status: ToolStatus::Unavailable,
+                        version: None,
+                        path: None,
+                    };
+                }
+            };
+
+            if !spec.platforms.contains_key(platform_key) {
+                return ToolStatusEntry {
+                    id: spec.id.clone(),
+                    display: spec.display.clone(),
+                    description: spec.description.clone(),
+                    tier: spec.tier,
+                    status: ToolStatus::Unavailable,
+                    version: None,
+                    path: None,
+                };
+            }
+
+            let bin_name = &spec.platforms[platform_key].bin;
+
+            // 1. System PATH wins.
+            if probe_system_path(&spec.check_cmd) {
+                let path = system_path_of(&spec.check_cmd);
+                // Probe the actual installed version rather than assuming the catalog version.
+                let version = probe_version(&spec.check_cmd, &spec.version_arg);
+                return ToolStatusEntry {
+                    id: spec.id.clone(),
+                    display: spec.display.clone(),
+                    description: spec.description.clone(),
+                    tier: spec.tier,
+                    status: ToolStatus::InstalledSystem,
+                    version,
+                    path,
+                };
+            }
+
+            // 2. Bundled dir.
+            if let Some(bundled) = bundled_tools_dir() {
+                let p = bundled.join(bin_name);
+                if p.exists() {
+                    return ToolStatusEntry {
+                        id: spec.id.clone(),
+                        display: spec.display.clone(),
+                        description: spec.description.clone(),
+                        tier: spec.tier,
+                        status: ToolStatus::InstalledBundled,
+                        version: Some(spec.version.clone()),
+                        path: Some(p.to_string_lossy().into_owned()),
+                    };
+                }
+            }
+
+            // 3. User-managed store.
+            if let Some(user_bin) = user_tools_dir() {
+                let p = user_bin.join(bin_name);
+                if p.exists() {
+                    return ToolStatusEntry {
+                        id: spec.id.clone(),
+                        display: spec.display.clone(),
+                        description: spec.description.clone(),
+                        tier: spec.tier,
+                        status: ToolStatus::InstalledManaged,
+                        version: Some(spec.version.clone()),
+                        path: Some(p.to_string_lossy().into_owned()),
+                    };
+                }
+            }
+
+            // 4. Not found.
+            ToolStatusEntry {
+                id: spec.id.clone(),
+                display: spec.display.clone(),
+                description: spec.description.clone(),
+                tier: spec.tier,
+                status: ToolStatus::Missing,
+                version: None,
+                path: None,
+            }
+        })
+        .collect()
+}
+
+// ---- Installation ----
+
+/// Download, verify, and install a single tool by ID into the user-managed
+/// store (`~/.agentmux/tools/bin/`).
+///
+/// Returns the installed binary path on success.
+pub async fn install_tool(id: &str, http_client: &reqwest::Client) -> Result<String, String> {
+    let catalog = load_catalog()?;
+    let spec = catalog
+        .tools
+        .iter()
+        .find(|t| t.id == id)
+        .ok_or_else(|| format!("tool '{id}' not found in catalog"))?;
+
+    let platform_key = current_platform()?;
+    let platform_spec = spec
+        .platforms
+        .get(platform_key)
+        .ok_or_else(|| format!("tool '{id}' has no entry for platform '{platform_key}'"))?;
+
+    // Ensure directories exist.
+    let dl_dir = downloads_dir().ok_or("cannot determine downloads dir")?;
+    let bin_dir = user_tools_dir().ok_or("cannot determine user tools dir")?;
+    std::fs::create_dir_all(&dl_dir)
+        .map_err(|e| format!("create downloads dir: {e}"))?;
+    std::fs::create_dir_all(&bin_dir)
+        .map_err(|e| format!("create bin dir: {e}"))?;
+
+    // Download to a temp file.
+    let dl_path = dl_dir.join(format!("{id}-download"));
+    tracing::info!(tool = %id, url = %platform_spec.url, dest = %dl_path.display(), "downloading tool");
+
+    {
+        let bytes = http_client
+            .get(&platform_spec.url)
+            .send()
+            .await
+            .map_err(|e| format!("download '{id}': {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("download '{id}' HTTP error: {e}"))?
+            .bytes()
+            .await
+            .map_err(|e| format!("read download body '{id}': {e}"))?;
+
+        std::fs::write(&dl_path, &bytes)
+            .map_err(|e| format!("write download file: {e}"))?;
+    }
+
+    // Verify SHA-256.
+    {
+        let data = std::fs::read(&dl_path)
+            .map_err(|e| format!("read downloaded file for hash: {e}"))?;
+        let mut hasher = Sha256::new();
+        hasher.update(&data);
+        let digest = hex::encode(hasher.finalize());
+        if digest != platform_spec.sha256 {
+            let _ = std::fs::remove_file(&dl_path);
+            return Err(format!(
+                "SHA-256 mismatch for '{id}': expected={} got={digest}",
+                platform_spec.sha256,
+            ));
+        }
+        tracing::debug!(tool = %id, "SHA-256 verified");
+    }
+
+    // Extract / copy into bin dir.
+    let dest_path = bin_dir.join(&platform_spec.bin);
+
+    match platform_spec.extract.as_str() {
+        "none" => {
+            std::fs::copy(&dl_path, &dest_path)
+                .map_err(|e| format!("copy '{id}' to bin: {e}"))?;
+        }
+        "zip" => {
+            let archive_in = platform_spec
+                .bin_in_archive
+                .as_deref()
+                .ok_or_else(|| format!("tool '{id}': extract=zip but bin_in_archive is missing"))?;
+
+            let zip_data = std::fs::read(&dl_path)
+                .map_err(|e| format!("read zip file: {e}"))?;
+            let cursor = std::io::Cursor::new(zip_data);
+            let mut archive = zip::ZipArchive::new(cursor)
+                .map_err(|e| format!("open zip archive: {e}"))?;
+
+            let mut entry = archive
+                .by_name(archive_in)
+                .map_err(|e| format!("zip entry '{archive_in}': {e}"))?;
+
+            let mut out = std::fs::File::create(&dest_path)
+                .map_err(|e| format!("create dest file: {e}"))?;
+            std::io::copy(&mut entry, &mut out)
+                .map_err(|e| format!("extract zip entry: {e}"))?;
+        }
+        "tar_gz" => {
+            let archive_in = platform_spec
+                .bin_in_archive
+                .as_deref()
+                .ok_or_else(|| format!("tool '{id}': extract=tar_gz but bin_in_archive is missing"))?;
+
+            let gz_file = std::fs::File::open(&dl_path)
+                .map_err(|e| format!("open tar.gz: {e}"))?;
+            let gz_decoder = flate2::read::GzDecoder::new(gz_file);
+            let mut archive = tar::Archive::new(gz_decoder);
+
+            let mut found = false;
+            for entry in archive.entries().map_err(|e| format!("tar entries: {e}"))? {
+                let mut entry = entry.map_err(|e| format!("tar entry: {e}"))?;
+                let path = entry.path().map_err(|e| format!("tar entry path: {e}"))?;
+                if path.to_string_lossy() == archive_in {
+                    entry
+                        .unpack(&dest_path)
+                        .map_err(|e| format!("unpack tar entry: {e}"))?;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return Err(format!(
+                    "tar archive does not contain expected entry '{archive_in}'"
+                ));
+            }
+        }
+        other => {
+            return Err(format!("unknown extract mode '{other}' for tool '{id}'"));
+        }
+    }
+
+    // Set executable bit on Unix.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mut perms = std::fs::metadata(&dest_path)
+            .map_err(|e| format!("stat installed binary: {e}"))?
+            .permissions();
+        let mode = perms.mode();
+        perms.set_mode(mode | 0o111);
+        std::fs::set_permissions(&dest_path, perms)
+            .map_err(|e| format!("set executable bit: {e}"))?;
+    }
+
+    // Clean up download.
+    let _ = std::fs::remove_file(&dl_path);
+
+    let dest_str = dest_path.to_string_lossy().into_owned();
+    tracing::info!(tool = %id, path = %dest_str, "tool installed successfully");
+    Ok(dest_str)
+}
+
+#[cfg(test)]
+mod tool_status_wire_tests {
+    use super::*;
+    use serde_json::json;
+
+    // `version` and `path` are plain Options with NO skip_serializing_if, so
+    // the keys are ALWAYS present and carry null when unknown. The
+    // hand-written declaration marked both optional (`version?`), i.e. "the
+    // key may be absent" -- which it never is. The generated binding says
+    // `string | null`, and this pins which of the two is true.
+    #[test]
+    fn a_tool_entry_always_carries_version_and_path() {
+        let v = serde_json::to_value(ToolStatusEntry {
+            id: "rg".to_string(),
+            display: "ripgrep".to_string(),
+            description: "search".to_string(),
+            tier: 1,
+            status: ToolStatus::Missing,
+            version: None,
+            path: None,
+        })
+        .expect("serializable");
+        let obj = v.as_object().expect("object");
+        assert!(obj.contains_key("version") && obj.contains_key("path"));
+        assert_eq!(v["version"], json!(null));
+        assert_eq!(v["path"], json!(null));
+    }
+
+    // ToolStatus is a closed set the frontend branches on; it is
+    // `rename_all = "snake_case"` and generates as a string union. Pin the
+    // wire spellings so the union cannot drift from them.
+    #[test]
+    fn tool_status_serializes_to_the_expected_snake_case_tags() {
+        for (variant, tag) in [
+            (ToolStatus::InstalledSystem, "installed_system"),
+            (ToolStatus::InstalledBundled, "installed_bundled"),
+            (ToolStatus::InstalledManaged, "installed_managed"),
+            (ToolStatus::Missing, "missing"),
+            (ToolStatus::Unavailable, "unavailable"),
+        ] {
+            assert_eq!(serde_json::to_value(variant).unwrap(), json!(tag));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tools_path_tests {
+    use super::{compose_tools_path, prepend_tools_path_with, UserToolsPrecedence};
+    use std::path::Path;
+
+    const SEP: &str = if cfg!(windows) { ";" } else { ":" };
+
+    fn join(parts: &[&str]) -> String {
+        parts.join(SEP)
+    }
+
+    #[test]
+    fn bundled_always_leads_and_user_follows_the_requested_precedence() {
+        let (b, u) = (Path::new("B"), Path::new("U"));
+        assert_eq!(
+            compose_tools_path("SYS", Some(b), Some(u), UserToolsPrecedence::BeforeExisting),
+            Some(join(&["B", "U", "SYS"]))
+        );
+        assert_eq!(
+            compose_tools_path("SYS", Some(b), Some(u), UserToolsPrecedence::AfterExisting),
+            Some(join(&["B", "SYS", "U"]))
+        );
+    }
+
+    #[test]
+    fn no_tool_dirs_leaves_path_untouched() {
+        assert_eq!(compose_tools_path("SYS", None, None, UserToolsPrecedence::BeforeExisting), None);
+    }
+
+    #[test]
+    fn an_agents_own_path_gets_the_tool_dirs_in_front_and_none_means_no_change() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let mut env = std::collections::HashMap::from([("PATH".to_string(), "SYS".to_string())]);
+        prepend_tools_path_with(&mut env, Some(Path::new("B")), Some(Path::new("U")));
+        assert_eq!(env["PATH"], format!("B{sep}U{sep}SYS"), "the user dir (build-slot shims) is ahead of the system PATH");
+        let mut untouched = std::collections::HashMap::from([("PATH".to_string(), "SYS".to_string())]);
+        prepend_tools_path_with(&mut untouched, None, None);
+        assert_eq!(untouched["PATH"], "SYS");
+        let mut none = std::collections::HashMap::new();
+        prepend_tools_path_with(&mut none, None, Some(Path::new("U")));
+        assert!(none["PATH"].starts_with(&format!("U{sep}")) || none["PATH"] == "U", "no PATH in the env: the process's own follows the user dir");
+    }
+
+    #[test]
+    fn an_empty_inherited_path_adds_no_empty_entry() {
+        // An empty PATH entry means "the current directory" on Unix.
+        assert_eq!(
+            compose_tools_path("", None, Some(Path::new("U")), UserToolsPrecedence::BeforeExisting),
+            Some("U".to_string())
+        );
+        assert_eq!(
+            compose_tools_path("", Some(Path::new("B")), None, UserToolsPrecedence::AfterExisting),
+            Some("B".to_string())
+        );
+    }
+}

@@ -3,7 +3,7 @@
 
 /**
  * The model an agent really runs, as srv records it on the pane: block meta `agent:route_model`
- * (`crates/srv/src/backend/model_gateway/launch.rs`). Absent or null on the harness's own sign-in, where the harness's
+ * (`crates/srv-core/src/backend/model_gateway/launch.rs`). Absent or null on the harness's own sign-in, where the harness's
  * model is what answers. The pane header reads it for its model badge; the composer footer reads the same field.
  */
 

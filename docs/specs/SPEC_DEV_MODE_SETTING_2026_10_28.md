@@ -28,7 +28,7 @@ Non-goals: no change to what agents can do through MCP / MuxAPI (§7); no new De
 | | |
 |---|---|
 | Key | `app:devmode` (boolean) |
-| Declared in | `schema/settings.json` (no `default`: absence means "the build's default", below), the typed settings struct in `crates/srv/src/backend/wconfig/types.rs`, and the generated `frontend/types/srv-types.d.ts` (regenerate, don't hand-edit); pinned in `settings-defaults.test.ts` like its neighbours |
+| Declared in | `schema/settings.json` (no `default`: absence means "the build's default", below), the typed settings struct in `crates/srv-core/src/backend/wconfig/types.rs`, and the generated `frontend/types/srv-types.d.ts` (regenerate, don't hand-edit); pinned in `settings-defaults.test.ts` like its neighbours |
 | Effective value | `settings["app:devmode"]` if set, otherwise **true in a task dev / debug build, false in a release build** |
 | Where it appears | Settings › Advanced, a new "Developer" header at the bottom with one toggle "Dev mode"; the settings search finds it by "devtools", "inspect element", "developer", "app:devmode" |
 | Palette | "Toggle Dev Mode" (id `view:devmode:toggle`, category View), modelled on `view:statusbar:toggle` in `command-registry.ts`. Always listed, so a user can turn it on when support asks |

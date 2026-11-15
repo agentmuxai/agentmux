@@ -6,7 +6,7 @@
  * auto-compacts.
  *
  * The CLI reports it (srv asks `get_context_usage` at spawn and every turn
- * boundary and publishes `agentcontextusage`, crates/srv/src/backend/
+ * boundary and publishes `agentcontextusage`, crates/srv-core/src/backend/
  * agent_context_usage.rs). It differs from the default window − 33K under
  * `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, the `autoCompactWindow` setting or
  * `CLAUDE_CODE_DISABLE_1M_CONTEXT`, and auto-compaction can be off. Until the

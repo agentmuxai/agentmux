@@ -21,7 +21,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const PROVIDERS_RS = join(here, "..", "..", "crates", "srv", "src", "backend", "providers", "claude.rs");
+const PROVIDERS_RS = join(here, "..", "..", "crates", "srv-core", "src", "backend", "providers", "claude.rs");
 export const COMPLETE_MARKER = ".agentmux-install-complete";
 const PACKAGE_DIR = "agentmux-fake-claude";
 

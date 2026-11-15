@@ -16,7 +16,7 @@ On startup, while the splash is visible, a window that looks like a command term
 - The launcher and CEF host are GUI-subsystem binaries in release ([`crates/launcher/src/main.rs:22-25`](../../crates/launcher/src/main.rs), [`crates/cef/src/main.rs:6-9`](../../crates/cef/src/main.rs)). Debug launcher builds are console-subsystem.
 - **srv is a console-subsystem binary.** It has no `windows_subsystem` attribute, and [`crates/srv/build.rs`](../../crates/srv/build.rs) only sets version info. The launcher hides it by spawning it with `CREATE_NO_WINDOW` ([`crates/launcher/src/srv_spawner.rs:248`](../../crates/launcher/src/srv_spawner.rs), `:463-464`).
 - Windows allocates a fresh console for any console-subsystem process started from a console-less parent without `CREATE_NO_WINDOW`. Redirecting stdio does not prevent it.
-- Almost every spawn site already sets the flag, via `agentmux_common::win32::CREATE_NO_WINDOW` ([`crates/common/src/win32.rs:27`](../../crates/common/src/win32.rs)) and the helpers in [`crates/common/src/cli.rs:24-37`](../../crates/common/src/cli.rs) and [`crates/srv/src/util.rs:31-36`](../../crates/srv/src/util.rs). The flash comes from the sites that bypass it.
+- Almost every spawn site already sets the flag, via `agentmux_common::win32::CREATE_NO_WINDOW` ([`crates/common/src/win32.rs:27`](../../crates/common/src/win32.rs)) and the helpers in [`crates/common/src/cli.rs:24-37`](../../crates/common/src/cli.rs) and [`crates/srv-core/src/util.rs:31-36`](../../crates/srv-core/src/util.rs). The flash comes from the sites that bypass it.
 
 ### Culprit 1 (most likely, about 75%): launcher `schtasks.exe` at every startup
 Chain, all before the host window exists:

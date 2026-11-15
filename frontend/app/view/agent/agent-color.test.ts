@@ -47,7 +47,7 @@ describe("isValidAgentColor", () => {
 // twice is the id hash, so this reads the Rust source: a change to one side
 // without the other fails here.
 describe("picks the colour srv's palette.rs would", () => {
-    const rust = readFileSync(resolve(__dirname, "../../../../crates/srv/src/backend/palette.rs"), "utf8");
+    const rust = readFileSync(resolve(__dirname, "../../../../crates/srv-core/src/backend/palette.rs"), "utf8");
 
     it("hashes with the same FNV-1a", () => {
         const start = rust.indexOf("fn fnv1a(");

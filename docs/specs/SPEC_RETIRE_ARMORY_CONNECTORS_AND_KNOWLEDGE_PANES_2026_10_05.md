@@ -77,7 +77,7 @@ Personal) is `armory:memory:subsection` (`armory-model.ts`).
 
 | Entry point | Where |
 |---|---|
-| Widget bar button "Armory" (pinned, vault icon) | [`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json) (`defwidget@armory`); a click always creates a new block |
+| Widget bar button "Armory" (pinned, vault icon) | [`crates/srv-core/src/config/widgets.json`](../../crates/srv-core/src/config/widgets.json) (`defwidget@armory`); a click always creates a new block |
 | Hamburger menu → Armory | [`frontend/app/window/hamburger-menu.tsx`](../../frontend/app/window/hamburger-menu.tsx) |
 | Command palette "Identity & Memory" (`app:identity`) | [`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts) |
 | macOS app menu "Identity & Memory…" | [`crates/cef/src/macos_menu.rs`](../../crates/cef/src/macos_menu.rs) |
@@ -85,7 +85,7 @@ Personal) is `armory:memory:subsection` (`armory-model.ts`).
 | Stash dialogs: "Browse the Armory catalog →", "edit it there" | `AgentMcpModal.tsx`, `AgentSkillsModal.tsx` |
 | Startup dialog "Armory → Bundles" | `AgentStartupModal.tsx` |
 | Bundle summary pane "Edit/Manage in Identity & Memory" | [`frontend/app/view/bundle-summary.tsx`](../../frontend/app/view/bundle-summary.tsx) |
-| Layout files (type `"armory"`, `config.section`) | [`crates/srv/src/backend/layout_file.rs`](../../crates/srv/src/backend/layout_file.rs) |
+| Layout files (type `"armory"`, `config.section`) | [`crates/srv-core/src/backend/layout_file.rs`](../../crates/srv-core/src/backend/layout_file.rs) |
 
 No MCP or MuxAPI tool opens the Armory.
 
@@ -217,7 +217,7 @@ presets and in layout files. None of them should break or fall back to a blank p
 | Where | Change |
 |---|---|
 | Frontend strings: the Armory label, failure rows, Stash and Startup dialogs, `AgentNewBundleModal`, `bundle-manager`, `BundleImportSelectModal`, `MemoryAdoptionApprovalWindow`, `useAgentControllerStatus` ("Sign in… from Armory → Accounts") | name the pane and section: "Connectors → Accounts", "Connectors → MCP servers", "Knowledge → Skills" |
-| Spawn error text, [`crates/srv/src/identity/resolver/errors.rs`](../../crates/srv/src/identity/resolver/errors.rs) ("Bind an account for this provider in the Armory.") | "…in Connectors → Accounts". **Must change in the same commit as the matcher in [`crates/srv/src/agents/failure.rs`](../../crates/srv/src/agents/failure.rs), which recognises the error by this text (lowercased: "bind an account for this provider in the armory"),** with its tests; otherwise the "no account bound" error stops being classified |
+| Spawn error text, [`crates/srv-core/src/identity/resolver/errors.rs`](../../crates/srv-core/src/identity/resolver/errors.rs) ("Bind an account for this provider in the Armory.") | "…in Connectors → Accounts". **Must change in the same commit as the matcher in [`crates/srv-core/src/agents/failure.rs`](../../crates/srv-core/src/agents/failure.rs), which recognises the error by this text (lowercased: "bind an account for this provider in the armory"),** with its tests; otherwise the "no account bound" error stops being classified |
 | MCP tool descriptions, [`crates/mcp/src/tool_schemas.rs`](../../crates/mcp/src/tool_schemas.rs) (the Global Memory tools: "managed exclusively through the Armory UI", "shown in the Armory Global Memory list", "the Armory UI's own Remove button", "the Armory can bring entries into an isolated channel") | "the Knowledge pane". Agents read these, so they should name what the operator sees |
 | Placeholder startup file, `backend/providers.rs` ("use Armory -> Memory -> Global") | "Knowledge → Global" |
 | `widgets.json` labels, layout preview summary (`layout_file.rs`) | the new names |
@@ -310,7 +310,7 @@ version becomes harness-agnostic, keeping its `provider` / `model` as the hint.
 
 The widget bar shows the operator's own pinned list when they've set one (`widget:pinned`,
 [`frontend/app/window/action-widgets-config.ts`](../../frontend/app/window/action-widgets-config.ts)); otherwise it's derived from the defaults in
-[`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json) (`display:pinned`, ordered by `display:order`). Today
+[`crates/srv-core/src/config/widgets.json`](../../crates/srv-core/src/config/widgets.json) (`display:pinned`, ordered by `display:order`). Today
 those defaults pin four: Agent, Swarm, Armory, Sysinfo.
 
 **New default (operator, 2026-10-05):** eleven pinned, in this order; everything else goes in More. (Reordered later the same day at the operator's request: Swarm second, Connectors after Files. Shipped with the widget default colors work, `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` §7 PR 3.)

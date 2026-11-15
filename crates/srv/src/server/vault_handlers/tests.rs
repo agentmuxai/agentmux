@@ -404,7 +404,7 @@ async fn an_empty_key_file_is_a_refused_key_file_and_not_no_key_file() {
     let host = |body: Value| post("/api/v1/host/vault", &[HOST], body);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("Keyed.kdbx");
-    std::fs::write(&path, include_bytes!("../../backend/vault/import/fixtures/pykeepass_keyfile_only.kdbx")).unwrap();
+    std::fs::write(&path, include_bytes!("../../../../srv-core/src/backend/vault/import/fixtures/pykeepass_keyfile_only.kdbx")).unwrap();
     let p = path.to_string_lossy().to_string();
     let (s, none) = send(&app, host(json!({ "op": "import_inspect", "path": p }))).await;
     assert_eq!((s, none["data"]["needs_passphrase"].as_bool()), (StatusCode::OK, Some(true)));

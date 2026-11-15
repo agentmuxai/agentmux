@@ -18,14 +18,14 @@ Versions: 0.60.27 (seen), 0.60.28 and main as of 2026-11-15 (same code, not fixe
 | 2026-11-14 | #7239 merges: a build-slot holder that has used no CPU for 10 minutes is told once, by a system note. It ships in 0.60.27. |
 | 11-14 22:44:10 | The watch tells one agent its slot is idle. That agent was in the middle of a turn, and the note is delivered without trouble. |
 | 11-15 00:45:20.676 | The watch tells another holder, which had no turn in flight. Delivering the note opens a turn (`[turn] opened`, `turn_active flip active=true`). |
-| 00:45:20 | `thread 'build-slot-idle' panicked at crates/srv/src/backend/blockcontroller/persistent/status.rs:91:9: there is no reactor running, must be called from the context of a Tokio 1.x runtime` |
-| 00:45:21 on | `panicked at crates/srv/src/backend/reactive/handler.rs:1416:27` and `:1444:27`, `PoisonError`. About 30,000 panics over the next two hours, one per message, list or delivery attempt. |
+| 00:45:20 | `thread 'build-slot-idle' panicked at crates/srv-core/src/backend/blockcontroller/persistent/status.rs:91:9: there is no reactor running, must be called from the context of a Tokio 1.x runtime` |
+| 00:45:21 on | `panicked at crates/srv-core/src/backend/reactive/handler.rs:1416:27` and `:1444:27`, `PoisonError`. About 30,000 panics over the next two hours, one per message, list or delivery attempt. |
 | ~02:32 | Found while sending messages for a release. Diagnosed from the log and the code. |
 | (pending) | AgentMux restarted, which cleared it. |
 
 ## Cause
 
-1. `crates/srv/src/backend/build_slot_idle.rs` `install()` starts a plain OS thread (`std::thread::Builder::new().name("build-slot-idle")`). Once a minute it calls `get_global_handler().deliver_system_note(...)`.
+1. `crates/srv-core/src/backend/build_slot_idle.rs` `install()` starts a plain OS thread (`std::thread::Builder::new().name("build-slot-idle")`). Once a minute it calls `get_global_handler().deliver_system_note(...)`.
 2. `ReactiveHandler::deliver_system_note` takes the handler's `inner` mutex and delivers while holding it.
 3. Delivering to an agent with no turn in flight starts a turn. Starting a turn calls `spawn_status_heartbeat`, which calls `tokio::spawn` (status.rs:91).
 4. `tokio::spawn` panics on a thread with no Tokio runtime. The panic unwinds while the handler mutex is held, so the mutex is **poisoned**.

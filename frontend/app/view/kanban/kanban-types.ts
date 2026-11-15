@@ -4,13 +4,13 @@
 // The Kanban's data as srv's `kanban.*` commands send it
 // (crates/srv/src/server/app_api/kanban.rs, docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md §7).
 
-/** A task's state in the queue (`work_state` in crates/srv/src/backend/storage/work_queue.rs). */
+/** A task's state in the queue (`work_state` in crates/srv-core/src/backend/storage/work_queue.rs). */
 export type TaskState = "open" | "held" | "claimed" | "blocked" | "review" | "done" | "failed" | "cancelled";
 
 /** An agent's state as srv decides it (`AgentState`), or `gone` when it isn't registered. */
 export type KanbanAgentState = "working" | "waiting" | "idle" | "stopped" | "error" | "limited" | "signed_out" | "gone";
 
-/** Why a task's holder can't work (`Unavailable` in crates/srv/src/backend/agent_state.rs): out of quota, or
+/** Why a task's holder can't work (`Unavailable` in crates/srv-core/src/backend/agent_state.rs): out of quota, or
  *  signed out. Absent from an older srv, and while the holder can work. */
 export interface KanbanUnavailable {
     state: "limited" | "signed_out";
@@ -27,7 +27,7 @@ export interface ChecklistItem {
 }
 
 /** A task another starts after, or one that starts after it (`AfterTask` in
- *  crates/srv/src/backend/storage/work_deps.rs). */
+ *  crates/srv-core/src/backend/storage/work_deps.rs). */
 export interface KanbanAfter {
     id: string;
     num: number;
@@ -39,7 +39,7 @@ export interface KanbanAfter {
     doc?: string;
 }
 
-/** What srv learned about a task's PR (`WorkPr` in crates/srv/src/backend/storage/work_prs.rs). */
+/** What srv learned about a task's PR (`WorkPr` in crates/srv-core/src/backend/storage/work_prs.rs). */
 export interface KanbanPr {
     /** When it merged (ms), once srv has seen it. */
     merged_at?: number | null;
@@ -83,7 +83,7 @@ export interface KanbanCardFields {
     media?: KanbanMediaSummary;
 }
 
-/** A thumbnail on the card (`MediaPreview` in crates/srv/src/backend/storage/work_media.rs). */
+/** A thumbnail on the card (`MediaPreview` in crates/srv-core/src/backend/storage/work_media.rs). */
 export interface KanbanMediaPreview {
     sha256: string;
     kind: "image" | "recording";

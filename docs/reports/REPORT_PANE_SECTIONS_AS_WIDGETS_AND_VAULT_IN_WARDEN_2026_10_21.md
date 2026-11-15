@@ -25,7 +25,7 @@ The operator asked three things on 2026-10-21:
 
 ### 3.1 A widget-bar entry is a pane definition
 
-`crates/srv/src/config/widgets.json` maps `defwidget@<name>` to a `blockdef.meta`. Clicking the entry creates a block with that meta. The user's own `widgets.json`, next to `settings.json`, is merged over the built-ins: a new key adds an entry and a built-in key replaces it (`crates/srv/src/backend/user_widgets.rs`, `merge_widgets`). It is hot-reloaded. So a user can already add an entry like this one, which opens the Vault on Cards:
+`crates/srv-core/src/config/widgets.json` maps `defwidget@<name>` to a `blockdef.meta`. Clicking the entry creates a block with that meta. The user's own `widgets.json`, next to `settings.json`, is merged over the built-ins: a new key adds an entry and a built-in key replaces it (`crates/srv-core/src/backend/user_widgets.rs`, `merge_widgets`). It is hot-reloaded. So a user can already add an entry like this one, which opens the Vault on Cards:
 
 ```json
 {
@@ -111,7 +111,7 @@ Follow the Remotes → Connectors move:
 
 ### 5.5 Text that names "the Vault pane"
 
-The Vault MCP tool's descriptions (`crates/mcp/src/tool_schemas.rs`), the operator-config seed (`crates/srv/operator-config-seed.json`, "kept in their Vault pane"), `window_capture.rs`, the CEF `browser_api` messages and `vault/storage` comments all say "Vault pane". They become "Warden's Vault section", or just "the Vault", which still reads right. Update the Vault spec and Kanban spec cross-references in the same PR.
+The Vault MCP tool's descriptions (`crates/mcp/src/tool_schemas.rs`), the operator-config seed (`crates/srv-core/operator-config-seed.json`, "kept in their Vault pane"), `window_capture.rs`, the CEF `browser_api` messages and `vault/storage` comments all say "Vault pane". They become "Warden's Vault section", or just "the Vault", which still reads right. Update the Vault spec and Kanban spec cross-references in the same PR.
 
 ### 5.6 Tests
 

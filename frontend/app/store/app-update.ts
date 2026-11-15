@@ -3,7 +3,7 @@
 
 /**
  * Whether a newer AgentMux release exists, as srv learns it from GitHub
- * Releases (crates/srv/src/backend/update/check.rs), which srv asks in the
+ * Releases (crates/srv-core/src/backend/update/check.rs), which srv asks in the
  * background (`update/auto.rs`) and when the user clicks Check for update or an
  * agent asks: `app.update-status` when a window opens,
  * kept current by the `app:updatestatus` event. The status-bar chip and the

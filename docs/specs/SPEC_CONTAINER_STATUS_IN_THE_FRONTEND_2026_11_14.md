@@ -20,14 +20,14 @@ agents by default).
 
 ## 2. What exists today (re-read before building)
 
-- **The kind is known and not sent.** `RuntimeKind` (`crates/srv/src/backend/runtime_adapter.rs`, `Host` | `Container`)
+- **The kind is known and not sent.** `RuntimeKind` (`crates/srv-core/src/backend/runtime_adapter.rs`, `Host` | `Container`)
   is decided by the pane block's meta `agentMode` (`RuntimeKind::of_block_meta`) or, for an agent with no pane, by its
   definition's `agent_type` (`storage/agents/mod.rs`, `RuntimeKind::of_agent_type`). The `AgentRuntime` row
-  (`crates/srv/src/backend/agent_runtime_state.rs`, built in `crates/srv/src/server/agent_runtime.rs` `list()`, published
+  (`crates/srv-core/src/backend/agent_runtime_state.rs`, built in `crates/srv/src/server/agent_runtime.rs` `list()`, published
   as `agentruntime:changed:<agent_id>` when any field changes, polled every 2 s) has no runtime field, though `list()`
   holds both the definition and the block. The frontend reads the kind only from block meta
   (`frontend/util/runtime-kind.ts`), so only for an agent that has a pane.
-- **Remote rows carry none.** `RemoteAgent` (`crates/srv/src/backend/swarm_remote.rs`) has no kind. The LAN fleet feed
+- **Remote rows carry none.** `RemoteAgent` (`crates/srv-core/src/backend/swarm_remote.rs`) has no kind. The LAN fleet feed
   already advertises it (`agent_kinds`, `lan/discovery/agent_names.rs`, from `FleetSnapshot.agent_kinds`), and the reader
   drops it: the peer record (`lan/discovery.rs` `LanInstance`) has no field for it. This machine's other channels answer
   the same feed over loopback, so the same field is there for them too.
@@ -147,10 +147,10 @@ kind the same way.
 ## 7. Where each fact lives (for the build)
 
 - `crates/srv/src/server/agent_runtime.rs` (`list`, `changed_rows`, the 2 s watch), `backend/agent_runtime_state.rs`.
-- `crates/srv/src/backend/runtime_adapter.rs` (`RuntimeKind`), `backend/storage/agents/mod.rs` (`agent_type`).
-- `crates/srv/src/backend/container.rs` (`container_name_for_slug`, `find_container`, `create_and_start`),
+- `crates/srv-core/src/backend/runtime_adapter.rs` (`RuntimeKind`), `backend/storage/agents/mod.rs` (`agent_type`).
+- `crates/srv-core/src/backend/container.rs` (`container_name_for_slug`, `find_container`, `create_and_start`),
   `container/runtime.rs` (`RuntimeSlot`, `is_available`), `server/agent_handlers/core.rs` (`containerruntimeavailable`).
-- `crates/srv/src/backend/lan/discovery/agent_names.rs` and `lan/discovery.rs` (`LanInstance`), `backend/fleet_feed.rs`
+- `crates/srv-core/src/backend/lan/discovery/agent_names.rs` and `lan/discovery.rs` (`LanInstance`), `backend/fleet_feed.rs`
   (`FleetSnapshot.agent_kinds`), `backend/swarm_remote.rs`.
 - The pattern: `backend/message_flow.rs`, `backend/task_flow.rs`, `backend/mps.rs`, `backend/mps_events.rs`,
   `server/message_flow_handler.rs`, `server/routes.rs`, `backend/route_audience.rs`.

@@ -39,7 +39,7 @@ running build or a third-party CLI, this spec says so and says how to verify it.
 
 A persistent Claude agent runs on the control protocol (`--permission-prompt-tool stdio`). The CLI sends a
 `can_use_tool` request for each tool call its mode wants approval for, and srv answers **every one** of them itself
-(`handle_control_frame`, [`crates/srv/src/backend/blockcontroller/persistent/input.rs`](../../crates/srv/src/backend/blockcontroller/persistent/input.rs)):
+(`handle_control_frame`, [`crates/srv-core/src/backend/blockcontroller/persistent/input.rs`](../../crates/srv-core/src/backend/blockcontroller/persistent/input.rs)):
 
 - `AskUserQuestion` is parked and shown to the user (works).
 - Every other tool, **including the request to leave plan mode**, gets `behavior: "allow"`.

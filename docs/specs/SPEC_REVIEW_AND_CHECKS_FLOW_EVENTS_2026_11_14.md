@@ -47,7 +47,7 @@ first (an old srv ignores the field, an old relay does not send it).
 
 ## 4. The events
 
-One module, `crates/srv/src/backend/pr_flow.rs`, mirroring `message_flow.rs`.
+One module, `crates/srv-core/src/backend/pr_flow.rs`, mirroring `message_flow.rs`.
 
 ```
 PrRef            { repo_id: number, number: number }          GitHub's own ids; never a name

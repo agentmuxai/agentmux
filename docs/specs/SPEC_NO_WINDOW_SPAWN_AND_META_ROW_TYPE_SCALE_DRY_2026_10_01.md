@@ -42,7 +42,7 @@ pub trait NoWindow { fn no_window(&mut self) -> &mut Self; }
   must stay explicit. The trait is for the common case only.
 
 ### Proposal B: extend the existing spawn-inventory guard
-[`crates/srv/src/backend/pane_env.rs`](../../crates/srv/src/backend/pane_env.rs) (around lines 210-430) already pins every process spawn in srv with
+[`crates/srv-core/src/backend/pane_env.rs`](../../crates/srv-core/src/backend/pane_env.rs) (around lines 210-430) already pins every process spawn in srv with
 `SPAWN_INVENTORY: (file, program, count, classification)`, so a new spawn fails a test until someone
 classifies it. That mechanism already exists for env sanitising. Reuse it:
 - Add a classification, for example `no-window:`, and cross-check that those files call `no_window()` or

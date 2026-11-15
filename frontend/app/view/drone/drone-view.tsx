@@ -1162,7 +1162,7 @@ const VariablesEditor = (p: {
 interface AgentRefShape {
     identityId: string;
     // Persisted key. Mirrors Rust `AgentRef.memory_id` under `#[serde(rename_all = "camelCase")]`
-    // (crates/srv/src/agents/types.rs) — the executor deserializes this object, so the
+    // (crates/srv-core/src/agents/types.rs) — the executor deserializes this object, so the
     // key is wire/persisted, not a local name (spec §4). Do not rename with the locals.
     memoryId: string;
     instanceName: string;

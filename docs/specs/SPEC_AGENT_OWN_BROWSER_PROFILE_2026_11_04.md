@@ -39,7 +39,7 @@ Guidance alone cannot do this (the task's reasons): the default is Personal for 
 
 ## What it touches
 
-`crates/srv/src/backend/browser_profiles_store.rs` (the field, `ensure_agent_profile`), `crates/srv/src/server/browser_identity.rs` (`for_agent_open`, `identity_for_agent`, `requested_by_container`, `check_agent_may_use`), `app_api/browser_profiles.rs` (delete stays user-only; add "sign out" and the agents' list to the result), the RPC types and their generated stubs, `frontend/app/view/settings/sections/browser-section.tsx`, `crates/mcp/src/tool_schemas.rs`. No CEF-host change if "sign out" reuses the delete path.
+`crates/srv-core/src/backend/browser_profiles_store.rs` (the field, `ensure_agent_profile`), `crates/srv/src/server/browser_identity.rs` (`for_agent_open`, `identity_for_agent`, `requested_by_container`, `check_agent_may_use`), `app_api/browser_profiles.rs` (delete stays user-only; add "sign out" and the agents' list to the result), the RPC types and their generated stubs, `frontend/app/view/settings/sections/browser-section.tsx`, `crates/mcp/src/tool_schemas.rs`. No CEF-host change if "sign out" reuses the delete path.
 
 ## Tests
 

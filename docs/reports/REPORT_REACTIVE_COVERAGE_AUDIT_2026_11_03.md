@@ -56,7 +56,7 @@ Naki-2 read the same code and confirms 3.1 (the service-OAuth commit in `oauth_c
 - Google grant and ungrant change what an agent may use, and announce nothing.
 - `GoogleServicesSection` fetched its agent and grant lists once per mount and had no subscription.
 
-Their fix, on branch `naki-2/connectors-live-update`: `crates/srv/src/identity/accounts_changed.rs` (the broker installed at startup, an `announce()`) called at those four commit points, and `GoogleServicesSection` re-fetches on the event. That is the "publish where it saves" rule of §5 applied, and the starting list for the second gate in §6.
+Their fix, on branch `naki-2/connectors-live-update`: `crates/srv-core/src/identity/accounts_changed.rs` (the broker installed at startup, an `announce()`) called at those four commit points, and `GoogleServicesSection` re-fetches on the event. That is the "publish where it saves" rule of §5 applied, and the starting list for the second gate in §6.
 
 Not fixed, and not on the account event: the Google call-log lines (Google tool calls by agents) do not push to the open details panel. One event per call would make every card re-fetch, so it needs its own event scoped to the account (a row in §3 for the build).
 

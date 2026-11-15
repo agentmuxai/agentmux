@@ -150,5 +150,5 @@ Under this model, a user who asks for an upgrade sees the same 10-second alert. 
   - Phase 3b's launcher dialog.
 - `SPEC_AGENT_SELF_QUIT_2026_09_24.md`: a pointer from §6.5 to this, and a decision on open question 4.
 - `SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04.md`: its launcher window becomes the fallback for §4.3.
-- The MuxAPI operator-config entry (`crates/srv/operator-config-seed.json`): the `App` bullet says an upgrade "never happens on your word alone". It needs a version bump so installs pick up the new text.
+- The MuxAPI operator-config entry (`crates/srv-core/operator-config-seed.json`): the `App` bullet says an upgrade "never happens on your word alone". It needs a version bump so installs pick up the new text.
 - `crates/mcp/src/tools/app_tool.rs` and the tool schema descriptions.

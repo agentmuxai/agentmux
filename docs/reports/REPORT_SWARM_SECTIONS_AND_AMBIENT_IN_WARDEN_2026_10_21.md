@@ -19,7 +19,7 @@ On 2026-10-21 the operator asked for a better Swarm design, aligned with the oth
 - **Who wrote the sections work:** Naki-2@narko (`naki-naki-2`), in `docs/reports/REPORT_PANE_SECTIONS_AS_WIDGETS_AND_VAULT_IN_WARDEN_2026_10_21.md`, built in #5284 (sections are part of the pane contract), #5286 (the Vault is Warden's Vault section), #5288 (pin a pane's section to the widget bar) and #5279 (what meta a widget may pass). It extends Camper@narko's `docs/specs/SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md` (the `PaneTabManifest` contract, from #3723 on). The widget SDK side is lark@narko's `docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md`. Note that the sections contract lives in a report, not a spec.
 - **The Swarm doesn't use sections.** It is one view with a toolbar of actions (Select all, Broadcast, Stop, Supervisor, Stats, Clear) over one long agent tree. It is the only large multi-purpose pane that hasn't moved onto the sections contract.
 - **The lines are already shared**, but they are named after the Swarm. The line under each row comes from `frontend/app/store/swarm-line.ts` and `activitySummary.ts`. It is also the pane tab's tooltip, the agent pane's footer and bottom panels, and the line other machines show for this machine's agents (srv `backend/agent_line.rs`). It should be renamed to an agent line, not a Swarm line (section 5).
-- **The stats are not message counts.** The Stats panel counts how **AgentMux's own model calls** ended (the `crates/srv/src/ambient/` module: session titles, prompt suggestions, names, previews, narration, running summaries, Supervisor verdicts). Those calls are what write the lines. So "monitor the lines from Warden" and "stats for ambient activity" are the same thing, and they make one Warden section: **Ambient** (section 6). Counts of messages between agents (jekts, broadcasts) don't exist anywhere today; section 6.4 covers that.
+- **The stats are not message counts.** The Stats panel counts how **AgentMux's own model calls** ended (the `crates/srv-core/src/ambient/` module: session titles, prompt suggestions, names, previews, narration, running summaries, Supervisor verdicts). Those calls are what write the lines. So "monitor the lines from Warden" and "stats for ambient activity" are the same thing, and they make one Warden section: **Ambient** (section 6). Counts of messages between agents (jekts, broadcasts) don't exist anywhere today; section 6.4 covers that.
 - **Recommendation:** first a Warden **Ambient** section, which is small and independent. Then the Swarm split into **Broadcast** and **Supervisor** on the sections contract, with one shared agent list and selection. Then rename the line module.
 
 ## 3. Today
@@ -40,7 +40,7 @@ Top to bottom (`swarm-view.tsx` `SwarmView`):
 
 Each local row has a checkbox, provider icon, name, unseen-turns dot, context size, last active, status chip, `SupervisorChip`, the summary line, the held Kanban task chip and the current tool. It also has child buckets: Supervisor decisions, Todos, Agent tools, Workflow, Shell, Cron, Long-running and Background.
 
-Selection is `selectedBlockIdsAtom` in `swarm-model.ts` (local block ids and remote keys). Broadcast goes through `FleetBroadcastCommand` to srv `fleet.broadcast` (`crates/srv/src/server/app_api/fleet.rs`). The Supervisor modes (`off`, `steady`, `drive`) are set through `supervisor.set-mode`, and the judge lives in `crates/srv/src/backend/supervisor/` (`docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md`).
+Selection is `selectedBlockIdsAtom` in `swarm-model.ts` (local block ids and remote keys). Broadcast goes through `FleetBroadcastCommand` to srv `fleet.broadcast` (`crates/srv/src/server/app_api/fleet.rs`). The Supervisor modes (`off`, `steady`, `drive`) are set through `supervisor.set-mode`, and the judge lives in `crates/srv-core/src/backend/supervisor/` (`docs/specs/SPEC_SWARM_SUPERVISOR_2026_10_16.md`).
 
 The problem the operator sees: the actions are a toolbar that changes shape with the selection, and the composer hides the other buttons. The stats are a fold-down panel. Two quite different jobs, talking to many agents at once and keeping an eye on them, share one row of buttons and one list.
 
@@ -106,7 +106,7 @@ What a row shows under an agent is resolved by `resolveSwarmLine` (`frontend/app
 - `frontend/app/element/PaneChrome.tsx`: the pane tab's tooltip;
 - `frontend/app/view/agent/components/AgentBottomPanels.tsx` and `AgentFooter.tsx`;
 - the agent hooks `useAgentActivitySummary.ts`, `useBlockActivity.ts`, `useAgentQuestions.ts` and `awaiting-user.ts`;
-- srv `crates/srv/src/backend/agent_line.rs`, which sends the line to this machine's other channels and to LAN hosts, under the setting `swarm:sharesummaries`.
+- srv `crates/srv-core/src/backend/agent_line.rs`, which sends the line to this machine's other channels and to LAN hosts, under the setting `swarm:sharesummaries`.
 
 So it is already the agent's line, used in four places, and only its names say Swarm. Recommendation: rename `swarm-line.ts` to `agent-line.ts` (`resolveAgentLine`, `readAgentSummary`) in one mechanical PR, and leave the setting key `swarm:sharesummaries` alone, because renaming a stored setting needs a migration for no visible gain. Only its label in Settings changes, to "Share what my agents are working on" (decision D6).
 
@@ -122,7 +122,7 @@ One section, **Ambient** (icon `wand-magic-sparkles`, after History), titled "Ag
 |---|---|
 | Purpose (Session titles, Session titles (recovery), Prompt suggestions, Subagent names, Workflow names, Agent previews, Narration, Running summaries, Supervisor verdicts, and any purpose this build doesn't name) | `ambient.outcomes` |
 | Requests, accepted, kept, refused, skipped, failed; the raw labels in the hover | `ambient.outcomes`, summarized by `summarizeAmbientOutcomes` (already outside the Swarm) |
-| Tokens spent | the `ambient:spent` event (`crates/srv/src/ambient/spend.rs`), which carries the purpose. Today `token-usage.ts` files all of it under one `__ambient__` bucket for the status bar, so keeping the per-purpose split is new frontend work |
+| Tokens spent | the `ambient:spent` event (`crates/srv-core/src/ambient/spend.rs`), which carries the purpose. Today `token-usage.ts` files all of it under one `__ambient__` bucket for the status bar, so keeping the per-purpose split is new frontend work |
 | A "failing" mark on a row | `unhealthy` (refusals and failures outnumber useful answers) |
 
 The counts run from srv's start and reset when it restarts; the section polls every 5 seconds while shown, as Host, LAN and Audit do. *As built:* the tab rail has no badges and Warden polls no section that isn't shown, so the failing count is in the pane's title while the section is shown ("Ambient · 2 failing"), the way Kanban's title carries "N need you". Tokens per purpose are left for phase 4.
@@ -138,7 +138,7 @@ The counts run from srv's start and reset when it restarts; the section polls ev
 ### 6.3 Docs and comments to update with it
 
 - `SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md` §5.8 says the counts moved to the Swarm on 2026-10-04; add that they moved to Warden.
-- `crates/srv/src/ambient/outcome.rs` line 9 still says the counts show "in the Instance panel"; that is already wrong.
+- `crates/srv-core/src/ambient/outcome.rs` line 9 still says the counts show "in the Instance panel"; that is already wrong.
 - agentmux-docs' Warden page (Naki-2's report §6.2 already lists it as stale).
 
 ### 6.4 "Ambient messages": counts of agent-to-agent messages

@@ -3,7 +3,7 @@ name = "agentmux-srv"
 version.workspace = true
 license = "Apache-2.0"
 edition = "2021"
-description = "AgentMux Rust backend server"
+description = "AgentMux Rust backend server: the server layer, the binaries"
 
 [[bin]]
 name = "agentmux-srv"
@@ -15,14 +15,9 @@ path = "src/main.rs"
 name = "agentmux"
 path = "src/agentmux_cli/main.rs"
 
-[features]
-# Test-only items of the core library that the binary's own tests also use (fixtures, seeds, test keys).
-# Switched on for tests by the dev-dependency on this package below; never in a normal build.
-test-support = ["dep:ctor"]
-
 [dependencies]
-# Only for the `test-support` feature (the TLS provider every test binary installs once).
-ctor = { version = "1", optional = true }
+# The server's core: storage, registry, identity, agents, the event bus (crates/srv-core).
+agentmux-srv-core = { path = "../srv-core" }
 agentmux-common = { path = "../common", features = ["ts", "tls-provider"] }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["ws"] }
@@ -33,8 +28,6 @@ tower = { version = "0.5" }
 serde = { version = "1", features = ["derive"] }
 # raw_value: a capture finds the exact text a JSON path matched, to clean it out of the output.
 serde_json = { version = "1", features = ["raw_value"] }
-memchr = "2"
-json_comments = "0.2"
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -44,15 +37,8 @@ tracing-appender = "0.2"
 # bridge was installed. All three are already in the tree, so this adds nothing new.
 tracing-log = "0.2"
 log = "0.4"
-# One-shot UDP 5353 diagnosis (backend/lan/mdns_diag.rs), the same crate `mdns-sd`
-# sets its sockets up with.
-socket2 = { version = "0.5.5", features = ["all"] }
 uuid = { version = "1", features = ["v4", "v5"] }
 chrono = "0.4"
-# This machine's IANA zone name, so a limit's "resets 7pm (America/Los_Angeles)"
-# is read only when it names the local zone (agents/limit_reset.rs). Already in
-# the tree through chrono, so this adds nothing new.
-iana-time-zone = "0.1"
 tokio-util = { version = "0.7", features = ["io", "rt"] }
 rusqlite = { version = "0.41", features = ["bundled", "backup", "blob"] }
 # TypeScript type generation for the RPC bindings (backend/rpc/schema.rs, and
@@ -70,84 +56,39 @@ base64 = "0.22"
 thiserror = "1"
 dirs = "5"
 libc = "0.2"
-same-file = "1"
 whoami = "1"
 async-stream = "0.3"
 portable-pty = "0.9"
 sysinfo = "0.35"
 parking_lot = "0.12"
-notify = "7"
 # "stream" is needed by backend/dev_proxy.rs's request/response body
 # streaming (`Body::wrap_stream` / `Response::bytes_stream`) — the native
 # reverse proxy forwards a dev server's traffic without buffering it whole
 # in memory. See docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "query", "form", "multipart", "stream"] }
-# OS-native secret storage (macOS Keychain / Windows Credential Manager /
-# Linux Secret Service) for account API keys. See
-# docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
-# keyring 4 is a wrapper that picks the stores for us and keeps the first
-# failure to open one for the life of the process; identity/secret_store.rs
-# installs the per-platform store itself (below) and retries.
-keyring-core = "1"
 # Zero plaintext secret buffers on drop.
 zeroize = { version = "1", features = ["zeroize_derive"] }
-# The Vault's `.vault` files are age files encrypted to a passphrase (SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §8.2).
-age = { version = "0.11", default-features = false }
-# The Vault's importers read the CSV files other password managers export (spec section 8.4).
-csv = "1"
 # `Terminal` `run`'s capture rules find a value in a command's output with a regex
 # (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.2).
 regex = "1"
-mdns-sd = "0.12"
-# Interface enumeration for LAN listener bind addresses (backend/lan/listeners.rs).
-# Already in the tree transitively via mdns-sd, so declaring it directly adds no
-# new supply-chain surface — it just makes the dependency honest.
-if-addrs = "0.13"
 which = "7"
 # The durable-session protocol, shared with the helper (crates/remote).
 agentmux-remote = { path = "../remote" }
 agentmux-procstats = { path = "../procstats" }
-# Text encoding detection + transcoding for the editor (SPEC_EDITOR_FILE_ENCODINGS).
-encoding_rs = "0.8"
-chardetng = "0.1"
 flate2 = "1"
 sha2 = "0.10"
-# Compressed frames of the shared transcript store
-# (SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §4).
-zstd = "0.13"
 # Image attachments in the agent composer: decode, orient, downscale, re-encode
 # (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.4). Same 0.25 line the
 # workspace already locks for agentmux-mcp.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
-# Any-file attachments (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §6):
-# text from DOCX/PPTX/ODT (quick-xml over the zip parts), spreadsheets
-# (calamine), PDF page count (lopdf). All pure Rust.
-quick-xml = "0.39"
-keepass = { version = "0.17", default-features = false, features = ["save_kdbx4"] }
-argon2 = { package = "rust-argon2", version = "3.0" }
-# Bitwarden's password-protected export: AES-256-CBC, HKDF-Expand and PBKDF2 (its Argon2id is rust-argon2, above).
-aes = "0.8"
-cbc = "0.1"
-hkdf = "0.12"
-pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
-calamine = { version = "0.36", default-features = false }
-lopdf = { version = "0.45", default-features = false }
 hex = "0.4"
 ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
-# X25519 for sealing a cloud file's key to its receiver (backend/jekt_seal.rs);
-# already in the build through ed25519-dalek.
-curve25519-dalek = { version = "5", default-features = false }
 # HMAC-SHA256 for the WhatsApp Cloud API webhook signature check
 # (X-Hub-Signature-256). `Mac::verify_slice` is constant-time internally
 # (backed by `subtle`, already present transitively). See
 # messaging/whatsapp/webhook.rs.
 hmac = "0.12"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-# The Windows portable release is an LZMA2 + BCJ2 .7z, which Windows' own
-# tar.exe can't read (no liblzma): the updater decodes it itself. Decompression
-# only (docs/specs/SPEC_UPDATE_UNPACK_7Z_IN_RUST_2026_10_19.md).
-sevenz-rust2 = { version = "0.24", default-features = false }
-tar = "0.4"
 tempfile = "3"
 bollard = { version = "0.18", features = ["chrono", "ssl"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -158,49 +99,12 @@ cron = "0.12"
 # itself evaluates in one fixed offset, so daylight-saving changes are handled
 # there, against this crate's zone data.
 chrono-tz = "0.10"
-# Move to the OS Trash / Recycle Bin, and restore from it, for the Files
-# pane's `fs.trash` / `fs.restore` (backend/fs_ops/trash_worker.rs). Called
-# from one dedicated thread only (its docs warn of UB from several threads
-# on Linux/FreeBSD), and set to NSFileManager on macOS so it never scripts
-# Finder. See docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §7.3, §9.1.5.
-trash = "5.2"
-# The viewer listener: TLS with a self-signed certificate a paired device pins
-# by fingerprint, serving the read-only feed (backend/viewer). rustls and
-# tokio-rustls are already in the tree through reqwest, on ring; these keep
-# ring (no aws-lc build) and add rcgen to make the certificate. hyper and
-# hyper-util (already under axum) serve the router over the TLS stream.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
-rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
 # ECDSA P-256 checks of a paired device's send signature (backend/viewer/signing),
 # from the ring already under rustls: no new crate.
 ring = { version = "0.17", default-features = false, features = ["alloc"] }
-hyper = { version = "1", features = ["http1", "server", "client"] }
-hyper-util = { version = "0.1", features = ["tokio", "service"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-# The Secret Service store behind keyring-core (identity/secret_store.rs).
-zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
-# Agent process tracking (process_tracker::cgroup_linux): ask the systemd user
-# manager for srv's delegated scope. Same zbus 5 the launcher already uses.
-zbus = { version = "5", default-features = false, features = ["tokio"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-# Trash through NSFileManager ourselves, to learn where each item went, so
-# undo can put it back (backend/fs_ops/trash_worker.rs). Already in the tree at
-# these versions via the trash crate, so they add no new supply-chain surface.
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"] }
-# The Keychain store behind keyring-core, and the keychain without its consent
-# dialog and the codes of its errors (identity/secret_store.rs). The store
-# builds on security-framework 3, so this is the same version, which makes
-# its errors downcast to ours.
-apple-native-keyring-store = { version = "1", features = ["keychain"] }
-security-framework = "3.7"
 
 [target.'cfg(windows)'.dependencies]
-# The Credential Manager store behind keyring-core (identity/secret_store.rs).
-windows-native-keyring-store = "1"
 # Read-only COM access to Windows Defender Firewall and the network list, to
 # tell whether LAN peers can reach us (backend/lan/firewall_windows.rs,
 # SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.2). Already in the tree at this
@@ -257,8 +161,8 @@ windows-sys = { version = "0.59", features = [
 winres = "0.1"
 
 [dev-dependencies]
-# The binary's tests build the core library with its test-only helpers.
-agentmux-srv = { path = ".", features = ["test-support"] }
+# The server layer's tests build the core with its test-only helpers.
+agentmux-srv-core = { path = "../srv-core", features = ["test-support"] }
 # Installs the ring TLS provider once per test binary (tls_test_init.rs): reqwest 0.13 builds no client without one.
 ctor = "1"
 # A paused, auto-advancing clock for tests that only wait on tokio time
@@ -267,11 +171,6 @@ tokio = { version = "1", features = ["test-util"] }
 tower = { version = "0.5", features = ["util"] }
 serde_json = "1"
 libc = "0.2"
-# Phase E.7 — property-based testing for reducer arm invariants.
-# `default-features = false` to avoid the timeout-fork machinery
-# that doesn't play nicely with our existing test runner; we only
-# need the strategy combinators + `proptest!` macro.
-proptest = { version = "1", default-features = false, features = ["std"] }
 # `blocking` feature enabled for the integration test target only —
 # `tests/integration_test.rs` spawns the srv as a subprocess and
 # wants synchronous HTTP from a non-tokio test fn. Production code
@@ -280,8 +179,5 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 
 # `cargo machete` (CI gate, ci-pr.yml) can't see build.rs-only use: winres
 # embeds the Windows icon/version resource from build.rs.
-# objc2 is macOS-only (fs_ops/trash_worker.rs) and unverifiable from a
-# Windows/Linux machete run; drop it from this list once a macOS build proves
-# objc2-foundation alone is enough.
 [package.metadata.cargo-machete]
-ignored = ["winres", "objc2"]
+ignored = ["winres"]

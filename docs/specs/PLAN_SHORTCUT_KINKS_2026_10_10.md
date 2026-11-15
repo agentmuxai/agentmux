@@ -44,7 +44,7 @@ Agent-side tooling notes (heredoc quoting in the shell wrapper, Node's WebSocket
 ### Masty@starpower (macOS)
 
 - **M1. Restore from the Trash on macOS** (K4).
-  - [`crates/srv/src/backend/fs_ops/trash_worker.rs`](../../crates/srv/src/backend/fs_ops/trash_worker.rs): the macOS `restore_paths` returns "isn't supported".
+  - [`crates/srv-core/src/backend/fs_ops/trash_worker.rs`](../../crates/srv-core/src/backend/fs_ops/trash_worker.rs): the macOS `restore_paths` returns "isn't supported".
   - Trash through `NSFileManager.trashItemAtURL`, which returns the item's new URL, and keep that per operation. Then restore moves it back, refusing on a name collision like the other platforms.
   - `files:undo` after `files:newFolder` also moves the folder to the Trash (Masty's rerun), so it hits the same gap; restore covers it.
   - When it lands, lift #4603's macOS refusal of `files:trash` ([`frontend/app/keybindings/app-api.ts`](../../frontend/app/keybindings/app-api.ts) `API_REFUSED_MAC`, [`crates/srv/src/server/ui_shortcuts.rs`](../../crates/srv/src/server/ui_shortcuts.rs)).

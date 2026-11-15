@@ -67,7 +67,7 @@ alternative is `window:showmuxbuscloud`; nothing below depends on the choice.
 
 ### 3.2 Backend
 
-- [`crates/srv/src/backend/wconfig/types.rs`](../../crates/srv/src/backend/wconfig/types.rs): add
+- [`crates/srv-core/src/backend/wconfig/types.rs`](../../crates/srv-core/src/backend/wconfig/types.rs): add
 
   ```rust
   #[serde(rename = "statusbar:showmuxbuscloud", default, skip_serializing_if = "Option::is_none")]

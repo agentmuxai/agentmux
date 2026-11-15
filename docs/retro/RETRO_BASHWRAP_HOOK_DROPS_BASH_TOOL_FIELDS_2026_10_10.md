@@ -89,7 +89,7 @@ It reproduced live while this retro was being written: a scan given
 `timeout: 300000` was cut at 120 s and moved to the background.
 
 The CLI builds the summary from the description when it has one. srv's own
-fixture for the background-task feed ([`crates/srv/src/backend/background_task_feed.rs`](../../crates/srv/src/backend/background_task_feed.rs),
+fixture for the background-task feed ([`crates/srv-core/src/backend/background_task_feed.rs`](../../crates/srv-core/src/backend/background_task_feed.rs),
 test near line 450) records
 `"summary": "Background command \"Background wait for agents\" completed (exit code 0)"`,
 the description of that call.

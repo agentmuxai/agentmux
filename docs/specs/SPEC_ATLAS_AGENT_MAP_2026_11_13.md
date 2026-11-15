@@ -275,12 +275,12 @@ Decision 4's second half and the cloud tier, on the data three srv builds added:
 - Local card data: `frontend/app/view/swarm/swarm-model.ts` (`AgentTreeNode`, `buildTree`), `swarm-agent-card.tsx`,
   `swarm-display-status.ts`, `frontend/app/store/swarm-line.ts`, meta `agent:context`, `agent:seat`, `agent:spend_today`,
   `agent:last_failure`.
-- Remote: `swarm-remote.ts` (`RemoteAgent`), `crates/srv/src/backend/swarm_remote.rs`, `frontend/types/rpc/LanInstance.ts`.
-- Seats and leads: `crates/srv/src/backend/agent_seat.rs`, `crates/srv/src/registry/def_schema.rs` (`AgentSeat`),
+- Remote: `swarm-remote.ts` (`RemoteAgent`), `crates/srv-core/src/backend/swarm_remote.rs`, `frontend/types/rpc/LanInstance.ts`.
+- Seats and leads: `crates/srv-core/src/backend/agent_seat.rs`, `crates/srv-core/src/registry/def_schema.rs` (`AgentSeat`),
   `frontend/types/rpc/SeatSummary.ts`, `swarm-seats.tsx`, `swarm-seat-groups.ts`.
 - Spawn: `frontend/app/agent-model/subagent-types.ts` (`ActiveSubagent`), `agent:worker_of`.
 - Machines and relay: `frontend/app/statusbar/host-popover-state.ts`, `lan-peer.ts`, `frontend/app/store/connectivity.ts`.
-- Work facts: `crates/srv/src/backend/work_facts/mod.rs`.
+- Work facts: `crates/srv-core/src/backend/work_facts/mod.rs`.
 - Pan and zoom: `frontend/app/view/drone/drone-view.tsx` (`zoomByCenter`, `fitView`), `drone-model.ts`.
 - Stopped-agent folding and order: `swarm-stopped-agents.tsx`, `swarm-agent-list.tsx`, `swarm-order.ts`.
 

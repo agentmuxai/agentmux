@@ -238,10 +238,10 @@ Rail rows already show a focus ring, and table rows aren't focusable.
 
 | Where | Change |
 |---|---|
-| `crates/srv/src/backend/tower/kind.rs` (new) | the type table and `classify(name, role, task kind, detail, provider, command line)`; agent CLIs and their packages from `providers::all_providers()` |
-| `crates/srv/src/backend/rpc_types/tower.rs` | `TowerProcessKind`; `TowerProcess.kind`, `.provider`; `TowerMachine.mem_total`; regenerated TS types |
-| `crates/srv/src/backend/tower/sampler.rs` | classify each process; the command-line cache for runtimes in tasks |
-| `crates/srv/src/backend/tower/remote.rs` | classify a remote frame's names on arrival |
+| `crates/srv-core/src/backend/tower/kind.rs` (new) | the type table and `classify(name, role, task kind, detail, provider, command line)`; agent CLIs and their packages from `providers::all_providers()` |
+| `crates/srv-core/src/backend/rpc_types/tower.rs` | `TowerProcessKind`; `TowerProcess.kind`, `.provider`; `TowerMachine.mem_total`; regenerated TS types |
+| `crates/srv-core/src/backend/tower/sampler.rs` | classify each process; the command-line cache for runtimes in tasks |
+| `crates/srv-core/src/backend/tower/remote.rs` | classify a remote frame's names on arrival |
 | `frontend/app/theme.scss`, 9 theme files | the five tokens and §4.2's overrides |
 | `frontend/app/view/tower/tower-kinds.ts` (new) | type → label, icon, token, order |
 | `tower-process-name.tsx` | the type icon (provider logo for agents) |

@@ -38,7 +38,7 @@ The landing bounce on the dropped pill (`tab-bounce 300ms`, marker held 400 ms b
   - Its own pane is not a target.
   - Outside every window tears the block off into a floating pane (`pane-tab-tearoff.ts`, one block).
   - The Window Tab bar and other windows accept nothing.
-- **The move.** `moveBlockInStack` (`layoutStack.ts:278-342`) moves **one block per call**: a local edit, then the `pane.moveTab` RPC, then `LayoutStackMove` in srv (`crates/srv/src/reducer/layout.rs:448-493`, `crates/srv/src/backend/layout/mod.rs:266-317`). A pane whose last tab leaves is removed as a move (not a close: no prompt, no close guard). The moved tab becomes active in the target and the target pane takes focus. The source pane's active tab, if it moved, passes to the right neighbour (or the new last tab). Cross-pane moves always append, though srv can already insert before/after.
+- **The move.** `moveBlockInStack` (`layoutStack.ts:278-342`) moves **one block per call**: a local edit, then the `pane.moveTab` RPC, then `LayoutStackMove` in srv (`crates/srv-core/src/reducer/layout.rs:448-493`, `crates/srv-core/src/backend/layout/mod.rs:266-317`). A pane whose last tab leaves is removed as a move (not a close: no prompt, no close guard). The moved tab becomes active in the target and the target pane takes focus. The source pane's active tab, if it moved, passes to the right neighbour (or the new last tab). Cross-pane moves always append, though srv can already insert before/after.
 - **No undo** exists for a tab move.
 - **Landing.** `landedTab` is one `{id, paneKey}` slot and one 400 ms timer.
 
@@ -213,7 +213,7 @@ N sequential `pane.moveTab` calls would be N optimistic edits, N RPCs and N vers
 - new `frontend/app/element/pane-tab-selection.ts` (+ test)
 - `frontend/app/drag/drag-session.ts`, `pane-tab-drag.ts`, `pane-tab-tearoff.ts` (cancel a multi-drag), and the three cross-window monitors where they read the payload
 - `frontend/layout/lib/layoutStack.ts`, `stackMembers.ts`, `layoutPersistence.ts`, `tilelayout-shared.tsx` (Escape order)
-- `crates/common/src/ipc.rs`, `crates/srv/src/backend/layout/mod.rs`, `crates/srv/src/reducer/layout.rs` (+ tests), `crates/srv/src/backend/rpc_types/`, the `pane.moveTab` handler's neighbour, `crates/launcher/src/reducer/mod.rs`, `crates/launcher/src/ipc/server.rs`, generated TS types
+- `crates/common/src/ipc.rs`, `crates/srv-core/src/backend/layout/mod.rs`, `crates/srv-core/src/reducer/layout.rs` (+ tests), `crates/srv-core/src/backend/rpc_types/`, the `pane.moveTab` handler's neighbour, `crates/launcher/src/reducer/mod.rs`, `crates/launcher/src/ipc/server.rs`, generated TS types
 - Docs: `SPEC_DROP_TARGET_LANDS_INVERTED` and `SPEC_PANE_TAB_DRAG_AND_DROP` (cite this), `SPEC_RESIZE_THROUGH_COLLAPSED_PANES` (R6 fix), the spec index
 - One changeset (`minor`: a new feature) in the build PR. The spec ships in the build PR, not on its own.
 

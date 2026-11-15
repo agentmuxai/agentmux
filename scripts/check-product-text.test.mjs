@@ -65,8 +65,8 @@ describe("the repository", () => {
 
     it("covers the seed manifests", () => {
         const files = targets();
-        expect(files).toContain("crates/srv/agent-seed.json");
-        expect(files).toContain("crates/srv/operator-config-seed.json");
+        expect(files).toContain("crates/srv-core/agent-seed.json");
+        expect(files).toContain("crates/srv-core/operator-config-seed.json");
     });
 
     it("fails on a listed file that does not exist, and scans the ones that do", () => {

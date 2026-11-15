@@ -41,7 +41,7 @@ So the in-app upgrade of a Windows portable fails on, at least, every Windows 10
 
 ## 4. Tests
 
-- **A real LZMA2 + BCJ2 fixture:** `crates/srv/src/backend/testdata/update-portable-0.59.27.7z`, a few KB. It's packed with the release's own `7z` flags from a portable-shaped folder (`agentmux.exe`, `runtime/agentmux-portable.marker`, `runtime/agentmux-0.59.27.exe`), so 7-Zip applies BCJ2 to the `.exe` files as it does for the release. The fixture's method list is checked when it's made, and noted in the test.
+- **A real LZMA2 + BCJ2 fixture:** `crates/srv-core/src/backend/testdata/update-portable-0.59.27.7z`, a few KB. It's packed with the release's own `7z` flags from a portable-shaped folder (`agentmux.exe`, `runtime/agentmux-portable.marker`, `runtime/agentmux-0.59.27.exe`), so 7-Zip applies BCJ2 to the `.exe` files as it does for the release. The fixture's method list is checked when it's made, and noted in the test.
 - `unpack_7z` unpacks it, and `is_staged_portable` accepts the result.
 - A crafted entry with `..`, and one with an absolute path, are refused, and nothing is written outside `dest`.
 - A truncated archive fails with a decode error, not a panic.

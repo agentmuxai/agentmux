@@ -186,7 +186,7 @@ function whatForKind(kind: string): string {
 }
 
 /** srv's announcement of a call to action it holds open (`userattention`,
- *  crates/srv/src/backend/user_attention.rs), as its Rust type. */
+ *  crates/srv-core/src/backend/user_attention.rs), as its Rust type. */
 export type UserAttention = UserAttentionEvent;
 
 /** Apply one of srv's announcements, if it's for this window: one that

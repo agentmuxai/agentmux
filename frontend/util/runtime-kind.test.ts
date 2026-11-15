@@ -69,7 +69,7 @@ function codeOf(line: string): string {
 }
 
 // Mirrors srv's `nothing_but_the_adapter_compares_a_mode_to_container`
-// (crates/srv/src/backend/runtime_adapter.rs): "is this a container agent?" is answered by
+// (crates/srv-core/src/backend/runtime_adapter.rs): "is this a container agent?" is answered by
 // runtime-kind.ts, and a new hand-written comparison is a branch it should own.
 const COMPARES_TO_CONTAINER = /(?:[!=]==?|\bcase)\s*["']container["']|["']container["']\s*[!=]==?/;
 

@@ -51,7 +51,7 @@ AgentMux has no generic "unknown CLI" path. A harness is bound in about 40 place
 **Required.**
 - **Two registries that must match:**
   - `frontend/app/view/agent/providers/catalog.ts` `PROVIDERS`
-  - `crates/srv/src/backend/providers.rs` `REGISTRY`
+  - `crates/srv-core/src/backend/providers.rs` `REGISTRY`
   - `pin-consistency.test.ts` enforces that the ids and launch args are equal.
 - **Three alias tables:**
   - `providers.rs` `ALIASES`
@@ -60,7 +60,7 @@ AgentMux has no generic "unknown CLI" path. A harness is bound in about 40 place
 - **The permission branch in `buildRuntimeArgs.ts`.** An unknown id falls into the Claude branch and gets `--dangerously-skip-permissions` appended. `pane-args-parity.test.ts` pins the set of providers that do.
 - **The card**, an entry in `defaults/cli-catalog.ts` `CLI_CATALOG`. A missing entry defaults to offering Container mode.
 - **The seeded definition.**
-  - Add a row in `scripts/gen-seed.js` and regenerate `crates/srv/agent-seed.json`.
+  - Add a row in `scripts/gen-seed.js` and regenerate `crates/srv-core/agent-seed.json`.
   - Raise its `version`, or the card never appears in the picker.
   - The generator has drifted: it lacks Antigravity, which the JSON has.
 - **Auth:**

@@ -15,7 +15,7 @@ Six of the panes a user can open don't declare `paneZoom`. Three take it the sim
 
 ## 2. Which panes zoom today
 
-Code read on main at `cc46a8c21`. The built-in panes are registered in `frontend/app/block/block-registry.ts`; the widgets the user picks from are in `crates/srv/src/config/widgets.json`.
+Code read on main at `cc46a8c21`. The built-in panes are registered in `frontend/app/block/block-registry.ts`; the widgets the user picks from are in `crates/srv-core/src/config/widgets.json`.
 
 | Pane (view) | Shared zoom | Added | Notes |
 |---|---|---|---|

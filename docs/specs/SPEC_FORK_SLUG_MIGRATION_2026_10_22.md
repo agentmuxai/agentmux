@@ -234,7 +234,7 @@ lists what can't be changed from here:
 - other agents' notes and memory that mention the old name;
 - LAN peers that will re-pin.
 
-As built (`crates/srv/src/backend/slug_migration/`):
+As built (`crates/srv-core/src/backend/slug_migration/`):
 - **Where it runs.** On the disk, not on the running instance's stores: every `channels/<ch>/versions/<v>/data`,
   `channels/<ch>/data` and `dev/<branch>[/<clone>]/data` on the root, each install's `wan.db`, and the host's
   `store.db` and `identity-store.db`. Another version's `objects.db` is opened raw, never through `Store::open`, so

@@ -153,7 +153,7 @@ Without `first`, `enqueue` files one task, as today.
 
 **The operator's New task** gets a "Spec first" switch, on by default. The operator described specs-first as how they work, so it is the default and they untick it for a small fix (D4). It files the same pair through `kanban.act` `create`.
 
-**The operator-config guidance** (`crates/srv/operator-config-seed.json`, the `Tasks` paragraph) gets one sentence: "A new feature is two tasks: file it with `first: "spec"`; a fix, a small change or a follow-up is one task." Global Memory's "Agent seats" entry already says the same in prose, and this makes it the tool's own guidance.
+**The operator-config guidance** (`crates/srv-core/operator-config-seed.json`, the `Tasks` paragraph) gets one sentence: "A new feature is two tasks: file it with `first: "spec"`; a fix, a small change or a follow-up is one task." Global Memory's "Agent seats" entry already says the same in prose, and this makes it the tool's own guidance.
 
 ### 5.2 The spec's path
 
@@ -313,7 +313,7 @@ The rule, already the Kanban's and the UI kit's (`Pill.tsx`, `SPEC_TOWER_AGENT_C
   - `accept` sends the follower message;
   - `cancel` with `also_cancel_followers`, or holds them;
   - agents' `color` and `agents_by_uid`.
-- **`crates/srv/operator-config-seed.json`:** one sentence in the Tasks guidance. The manifest version bumps.
+- **`crates/srv-core/operator-config-seed.json`:** one sentence in the Tasks guidance. The manifest version bumps.
 
 **Docs:**
 - this spec, with `SPEC_WARDEN_KANBAN_2026_10_20.md`'s sections listed under Changes;

@@ -28,7 +28,7 @@ by line; confirm those citations when implementing.
 
 | Claim | Evidence |
 |---|---|
-| AgentMux installs a pinned copy of each npm-managed CLI into its own folder. | `crates/srv/src/backend/cli_install.rs:62-77`: `<shared_dir>/cli/<provider>/<pinned_version>/`, `shared_dir` = `~/.agentmux/shared` (`crates/common/src/data_paths.rs:216`). Installed with `npm install --prefix <dir> <pkg>@<pin>` (`cli_install.rs:406-456`): no `-g`. |
+| AgentMux installs a pinned copy of each npm-managed CLI into its own folder. | `crates/srv-core/src/backend/cli_install.rs:62-77`: `<shared_dir>/cli/<provider>/<pinned_version>/`, `shared_dir` = `~/.agentmux/shared` (`crates/common/src/data_paths.rs:216`). Installed with `npm install --prefix <dir> <pkg>@<pin>` (`cli_install.rs:406-456`): no `-g`. |
 | It runs that copy, never a system one, for those providers. | `crates/srv/src/server/cli_handlers.rs:29` ("Never falls back to system PATH for npm-backed providers"); the PATH lookup at `cli_handlers.rs:91-92` runs only when `npm_package` is empty. Same order in `agent.open` (`server/app_api/agent_open.rs:479-545`). |
 | It does not touch the system's own installs. | A grep of `crates/` finds no `npm install -g` / `--global`, no PATH edit, no registry write for CLIs. |
 | Each agent's login and config live in AgentMux's folders, not the system's. | `auth_config_dir_env_var` per provider points at `~/.agentmux/shared/providers/<name>/` (`crates/cef/src/commands/providers.rs:703-711`, set at `agent_open.rs:600-626`); per-account dirs under `shared/identities/<id>/<provider>` override (`identity_auth_dirs.rs:306-320`). Variables: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_CLI_HOME`, `COPILOT_HOME`, `CLINE_DIR`, `OPENCLAW_HOME`, `DSH_HOME`, `QWEN_HOME`, `GROK_HOME`, `PI_CODING_AGENT_DIR`, `KIMI_SHARE_DIR`, `MUXCODE_CONFIG_DIR`, `GOOSE_PATH_ROOT`, `CRUSH_GLOBAL_DATA`, `XDG_DATA_HOME` (kilo, opencode), `XDG_CONFIG_HOME` (muse). |
@@ -37,13 +37,13 @@ by line; confirm those citations when implementing.
 ### 2.2 Caveats the wording must respect
 
 1. **Six providers are not managed.** `aider`, `antigravity`, `goose`, `grok`, `kimi`, `muse` have an empty `npm_package`
-   (`crates/srv/src/backend/providers/<name>.rs`). AgentMux does not install them: its installer is npm-only
+   (`crates/srv-core/src/backend/providers/<name>.rs`). AgentMux does not install them: its installer is npm-only
    (`install_handlers.rs` header) and none of these is on npm; each ships its own installer (section 4.3). It finds them
    on `PATH` or in the vendor installer's own folder and otherwise shows the install command
    (`cli_handlers.rs:106-124`). So for these the user's own install is what runs. Antigravity also reads no config-dir variable (`antigravity.rs:26-28`: it "signs in
    once per machine"), so it is not config-isolated either; Aider has no variable at all.
 2. **Not a sandbox.** Agents still run on the user's machine with the user's `HOME` and `PATH`; `HOME` is not overridden
-   (`crates/srv/src/backend/pane_env.rs:755-764` keeps `HOME` and `PATH`). `RuntimeBadge.tsx:35` already says host agents
+   (`crates/srv-core/src/backend/pane_env.rs:755-764` keeps `HOME` and `PATH`). `RuntimeBadge.tsx:35` already says host agents
    run "directly on your machine with full system access". The note must not suggest otherwise. For Claude, a
    placeholder `CLAUDE.md` is seeded because `CLAUDE_CONFIG_DIR` alone leaked the user-level `~/.claude/CLAUDE.md`
    (`providers.rs:609-637`, `docs/reports/REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §0). Whether other
@@ -121,7 +121,7 @@ the catalog.)
 ### 4.3 The installers (source for the links and the docs table)
 
 Install commands are the ones already in `frontend/app/view/agent/providers/catalog.ts` (the hints the app shows when a
-launch finds the CLI missing); "lands in" is `known_install_paths` in `crates/srv/src/backend/providers.rs:412-500`.
+launch finds the CLI missing); "lands in" is `known_install_paths` in `crates/srv-core/src/backend/providers.rs:412-500`.
 
 | Harness | Windows | macOS / Linux | Lands in | Notes (from the code) |
 |---|---|---|---|---|

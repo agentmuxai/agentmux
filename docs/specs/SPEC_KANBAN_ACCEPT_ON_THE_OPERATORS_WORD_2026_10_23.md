@@ -146,7 +146,7 @@ The operator says "accept them for me" more often than "accept #935, #1102 and #
 
 ## 7. Agents' guidance
 
-The operator-config `Tasks` paragraph (`crates/srv/operator-config-seed.json`, manifest bump) gets two sentences:
+The operator-config `Tasks` paragraph (`crates/srv-core/operator-config-seed.json`, manifest bump) gets two sentences:
 
 > When the operator tells you to accept or send back tasks in Review, and you are one of their delegates, do it with `Tasks` `accept` / `send_back`, quoting their message as `user_instruction`. Name the tasks' numbers in your reply first, so their "accept them" covers exactly those; never accept your own work.
 

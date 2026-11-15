@@ -10,7 +10,7 @@ Line references are against `origin/main` at `be2d8f8fe`. "Daemon" is the Docker
 
 ## 1. Today
 
-`create_and_start` (`crates/srv/src/backend/container.rs:1238`) builds the container with a `HostConfig` of mounts, `network_mode: bridge` and `extra_hosts` only (`:1304-1318`). No `memory`, `memory_swap`, `nano_cpus` or `pids_limit`. So a `cargo build` or test run inside a container agent can take every core and all the memory the daemon has. On native Linux that is the user's machine; on Docker Desktop it is the Docker VM, whose own cap protects the host only as far as that cap is set (§6).
+`create_and_start` (`crates/srv-core/src/backend/container.rs:1238`) builds the container with a `HostConfig` of mounts, `network_mode: bridge` and `extra_hosts` only (`:1304-1318`). No `memory`, `memory_swap`, `nano_cpus` or `pids_limit`. So a `cargo build` or test run inside a container agent can take every core and all the memory the daemon has. On native Linux that is the user's machine; on Docker Desktop it is the Docker VM, whose own cap protects the host only as far as that cap is set (§6).
 
 A container agent has one container for its life: the name comes from the agent id (`container_name_for_slug`, `container_turn.rs`), every pane of that agent shares it, and each turn runs as a `docker exec` in it. So the limit is per agent, and one container's limit covers everything its panes do.
 

@@ -53,10 +53,10 @@ The operator approved the direction on 2026-10-23: a lower auto-compact backstop
 
 The backstop catches agents that don't compact themselves. The 32% comes from agents compacting at ~400K at a boundary. A 400K backstop would capture the same tokens but mid-task, roughly twice as often as at 600K (84 vs 40 extra compactions in the replay), with the re-reads and lost steps the report measured. It would also fire before the 400K hint could get the agent to compact cleanly. Keep the backstop above the hint, so the hint gets the first chance. Until PR 2 ships, the backstop alone is in effect (~23%). Shown in Settings ▸ Advanced as "Compact agents at", with the hint "Agents compact their context when it reaches this size. Lower saves tokens; higher keeps more detail. Takes effect when each agent next starts."
 
-**Seeding.** srv writes Claude Code's `autoCompactWindow` = `agent:compactat` + 33,000 (Claude Code compacts at the window minus 33K), clamped to Claude Code's accepted range of 100,000–1,000,000, into the config dir's `settings.json`. A new `seed_auto_compact_window(provider, config_dir, compact_at)` in `crates/srv/src/backend/providers.rs`, called next to `seed_transcript_retention_if_missing` in both places that already call it:
+**Seeding.** srv writes Claude Code's `autoCompactWindow` = `agent:compactat` + 33,000 (Claude Code compacts at the window minus 33K), clamped to Claude Code's accepted range of 100,000–1,000,000, into the config dir's `settings.json`. A new `seed_auto_compact_window(provider, config_dir, compact_at)` in `crates/srv-core/src/backend/providers.rs`, called next to `seed_transcript_retention_if_missing` in both places that already call it:
 
 - `prepare_provider_auth_dir` (`providers.rs`), for the default and per-agent dirs;
-- the identity resolver's spawn path (`crates/srv/src/identity/resolver/inject.rs`), for per-account dirs.
+- the identity resolver's spawn path (`crates/srv-core/src/identity/resolver/inject.rs`), for per-account dirs.
 
 It follows the existing seeding rules: Claude only; never rewrites a `settings.json` it can't parse as a JSON object; writes through a temp file and a rename; soft-fails with a warning and never blocks a spawn.
 
@@ -171,8 +171,8 @@ The agent decides with one judgment it already holds at the end of its turn: is 
 
 | Area | Files |
 |---|---|
-| Setting | `crates/srv/src/backend/wconfig/types.rs` (`SettingsType`: `agent:compactat`, `agent:compacthintat`, `agent:freshhintat`, `agent:compacthints`), generated `frontend/types/srv-types.d.ts`, `frontend/app/view/settings/sections/advanced-section.tsx` |
-| Seeding | `crates/srv/src/backend/providers.rs` (`seed_auto_compact_window`, called from `prepare_provider_auth_dir`), `crates/srv/src/identity/resolver/inject.rs`, `providers/tests.rs` |
+| Setting | `crates/srv-core/src/backend/wconfig/types.rs` (`SettingsType`: `agent:compactat`, `agent:compacthintat`, `agent:freshhintat`, `agent:compacthints`), generated `frontend/types/srv-types.d.ts`, `frontend/app/view/settings/sections/advanced-section.tsx` |
+| Seeding | `crates/srv-core/src/backend/providers.rs` (`seed_auto_compact_window`, called from `prepare_provider_auth_dir`), `crates/srv-core/src/identity/resolver/inject.rs`, `providers/tests.rs` |
 | Context in srv | `blockcontroller/persistent/mod.rs` (`PersistentInner`), `persistent/stdout_reader.rs`, `subprocess/codex_context.rs` and the Codex host spawn |
 | Compact | `persistent/input.rs` (direct stdin write at the boundary), `persistent/stdout_reader.rs` (boundary hook), `subprocess/codex_compact.rs` |
 | Fresh | `persistent/lifecycle.rs`, `persistent/spawn.rs`, `persistent/resume_retry.rs`, `context_reading.rs` (the flag that skips the packet); Codex: `subprocess/codex_fresh.rs`, `subprocess/session.rs` (retired ids) |

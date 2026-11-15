@@ -51,7 +51,7 @@ Legend: CONFIRMED = zero references of the kind stated, from the greps listed. L
 - Action: delete the .reg (keep the .ps1, a documented manual tool with 2 spec refs). Risk: low.
 
 ### 1.6 `scripts/import-agents.sh` (530 lines, 27 KB) - LIKELY superseded
-- Claim: copies user agent definitions between per-version `objects.db` files and rehydrates the Claude session. Since cross-channel agent persistence (global definition store), `crates/srv/src/registry/def_migrate.rs` does the definition backfill in-process; that Rust file only mentions the script in a comment ("Resilience mirrors ..."). `docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md` says `rehydrate_claude_session` still exists only in this script (Parts B/C not started), so keep until that is decided.
+- Claim: copies user agent definitions between per-version `objects.db` files and rehydrates the Claude session. Since cross-channel agent persistence (global definition store), `crates/srv-core/src/registry/def_migrate.rs` does the definition backfill in-process; that Rust file only mentions the script in a comment ("Resilience mirrors ..."). `docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md` says `rehydrate_claude_session` still exists only in this script (Parts B/C not started), so keep until that is decided.
 - Evidence: `rg -F import-agents` code hits = `def_migrate.rs` (comment) only; docs = 8 (specs/analysis/VERSION_HISTORY).
 - Action: human decision; if rehydrate is dropped, delete. Risk: medium (largest script in this list, only copy of the rehydrate logic).
 
@@ -93,7 +93,7 @@ No Taskfile/CI/package.json entry for these. Plausibly still useful; listed so t
 - `scripts/cli-probe/probe.mjs` (186): manual, safe CLI probe (SPEC_RUNTIME_MENU_REMAINING_GAPS s.7); its sibling tests run in CI (`ci-pr.yml:753`).
 - `tools/tests/*` (5270 lines, 228 KB): ad-hoc PowerShell/Node harnesses against a running dev instance, documented in `tools/tests/README.md`. In the README: authfile, bench-term-echo, bench-agent-keystroke, bench-term-cross-pane, pane-load, term-keyrepeat-hiccups, vim-freeze-probe, layout/pane-focus/three-pane. NOT in the README: `agent-layout-drift.mjs`, `bench-aggregate.mjs`, `bench-markdown-parse.mjs` (comment ref in `frontend/app/element/markdown-render-work.test.tsx`), `dom-smoke.ps1`. Documented manual tools, not dead.
 - `scripts/benchmarks/agent-open.mjs`, `scripts/cef-build/configure-cef-build{.sh,-windows.ps1}`, `scripts/cef-verify.sh`, `scripts/cef-verify-patches.sh`, `packaging/msix/generate-assets.ps1`: documented in `docs/cef-build/*`, `CEF_FORK_MAINTENANCE.md`, or their own headers. Not dead.
-- `scripts/gen-seed.js`: regeneration tool for `crates/srv/agent-seed.json` (`ANALYSIS_SCRIPTS_CLEANUP` kept it deliberately); only comments + `ci-classify-changes.mjs` path list reference it. Keep.
+- `scripts/gen-seed.js`: regeneration tool for `crates/srv-core/agent-seed.json` (`ANALYSIS_SCRIPTS_CLEANUP` kept it deliberately); only comments + `ci-classify-changes.mjs` path list reference it. Keep.
 - `scripts/dev/gen-splash-font.py` (49): regenerates `crates/launcher/src/splash_font.rs` (the generated file's header names it). Keep.
 
 ### 1.13 Root-level configs touching scripts

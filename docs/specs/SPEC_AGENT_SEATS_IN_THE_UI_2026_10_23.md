@@ -20,7 +20,7 @@
 
 ## 1. Today
 
-- `AgentDefinition` (`crates/srv/src/backend/storage/agents/mod.rs`) has `name`, `description`, `parent_id`, `branch_label` and no role or lead. Only `AgentCard`'s caption shows `description`, and only for templates.
+- `AgentDefinition` (`crates/srv-core/src/backend/storage/agents/mod.rs`) has `name`, `description`, `parent_id`, `branch_label` and no role or lead. Only `AgentCard`'s caption shows `description`, and only for templates.
 - A fork's `parent_id`/`branch_label` say where it came from, not whom it reports to.
 - Spawned workers carry `agent:worker_of` (agent content, written only by srv) and `agent:coached_by` (block meta). That's the one place "reports to" exists in the code.
 - Agent groups (`db_agent_groups`) are saved fleet-control target sets of block ids, per channel. They aren't a team model, so this spec doesn't reuse them.
@@ -38,7 +38,7 @@ seat: {
 }
 ```
 
-**Where:** `DefinitionRecordV1.seat` (`crates/srv/src/registry/def_schema.rs`), `#[serde(default, skip_serializing_if = "Option::is_none")]`. It's additive, the same way `use_ambient_login` and `former_slugs` were added: an older binary keeps it through `merge_for_write`.
+**Where:** `DefinitionRecordV1.seat` (`crates/srv-core/src/registry/def_schema.rs`), `#[serde(default, skip_serializing_if = "Option::is_none")]`. It's additive, the same way `use_ambient_login` and `former_slugs` were added: an older binary keeps it through `merge_for_write`.
 - `AgentDefinition` gains `seat: Option<AgentSeat>`, one nested field. That keeps the ~100 struct-literal sites to one added line each. `#[serde(default)]` applies, and the ts-rs export follows.
 - `def_registry_mirror.rs` maps it both ways, and `agent_def_list` copies it back from the record when it lays the record over the local row (`definition.rs`, as for `memory_id`). Otherwise the overlay would drop it on every read.
 - No `db_agents` column: the seat is the shared record's, like the agent's name. A channel-local agent with no shared record has no seat. That's rare today, and the Seat tab says so for it.

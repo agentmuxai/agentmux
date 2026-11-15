@@ -22,7 +22,7 @@
 |---|---|
 | Component | `frontend/app/element/blockstats.tsx` (`BlockStatsBadge`), placed by `frontend/app/block/blockframe.tsx` at the pane's top-right corner, over the content |
 | Shown on | terminal panes (`term.tsx`: `statsBadgeSetting: "term:showstatsbadge"`); on unless that setting is `false` |
-| Data | the `blockstats` event, scoped `block:<id>`, published by `crates/srv/src/backend/sysinfo.rs` on every telemetry tick (`telemetry:interval`, default 1 s) |
+| Data | the `blockstats` event, scoped `block:<id>`, published by `crates/srv-core/src/backend/sysinfo.rs` on every telemetry tick (`telemetry:interval`, default 1 s) |
 | Processes | the pane's shell PID (`pidregistry`) and all its descendants (`process_tree::collect_descendants`, capped at `MAX_PIDS_PER_BLOCK`) |
 | CPU | the sum of `sysinfo`'s `cpu_usage()` over those processes: percent of **one** core, so it can pass 100% on several cores. 50%+ is drawn in the warning colour, 90%+ in the error colour |
 | Memory | the sum of `sysinfo`'s `memory()`. In `sysinfo` 0.35.2 on Windows that is `WorkingSetSize` (`src/windows/process.rs`); on Linux and macOS the resident set size. Shown as `K`, `M` or `G` |
@@ -45,7 +45,7 @@ Measured read-only on this machine, against the 24 `pwsh` terminals under the ru
 
 ## 4. Why it rises with each `ll`, and why it stops
 
-The user's profile (`Documents/PowerShell/Microsoft.PowerShell_profile.ps1`) defines `ll` as an alias for `Get-ChildItem`. AgentMux starts `pwsh` with the profile loaded (`-NoExit -File wavepwsh.ps1`, `crates/srv/src/backend/shellintegration.rs`), and its own integration script (`shellintegration/pwsh.ps1`) defines no `ll` and does little per prompt (a directory OSC and an agent-id OSC).
+The user's profile (`Documents/PowerShell/Microsoft.PowerShell_profile.ps1`) defines `ll` as an alias for `Get-ChildItem`. AgentMux starts `pwsh` with the profile loaded (`-NoExit -File wavepwsh.ps1`, `crates/srv-core/src/backend/shellintegration.rs`), and its own integration script (`shellintegration/pwsh.ps1`) defines no `ll` and does little per prompt (a directory OSC and an agent-id OSC).
 
 Each `ll` builds a file object per entry, formats them into a table, and writes the text. All of it is garbage a moment later. In a separate `pwsh` with the same profile, running `ll <a 40-entry folder> | Out-String | Out-Null` repeatedly (script in §7):
 
@@ -116,7 +116,7 @@ On macOS and Linux the committed line is left out, and "Windows trims it" become
 
 One procstats snapshot takes about 20 ms here (626 processes, release build), too much to take for every terminal every second. So the tooltip's extra figures are read only while it is open, and the 1 Hz event gains only the peak, which costs nothing.
 
-1. `crates/srv/src/backend/blockstats_detail.rs`: `detail()` walks a snapshot from the pane's shell, as many processes as the badge counts (64), and returns the process count, names (shell first, then the most numerous, without `.exe`), the shell's start time, and summed private and committed memory. `Peaks` keeps each pane's highest badge memory, reset when the pane gets a new shell.
+1. `crates/srv-core/src/backend/blockstats_detail.rs`: `detail()` walks a snapshot from the pane's shell, as many processes as the badge counts (64), and returns the process count, names (shell first, then the most numerous, without `.exe`), the shell's start time, and summed private and committed memory. `Peaks` keeps each pane's highest badge memory, reset when the pane gets a new shell.
 2. `sysinfo.rs`: the `blockstats` event carries `mem:peak` next to `cpu`, `mem` and `pids`.
 3. `blockstats.detail { block_id }` (`server/app_api/blockstats.rs`): one snapshot, off the async workers. The window's only: a connection registered as an agent is refused, as for Tower.
 4. `blockstats.tsx`: the badge is wrapped in the UI `Tooltip`, placed below it. The tooltip's content is mounted only while it is open; it asks for the detail then, and again every 2 s. If the request fails, it still shows CPU, memory and peak.

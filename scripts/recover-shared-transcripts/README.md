@@ -31,7 +31,7 @@ result in place is a manual step (see "Putting the result in place").
    the content scan).
 6. Plans what to do with each damaged file:
    - `agent:<id>:current` / `output`: **rebuild** from the richest whole per-channel
-     copy, the same source `crates/srv/src/backend/transcript_backfill.rs` uses (every
+     copy, the same source `crates/srv-core/src/backend/transcript_backfill.rs` uses (every
      `channels/*/versions/*/data` and `dev/**/data` store; the blocks whose meta
      `agentId` or legacy `agent:id` is the agent). A copy with its own gap, the wrong size or NUL bytes is not used.
      No copy: **no-source**, left alone. A copy shorter than the zone: **source-shorter**,

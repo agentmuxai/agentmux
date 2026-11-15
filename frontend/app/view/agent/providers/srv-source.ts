@@ -1,4 +1,4 @@
-// Reading srv's provider registry (crates/srv/src/backend/providers.rs and providers/*.rs) from a test.
+// Reading srv's provider registry (crates/srv-core/src/backend/providers.rs and providers/*.rs) from a test.
 //
 // The frontend catalog (catalog.ts) and srv's `ProviderConfig` statics describe the same providers, and a few
 // fields of each are copies of the other's. The drift guards (pin-consistency.test.ts, catalog-parity.test.ts)
@@ -17,7 +17,7 @@ export function read(rel: string): string {
 
 /** srv's provider registry: providers.rs plus one file per provider in providers/. */
 export function readSrvProviders(): string {
-    const dir = "crates/srv/src/backend/providers";
+    const dir = "crates/srv-core/src/backend/providers";
     const files = readdirSync(resolve(repoRoot, dir)).filter((f) => f.endsWith(".rs"));
     return [read(`${dir}.rs`), ...files.sort().map((f) => read(`${dir}/${f}`))].join("\n");
 }

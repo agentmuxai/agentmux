@@ -103,7 +103,7 @@ The command palette gains "Animations: Off", "Animations: Quick", "Animations: S
 
 ## 5. Where it lives
 
-- **Schema and types:** `schema/settings.json`, the srv settings struct (`crates/srv/src/backend/wconfig/types.rs`), `frontend/types/srv-types.d.ts` and `settings-template.jsonc` gain the four keys. `gen-rpc-stubs --check` is run.
+- **Schema and types:** `schema/settings.json`, the srv settings struct (`crates/srv-core/src/backend/wconfig/types.rs`), `frontend/types/srv-types.d.ts` and `settings-template.jsonc` gain the four keys. `gen-rpc-stubs --check` is run.
 - **Resolver:** `frontend/app/motion/animation-settings.ts` (new): clamp and snap, the preset table, `resolveAnimation(settings, tier)`, and the code that writes `--motion-scale`, `--motion-scale-decorative` and `data-motion-reduce` on `<html>`. `initMotion()` (the only reader of the OS query, kept so by `check-motion-gates.mjs`) calls it, and again on every settings change and every OS change.
 - **Page:** `frontend/app/view/settings/sections/animations-section.tsx` and its test, with the preview in its own file.
 

@@ -75,7 +75,7 @@ srv checks for an overlap when an agent's watcher sees it edit a file, and when 
 
 - **File:** the same (repository, path) is uncommitted or edited in the last 2 hours by another agent →
   one AgentMux system note (the existing `[AgentMux]` note, which no jekt can forge):
-  `[AgentMux] Agent4 also has uncommitted changes in crates/srv/src/muxbus/presence.rs (repo agentmuxai/agentmux, branch agent4/presence). Message them before changing it.`
+  `[AgentMux] Agent4 also has uncommitted changes in crates/srv-core/src/muxbus/presence.rs (repo agentmuxai/agentmux, branch agent4/presence). Message them before changing it.`
 - At most one note per (other agent, file) per 2 hours, and at most 3 notes per agent per 10 minutes (then one
   summary). No note for the agent's own other clones.
 - Phase 2 as built: only edits the watcher reads live are checked (never a backlog read after a restart), each
@@ -93,7 +93,7 @@ srv checks for an overlap when an agent's watcher sees it edit a file, and when 
 
 `ClaimWork({ path? | branch? | topic, note, ttl_minutes = 120 })` and `ReleaseWork`. Claims use the work queue's
 existing lease store (host-wide, across channels, expiring), so a crashed agent's claim lapses by itself. A claim shows
-in `WhoIsWorkingOn` (kind `claim`) and in overlap notes ("Agent5 claimed crates/srv/src/muxbus/ 40 min ago: presence
+in `WhoIsWorkingOn` (kind `claim`) and in overlap notes ("Agent5 claimed crates/srv-core/src/muxbus/ 40 min ago: presence
 work"). Claims never block.
 
 Phase 3a as built:

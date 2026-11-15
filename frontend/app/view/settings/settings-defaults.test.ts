@@ -382,42 +382,42 @@ const BACKEND_DIRS = ["crates/srv/src", "crates/launcher/src"];
 
 /** Defaults the backend keeps in a constant instead of at the read: file, and a pattern capturing the value. */
 const BACKEND_CONSTANTS: Record<string, [string, RegExp]> = {
-    "attachments:maxfiles": ["crates/srv/src/backend/attachments/mod.rs", /const DEFAULT_MAX_FILES: \w+ = (\d+);/],
-    "attachments:maxtotalmb": ["crates/srv/src/backend/attachments/mod.rs", /const DEFAULT_MAX_TOTAL_MB: \w+ = (\d+);/],
+    "attachments:maxfiles": ["crates/srv-core/src/backend/attachments/mod.rs", /const DEFAULT_MAX_FILES: \w+ = (\d+);/],
+    "attachments:maxtotalmb": ["crates/srv-core/src/backend/attachments/mod.rs", /const DEFAULT_MAX_TOTAL_MB: \w+ = (\d+);/],
     "attachments:sendmaxedge": [
-        "crates/srv/src/backend/attachments/mod.rs",
+        "crates/srv-core/src/backend/attachments/mod.rs",
         /const DEFAULT_SEND_MAX_EDGE: \w+ = (\d+);/,
     ],
     "attachments:retentiondays": [
-        "crates/srv/src/backend/attachments/mod.rs",
+        "crates/srv-core/src/backend/attachments/mod.rs",
         /const DEFAULT_RETENTION_DAYS: \w+ = (\d+);/,
     ],
     "attachments:claudeinlinemax": [
-        "crates/srv/src/backend/attachments/prompt.rs",
+        "crates/srv-core/src/backend/attachments/prompt.rs",
         /const DEFAULT_INLINE_MAX_COUNT: \w+ = (\d+);/,
     ],
     "attachments:claudesessioninlinemb": [
-        "crates/srv/src/backend/attachments/prompt.rs",
+        "crates/srv-core/src/backend/attachments/prompt.rs",
         /const DEFAULT_SESSION_INLINE_MB: \w+ = (\d+);/,
     ],
-    "telemetry:interval": ["crates/srv/src/backend/sysinfo.rs", /const DEFAULT_INTERVAL_SECS: f64 = ([\d.]+);/],
+    "telemetry:interval": ["crates/srv-core/src/backend/sysinfo.rs", /const DEFAULT_INTERVAL_SECS: f64 = ([\d.]+);/],
     "voice:whisperModel": ["crates/srv/src/server/voice.rs", /const DEFAULT_WHISPER_MODEL: &str = ("[^"]*");/],
-    "agent:compacthintat": ["crates/srv/src/backend/context_reading.rs", /const DEFAULT_HINT_AT: u64 = (\d+);/],
-    "supervisor:enabled": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_ENABLED: bool = (true|false);/],
-    "supervisor:steady:continuations": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_STEADY_CONTINUATIONS: \w+ = (\d+);/],
-    "supervisor:steady:minutes": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_STEADY_MINUTES: \w+ = (\d+);/],
-    "supervisor:drive:continuations": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_DRIVE_CONTINUATIONS: \w+ = (\d+);/],
-    "supervisor:drive:minutes": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_DRIVE_MINUTES: \w+ = (\d+);/],
-    "supervisor:noprogress": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_NO_PROGRESS: \w+ = (\d+);/],
-    "supervisor:cooldown": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_COOLDOWN: \w+ = (\d+);/],
-    "supervisor:hourly": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_HOURLY: \w+ = (\d+);/],
-    "supervisor:notify:needsyou": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
-    "supervisor:notify:limit": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
-    "supervisor:notify:failed": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
-    "supervisor:notify:done": ["crates/srv/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
-    "agent:freshhintat": ["crates/srv/src/backend/context_reading.rs", /const DEFAULT_FRESH_HINT_AT: u64 = (\d+);/],
-    "agent:subagentmodel": ["crates/srv/src/backend/subagent_model.rs", /const DEFAULT_SUBAGENT_MODEL: &str = ("[^"]*");/],
-    "agent:exploremodel": ["crates/srv/src/backend/subagent_model.rs", /const DEFAULT_EXPLORE_MODEL: &str = ("[^"]*");/],
+    "agent:compacthintat": ["crates/srv-core/src/backend/context_reading.rs", /const DEFAULT_HINT_AT: u64 = (\d+);/],
+    "supervisor:enabled": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_ENABLED: bool = (true|false);/],
+    "supervisor:steady:continuations": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_STEADY_CONTINUATIONS: \w+ = (\d+);/],
+    "supervisor:steady:minutes": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_STEADY_MINUTES: \w+ = (\d+);/],
+    "supervisor:drive:continuations": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_DRIVE_CONTINUATIONS: \w+ = (\d+);/],
+    "supervisor:drive:minutes": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_DRIVE_MINUTES: \w+ = (\d+);/],
+    "supervisor:noprogress": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_NO_PROGRESS: \w+ = (\d+);/],
+    "supervisor:cooldown": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_COOLDOWN: \w+ = (\d+);/],
+    "supervisor:hourly": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_HOURLY: \w+ = (\d+);/],
+    "supervisor:notify:needsyou": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
+    "supervisor:notify:limit": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
+    "supervisor:notify:failed": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
+    "supervisor:notify:done": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
+    "agent:freshhintat": ["crates/srv-core/src/backend/context_reading.rs", /const DEFAULT_FRESH_HINT_AT: u64 = (\d+);/],
+    "agent:subagentmodel": ["crates/srv-core/src/backend/subagent_model.rs", /const DEFAULT_SUBAGENT_MODEL: &str = ("[^"]*");/],
+    "agent:exploremodel": ["crates/srv-core/src/backend/subagent_model.rs", /const DEFAULT_EXPLORE_MODEL: &str = ("[^"]*");/],
     "app:showtray": ["crates/launcher/src/background_config.rs", /\bshow_tray: (true|false),/],
     "app:runinbackground": ["crates/launcher/src/background_config.rs", /\brun_in_background: (true|false),/],
     "app:startatlogin": ["crates/launcher/src/start_at_login.rs", /\.map\(\|v\| v\.unwrap_or\((true|false)\)\)/],
@@ -482,7 +482,7 @@ function backendValues(): Map<string, Found[]> {
         push(out, key, { value: JSON.parse(m[1]), at: `${rel}:${lineOf(text, m.index)}` });
     }
     // Non-Option typed fields: unset means the type's zero value.
-    const typesRel = "crates/srv/src/backend/wconfig/types.rs";
+    const typesRel = "crates/srv-core/src/backend/wconfig/types.rs";
     const types = read(typesRel);
     const zero: Record<string, unknown> = { bool: false, f64: 0, i64: 0, u32: 0, u64: 0, String: "" };
     for (const m of types.matchAll(/rename = "([^"]+)"[^\]]*\]\s*pub \w+: (\w+),/g)) {
@@ -498,7 +498,7 @@ function backendValues(): Map<string, Found[]> {
 }
 
 function notifySuffixes(): string[] {
-    const text = read("crates/srv/src/backend/notify/policy.rs");
+    const text = read("crates/srv-core/src/backend/notify/policy.rs");
     const body = /fn setting_suffix\(self\)[^{]*\{([\s\S]*?)\n    \}/.exec(text);
     if (!body) throw new Error("NotifyKind::setting_suffix not found in notify/policy.rs");
     return [...body[1].matchAll(/Some\("([^"]+)"\)/g)].map((m) => m[1]);

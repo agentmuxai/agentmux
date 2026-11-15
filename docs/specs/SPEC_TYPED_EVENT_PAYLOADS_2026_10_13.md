@@ -5,7 +5,7 @@
 
 ## The gap
 
-Broker events reach the frontend as `MuxEvent` (`crates/srv/src/backend/mps.rs`). Its envelope is generated (`event`, `scopes`, `sender`, `persist`), but `data` is `any`.
+Broker events reach the frontend as `MuxEvent` (`crates/srv-core/src/backend/mps.rs`). Its envelope is generated (`event`, `scopes`, `sender`, `persist`), but `data` is `any`.
 
 | What | Count |
 |---|---|

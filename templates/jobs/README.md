@@ -3,7 +3,7 @@
 Each folder here is a job template that ships with AgentMux, published as
 `agentmux.<name>` (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4, §5.5).
 srv compiles them in: add every new folder, with each of its files, to
-`BUILTINS` in `crates/srv/src/backend/job_templates/mod.rs` (a test fails
+`BUILTINS` in `crates/srv-core/src/backend/job_templates/mod.rs` (a test fails
 otherwise). The operator still approves each one once before a job can use it.
 
 A template folder holds:

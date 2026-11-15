@@ -626,7 +626,7 @@ The splits and renames since §7.1 was ranked moved most of its files (`agentmux
 | 1 | `crates/srv/src/server/reactive.rs` | 11,374 | 74 | first pass done (#7228, #7247, #7290): 8,315 tokens (−27%) |
 | 2 | `frontend/app/view/swarm/swarm-model.ts` | 13,958 | 51 | first pass done (#7248, #7268, #7275): 11,156 tokens (−20%) |
 | 3 | `frontend/app/store/agent-pane-state/types.ts` | 12,320 | 42 | first pass done (#7250, #7270): 10,547 tokens (−14%) |
-| 4 | `crates/srv/src/backend/storage/migrations.rs` | 13,143 | 37 | first pass done (#7258, #7271): 11,292 tokens (−14%); still 68% comment lines |
+| 4 | `crates/srv-core/src/backend/storage/migrations.rs` | 13,143 | 37 | first pass done (#7258, #7271): 11,292 tokens (−14%); still 68% comment lines |
 | 5 | `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | 8,727 | 54 | first pass done (#7261): 7,223 tokens (−17%) |
 
 Measured with `check-comment-hygiene.mjs --report` on `e7ff6280d` and after the last PR above: the five files go from 59,522 to 48,533 comment tokens (−18%). That is below §1's 35–50% estimate, because the first pass kept most content (§1: 85% of comment lines are worth keeping) and cut review narration, restated code and duplicated rationale. Every PR passed `--code-equal` with no code change. To reach the estimate, a second pass over the same files has to move whole rationale blocks to `docs/` (rule C5), starting with the version history in `migrations.rs` and the per-command docs in `types.ts`; whether to do that, or to move on to the next files of §7.1, is open.
