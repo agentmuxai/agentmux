@@ -13,7 +13,7 @@
 218 crates/bashwrap/src/hook.rs::scan_redirect
 541 crates/cef/src/app/mod.rs::AgentMuxApp::App::on_before_command_line_processing
 114 crates/cef/src/app/mod.rs::AgentMuxBrowserProcessHandler::BrowserProcessHandler::on_context_initialized
-148 crates/cef/src/app/mod.rs::AgentMuxWindowDelegate::WindowDelegate::on_window_created
+149 crates/cef/src/app/mod.rs::AgentMuxWindowDelegate::WindowDelegate::on_window_created
 157 crates/cef/src/browser_api/act.rs::act
 118 crates/cef/src/browser_api/act.rs::snapshot_route
 108 crates/cef/src/browser_api/routes.rs::click_element
@@ -49,7 +49,7 @@
 181 crates/cef/src/commands/drag.rs::tear_off_sc_move_handshake
 213 crates/cef/src/commands/floating_pane.rs::open_floating_pane_window
 195 crates/cef/src/commands/orphan_reconcile.rs::ui_thread_reconcile
-212 crates/cef/src/commands/pane_pool.rs::promote_pane_pool_window
+213 crates/cef/src/commands/pane_pool.rs::promote_pane_pool_window
 160 crates/cef/src/commands/tear_off_hook/macos.rs::start_tab_drag_tracking
 135 crates/cef/src/commands/tear_off_hook/windows.rs::handle_button_up
 134 crates/cef/src/commands/tear_off_hook/windows.rs::start_hook_session
