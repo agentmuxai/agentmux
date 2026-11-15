@@ -377,6 +377,8 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // fileprobe → what a file is, before the Editor reads it (one stat, the
     // first 8 KB): SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.2.
     crate::backend::editor_probe::register(engine);
+    // filesearchbytes → the hex viewer's find, read on srv.
+    crate::backend::editor_search::register(engine);
     register_fs_browsing(engine, state);
     register_fs_mutations(engine, state);
     register_fs_jobs(engine, state);
