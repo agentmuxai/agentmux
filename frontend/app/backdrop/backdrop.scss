@@ -1,0 +1,110 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// A pane's backdrop (docs/specs/SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7). A pane's `PaneScope` carries the
+// properties below inline; this file registers them and holds the aliases that must be resolved again at the pane.
+
+@use "aliases";
+
+// Registered, so a pane's colours are real colours: an invalid one falls back to transparent here, never to
+// the inherited value of a property that happens to share its name, and the scope's `var()` chain stays typed.
+@property --surface {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --surface-raised {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --surface-overlay {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-text {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-muted {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-faint {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-border {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-divider {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-accent {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-error {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-warning {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-success {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-info {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-focus {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-hover {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+@property --ink-selected {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
+// The scope's element takes no part in layout: it only carries properties down.
+.pane-scope {
+    display: contents;
+}

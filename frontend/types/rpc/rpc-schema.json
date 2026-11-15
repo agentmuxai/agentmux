@@ -3780,6 +3780,25 @@
     }
   },
   {
+    "command": "getdronepayloadschema",
+    "request": "agentmux_srv::server::drone_payload::PayloadSchemaReq",
+    "requestName": "PayloadSchemaReq",
+    "requestTs": {
+      "imports": [
+        "PayloadSchemaReq"
+      ],
+      "name": "PayloadSchemaReq"
+    },
+    "response": "agentmux_srv::server::drone_payload::PayloadSchemaResp",
+    "responseName": "PayloadSchemaResp",
+    "responseTs": {
+      "imports": [
+        "PayloadSchemaResp"
+      ],
+      "name": "PayloadSchemaResp"
+    }
+  },
+  {
     "command": "geteditorhome",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::editor_read::EditorRootsReq>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::editor_read::EditorRootsReq>",
