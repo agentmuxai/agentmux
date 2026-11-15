@@ -177,7 +177,7 @@ pub(crate) fn file_task_as(
     let item = WorkItem {
         id: uuid::Uuid::new_v4().to_string(),
         title: crate::server::work_tasks::clean(title),
-        payload: crate::server::work_tasks::clean(payload),
+        payload: crate::server::work_tasks::payload_text(payload).unwrap_or_else(|_| payload.chars().take(crate::server::work_tasks::MAX_PAYLOAD).collect()),
         kind: kind.to_string(),
         target_agent: target,
         target_group: String::new(),

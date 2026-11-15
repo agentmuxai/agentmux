@@ -25,7 +25,7 @@ use agentmux_common::time::now_ms;
 
 use crate::backend::agent_state::{self, AgentState};
 use crate::backend::message_origin::MessageOrigin;
-use crate::backend::reactive::sanitize::{neutralize_markers, quote_in_system_note, sanitize_message};
+use crate::backend::reactive::sanitize::{neutralize_markers, quote_in_system_note, sanitize_message, sanitize_text};
 use crate::backend::reactive::types::AgentRegistration;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
@@ -517,8 +517,11 @@ fn quoted(text: &str) -> String {
 fn start_text(t: &BoardTask, attempt: i64, by: &Actor) -> String {
     let (name, n) = (t.card.name(), t.card.id_arg());
     let title = quote_in_system_note(&t.item.title);
+    // A message holds less than a brief can: say where the rest is rather than hand over half without a word.
+    let cut = sanitize_message(&t.item.payload) != sanitize_text(t.item.payload.trim());
+    let rest = if cut { format!(" The brief above is cut to fit a message: read all of it with Tasks get (id {n}).") } else { String::new() };
     let report = format!(
-        "Report on it with Tasks (id {n}, attempt {attempt}): update at milestones, ask if you need {}, submit when it's done.",
+        "Report on it with Tasks (id {n}, attempt {attempt}): update at milestones, ask if you need {}, submit when it's done.{rest}",
         by.me()
     );
     let operator_wrote = t.card.filed_by.is_empty() && t.item.created_by == OPERATOR;
@@ -553,6 +556,7 @@ fn create_one(
     after: &[String],
     now: i64,
 ) -> Result<(String, i64), String> {
+    let payload = crate::server::work_tasks::payload_text(payload)?;
     let store = &state.work_store;
     // The operator sees every board; an archived one takes no new tasks.
     let board = crate::server::work_tasks::pick_board(state, req.board.as_deref(), None, true)?;
@@ -570,7 +574,7 @@ fn create_one(
     let item = WorkItem {
         id: Uuid::new_v4().to_string(),
         title: clean(title),
-        payload: clean(payload),
+        payload,
         kind: kind.to_string(),
         target_agent: target,
         target_group: String::new(),
@@ -728,6 +732,16 @@ mod tests {
         assert!(text.starts_with("Task #12 from the Kanban: Write a spec\n\nWrite the spec for X."), "{text}");
         assert!(text.ends_with("(id 12, attempt 1): update at milestones, ask if you need me, submit when it's done."));
         assert!(!text.contains("[JEKT:FROM"), "markers are neutralized: {text}");
+    }
+
+    #[test]
+    fn a_brief_longer_than_a_message_carries_says_where_to_read_all_of_it() {
+        let mut long = t("operator", "", "operator", "");
+        long.item.payload = "word ".repeat(3_000);
+        let text = start_text(&long, 1, &Actor::operator());
+        assert!(text.ends_with("read all of it with Tasks get (id 12)."), "{text}");
+        let short = start_text(&t("operator", "", "operator", ""), 1, &Actor::operator());
+        assert!(!short.contains("Tasks get"), "{short}");
     }
 
     #[test]
