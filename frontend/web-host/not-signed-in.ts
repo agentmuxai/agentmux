@@ -6,7 +6,7 @@
 // a crash and offers a button that cannot help: only `agentmux open`, run in the server's terminal, signs a browser in.
 
 import { FONT, mountRoot, StartupFailureHandled } from "@/app/init/error-display";
-import { authHeaders } from "@/app/store/auth-headers";
+import { SESSION_HEADER } from "@/util/sharedconst";
 
 /** Why this browser cannot use the server: it holds no sign-in, or the server no longer accepts the one it holds. */
 export type SignInProblem = "none" | "ended";
@@ -17,16 +17,18 @@ const PROBE = "/api/bus/agents";
 /**
  * What is wrong with this browser's sign-in, or `null` when nothing is known to be (including when the server cannot be
  * asked: that is a different failure, and the usual startup recovery handles it). The server is always asked, because a
- * page behind a proxy that adds the key holds no token and is signed in all the same.
+ * page behind a proxy that adds the key holds no token and is signed in all the same. `token` is the tab's session
+ * token, taken from the host API before `window.api` exists: nothing else may start the app until this has answered.
  */
 export async function signInProblem(
-    hasToken: boolean,
+    token: string | undefined,
     fetchImpl: (input: string, init: RequestInit) => Promise<{ status: number }> = (input, init) => fetch(input, init)
 ): Promise<SignInProblem | null> {
     try {
-        const resp = await fetchImpl(PROBE, { headers: authHeaders(), credentials: "same-origin" });
+        const headers: Record<string, string> = token ? { [SESSION_HEADER]: token } : {};
+        const resp = await fetchImpl(PROBE, { headers, credentials: "same-origin" });
         if (resp.status !== 401) return null;
-        return hasToken ? "ended" : "none";
+        return token ? "ended" : "none";
     } catch {
         return null;
     }
@@ -51,24 +53,24 @@ export function showNotSignedIn(problem: SignInProblem): void {
     const main = mountRoot();
     const card = document.createElement("div");
     card.setAttribute("role", "alert");
+    // Theme tokens, not colour literals (scripts/check-ui-primitives.mjs): the stylesheet is loaded before the host starts.
     card.style.cssText =
-        "max-width:560px;margin:14vh auto 0;padding:28px 32px;border-radius:12px;background:#17181b;" +
-        "border:1px solid rgba(255,255,255,0.08);box-shadow:0 8px 40px rgba(0,0,0,0.5);" +
-        `font-family:${FONT};color:#e8e8e8;`;
+        "max-width:560px;margin:14vh auto 0;padding:28px 32px;border-radius:var(--radius-lg);background:var(--modal-bg-color);" +
+        `border:1px solid var(--border-color);font-family:${FONT};color:var(--secondary-text-color);line-height:1.5;`;
 
     const h = document.createElement("h2");
     h.textContent = title;
-    h.style.cssText = "margin:0 0 10px;font-size:18px;color:#ffd479;";
+    h.style.cssText = "margin:0 0 10px;font-size:1.25em;color:var(--warning-color);";
 
     const p = document.createElement("p");
     p.textContent = lead;
-    p.style.cssText = "margin:0 0 14px;font-size:14px;line-height:1.5;color:rgba(255,255,255,0.8);";
+    p.style.cssText = "margin:0 0 14px;";
 
     const how = document.createElement("p");
-    how.style.cssText = "margin:0;font-size:14px;line-height:1.5;color:rgba(255,255,255,0.8);";
+    how.style.cssText = "margin:0;";
     const code = document.createElement("code");
     code.textContent = COMMAND;
-    code.style.cssText = "padding:1px 6px;border-radius:5px;background:rgba(255,255,255,0.1);";
+    code.style.cssText = "padding:1px 6px;border-radius:var(--radius-sm);background:var(--accent-bg);";
     how.append(
         "To sign in, run ",
         code,
@@ -80,8 +82,8 @@ export function showNotSignedIn(problem: SignInProblem): void {
 }
 
 /** Check this browser's sign-in before the app starts; when it is not one, say so and stop the startup quietly. */
-export async function requireSignIn(hasToken: boolean): Promise<void> {
-    const problem = await signInProblem(hasToken);
+export async function requireSignIn(token: string | undefined): Promise<void> {
+    const problem = await signInProblem(token);
     if (problem == null) return;
     showNotSignedIn(problem);
     // `bootstrap` treats this as a failure already handled: no reload loop, no second card.

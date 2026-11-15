@@ -21,21 +21,21 @@ const answering = (status: number) => vi.stubGlobal("fetch", vi.fn(async () => (
 
 describe("whether this browser is signed in", () => {
     it("is not, when the server refuses a browser that holds no sign-in", async () => {
-        expect(await signInProblem(false, async () => ({ status: 401 }))).toBe("none");
+        expect(await signInProblem(undefined, async () => ({ status: 401 }))).toBe("none");
     });
 
     it("has ended, when the server refuses the sign-in the browser holds", async () => {
-        expect(await signInProblem(true, async () => ({ status: 401 }))).toBe("ended");
+        expect(await signInProblem("tok", async () => ({ status: 401 }))).toBe("ended");
     });
 
     it("is fine when the server answers, with or without a token (a proxy may add the key)", async () => {
-        expect(await signInProblem(false, async () => ({ status: 200 }))).toBeNull();
-        expect(await signInProblem(true, async () => ({ status: 200 }))).toBeNull();
+        expect(await signInProblem(undefined, async () => ({ status: 200 }))).toBeNull();
+        expect(await signInProblem("tok", async () => ({ status: 200 }))).toBeNull();
     });
 
     it("is not blamed when the server cannot be reached or fails: that is another failure with its own recovery", async () => {
-        expect(await signInProblem(true, async () => Promise.reject(new TypeError("Failed to fetch")))).toBeNull();
-        expect(await signInProblem(true, async () => ({ status: 503 }))).toBeNull();
+        expect(await signInProblem("tok", async () => Promise.reject(new TypeError("Failed to fetch")))).toBeNull();
+        expect(await signInProblem("tok", async () => ({ status: 503 }))).toBeNull();
     });
 });
 
@@ -59,13 +59,19 @@ describe("the card", () => {
 describe("starting the page", () => {
     it("stops with the card, as a failure already handled, when the server refuses this browser", async () => {
         answering(401);
-        await expect(requireSignIn(false)).rejects.toBeInstanceOf(StartupFailureHandled);
+        await expect(requireSignIn(undefined)).rejects.toBeInstanceOf(StartupFailureHandled);
         expect(document.body.textContent).toContain("This browser isn't signed in");
+    });
+
+    it("sends the tab's session token, and nothing else, to the server", async () => {
+        const fetchMock = vi.fn(async (_input: string, _init: RequestInit) => ({ status: 200 }));
+        await signInProblem("tok", fetchMock);
+        expect(fetchMock).toHaveBeenCalledWith("/api/bus/agents", { headers: { "X-AM-Session": "tok" }, credentials: "same-origin" });
     });
 
     it("goes on, and shows nothing, when the server accepts it", async () => {
         answering(200);
-        await expect(requireSignIn(true)).resolves.toBeUndefined();
+        await expect(requireSignIn("tok")).resolves.toBeUndefined();
         expect(document.querySelector('[role="alert"]')).toBeNull();
     });
 });

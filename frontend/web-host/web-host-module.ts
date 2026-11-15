@@ -26,8 +26,11 @@ export const hostModule: HostModule = {
         const { web, ws } = endpointsFor(window.location.origin);
         window.__WAVE_SERVER_WEB_ENDPOINT__ = web;
         window.__WAVE_SERVER_WS_ENDPOINT__ = ws;
-        window.api = buildWebApi();
+        const api = buildWebApi();
         // A browser that was never signed in gets one plain card, not a reconnect loop that ends in "Press Restore".
-        await requireSignIn(!!window.api.getSessionToken?.());
+        // `window.api` is installed only after the check: the app's own start (app-init.ts waits for `window.api`)
+        // must not run beside it, or its failure would put the recovery card over this one.
+        await requireSignIn(api.getSessionToken?.());
+        window.api = api;
     },
 };
