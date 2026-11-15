@@ -1,0 +1,49 @@
+{
+  "nodes": [
+    { "id": "agents", "position": { "x": 0, "y": 0 }, "data": { "kind": "app_query", "query": "agents" } },
+    { "id": "muxbus", "position": { "x": 240, "y": 0 }, "data": { "kind": "app_query", "query": "muxbus" } },
+    { "id": "peers", "position": { "x": 480, "y": 0 }, "data": { "kind": "app_query", "query": "lan_peers" } },
+    {
+      "id": "healthy",
+      "position": { "x": 720, "y": 0 },
+      "data": { "kind": "condition", "expr": "{{agents.all_up}} == true && {{muxbus.connected}} == true && {{peers.answered}} == {{peers.count}}" }
+    },
+    {
+      "id": "allclear",
+      "position": { "x": 960, "y": -80 },
+      "data": {
+        "kind": "message",
+        "to": "{{param.leader}}",
+        "body": "AgentMux {{trigger.version}} is up after the upgrade from {{trigger.upgraded_from}}: {{agents.up}} of {{agents.wanted_running}} agents running, MuxBus connected, {{peers.answered}} of {{peers.count}} LAN peers answering. No reply needed."
+      }
+    },
+    {
+      "id": "file",
+      "position": { "x": 960, "y": 80 },
+      "data": {
+        "kind": "task",
+        "title": "After the upgrade to this AgentMux version, something is not up",
+        "body": "Agents not up: {{agents.problem_names}}. MuxBus: {{muxbus.state}}. LAN peers answering: {{peers.answered}} of {{peers.count}}. Check each and say what you found.",
+        "target": "{{param.steward}}",
+        "dedupe": "agentmux.after-upgrade-check:{{trigger.version}}"
+      }
+    },
+    {
+      "id": "alert",
+      "position": { "x": 1200, "y": 80 },
+      "data": {
+        "kind": "notify",
+        "title": "AgentMux upgrade: something is not up",
+        "body": "Agents not up: {{agents.problem_names}}. MuxBus: {{muxbus.state}}. LAN peers answering: {{peers.answered}} of {{peers.count}}."
+      }
+    }
+  ],
+  "edges": [
+    { "id": "agents-muxbus", "source": "agents", "target": "muxbus" },
+    { "id": "muxbus-peers", "source": "muxbus", "target": "peers" },
+    { "id": "peers-healthy", "source": "peers", "target": "healthy" },
+    { "id": "healthy-allclear", "source": "healthy", "target": "allclear", "sourceHandle": "true" },
+    { "id": "healthy-file", "source": "healthy", "target": "file", "sourceHandle": "false" },
+    { "id": "file-alert", "source": "file", "target": "alert" }
+  ]
+}
