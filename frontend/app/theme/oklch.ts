@@ -49,6 +49,24 @@ export function oklchHueOfSrgb(rgb: Rgb): number {
     return h < 0 ? h + 360 : h;
 }
 
+export interface Oklch {
+    /** Lightness, 0 to 1. */
+    l: number;
+    /** Chroma, about 0 to 0.4. */
+    c: number;
+    /** Hue, degrees 0 to 360. */
+    h: number;
+}
+
+/** A `#rrggbb` as OKLCH, or undefined when it is not one. */
+export function oklchOfHex(hex: string): Oklch | undefined {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return undefined;
+    const [l, a, b] = linearRgbToOklab(rgb.map(srgbToLinear) as Rgb);
+    const h = (Math.atan2(b, a) * 180) / Math.PI;
+    return { l, c: Math.hypot(a, b), h: h < 0 ? h + 360 : h };
+}
+
 function inGamut(rgb: Rgb): boolean {
     return rgb.every((c) => c >= -1e-4 && c <= 1 + 1e-4);
 }
