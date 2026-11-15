@@ -16,6 +16,7 @@ const LABEL: Record<HealthKind, string> = {
     pagefile: "Low page file",
     backend: "Slow backend",
     disk: "Low disk space",
+    panics: "srv panics",
 };
 
 const RAM_MESSAGE: Record<ActiveHealthLevel, string> = {
@@ -85,6 +86,21 @@ export function diskMessage(level: ActiveHealthLevel, payload: HealthPayload): s
         : `The drive with AgentMux's data${where} is running low:${left} On a nearly full drive, writes slow down and AgentMux can pause for seconds at a time. Freeing up space will help.`;
 }
 
+/** "handler.rs:1416" from "backend/reactive/handler.rs:1416": the file and line, without the folders. */
+export function shortPlace(location: string): string {
+    return location.split(/[\\/]/).pop() ?? location;
+}
+
+/** The notice for srv's own panics: how often, where most (one place), and what it can mean for messaging. */
+export function panicsMessage(level: ActiveHealthLevel, payload: HealthPayload): string {
+    const n = payload.last_minute;
+    const times = n === undefined ? "repeatedly" : `${n} ${n === 1 ? "time" : "times"} in the last minute`;
+    const top = payload.top?.[0]?.location;
+    const where = top ? ` (top place: ${shortPlace(top)})` : "";
+    const lead = level === "critical" ? "srv is panicking constantly" : "srv is panicking";
+    return `${lead}: ${times}${where}. Agents may not hear each other; restarting AgentMux clears a stuck messaging path.`;
+}
+
 /** "222 GB" or "9.5 GB": one decimal under 100. */
 export function formatGb(gb: number): string {
     return gb < 100 ? `${gb.toFixed(1)} GB` : `${Math.round(gb)} GB`;
@@ -96,6 +112,7 @@ export function messageFor(kind: HealthKind, level: ActiveHealthLevel, payload: 
     if (kind === "ram") return RAM_MESSAGE[level];
     if (kind === "backend") return backendMessage(level, payload.avg_ms);
     if (kind === "disk") return diskMessage(level, payload);
+    if (kind === "panics") return panicsMessage(level, payload);
     return PAGEFILE_MESSAGE[level] + pagefileGuidance(payload.system_managed, payload.disk_free_pct);
 }
 

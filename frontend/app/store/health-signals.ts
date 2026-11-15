@@ -7,16 +7,21 @@
  * the active ones, which a window reads once when it starts so it can catch
  * up on an episode already under way. The status bar's backend dot and its
  * panel read this store. REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.
+ * srv's own panics come the other way: srv publishes a persisted `srv-panics` mux event in the same shape, so a
+ * window that opens mid-storm gets the last one on subscribe (kind `panics`; `normal` clears it).
  *
  * Drive it from DevTools:
  *   window.dispatchEvent(new CustomEvent('agentmux-event',
  *     { detail: { event: 'health-signal', payload: { kind: 'backend', level: 'warn', avg_ms: 1800 } } }))
  */
 
+import { onMuxEvent } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
+import type { PanicPlace } from "@/types/rpc/PanicPlace";
 import { getApi } from "@/util/app-api";
 import { createSignal } from "solid-js";
 
-export type HealthKind = "ram" | "pagefile" | "backend" | "disk";
+export type HealthKind = "ram" | "pagefile" | "backend" | "disk" | "panics";
 export type HealthLevel = "normal" | "warn" | "critical";
 export type ActiveHealthLevel = Exclude<HealthLevel, "normal">;
 
@@ -24,7 +29,7 @@ export interface HealthPayload {
     kind: HealthKind;
     level: HealthLevel;
     /** When the episode began (ms epoch), set by the host. */
-    since_ms?: number;
+    since_ms?: number | null;
     // "ram"
     phys_free_mb?: number;
     // "pagefile"
@@ -37,6 +42,12 @@ export interface HealthPayload {
     disk_free_gb?: number;
     disk_total_gb?: number;
     disk_path?: string;
+    // "panics": srv's own panics (the `srv-panics` event, SrvPanicsEvent)
+    last_minute?: number;
+    total?: number;
+    recovered_lock?: number;
+    /** The places that panicked most, biggest first. */
+    top?: PanicPlace[];
 }
 
 export interface HealthSignal {
@@ -46,7 +57,7 @@ export interface HealthSignal {
     payload: HealthPayload;
 }
 
-const KINDS: HealthKind[] = ["backend", "disk", "pagefile", "ram"];
+const KINDS: HealthKind[] = ["backend", "panics", "disk", "pagefile", "ram"];
 
 function severity(level: HealthLevel): number {
     return level === "critical" ? 2 : level === "warn" ? 1 : 0;
@@ -116,9 +127,14 @@ export function startHealthSignals(): () => void {
             }
         })
         .catch(() => {});
+    // srv's own panic count: a persisted event, so the last one arrives on subscribe.
+    const unlistenPanics = onMuxEvent(WpsEvent.SrvPanics, (p) => {
+        setSignals((s) => applyHealthEvent(s, p, Date.now()));
+    });
     stop = () => {
         stopped = true;
         unlisten?.();
+        unlistenPanics();
         stop = undefined;
     };
     return stop;
