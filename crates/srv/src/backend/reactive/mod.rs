@@ -16,6 +16,7 @@ pub mod controller_wait;
 pub mod cli_native_audit;
 pub mod turn_audit;
 pub mod handler;
+mod handler_lock;
 pub mod held_notes;
 pub mod held_request;
 pub mod progress_watcher;

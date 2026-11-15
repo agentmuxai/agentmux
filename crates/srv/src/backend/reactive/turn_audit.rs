@@ -22,6 +22,6 @@ impl Handler {
 impl ReactiveHandler {
     /// See [`Handler::log_ack_refused`].
     pub fn log_ack_refused(&self, source_agent: &str, target_agent: &str, request_id: &str, why: &str) {
-        self.inner.lock().unwrap().log_ack_refused(source_agent, target_agent, request_id, why);
+        self.inner.lock().log_ack_refused(source_agent, target_agent, request_id, why);
     }
 }

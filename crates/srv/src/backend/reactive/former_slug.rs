@@ -189,22 +189,22 @@ impl Handler {
 impl ReactiveHandler {
     /// See the inner [`Handler::get_delivery_target`].
     pub fn get_delivery_target(&self, name: &str) -> Option<AgentRegistration> {
-        self.inner.lock().unwrap().get_delivery_target(name).cloned()
+        self.inner.lock().get_delivery_target(name).cloned()
     }
 
     /// See the inner [`Handler::lookup_delivery_target`].
     pub fn lookup_delivery_target(&self, name: &str) -> LookupOutcome {
-        self.inner.lock().unwrap().lookup_delivery_target(name)
+        self.inner.lock().lookup_delivery_target(name)
     }
 
     /// See the inner [`Handler::set_former_slug_resolver`].
     pub fn set_former_slug_resolver(&self, resolver: FormerSlugResolver) {
-        self.inner.lock().unwrap().set_former_slug_resolver(resolver);
+        self.inner.lock().set_former_slug_resolver(resolver);
     }
 
     /// See the inner [`Handler::set_display_route_resolver`].
     pub fn set_display_route_resolver(&self, resolver: FormerSlugResolver) {
-        self.inner.lock().unwrap().set_display_route_resolver(resolver);
+        self.inner.lock().set_display_route_resolver(resolver);
     }
 }
 

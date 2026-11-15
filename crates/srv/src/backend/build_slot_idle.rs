@@ -17,10 +17,13 @@
 //! parameter of [`check`], so they are tested without a clock or a running build.
 
 use std::collections::HashSet;
+use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::time::Duration;
 
 use agentmux_common::build_slot::{self as slot, SlotHolder};
+
+use crate::backend::reactive::ReactiveHandler;
 
 /// A holder whose tree used no CPU for this long is idle.
 pub const IDLE_AFTER_SECS: u64 = 10 * 60;
@@ -181,24 +184,39 @@ fn snapshot(sys: &mut sysinfo::System) -> Vec<Proc> {
         .collect()
 }
 
+/// Tells the idle holder's agent, from the watch's own thread. That thread has no Tokio runtime, and a note to an agent
+/// between turns starts a turn, which spawns tasks (the status heartbeat): without a runtime `tokio::spawn` panics, while
+/// the handler lock is held (#2577: on 2026-11-15 that stopped all agent messaging on a machine for two hours). So the
+/// delivery runs inside `runtime`, and a panic in it is logged and costs this note, not the watch.
+fn tell_holder(runtime: &tokio::runtime::Handle, handler: &ReactiveHandler, idle: &Idle, now: u64) {
+    let _in_runtime = runtime.enter();
+    let text = note_text(idle, now);
+    match std::panic::catch_unwind(AssertUnwindSafe(|| handler.deliver_system_note(&idle.holder.agent, &text))) {
+        Ok(Ok(())) => tracing::info!(agent = %idle.holder.agent, idle_min = (now - idle.since) / 60, "build slot: told the holder it is idle"),
+        Ok(Err(e)) => tracing::debug!(agent = %idle.holder.agent, error = %e, "build slot: the idle holder was not told"),
+        Err(_) => tracing::error!(agent = %idle.holder.agent, "build slot: telling the idle holder panicked; the watch goes on"),
+    }
+}
+
 /// Starts the once-a-minute look. Only the srv that runs the host's cleanups does it, so two
 /// AgentMux channels on one machine do not both write the note or message the agent.
 pub fn install() {
     if !crate::backend::build_cache_service::this_srv_may_clean() {
         return;
     }
-    let spawned = std::thread::Builder::new().name("build-slot-idle".into()).spawn(|| {
+    // Called during srv start, inside the runtime: the watch's thread delivers through this handle.
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        tracing::warn!("build slot: idle watch not started: not called from inside the Tokio runtime");
+        return;
+    };
+    let spawned = std::thread::Builder::new().name("build-slot-idle".into()).spawn(move || {
         let (mut watch, mut sys) = (Watch::default(), sysinfo::System::new());
         loop {
             std::thread::sleep(CHECK_EVERY);
             let Some(root) = slot::lock_dir() else { return };
             let now = agentmux_common::time::now_secs_u64();
             let Some(idle) = check(&root, &mut watch, now, || snapshot(&mut sys)).filter(|i| i.notify) else { continue };
-            let handler = crate::backend::reactive::get_global_handler();
-            match handler.deliver_system_note(&idle.holder.agent, &note_text(&idle, now)) {
-                Ok(()) => tracing::info!(agent = %idle.holder.agent, idle_min = (now - idle.since) / 60, "build slot: told the holder it is idle"),
-                Err(e) => tracing::debug!(agent = %idle.holder.agent, error = %e, "build slot: the idle holder was not told"),
-            }
+            tell_holder(&runtime, crate::backend::reactive::get_global_handler(), &idle, now);
         }
     });
     if let Err(e) = spawned {
@@ -328,5 +346,73 @@ mod tests {
         assert!(text.contains("12 min") && text.contains("cargo test -p srv second line"), "got {text}");
         assert!(text.contains("has not stopped it"));
         assert!(text.contains("process id is 4321"), "the note gives the id to end: {text}");
+    }
+
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use crate::backend::reactive::SenderDelivery;
+
+    /// What the watch finds: `lazo`'s build idle since `T0`, to be told now.
+    fn idle_lazo() -> Idle {
+        let holder = SlotHolder { agent: "lazo".into(), command: "cargo test -p srv".into(), pid: Some(700), winpid: Some(700), ..Default::default() };
+        Idle { holder, since: T0, notify: true }
+    }
+
+    /// A handler with `lazo` registered whose sender does what starting a turn does: spawn a task (the status heartbeat).
+    fn handler_whose_delivery_spawns(ran: &Arc<AtomicBool>) -> ReactiveHandler {
+        let handler = ReactiveHandler::new();
+        let ran = ran.clone();
+        handler.set_message_sender(Arc::new(move |_block: &str, _text: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin, _expires: Option<i64>| {
+            let ran = ran.clone();
+            tokio::spawn(async move { ran.store(true, Ordering::SeqCst) });
+            Ok(SenderDelivery::Delivered)
+        }));
+        handler.register_agent("lazo", "block1", None).unwrap();
+        handler
+    }
+
+    fn wait_for(flag: &AtomicBool) -> bool {
+        for _ in 0..200 {
+            if flag.load(Ordering::SeqCst) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        false
+    }
+
+    /// #2577. The watch's thread has no Tokio runtime and the note starts a turn, which spawns a task: that panicked under
+    /// the handler lock on 2026-11-15 and stopped all agent messaging on the machine.
+    #[test]
+    fn the_idle_note_reaches_an_agent_between_turns_from_a_thread_with_no_runtime() {
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        let ran = Arc::new(AtomicBool::new(false));
+        let handler = handler_whose_delivery_spawns(&ran);
+
+        // Without the runtime the delivery panics: this is what the watch did.
+        let without = std::thread::scope(|s| s.spawn(|| handler.deliver_system_note("lazo", "[AgentMux] idle")).join());
+        assert!(without.is_err(), "a delivery that spawns, on a thread with no runtime, panics");
+        assert!(!ran.load(Ordering::SeqCst));
+
+        // The same delivery through `tell_holder` runs the task, and the handler works after both.
+        let rt = runtime.handle().clone();
+        std::thread::scope(|s| s.spawn(|| tell_holder(&rt, &handler, &idle_lazo(), T0 + 11 * 60)).join()).expect("the watch's thread does not panic");
+        assert!(wait_for(&ran), "the task the delivery spawned ran on the runtime");
+        assert_eq!(handler.list_agents().len(), 1, "messaging works");
+        assert!(handler.get_audit_log(5).iter().any(|e| e.success), "and the note was audited as delivered");
+    }
+
+    #[test]
+    fn a_delivery_that_panics_costs_the_watch_only_that_note() {
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        let handler = ReactiveHandler::new();
+        handler.set_message_sender(Arc::new(|_: &str, _: &str, _: &[serde_json::Value], _: &crate::backend::message_origin::MessageOrigin, _: Option<i64>| -> Result<SenderDelivery, String> {
+            panic!("a panic in the controller's delivery")
+        }));
+        handler.register_agent("lazo", "block1", None).unwrap();
+        let rt = runtime.handle().clone();
+        std::thread::scope(|s| s.spawn(|| tell_holder(&rt, &handler, &idle_lazo(), T0 + 11 * 60)).join()).expect("tell_holder keeps the panic to itself");
+        assert_eq!(handler.list_agents().len(), 1, "and the handler still answers");
     }
 }
