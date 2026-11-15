@@ -17,7 +17,9 @@ use serde_json::{json, Value};
 
 use super::browser_actions::{note, How, Kind};
 use super::browser_capture::{CaptureRequest, DOWNLOAD_WAIT, HOST_WAIT};
-use super::browser_capture_shape::{note_miss, Shape};
+use agentmux_common::capture_shape::CaptureShape;
+
+use super::browser_capture_shape::miss;
 use super::browser_attention::Waiting;
 use super::browser_click_approval::{approve_click, ClickRefused};
 use super::ui_handlers::{err_response, proxy_value};
@@ -25,7 +27,7 @@ use super::AppState;
 
 /// What the request reads: its reference (empty when `near` names the text instead), and the shape the
 /// value must have. An error says what to give.
-pub(super) fn what_to_read(req: &CaptureRequest) -> Result<(String, Option<Shape>), String> {
+pub(super) fn what_to_read(req: &CaptureRequest) -> Result<(String, Option<CaptureShape>), String> {
     let ref_ = req.ref_.clone().filter(|r| !r.trim().is_empty());
     let near = req.near.as_deref().map(str::trim).filter(|n| !n.is_empty());
     if near.is_some() && (ref_.is_some() || req.download || req.copy) {
@@ -34,7 +36,7 @@ pub(super) fn what_to_read(req: &CaptureRequest) -> Result<(String, Option<Shape
     if req.download && req.copy {
         return Err("a ref is a file's download button (download) or a copy button (copy), not both".into());
     }
-    let shape = Shape::new(req.prefix.as_deref(), req.pattern.as_deref())?;
+    let shape = CaptureShape::new(req.prefix.as_deref(), req.shape.as_deref(), req.min_length, req.max_length)?;
     match (ref_, near) {
         (Some(r), None) => Ok((r, shape)),
         (None, Some(_)) => Ok((String::new(), shape)),
@@ -53,13 +55,19 @@ pub(super) fn what_to_read(req: &CaptureRequest) -> Result<(String, Option<Shape
 
 /// Ask the host for the value: `{value, origin, ...}`, and the wait that holds a click the person approved
 /// until the host has made it. An error is the answer to give the agent.
-pub(super) async fn read_page(state: &AppState, req: &CaptureRequest, block_id: &str, agent: &str, ref_: &str) -> Result<(Value, Option<Waiting>), Response> {
+pub(super) async fn read_page(
+    state: &AppState,
+    req: &CaptureRequest,
+    block_id: &str,
+    agent: &str,
+    (ref_, shape): (&str, Option<&CaptureShape>),
+) -> Result<(Value, Option<Waiting>), Response> {
     let route = if req.download {
         "capture_download"
     } else if req.copy {
         "capture_copy"
     } else {
-        let body = json!({ "block_id": block_id, "ref": ref_, "near": req.near.as_deref().map(str::trim), "prefix": req.prefix.as_deref().map(str::trim) });
+        let body = json!({ "block_id": block_id, "ref": ref_, "near": req.near.as_deref().map(str::trim), "shape": shape });
         return proxy_value(state, "capture_value", body, HOST_WAIT).await.map(|v| (v, None)).map_err(|(code, e)| err_response(code, e));
     };
     let body = |approved: Option<&Value>| json!({ "block_id": block_id, "ref": ref_, "timeout_ms": req.timeout_ms, "approved_as": approved });
@@ -77,14 +85,24 @@ pub(super) async fn read_page(state: &AppState, req: &CaptureRequest, block_id: 
 }
 
 /// The value has the shape the agent gave, or nothing is saved. The answer says only that it did not.
-pub(super) fn check_shape(shape: Option<&Shape>, value: &str, pane: &str) -> Result<(), String> {
+pub(super) fn check_shape(shape: Option<&CaptureShape>, value: &str, agent: &str) -> Result<(), String> {
     match shape {
         Some(s) if !s.matches(value) => {
-            note_miss(pane);
-            Err("nothing was saved: what the page holds there does not match the prefix or pattern you gave (it is not shown to you)".into())
+            let more = miss(agent);
+            Err(format!("nothing was saved: what the page holds there does not match the shape you gave (it is not shown to you).{more}"))
         }
         _ => Ok(()),
     }
+}
+
+/// A capture with a shape that the host could not read a value for (no value beside the label, none with
+/// the prefix, two of them) is the same answer as a mismatch, and counts as one: the host tests the shape
+/// too, to choose the value, so a failure there says whether one matched.
+pub(super) fn counted(refused: Response, shape: Option<&CaptureShape>, agent: &str) -> Response {
+    if shape.is_some() {
+        let _ = miss(agent);
+    }
+    refused
 }
 
 #[cfg(test)]

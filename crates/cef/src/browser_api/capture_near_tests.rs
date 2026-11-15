@@ -3,6 +3,10 @@
 
 use super::*;
 
+fn prefix(p: &str) -> Option<CaptureShape> {
+    CaptureShape::new(Some(p), None, None, None).unwrap()
+}
+
 const SECRET: &str = "xK9fQ2mLp7ZaB3cD4eF5gH6";
 
 fn n(id: &str, parent: Option<&str>, role: &str, name: &str, backend: i64, kids: &[&str]) -> Value {
@@ -39,8 +43,8 @@ fn the_text_beside_a_label_is_found_without_a_reference() {
 fn a_prefix_picks_a_value_with_no_secret_shape() {
     let plain = "abc-def-ghi";
     assert!(find_value(&page("Token", plain), "Token", None).unwrap_err().contains("no value found"));
-    assert_eq!(find_value(&page("Token", plain), "Token", Some("abc-")), Ok(4));
-    assert!(find_value(&page("Token", plain), "Token", Some("xyz-")).is_err());
+    assert_eq!(find_value(&page("Token", plain), "Token", prefix("abc-").as_ref()), Ok(4));
+    assert!(find_value(&page("Token", plain), "Token", prefix("xyz-").as_ref()).is_err());
 }
 
 #[test]
@@ -66,7 +70,12 @@ fn two_values_or_two_labels_are_refused_without_quoting_the_page() {
     nodes[1]["childIds"] = json!(["3", "4", "5", "6", "7"]);
     let err = find_value(&nodes, "Secret", None).unwrap_err();
     assert!(err.contains("2 values") && err.contains("prefix") && !err.contains(SECRET), "{err}");
-    assert_eq!(find_value(&nodes, "Secret", Some("Zb8")), Ok(7), "a prefix chooses");
+    assert_eq!(find_value(&nodes, "Secret", prefix("Zb8").as_ref()), Ok(7), "a prefix chooses");
+    let by_name = CaptureShape::new(None, Some("digits:6"), None, None).unwrap();
+    let mut codes = page("Code", "482913");
+    codes.push(n("7", Some("2"), "StaticText", "Zb8Yc7Xd6We5Vf4Ug3Th2Si1", 7, &[]));
+    codes[1]["childIds"] = json!(["3", "4", "5", "6", "7"]);
+    assert_eq!(find_value(&codes, "Code", by_name.as_ref()), Ok(4), "a named shape chooses");
     let mut twice = page("Secret", SECRET);
     twice.push(n("8", Some("1"), "StaticText", "Secret", 8, &[]));
     twice[0]["childIds"] = json!(["2", "8"]);

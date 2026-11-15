@@ -17,7 +17,9 @@ fn request() -> CaptureRequest {
         reason: None,
         near: None,
         prefix: None,
-        pattern: None,
+        shape: None,
+        min_length: None,
+        max_length: None,
         copy: false,
     }
 }
@@ -48,24 +50,38 @@ fn a_copy_button_is_a_reference_and_a_label_is_not_a_button() {
 
 #[test]
 fn the_shape_the_agent_gave_is_checked_and_a_refusal_never_quotes_the_value() {
-    let req = CaptureRequest { ref_: Some("e4".into()), prefix: Some("sk_live_".into()), pattern: Some("[A-Za-z0-9_]{20,40}".into()), ..request() };
+    let req = CaptureRequest { ref_: Some("e4".into()), prefix: Some("sk_live_".into()), shape: Some("stripe-secret".into()), ..request() };
     let (_, shape) = what_to_read(&req).unwrap();
-    assert!(check_shape(shape.as_ref(), "sk_live_abcdefghijkl1234", "pane-read-test-a").is_ok());
-    let err = check_shape(shape.as_ref(), "pk_test_hunter2hunter2hunter2", "pane-read-test-a").unwrap_err();
+    assert!(check_shape(shape.as_ref(), "sk_live_abcdefghijkl1234", "agent-read-a").is_ok());
+    let err = check_shape(shape.as_ref(), "pk_test_hunter2hunter2hunter2", "agent-read-a").unwrap_err();
     assert!(err.contains("nothing was saved") && !err.contains("hunter2") && !err.contains("sk_live_"), "{err}");
-    assert!(check_shape(None, "anything", "pane-read-test-a").is_ok(), "no shape, no check");
-    let bad = CaptureRequest { ref_: Some("e4".into()), pattern: Some("(".into()), ..request() };
-    assert!(what_to_read(&bad).is_err());
+    assert!(check_shape(None, "anything", "agent-read-a").is_ok(), "no shape, no check");
 }
 
 #[test]
-fn a_pane_that_keeps_missing_is_refused_a_shape() {
-    let req = CaptureRequest { ref_: Some("e4".into()), prefix: Some("sk_".into()), ..request() };
+fn only_the_named_shapes_are_taken_not_an_expression() {
+    let regex = CaptureRequest { ref_: Some("e4".into()), shape: Some("[a-m].*".into()), ..request() };
+    assert!(what_to_read(&regex).unwrap_err().contains("stripe-secret"));
+    let long = CaptureRequest { ref_: Some("e4".into()), prefix: Some("thirteen_char".into()), ..request() };
+    assert!(what_to_read(&long).is_err(), "a prefix is at most 12 characters");
+    let range = CaptureRequest { ref_: Some("e4".into()), min_length: Some(20), max_length: Some(10), ..request() };
+    assert!(what_to_read(&range).is_err());
+}
+
+#[test]
+fn a_capture_the_host_could_not_find_a_value_for_counts_as_a_miss_and_so_does_a_mismatch() {
+    let req = CaptureRequest { ref_: Some("e4".into()), shape: Some("uuid".into()), ..request() };
     let (_, shape) = what_to_read(&req).unwrap();
-    let pane = "pane-read-test-probe";
-    for _ in 0..5 {
-        assert!(super::super::browser_capture_shape::check_not_probing(pane).is_ok());
-        assert!(check_shape(shape.as_ref(), "nope", pane).is_err());
-    }
-    assert!(super::super::browser_capture_shape::check_not_probing(pane).is_err());
+    let agent = "agent-read-count";
+    // Three misses, of either kind, are allowed; the fourth ends shapes for the agent.
+    let refused = || axum::response::IntoResponse::into_response((axum::http::StatusCode::BAD_REQUEST, "no value found"));
+    let _ = counted(refused(), shape.as_ref(), agent);
+    assert!(check_shape(shape.as_ref(), "nope", agent).is_err());
+    let _ = counted(refused(), shape.as_ref(), agent);
+    let err = check_shape(shape.as_ref(), "nope", agent).unwrap_err();
+    assert!(err.contains("one miss too many"), "{err}");
+    assert!(super::super::browser_capture_shape::start(agent).unwrap_err().contains("refused for you"));
+    // A capture with no shape is never counted.
+    let _ = counted(refused(), None, "agent-read-none");
+    assert!(super::super::browser_capture_shape::start("agent-read-none").is_ok());
 }

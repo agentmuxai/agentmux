@@ -1079,7 +1079,7 @@ async fn vault_fill(
 
 async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiAutomationAuth, pane: Option<String>, arguments: &Value) -> Result<String> {
     let mut body = json!({ "auth": auth, "pane": pane });
-    for k in ["ref", "as", "entry", "download", "reason", "card", "near", "prefix", "pattern", "copy"] {
+    for k in ["ref", "as", "entry", "download", "reason", "card", "near", "prefix", "shape", "min_length", "max_length", "copy"] {
         if let Some(v) = arguments.get(k).filter(|v| !v.is_null()) {
             body[k] = v.clone();
         }

@@ -38,9 +38,9 @@ pub struct CaptureReq {
     /// Text with no reference of its own: the value beside the text that reads this (instead of `ref`).
     #[serde(default)]
     pub near: Option<String>,
-    /// What the value starts with, to choose it among the text around it.
+    /// What the value must be, to choose it among the text around it (srv checks the value again before saving it).
     #[serde(default)]
-    pub prefix: Option<String>,
+    pub shape: Option<agentmux_common::capture_shape::CaptureShape>,
     /// A card's part: the element's whole text or value, as one short line, not a secret picked out of the text
     /// around it (a card number shows as "4242 4242 4242 4242", an expiry as "03/30").
     #[serde(default)]
@@ -99,7 +99,7 @@ pub async fn capture_value_route(
 
 async fn capture(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &CaptureReq) -> Result<Captured, String> {
     let ref_ = match req.near.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
-        Some(label) => super::capture_near::resolve(state, root, &req.block_id, label, req.prefix.as_deref()).await?,
+        Some(label) => super::capture_near::resolve(state, root, &req.block_id, label, req.shape.as_ref()).await?,
         None => req.ref_.clone(),
     };
     let (located, backend, frame) = locate(state, &req.block_id, &ref_, root).await?;
@@ -112,7 +112,7 @@ async fn capture(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: 
         return Err(format!("{ref_} has no text to save"));
     };
     let field = read.get("field").and_then(Value::as_bool).unwrap_or(false);
-    let value = if req.whole { whole(text, &ref_)? } else { pick(text, field, &ref_, req.prefix.as_deref())? };
+    let value = if req.whole { whole(text, &ref_)? } else { pick(text, field, &ref_, req.shape.as_ref())? };
     Ok(Captured { value, origin: located.origin, page: located.page, ref_ })
 }
 
@@ -148,14 +148,14 @@ async fn mark(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Ca
 }
 
 /// The secret in what was read: a field's whole value; in text, its one token with
-/// a one-time secret's shape, or starting with the `prefix` the agent gave (text like
-/// "Value: <secret>" is more than the secret).
-fn pick(text: &str, field: bool, ref_: &str, prefix: Option<&str>) -> Result<String, String> {
+/// a one-time secret's shape, or the shape the agent gave (text like "Value: <secret>" is
+/// more than the secret).
+fn pick(text: &str, field: bool, ref_: &str, shape: Option<&agentmux_common::capture_shape::CaptureShape>) -> Result<String, String> {
     check(text, ref_)?;
     if field || !text.chars().any(char::is_whitespace) {
         return Ok(text.to_string());
     }
-    let tokens: Vec<&str> = text.split_whitespace().filter(|t| super::capture_near::is_value_token(t, prefix, false)).collect();
+    let tokens: Vec<&str> = text.split_whitespace().filter(|t| super::capture_near::is_value_token(t, shape, false)).collect();
     match tokens.as_slice() {
         [one] => Ok(one.to_string()),
         [] => Err(format!("{ref_} holds text, not one secret: capture the element that holds only the value (its own line in a scoped snapshot)")),

@@ -77,11 +77,15 @@ pub(crate) struct CaptureRequest {
     /// Text with no reference of its own: the value shown beside this label. Instead of `ref`.
     #[serde(default)]
     pub(super) near: Option<String>,
-    /// What the value must start with, and a regular expression all of it must match, or nothing is saved.
+    /// What the value must be, or nothing is saved: a short prefix, one of the named shapes, a length range.
     #[serde(default)]
     pub(super) prefix: Option<String>,
     #[serde(default)]
-    pub(super) pattern: Option<String>,
+    pub(super) shape: Option<String>,
+    #[serde(default)]
+    pub(super) min_length: Option<u32>,
+    #[serde(default)]
+    pub(super) max_length: Option<u32>,
     /// The reference is the page's own copy button: its value is taken from the page's copy, never the clipboard.
     #[serde(default)]
     pub(super) copy: bool,
@@ -198,12 +202,13 @@ async fn handle_browser_capture(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
+    let agent: String = req.auth.agent_id.chars().take(64).collect();
+    // A shape is a question about a value the agent can't read: each one is counted, match or miss.
     if shape.is_some() {
-        if let Err(e) = super::browser_capture_shape::check_not_probing(&block_id) {
+        if let Err(e) = super::browser_capture_shape::start(&agent) {
             return err_response(StatusCode::TOO_MANY_REQUESTS, e);
         }
     }
-    let agent: String = req.auth.agent_id.chars().take(64).collect();
     let agent_pane = super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth);
     let rule = match rule_of(&req) {
         Ok(r) => r,
@@ -224,9 +229,9 @@ async fn handle_browser_capture(
     };
 
     // Held until the approved click is made, if one waits for the person.
-    let (read, _approved_click) = match read_page(&state, &req, &block_id, &agent, &ref_).await {
+    let (read, _approved_click) = match read_page(&state, &req, &block_id, &agent, (&ref_, shape.as_ref())).await {
         Ok(r) => r,
-        Err(refused) => return refused,
+        Err(refused) => return super::browser_capture_read::counted(refused, shape.as_ref(), &agent),
     };
     let file = read.get("name").and_then(Value::as_str).map(|n| n.chars().take(200).collect::<String>());
     // Text found beside a label has a reference now, which marks it once it is saved.
@@ -235,7 +240,7 @@ async fn handle_browser_capture(
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::BAD_GATEWAY, e),
     };
-    if let Err(e) = check_shape(shape.as_ref(), &value, &block_id) {
+    if let Err(e) = check_shape(shape.as_ref(), &value, &agent) {
         return err_response(StatusCode::UNPROCESSABLE_ENTITY, e);
     }
     if origin.is_empty() {
