@@ -84,6 +84,12 @@ pub(crate) fn note_world(browser_id: i32, session: Option<&str>, frame: &str, co
     list.push(World { session: session.map(str::to_string), context, frame: frame.to_string(), origin: origin.to_string() });
 }
 
+/// The listener worlds of `browser_id`'s frames: the DevTools session that made each (`None` for the
+/// page's own) and its execution context.
+pub(super) fn worlds_of(browser_id: i32) -> Vec<(Option<String>, i64)> {
+    WORLDS.lock().get(&browser_id).map(|l| l.iter().map(|w| (w.session.clone(), w.context)).collect()).unwrap_or_default()
+}
+
 /// Keep only the worlds of frames still in the page.
 pub(crate) fn keep_frames(browser_id: i32, live: &std::collections::HashSet<String>) {
     if let Some(list) = WORLDS.lock().get_mut(&browser_id) {

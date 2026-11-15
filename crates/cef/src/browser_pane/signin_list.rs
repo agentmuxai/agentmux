@@ -74,6 +74,17 @@ pub(crate) fn send(state: Arc<AppState>, browser_id: i32, session: Option<String
     let _ = tx.send(Report { method, args, session, context });
 }
 
+/// srv closed the list by itself (a pick made by a click in the pane's own UI, a strong password made
+/// there): tell every listener world of `browser_id` that no list shows and nothing is selected, so
+/// the next Up, Down, Escape or Enter in the page's field is the page's again. Nothing srv could have
+/// answered a report of the listener reaches it otherwise.
+pub(crate) async fn clear(browser_id: i32) {
+    let script = state_script(&Value::Null);
+    for (session, context) in super::signin_notice::worlds_of(browser_id) {
+        super::side_button_cdp::eval_in(browser_id, session.as_deref(), context, &script).await;
+    }
+}
+
 /// The pane's browser closed.
 pub(crate) fn forget(browser_id: i32) {
     SENDERS.lock().remove(&browser_id);
@@ -90,6 +101,19 @@ mod tests {
         assert_eq!(state_script(&json!({ "shown": true, "cursor": false })), "window.__agentmuxList={shown:true,cursor:false}");
         assert_eq!(state_script(&json!({ "shown": true, "cursor": true })), "window.__agentmuxList={shown:true,cursor:true}");
         assert_eq!(state_script(&json!({})), "window.__agentmuxList={shown:false,cursor:false}");
+    }
+
+    #[test]
+    fn a_close_srv_made_itself_is_told_to_every_listener_world_as_nothing_showing() {
+        use super::super::signin_notice::{forget, note_world, worlds_of};
+        let browser = 7_100_001;
+        note_world(browser, None, "main", 4, "https://a.example.com");
+        note_world(browser, Some("frame-session"), "child", 9, "https://b.example.com");
+        assert_eq!(worlds_of(browser), vec![(None, 4), (Some("frame-session".to_string()), 9)]);
+        // What `clear` runs in each of them: no list, no selected row.
+        assert_eq!(state_script(&Value::Null), "window.__agentmuxList={shown:false,cursor:false}");
+        forget(browser);
+        assert!(worlds_of(browser).is_empty());
     }
 
     #[test]
