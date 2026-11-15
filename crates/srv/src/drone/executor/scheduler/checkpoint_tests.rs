@@ -102,7 +102,11 @@ async fn drain(mut events: mpsc::UnboundedReceiver<RunEvent>) -> Drained {
 }
 
 async fn run_kept_on(sink: Arc<MemorySink>, graph: DroneGraph, trigger: Value) -> Kept {
-    let handle = run_drone("d".to_string(), graph, trigger, (None, Some(Persist { sink: sink.clone(), graph: graph_ref() }))).await.unwrap();
+    run_kept_capped(sink, graph, trigger, None).await
+}
+
+async fn run_kept_capped(sink: Arc<MemorySink>, graph: DroneGraph, trigger: Value, run_cap_usd: Option<f64>) -> Kept {
+    let handle = run_drone("d".to_string(), graph, trigger, (run_cap_usd, Some(Persist { sink: sink.clone(), graph: graph_ref() }))).await.unwrap();
     let run_id = handle.run_id.clone();
     let (result, done, steps, done_at) = drain(handle.events).await;
     Kept { result, done, steps, done_at, sink, run_id }
@@ -409,6 +413,20 @@ async fn a_run_told_to_skip_the_step_goes_on_with_the_output_it_was_given_as_out
     assert_eq!(last.bits["call"], (true, false), "what was supplied is outside text");
     assert_eq!(last.bits["done"], (true, false), "and so is what is made of it");
     assert!(last.frontier.running.is_empty());
+}
+
+#[tokio::test]
+async fn the_cost_a_skip_supplies_counts_against_the_runs_cap() {
+    let graph = calling_then_answering();
+    // The cap is the run's own: it is kept in the checkpoint, so a restart finds it.
+    let kept = run_kept_capped(Arc::new(MemorySink::default()), graph.clone(), Value::Null, Some(5.0)).await;
+    let mut p = park(&kept, &graph, 3);
+    attention(&mut p).await;
+    decide(&p.run_id, Decision::Skip { output: json!({ "value": "given", "cost_usd": 5.0 }) }).unwrap();
+    let why = p.task.await.unwrap().unwrap_err();
+    assert!(why.contains("the run spent $5.00, its cap of $5.00"), "{why}");
+    let events = the_rest(&mut p.events).await;
+    assert!(!events.iter().any(|e| matches!(e, RunEvent::BlockStarted { block_id, .. } if block_id == "done")), "the next block did not start");
 }
 
 #[tokio::test]
