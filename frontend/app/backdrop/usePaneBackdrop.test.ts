@@ -31,6 +31,30 @@ function mount(blockId: string, meta: () => { backdrop?: unknown; bg?: unknown }
     });
 }
 
+/** A `(forced-colors: active)` media query the test can flip, counting its change listeners. */
+function fakeForcedColors(initial: boolean) {
+    let matches = initial;
+    const listeners = new Set<(e: { matches: boolean }) => void>();
+    Object.defineProperty(window, "matchMedia", {
+        configurable: true,
+        writable: true,
+        value: (q: string) => ({
+            get matches() {
+                return q === "(forced-colors: active)" && matches;
+            },
+            addEventListener: (_: string, fn: (e: { matches: boolean }) => void) => listeners.add(fn),
+            removeEventListener: (_: string, fn: (e: { matches: boolean }) => void) => listeners.delete(fn),
+        }),
+    });
+    return {
+        set(next: boolean) {
+            matches = next;
+            for (const fn of [...listeners]) fn({ matches: next });
+        },
+        listeners: () => listeners.size,
+    };
+}
+
 describe("usePaneBackdrop", () => {
     it("registers nothing for a pane with no backdrop", () => {
         const r = mount("hb-none", () => ({}));
@@ -82,14 +106,41 @@ describe("usePaneBackdrop", () => {
         expect(r()?.id).toBe("builtin:teal");
     });
 
-    it("has no backdrop while forced colours are on", () => {
-        Object.defineProperty(window, "matchMedia", {
-            configurable: true,
-            writable: true,
-            value: (q: string) => ({ matches: q === "(forced-colors: active)" }),
-        });
+    it("has no backdrop while forced colours are on, and follows the system turning them on and off while mounted", () => {
+        const q = fakeForcedColors(true);
         const r = mount("hb-forced", () => ({ backdrop: teal }));
         expect(r()).toBeUndefined();
         expect(getPaneScope("hb-forced")()).toBeUndefined();
+        q.set(false);
+        expect(r()?.id).toBe("builtin:teal");
+        expect(getPaneScope("hb-forced")()?.["--surface"]).toMatch(/^#[0-9a-f]{6}$/);
+        q.set(true);
+        expect(r()).toBeUndefined();
+        expect(getPaneScope("hb-forced")()).toBeUndefined();
+    });
+
+    it("stops listening for forced colours when the pane is gone", () => {
+        const q = fakeForcedColors(false);
+        const dispose = createRoot((d) => {
+            usePaneBackdrop("hb-listen", () => ({ backdrop: teal }));
+            return d;
+        });
+        expect(q.listeners()).toBe(1);
+        dispose();
+        expect(q.listeners()).toBe(0);
+    });
+
+    it("a second frame for the block (owner: false) resolves the backdrop but never registers or releases the live scope", () => {
+        mount("hb-owner", () => ({ backdrop: teal }));
+        const live = getPaneScope("hb-owner")();
+        expect(live?.["--surface"]).toMatch(/^#[0-9a-f]{6}$/);
+        const dispose = createRoot((d) => {
+            const r = usePaneBackdrop("hb-owner", () => ({ backdrop: { ...teal, id: "crimson" } }), { owner: false });
+            expect(r()?.id).toBe("builtin:crimson");
+            return d;
+        });
+        expect(getPaneScope("hb-owner")()).toEqual(live);
+        dispose();
+        expect(getPaneScope("hb-owner")()).toEqual(live);
     });
 });
