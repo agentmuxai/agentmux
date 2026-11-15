@@ -133,9 +133,47 @@ fn host_of(origin: &str) -> String {
     reqwest::Url::parse(origin).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| origin.to_string())
 }
 
+/// Whether a use that has no "Always" grant may ask the person.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Asking {
+    /// A run the person can see: the first use asks (the API block).
+    Person,
+    /// A background poll: nobody is at the desk, and a poll every few minutes would stack up cards that silence then
+    /// denies, so with no grant it fails at once, with no card and no line in the Vault's Activity. The grant is given
+    /// where a person is: a manual run of the drone, answered "Always".
+    Never,
+}
+
+/// How many polls a Vault Activity line stands for: one line per this long, with the count in it.
+const POLL_LINE_EVERY_MS: i64 = 3_600_000;
+
+/// When a poll last wrote its Activity line, and how many polls since, per drone and entry.
+fn poll_lines() -> &'static std::sync::Mutex<std::collections::HashMap<(String, String), (i64, u32)>> {
+    static LINES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<(String, String), (i64, u32)>>> = std::sync::OnceLock::new();
+    LINES.get_or_init(Default::default)
+}
+
+/// Counts a poll's use of `entry` and says whether this one writes the Activity line, and for how many polls.
+fn poll_line_due(drone_id: &str, entry_id: &str, now_ms: i64) -> Option<u32> {
+    let mut map = poll_lines().lock().unwrap_or_else(|p| p.into_inner());
+    let slot = map.entry((drone_id.to_string(), entry_id.to_string())).or_insert((i64::MIN, 0));
+    slot.1 += 1;
+    if now_ms.saturating_sub(slot.0) < POLL_LINE_EVERY_MS {
+        return None;
+    }
+    let polls = slot.1;
+    *slot = (now_ms, 0);
+    Some(polls)
+}
+
 /// Resolves, asks for and reads the entry `entry` for a call to `origin` by drone `drone_id`.
 /// Nothing is read and nothing is sent unless this returns `Ok`.
 pub(crate) async fn resolve(state: &AppState, drone_id: &str, entry: &str, origin: &str) -> Result<Resolved, String> {
+    resolve_with(state, drone_id, entry, origin, Asking::Person).await
+}
+
+/// [`resolve`], saying whether a use with no grant may ask the person.
+pub(crate) async fn resolve_with(state: &AppState, drone_id: &str, entry: &str, origin: &str, asking: Asking) -> Result<Resolved, String> {
     let entry = entry_text_ok(entry)?.to_string();
     let who = actor(drone_id);
     let (store, e, a) = (state.identity_store.clone(), entry, who.clone());
@@ -171,6 +209,16 @@ pub(crate) async fn resolve(state: &AppState, drone_id: &str, entry: &str, origi
         let (store, id, k) = (state.identity_store.clone(), target.id.clone(), key.clone());
         tokio::task::spawn_blocking(move || store.vault_grant_check(&id, &k).unwrap_or(false)).await.unwrap_or(false)
     };
+    if !granted && asking == Asking::Never {
+        // Nothing is asked and nothing is written to the Activity: a poll that runs every few minutes would fill it.
+        return Err(match &mismatch {
+            Some(why) => format!("{why}: a poll can't ask, so it doesn't send it; run the drone by hand and choose Allow once"),
+            None => format!(
+                "the drone {drone_id} has no \"Always\" for {} at {origin}, and a poll can't ask: run the drone by hand once, answer \"Always\", then the poll goes ahead",
+                target.label
+            ),
+        });
+    }
     if !granted {
         let request = UseRequest {
             id: uuid::Uuid::new_v4().to_string(),
@@ -219,7 +267,18 @@ pub(crate) async fn resolve(state: &AppState, drone_id: &str, entry: &str, origi
         record("failed");
         return Err(format!("{} is too short to send: the response couldn't be cleaned of it", target.label));
     }
-    record("done");
+    if asking == Asking::Never {
+        // One line an hour for a poll, with the number of polls it stands for; never the value.
+        if let Some(polls) = poll_line_due(drone_id, &target.id, agentmux_common::time::now_ms()) {
+            vault::record_line(
+                &state.identity_store,
+                vault::Line { entry_id: &target.id, label: &target.label, actor: &who, action: CALLED, target: origin, outcome: "done", reason: &format!("a poll, {polls} time(s) since the last line") },
+            );
+            super::vault_handlers::publish(state);
+        }
+    } else {
+        record("done");
+    }
     let (store, id) = (state.identity_store.clone(), target.id.clone());
     let _ = tokio::task::spawn_blocking(move || store.vault_touch(&id, agentmux_common::time::now_ms())).await;
     let scrubber = Scrubber::new(&[(target.id.clone(), value.to_string())]);
