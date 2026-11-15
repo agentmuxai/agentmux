@@ -82,6 +82,45 @@ fn the_listener_reports_seven_kinds() {
 }
 
 #[test]
+fn the_listener_reports_what_the_person_does_in_a_login_field() {
+    let open = serde_json::from_str::<Notice>(r#"{"kind":"open","role":"username","text":"al"}"#);
+    assert!(matches!(&open, Ok(Notice::Open { role, text: Some(t) }) if role == "username" && t.0.as_str() == "al"));
+    assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"open","role":"password"}"#), Ok(Notice::Open { text: None, .. })), "no text for a password field");
+    assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"key","key":"ArrowDown"}"#), Ok(Notice::Key { .. })));
+    assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"close"}"#), Ok(Notice::Close)));
+    assert!(serde_json::from_str::<Notice>(r#"{"kind":"key"}"#).is_err(), "a key without its name");
+}
+
+#[test]
+fn a_report_about_the_list_goes_to_srv_by_its_own_method_with_the_frames_origin_from_the_host() {
+    let (method, args) = list_report(serde_json::from_str(r#"{"kind":"open","role":"username","text":"al"}"#).unwrap(), "b1", "https://shop.example.com");
+    assert_eq!(method, "FieldOpen");
+    assert_eq!(args, serde_json::json!({ "block_id": "b1", "origin": "https://shop.example.com", "role": "username", "text": "al" }));
+    let (method, args) = list_report(serde_json::from_str(r#"{"kind":"key","key":"Escape"}"#).unwrap(), "b1", "https://shop.example.com");
+    assert_eq!((method, args), ("FieldKey", serde_json::json!({ "block_id": "b1", "key": "Escape" })));
+    let (method, args) = list_report(serde_json::from_str(r#"{"kind":"close"}"#).unwrap(), "b1", "https://shop.example.com");
+    assert_eq!((method, args), ("FieldClose", serde_json::json!({ "block_id": "b1" })));
+}
+
+#[test]
+fn the_list_asks_only_for_the_text_of_a_user_name_field_and_only_on_the_persons_own_events() {
+    // The one text a report carries is a user name field's, clipped; a password field's value is never read there.
+    assert_eq!(SCRIPT.matches(r#"text: role === "username" ? el.value.slice(0, 64) : undefined"#).count(), 1);
+    let start = SCRIPT.find("const loginRole").expect("the list's rules");
+    let end = SCRIPT.find("const watchLeaving").expect("what follows them");
+    let list = &SCRIPT[start..end];
+    assert!(!list.contains("password.value") && !list.contains("pw.value"), "no password value in the list's code");
+    assert_eq!(list.matches("isTrusted").count(), 3, "pointerdown, keydown and input each count only the person's own");
+}
+
+#[test]
+fn the_list_is_asked_for_only_in_a_login_field_the_listener_already_knows() {
+    for needle in ["const loginRole", "newPasswordField(el)", "changeField(group) === el", "passwords.some(newPasswordField)", "window.__agentmuxList"] {
+        assert!(SCRIPT.contains(needle), "{needle}");
+    }
+}
+
+#[test]
 fn the_listener_reads_a_password_change_by_its_new_password_and_never_sends_the_current_one() {
     for needle in ["const changeField", r#"kind: "change""#, "password: changed.value", r#"autocomplete(p).includes("current-password")"#] {
         assert!(SCRIPT.contains(needle), "{needle}");

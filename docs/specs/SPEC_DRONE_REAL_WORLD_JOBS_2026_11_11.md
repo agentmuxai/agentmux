@@ -85,6 +85,17 @@ The node shows a **tier badge** (Local, LAN, Cloud) and, for a cloud kind, what 
 
 Any trigger may carry `delay: <minutes>`: the fire is scheduled at `event time + delay` as an ordinary `scheduled` ledger row (Jobs spec §3.1), so a restart does not lose it and no run has to wait inside the executor.
 
+#### 3.2.0 A poll of a site (`query: "api"`), as built
+
+The poll's check can be a GET of a site's list with an optional Vault credential, beside the four state queries. The filter: `url` (https, written out: no `{{reference}}`, no user name), `auth` (as the API block's: `{ "vault": "<entry>", "as": "bearer" }`), `headers` (plain text), `items` (the dotted path to the list in the answer, empty when the answer is the list), `id` (the dotted path of an item's id, `id` when left out), `limit` (1 to 200, 100 when left out), `every_minutes` (**5 or more**), `include_existing`. Each item is one event, keyed by its id; the run reads `{{trigger.item}}` (the item, whole) and `{{trigger.key}}`.
+
+What keeps it to one credentialed-request path and keeps an unattended job from asking (the platform lead's conditions, 2026-11-15):
+1. **One function.** `poll` calls the API block's own request code (`api::run`), not a second HTTP client: the same site binding (the URL's origin is what the grant is for), no `Host` override, no header the credential also sets, the same 8 MiB cap and timeout. A test proves a poll and the block refuse the same bad request in the same words.
+2. **GET only.** The filter has no `method` or `body`. A call with a credential follows no redirect, so a 3xx is an error that says so; no credential is sent to another origin. A poll asks a site at most every 5 minutes.
+3. **A background poll never asks.** With no "Always" the person gave this drone for this site and part, the poll fails at once with a clear error and raises no card, so a poll every few minutes cannot stack up prompts that silence then denies. The grant is given where a person is: a manual run of the drone's API node, answered "Always" (and the turn-on prompt when phase 4 lands). A key saved for another site is refused too, and an earlier "Always" does not cover it.
+4. **The Activity does not flood.** A poll writes one Vault Activity line an hour per drone and entry (action "called an API", the actor `drone:<id>`, the number of polls it stands for), never the value. The ledger and the logs keep ids and the items path's output only, never headers.
+5. **What comes back is outside text,** handled as the API block's output is: the taint rules of phase 4 apply to a poll's items as to the block's response, and `{{… | jsonstr}}` is how a value goes into a JSON body.
+
 #### 3.2.1 App events
 
 Normalised names, with the payload's typed fields in brackets. The first four exist on the broker today; the rest are small new publishers on it.

@@ -150,6 +150,10 @@ pub async fn signin_fill_route(State(state): State<Arc<AppState>>, headers: Head
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    // srv closed the list as it started this: the page's listener is told, so its keys are the page's again.
+    if let Some(id) = cdp.browser_id() {
+        crate::browser_pane::signin_list::clear(id).await;
+    }
     let result = fill(&mut cdp, &req).await;
     let _ = cdp.close().await;
     match result {

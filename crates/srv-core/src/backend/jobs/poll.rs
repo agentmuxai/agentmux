@@ -45,9 +45,15 @@ use crate::backend::storage::cron::CronJob;
 use crate::backend::storage::store::Store;
 
 /// The questions a poll may ask.
-pub const QUERIES: [&str; 4] = ["tasks", "jobs", "agents", "lan_peers"];
+pub const QUERIES: [&str; 5] = ["tasks", "jobs", "agents", "lan_peers", "api"];
 pub const MIN_EVERY_MINUTES: u64 = 1;
 pub const MAX_EVERY_MINUTES: u64 = 24 * 60;
+/// How often a poll may ask a site outside AgentMux: not more than every few minutes, so a drone cannot spend a site's
+/// rate limit (or the person's API quota) in a minute.
+pub const MIN_API_EVERY_MINUTES: u64 = 5;
+/// How many items a poll of `api` keeps when the filter gives no `limit`, and the most it ever keeps.
+pub const API_DEFAULT_ITEMS: usize = 100;
+pub const API_MAX_ITEMS: usize = 200;
 /// The most tasks and runs the App query returns (its own caps), which is what a poll asks for unless `limit` says less.
 const MAX_TASKS: u64 = 200;
 const MAX_RUNS: u64 = 100;
@@ -74,6 +80,8 @@ fn shape_of(query: &str) -> Option<Shape> {
         "jobs" => Some(Shape { items: "runs", id: &["id"] }),
         "agents" => Some(Shape { items: "problems", id: &["agent", "state"] }),
         "lan_peers" => Some(Shape { items: "peers", id: &["host"] }),
+        // `api_poll::ask` has already put each item under `item` with its id: the id is the item's own path, not a list of fields.
+        "api" => Some(Shape { items: "items", id: &["id"] }),
         _ => None,
     }
 }
@@ -83,6 +91,7 @@ fn own_keys(query: &str) -> &'static [&'static str] {
     match query {
         "tasks" => &["holder", "state", "pr", "limit"],
         "jobs" => &["job", "limit"],
+        "api" => &["url", "auth", "headers", "items", "id", "limit"],
         _ => &[],
     }
 }
@@ -117,6 +126,51 @@ pub fn validate_filter(filter: &Map<String, Value>) -> Result<(), String> {
     }
     if filter.get("limit").is_some_and(|v| !v.as_u64().is_some_and(|n| (1..=200).contains(&n))) {
         return Err("trigger: poll filter \"limit\" is a whole number of 1 to 200".to_string());
+    }
+    if query == "api" {
+        validate_api_filter(filter)?;
+    }
+    Ok(())
+}
+
+/// What a poll of `api` takes: a site written out in the job, asked at most every few minutes, with a credential or none.
+fn validate_api_filter(filter: &Map<String, Value>) -> Result<(), String> {
+    let url = filter.get("url").and_then(Value::as_str).unwrap_or("").trim();
+    if url.is_empty() {
+        return Err("trigger: a poll of api has url, the https address of the list".to_string());
+    }
+    if url.contains("{{") {
+        return Err("trigger: a poll of api writes its url out: no {{reference}} in it".to_string());
+    }
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("trigger: the poll's url is not an address: {e}"))?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none() || !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("trigger: a poll of api calls an https address with no user name or password in it".to_string());
+    }
+    if filter.get("every_minutes").and_then(Value::as_u64).is_some_and(|n| n < MIN_API_EVERY_MINUTES) {
+        return Err(format!("trigger: a poll of api asks at most every {MIN_API_EVERY_MINUTES} minutes: every_minutes is {MIN_API_EVERY_MINUTES} or more"));
+    }
+    if let Some(auth) = filter.get("auth").filter(|a| !a.is_null()) {
+        // The API block checks the rest (the header name, the entry) when it runs; the shape is checked here.
+        let obj = auth.as_object().ok_or("trigger: poll filter \"auth\" is { \"vault\": \"<entry>\", \"as\": \"bearer\" }")?;
+        if let Some(key) = obj.keys().find(|k| !matches!(k.as_str(), "vault" | "as")) {
+            return Err(format!("trigger: poll auth has no {key:?}: it takes vault and as"));
+        }
+        if !obj.get("vault").and_then(Value::as_str).is_some_and(|v| !v.trim().is_empty() && !v.contains("{{")) {
+            return Err("trigger: poll auth names its Vault entry in vault, written out".to_string());
+        }
+    }
+    if let Some(headers) = filter.get("headers") {
+        let Some(obj) = headers.as_object() else { return Err("trigger: poll filter \"headers\" is an object of text".to_string()) };
+        for (name, value) in obj {
+            if !value.is_string() || value.as_str().is_some_and(|v| v.contains("{{")) {
+                return Err(format!("trigger: poll header {name:?} is plain text, with no {{{{reference}}}}"));
+            }
+        }
+    }
+    for key in ["items", "id"] {
+        if filter.get(key).is_some_and(|v| !v.is_string()) {
+            return Err(format!("trigger: poll filter {key:?} is a dotted path, like data.items"));
+        }
     }
     Ok(())
 }
@@ -153,6 +207,9 @@ fn plan_of(job: &CronJob) -> Option<Plan> {
         Some("jobs") => {
             ask.entry("limit").or_insert(json!(MAX_RUNS));
         }
+        Some("api") => {
+            ask.entry("limit").or_insert(json!(API_DEFAULT_ITEMS));
+        }
         _ => {}
     }
     let include_existing = ask.remove("include_existing").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -185,7 +242,9 @@ fn items_of(query: &str, answer: &Value) -> Vec<(String, Value)> {
         .filter_map(|item| {
             let parts = shape.id.iter().map(|f| part(item, f)).collect::<Option<Vec<_>>>()?;
             let id = parts.join(":");
-            seen.insert(id.clone()).then(|| (id, item.clone()))
+            // An `api` answer wraps each item with its id; the run is given the item itself.
+            let item = if query == "api" { item.get("item").cloned()? } else { item.clone() };
+            seen.insert(id.clone()).then(|| (id, item))
         })
         .collect()
 }
@@ -243,7 +302,13 @@ pub async fn poll_due(scheduler: &CronScheduler, all: &[CronJob], check: &Check,
             continue;
         }
         st.next_due_ms = now + plan.every_ms;
-        let answer = match check(plan.ask.clone()).await {
+        let mut question = plan.ask.clone();
+        if plan.query == "api" {
+            // Who a Vault credential is granted to: the drone this job runs. Not part of the question's signature.
+            let drone = (job.action_kind == super::definition::action_kind::DRONE).then(|| job.action.get("drone_id").and_then(Value::as_str)).flatten();
+            question.insert("drone_id".to_string(), json!(drone.unwrap_or("")));
+        }
+        let answer = match check(question).await {
             Ok(answer) => answer,
             Err(e) => {
                 tracing::warn!(job_id = %job.id, query = %plan.query, error = %e, "jobs: a poll's question failed; asking again next time");
