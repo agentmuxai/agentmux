@@ -14,6 +14,9 @@ export type SignInProblem = "none" | "ended";
 /** A route that needs a signed-in browser and costs the server nothing: a 401 here means the sign-in is not accepted. */
 const PROBE = "/api/bus/agents";
 
+/** How long the server is given to answer: under the five seconds app-init waits for the host API. */
+const PROBE_LIMIT_MS = 3000;
+
 /**
  * What is wrong with this browser's sign-in, or `null` when nothing is known to be (including when the server cannot be
  * asked: that is a different failure, and the usual startup recovery handles it). The server is always asked, because a
@@ -24,13 +27,19 @@ export async function signInProblem(
     token: string | undefined,
     fetchImpl: (input: string, init: RequestInit) => Promise<{ status: number }> = (input, init) => fetch(input, init)
 ): Promise<SignInProblem | null> {
+    // The app's own start waits five seconds for `window.api` (app-init.ts) and caches a failure, and `window.api` is
+    // installed only after this answers: a server that is slower than that is not asked any longer.
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), PROBE_LIMIT_MS);
     try {
         const headers: Record<string, string> = token ? { [SESSION_HEADER]: token } : {};
-        const resp = await fetchImpl(PROBE, { headers, credentials: "same-origin" });
+        const resp = await fetchImpl(PROBE, { headers, credentials: "same-origin", signal: ctl.signal });
         if (resp.status !== 401) return null;
         return token ? "ended" : "none";
     } catch {
         return null;
+    } finally {
+        clearTimeout(timer);
     }
 }
 

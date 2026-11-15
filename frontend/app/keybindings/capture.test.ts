@@ -60,7 +60,7 @@ describe("captureKey", () => {
         const altGr = (k: string) => k === "AltGraph";
         // Windows: AltGr+Q types "@" on a German layout and reports Ctrl+Alt.
         expect(captureKey(press("@", "KeyQ", { ctrlKey: true, altKey: true, getModifierState: altGr }))).toEqual({ ignored: "altgr" });
-        expect(captureKey(press("€", "KeyE", { ctrlKey: true, altKey: true, getModifierState: altGr }))).toEqual({ ignored: "altgr" });
+        expect(captureKey(press("â‚¬", "KeyE", { ctrlKey: true, altKey: true, getModifierState: altGr }))).toEqual({ ignored: "altgr" });
         // Ctrl+Alt+Q on a layout with no AltGr is a shortcut, and so is a Latin letter typed with AltGr down.
         expect(captureKey(press("q", "KeyQ", { ctrlKey: true, altKey: true }))).toEqual({ key: "ctrl+alt+q" });
         expect(captureKey(press("q", "KeyQ", { ctrlKey: true, altKey: true, getModifierState: altGr }))).toEqual({ key: "ctrl+alt+q" });
