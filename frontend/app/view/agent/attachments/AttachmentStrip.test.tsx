@@ -8,14 +8,20 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const info = vi.hoisted(() => ({ ask: vi.fn() }));
+
 vi.mock("@/util/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://x" }));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AttachmentsInfoCommand: (_c: unknown, d: unknown) => info.ask(d) } }));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { AttachmentStrip } from "./AttachmentStrip";
 
 let report: (width: number) => void = () => {};
 
 beforeEach(() => {
+    info.ask.mockReset();
+    info.ask.mockResolvedValue({ items: [] });
     class FakeObserver {
         constructor(cb: (entries: { contentRect: { width: number } }[]) => void) {
             report = (width) => cb([{ contentRect: { width } }]);
@@ -56,5 +62,35 @@ describe("AttachmentStrip layout", () => {
         report(560);
         expect(tiles(container).every((el, i) => el === before[i])).toBe(true);
         expect(more(container)).toBe("+3");
+    });
+});
+
+describe("AttachmentStrip details", () => {
+    const pdf = { id: "b".repeat(64), name: "report.pdf" };
+
+    it("asks for the details of the shown ids once, and gives a PDF's tile its page count", async () => {
+        info.ask.mockResolvedValue({ items: [{ id: pdf.id, kind: "pdf", page_count: 3 }] });
+        const { container } = render(() => <AttachmentStrip attachments={[pdf]} />);
+        report(600);
+        const tile = container.querySelector("li.agent-attachment-tile");
+        await vi.waitFor(() => expect(container.querySelector(".agent-attachment-tile__pages")?.textContent).toContain("3"));
+        expect(info.ask).toHaveBeenCalledTimes(1);
+        expect(info.ask).toHaveBeenCalledWith({ ids: [pdf.id] });
+        // The tile was not mounted again when the details arrived.
+        expect(container.querySelector("li.agent-attachment-tile")).toBe(tile);
+    });
+
+    it("leaves the tile as it was when the details can't be had", async () => {
+        info.ask.mockRejectedValue(new Error("srv down"));
+        const { container } = render(() => <AttachmentStrip attachments={[pdf]} />);
+        report(600);
+        await Promise.resolve();
+        expect(container.querySelector("li.agent-attachment-tile")).not.toBeNull();
+        expect(container.querySelector(".agent-attachment-tile__pages")).toBeNull();
+    });
+
+    it("does not ask for an attachment that is already gone", () => {
+        render(() => <AttachmentStrip attachments={[{ name: "gone.pdf" }]} />);
+        expect(info.ask).not.toHaveBeenCalled();
     });
 });
