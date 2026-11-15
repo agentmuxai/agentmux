@@ -8,8 +8,11 @@
 # it); one that does not is refused with exit status 1, and the caller must not start it. Run it
 # on every binary of the build under test, then start the build with AGENTMUX_TEST_OFFSCREEN=1:
 #
-#   scripts/offscreen-check.sh ./agentmux-launcher ./runtime/agentmux-cef-host \
+#   scripts/offscreen-check.sh ./agentmux-launcher ./runtime/agentmux-cef.dll \
 #     && AGENTMUX_TEST_OFFSCREEN=1 ./agentmux-launcher
+#
+# Give it the file that holds the host's code: on Windows runtime/agentmux-cef.dll (agentmux-cef.exe
+# is a thin stub that does not carry the name), elsewhere the agentmux-cef binary itself.
 #
 # After the start, the host's log says "test window mode: every window is created off-screen"
 # (a dev or local build) or "AGENTMUX_TEST_OFFSCREEN=1 ignored" (a published release, which

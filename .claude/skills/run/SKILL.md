@@ -182,7 +182,8 @@ away a moment later has been seen (three times on 2026-11-15). Start every test 
 first frame instead of racing a mover script:
 
 ```bash
-scripts/offscreen-check.sh <launcher> <host>   # refuses (exit 1) a build from before the flag: do not start it
+scripts/offscreen-check.sh <launcher> <host code>   # refuses (exit 1) a build from before the flag: do not start it
+                                                    # (host code: runtime/agentmux-cef.dll on Windows, not the .exe stub)
 AGENTMUX_TEST_OFFSCREEN=1 task dev             # or the same variable before a packaged build's launcher
 ```
 
@@ -194,7 +195,9 @@ AGENTMUX_TEST_OFFSCREEN=1 task dev             # or the same variable before a p
   test instance's shell cannot hide a person's windows): its log says `AGENTMUX_TEST_OFFSCREEN=1 ignored`.
   A build that honours it logs `test window mode: every window is created off-screen`; check that line in
   the host log before you trust the run.
-- Do not start a build without `scripts/offscreen-check.sh` passing, and do not write a mover script.
+- Do not start a prebuilt or packaged build without `scripts/offscreen-check.sh` passing, and do not write a
+  mover script. (`task dev` compiles your own checkout and launches it in one command, so a checkout that has
+  this section has the flag; the check is for binaries someone else built.)
 - Not covered: the OS's own message boxes (the quit confirmation, the upgrade confirmation) cannot be
   placed by the host. A test run does not reach them. On Linux/Wayland a window cannot be placed at all:
   use X11 (or XWayland) for a test build.
