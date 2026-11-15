@@ -62,6 +62,7 @@ import { registerBlockComponentModel, unregisterBlockComponentModel } from "@/ap
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import * as util from "@/util/util";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
+import { getPaneScope } from "@/app/backdrop/scope";
 import { BlockFrame } from "./blockframe";
 
 registerPaneTab({
@@ -103,12 +104,14 @@ type Over = {
     manageConnection?: boolean;
     dragging?: boolean;
     bodyItems?: any[];
-    /** The `bg` the view model reports (the legacy background). */
+    /** The `bg` the view model reports: a terminal's own theme background, not the block's meta. */
     bg?: string;
+    /** Mount for this block id (a second frame for a block that already has one) instead of a fresh block. */
+    blockId?: string;
 };
 
 function setup(over: Over = {}) {
-    const blockId = `bf${++nextId}`;
+    const blockId = over.blockId ?? `bf${++nextId}`;
     seedBlock(blockId, over.meta ?? { view: "term" });
     const [focused, setFocused] = createSignal(over.focused ?? true);
     const toggleMagnify = vi.fn();
@@ -268,12 +271,33 @@ describe("the backdrop", () => {
         expect(el.style.getPropertyValue("--block-agent-color")).not.toBe("");
     });
 
-    it("a plain colour in the old bg meta is a legacy backdrop; a gradient is left untouched", () => {
-        const plain = setup({ bg: "#336699" });
+    it("a plain colour in the block's own bg meta is a legacy backdrop; a gradient is left untouched", () => {
+        const plain = setup({ meta: { view: "term", bg: "#336699" } });
         expect(frame(plain.view.container).getAttribute("data-backdrop")).toBe("legacy");
         cleanup();
-        const gradient = setup({ bg: "linear-gradient(red, blue)" });
+        const gradient = setup({ meta: { view: "term", bg: "linear-gradient(red, blue)" } });
         expect(frame(gradient.view.container).hasAttribute("data-backdrop")).toBe(false);
+    });
+
+    it("a terminal whose view model reports its theme's background, with no bg in the block's meta, gets no backdrop and no vars", () => {
+        const t = setup({ bg: "#1e1e2e" });
+        expect(frame(t.view.container).hasAttribute("data-backdrop")).toBe(false);
+        expect(style(t.view.container).getPropertyValue("--surface")).toBe("");
+        expect(getPaneScope(t.blockId)()).toBeUndefined();
+    });
+
+    it("a drag preview of a block reads its live scope, and its unmounting leaves that scope", () => {
+        const meta = { view: "term", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } };
+        const live = setup({ meta });
+        const scope = getPaneScope(live.blockId)();
+        expect(scope?.["--surface"]).toMatch(/^#[0-9a-f]{6}$/);
+        const preview = setup({ blockId: live.blockId, preview: true, meta });
+        const previewFrame = [...preview.view.container.querySelectorAll<HTMLElement>(".block-frame-default")].pop()!;
+        expect(previewFrame.style.getPropertyValue("--surface")).toBe(scope?.["--surface"]);
+        expect(previewFrame.getAttribute("data-backdrop")).toBe("builtin:teal");
+        preview.view.unmount();
+        expect(getPaneScope(live.blockId)()).toEqual(scope);
+        expect(frame(live.view.container).style.getPropertyValue("--surface")).toBe(scope?.["--surface"]);
     });
 
     it("a record that can't be read is no backdrop", () => {

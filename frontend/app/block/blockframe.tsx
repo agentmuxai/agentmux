@@ -1369,10 +1369,13 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const nodeModel = props.nodeModel;
     // A pane's backdrop (spec SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7.3): its properties go on this frame, so the
     // header, the body and everything in them read the pane's colours. A pane with none sets nothing.
-    const backdrop = usePaneBackdrop(nodeModel.blockId, () => ({
-        backdrop: s.blockData()?.meta?.backdrop,
-        bg: util.useAtomValueSafe(props.viewModel?.blockBg)?.["bg"],
-    }));
+    // `bg` is the block's own meta only: a view model's `blockBg` can be its own theme's background (a terminal's), which
+    // is not a backdrop. A drag preview is a second frame for the same block: it reads the live scope, never owns it.
+    const backdrop = usePaneBackdrop(
+        nodeModel.blockId,
+        () => ({ backdrop: s.blockData()?.meta?.backdrop, bg: s.blockData()?.meta?.bg }),
+        { owner: !props.preview }
+    );
     const backdropVars = getPaneScope(nodeModel.blockId);
 
     return (
