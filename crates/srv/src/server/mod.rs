@@ -124,6 +124,7 @@ mod containers_handler;
 mod message_flow_handler;
 mod message_stats_handler;
 mod pr_flow_handler;
+mod reviews_handler;
 mod task_flow_handler;
 mod task_flow_notes;
 pub(crate) mod memory_launch_cost;

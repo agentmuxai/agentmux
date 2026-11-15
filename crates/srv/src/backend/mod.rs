@@ -116,6 +116,7 @@ pub mod lan;
 pub mod lsp;
 pub mod message_flow;
 pub mod pr_flow;
+pub mod reviews;
 pub mod task_flow;
 pub mod messagebus;
 pub mod notify;
