@@ -32,8 +32,9 @@
 //!               answered this machine's own poll (asked every 30 s) in the last two minutes: it is up and
 //!               reachable from here. It is not a signature check.
 //!   * `jobs`:   (scheduled, Drone and cloud jobs alike, as the run ledger holds them) `{ "found": bool, "count": N, "runs": [{ "id", "job_id", "job", "state", "outcome", "trigger",
-//!               "summary", "started_ms", "ended_ms"?, "cost_usd"? }] }`; `found` is false for a `job` that
-//!               matches none.
+//!               "summary", "started_ms", "ended_ms"?, "cost_usd"? }], "last_ok"? }`; `found` is false for a `job` that
+//!               matches none. With a `job`, `last_ok` is that job's newest run that finished with outcome `ok` or
+//!               `findings` (a run row, or null when there is none), found whatever `limit` cuts `runs` to.
 
 use serde_json::{json, Value};
 
@@ -328,7 +329,8 @@ pub(crate) fn jobs_answer(jobs: &crate::backend::storage::store::Store, ledger: 
         [] => Ok(json!({ "found": false, "count": 0, "runs": [] })),
         [id] => {
             let rows: Vec<Value> = ledger.job_runs_for_job(id, f.limit as i64, None).map_err(read)?.iter().map(run_row).collect();
-            Ok(json!({ "found": true, "count": rows.len(), "runs": rows }))
+            let last_ok = ledger.job_run_last_good(id).map_err(read)?.map(|r| run_row(&r)).unwrap_or(Value::Null);
+            Ok(json!({ "found": true, "count": rows.len(), "runs": rows, "last_ok": last_ok }))
         }
         _ => Ok(json!({ "found": false, "ambiguous": true, "count": 0, "runs": [] })),
     }
@@ -463,6 +465,29 @@ mod tests {
         }
         let idle = jobs_answer(&state.mstore, &state.mstore, &JobsFilter { job: "Idle".to_string(), limit: 20 }).unwrap();
         assert_eq!((idle["found"].clone(), idle["count"].clone()), (json!(true), json!(0)), "a scheduled job that hasn't run yet exists");
+    }
+
+    #[tokio::test]
+    async fn a_named_job_says_its_last_good_run_even_when_newer_runs_failed_and_the_limit_hides_it() {
+        use crate::backend::storage::job_runs::JobRun;
+        let state = ledger_with(&[("j1", "Nightly")], &[]);
+        let run = |id: &str, outcome: &str, at: i64| {
+            let mut r = JobRun::new(id, "j1", "cron", "Nightly", "schedule", "finished", at);
+            r.outcome = outcome.to_string();
+            r.ended_at_ms = Some(at + 10);
+            state.mstore.job_run_insert(&r).unwrap();
+        };
+        run("old-ok", "ok", 100);
+        run("fail-1", "failed", 200);
+        run("fail-2", "failed", 300);
+        let a = jobs_answer(&state.mstore, &state.mstore, &JobsFilter { job: "Nightly".to_string(), limit: 2 }).unwrap();
+        let ids: Vec<&str> = a["runs"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["fail-2", "fail-1"], "the listing is cut to the two newest, both failed");
+        assert_eq!(a["last_ok"]["id"], json!("old-ok"), "the last good run is not in it, and is still said");
+        assert_eq!(a["last_ok"]["ended_ms"], json!(110));
+        let none = ledger_with(&[("j2", "Never")], &[]);
+        let n = jobs_answer(&none.mstore, &none.mstore, &JobsFilter { job: "Never".to_string(), limit: 20 }).unwrap();
+        assert!(n["last_ok"].is_null(), "no good run: null");
     }
 
     #[tokio::test]

@@ -396,6 +396,19 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// The newest run of `job_id` that finished and did its work (outcome `ok` or `findings`), however many newer runs
+    /// did not: a listing cut to the newest few can miss it.
+    pub fn job_run_last_good(&self, job_id: &str) -> Result<Option<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM db_job_runs
+              WHERE job_id = ?1 AND collapsed_into = '' AND state = 'finished' AND outcome IN ('ok', 'findings')
+              ORDER BY COALESCE(ended_at_ms, started_at_ms) DESC, rowid DESC LIMIT 1"
+        ))?;
+        let mut rows = stmt.query_map(params![job_id], row_to_run)?;
+        Ok(rows.next().transpose()?)
+    }
+
     /// The newest run of every job the ledger has runs of, whatever its source (scheduled, Drone or cloud),
     /// newest first, at most `limit`.
     pub fn job_runs_latest_per_job(&self, limit: i64) -> Result<Vec<JobRun>, StoreError> {
