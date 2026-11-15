@@ -246,3 +246,28 @@ fn the_open_states_are_one_list() {
         assert_eq!(run.is_open(), open, "{st} {ended:?}");
     }
 }
+
+/// The last good run is found however many newer runs failed, were skipped or are still going.
+#[test]
+fn the_last_good_run_is_found_behind_any_number_of_newer_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = store_at(&dir);
+    let put = |id: &str, st: &str, outcome: &str, at: i64| {
+        let mut r = JobRun::new(id, "j1", "cron", "nightly", "schedule", st, at);
+        r.outcome = outcome.to_string();
+        if st == state::FINISHED {
+            r.ended_at_ms = Some(at + 5);
+        }
+        s.job_run_insert(&r).unwrap();
+    };
+    assert!(s.job_run_last_good("j1").unwrap().is_none(), "no runs");
+    put("g1", state::FINISHED, "findings", NOW);
+    put("g2", state::FINISHED, "ok", NOW + MIN);
+    for i in 0..120 {
+        put(&format!("f{i}"), state::FINISHED, "failed", NOW + (2 + i) * MIN);
+    }
+    put("u", state::FINISHED, "unknown", NOW + 500 * MIN);
+    put("r", state::RUNNING, "ok", NOW + 600 * MIN);
+    assert_eq!(s.job_run_last_good("j1").unwrap().unwrap().id, "g2", "the newest good one: findings and ok both count, failed, unknown and a run still going do not");
+    assert!(s.job_run_last_good("j2").unwrap().is_none(), "another job's runs are its own");
+}

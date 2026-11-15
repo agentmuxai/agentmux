@@ -147,3 +147,41 @@ async fn a_gap_starts_one_run_and_a_good_run_followed_by_a_new_gap_starts_anothe
     *reply.lock().unwrap() = serde_json::Value::Null;
     assert_eq!(expect::expect_due(&rig.sched, &all, &check, &mut state, at(300)).await, 0, "a failed read is not a gap");
 }
+
+#[test]
+fn the_last_good_run_said_on_its_own_counts_when_the_listing_holds_only_failures() {
+    let mut a = answer(vec![run("f1", "finished", "failed", 10, Some(9)), run("f2", "finished", "failed", 20, Some(19))]);
+    a["last_ok"] = run("old", "finished", "ok", 70, Some(60));
+    assert_eq!(expect::judge("nightly", 1500, &a, NOW), Verdict::Fine, "a good run an hour ago, behind the failures");
+    let Verdict::Missed { id, input } = expect::judge("nightly", 30, &a, NOW) else { panic!("an hour is past 30 minutes") };
+    assert_eq!(id, format!("expect:nightly:{}", NOW - 60 * MIN), "keyed by it, not by 'never'");
+    assert_eq!(input["last_ok_ms"], json!(NOW - 60 * MIN));
+    a["last_ok"] = serde_json::Value::Null;
+    assert!(matches!(expect::judge("nightly", 30, &a, NOW), Verdict::Missed { id, .. } if id == "expect:nightly:never"), "none at all");
+}
+
+/// A gap's id is forgotten after a week like any event id; each look moves it forward while the gap lasts, so the
+/// same gap does not start a second run.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_gap_that_lasts_past_the_weekly_sweep_does_not_start_a_second_run() {
+    use crate::backend::storage::job_events::KEEP_MS;
+    let rig = rig();
+    let ledger_for_runs = rig.ledger.clone();
+    rig.sched.install_actions(Arc::new(move |_, run_id| {
+        ledger_for_runs.drone_attached(&run_id, &format!("dr-{run_id}"), &Value::Null, agentmux_common::time::now_ms());
+        ledger_for_runs.drone_finished(&run_id, true, &Default::default(), "");
+        Box::pin(async { ActionOutcome::Drone })
+    }));
+    let job = expect_job(&rig, "j-week", json!({ "job": "nightly", "within_minutes": 60, "every_minutes": 60 }));
+    let reply = Arc::new(Mutex::new(json!({ "found": true, "count": 0, "runs": [], "last_ok": null })));
+    let check = fake(&reply, &Arc::default());
+    let all = [job];
+    let mut state = ExpectState::default();
+    let t0 = agentmux_common::time::now_ms();
+    let day = 24 * 60 * MIN;
+    assert_eq!(expect::expect_due(&rig.sched, &all, &check, &mut state, t0).await, 1, "the gap");
+    assert_eq!(expect::expect_due(&rig.sched, &all, &check, &mut state, t0 + 6 * day).await, 0, "still the same gap, looked at on day 6");
+    rig.store.job_events_forget_before(t0 + 8 * day - KEEP_MS).unwrap();
+    assert_eq!(expect::expect_due(&rig.sched, &all, &check, &mut state, t0 + 8 * day).await, 0, "the week's sweep did not take the gap's id");
+    assert_eq!(rig.runs("j-week").len(), 1);
+}

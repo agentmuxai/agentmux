@@ -11,7 +11,7 @@
 //!                       this long ago.
 //!   * `every_minutes`   how often to look, 1 to 1440, default 5.
 //!
-//! A good run is a finished one whose outcome is `ok` or `findings` (it did its work). A run that failed, or ended
+//! A good run is the newest run of the watched job that is a finished one whose outcome is `ok` or `findings` (it did its work). A run that failed, or ended
 //! with an unknown outcome, is not one. While a run of the watched job is still going, nothing fires: it may yet
 //! succeed in time.
 //!
@@ -20,6 +20,8 @@
 //! repeat it, and a good run followed by a new gap is a new event. The run reads `{{trigger.expected}}` (the watched
 //! job), `{{trigger.within_minutes}}`, `{{trigger.last_ok_ms}}` (null when there has never been one),
 //! `{{trigger.job_found}}` and `{{trigger.last_seen}}` (the newest run, if any).
+//!
+//! (The ledger is asked for the last good run on its own, so a long bad stretch does not hide it.)
 //!
 //! The local form checks this machine's run ledger, so it cannot fire while the machine is off; the cloud form that
 //! can is a later phase.
@@ -116,7 +118,10 @@ pub(crate) fn judge(plan_job: &str, within_minutes: u64, answer: &Value, now: i6
     if runs.iter().any(|r| is_open(r) && now - r.get("started_ms").and_then(Value::as_i64).unwrap_or(now) < within_ms) {
         return Verdict::Fine;
     }
-    let last_ok = runs.iter().filter(|r| is_good(r)).map(|r| ended_or_started(r)).max();
+    // The listing is the newest runs only: the last good run is also said on its own, found however many newer ones
+    // failed, so a long bad stretch does not hide it.
+    let said_ok = answer.get("last_ok").filter(|r| r.is_object()).map(ended_or_started);
+    let last_ok = runs.iter().filter(|r| is_good(r)).map(|r| ended_or_started(r)).chain(said_ok).max();
     if last_ok.is_some_and(|ok| now - ok <= within_ms) {
         return Verdict::Fine;
     }
@@ -160,8 +165,13 @@ pub async fn expect_due(scheduler: &CronScheduler, all: &[CronJob], check: &Chec
         };
         let within_minutes = (plan.within_ms / 60_000) as u64;
         if let Verdict::Missed { id, input } = judge(&plan.job, within_minutes, &answer, now) {
-            let fired = scheduler.fire_event(job, JobEvent { id, source: event_source::EXPECT.to_string(), input }).await;
+            let fired = scheduler.fire_event(job, JobEvent { id: id.clone(), source: event_source::EXPECT.to_string(), input }).await;
             started += usize::from(fired.run_id.is_some());
+            // The gap's id is forgotten after a week like any event id, which would start the same gap's run again:
+            // each look while the gap lasts moves its time forward (the row's run is unchanged, so it is not a new event).
+            if let Some(ledger) = scheduler.runs() {
+                let _ = ledger.store().job_event_touch(&job.id, &id, now);
+            }
         }
     }
     started
