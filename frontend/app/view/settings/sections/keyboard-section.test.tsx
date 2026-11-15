@@ -5,7 +5,7 @@
 // Reset all write to the `keybindings` setting, and the entries that could not be used
 // (docs/specs/SPEC_KEYBOARD_SHORTCUTS_SETTINGS_2026_11_06.md §4).
 
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ writes: [] as Array<[string, unknown]> }));
@@ -246,6 +246,27 @@ describe("Help's links", () => {
         expect(scroll).toHaveBeenCalled();
         expect(document.activeElement).toBe(line("tab:new"));
         expect((screen.getByLabelText("Search shortcuts by action or key") as HTMLInputElement).value).toBe("");
+    });
+
+    it("keep the caret on the row when the pane then gives it to the search box", async () => {
+        Element.prototype.scrollIntoView = vi.fn();
+        render(() => <KeyboardSection />);
+        const search = screen.getByLabelText("Search shortcuts by action or key") as HTMLInputElement;
+        requestKeyboardRow("tab:new");
+        await Promise.resolve();
+        search.focus();
+        await waitFor(() => expect(document.activeElement).toBe(line("tab:new")));
+    });
+
+    it("leave the caret where the person put it, when it is not the search box", async () => {
+        Element.prototype.scrollIntoView = vi.fn();
+        render(() => <KeyboardSection />);
+        requestKeyboardRow("tab:new");
+        await Promise.resolve();
+        const other = line("tab:close") as HTMLElement;
+        other.focus();
+        await new Promise((r) => setTimeout(r, 100));
+        expect(document.activeElement).toBe(other);
     });
 
     it("go to the Settings pane that was shown when several are open", async () => {

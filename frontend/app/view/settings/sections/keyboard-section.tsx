@@ -18,6 +18,7 @@ import { KeyboardToolbar, OtherEntries, ShortcutList, type KeyboardEdit } from "
 import { EmptyState } from "@/app/element/ui";
 import { DURATION_LINGER_MS } from "@/app/motion/tokens";
 import { clearKeyboardRowRequest, keyboardRowRequest } from "@/app/store/keyboard-focus-request";
+import { afterTwoFrames } from "@/app/util/after-two-frames";
 
 export { KEYBOARD_SETTINGS } from "./keyboard-settings-index";
 
@@ -55,6 +56,11 @@ export function KeyboardSection(): JSX.Element {
                 if (!line) return;
                 line.scrollIntoView({ block: "center" });
                 line.focus();
+                // A pane that has just been shown or opened puts the caret in its first field when it takes focus, which
+                // can come after this: where that field is the search box, the row gets the caret back.
+                afterTwoFrames(() => {
+                    if (line.isConnected && search && document.activeElement === search) line.focus();
+                });
                 line.classList.add("setting-row--search-highlight");
                 setTimeout(() => line.classList.remove("setting-row--search-highlight"), DURATION_LINGER_MS);
             });
