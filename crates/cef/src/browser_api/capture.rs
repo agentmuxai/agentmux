@@ -6,9 +6,10 @@
 //!
 //! Two routes, for srv only:
 //! - `/agentmux/browser/capture_value` reads the element a reference names (an
-//!   input's value, otherwise its text's one secret) and answers with the value and
-//!   the origin of the frame it is in, taken from the host's own frame map, never
-//!   from the page. srv stores it; the agent never sees it.
+//!   input's value, otherwise its text's one secret), or the value beside a label
+//!   (`near`, `capture_near.rs`), and answers with the value and the origin of the
+//!   frame it is in, taken from the host's own frame map, never from the page. srv
+//!   stores it; the agent never sees it.
 //! - `/agentmux/browser/capture_mark`, once srv has stored it, marks the element as
 //!   holding a Vault value (`data-agentmux-vault`, on the element or a text node's
 //!   parent). A capture srv refused leaves no mark.
@@ -32,8 +33,14 @@ pub const MAX_VALUE: usize = 16 * 1024;
 #[derive(Debug, Deserialize)]
 pub struct CaptureReq {
     pub block_id: String,
-    #[serde(rename = "ref")]
+    #[serde(rename = "ref", default)]
     pub ref_: String,
+    /// Text with no reference of its own: the value beside the text that reads this (instead of `ref`).
+    #[serde(default)]
+    pub near: Option<String>,
+    /// What the value must be, to choose it among the text around it (srv checks the value again before saving it).
+    #[serde(default)]
+    pub shape: Option<agentmux_common::capture_shape::CaptureShape>,
     /// A card's part: the element's whole text or value, as one short line, not a secret picked out of the text
     /// around it (a card number shows as "4242 4242 4242 4242", an expiry as "03/30").
     #[serde(default)]
@@ -47,6 +54,9 @@ pub struct Captured {
     pub origin: String,
     /// The page's URL.
     pub page: String,
+    /// The reference the value was read by: the one asked for, or the one a label's value was given.
+    #[serde(rename = "ref")]
+    pub ref_: String,
 }
 
 /// The element's value or text, trimmed, and whether it is a field (whose whole
@@ -88,18 +98,22 @@ pub async fn capture_value_route(
 }
 
 async fn capture(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &CaptureReq) -> Result<Captured, String> {
-    let (located, backend, frame) = locate(state, &req.block_id, &req.ref_, root).await?;
+    let ref_ = match req.near.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        Some(label) => super::capture_near::resolve(state, root, &req.block_id, label, req.shape.as_ref()).await?,
+        None => req.ref_.clone(),
+    };
+    let (located, backend, frame) = locate(state, &req.block_id, &ref_, root).await?;
     let mut in_frame = root.in_session(frame.as_ref().and_then(|f| f.session.as_deref()));
     let cdp = &mut in_frame;
     let ctx = isolated_context(cdp, frame.as_ref().map(|f| f.frame_id.as_str())).await?;
-    let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
+    let obj = resolve(cdp, backend, ctx, &ref_).await?;
     let read = call_on(cdp, &obj, READ, vec![]).await?;
     let Some(text) = read.get("value").and_then(Value::as_str) else {
-        return Err(format!("{} has no text to save", req.ref_));
+        return Err(format!("{ref_} has no text to save"));
     };
     let field = read.get("field").and_then(Value::as_bool).unwrap_or(false);
-    let value = if req.whole { whole(text, &req.ref_)? } else { pick(text, field, &req.ref_)? };
-    Ok(Captured { value, origin: located.origin, page: located.page })
+    let value = if req.whole { whole(text, &ref_)? } else { pick(text, field, &ref_, req.shape.as_ref())? };
+    Ok(Captured { value, origin: located.origin, page: located.page, ref_ })
 }
 
 /// `POST /agentmux/browser/capture_mark`: the element's value is in the Vault now.
@@ -134,13 +148,14 @@ async fn mark(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Ca
 }
 
 /// The secret in what was read: a field's whole value; in text, its one token with
-/// a one-time secret's shape (text like "Value: <secret>" is more than the secret).
-fn pick(text: &str, field: bool, ref_: &str) -> Result<String, String> {
+/// a one-time secret's shape, or the shape the agent gave (text like "Value: <secret>" is
+/// more than the secret).
+fn pick(text: &str, field: bool, ref_: &str, shape: Option<&agentmux_common::capture_shape::CaptureShape>) -> Result<String, String> {
     check(text, ref_)?;
     if field || !text.chars().any(char::is_whitespace) {
         return Ok(text.to_string());
     }
-    let tokens: Vec<&str> = text.split_whitespace().filter(|t| agentmux_common::shown_once::looks_shown_once(t)).collect();
+    let tokens: Vec<&str> = text.split_whitespace().filter(|t| super::capture_near::is_value_token(t, shape, false)).collect();
     match tokens.as_slice() {
         [one] => Ok(one.to_string()),
         [] => Err(format!("{ref_} holds text, not one secret: capture the element that holds only the value (its own line in a scoped snapshot)")),
@@ -178,13 +193,13 @@ mod tests {
     #[test]
     fn text_around_a_secret_is_left_out_and_a_fields_value_is_kept_whole() {
         let secret = "Xy8Q~abcDEF1234ghijKLmnoPQRstu.vwxYZ0123";
-        assert_eq!(pick(&format!("Value {secret}"), false, "e5").unwrap(), secret);
-        assert_eq!(pick(secret, false, "e5").unwrap(), secret);
+        assert_eq!(pick(&format!("Value {secret}"), false, "e5", None).unwrap(), secret);
+        assert_eq!(pick(secret, false, "e5", None).unwrap(), secret);
         let codes = "recovery codes:\nabcd-1234 efgh-5678\nijkl-9012";
-        assert_eq!(pick(codes, true, "e8").unwrap(), codes, "a field's value is the secret, spaces, lines and all");
-        let none = pick("Copy this value now please", false, "e5").unwrap_err();
+        assert_eq!(pick(codes, true, "e8", None).unwrap(), codes, "a field's value is the secret, spaces, lines and all");
+        let none = pick("Copy this value now please", false, "e5", None).unwrap_err();
         assert!(none.contains("not one secret"), "{none}");
-        let two = pick(&format!("{secret} and {secret}"), false, "e5").unwrap_err();
+        let two = pick(&format!("{secret} and {secret}"), false, "e5", None).unwrap_err();
         assert!(two.contains("holds 2 secrets") && !two.contains(secret), "{two}");
     }
 
@@ -192,7 +207,7 @@ mod tests {
     fn a_card_part_is_the_elements_whole_text_on_one_short_line() {
         assert_eq!(whole("4242 4242 4242 4242", "e1").unwrap(), "4242 4242 4242 4242");
         assert_eq!(whole("Alex Doe", "e2").unwrap(), "Alex Doe");
-        assert!(pick("4242 4242 4242 4242", false, "e1").is_err(), "picked as a secret, a spaced number would not be taken");
+        assert!(pick("4242 4242 4242 4242", false, "e1", None).is_err(), "picked as a secret, a spaced number would not be taken");
         let two = whole("03/30\n123", "e3").unwrap_err();
         assert!(two.contains("more than one card part") && !two.contains("123"), "{two}");
         assert!(whole(&"x".repeat(121), "e4").is_err());

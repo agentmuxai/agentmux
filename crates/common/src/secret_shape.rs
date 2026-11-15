@@ -10,6 +10,10 @@ use crate::shown_once::has_shown_once;
 /// What an agent reads in place of withheld text.
 pub const WITHHELD: &str = "[hidden text withheld: it may be a secret; use Browser capture to save it]";
 
+/// What an agent reads in place of a secret the page shows in plain sight, in a row named like one: it is
+/// there, and `Browser` `capture` saves it, but its text stays out of the agent's context.
+pub const UNREAD: &str = "[unread secret: use Browser capture to save it]";
+
 /// Prefixes of keys, tokens and signing secrets that are short enough to miss the one-time shape.
 const KEY_PREFIXES: &[&str] = &["sk_", "rk_", "pk_", "whsec_", "ghp_", "gho_", "ghs_", "github_pat_", "xoxb-", "xoxp-", "xoxa-", "eyj"];
 

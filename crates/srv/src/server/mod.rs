@@ -181,6 +181,8 @@ pub(crate) mod vault_inspect;
 pub(crate) mod vault_rotate;
 pub(crate) mod browser_capture;
 pub(crate) mod browser_capture_card;
+mod browser_capture_read;
+mod browser_capture_shape;
 pub(crate) mod browser_vault_fill;
 pub(crate) mod browser_signin_offer;
 pub(crate) mod browser_signin;
