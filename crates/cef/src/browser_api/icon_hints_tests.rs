@@ -109,3 +109,11 @@ fn a_description_the_page_links_is_the_hint_before_the_icon() {
     mark(&mut nodes, &hints);
     assert_eq!(nodes[0]["name"]["value"], "(no name; title \"Rotate this key\")");
 }
+
+#[test]
+fn a_secret_near_the_cut_of_a_long_tooltip_is_scrubbed_before_it_is_cut() {
+    let secret = "Xy8Q~abcDEF1234ghijKLmnoPQRstu.vwxYZ0123";
+    let page = dom(&[el(-1, "div", &[]), el(0, "button", &[("data-tooltip", Box::leak(format!("{}{secret}", "word ".repeat(10)).into_boxed_str()))])]);
+    let hint = hints(&page).get(&11).cloned().unwrap();
+    assert!(!hint.contains("Xy8Q"), "no piece of it: {hint}");
+}

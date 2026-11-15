@@ -136,8 +136,9 @@ fn tip(text: &str) -> Option<String> {
     if clean.is_empty() {
         return None;
     }
+    // A secret's shape is found in the whole text, before any of it is cut: a cut through a token hides its shape.
+    let clean = agentmux_common::secret_shape::scrub(&clean);
     let masked = agentmux_common::pii_mask::mask_bounded(&clean, MAX_TIP + 1);
-    let masked = agentmux_common::secret_shape::scrub(&masked);
     Some(if masked.chars().count() > MAX_TIP { format!("{}…", masked.chars().take(MAX_TIP).collect::<String>()) } else { masked })
 }
 
