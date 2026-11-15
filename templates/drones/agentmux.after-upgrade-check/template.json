@@ -1,0 +1,20 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.after-upgrade-check",
+  "name": "After an upgrade: health check",
+  "version": "1.0.0",
+  "kind": "drone",
+  "description": "Five minutes after AgentMux starts on a new version, it checks that this computer's agents are running, that cloud messages reach it and that the other computers on the LAN answer. All well: one line to the leader. Something not up: a Kanban task for the steward that names what, and a notification. A restart that is no upgrade starts nothing.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "leader": { "type": "string", "title": "Who to tell", "description": "The id of the agent that gets the one-line all-clear as a message." },
+      "steward": { "type": "string", "title": "Who gets the task", "description": "The id of the agent that gets a Kanban task when something is not up after an upgrade." }
+    },
+    "required": ["leader", "steward"]
+  },
+  "trigger": { "kind": "event", "source": "app_event", "filter": { "event": "app.started", "upgraded": true }, "delay": 5, "max_per_hour": 4 },
+  "policy": { "overlap": "skip", "catch_up": "skip", "caps": { "run_usd": 1 } },
+  "outputs": ["message:owner", "kanban_task"],
+  "secrets": []
+}
