@@ -105,26 +105,6 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 ring = { version = "0.17", default-features = false, features = ["alloc"] }
 
 [target.'cfg(windows)'.dependencies]
-# Read-only COM access to Windows Defender Firewall and the network list, to
-# tell whether LAN peers can reach us (backend/lan/firewall_windows.rs,
-# SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.2). Already in the tree at this
-# version via sysinfo, so declaring it adds no new supply-chain surface.
-windows = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_System_Com",
-    "Win32_System_Ole",
-    "Win32_System_Variant",
-    "Win32_NetworkManagement_WindowsFirewall",
-    "Win32_Networking_NetworkListManager",
-    # The system's own file icons for the Files pane (backend/file_icons): the shell's image
-    # lists by file type, their bitmaps, and the registry's file associations.
-    "Win32_UI_Shell",
-    "Win32_UI_Controls",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_Graphics_Gdi",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Registry",
-] }
 # Out-of-process crash dump capture via VEH + named-pipe IPC.
 # Catches AV, heap corruption, and non-__fastfail aborts.
 # __fastfail (0xC0000409) is handled separately by WER LocalDumps.
