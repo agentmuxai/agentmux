@@ -1,5 +1,7 @@
 # Spec: the shared transcript store gets smaller: compressed frames, and the streaming deltas cleaned out
 
+**Area:** history store
+
 **Date:** 2026-10-21
 **Author:** Agent5@narko
 **Type:** Spec (a storage change; what a reader sees does not change)

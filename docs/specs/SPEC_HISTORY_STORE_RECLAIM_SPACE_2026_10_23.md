@@ -1,5 +1,7 @@
 # SPEC: give disk space back after history compression
 
+**Area:** history store
+
 **Date:** 2026-10-23
 **Status:** active — approved by the operator on 2026-10-23; built in #5383 (all of §4–§6; §9's two PRs went in as one). See §11 for where the build differs. Follows `SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md` (the framer, #5324/#5328/#5330/#5331), whose §3 rules hold here too.
 **Author:** Loap-3 (loap-loap-2-loap-3), for Agent5 (history store).
