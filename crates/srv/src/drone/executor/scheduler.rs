@@ -138,6 +138,9 @@ struct Scheduler<'a> {
     cancel: Cancel,
     /// Set when the run ended because `cancel` did, so that is not taken for a failure.
     cancelled: bool,
+    /// The block that is running while it has effects, and whether it was forced:
+    /// the one a restart must not run again on its own.
+    in_flight: Option<(&'a str, bool)>,
     /// Writes the run's checkpoints, with the graph version they say the run is on.
     recorder: Option<(Recorder, GraphRef)>,
     started: Instant,
@@ -181,6 +184,11 @@ pub(super) async fn resume(
     let mut s = Scheduler::new(&c.run_id, graph, plan, ExecutionScope::for_drone(&c.drone_id, c.trigger.clone()), limits, tx, states);
     s.restore(c).map_err(RunEnd::Failed)?;
     s.show_restored().await;
+    if let Some((id, _)) = s.in_flight {
+        // It may have done its work before the machine stopped, and a second time
+        // would repeat it: it is not run again on its own.
+        return Err(RunEnd::Failed(format!("block {id} was running when the run stopped and it has effects, so it is not run again on its own")));
+    }
     finish(&mut s, Ok(())).await
 }
 
@@ -238,6 +246,7 @@ impl<'a> Scheduler<'a> {
             run_cap_usd: limits.run_cap_usd,
             cancel: limits.cancel,
             cancelled: false,
+            in_flight: None,
             recorder: limits.persist.map(|p| (Recorder::new(p.sink, run_id), p.graph)),
             started: Instant::now(),
             elapsed_before_ms: 0,
@@ -330,6 +339,7 @@ impl<'a> Scheduler<'a> {
         for guard in guards {
             self.loop_started.entry(guard).or_insert_with(Instant::now);
         }
+        self.mark_in_flight(node, forced)?;
         let (output, failed) = match self.run_block(node).await {
             Ok(output) => (output, false),
             Err(e) if !self.cancelled && self.has_error_edge(id) => {
@@ -343,6 +353,7 @@ impl<'a> Scheduler<'a> {
             Err(e) => return Err(e),
         };
         self.finished.insert(id);
+        self.in_flight = None;
         self.route(node, &output, failed)?;
         self.checkpoint(Some(id))
     }
