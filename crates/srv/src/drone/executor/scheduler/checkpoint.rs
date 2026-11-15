@@ -67,8 +67,29 @@ impl<'a> Scheduler<'a> {
         if self.effect_of_node(node, kind) != Effect::Effectful {
             return Ok(());
         }
-        self.in_flight = Some((node.id.as_str(), forced));
+        self.in_flight.push((node.id.as_str(), forced));
         self.keep(Some(node.id.as_str()), true)
+    }
+
+    /// [`mark_in_flight`](Self::mark_in_flight) for a batch of blocks that start together: the
+    /// ones with effects are listed as running in one checkpoint, kept before any starts, and
+    /// the others are listed as ready until they finish.
+    pub(super) fn mark_batch_in_flight(&mut self, batch: &[(&'a str, bool)]) -> Result<(), String> {
+        let mut effectful = false;
+        for &(id, forced) in batch {
+            let node = self.node_of[id];
+            let effect = kind_of(node).map(|kind| self.effect_of_node(node, kind));
+            if self.recorder.is_some() && effect == Ok(Effect::Effectful) {
+                self.in_flight.push((id, forced));
+                effectful = true;
+            } else {
+                self.running_ro.push((id, forced));
+            }
+        }
+        if effectful {
+            return self.keep(batch.first().map(|(id, _)| *id), true);
+        }
+        Ok(())
     }
 
     /// [`checkpoint`](Self::checkpoint), and with `required` a checkpoint that
@@ -108,13 +129,14 @@ impl<'a> Scheduler<'a> {
             step,
             state: self.scope.state.snapshot(),
             frontier: Frontier {
-                ready: self.ready.iter().map(|(id, _)| id.to_string()).collect(),
+                ready: self.running_ro.iter().chain(self.ready.iter()).map(|(id, _)| id.to_string()).collect(),
                 forced: self
-                    .ready
+                    .running_ro
                     .iter()
+                    .chain(self.ready.iter())
                     .filter(|(_, forced)| *forced)
                     .map(|(id, _)| id.to_string())
-                    .chain(self.in_flight.filter(|(_, forced)| *forced).map(|(id, _)| id.to_string()))
+                    .chain(self.in_flight.iter().filter(|(_, forced)| *forced).map(|(id, _)| id.to_string()))
                     .chain(self.waiting.filter(|(_, forced)| *forced).map(|(id, _)| id.to_string()))
                     .collect(),
                 running: self.in_flight.iter().map(|(id, _)| id.to_string()).collect(),
@@ -189,11 +211,10 @@ impl<'a> Scheduler<'a> {
             .map(|(id, ms)| (id.clone(), now.checked_sub(Duration::from_millis(*ms)).unwrap_or(now)))
             .collect();
 
-        let in_flight = match c.frontier.running.as_slice() {
-            [] => None,
-            [id] => Some((node(id)?, c.frontier.forced.iter().any(|f| f == id))),
-            _ => return Err("the saved run has more than one block running, which this build does not run".to_string()),
-        };
+        let mut in_flight = Vec::new();
+        for id in &c.frontier.running {
+            in_flight.push((node(id)?, c.frontier.forced.iter().any(|f| f == id)));
+        }
         // A block that was waiting is run again from its start, and takes the wait it finds.
         let mut ready = ready;
         for id in c.frontier.waiting.iter().rev() {

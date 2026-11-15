@@ -35,6 +35,24 @@ use crate::drone::recorder::{Persist, Recorder};
 use crate::drone::types::{BlockKind, BlockState, DroneGraph, FlowEdge, FlowNode};
 use agentmux_common::time::now_ms;
 
+/// The code of a block that reads and writes only the run's scope.
+pub(super) async fn dispatch_scoped(node: &FlowNode, kind: BlockKind, scope: &mut ExecutionScope) -> Result<Value, String> {
+    match kind {
+        BlockKind::Variables => blocks::variables::run(node, scope).await,
+        BlockKind::Api => blocks::api::run(node, scope).await,
+        BlockKind::Condition => blocks::condition::run(node, scope).await,
+        BlockKind::Response => blocks::response::run(node, scope).await,
+        BlockKind::Agent => blocks::agent::run(node, scope).await,
+        BlockKind::Message => blocks::message::run(node, scope).await,
+        BlockKind::Task => blocks::task::run(node, scope).await,
+        BlockKind::Notify => blocks::notify::run(node, scope).await,
+        BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
+        BlockKind::Spawn => blocks::spawn::run(node, scope).await,
+        BlockKind::Transform => blocks::transform::run(node, scope).await,
+        BlockKind::ForEach | BlockKind::Wait | BlockKind::Drone | BlockKind::Join => unreachable!("the scheduler runs these"),
+    }
+}
+
 /// How many earlier outputs of a block a later iteration can read as
 /// `{{block.history}}`.
 const HISTORY_LEN: usize = 50;
@@ -146,9 +164,11 @@ struct Scheduler<'a> {
     cancel: Cancel,
     /// Set when the run ended because `cancel` did, so that is not taken for a failure.
     cancelled: bool,
-    /// The block that is running while it has effects, and whether it was forced:
-    /// the one a restart must not run again on its own.
-    in_flight: Option<(&'a str, bool)>,
+    /// The blocks that are running while they have effects, and whether each was forced:
+    /// the ones a restart must not run again on its own.
+    in_flight: Vec<(&'a str, bool)>,
+    /// The blocks of the batch that is running and have no effects: a restart runs them again.
+    running_ro: Vec<(&'a str, bool)>,
     /// The Wait block the run is stopped at, and whether it was forced, and what
     /// it waits for: a time, as milliseconds since 1970, or the key of an event.
     waiting: Option<(&'a str, bool)>,
@@ -214,9 +234,10 @@ pub(super) async fn resume(
     let mut s = Scheduler::new(&c.run_id, graph, plan, ExecutionScope::for_drone(&c.drone_id, c.trigger.clone()), limits, tx, states);
     s.restore(c).map_err(RunEnd::Failed)?;
     s.show_restored().await;
-    if let Some((id, forced)) = s.in_flight {
-        // It may have done its work before the machine stopped, and a second time
-        // would repeat it: it is not run again on its own, the run waits to be told.
+    // They may have done their work before the machine stopped, and a second time
+    // would repeat it: none is run again on its own, the run waits to be told, one by one.
+    // Each stays listed until it is answered, so a checkpoint kept meanwhile still has it.
+    for (id, forced) in s.in_flight.clone() {
         if let Err(why) = s.settle_in_flight(id, forced).await {
             return Err(if s.cancelled { RunEnd::Cancelled(s.cancel.reason()) } else { RunEnd::Failed(why) });
         }
@@ -280,7 +301,8 @@ impl<'a> Scheduler<'a> {
             run_cap_usd: limits.run_cap_usd,
             cancel: limits.cancel,
             cancelled: false,
-            in_flight: None,
+            in_flight: Vec::new(),
+            running_ro: Vec::new(),
             waiting: None,
             deadlines: BTreeMap::new(),
             resume_on: BTreeMap::new(),
@@ -308,7 +330,13 @@ impl<'a> Scheduler<'a> {
     /// Run blocks until none is ready and no edge is left to decide.
     async fn drive(&mut self) -> Result<(), String> {
         loop {
-            while let Some((id, forced)) = self.ready.pop_front() {
+            while !self.ready.is_empty() {
+                let batch = self.next_batch();
+                if batch.len() > 1 {
+                    self.step_batch(batch).await?;
+                    continue;
+                }
+                let Some((id, forced)) = self.ready.pop_front() else { break };
                 self.queued.remove(id);
                 self.step(id, forced).await?;
             }
@@ -358,9 +386,7 @@ impl<'a> Scheduler<'a> {
             return Err(format!("stopped: {}", self.cancel.reason()));
         }
         let node = self.node_of[id];
-        let ins = self.incoming.get(id).cloned().unwrap_or_default();
-        let runs = ins.is_empty() || forced || ins.iter().any(|e| self.decided.get(e.id.as_str()) == Some(&true)) || self.join_has_failed_branch(id);
-        if !runs {
+        if !self.will_run(id, forced) {
             self.finished.insert(id);
             mark_state(self.states, id, BlockState { status: "skipped".to_string(), output: None, error: None, started_at: None, completed_at: Some(now_ms()) }).await;
             for edge in self.outgoing.get(id).cloned().unwrap_or_default() {
@@ -391,6 +417,13 @@ impl<'a> Scheduler<'a> {
             let late = ran.as_ref().is_ok_and(|o| o.get("late").and_then(Value::as_bool).unwrap_or(false));
             self.end_wait(id, late);
         }
+        self.finish_step(node, ran)
+    }
+
+    /// What a block came to is taken up: a failure its graph handles becomes its output, the
+    /// block is finished and the run goes on from it.
+    fn finish_step(&mut self, node: &'a FlowNode, ran: Result<Value, String>) -> Result<(), String> {
+        let id = node.id.as_str();
         let (output, failed) = match ran {
             Ok(output) => (output, false),
             Err(e) if !self.cancelled && self.handles_failure(id) => {
@@ -404,9 +437,17 @@ impl<'a> Scheduler<'a> {
             Err(e) => return Err(e),
         };
         self.finished.insert(id);
-        self.in_flight = None;
+        self.in_flight.retain(|(b, _)| *b != id);
+        self.running_ro.retain(|(b, _)| *b != id);
         self.route(node, &output, failed)?;
         self.checkpoint(Some(id))
+    }
+
+    /// Whether a ready block runs: it is a root, or was forced, or an edge into it was taken, or it
+    /// is a Join that a branch failed into. Otherwise it is skipped.
+    fn will_run(&self, id: &str, forced: bool) -> bool {
+        let ins = self.incoming.get(id).map(Vec::as_slice).unwrap_or_default();
+        ins.is_empty() || forced || ins.iter().any(|e| self.decided.get(e.id.as_str()) == Some(&true)) || self.join_has_failed_branch(id)
     }
 
     fn has_error_edge(&self, id: &str) -> bool {
@@ -483,31 +524,33 @@ impl<'a> Scheduler<'a> {
         if kind == BlockKind::Join {
             return self.run_join(node);
         }
-        let scope = &mut self.scope;
-        match kind {
-            BlockKind::Variables => blocks::variables::run(node, scope).await,
-            BlockKind::Api => blocks::api::run(node, scope).await,
-            BlockKind::Condition => blocks::condition::run(node, scope).await,
-            BlockKind::Response => blocks::response::run(node, scope).await,
-            BlockKind::Agent => blocks::agent::run(node, scope).await,
-            BlockKind::Message => blocks::message::run(node, scope).await,
-            BlockKind::Task => blocks::task::run(node, scope).await,
-            BlockKind::Notify => blocks::notify::run(node, scope).await,
-            BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
-            BlockKind::Spawn => blocks::spawn::run(node, scope).await,
-            BlockKind::Transform => blocks::transform::run(node, scope).await,
-            BlockKind::ForEach | BlockKind::Wait | BlockKind::Drone | BlockKind::Join => unreachable!("handled above"),
-        }
+        dispatch_scoped(node, kind, &mut self.scope).await
     }
 
     /// Run one block with its events and its recorded state.
     async fn run_block(&mut self, node: &'a FlowNode) -> Result<Value, String> {
-        let id = node.id.as_str();
         let kind = kind_of(node)?;
         self.settle_late_spend().await;
+        let started_at = self.begin_block(node).await;
+        let spent_before = self.spent;
+        let result = self.guarded(node, kind).await;
+        self.end_block(node, kind, result, (started_at, spent_before)).await
+    }
+
+    /// A block starts: its event and its running state. Gives when it started, which the
+    /// states it ends with carry too.
+    async fn begin_block(&mut self, node: &'a FlowNode) -> i64 {
+        let id = node.id.as_str();
         let _ = self.tx.send(RunEvent::BlockStarted { run_id: self.run_id.to_string(), block_id: id.to_string() });
-        // Captured once so the running, done and error states carry the same start.
         let started_at = now_ms();
+        let running = BlockState { status: "running".to_string(), output: None, error: None, started_at: Some(started_at), completed_at: None };
+        mark_state(self.states, id, running).await;
+        started_at
+    }
+
+    /// A block ends with `result`: its output is kept, its cost counted, its event and its state.
+    async fn end_block(&mut self, node: &'a FlowNode, kind: BlockKind, result: Result<Value, String>, (started_at, spent_before): (i64, f64)) -> Result<Value, String> {
+        let id = node.id.as_str();
         let state = |status: &str, output: Option<Value>, error: Option<String>, done: bool| BlockState {
             status: status.to_string(),
             output,
@@ -515,9 +558,6 @@ impl<'a> Scheduler<'a> {
             started_at: Some(started_at),
             completed_at: done.then(now_ms),
         };
-        mark_state(self.states, id, state("running", None, None, false)).await;
-        let spent_before = self.spent;
-        let result = self.guarded(node, kind).await;
         // What a block spent and then failed (a callee that ran, then failed) was still spent: it
         // is on the block's state, which is what the ledger sums.
         // Only a Drone block: a for-each's body has put its own spend on its own state.
@@ -693,6 +733,7 @@ mod call;
 mod checkpoint;
 mod foreach;
 mod join;
+mod parallel;
 mod wait;
 
 #[cfg(test)]

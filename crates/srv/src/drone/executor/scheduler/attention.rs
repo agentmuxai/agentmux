@@ -46,7 +46,7 @@ impl<'a> Scheduler<'a> {
         match decision {
             Decision::RunAgain => {
                 // It runs as the next block, marked running again before it starts.
-                self.in_flight = None;
+                self.in_flight.retain(|(b, _)| *b != id);
                 self.enqueue(id, forced);
                 Ok(())
             }
@@ -58,7 +58,7 @@ impl<'a> Scheduler<'a> {
     /// outside the graph and so is tainted, and the run goes on from there.
     async fn skip_in_flight(&mut self, id: &'a str, mut output: Value) -> Result<(), String> {
         let node = self.node_of[id];
-        self.in_flight = None;
+        self.in_flight.retain(|(b, _)| *b != id);
         self.finished.insert(id);
         self.keep_history(id, &mut output);
         // What it cost counts as for any block that finished, against the run's

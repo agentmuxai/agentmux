@@ -744,3 +744,39 @@ async fn an_event_wait_past_its_limit_does_not_open_its_key_again_so_a_resend_ca
         assert!(!matches!(ev, RunEvent::Waiting { .. }), "a wait that is over is not announced");
     }
 }
+
+/// `first` fans out to two POSTs that cannot get anywhere: both have effects and are ready together.
+fn two_calls() -> DroneGraph {
+    let call = |id: &str| node(id, json!({ "kind": "api", "method": "POST", "url": "ftp://nowhere.invalid/x" }));
+    DroneGraph {
+        nodes: vec![vars("first", "a", "1"), call("p1"), call("p2"), response("done", "{{p1.value}} {{p2.value}}")],
+        edges: vec![edge("e1", "first", "p1", None), edge("e2", "first", "p2", None), edge("e3", "p1", "done", None), edge("e4", "p2", "done", None)],
+    }
+}
+
+#[tokio::test]
+async fn blocks_with_effects_that_start_together_are_marked_in_one_checkpoint() {
+    let kept = run_kept(two_calls(), Value::Null).await;
+    assert!(kept.result.is_err());
+    // Step 0, the checkpoint after `first`, then one mark for both, kept before either starts.
+    assert_eq!(kept.steps[..3], [step(0, None), step(1, Some("first")), step(2, Some("p1"))]);
+    let marked = load(&kept.rows()[..3]).unwrap().unwrap();
+    assert_eq!(marked.frontier.running, vec!["p1".to_string(), "p2".to_string()]);
+    assert!(marked.frontier.ready.is_empty());
+}
+
+#[tokio::test]
+async fn a_restart_asks_about_each_block_that_was_running_in_turn() {
+    let graph = two_calls();
+    let kept = run_kept(graph.clone(), Value::Null).await;
+    let mut p = park(&kept, &graph, 3);
+    let (first, _) = attention(&mut p).await;
+    assert_eq!(first, "p1");
+    decide(&p.run_id, Decision::Skip { output: json!({ "value": "one" }) }).unwrap();
+    let (second, _) = attention(&mut p).await;
+    assert_eq!(second, "p2", "it asks about the next one, and still has it marked until it is answered");
+    decide(&p.run_id, Decision::Skip { output: json!({ "value": "two" }) }).unwrap();
+    assert_eq!(p.task.await.unwrap(), Ok(json!("one two")));
+    let last = load(&p.sink.rows_of(&p.run_id)).unwrap().unwrap();
+    assert!(last.frontier.running.is_empty());
+}
