@@ -308,10 +308,14 @@ jobs:
     needs: gate
     permissions:
       contents: read
+      id-token: write   # the ceiling for the called workflow: only its signing job uses it
     uses: agentmuxai/agentmux/.github/workflows/build-server-package.yml@main
     with:
       ref: ${{ github.sha }}
       legs: release
+      # Developer ID signing and notarization of the macOS programs, in a job of their own. Off until the repository variable
+      # says so (the same kind of switch as RELEASE_SIGNING_ENABLED).
+      sign: ${{ vars.SERVER_PACKAGE_MACOS_SIGNING == 'true' }}
 
   # ── Phase 2b: Sign the release's manifest ───────────────────────────────
   # docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md. The app downloads

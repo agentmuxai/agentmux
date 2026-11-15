@@ -203,5 +203,6 @@ fn reset_signins(state: &AppState) {
     crate::server::browser_signin_offer::reset_bars(state);
     crate::server::browser_signin_fill::reset_lists(state);
     crate::server::browser_signup::reset_offers(state);
+    crate::server::browser_signin_list::reset(state);
     crate::server::browser_signin::reset_notices(state);
 }
