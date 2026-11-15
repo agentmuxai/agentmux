@@ -46,7 +46,6 @@
     "frontend/app/notification/notificationbubbles.tsx": 1,
     "frontend/app/notification/notificationitem.tsx": 1,
     "frontend/app/statusbar/AmbientPurposes.tsx": 9,
-    "frontend/app/statusbar/AttentionListPopover.tsx": 12,
     "frontend/app/statusbar/BackendStatus.tsx": 24,
     "frontend/app/statusbar/BrowserPauseAllStatus.tsx": 1,
     "frontend/app/statusbar/ConfigStatus.tsx": 2,
