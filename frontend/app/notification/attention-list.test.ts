@@ -40,6 +40,7 @@ describe("mergeAttention", () => {
                 color: "#3b82f6",
                 what: "asks to approve a Bash call",
                 since: 100,
+                kinds: [],
                 local: true,
             },
         ]);
@@ -93,7 +94,7 @@ describe("mergeAttention", () => {
         // Another window: only srv's row says so. The item is the pane where the answer is given.
         const elsewhere = mergeAttention([], [asks], seen, () => false);
         expect(elsewhere).toEqual([
-            { blockId: "web", name: "Korp", agentId: undefined, color: "#00aa00", what: "needs you in the browser", since: 500, local: false },
+            { blockId: "web", name: "Korp", agentId: undefined, color: "#00aa00", what: "needs you in the browser", since: 500, kinds: ["browser"], local: false },
         ]);
         // The pane's own window: its registry has the request already, so the row adds nothing.
         const here = mergeAttention([pane("web", "needs you in the browser", 100)], [asks], seen, () => true, () => "Browser");
