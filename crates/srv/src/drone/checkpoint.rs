@@ -72,6 +72,16 @@ pub struct Position {
     pub response: Option<serde_json::Value>,
 }
 
+/// Where a replaying run came from: the run and the step it started at, and whether its
+/// blocks that have effects run for real. Never changes inside a run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fork {
+    pub run_id: String,
+    pub step: u32,
+    #[serde(default)]
+    pub real: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Checkpoint {
     pub schema_version: u32,
@@ -116,6 +126,9 @@ pub struct Checkpoint {
     pub history: BTreeMap<String, Vec<serde_json::Value>>,
     #[serde(default)]
     pub position: Position,
+    /// Set on a run that replays an earlier one (`replay`); absent on any other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork: Option<Fork>,
 }
 
 /// What changed from one checkpoint to the next. Fields that did not change
@@ -426,6 +439,7 @@ pub(crate) fn sample(step: u32) -> Checkpoint {
             finished: vec!["n1".into()],
             ..Position::default()
         },
+        fork: None,
     }
 }
 

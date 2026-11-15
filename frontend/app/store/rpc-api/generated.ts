@@ -514,6 +514,8 @@ import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
 import type { RemoteSshLocation } from "@/types/rpc/RemoteSshLocation";
 import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
 import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
+import type { ReplayRunReq } from "@/types/rpc/ReplayRunReq";
+import type { ReplayRunResp } from "@/types/rpc/ReplayRunResp";
 import type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";
 import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
 import type { ResolveInstallCommandResult } from "@/types/rpc/ResolveInstallCommandResult";
@@ -2481,6 +2483,10 @@ export const GeneratedApi = {
   // command "resumedronewait"
   ResumeDroneWaitCommand(client: RpcClient, data: ResumeWaitReq, opts?: RpcOpts): Promise<ResumeWaitResp> {
     return client.rpcCall("resumedronewait", data, opts);
+  },
+  // command "replaydronerun"
+  ReplayDroneRunCommand(client: RpcClient, data: ReplayRunReq, opts?: RpcOpts): Promise<ReplayRunResp> {
+    return client.rpcCall("replaydronerun", data, opts);
   },
   // command "layout.save"
   SaveLayoutCommand(client: RpcClient, data: CommandLayoutSaveData, opts?: RpcOpts): Promise<LayoutSaveResult> {

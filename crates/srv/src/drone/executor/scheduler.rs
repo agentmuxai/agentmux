@@ -32,6 +32,7 @@ use crate::drone::checkpoint::{Checkpoint, GraphRef};
 use crate::drone::data_flow::ExecutionScope;
 use crate::drone::host::DroneLookup;
 use crate::drone::recorder::{Persist, Recorder};
+use crate::drone::replay::Replay;
 use crate::drone::types::{BlockKind, BlockState, DroneGraph, FlowEdge, FlowNode};
 use agentmux_common::time::now_ms;
 
@@ -71,6 +72,8 @@ pub(super) struct Limits {
     pub(super) chain: Vec<String>,
     /// Where a Drone block finds the drone it calls.
     pub(super) lookup: Option<Arc<dyn DroneLookup>>,
+    /// Set on a run that replays an earlier one: what its blocks with effects say instead of doing them.
+    pub(super) replay: Option<Arc<Replay>>,
 }
 
 /// How long a block may run when its graph does not say (`timeout_seconds`): an
@@ -182,6 +185,7 @@ struct Scheduler<'a> {
     lookup: Option<Arc<dyn DroneLookup>>,
     /// What callees spent that nobody was waiting for any more, by child run: counted at the next block.
     late_spend: Arc<call::LateSpend>,
+    replay: Option<Arc<Replay>>,
     /// Writes the run's checkpoints, with the graph version they say the run is on.
     recorder: Option<(Recorder, GraphRef)>,
     started: Instant,
@@ -244,6 +248,23 @@ pub(super) async fn resume(
         }
     }
     finish(&mut s, Ok(())).await
+}
+
+/// Run a replay from `first`, the new run's first checkpoint (`replay::fork_checkpoint`), to its end.
+/// `graph` must be the graph the replayed run was on. Its own checkpoints begin at step 0.
+pub(super) async fn replay(
+    (graph, first, limits): (&DroneGraph, &Checkpoint, Limits),
+    tx: &mpsc::UnboundedSender<RunEvent>,
+    states: &States,
+) -> Result<Value, RunEnd> {
+    let plan = schedule::analyze(graph).map_err(|issues| {
+        RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))
+    })?;
+    let mut s = Scheduler::new(&first.run_id, graph, plan, ExecutionScope::for_drone(&first.drone_id, first.trigger.clone()), limits, tx, states);
+    s.restore_state(first).map_err(RunEnd::Failed)?;
+    s.show_restored().await;
+    let started = s.checkpoint(None);
+    finish(&mut s, started).await
 }
 
 /// Run what is left of a run that is set up, and say how it ended. `started` is
@@ -311,6 +332,7 @@ impl<'a> Scheduler<'a> {
             chain: limits.chain,
             lookup: limits.lookup,
             late_spend: Arc::default(),
+            replay: limits.replay,
             recorder: limits.persist.map(|p| (Recorder::new(p.sink, run_id), p.graph)),
             started: Instant::now(),
             elapsed_before_ms: 0,
@@ -534,7 +556,11 @@ impl<'a> Scheduler<'a> {
         self.settle_late_spend().await;
         let started_at = self.begin_block(node).await;
         let spent_before = self.spent;
-        let result = self.guarded(node, kind).await;
+        // A replay does not repeat the world: a block with effects says what it said before.
+        let result = match self.stub_of(node, kind) {
+            Some(said) => Ok(said),
+            None => self.guarded(node, kind).await,
+        };
         self.end_block(node, kind, result, (started_at, spent_before)).await
     }
 
@@ -736,6 +762,7 @@ mod checkpoint;
 mod foreach;
 mod join;
 mod parallel;
+mod replay;
 mod wait;
 
 #[cfg(test)]

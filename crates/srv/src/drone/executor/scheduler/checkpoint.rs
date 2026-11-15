@@ -38,8 +38,16 @@ impl<'a> Scheduler<'a> {
         self.keep(Some(id), true)
     }
 
+    /// What `node` does to the world. A block a replay stubs does nothing to it.
+    pub(super) fn effect_of_node(&self, node: &FlowNode, kind: BlockKind) -> Effect {
+        if self.stub_of(node, kind).is_some() {
+            return Effect::ReadOnly;
+        }
+        self.real_effect_of_node(node, kind)
+    }
+
     /// What `node` does to the world, which a for-each takes from its body.
-    fn effect_of_node(&self, node: &FlowNode, kind: BlockKind) -> Effect {
+    pub(super) fn real_effect_of_node(&self, node: &FlowNode, kind: BlockKind) -> Effect {
         let resolve = |template: &str| self.scope.resolve(template);
         let body = match kind {
             BlockKind::ForEach => foreach_config(node)
@@ -163,6 +171,7 @@ impl<'a> Scheduler<'a> {
                 loop_elapsed_ms: self.loop_started.iter().map(|(id, since)| (id.clone(), ms(since))).collect(),
                 response: self.response.clone(),
             },
+            fork: self.replay.as_ref().map(|r| r.fork.clone()),
         }
     }
 
@@ -170,6 +179,16 @@ impl<'a> Scheduler<'a> {
     /// where `c` left the run. A checkpoint that names a block or an edge the graph
     /// does not have was written on another graph, and is refused.
     pub(super) fn restore(&mut self, c: &Checkpoint) -> Result<(), String> {
+        self.restore_state(c)?;
+        if let Some((recorder, _)) = self.recorder.as_mut() {
+            recorder.resume_from(c.clone());
+        }
+        Ok(())
+    }
+
+    /// [`restore`](Self::restore) but for the run's own place only: its checkpoints go on as they are,
+    /// which a run that starts from `c` (a replay) does not have yet.
+    pub(super) fn restore_state(&mut self, c: &Checkpoint) -> Result<(), String> {
         let edges: HashMap<&'a str, &'a crate::drone::types::FlowEdge> = self.outgoing.values().flatten().map(|e| (e.id.as_str(), *e)).collect();
         let node = |id: &str| -> Result<&'a str, String> {
             self.node_of.get_key_value(id).map(|(k, _)| *k).ok_or_else(|| format!("the saved run does not fit its graph: it has no block {id}"))
@@ -244,9 +263,6 @@ impl<'a> Scheduler<'a> {
         self.scope.bits = c.bits.iter().map(|(id, b)| (id.clone(), *b)).collect();
         self.scope.vars = c.state.vars.iter().map(|(name, tv)| (name.clone(), tv.v.clone())).collect();
         self.scope.state = RunState::from_snapshot(c.state.clone());
-        if let Some((recorder, _)) = self.recorder.as_mut() {
-            recorder.resume_from(c.clone());
-        }
         Ok(())
     }
 

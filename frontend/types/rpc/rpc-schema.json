@@ -6572,6 +6572,25 @@
     }
   },
   {
+    "command": "replaydronerun",
+    "request": "agentmux_srv::server::drone_replay::ReplayRunReq",
+    "requestName": "ReplayRunReq",
+    "requestTs": {
+      "imports": [
+        "ReplayRunReq"
+      ],
+      "name": "ReplayRunReq"
+    },
+    "response": "agentmux_srv::server::drone_replay::ReplayRunResp",
+    "responseName": "ReplayRunResp",
+    "responseTs": {
+      "imports": [
+        "ReplayRunResp"
+      ],
+      "name": "ReplayRunResp"
+    }
+  },
+  {
     "command": "reseedagents",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandReseedAgentsData>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandReseedAgentsData>",
