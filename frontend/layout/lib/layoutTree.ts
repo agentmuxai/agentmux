@@ -50,7 +50,7 @@ import { LayoutTreeReplaceNodeAction, LayoutTreeSplitHorizontalAction, LayoutTre
  * chip) moves like any pane and stays a chip where it lands; a fully-minimized branch does not
  * move; and only a chip may go into a chip or a strip of chips, where an expanded pane would be
  * laid out inside a header strip. SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 B. srv applies the
- * same rule (`move_node`, crates/srv/src/backend/layout/intent.rs).
+ * same rule (`move_node`, crates/srv-core/src/backend/layout/intent.rs).
  */
 export function moveIsLockedByMinimize(node: LayoutNode | undefined, parent: LayoutNode | undefined): boolean {
     if (!node) return false;
@@ -472,7 +472,7 @@ function leafIds(node: LayoutNode | undefined, out: string[] = []): string[] {
  * pane left is minimized, restore the nearest one, the pane that followed it in reading order or
  * else the one before it, so a tab always shows one. `before` is the reading order with the
  * removed panes still in it. srv does the same (`restore_nearest_if_all_minimized`,
- * crates/srv/src/backend/layout/intent.rs).
+ * crates/srv-core/src/backend/layout/intent.rs).
  */
 function restoreNearestIfAllMinimized(root: LayoutNode | undefined, before: string[], removed: string[]) {
     if (!root || countExpandedLeaves(root) > 0) return;

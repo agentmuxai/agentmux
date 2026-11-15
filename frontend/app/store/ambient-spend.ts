@@ -7,7 +7,7 @@
  * totals under `ambient:<purpose>`.
  *
  * srv publishes every call's spend once, as an `ambient:spent` event
- * (`crates/srv/src/ambient/spend.rs`), including the calls it makes on its own
+ * (`crates/srv-core/src/ambient/spend.rs`), including the calls it makes on its own
  * that no pane asked for. This is the only place that records it; the panes
  * that ask for a title, a name or a suggestion don't, so nothing is counted twice.
  */

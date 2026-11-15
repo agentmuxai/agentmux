@@ -23,7 +23,7 @@ import "./identity-view.scss";
 
 // CLI providers whose config dir holds conversation history that a delete
 // keeps: those with a `history_native_subdir` in
-// crates/srv/src/backend/providers.rs (Copilot has none).
+// crates/srv-core/src/backend/providers.rs (Copilot has none).
 const PROVIDERS_WITH_KEPT_HISTORY = new Set(["claude", "codex", "gemini"]);
 
 const STATUS_DOT: Record<string, string> = {

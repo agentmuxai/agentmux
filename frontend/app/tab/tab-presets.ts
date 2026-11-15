@@ -42,7 +42,7 @@ export type PresetNode = LeafNode | SplitNode;
 //
 // agent on the left half; sysinfo (CPU) above swarm on the right half.
 // Matches the window-bootstrap default in
-// crates/srv/src/backend/wcore/mod.rs's `default_three_pane_tree` — a
+// crates/srv-core/src/backend/wcore/mod.rs's `default_three_pane_tree` — a
 // SEPARATE mechanism kept in sync by convention, not shared code, so a
 // change to either one has to be mirrored here by hand. Connectors and
 // Memory aren't in the starter set (each one click away in the widget bar),

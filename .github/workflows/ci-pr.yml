@@ -288,11 +288,12 @@ jobs:
     # themselves): the job's own limit used to come first and, on a runner that had stopped answering, was only
     # enforced after the service's grace period (2026-11-12: a 35-minute job was cancelled after 40).
     #
-    # In the merge queue the Ubuntu leg gets 28: it takes 7 to 10 minutes there, the nextest step's two attempts
-    # are limited to 14 + 8 (12 + 8 until the build was cut to two LLVM threads, which adds 1 to 2 minutes to a slow compile), and a stalled leg holds every entry behind it until the limit ends it (and only the
+    # In the merge queue the Ubuntu leg gets 32: it took 7 to 10 minutes there until the core became its own package and
+    # its test harness was built alone, before the server layer's (two builds of about 9 GB at once paged a 16 GB runner,
+    # 2026-11-15), which adds about 4 minutes; the nextest step's two attempts are limited to 18 + 8, and a stalled leg holds every entry behind it until the limit ends it (and only the
     # limit does: a cancel needs the runner to answer, which a stalled one cannot). 2026-11-13: nine stalls ran to
     # 50 + 5 minutes, the queue 19 deep behind them.
-    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && (needs.changes.outputs.queue == 'true' && 28 || 50) || 35 }}
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && (needs.changes.outputs.queue == 'true' && 32 || 50) || 35 }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -446,7 +447,7 @@ jobs:
       # tests it runs (the nextest step below), and checks the other crates there.
       - name: cargo check --tests (CEF-free crates)
         if: matrix.os == 'windows-latest'
-        run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+        run: cargo check --tests -p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
       # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations)
       # in the same CEF-free scope.
@@ -487,12 +488,12 @@ jobs:
         if: matrix.os != 'windows-latest'
         env:
           IN_QUEUE: ${{ needs.changes.outputs.queue }}
-          # The attempt limits: a PR run takes 13 to 18 minutes (7 in the queue); a stalled attempt is ended at
+          # The attempt limits: a PR run takes 13 to 21 minutes (about 11 in the queue); a stalled attempt is ended at
           # about twice that and tried once more, which reuses what it built. The step's limit is the two together
           # and the job's (below) is just over it, so a stall is ended by the script and not by the job.
-          CI_ATTEMPT1_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 840 || 1500 }}
+          CI_ATTEMPT1_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 1080 || 1500 }}
           CI_ATTEMPT2_SECONDS: ${{ needs.changes.outputs.queue == 'true' && 480 || 900 }}
-        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 24 || 42 }}
+        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 28 || 42 }}
         # The build's warnings go to a file for the ts-rs check below, which used
         # to read them off a separate `cargo check`; pipefail keeps a failing
         # build or test failing the step.
@@ -576,7 +577,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Keep this crate list identical to the `rust` job's.
       - name: cargo check --tests (CEF-free crates)
-        run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+        run: cargo check --tests -p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
   # Windows test EXECUTION on the PR (SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md
   # §6 said to restore a targeted Windows subset if Windows-only runtime
@@ -633,7 +634,7 @@ jobs:
         uses: taiki-e/install-action@nextest
       # The same crate list as the `rust` job's.
       - name: cargo nextest archive (CEF-free crates)
-        run: cargo nextest archive -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats --archive-file "$env:RUNNER_TEMP\nextest-windows.tar.zst"
+        run: cargo nextest archive -p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats --archive-file "$env:RUNNER_TEMP\nextest-windows.tar.zst"
       - uses: actions/upload-artifact@v4
         with:
           name: nextest-windows-archive
@@ -940,7 +941,7 @@ jobs:
       - name: Function size ratchet
         run: node scripts/check-function-sizes.mjs
 
-      # srv builds every HTTP client through crates/srv/src/http_client.rs: reqwest 0.13 refuses to build one on a
+      # srv builds every HTTP client through crates/srv-core/src/http_client.rs: reqwest 0.13 refuses to build one on a
       # Linux machine with no system certificates, and a direct `reqwest::Client::new()` panics there, so the server
       # died at start. The helper builds a client that trusts nothing in that case.
       - name: srv HTTP clients

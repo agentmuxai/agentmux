@@ -10,7 +10,7 @@
  * on every message until there is one; once there is one, re-evaluate after
  * human turns 2, 5 and 8, then every third (11, 14, ...). Whether a new title
  * replaces the old one (only if it is news, not a rewording of the same goal) is
- * decided where it is stored, in `crates/srv/src/ambient/title.rs`.
+ * decided where it is stored, in `crates/srv-core/src/ambient/title.rs`.
  *
  * The backend's empty-title recovery (activity_watcher.rs) covers the agents this
  * cannot: ones driven by jekts or tools, with no human message to trigger it.

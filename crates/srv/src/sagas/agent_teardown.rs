@@ -875,37 +875,38 @@ mod tests {
             ".stop_for_replace(",
             "delete_controller(",
         ];
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut offenders = Vec::new();
-        let mut stack = vec![root.clone()];
-        while let Some(dir) = stack.pop() {
-            for entry in std::fs::read_dir(&dir).unwrap() {
-                let path = entry.unwrap().path();
-                if path.is_dir() {
-                    stack.push(path);
-                    continue;
-                }
-                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-                    continue;
-                }
-                let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
-                // Test modules in their own files (`tests.rs`, `tests/`).
-                let is_test_file = rel.ends_with("tests.rs") || rel.contains("/tests/");
-                if is_test_file || ALLOWED.iter().any(|(a, _)| rel.starts_with(a) || rel == *a) {
-                    continue;
-                }
-                let text = std::fs::read_to_string(&path).unwrap();
-                // Code only: skip comment lines and everything from a test module on.
-                // (A test-only item the core also builds for the server's tests carries the feature form.)
-                let cut = ["#[cfg(test)]", "#[cfg(any(test, feature = \"test-support\"))]"].iter().filter_map(|m| text.find(m)).min();
-                let code = &text[..cut.unwrap_or(text.len())];
-                for (i, line) in code.lines().enumerate() {
-                    let t = line.trim_start();
-                    if t.starts_with("//") {
+        for root in crate::test_support::server_src_roots() {
+            let mut stack = vec![root.clone()];
+            while let Some(dir) = stack.pop() {
+                for entry in std::fs::read_dir(&dir).unwrap() {
+                    let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        stack.push(path);
                         continue;
                     }
-                    if let Some(p) = PATTERNS.iter().find(|p| line.contains(*p)) {
-                        offenders.push(format!("{rel}:{}: `{p}`", i + 1));
+                    if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                        continue;
+                    }
+                    let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+                    // Test modules in their own files (`tests.rs`, `tests/`).
+                    let is_test_file = rel.ends_with("tests.rs") || rel.contains("/tests/");
+                    if is_test_file || ALLOWED.iter().any(|(a, _)| rel.starts_with(a) || rel == *a) {
+                        continue;
+                    }
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    // Code only: skip comment lines and everything from a test module on.
+                    // (A test-only item the core also builds for the server's tests carries the feature form.)
+                    let cut = ["#[cfg(test)]", "#[cfg(any(test, feature = \"test-support\"))]"].iter().filter_map(|m| text.find(m)).min();
+                    let code = &text[..cut.unwrap_or(text.len())];
+                    for (i, line) in code.lines().enumerate() {
+                        let t = line.trim_start();
+                        if t.starts_with("//") {
+                            continue;
+                        }
+                        if let Some(p) = PATTERNS.iter().find(|p| line.contains(*p)) {
+                            offenders.push(format!("{rel}:{}: `{p}`", i + 1));
+                        }
                     }
                 }
             }

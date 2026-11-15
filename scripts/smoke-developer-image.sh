@@ -5,7 +5,7 @@
 #
 #   --image  the image to test (default ghcr.io/agentmuxai/agent-base:developer)
 #   --ref    a branch, tag or commit of the repo to build inside the container (default main)
-#   --stage  check: the pinned Rust matches the repo, then `cargo check --tests -p agentmux-srv` (about 7 min cold)
+#   --stage  check: the pinned Rust matches the repo, then `cargo check --tests -p agentmux-srv-core -p agentmux-srv` (about 7 min cold)
 #            dev:   check, then `agent-dev` (Xvfb + `task dev`) until the window is up and stays up, with a screenshot
 #            (about 16 min cold, 12 GB of build output). Default check.
 #   --out    where the screenshot goes (default ./smoke-developer-image-out)
@@ -77,8 +77,8 @@ have="$(cd /tmp && rustc --version | awk '{print $2}')"
 echo "Rust $have"
 done_step
 
-step "cargo check --tests -p agentmux-srv"
-cargo check --tests -p agentmux-srv 2>&1 | tail -n 3
+step "cargo check --tests -p agentmux-srv-core -p agentmux-srv"
+cargo check --tests -p agentmux-srv-core -p agentmux-srv 2>&1 | tail -n 3
 done_step
 
 if [ "$STAGE" = dev ]; then

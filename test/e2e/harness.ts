@@ -103,7 +103,7 @@ export async function evalInMainWindow(port: number, expression: string): Promis
  *  not instance state, and being able to set it on an E2E run is exactly
  *  how close-path failures in these suites get diagnosed.
  *  `AGENTMUX_TEST_HARNESS` is added: an instance under test doesn't publish
- *  its cloud presence (crates/srv/src/muxbus/wan_presence/policy.rs). */
+ *  its cloud presence (crates/srv-core/src/muxbus/wan_presence/policy.rs). */
 function scrubbedEnv(): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const [k, v] of Object.entries(process.env)) {

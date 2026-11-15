@@ -2,7 +2,7 @@ name: Developer image smoke
 
 # Does the container agent developer image still build AgentMux? Runs scripts/smoke-developer-image.sh: the image's
 # tools are there, its Rust is the version rust-toolchain.toml pins, and a fresh clone passes
-# `cargo check --tests -p agentmux-srv`. With stage `dev` it also starts `agent-dev` (Xvfb + `task dev`) until the
+# `cargo check --tests -p agentmux-srv-core -p agentmux-srv`. With stage `dev` it also starts `agent-dev` (Xvfb + `task dev`) until the
 # window is up and stays up, and uploads a screenshot.
 #
 # By hand only, not on every pull request or release: the check stage is about 7 minutes cold and the dev stage

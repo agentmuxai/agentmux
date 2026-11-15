@@ -5,7 +5,7 @@
 // check-srv-http-clients.mjs — CI gate: srv, the MCP server, bashwrap and the desktop host build their HTTP clients in one
 // place each.
 //
-// THE RULE. Every HTTP client in crates/srv is built through crates/srv/src/http_client.rs (`builder()` and `client()`); every
+// THE RULE. Every HTTP client in crates/srv is built through crates/srv-core/src/http_client.rs (`builder()` and `client()`); every
 // one in crates/mcp, crates/bashwrap and crates/cef (which only talk to the local server) through
 // crates/common/src/local_http.rs. reqwest 0.13 reads the machine's certificates when it builds a client and refuses to build
 // one on a Linux machine that has none, and `reqwest::Client::new()` turns that refusal into a panic: the server and the MCP
@@ -34,13 +34,13 @@ import { isMain } from "./lib/is-main.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-const CRATES = ["crates/srv/src", "crates/mcp/src", "crates/bashwrap/src", "crates/cef/src"];
-const HELPER = "crates/srv/src/http_client.rs";
+const CRATES = ["crates/srv/src", "crates/srv-core/src", "crates/mcp/src", "crates/bashwrap/src", "crates/cef/src"];
+const HELPER = "crates/srv-core/src/http_client.rs";
 const FULL = /reqwest::(?:Client::(?:new|builder|default)\b|ClientBuilder::new\b|get\s*\()/;
 const SHORT = /(?<![\w:])Client::(?:new|builder|default)\s*\(/;
 const IMPORTS_CLIENT = /use\s+reqwest::(?:\{[^}]*\bClient\b[^}]*\}|Client\b)/;
 
-const SRV = "crates/srv/src/";
+const SRV_DIRS = ["crates/srv/src/", "crates/srv-core/src/"];
 const HELPER_BUILDER = /http_client::builder\s*\(\)/g;
 const PANICKING_END = /\.build\s*\(\s*\)\s*(\.(?:unwrap_or_default\s*\(\s*\)|expect\s*\(|unwrap\s*\(\s*\)))/g;
 
@@ -142,7 +142,7 @@ export function checkFile(path, text) {
         if (test[i]) continue;
         if (FULL.test(l) || (imports && SHORT.test(l))) out.push({ path, line: i + 1, text: raw[i].trim() });
     }
-    if (path.startsWith(SRV)) {
+    if (SRV_DIRS.some((dir) => path.startsWith(dir))) {
         const whole = code.join("\n");
         for (const at of panickingEndings(whole)) {
             const line = whole.slice(0, at).split("\n").length - 1;

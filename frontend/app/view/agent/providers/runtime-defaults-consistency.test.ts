@@ -3,15 +3,15 @@
 // `agent.open` (MCP `OpenAgent`, layouts) builds a pane without the frontend, and
 // srv fills a stored pane's missing runtime flags at spawn, so srv has to know the
 // default model, effort and permission mode itself
-// (`crates/srv/src/backend/agent_runtime.rs`). The runtime menu shows
+// (`crates/srv-core/src/backend/agent_runtime.rs`). The runtime menu shows
 // the FRONTEND's idea of the default; if the two disagree, a pane opens running
 // one model while its menu reads another — the bug this exists to keep closed.
 // docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md (G3).
 //
 //   frontend/app/agent-model/document-state.ts   DEFAULT_RUNTIME_CONFIG
 //   frontend/app/view/agent/providers/catalog.ts  models[].default
-//   crates/srv/src/backend/providers.rs          default_model_for()
-//   crates/srv/src/backend/agent_runtime.rs  DEFAULT_PERMISSION_MODE / DEFAULT_EFFORT
+//   crates/srv-core/src/backend/providers.rs          default_model_for()
+//   crates/srv-core/src/backend/agent_runtime.rs  DEFAULT_PERMISSION_MODE / DEFAULT_EFFORT
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -25,17 +25,17 @@ const read = (rel: string) => readFileSync(resolve(repoRoot, rel), "utf8");
 
 /** `default_model_for`'s match arms: provider id → model (`null` for `None`). */
 function srvDefaultModels(): Map<string, string> {
-    const fn = read("crates/srv/src/backend/providers.rs").match(
+    const fn = read("crates/srv-core/src/backend/providers.rs").match(
         /pub fn default_model_for\(provider_id: &str\) -> Option<&'static str> \{([\s\S]*?)\n\}/
     );
-    if (!fn) throw new Error("default_model_for not found in crates/srv/src/backend/providers.rs");
+    if (!fn) throw new Error("default_model_for not found in crates/srv-core/src/backend/providers.rs");
     const out = new Map<string, string>();
     for (const m of fn[1].matchAll(/"([^"]+)"\s*=>\s*Some\("([^"]+)"\)/g)) out.set(m[1], m[2]);
     return out;
 }
 
 function srvConst(name: string): string {
-    const m = read("crates/srv/src/backend/agent_runtime.rs").match(
+    const m = read("crates/srv-core/src/backend/agent_runtime.rs").match(
         new RegExp(`const ${name}: &str = "([^"]+)";`)
     );
     if (!m) throw new Error(`${name} not found in agent_runtime.rs`);

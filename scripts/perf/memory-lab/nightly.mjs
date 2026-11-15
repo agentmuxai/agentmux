@@ -36,7 +36,7 @@ function flag(argv, name) {
     return i >= 0 ? argv[i + 1] : null;
 }
 
-const CLAUDE_PROVIDER = "crates/srv/src/backend/providers/claude.rs";
+const CLAUDE_PROVIDER = "crates/srv-core/src/backend/providers/claude.rs";
 
 /**
  * The Claude Code version the srv of a build pins, read from the build's own source: the lab's stand-in Claude must be

@@ -3,7 +3,7 @@
 
 /*
  * What the user typed to an agent, kept with the agent by srv
- * (`agent.input-history*`, `agent.input-draft`; crates/srv/src/backend/storage/
+ * (`agent.input-history*`, `agent.input-draft`; crates/srv-core/src/backend/storage/
  * agent_input_history.rs, docs/specs/SPEC_AGENT_INPUT_HISTORY_2026_10_18.md),
  * so ArrowUp recalls it and the draft comes back after a restart, an upgrade
  * or in a new pane. A pane without a defined agent (a quick-launch provider

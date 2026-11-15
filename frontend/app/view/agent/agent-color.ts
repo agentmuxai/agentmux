@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Per-agent color assignment: the frontend counterpart of
-// crates/srv/src/backend/agent_color.rs. The colours are the shared palette
+// crates/srv-core/src/backend/agent_color.rs. The colours are the shared palette
 // (theme/palette.ts, schema/color-palette.json), read by both sides, so
 // there is no list to keep in sync.
 //

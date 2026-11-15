@@ -155,17 +155,17 @@ const RULES = [
         what: "migration range",
         page: "internals/data-structure.md",
         run(text, code, files) {
-            const nums = files.map((f) => /^crates\/srv\/src\/migrations\/m(\d{4})_/.exec(f)?.[1]).filter(Boolean).map(Number);
+            const nums = files.map((f) => /^crates\/srv-core\/src\/migrations\/m(\d{4})_/.exec(f)?.[1]).filter(Boolean).map(Number);
             if (!nums.length) return [];
             const last = Math.max(...nums);
-            return sameNumber("internals/data-structure.md", "migration range", numbersIn(text, /`m0000`\s*[–-]\s*`m(\d{4})`/g), last, "the highest crates/srv/src/migrations/mNNNN file");
+            return sameNumber("internals/data-structure.md", "migration range", numbersIn(text, /`m0000`\s*[–-]\s*`m(\d{4})`/g), last, "the highest crates/srv-core/src/migrations/mNNNN file");
         },
     },
     {
         what: "wan.db schema counter",
         page: "internals/data-structure.md",
         run(text, code) {
-            const src = read(code, "crates/srv/src/backend/storage/wan_identity.rs");
+            const src = read(code, "crates/srv-core/src/backend/storage/wan_identity.rs");
             const actual = src && Number(/\bconst SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/.exec(src)?.[1]);
             if (!actual) return [];
             return sameNumber("internals/data-structure.md", "wan.db schema counter", numbersIn(text, /own counter,\s*(\d+)\)|schema counter\s*\((\d+)\)/g), actual, "SCHEMA_VERSION in wan_identity.rs");
@@ -261,7 +261,7 @@ const RULES = [
         what: "pane env allow-list",
         page: "internals/env-vars.md",
         run(text, code) {
-            const src = read(code, "crates/srv/src/backend/pane_env.rs");
+            const src = read(code, "crates/srv-core/src/backend/pane_env.rs");
             const body = section(text, /^### The pane allow-list \(`PANE_ENV_KEEP`\)/);
             const keep = src && stringsAfter(src, /\bPANE_ENV_KEEP:\s*&\[&str\]/, /=\s*&\[/);
             if (!keep || !body) return [];

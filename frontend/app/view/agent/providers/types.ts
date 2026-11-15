@@ -102,7 +102,7 @@ export interface ProviderDefinition {
     // Set for a CLI that ignores stdin and takes the prompt as an argument
     // (`agy -p <prompt>`): the flag that carries it. Written to pane meta as
     // `agent:prompt_arg_flag`; mirrors `ProviderConfig::prompt_arg_flag` in
-    // crates/srv/src/backend/providers.rs.
+    // crates/srv-core/src/backend/providers.rs.
     promptArgFlag?: string;
     // Resume flag — how to pass a session ID for multi-turn continuity.
     // null means this provider does not support simple-flag resume (e.g. Codex uses a subcommand).
