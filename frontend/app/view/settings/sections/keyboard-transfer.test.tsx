@@ -59,7 +59,7 @@ describe("Export", () => {
         expect(JSON.parse(h.copied[0])).toEqual(MINE);
     });
 
-    it("shows the text selected, for Ctrl+C, when the clipboard does not take it", async () => {
+    it("shows the text selected, to copy by hand, when the clipboard does not take it", async () => {
         h.clipboardFails = true;
         useEntries(MINE);
         render(() => <KeyboardSection />);
@@ -69,7 +69,7 @@ describe("Export", () => {
         expect(box.readOnly).toBe(true);
         expect(box.selectionStart).toBe(0);
         expect(box.selectionEnd).toBe(box.value.length);
-        expect(screen.getByText(/Could not copy to the clipboard \(on Linux it needs wl-clipboard, xclip or xsel\)\. The entries are selected below: press Ctrl\+C\./)).toBeTruthy();
+        expect(screen.getByText(/Could not copy to the clipboard \(on Linux it needs wl-clipboard, xclip or xsel\)\. The entries are selected below: copy from there\./)).toBeTruthy();
     });
 
     it("takes the text away again on the next export that copies", async () => {

@@ -69,7 +69,7 @@ export function KeyboardTransfer(p: { edit: KeyboardEdit }): JSX.Element {
     const [open, setOpen] = createSignal(false);
     const [note, setNote] = createSignal("");
     // The text itself, when the clipboard did not take it (Linux with none of wl-copy, xclip or xsel, and no copy the page
-    // may make): shown selected so the person can copy it with Ctrl+C, which needs no tool.
+    // may make): shown selected so the person can copy it by hand, which needs no tool.
     const [manual, setManual] = createSignal<string | null>(null);
     let manualBox: HTMLTextAreaElement | undefined;
     createEffect(() => {
@@ -86,7 +86,7 @@ export function KeyboardTransfer(p: { edit: KeyboardEdit }): JSX.Element {
             () => setNote(`Copied ${entries.length} ${entries.length === 1 ? "entry" : "entries"}.`),
             () => {
                 setManual(text);
-                setNote(`Could not copy to the clipboard (on Linux it needs wl-clipboard, xclip or xsel). The ${entries.length === 1 ? "entry is" : "entries are"} selected below: press Ctrl+C.`);
+                setNote(`Could not copy to the clipboard (on Linux it needs wl-clipboard, xclip or xsel). The ${entries.length === 1 ? "entry is" : "entries are"} selected below: copy from there.`);
             }
         );
     };
