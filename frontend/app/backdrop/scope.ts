@@ -14,7 +14,9 @@
 
 import { createSignal, type Accessor } from "solid-js";
 import { hexToRgb } from "../theme/oklch";
-import type { DerivedBackdrop } from "./ink";
+import { contrastRatio } from "../block/pane-color-scheme";
+import type { AnsiColours } from "./ansi";
+import { toneMove, type DerivedBackdrop, type Surfaces } from "./ink";
 import mapped from "./mapped-tokens.json";
 
 export type ScopeVars = Record<string, string>;
@@ -36,8 +38,21 @@ function rgbTriplet(hex: string): string | undefined {
     return rgb ? rgb.map((c) => Math.round(c * 255)).join(", ") : undefined;
 }
 
-/** The custom properties for a pane's inline style, from what `deriveInk` made of its backdrop. */
-export function scopeVars(derived: DerivedBackdrop): ScopeVars {
+/** What the transcript's terminal-palette colours are held to on a pane's surfaces (WCAG, as for muted text). */
+export const ANSI_CONTRAST = 4.5;
+
+/** A palette colour moved, in lightness only, to read on the hardest of the pane's three layers (so it reads on all of them). */
+function readableOn(hex: string, surfaces: Surfaces): string {
+    const hardest = [surfaces.surface, surfaces.raised, surfaces.overlay].sort((a, b) => contrastRatio(hex, a) - contrastRatio(hex, b))[0];
+    return toneMove(hex, hardest, ANSI_CONTRAST).hex;
+}
+
+/**
+ * The custom properties for a pane's inline style, from what `deriveInk` made of its backdrop. `ansi` is the active
+ * app theme's terminal palette (`themeAnsi`): each colour in it is set again on the pane, moved to read there, for the
+ * transcript's syntax and status colours (spec §6). Without it the pane sets none, and they stay the theme's.
+ */
+export function scopeVars(derived: DerivedBackdrop, ansi?: AnsiColours): ScopeVars {
     const { surfaces, ink } = derived;
     const vars: ScopeVars = {
         "color-scheme": derived.scheme,
@@ -63,6 +78,7 @@ export function scopeVars(derived: DerivedBackdrop): ScopeVars {
     // `rgba(var(--accent-color-rgb), a)` is how the theme tints with the accent, and it needs the channels, not a colour.
     const triplet = rgbTriplet(ink.accent);
     if (triplet) vars["--accent-color-rgb"] = triplet;
+    for (const [token, hex] of Object.entries(ansi ?? {})) vars[token] = readableOn(hex, surfaces);
     return vars;
 }
 
