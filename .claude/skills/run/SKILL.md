@@ -175,6 +175,40 @@ shows your real agents, that is a bug: stop it, check the `[dev] home:` line, an
   be shared.
 - Start over: stop the build (section 4), then delete `<clone>/.dev-home/<port>`.
 
+## 3c. A test window that never shows on a real screen
+
+A tester's build runs on a machine a person works at, and a window that opens on the screen and is moved
+away a moment later has been seen (three times on 2026-11-15). Start every test build off-screen from the
+first frame instead of racing a mover script:
+
+```bash
+scripts/offscreen-check.sh <launcher> <host code>   # refuses (exit 1) a build from before the flag: do not start it
+                                                    # (host code: runtime/agentmux-cef.dll on Windows, not the .exe stub)
+AGENTMUX_TEST_OFFSCREEN=1 task dev             # or the same variable before a packaged build's launcher
+```
+
+- Every window of the instance is created at (0, -32000), far above every display: the first one, new and torn-off ones, pooled
+  and floating ones, and the splash is off. Nothing saves that place as the person's window position, and the
+  launcher does not move the window back. Screenshots and the Browser and UI tools work on the page as on any
+  window (they read the page, not the screen).
+- Only a dev or local build honours it. A published release ignores the variable (so one inherited from a
+  test instance's shell cannot hide a person's windows): its log says `AGENTMUX_TEST_OFFSCREEN=1 ignored`.
+  A build that honours it logs `test window mode: every window is created off-screen`; check that line in
+  the host log before you trust the run.
+- Do not start a prebuilt or packaged build without `scripts/offscreen-check.sh` passing, and do not write a
+  mover script. (`task dev` compiles your own checkout and launches it in one command, so a checkout that has
+  this section has the flag; the check is for binaries someone else built.)
+- **macOS is not supported yet, and refuses.** AppKit puts a window onto a display when it is first shown
+  and clamps every later move, so a window there can only be kept off the screen by never ordering it in.
+  With the variable set, a dev or local build on macOS prints one line and exits with status 2 before any
+  window or splash exists. Start a macOS build without the variable, and never while someone records or
+  works at that machine.
+- Not covered: the OS's own message boxes (the quit confirmation, the upgrade confirmation) cannot be
+  placed by the host. A test run does not reach them. On Linux/Wayland a window cannot be placed at all:
+  use X11 (or XWayland) for a test build.
+- `focus` on a window does not bring it onto a display in this mode (it normally does for a window that is
+  off every display).
+
 **An agent that works with no account.** Once the window is up, `task dev:seed` (or
 `node scripts/dev-seed.mjs`) puts the scripted fake Claude Code (`scripts/ui-screenshots/fake-claude`)
 in the home, adds a placeholder account (`dev@example.invalid`) and one agent linked to it, and opens
