@@ -15,8 +15,12 @@
 //!
 //! Line positions come from the line counter, caught up in memory when the
 //! file has grown past it (`SnapshotReader::tail_state`). A transcript with no
-//! usable counter epoch comes back without `stream`/`gen`/line positions and
-//! the pane opens the way it always did.
+//! usable counter epoch is counted first (`transcript::counting`, one scan at a
+//! time per file, off this read's snapshot): a small one is counted within the
+//! call, a large one answers `counting` and the pane asks again. Without that
+//! the pane's usual open could not read it either: `output.idx` is never
+//! fresh for a file with no generation. A transcript whose newest line fits no
+//! window comes back without line positions and the pane opens the usual way.
 
 use super::blockfile::{is_claude_turn_start, trim_to_last_turns, trim_to_tail_bytes};
 use super::*;
@@ -33,6 +37,9 @@ const MAX_WINDOW_BYTES: i64 = 16 << 20;
 /// The most a slice is extended back to reach a turn start, and the most
 /// `tail_bytes` asks for: the pane's restore size today.
 const RESTORE_BUDGET_BYTES: i64 = 1 << 20;
+/// How long a call waits for a transcript with no epoch to be counted before it answers "counting"
+/// (the pane's call times out at 5 s). A small file is counted well inside it.
+const COUNT_WAIT: std::time::Duration = std::time::Duration::from_millis(1500);
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
@@ -111,8 +118,10 @@ enum Read {
     Slice(Slice),
     /// `expect_gen` is not the transcript's generation (named here).
     Mismatch(String),
-    /// No usable counter epoch, or the slice could not be read: no line positions.
+    /// The slice could not be read (the newest line is larger than any window): no line positions.
     Uncounted { size: i64 },
+    /// No usable counter epoch: the file has to be counted first (`transcript::counting`).
+    NoEpoch { size: i64 },
 }
 
 struct Slice {
@@ -184,7 +193,8 @@ fn read_stamps(r: &SnapshotReader<'_>, zone: &str, offsets: &[i64]) -> Result<Op
 fn read_slice(r: &SnapshotReader<'_>, zone: &str, cmd: &CommandAgentOpenTailData) -> Result<Read, StoreError> {
     let Some(state) = r.tail_state(zone, "output", MAX_CATCH_UP_BYTES)? else {
         let size = r.file(zone, "output")?.map(|f| f.size).unwrap_or(0);
-        return Ok(Read::Uncounted { size });
+        // Nothing to count in a file that is missing or empty (a new agent's block): the usual open answers it.
+        return Ok(if size > 0 { Read::NoEpoch { size } } else { Read::Uncounted { size } });
     };
     if let Some(expected) = &cmd.expect_gen {
         if *expected != state.gen {
@@ -282,6 +292,17 @@ fn open_tail(
     mstore: &Arc<Store>,
     cmd: CommandAgentOpenTailData,
 ) -> Result<AgentOpenTailResult, String> {
+    open_tail_waiting(filestore, global, mstore, cmd, COUNT_WAIT)
+}
+
+/// [`open_tail`], waiting up to `count_wait` for a transcript with no epoch to be counted.
+fn open_tail_waiting(
+    filestore: &Arc<FileStore>,
+    global: Option<&Arc<FileStore>>,
+    mstore: &Arc<Store>,
+    cmd: CommandAgentOpenTailData,
+    count_wait: std::time::Duration,
+) -> Result<AgentOpenTailResult, String> {
     if cmd.filename != crate::backend::agent_session::OUTPUT_FILE {
         return Err(format!("agent:open_tail: only `{}` has a tail", crate::backend::agent_session::OUTPUT_FILE));
     }
@@ -294,7 +315,12 @@ fn open_tail(
             read = fs.read_snapshot(|r| read_slice(r, &zone, &cmd));
         }
     }
-    let read = read.map_err(|e| format!("agent:open_tail: {e}"))?;
+    let mut read = read.map_err(|e| format!("agent:open_tail: {e}"))?;
+    // No epoch: count the file (once, whoever asks), and wait for it a moment. A small file is counted
+    // by then and opens in this call; a large one answers "counting" and the pane asks again.
+    if matches!(read, Read::NoEpoch { .. }) && crate::backend::transcript::counting::ensure_counted(&fs, &zone, count_wait) {
+        read = fs.read_snapshot(|r| read_slice(r, &zone, &cmd)).map_err(|e| format!("agent:open_tail: {e}"))?;
+    }
     let mut out = match read {
         Read::Mismatch(gen) => AgentOpenTailResult {
             stream: Some(stream),
@@ -303,6 +329,7 @@ fn open_tail(
             ..Default::default()
         },
         Read::Uncounted { size } => AgentOpenTailResult { size: Some(size.max(0) as u64), ..Default::default() },
+        Read::NoEpoch { size } => AgentOpenTailResult { size: Some(size.max(0) as u64), counting: Some(true), ..Default::default() },
         Read::Slice(slice) => {
             let end_line = slice.total_lines;
             let start_line = end_line - slice.lines.len() as u64;

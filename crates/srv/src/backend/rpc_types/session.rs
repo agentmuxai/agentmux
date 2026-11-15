@@ -337,6 +337,12 @@ pub struct AgentOpenTailResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub history_damaged: Option<bool>,
+    /// The transcript has no line positions yet and srv is counting it (one scan, once per file):
+    /// `lines` is empty. Ask again in a moment instead of opening the usual way, which cannot read a
+    /// large transcript without them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub counting: Option<bool>,
 }
 
 /// Request for `agent:session:write_state`. Writes `output.state.json`

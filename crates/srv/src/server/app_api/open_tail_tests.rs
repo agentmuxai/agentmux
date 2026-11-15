@@ -191,14 +191,59 @@ fn a_counter_behind_the_file_is_caught_up_in_memory_and_nothing_is_written() {
 }
 
 #[test]
-fn a_transcript_without_a_usable_epoch_has_no_line_positions() {
+fn a_transcript_without_an_epoch_is_counted_and_opens_in_the_same_call() {
     let (fs, dir) = file_store("uncounted");
     seed(&fs, &[line(0, 10), line(1, 10)]);
     fs.lock_conn().execute("UPDATE db_wave_file SET gen = NULL WHERE name = 'output'", []).unwrap();
     let r = run(&fs, cmd(None));
-    assert!(r.stream.is_none() && r.gen.is_none() && r.start_line.is_none() && r.end_line.is_none());
-    assert!(r.lines.is_empty());
+    assert!(r.gen.is_some() && r.stream.is_some());
+    assert_eq!((r.start_line, r.end_line), (Some(0), Some(2)));
+    assert_eq!(r.lines.len(), 2);
+    assert!(r.counting.is_none());
+    assert!(fs.line_state(BLOCK, "output").unwrap().unwrap().counted.is_some(), "the epoch stays");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_missing_or_empty_transcript_is_not_counting() {
+    // A new agent's block: no output file at all, then an empty one. Neither is counted or waited for.
+    let dir = std::env::temp_dir().join(format!("open-tail-missing-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fs = Arc::new(FileStore::open(&dir.join("t.db")).unwrap());
+    let r = run(&fs, cmd(None));
+    assert!(r.counting.is_none() && r.lines.is_empty() && r.gen.is_none());
+    fs.make_file(BLOCK, "output", FileMeta::default(), FileOpts::default()).unwrap();
+    let r = run(&fs, cmd(None));
+    assert!(r.counting.is_none(), "an empty file has nothing to count");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_transcript_still_being_counted_answers_counting_with_no_lines() {
+    let (fs, dir) = file_store("counting");
+    seed(&fs, &[line(0, 10), line(1, 10)]);
+    fs.lock_conn().execute("UPDATE db_wave_file SET gen = NULL WHERE name = 'output'", []).unwrap();
+    // Another reader's count of this file is running and has not finished.
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    let key = crate::backend::transcript::counting::flight_key(&fs, BLOCK);
+    let holder = std::thread::spawn(move || {
+        crate::backend::transcript::counting::run_once(key, std::time::Duration::from_secs(10), move || {
+            gate.recv().unwrap();
+        })
+    });
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let r = open_tail_waiting(&fs, None, &mem_store(), cmd(None), std::time::Duration::from_millis(50)).unwrap();
+    assert_eq!(r.counting, Some(true));
+    assert!(r.lines.is_empty() && r.gen.is_none() && r.start_line.is_none());
     assert!(r.size.unwrap() > 0, "the size is still reported");
+
+    release.send(()).unwrap();
+    assert!(holder.join().unwrap());
+    // Once it is over, the next ask is answered.
+    let r = run(&fs, cmd(None));
+    assert_eq!(r.end_line, Some(2));
+    assert!(r.counting.is_none());
     let _ = std::fs::remove_dir_all(dir);
 }
 

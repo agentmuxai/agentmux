@@ -219,3 +219,184 @@ fn a_fork_shows_the_parents_human_messages_as_the_humans() {
     assert_eq!(read_all(&gfs, &agent_current_zone(PARENT), OUTPUT_FILE).len(), copied.len(), "same size, so the sidecar still matches");
     assert_eq!(kind(PARENT, &read_all(&gfs, &zone, OUTPUT_FILE).split(|b| *b == b'\n').nth(1).unwrap().to_vec()).as_deref(), Some("user"), "the parent's own copy is untouched");
 }
+
+// A parent's transcript is its whole life; a fork copies only a newest part of it, from a turn start.
+
+fn turn_line(sid: &str, n: usize) -> String {
+    let mut l = serde_json::json!({ "type": "user", "session_id": sid, "message": { "role": "user", "content": format!("question {n}") } }).to_string();
+    l.push('\n');
+    l
+}
+
+fn work_line(sid: &str, n: usize, pad: usize) -> String {
+    format!("{{\"type\":\"assistant\",\"session_id\":\"{sid}\",\"n\":{n},\"pad\":\"{}\"}}\n", "x".repeat(pad))
+}
+
+/// `turns` turns of `sid`, each a question and three replies. Returns the bytes and where each turn starts.
+fn long_history(sid: &str, turns: usize) -> (String, Vec<usize>) {
+    let (mut data, mut starts) = (String::new(), Vec::new());
+    for t in 0..turns {
+        starts.push(data.len());
+        data += &turn_line(sid, t);
+        for k in 0..3 {
+            data += &work_line(sid, t * 3 + k, 100);
+        }
+    }
+    (data, starts)
+}
+
+fn lines_of(bytes: &[u8]) -> usize {
+    bytes.split(|b| *b == b'\n').filter(|l| !l.is_empty()).count()
+}
+
+fn records_of(sidecar: &[u8]) -> Vec<(u64, i64)> {
+    sidecar
+        .split(|b| *b == b'\n')
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let v: serde_json::Value = serde_json::from_slice(l).unwrap();
+            (v["off"].as_u64().unwrap(), v["ms"].as_i64().unwrap())
+        })
+        .collect()
+}
+
+#[test]
+fn a_parent_over_the_cap_gives_the_fork_its_newest_part_from_a_turn_start() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    let zone = agent_current_zone(PARENT);
+    let (data, starts) = long_history("sess-b", 80);
+    gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_lines(&zone, OUTPUT_FILE, data.as_bytes()).unwrap();
+    let side: String = starts.iter().enumerate().map(|(i, o)| format!("{{\"off\":{o},\"ms\":{}}}\n", 1000 + i)).collect();
+    write_zone_file(&gfs, &zone, TSIDX_FILE, side.as_bytes()).unwrap();
+    write_zone_file(&gfs, &zone, SNAPSHOT_FILE, b"{\"highWaterMark\":160}").unwrap();
+    write_zone_file(&gfs, &zone, crate::backend::continuity_state::STATE_FILE, b"{\"summary\":1}").unwrap();
+    let cap = 6_000;
+    assert!(data.len() > 4 * cap as usize);
+
+    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", cap).unwrap();
+
+    let fork = agent_current_zone(FORK);
+    let copied = read_all(&gfs, &fork, OUTPUT_FILE);
+    assert!(matches!(out, ForkHistory::Copied { bytes } if bytes as usize > copied.len()), "got {out:?}");
+    assert!(copied.len() as i64 <= cap, "{} bytes over a cap of {cap}", copied.len());
+    assert!(copied.len() as i64 > cap - 900, "it keeps what fits, less one turn and a cut line");
+    assert!(data.as_bytes().ends_with(&copied), "the newest part, exactly");
+    let cut = data.len() - copied.len();
+    assert!(starts.contains(&cut), "it starts at a turn start");
+    // Counted from its first byte, so the pane opens from line positions at once.
+    let counted = gfs.line_state(&fork, OUTPUT_FILE).unwrap().unwrap().counted.expect("counted");
+    assert_eq!(counted.lines as usize, lines_of(&copied));
+    // The sidecar is the parent's records for those bytes, moved to start at 0.
+    let recs = records_of(&read_all(&gfs, &fork, TSIDX_FILE));
+    let want: Vec<(u64, i64)> = starts.iter().enumerate().filter(|(_, o)| **o >= cut).map(|(i, o)| ((*o - cut) as u64, 1000 + i as i64)).collect();
+    assert_eq!(recs, want);
+    // The parent's snapshot counts lines of the whole transcript; its summary is the conversation's.
+    assert!(gfs.stat(&fork, SNAPSHOT_FILE).unwrap().is_none());
+    assert_eq!(read_all(&gfs, &fork, crate::backend::continuity_state::STATE_FILE), b"{\"summary\":1}");
+    assert_eq!(inherited_session(&gfs, &fork).as_deref(), Some("sess-b"));
+    assert_eq!(read_all(&gfs, &zone, OUTPUT_FILE), data.as_bytes(), "the parent keeps everything");
+    // The fork continues after what it was given.
+    gfs.append_lines(&fork, OUTPUT_FILE, work_line("fork-session", 0, 5).as_bytes()).unwrap();
+    assert_eq!(gfs.line_state(&fork, OUTPUT_FILE).unwrap().unwrap().counted.unwrap().lines, counted.lines + 1);
+}
+
+#[test]
+fn a_transcript_at_the_cap_is_copied_whole_as_before() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    let zone = agent_current_zone(PARENT);
+    let (data, _) = long_history("sess-b", 5);
+    gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_lines(&zone, OUTPUT_FILE, data.as_bytes()).unwrap();
+    write_zone_file(&gfs, &zone, SNAPSHOT_FILE, b"{\"highWaterMark\":20}").unwrap();
+
+    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", data.len() as i64).unwrap();
+
+    assert!(matches!(out, ForkHistory::Copied { .. }));
+    let fork = agent_current_zone(FORK);
+    assert_eq!(read_all(&gfs, &fork, OUTPUT_FILE), data.as_bytes());
+    assert_eq!(read_all(&gfs, &fork, SNAPSHOT_FILE), b"{\"highWaterMark\":20}");
+    assert_eq!(gfs.line_state(&fork, OUTPUT_FILE).unwrap().unwrap().counted.expect("counted").lines as usize, lines_of(data.as_bytes()));
+}
+
+#[test]
+fn a_window_with_no_turn_start_begins_at_a_whole_line() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    let zone = agent_current_zone(PARENT);
+    // One long turn: the question, then replies for far more than the cap.
+    let mut data = turn_line("sess-b", 0);
+    for k in 0..200 {
+        data += &work_line("sess-b", k, 100);
+    }
+    gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_lines(&zone, OUTPUT_FILE, data.as_bytes()).unwrap();
+
+    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", 5_000).unwrap();
+
+    assert!(matches!(out, ForkHistory::Copied { .. }), "got {out:?}");
+    let copied = read_all(&gfs, &agent_current_zone(FORK), OUTPUT_FILE);
+    assert!(copied.len() <= 5_000 && copied.starts_with(b"{\"type\":\"assistant\""), "a whole line, not a cut one");
+    assert!(data.as_bytes().ends_with(&copied));
+}
+
+#[test]
+fn a_fork_of_an_older_session_over_the_cap_gets_the_newest_part_up_to_where_it_ends() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    let zone = agent_current_zone(PARENT);
+    let (older, starts) = long_history("older-session", 40);
+    let (newer, _) = long_history("sess-b", 10);
+    gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_lines(&zone, OUTPUT_FILE, format!("{older}{newer}").as_bytes()).unwrap();
+    let side: String = starts.iter().enumerate().map(|(i, o)| format!("{{\"off\":{o},\"ms\":{}}}\n", 1000 + i)).collect::<String>()
+        + &format!("{{\"off\":{},\"ms\":9000}}\n", older.len());
+    write_zone_file(&gfs, &zone, TSIDX_FILE, side.as_bytes()).unwrap();
+    write_zone_file(&gfs, &zone, SNAPSHOT_FILE, b"{\"highWaterMark\":999}").unwrap();
+    let cap = 6_000;
+
+    let out = copy_older_session_history_capped(&gfs, PARENT, FORK, "older-session", "session_id", &zone, older.len() as i64, cap).unwrap();
+
+    assert!(matches!(out, ForkHistory::Copied { .. }), "got {out:?}");
+    let fork = agent_current_zone(FORK);
+    let copied = read_all(&gfs, &fork, OUTPUT_FILE);
+    assert!(copied.len() as i64 <= cap);
+    assert!(older.as_bytes().ends_with(&copied), "the newest part of that session, ending where it ends");
+    assert!(starts.contains(&(older.len() - copied.len())), "from a turn start");
+    let recs = records_of(&read_all(&gfs, &fork, TSIDX_FILE));
+    assert!(recs.iter().all(|(off, _)| (*off as usize) < copied.len()), "no record of the later session");
+    assert_eq!(recs[0].0, 0);
+    assert!(gfs.stat(&fork, SNAPSHOT_FILE).unwrap().is_none());
+    assert!(gfs.stat(&fork, crate::backend::continuity_state::STATE_FILE).unwrap().is_none());
+    assert_eq!(inherited_session(&gfs, &fork).as_deref(), Some("older-session"));
+}
+
+#[test]
+fn the_human_messages_in_a_capped_copy_are_the_humans_in_the_fork() {
+    use crate::backend::transcript::origin_sig::{sign_line, vet_line};
+    let gfs = FileStore::open_in_memory().unwrap();
+    let zone = agent_current_zone(PARENT);
+    let human = |n: usize| {
+        let v = serde_json::json!({ "type": "user", "session_id": "sess-b", "message": { "role": "user", "content": format!("typed {n}") }, "amx": { "v": 1, "origin": { "kind": "user" } } });
+        let mut l = v.to_string().into_bytes();
+        l.push(b'\n');
+        sign_line(PARENT, &l, 1_700_000_000_000)
+    };
+    let mut data: Vec<u8> = Vec::new();
+    for n in 0..30 {
+        data.extend_from_slice(&human(n));
+        data.extend_from_slice(work_line("sess-b", n, 200).as_bytes());
+    }
+    gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_lines(&zone, OUTPUT_FILE, &data).unwrap();
+
+    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", 4_000).unwrap();
+
+    assert!(matches!(out, ForkHistory::Copied { .. }), "got {out:?}");
+    let copied = read_all(&gfs, &agent_current_zone(FORK), OUTPUT_FILE);
+    let kind = |owner: &str, l: &[u8]| {
+        let v: serde_json::Value = serde_json::from_slice(&vet_line(owner, l)).unwrap();
+        v.pointer("/amx/origin/kind").and_then(|k| k.as_str()).map(str::to_string)
+    };
+    let humans: Vec<&[u8]> = copied.split(|b| *b == b'\n').filter(|l| l.windows(13).any(|w| w == b"\"type\":\"user\"")).collect();
+    assert!(humans.len() > 3);
+    assert!(humans.iter().all(|l| kind(FORK, l).as_deref() == Some("user") && kind(PARENT, l).is_none()), "signed for the fork, not the parent");
+}
