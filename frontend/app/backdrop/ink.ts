@@ -25,11 +25,11 @@ export interface Signals {
 
 /** The hues the default app theme paints (theme.scss: `--accent-color`, `--error-color`, ...). */
 export const APP_SIGNALS: Signals = {
-    accent: "#419fe0",
-    error: "#e54d2e",
-    warning: "#e0b956",
-    success: "#4e9a06",
-    info: "#419fe0",
+    accent: "#419fe0", // colour: fixed (the app's own hue, an input to the derivation)
+    error: "#e54d2e", // colour: fixed (the app's own hue, an input to the derivation)
+    warning: "#e0b956", // colour: fixed (the app's own hue, an input to the derivation)
+    success: "#4e9a06", // colour: fixed (the app's own hue, an input to the derivation)
+    info: "#419fe0", // colour: fixed (the app's own hue, an input to the derivation)
 };
 
 /**
