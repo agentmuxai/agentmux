@@ -543,7 +543,7 @@ impl ContainerManager {
         // that has ever run. Recreate on drift; the per-agent named volume
         // carries session/project state across the swap.
         let existing = match existing {
-            Some(status) => match self.container_drift(container_name, spec).await {
+            Some(status) => match self.container_drift(container_name, image, spec).await {
                 Some(reason) => {
                     tracing::info!(container = container_name, reason, "container spec drift detected — recreating");
                     let _ = self.stop(container_name, 10).await;
@@ -1103,10 +1103,13 @@ impl ContainerManager {
     /// recreate kills a live agent and loses its container-local state,
     /// which is worse than one more restart on stale state we couldn't
     /// even confirm).
-    async fn container_drift(&self, container_name: &str, spec: &ContainerMountSpec) -> Option<&'static str> {
+    async fn container_drift(&self, container_name: &str, image: &str, spec: &ContainerMountSpec) -> Option<&'static str> {
         let Ok(details) = self.inner.docker.inspect_container(container_name, None).await else {
             return None;
         };
+        if image_tools::made_from_retired_image(&details, image) {
+            return Some("made from the retired agent image");
+        }
         if !Self::mounts_match(&details, container_name, spec) {
             return Some("mounts differ from the desired spec (credentials/workspace)");
         }

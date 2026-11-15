@@ -21,6 +21,15 @@ fn missing_image_tools(output: &str) -> Option<Vec<String>> {
     Some(output.lines().filter_map(|l| l.trim().strip_prefix("missing:")).map(str::to_string).collect())
 }
 
+/// Whether the existing container was made from the retired image while `requested` (what this start asks for)
+/// is not it. Such a container is recreated, not reused: it has none of the AgentMux tools, and reusing it would
+/// refuse every start with an image the definition no longer names (#47725). A container on any other image,
+/// an older base image included, is left alone: moving it is `update_container`'s, so tools installed in it stay.
+pub(super) fn made_from_retired_image(details: &bollard::models::ContainerInspectResponse, requested: &str) -> bool {
+    let actual = details.config.as_ref().and_then(|c| c.image.as_deref()).unwrap_or("");
+    super::image::is_legacy_agent_image(actual) && !super::image::is_legacy_agent_image(requested)
+}
+
 impl ContainerManager {
     /// Whether the running container `container_name`, made from `image`, has what an AgentMux agent needs
     /// ([`IMAGE_TOOLS`]). An image that lacks them makes a container that starts and cannot talk (no tools, no
@@ -43,7 +52,9 @@ impl ContainerManager {
         };
         match missing_image_tools(&outcome.output) {
             Some(missing) if !missing.is_empty() => {
-                tracing::warn!(container = container_name, %image, ?missing, "the container image lacks the AgentMux tools");
+                tracing::warn!(container = container_name, %image, ?missing, "the container image lacks the AgentMux tools; stopping it");
+                // Left running it would sit there idle and unusable; the next start asks again.
+                let _ = self.stop(container_name, 10).await;
                 Err(ContainerError::ImageIncomplete { image: image.to_string(), missing })
             }
             Some(_) => {
@@ -74,6 +85,21 @@ mod tests {
         assert_eq!(missing_image_tools(""), None);
         assert_eq!(missing_image_tools("sh: not found\n"), None);
         assert_eq!(missing_image_tools("missing:agentmux-mcp\n"), None);
+    }
+
+    #[test]
+    fn a_container_made_from_the_retired_image_is_recreated_and_no_other_is() {
+        let made_from = |image: &str| bollard::models::ContainerInspectResponse {
+            config: Some(bollard::models::ContainerConfig { image: Some(image.to_string()), ..Default::default() }),
+            ..Default::default()
+        };
+        let base = "ghcr.io/agentmuxai/agent-base:0.60.29";
+        assert!(made_from_retired_image(&made_from("ghcr.io/agentmuxai/agent-claude:latest"), base));
+        assert!(made_from_retired_image(&made_from("ghcr.io/agentmuxai/agent-claude@sha256:abc"), base));
+        assert!(!made_from_retired_image(&made_from("ghcr.io/agentmuxai/agent-base:0.60.1"), base), "an older base image is update_container's");
+        assert!(!made_from_retired_image(&made_from("my/own:1"), base));
+        assert!(!made_from_retired_image(&made_from("ghcr.io/agentmuxai/agent-claude:latest"), "ghcr.io/agentmuxai/agent-claude:latest"), "unless the retired image is what is asked for");
+        assert!(!made_from_retired_image(&bollard::models::ContainerInspectResponse::default(), base), "no inspect data: leave it");
     }
 
     #[test]
