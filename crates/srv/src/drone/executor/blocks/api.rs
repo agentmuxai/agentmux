@@ -197,14 +197,18 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
             req = req.body(b);
         }
     }
-    let resp = req.send().await.map_err(|e| format!("request failed: {e}"))?;
+    // A timeout says nothing about whether the other side did the work, so it
+    // is worded apart from a failure to connect: the retry policy runs the
+    // second again and never the first.
+    let timed_out = |e: &reqwest::Error| format!("timed out after {} seconds: {e}", timeout_ms.div_ceil(1000));
+    let resp = req.send().await.map_err(|e| if e.is_timeout() { timed_out(&e) } else { format!("request failed: {e}") })?;
     let status = resp.status().as_u16();
     let resp_headers: HashMap<String, String> = resp
         .headers()
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
         .collect();
-    let bytes = resp.bytes().await.map_err(|e| format!("read body: {e}"))?;
+    let bytes = resp.bytes().await.map_err(|e| if e.is_timeout() { timed_out(&e) } else { format!("read body: {e}") })?;
     let text = String::from_utf8_lossy(&bytes).to_string();
     // Try to parse as JSON for downstream `{{api.body.field}}` access.
     let body_val: Value = serde_json::from_str(&text).unwrap_or(Value::String(text));
