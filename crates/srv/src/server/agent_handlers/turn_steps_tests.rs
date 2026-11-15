@@ -49,6 +49,56 @@ async fn a_refusal_before_any_process_is_recorded_as_the_blocks_last_failure() {
     assert!(failure.to_string().contains("Attachments aren't supported"), "{failure}");
 }
 
+fn resolved(number: usize, name: &str, path: std::path::PathBuf) -> crate::backend::attachments::prompt::Resolved {
+    crate::backend::attachments::prompt::Resolved { number, name: name.to_string(), path, mime: "image/png".into(), page_count: None, note: None }
+}
+
+#[test]
+fn a_container_attachment_is_copied_into_the_working_folder_and_the_list_points_there() {
+    let host = tempfile::tempdir().unwrap();
+    let send_copy = host.path().join("not-the-cwd.png");
+    std::fs::write(&send_copy, b"png bytes").unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+
+    let (found, missing) = rehome_for_container(vec![resolved(1, "shot.png", send_copy)], Vec::new(), cwd.path().to_str().unwrap());
+
+    assert!(missing.is_empty());
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].path, std::path::PathBuf::from("/workspace/shot.png"));
+    assert_eq!(std::fs::read(cwd.path().join("shot.png")).unwrap(), b"png bytes");
+}
+
+#[test]
+fn two_attachments_with_the_same_display_name_land_as_two_de_conflicted_files() {
+    let host = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let a = host.path().join("a");
+    let b = host.path().join("b");
+    std::fs::write(&a, b"first").unwrap();
+    std::fs::write(&b, b"second").unwrap();
+
+    let (found, missing) = rehome_for_container(
+        vec![resolved(1, "notes.txt", a), resolved(2, "notes.txt", b)],
+        Vec::new(),
+        cwd.path().to_str().unwrap(),
+    );
+
+    assert!(missing.is_empty());
+    assert_eq!(found.len(), 2);
+    assert_ne!(found[0].path, found[1].path, "the second must not overwrite the first: {found:?}");
+}
+
+#[test]
+fn a_send_copy_that_is_gone_joins_missing_instead_of_failing_the_whole_turn() {
+    let cwd = tempfile::tempdir().unwrap();
+    let gone = std::env::temp_dir().join("agentmux-test-attachment-never-written.png");
+
+    let (found, missing) = rehome_for_container(vec![resolved(1, "shot.png", gone)], vec!["already-missing.png".to_string()], cwd.path().to_str().unwrap());
+
+    assert!(found.is_empty());
+    assert_eq!(missing, vec!["already-missing.png".to_string(), "shot.png".to_string()]);
+}
+
 #[tokio::test]
 async fn a_turn_for_a_block_with_no_controller_is_refused_before_anything_is_read() {
     let state = test_state();

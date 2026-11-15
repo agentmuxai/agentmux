@@ -177,22 +177,37 @@ pub(super) async fn prepare_attachments(
     // Attachments (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6,
     // SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §7): every provider gets
     // a numbered list of the files appended to the text; Claude's persistent
-    // stream-json path also gets images and short PDFs inline. Container
-    // agents can't reach host paths yet (their panes copy files into the
-    // working folder instead), so they refuse rather than send a list the
-    // agent can't open.
+    // stream-json path also gets images and short PDFs inline. A container
+    // agent can't reach a host path, so its copies are rehomed into the
+    // pane's working folder (the host side of its workspace bind mount,
+    // narko #198 piece 2) and the list points there instead.
     let mut inline_images: Vec<serde_json::Value> = Vec::new();
     let mut image_paths: Vec<String> = Vec::new();
     let message = if attachments.is_empty() {
         message
     } else {
+        let runtime = RuntimeKind::of_block_meta(&block.meta);
         // Refusals go through surface_refusal like every other early exit
         // here, so the reason survives a pane reload.
-        if !RuntimeKind::of_block_meta(&block.meta).adapter().accepts_attachments() {
-            let msg = "Attachments aren't supported for container agents yet.";
+        if !runtime.adapter().accepts_attachments() && !runtime.is_container() {
+            let msg = "Attachments aren't supported for this agent yet.";
             surface_refusal(deps, block_id, msg);
             return Err(msg.to_string());
         }
+        // A container's workspace bind mount is this turn's `cmd:cwd`, host
+        // side (`ContainerMountSpec::for_agent`, container/mounts.rs): with
+        // none set yet there is nowhere on the host to put the copies.
+        let container_cwd = if runtime.is_container() {
+            let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
+            if cwd.is_empty() {
+                let msg = "Attachments need a working folder, and this agent's pane has none yet.";
+                surface_refusal(deps, block_id, msg);
+                return Err(msg.to_string());
+            }
+            Some(cwd)
+        } else {
+            None
+        };
         let Some(svc) = crate::backend::attachments::get() else {
             let msg = "Image attachments are unavailable: the attachment service isn't running.";
             surface_refusal(deps, block_id, msg);
@@ -221,6 +236,10 @@ pub(super) async fn prepare_attachments(
         let (prepared, pictures) = tokio::task::spawn_blocking(move || {
             use crate::backend::attachments::prompt;
             let (found, missing) = prompt::resolve(&svc, &attachments);
+            let (found, missing) = match &container_cwd {
+                Some(cwd) => rehome_for_container(found, missing, cwd),
+                None => (found, missing),
+            };
             let pictures = if by_path { prompt::image_paths(&found) } else { Vec::new() };
             // Read, spend and record the session budget as one locked step.
             let prepared = svc.with_session_inline_budget(
@@ -242,6 +261,36 @@ pub(super) async fn prepare_attachments(
         crate::backend::attachments::prompt::append(&message, &prepared.list)
     };
     Ok((message, inline_images, image_paths))
+}
+
+/// Copy each resolved attachment's send-copy from its host path into `host_cwd` (the pane's working
+/// folder) and point it at the container-side path instead (narko #198 piece 2): a container agent can
+/// open a file under its workspace mount, never a bare host path. A copy that fails joins `missing`,
+/// same treatment as a send-copy swept by retention.
+fn rehome_for_container(
+    found: Vec<crate::backend::attachments::prompt::Resolved>,
+    mut missing: Vec<String>,
+    host_cwd: &str,
+) -> (Vec<crate::backend::attachments::prompt::Resolved>, Vec<String>) {
+    use crate::backend::runtime_adapter::MountRole;
+    use agentmux_common::copy_into_dir::{copy_into_dir, CopyControl};
+    let container_dir = RuntimeKind::Container.adapter().map_mount(MountRole::Workspace, host_cwd);
+    let dir = std::path::Path::new(host_cwd);
+    let mut rehomed = Vec::with_capacity(found.len());
+    for mut item in found {
+        match copy_into_dir(&item.path, dir, &item.name, &CopyControl::default()) {
+            Ok(dest) => {
+                let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| item.name.clone());
+                item.path = std::path::PathBuf::from(format!("{container_dir}/{name}"));
+                rehomed.push(item);
+            }
+            Err(e) => {
+                tracing::warn!(name = %item.name, error = %e, "container attachment: could not copy into the pane's working folder");
+                missing.push(item.name);
+            }
+        }
+    }
+    (rehomed, missing)
 }
 
 /// Dispatch to a persistent controller: it starts (or respawns) the CLI and carries the message on its input.
