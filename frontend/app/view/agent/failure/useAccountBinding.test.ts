@@ -106,6 +106,19 @@ describe("useAccountBinding", () => {
         m.dispose();
     });
 
+    it("offers the linked account too while the agent is signed out, and binding it starts the agent", async () => {
+        const m = mount({
+            accounts: [oauth("acc-a", "a@x")],
+            links: [{ provider: "claude", account_id: "acc-a" }],
+            signedOut: true,
+        });
+        await flush();
+        expect(m.bindCandidates().map((a) => a.id)).toEqual(["acc-a"]);
+        m.onBindAccount();
+        expect(m.bind).toHaveBeenCalledWith(expect.objectContaining({ id: "acc-a" }));
+        m.dispose();
+    });
+
     it("reads a failed identity lookup as no linked account", async () => {
         const m = mount({ accounts: [oauth("acc-a", "a@x")], listFails: true });
         await flush();
