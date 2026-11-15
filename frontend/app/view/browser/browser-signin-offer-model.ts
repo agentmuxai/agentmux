@@ -90,3 +90,34 @@ export function signinPendingText(p: SigninPending, nowMs: number): string {
     const as = p.user ? ` as ${p.user}` : "";
     return `${p.agent} is signing in to ${p.origin}${as} with your saved sign-in (${left} s)`;
 }
+
+export const MANAGE_PASSWORDS_LABEL = "Manage passwords";
+
+/** The list of saved sign-ins under a login field the person is in, as srv writes `browser:signin-list`
+ *  (docs/specs/SPEC_VAULT_AUTOFILL_IN_BROWSER_PANE_2026_11_14.md §P2.3): masked user names, never a value. */
+export interface SigninList {
+    origin: string;
+    role: "username" | "password" | "newpassword";
+    rows: { entry: string; user: string }[];
+    /** A strong password is offered: the only item, for a field for a new password. */
+    strong: boolean;
+    /** The selected item, by the keys; none until Up or Down. */
+    cursor: number | null;
+}
+
+export function readSigninList(meta: Record<string, unknown> | undefined): SigninList | undefined {
+    const v = meta?.["browser:signin-list"] as Record<string, unknown> | null | undefined;
+    if (!v || typeof v !== "object" || typeof v.origin !== "string" || !Array.isArray(v.rows)) return undefined;
+    const role = v.role === "password" || v.role === "newpassword" ? v.role : "username";
+    const rows = v.rows.flatMap((r: { entry?: unknown; user?: unknown } | null) =>
+        r && typeof r.entry === "string" ? [{ entry: r.entry, user: typeof r.user === "string" ? r.user : "" }] : []
+    );
+    const strong = v.strong === true;
+    if (!strong && rows.length === 0) return undefined;
+    return { origin: v.origin, role, rows, strong, cursor: typeof v.cursor === "number" ? v.cursor : null };
+}
+
+/** What a row says: the masked user name, or that the sign-in has none. */
+export function listRowLabel(row: { user: string }): string {
+    return row.user || "No user name";
+}

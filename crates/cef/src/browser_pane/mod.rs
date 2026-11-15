@@ -7,6 +7,7 @@
 //! lifecycle now lives only in the host reducer (`HostState.browser_panes`).
 //! `RegisterResult` moved to `crate::reducer`.
 
+pub mod agent_input;
 pub mod auth;
 pub mod callbacks;
 pub mod creation;
@@ -24,6 +25,7 @@ pub mod hwnd;
 pub mod wrapper;
 pub mod creation_views;
 pub mod side_button_cdp;
+pub mod signin_list;
 pub mod signin_notice;
 
 pub use creation::CreateBrowserPaneTask;

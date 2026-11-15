@@ -138,6 +138,8 @@ fn set_meta(state: &AppState, block_id: &str, value: Value) {
 /// The person chose entry `entry` from pane `block_id`'s "Sign in as" menu: type
 /// it into the page, if the page still shows a form for the site it is saved for.
 pub(crate) async fn fill(state: &AppState, block_id: &str, entry: &str) -> Result<(), String> {
+    // A pick closes the pane's list, by click or by key.
+    super::browser_signin_list::close(state, block_id);
     let profile = super::browser_signin_offer::profile_of(state, block_id).ok_or("this tab keeps no sign-ins (Incognito)")?;
     fill_as(state, block_id, entry, &profile, crate::backend::vault::PERSON, None, "").await.map(|_| ())
 }
