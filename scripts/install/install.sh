@@ -279,8 +279,9 @@ can_check_sshsig() {
 # could have been checked this way and has no signature is not installed. The signer is only ever one of the pinned keys, put
 # in an allowed-signers file here; the key carried inside the signature is checked against them by ssh-keygen, never trusted.
 verify_sshsig() {
-    can_check_sshsig || return 2
-    version_at_least "$VERSION" "${AGENTMUX_INSTALL_SSHSIG_FLOOR:-$SSHSIG_FLOOR}" || return 2
+    SSH_WHY=""
+    can_check_sshsig || { SSH_WHY=tool; return 2; }
+    version_at_least "$VERSION" "${AGENTMUX_INSTALL_SSHSIG_FLOOR:-$SSHSIG_FLOOR}" || { SSH_WHY=floor; return 2; }
     if ! ( fetch "$2/AgentMux-$VERSION-envelope.json.sshsig" "$TMP/envelope.sshsig" ) > /dev/null 2>&1; then
         die "this release ($VERSION) should carry AgentMux-$VERSION-envelope.json.sshsig (every release from $SSHSIG_FLOOR on does) and it could not be downloaded: not installing"
     fi
@@ -330,8 +331,13 @@ download_verified() {
         *)
             dv_ossl="$(openssl version 2> /dev/null | head -n 1 || true)"
             [ -n "$dv_ossl" ] || dv_ossl="no openssl"
-            [ "$REQUIRE_SIGNATURE" = 0 ] || die "the release's signature cannot be checked here ($dv_ossl; the check needs OpenSSL 3, or an ssh-keygen of OpenSSH 8.0 or newer for a release from $SSHSIG_FLOOR on) and --require-signature was given"
-            say "signature NOT checked: this system's openssl ($dv_ossl) cannot check Ed25519 signatures (it needs OpenSSL 3; on a Mac, Homebrew's openssl@3 does, if you have it), and there is no ssh-keygen of OpenSSH 8.0 or newer to check the SSH signature that releases from $SSHSIG_FLOOR on carry"
+            # Why the SSH signature was not used either: this release is older than the first that has one, or there is no usable ssh-keygen.
+            case "${SSH_WHY:-tool}" in
+                floor) dv_why="this release ($VERSION) is older than ${AGENTMUX_INSTALL_SSHSIG_FLOOR:-$SSHSIG_FLOOR}, the first with an SSH signature" ;;
+                *) dv_why="there is no ssh-keygen of OpenSSH 8.0 or newer to check the SSH signature that releases from $SSHSIG_FLOOR on carry" ;;
+            esac
+            [ "$REQUIRE_SIGNATURE" = 0 ] || die "the release's signature cannot be checked here ($dv_ossl cannot, and $dv_why) and --require-signature was given"
+            say "signature NOT checked: this system's openssl ($dv_ossl) cannot check Ed25519 signatures (it needs OpenSSL 3; on a Mac, Homebrew's openssl@3 does, if you have it), and $dv_why"
             say "what is checked instead: the file's size and SHA-256 against the manifest. That catches a damaged download, not a release that was replaced upstream"
             ;;
     esac
