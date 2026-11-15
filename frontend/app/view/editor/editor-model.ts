@@ -1413,7 +1413,7 @@ export class EditorViewModel {
             return null;
         }
         const tab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
-        const viewer = tab?.viewerOverride === "info" ? "info" : viewerForDropped(file.name, file.type);
+        const viewer = viewerForDropped(file.name, file.type, tab?.viewerOverride);
         if (tab?.viewer !== viewer) dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer, source: "system" });
         return this._markViewerLoaded(tabId, `dropped:${file.size}:${file.lastModified}`, opts);
     }

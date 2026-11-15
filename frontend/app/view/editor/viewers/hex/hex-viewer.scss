@@ -1,0 +1,174 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Editor's hex viewer (hex-viewer.tsx): rows of an offset, the bytes in
+// hex and their text, in the editor's monospace font, and the data inspector
+// beside them. A row's height is --hex-row-h, which the viewer's arithmetic
+// shares (hex-layout.ts ROW_H). Theme variables only.
+
+@use "../../../../mixins.scss";
+
+.hex-viewer-body {
+    position: relative;
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    background: var(--main-bg-color);
+}
+
+.hex-viewer-error {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    color: var(--error-text-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.hex-viewer-offset-input {
+    width: 9em;
+    padding: 1px var(--space-1);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--main-text-color);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+
+    &[aria-invalid="true"] {
+        border-color: var(--error-color);
+    }
+}
+
+.hex-grid {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+    line-height: var(--hex-row-h);
+    user-select: none;
+    cursor: default;
+
+    &:focus {
+        outline: none;
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring-inset;
+    }
+}
+
+// The header and the rows' spacer, as wide as a row (the header is one):
+// wider than the pane, they scroll sideways together.
+.hex-sheet {
+    width: max-content;
+    min-width: 100%;
+}
+
+// As tall as the file's rows. The rows on screen sit in it by a top margin
+// (the viewer sets it), in the normal flow, so the sticky header paints over
+// them with no z-index; they never make it taller than the file's rows.
+.hex-spacer {
+    overflow: hidden;
+}
+
+.hex-row {
+    display: flex;
+    gap: 2ch;
+    height: var(--hex-row-h);
+    padding: 0 var(--space-2);
+    white-space: pre;
+}
+
+.hex-head {
+    position: sticky;
+    top: 0;
+    color: var(--secondary-text-color);
+    background: var(--main-bg-color);
+    border-bottom: 1px solid var(--border-color);
+    box-sizing: border-box;
+}
+
+// --hex-digits and --hex-width (the grid sets them) keep the header's
+// columns as wide as the rows'.
+.hex-offset {
+    flex: 0 0 auto;
+    width: calc(var(--hex-digits, 8) * 1ch);
+    color: var(--secondary-text-color);
+}
+
+.hex-bytes {
+    flex: 0 0 auto;
+    display: flex;
+
+    > span {
+        padding: 0 0.5ch;
+    }
+
+    // A wider gap before every eighth byte.
+    > span:nth-child(8n + 1):not(:first-child) {
+        margin-left: 1ch;
+    }
+}
+
+.hex-text {
+    flex: 0 0 auto;
+    display: flex;
+    min-width: calc(var(--hex-width, 16) * 1ch);
+    color: var(--secondary-text-color);
+}
+
+.hex-sel {
+    background: var(--accent-bg-heavy);
+    color: var(--main-text-color);
+}
+
+// The cursor: filled in the column the keys act on, outlined in the other.
+.hex-cur {
+    outline: 1px solid var(--accent-color);
+    outline-offset: -1px;
+}
+
+.hex-grid[data-column="hex"] .hex-bytes .hex-cur,
+.hex-grid[data-column="text"] .hex-text .hex-cur {
+    background: var(--accent-color);
+    color: var(--accent-text-color);
+}
+
+.hex-inspector {
+    flex: 0 0 auto;
+    width: 19em;
+    max-width: 45%;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border-left: 1px solid var(--border-color);
+}
+
+.hex-inspector-values {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+
+    dt {
+        color: var(--secondary-text-color);
+    }
+
+    dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+        user-select: text;
+    }
+}
+
+.hex-inspector-none {
+    color: var(--secondary-text-color);
+}
