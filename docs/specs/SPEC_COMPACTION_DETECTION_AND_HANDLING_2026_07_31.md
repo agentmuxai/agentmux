@@ -1,5 +1,7 @@
 # Spec: Detecting and Handling Context Compaction in Agent Panes
 
+**Area:** compaction
+
 **Date:** 2026-07-31
 **Repo:** agentmuxai/agentmux
 **Trigger:** investigating AgentA's long compaction stretch (see `REPORT_AGENTA_AUTH_AUDIT_AND_COMPACTION_2026-07-31.md`) required reconstructing *when* compaction happened from git commit timestamps — AgentMux itself couldn't answer that question directly. This spec is about closing that gap structurally.

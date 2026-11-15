@@ -1,5 +1,7 @@
 # SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest
 
+**Area:** history store
+
 **Date:** 2026-08-05
 **Status:** active — Part A (session-outcome transcript event) shipped in PR #2426, and extended 2026-08-27 to cover the no-`--resume`-attempted case (§2.1's superseded callout). Parts B (rehydrate-before-resume) and C (session_id backfill) still not started — `rehydrate_claude_session` exists only in [`scripts/import-agents.sh`](../../scripts/import-agents.sh), not in `agentmux-srv`. Verified against `main` 2026-08-27. See also SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md, which builds on Part A.
 **Severity:** Medium — no data loss, but a real correctness gap: the pane can

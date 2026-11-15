@@ -1,5 +1,7 @@
 # SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way
 
+**Area:** compaction
+
 **Date:** 2026-10-01
 **Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) shipped in PR #4232; the stream-frame fix (§3) is built (§8 D1); the rest of status-frame handling (§6) is not built and needs D2. Amended 2026-10-10 (§5a): a built-in first estimate, and the bar in the pane's colour.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)

@@ -1,5 +1,7 @@
 # Spec: Hidden memory reinjection after compaction
 
+**Area:** compaction
+
 **Status:** superseded — shipped in #3502 (hidden-turn primitive, trigger and
 suppression, size-band warning) and #3512 (`fresh` trigger, §3.3a). Still the
 detailed design reference for those pieces. Current state, gaps and the plan

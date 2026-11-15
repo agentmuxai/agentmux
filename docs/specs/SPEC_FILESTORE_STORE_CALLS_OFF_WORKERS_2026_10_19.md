@@ -1,5 +1,7 @@
 # Spec: store calls stop pinning tokio workers while they wait for the connection
 
+**Area:** history store
+
 **Date:** 2026-10-19
 **Author:** Maricon@charlie
 **Type:** Spec (a scheduling change; no change to what is stored or read)

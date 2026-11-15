@@ -29,7 +29,24 @@
 // Output is byte-identical to the shell version for every tree without CRLF
 // or non-ASCII spec filenames; the spec's §6 lists the deliberate differences.
 //
-// WHY GENERATED, AND WHY GROUPED BY STATUS
+// WHY GENERATED, AND HOW IT IS GROUPED (changed 2026-11-14)
+//
+// The index used to group by Status. A reader looking for "the spec about X" then
+// had to scan 1,300 rows by title, and a replaced spec looked as live as the one
+// that replaced it (a history-compaction spec was nearly rewritten from scratch
+// because the built one was hard to find, task #47664). It now groups by AREA, and
+// each row carries its Status, its date and what it replaces or is replaced by.
+// A spec says its area, and what it replaces, in its first 40 lines:
+//
+//   **Area:** history store
+//   **Supersedes:** SPEC_OLD_2026_09_01          (optional; names a spec in docs/specs)
+//   **Superseded-by:** SPEC_NEW_2026_10_21       (optional; the Status rules require it for `superseded`)
+//
+// Either side of a replacement is enough: the index shows both directions. A spec
+// with no Area line lands in "unsorted" with its date, newest first, so nothing is
+// hidden and nothing needs a bulk restamp.
+//
+// The older reasoning, kept for what it says about Status:
 //
 // The curated index above the marker is genuinely useful and stays hand-written:
 // it answers "where do I start for subsystem X", which no generator can.
@@ -105,6 +122,8 @@ export const END = "<!-- END GENERATED INDEX -->";
 /** Canonical buckets, in output order. */
 export const CANONICAL = ["implemented", "active", "proposed", "draft", "living", "historical", "superseded"];
 const NONE = "__none__";
+/** The group of specs that name no area. */
+export const UNSORTED = "";
 
 /** Lines of each spec that are examined (the shell version's `head -40`). */
 const HEAD_LINES = 40;
@@ -179,82 +198,124 @@ export function titleOf(text, fallback) {
     return fallback;
 }
 
+/** The value of the first `**<name>:**` line in a spec's first 40 lines (ASCII
+ *  case-insensitive), or `null`. A trailing CR and blanks are dropped. */
+function fieldOf(text, name) {
+    const prefix = new RegExp(`^\\*\\*${name}:\\*\\*[ \t\n\v\f\r]*`, "i");
+    for (const raw of headLines(text)) {
+        const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+        if (prefix.test(line)) return line.replace(prefix, "").replace(/[ \t\v\f]+$/, "");
+    }
+    return null;
+}
+
+/** A name that can head a group: short, plain words. An `**Area:**` line that
+ *  lists code paths or links (some older specs use it that way) is not one. */
+const AREA_NAME = /^[a-z0-9][a-z0-9 /&+-]{0,38}$/;
+
+/** The area a spec says it belongs to (`**Area:** history store`): ASCII-lowercased
+ *  and blanks collapsed. `""` when it has none, or says something that is not a
+ *  short plain name, which is "unsorted". */
+export function areaOf(text) {
+    const value = fieldOf(text, "area");
+    if (value === null) return UNSORTED;
+    const name = asciiLower(value).replace(/[ \t]+/g, " ").trim();
+    return AREA_NAME.test(name) ? name : UNSORTED;
+}
+
+/** The spec names in a `**Supersedes:**` or `**Superseded-by:**` value, as stems
+ *  (no directory, no `.md`). Markdown links and backticks are read through. Only
+ *  words that are also in `known` count, so prose in the line cannot invent one. */
+export function targetsOf(value, known) {
+    if (value === null) return [];
+    const flat = value.replace(/\[[^\]]*\]\(([^)]*)\)/g, " $1 ");
+    const found = [];
+    for (const word of flat.split(/[ \t,;()`*]+/)) {
+        const stem = word.slice(word.lastIndexOf("/") + 1).replace(/[.]md[.]?$/, "").replace(/[.:]+$/, "");
+        if (stem !== "" && known.has(stem) && !found.includes(stem)) found.push(stem);
+    }
+    return found;
+}
+
+/** The date in a spec's file name (`..._2026_10_21`), as `2026-10-21`, or `""`. */
+export function dateOf(base) {
+    const all = [...base.matchAll(/(\d{4})_(\d{2})_(\d{2})(?!\d)/g)];
+    const last = all[all.length - 1];
+    return last ? `${last[1]}-${last[2]}-${last[3]}` : "";
+}
+
+const stemOf = (base) => (base.endsWith(".md") ? base.slice(0, -3) : base);
+
+/** What a spec replaces and what replaces it, as one table cell. Either spec may
+ *  say it (`Supersedes` on the new one, `Superseded-by` on the old one). A value
+ *  that cites a section (`§4.2 of X`) is a partial replacement, and says "part of". */
+function relationsCell(stem, replaces, replacedBy, baseOf) {
+    const list = (map, whole, partial) => {
+        const found = map.get(stem);
+        if (!found?.size) return [];
+        const link = (t) => `[\`${t}\`](${baseOf.get(t)})`;
+        const names = (isPartial) => [...found].filter(([, p]) => p === isPartial).map(([t]) => t).sort(byteCompare).map(link).join(", ");
+        const out = [];
+        if ([...found.values()].includes(false)) out.push(`${whole} ${names(false)}`);
+        if ([...found.values()].includes(true)) out.push(`${partial} ${names(true)}`);
+        return out;
+    };
+    return [...list(replaces, "replaces", "replaces part of"), ...list(replacedBy, "replaced by", "partly replaced by")].join("; ");
+}
+
 /** One table row for a spec file (basename as a latin1 byte string). */
-export function rowFor(base, title) {
-    const stem = base.endsWith(".md") ? base.slice(0, -3) : base;
-    return `| [\`${stem}\`](${base}) | ${title} |\n`;
+export function rowFor(base, title, { status = NONE, date = "", relations = "" } = {}) {
+    const word = status === NONE ? "none" : status;
+    return `| [\`${stemOf(base)}\`](${base}) | ${title} | ${word} | ${date} | ${relations} |\n`;
 }
 
 /**
- * Render the generated section from rows grouped by Status. `total` is the
- * number of candidate files. Returns `{ text, shown }`; the caller compares
- * `shown` with `total` (the completeness assertion).
+ * Render the generated section from rows grouped by area (`UNSORTED` is the
+ * group of specs that name none, always last). `total` is the number of
+ * candidate files. Returns `{ text, shown }`; the caller compares `shown` with
+ * `total` (the completeness assertion).
  */
-export function render(rowsByStatus, total) {
+export function render(rowsByArea, total) {
     let shown = 0;
     let out = "";
     const emit = (s) => {
         out += bytes(s);
     };
     const emitRows = (rows) => {
+        emit("| Spec | Title | Status | Date | Replaces / replaced by |\n|---|---|---|---|---|\n");
         for (const r of rows) out += r;
         shown += rows.length;
     };
 
     emit(`${BEGIN}\n`);
-    emit("\n## All specs by status\n\n");
+    emit("\n## All specs by area\n\n");
     emit("Generated by `scripts/gen-docs-index.sh` — do not hand-edit. Covers\n");
     emit("every spec directly in `docs/specs/`, which the curated sections\n");
-    emit("above deliberately do not.\n");
+    emit("above deliberately do not. Each spec is listed once, under the area its\n");
+    emit("`**Area:**` line names, newest first. The Status column is its\n");
+    emit("`**Status:**` word; read it before trusting the spec. A spec's\n");
+    emit("`**Supersedes:**` and `**Superseded-by:**` lines show here as links in both\n");
+    emit("directions (`docs/specs/README.md`).\n");
     emit('\n`archive/` is excluded on purpose — it means "not worth reading unless you\n');
     emit('are doing history". Everything else is here; the completeness\n');
     emit("assertion in the generator fails the build rather than emit a\n");
     emit("partial list.\n");
 
-    for (const st of CANONICAL) {
-        const rows = rowsByStatus.get(st);
-        if (!rows || rows.length === 0) continue;
-        emit(`\n### ${st}\n\n`);
-        emit("| Spec | Title |\n|---|---|\n");
-        emitRows(rows);
+    const areas = [...rowsByArea.keys()].filter((k) => k !== UNSORTED && rowsByArea.get(k).length > 0).sort(byteCompare);
+    for (const area of areas) {
+        emit(`\n### ${area}\n\n`);
+        emitRows(rowsByArea.get(area));
     }
 
-    // Specs with no Status line at all — surfaced, not dropped. Hiding them
-    // would make the index look complete while omitting a sixth of the tree.
-    const none = rowsByStatus.get(NONE);
-    if (none && none.length > 0) {
-        emit("\n### no status line\n\n");
-        emit("Predate the closed vocabulary. Not a backlog to bulk-restamp —\n");
-        emit('an unverified restamp turns "unknown" into "confidently wrong".\n');
-        emit("Fix one when you touch it and know its real state.\n\n");
-        emit("| Spec | Title |\n|---|---|\n");
-        emitRows(none);
-    }
-
-    // Status line present, but its first word is outside the closed enum.
-    //
-    // An earlier version printed ONLY the seven canonical buckets, so every one
-    // of these landed in a bucket the print loop never iterated and vanished
-    // from the index with no trace — 189 specs (26% of the tree) silently
-    // absent, while the header above claimed to cover every file. --check could
-    // not catch it: it only diffs a re-run of the same logic, so a stable bug
-    // stays green forever. The completeness assertion is what catches it.
-    const noncanon = [...rowsByStatus.keys()]
-        .filter((st) => st !== NONE && !CANONICAL.includes(st) && rowsByStatus.get(st).length > 0)
-        .sort(byteCompare);
-    if (noncanon.length > 0) {
-        emit("\n### non-canonical status\n");
-        emit("\nThese carry a `**Status:**` line whose first word is not in the closed enum\n");
-        emit("(`docs/specs/README.md`). Grouped by the word actually found, so the\n");
-        emit("real state is visible rather than guessed at. `check-doc-status.sh`\n");
-        emit("requires a fix the next time one of these is edited; as with the\n");
-        emit("section above, do not bulk-restamp them.\n");
-        for (const st of noncanon) {
-            // `st` is already a byte string of a–z only.
-            out += `\n**\`${st}\`**\n\n`;
-            emit("| Spec | Title |\n|---|---|\n");
-            emitRows(rowsByStatus.get(st));
-        }
+    // Specs that name no area — surfaced, not dropped. Hiding them would make
+    // the index look complete while omitting most of the tree.
+    const unsorted = rowsByArea.get(UNSORTED);
+    if (unsorted && unsorted.length > 0) {
+        emit("\n### unsorted\n\n");
+        emit("No `**Area:**` line yet (or one that is not a short plain name), newest\n");
+        emit("first. Not a backlog to bulk-stamp — an area guessed from a title is worse\n");
+        emit("than none. Add the line when you touch one and know which area it belongs to.\n\n");
+        emitRows(unsorted);
     }
 
     emit(`\n${END}\n`);
@@ -406,22 +467,60 @@ function readHead(root, rel) {
 
 /** Build the generated section for the tree at `root`. */
 export function build(root, { env = process.env, transformRows } = {}) {
-    const rowsByStatus = new Map();
-    let total = 0;
+    const specs = [];
     for (const f of specFiles(root, env)) {
         if (f.base === "INDEX.md" || f.base === "README.md") continue;
-        total++;
-        const text = readHead(root, f.path);
-        const st = statusOf(text);
-        const row = rowFor(f.base, titleOf(text, f.base));
-        if (!rowsByStatus.has(st)) rowsByStatus.set(st, []);
-        rowsByStatus.get(st).push(row);
+        specs.push({ base: f.base, text: readHead(root, f.path) });
+    }
+    const baseOf = new Map(specs.map((x) => [stemOf(x.base), x.base]));
+    const known = new Set(baseOf.keys());
+    // Either side of a replacement is enough, so build both directions.
+    const replaces = new Map();
+    const replacedBy = new Map();
+    const note = (map, key, value, partial) => {
+        if (!map.has(key)) map.set(key, new Map());
+        // Said whole anywhere, it is whole.
+        map.get(key).set(value, (map.get(key).get(value) ?? true) && partial);
+    };
+    // A `§` (U+00A7, read as the byte pair C2 A7) means a section, not the spec.
+    const cites = (value) => value !== null && value.includes("\xa7");
+    for (const x of specs) {
+        const stem = stemOf(x.base);
+        const said = fieldOf(x.text, "supersedes");
+        for (const old of targetsOf(said, known)) {
+            if (old === stem) continue;
+            note(replaces, stem, old, cites(said));
+            note(replacedBy, old, stem, cites(said));
+        }
+        const by = fieldOf(x.text, "superseded-by");
+        for (const next of targetsOf(by, known)) {
+            if (next === stem) continue;
+            note(replacedBy, stem, next, cites(by));
+            note(replaces, next, stem, cites(by));
+        }
+    }
+    const entries = specs.map((x) => {
+        const stem = stemOf(x.base);
+        const date = dateOf(x.base);
+        const row = rowFor(x.base, titleOf(x.text, x.base), {
+            status: statusOf(x.text),
+            date,
+            relations: relationsCell(stem, replaces, replacedBy, baseOf),
+        });
+        return { area: areaOf(x.text), base: x.base, date, row };
+    });
+    // Newest first inside a group; undated and equal dates by name.
+    entries.sort((a, b) => byteCompare(b.date, a.date) || byteCompare(a.base, b.base));
+    const rowsByArea = new Map();
+    for (const e of entries) {
+        if (!rowsByArea.has(e.area)) rowsByArea.set(e.area, []);
+        rowsByArea.get(e.area).push(e.row);
     }
     // Test seam for the completeness assertion, which cannot trip on a correct
     // tree by construction. Never set outside tests.
-    if (transformRows) transformRows(rowsByStatus);
-    const { text, shown } = render(rowsByStatus, total);
-    return { text, total, shown };
+    if (transformRows) transformRows(rowsByArea);
+    const { text, shown } = render(rowsByArea, specs.length);
+    return { text, total: specs.length, shown };
 }
 
 // ── Why --check is scoped to branches that touch docs/specs ─────────────────

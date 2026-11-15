@@ -1,8 +1,10 @@
 # Conversation Continuity Across a Version/Channel Switch — Verification Report
 
+**Area:** history store
+
 **Date:** 2026-08-17
 **Author:** AgentY (agent, `~/.agentmux/agents/agenty-0629j`), at operator request
-**Status:** Report — independently re-verified against live `origin/main` code. No code changes in this doc.
+**Status:** analysis — Report — independently re-verified against live `origin/main` code. No code changes in this doc.
 **Ground truth basis:** `agentmuxai/agentmux` `origin/main`. Every citation below is a real file:line, checked
 directly (not taken from a doc's word alone).
 **Related (read in full before writing this):**
