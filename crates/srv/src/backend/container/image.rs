@@ -99,10 +99,12 @@ pub const CONTAINER_CLI_DIR: &str = "/home/agent/.agentmux/cli";
 
 /// The image a stored `agent:container_image` value means: empty, or the plain `:latest` base
 /// image that agent definitions carry by default, is this version's base image; `:developer` is this
-/// version's developer image.
+/// version's developer image. The retired image, at any tag, is this version's base image too: it has
+/// no `agentmux-bashwrap` or `agentmux-mcp`, and its bundled CLI shadows AgentMux's own, so a container
+/// made from it starts and cannot talk (#47725).
 pub fn resolve_container_image(stored: &str) -> String {
     let stored = stored.trim();
-    if stored.is_empty() || stored == DEFAULT_AGENT_IMAGE {
+    if stored.is_empty() || stored == DEFAULT_AGENT_IMAGE || is_legacy_agent_image(stored) {
         versioned_agent_image()
     } else if stored == DEFAULT_DEVELOPER_IMAGE {
         versioned_developer_image()
@@ -431,6 +433,15 @@ mod tests {
         assert_eq!(resolve_container_image(DEFAULT_AGENT_IMAGE), versioned, "the default definitions carry :latest");
         assert_eq!(resolve_container_image("my/own:1"), "my/own:1");
         assert_eq!(resolve_container_image("ghcr.io/agentmuxai/agent-base:0.59.1"), "ghcr.io/agentmuxai/agent-base:0.59.1");
+    }
+
+    #[test]
+    fn the_retired_image_is_never_what_a_container_is_made_from() {
+        let versioned = versioned_agent_image();
+        for legacy in ["ghcr.io/agentmuxai/agent-claude:latest", "ghcr.io/agentmuxai/agent-claude", "ghcr.io/agentmuxai/agent-claude:2026-06-14", "ghcr.io/agentmuxai/agent-claude@sha256:abc"] {
+            assert_eq!(resolve_container_image(legacy), versioned, "{legacy}");
+        }
+        assert_eq!(resolve_container_image("ghcr.io/agentmuxai/agent-claude-extra:latest"), "ghcr.io/agentmuxai/agent-claude-extra:latest");
     }
 
     #[test]
