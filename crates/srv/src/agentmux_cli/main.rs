@@ -15,6 +15,7 @@
 //! Nothing here prints a key, a code or a token.
 
 mod doctor;
+mod logs;
 mod process;
 mod service;
 mod settings;
@@ -138,9 +139,12 @@ enum Cmd {
     Logout,
     /// The server's log.
     Logs {
-        /// How many of the last lines to show.
-        #[arg(long, default_value_t = 50)]
-        lines: usize,
+        /// How many of the last lines to show (50 when `--since` is not given).
+        #[arg(long)]
+        lines: Option<usize>,
+        /// Only the lines written in the last while: a number and s, m, h or d (`30m`, `1h`).
+        #[arg(long, value_name = "AGE")]
+        since: Option<String>,
         /// Keep showing new lines until interrupted.
         #[arg(short, long)]
         follow: bool,
@@ -186,7 +190,13 @@ fn dispatch(cli: Cli) -> i32 {
         Cmd::Status { json } => cmd_status(&paths, json),
         Cmd::Open { print, origin } => cmd_client(&paths, "open", &client_args(print, origin)),
         Cmd::Logout => cmd_client(&paths, "logout", &[]),
-        Cmd::Logs { lines, follow } => cmd_logs(&paths, lines, follow),
+        Cmd::Logs { lines, since, follow } => match since.as_deref().map(logs::parse_age).transpose() {
+            Ok(age) => cmd_logs(&paths, lines, age, follow),
+            Err(e) => {
+                warn!("logs --since: {e}");
+                2
+            }
+        },
         Cmd::Version { .. } => unreachable!("answered above"),
     }
 }
@@ -801,7 +811,7 @@ fn cmd_client(paths: &DataPaths, name: &str, extra: &[String]) -> i32 {
     }
 }
 
-fn cmd_logs(paths: &DataPaths, lines: usize, follow: bool) -> i32 {
+fn cmd_logs(paths: &DataPaths, lines: Option<usize>, since: Option<Duration>, follow: bool) -> i32 {
     use std::io::{Read, Seek, SeekFrom, Write};
     let path = state::log_path(&paths.instance_dir);
     let Ok(text) = std::fs::read_to_string(&path) else {
@@ -809,7 +819,16 @@ fn cmd_logs(paths: &DataPaths, lines: usize, follow: bool) -> i32 {
         return 1;
     };
     let mut out = std::io::stdout();
-    for line in state::last_lines(&text, lines) {
+    // With `--since` the whole window is shown unless `--lines` also caps it; without it, the last 50 lines.
+    let shown: Vec<&str> = match since {
+        Some(age) => {
+            let cutoff = chrono::Utc::now() - chrono::Duration::from_std(age).unwrap_or_else(|_| chrono::Duration::days(36_500));
+            let window = logs::since(&text, cutoff);
+            window[window.len().saturating_sub(lines.unwrap_or(usize::MAX))..].to_vec()
+        }
+        None => state::last_lines(&text, lines.unwrap_or(50)),
+    };
+    for line in shown {
         if writeln!(out, "{line}").is_err() {
             return 0;
         }
@@ -891,6 +910,8 @@ mod tests {
             vec!["open", "--origin", "http://127.0.0.1:8080"],
             vec!["logout"],
             vec!["logs", "--lines", "5", "-f"],
+            vec!["logs", "--since", "1h"],
+            vec!["logs", "--since", "30m", "--lines", "20"],
             vec!["version", "--json"],
         ] {
             assert!(parse(&args).is_ok(), "{args:?}");
