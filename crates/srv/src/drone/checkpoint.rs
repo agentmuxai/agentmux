@@ -105,6 +105,11 @@ pub struct Checkpoint {
     /// Each block's output bits `(tainted, derived)`. A restore never clears one.
     #[serde(default)]
     pub bits: BTreeMap<String, (bool, bool)>,
+    /// What each block that a loop ran again has said before, newest last (at
+    /// most 50): what `{{block.history}}` reads. Saved as it is, because it
+    /// cannot be told apart from the outputs.
+    #[serde(default)]
+    pub history: BTreeMap<String, Vec<serde_json::Value>>,
     #[serde(default)]
     pub position: Position,
 }
@@ -138,6 +143,8 @@ pub struct CheckpointDiff {
     pub changed_outputs: BTreeMap<String, serde_json::Value>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub changed_bits: BTreeMap<String, (bool, bool)>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub changed_history: BTreeMap<String, Vec<serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<Position>,
 }
@@ -260,6 +267,7 @@ pub fn diff(prev: &Checkpoint, next: &Checkpoint) -> Result<CheckpointDiff, Chec
     }
     d.changed_outputs = changed_map(&prev.outputs, &next.outputs);
     d.changed_bits = changed_map(&prev.bits, &next.bits);
+    d.changed_history = changed_map(&prev.history, &next.history);
     if prev.position != next.position {
         d.position = Some(next.position.clone());
     }
@@ -333,6 +341,7 @@ pub fn apply(prev: &Checkpoint, d: &CheckpointDiff) -> Result<Checkpoint, Checkp
     }
     out.outputs.extend(d.changed_outputs.iter().map(|(id, v)| (id.clone(), v.clone())));
     out.bits.extend(d.changed_bits.iter().map(|(id, b)| (id.clone(), *b)));
+    out.history.extend(d.changed_history.iter().map(|(id, h)| (id.clone(), h.clone())));
     if let Some(position) = &d.position {
         out.position = position.clone();
     }
@@ -398,6 +407,7 @@ pub(crate) fn sample(step: u32) -> Checkpoint {
         run_cap_usd: Some(5.0),
         outputs: BTreeMap::from([("n1".to_string(), serde_json::json!({ "value": "x" }))]),
         bits: BTreeMap::from([("n1".to_string(), (true, false))]),
+        history: BTreeMap::new(),
         position: Position {
             decided: BTreeMap::from([("e1".to_string(), true)]),
             finished: vec!["n1".into()],
