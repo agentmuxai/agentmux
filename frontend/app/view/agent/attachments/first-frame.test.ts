@@ -68,3 +68,32 @@ describe("a video that never gives a frame", () => {
         vi.unstubAllGlobals();
     });
 });
+
+describe("a video whose seek ends before its frame is there", () => {
+    it("is drawn only once the frame can be drawn, never as a black picture", async () => {
+        const video = document.createElement("video");
+        Object.defineProperty(video, "videoWidth", { value: 640 });
+        Object.defineProperty(video, "videoHeight", { value: 360 });
+        Object.defineProperty(video, "duration", { value: 10 });
+        let ready = 0;
+        Object.defineProperty(video, "readyState", { get: () => ready });
+        vi.spyOn(video, "load").mockImplementation(() => {});
+        const drawn: number[] = [];
+        const canvas = document.createElement("canvas");
+        vi.spyOn(canvas, "getContext").mockReturnValue({ drawImage: () => drawn.push(ready) } as unknown as CanvasRenderingContext2D);
+        vi.spyOn(canvas, "toBlob").mockImplementation((cb) => cb(new Blob(["jpeg"])));
+        const make = document.createElement.bind(document);
+        vi.spyOn(document, "createElement").mockImplementation((tag: string) => (tag === "video" ? video : tag === "canvas" ? canvas : make(tag)));
+        vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:clip", revokeObjectURL: () => {} }));
+        const result = firstFrame("video", new Blob(["x"]));
+        video.onloadedmetadata?.(new Event("loadedmetadata"));
+        video.onseeked?.(new Event("seeked"));
+        expect(drawn).toEqual([]);
+        ready = 2;
+        video.oncanplay?.(new Event("canplay"));
+        expect((await result)?.size).toBe(4);
+        expect(drawn).toEqual([2]);
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+});

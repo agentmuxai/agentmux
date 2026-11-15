@@ -14,6 +14,8 @@ const EDGE = 96;
 /** The largest file read for a picture. A bigger one keeps its icon: the tile never reads more than it shows. */
 export const MAX_PDF_BYTES = 30 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
+/** `HTMLMediaElement.readyState` once the frame at the current time can be drawn. */
+const HAVE_CURRENT_DATA = 2;
 /** How long a file may take to give its picture. */
 const GIVE_UP_MS = 8000;
 
@@ -123,7 +125,10 @@ function videoFirstFrame(blob: Blob, signal: AbortSignal): Promise<Blob | null> 
             // A moment in, not frame zero, which is often black.
             video.currentTime = Math.min(0.1, (video.duration || 0) / 2);
         };
-        video.onseeked = () => {
+        let drawn = false;
+        const draw = () => {
+            if (drawn) return;
+            drawn = true;
             const scale = fitScale(video.videoWidth, video.videoHeight);
             const canvas = document.createElement("canvas");
             canvas.width = Math.max(1, Math.floor(video.videoWidth * scale));
@@ -132,6 +137,11 @@ function videoFirstFrame(blob: Blob, signal: AbortSignal): Promise<Blob | null> 
             if (!context || !video.videoWidth) return done(null);
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
             void canvasBlob(canvas).then(done, () => done(null));
+        };
+        // The seek can finish before the frame is there; drawn then, it is a black picture, and it would be kept.
+        video.onseeked = () => {
+            if (video.readyState >= HAVE_CURRENT_DATA) draw();
+            else video.oncanplay = draw;
         };
         video.src = source;
     });
