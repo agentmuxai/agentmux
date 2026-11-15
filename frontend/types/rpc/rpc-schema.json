@@ -6610,6 +6610,25 @@
     }
   },
   {
+    "command": "resolvedronerun",
+    "request": "agentmux_srv::server::drone_handlers::ResolveRunReq",
+    "requestName": "ResolveRunReq",
+    "requestTs": {
+      "imports": [
+        "ResolveRunReq"
+      ],
+      "name": "ResolveRunReq"
+    },
+    "response": "agentmux_srv::server::drone_handlers::ResolveRunResp",
+    "responseName": "ResolveRunResp",
+    "responseTs": {
+      "imports": [
+        "ResolveRunResp"
+      ],
+      "name": "ResolveRunResp"
+    }
+  },
+  {
     "command": "routeannounce",
     "request": "serde_json::value::Value",
     "requestName": "Value",

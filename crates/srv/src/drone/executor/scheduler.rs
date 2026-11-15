@@ -182,10 +182,12 @@ pub(super) async fn resume(
     let mut s = Scheduler::new(&c.run_id, graph, plan, ExecutionScope::for_drone(&c.drone_id, c.trigger.clone()), limits, tx, states);
     s.restore(c).map_err(RunEnd::Failed)?;
     s.show_restored().await;
-    if let Some((id, _)) = s.in_flight {
+    if let Some((id, forced)) = s.in_flight {
         // It may have done its work before the machine stopped, and a second time
-        // would repeat it: it is not run again on its own.
-        return Err(RunEnd::Failed(format!("block {id} was running when the run stopped and it has effects, so it is not run again on its own")));
+        // would repeat it: it is not run again on its own, the run waits to be told.
+        if let Err(why) = s.settle_in_flight(id, forced).await {
+            return Err(if s.cancelled { RunEnd::Cancelled(s.cancel.reason()) } else { RunEnd::Failed(why) });
+        }
     }
     finish(&mut s, Ok(())).await
 }
@@ -609,6 +611,7 @@ impl<'a> Scheduler<'a> {
     }
 }
 
+mod attention;
 mod checkpoint;
 mod foreach;
 

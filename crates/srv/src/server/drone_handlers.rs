@@ -25,10 +25,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::rpc_types::{
     COMMAND_DELETE_DRONE, COMMAND_GET_DRONE, COMMAND_LIST_DRONES,
-    COMMAND_LIST_DRONE_RUNS, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
+    COMMAND_LIST_DRONE_RUNS, COMMAND_RESOLVE_DRONE_RUN, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
 };
 use crate::server::AppState;
 use crate::backend::rpc::engine::WshRpcEngine;
+use crate::backend::drone_decision::{self, Decision};
 use crate::drone::executor::{run_drone, RunEvent};
 use crate::drone::storage::DroneStore;
 use crate::drone::types::{RunStatus, DroneDefinition, DroneRun};
@@ -226,6 +227,34 @@ fn insert_run_placeholder(state: &AppState, run_id: &str, drone_id: &str, starte
     Ok(())
 }
 
+/// A run's row follows its wait: `needs_attention` with the reason when a step needs an
+/// answer, `running` again once it has one. Any other event leaves the row alone.
+async fn note_attention(
+    mstore: &crate::backend::storage::store::Store,
+    (run_id, drone_id, started_at): (&str, &str, i64),
+    ev: &RunEvent,
+    final_states: &tokio::sync::Mutex<HashMap<String, crate::drone::types::BlockState>>,
+) {
+    let (status, error) = match ev {
+        RunEvent::NeedsAttention { reason, .. } => (RunStatus::NeedsAttention, reason.clone()),
+        RunEvent::AttentionAnswered { .. } => (RunStatus::Running, String::new()),
+        _ => return,
+    };
+    let row = DroneRun {
+        id: run_id.to_string(),
+        drone_id: drone_id.to_string(),
+        status: status.as_str().to_string(),
+        started_at,
+        ended_at: 0,
+        block_states: final_states.lock().await.clone(),
+        output: String::new(),
+        error,
+    };
+    if let Err(e) = mstore.drone_run_update(&row) {
+        tracing::warn!(run_id, error = %e, "drone_run_update failed");
+    }
+}
+
 /// Drain a run's events on a background task; on completion, UPDATE the
 /// placeholder row in place and close the run ledger's row.
 pub(crate) fn spawn_run_drain(
@@ -310,6 +339,8 @@ pub(crate) fn spawn_run_drain(
                     }
                 }
             }
+            // A run that needs attention shows it in its row, and shows it is going again when answered.
+            note_attention(&mstore_for_drain, (&run_id_for_drain, &drone_id_for_drain, started_at), &ev, &handle.final_states).await;
             broker_for_drain.publish_event_for::<crate::backend::mps_events::DroneRun>(&run_id_for_drain, &ev, vec![], 0);
         }
     });
@@ -401,6 +432,54 @@ async fn launch_run(
     Ok(run_id)
 }
 
+/// What `resolvedronerun` is asked to do with a run that needs attention.
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ResolveRunReq {
+    pub run_id: String,
+    /// `run_again` (the step may repeat what it did before the restart), `skip`
+    /// (carry on as if it had finished with `output`) or `cancel` (end the run).
+    pub action: String,
+    /// With `skip`: what the step is taken to have said. It is treated as
+    /// outside text (tainted) whoever sends it. At most 64 KB.
+    #[serde(default)]
+    #[ts(type = "unknown", optional)]
+    pub output: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ResolveRunResp {
+    pub run_id: String,
+    pub action: String,
+}
+
+/// `resolvedronerun`: answer a run that is waiting, `needs_attention`, for what to
+/// do with the step that was running when AgentMux stopped.
+pub(crate) fn resolve_drone_run(cmd: ResolveRunReq) -> Result<ResolveRunResp, String> {
+    let ResolveRunReq { run_id, action, output } = cmd;
+    if !drone_decision::is_waiting(&run_id) {
+        return Err(format!("resolvedronerun: run {run_id} is not waiting for an answer"));
+    }
+    match action.as_str() {
+        "run_again" => drone_decision::decide(&run_id, Decision::RunAgain),
+        "skip" => {
+            let output = output.ok_or("resolvedronerun: `skip` needs `output`, what the step is taken to have said")?;
+            let size = output.to_string().len();
+            if size > MAX_INPUT_BYTES {
+                return Err(format!("resolvedronerun: the output is {size} bytes; at most {MAX_INPUT_BYTES}"));
+            }
+            drone_decision::decide(&run_id, Decision::Skip { output })
+        }
+        "cancel" => crate::backend::drone_cancel::cancel_run(&run_id, "cancelled when asked what to do with a step that needed attention")
+            .then_some(())
+            .ok_or_else(|| format!("run {run_id} is not running")),
+        other => Err(format!("resolvedronerun: unknown action {other:?}; use run_again, skip or cancel")),
+    }
+    .map_err(|e| if e.starts_with("resolvedronerun") { e } else { format!("resolvedronerun: {e}") })?;
+    Ok(ResolveRunResp { run_id, action })
+}
+
 /// `listdroneruns`.
 pub(crate) fn list_drone_runs(state: &AppState, cmd: ListRunsReq) -> Result<Vec<DroneRun>, String> {
     let limit = cmd.limit.clamp(0, MAX_LIST_LIMIT);
@@ -447,6 +526,8 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move { start_drone_run(&s, cmd).await }
     });
 
+    engine.register_typed(COMMAND_RESOLVE_DRONE_RUN, move |cmd: ResolveRunReq, _ctx| async move { resolve_drone_run(cmd) });
+
     let s = state.clone();
     engine.register_typed(COMMAND_LIST_DRONE_RUNS, move |cmd: ListRunsReq, _ctx| {
         let s = s.clone();
@@ -484,6 +565,7 @@ mod tests {
             (COMMAND_UPSERT_DRONE, "DroneDefinition", "DroneDefinition"),
             (COMMAND_DELETE_DRONE, "DeleteDroneReq", "DeleteResp"),
             (COMMAND_RUN_DRONE, "RunDroneReq", "RunResp"),
+            (COMMAND_RESOLVE_DRONE_RUN, "ResolveRunReq", "ResolveRunResp"),
         ] {
             let row = find(cmd);
             assert_eq!(row["requestName"], req, "{cmd} request");
