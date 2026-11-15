@@ -28,26 +28,29 @@ function agent(name: string, lead?: string): AtlasAgent {
 describe("wrappedRoute", () => {
     const lead: Pt = { x: 400, y: 0 };
 
-    it("is null for a report on the row under its lead, so that line is the curve it always was", () => {
+    it("leaves a line the layout did not say is wrapped as the curve it always was, however far down the report stands", () => {
         const under: Pt = { x: 300, y: NODE_H + GAP_Y };
-        expect(wrappedRoute(lead, under)).toBeNull();
+        // A report on another machine, or of another lead, can stand rows below: that line is still the curve.
+        const far: Pt = { x: 900, y: NODE_H + GAP_Y + 3 * (NODE_H + 24) };
         expect(edgePath(lead, under)).toMatch(/^M\S+ C/);
+        expect(edgePath(lead, far)).toMatch(/^M\S+ C/);
+        expect(edgePath(lead, far, true)).not.toMatch(/ C/);
     });
 
     it("runs a wrapped report's line along the gap above the first row, down the gap left of its column, into its left side", () => {
         const wrapped: Pt = { x: 300, y: NODE_H + GAP_Y + NODE_H + 24 };
-        const route = wrappedRoute(lead, wrapped)!;
+        const route = wrappedRoute(lead, wrapped);
         expect(route[0]).toEqual({ x: lead.x + NODE_W / 2, y: NODE_H });
         expect(route.at(-1)).toEqual({ x: wrapped.x, y: wrapped.y + NODE_H / 2 });
         // The vertical run is in the gap left of the column, 7 px from the card.
         const rail = route.filter((p) => p.x === wrapped.x - GAP_X / 2);
         expect(rail.length).toBe(2);
-        expect(edgePath(lead, wrapped)).toContain("Q");
+        expect(edgePath(lead, wrapped, true)).toContain("Q");
     });
 
     it("has no sideways run when the gap left of the column is straight under the lead", () => {
         const wrapped: Pt = { x: lead.x + NODE_W / 2 + GAP_X / 2, y: NODE_H + GAP_Y + NODE_H + 24 };
-        const route = wrappedRoute(lead, wrapped)!;
+        const route = wrappedRoute(lead, wrapped);
         // Down from the lead, then the short stub into the card: no run along the top of the first row.
         expect(route).toHaveLength(3);
         expect(route[0].x).toBe(route[1].x);
@@ -90,8 +93,8 @@ describe("the lines of a wrapped fleet", () => {
                     const from = l.nodes.get(e.from);
                     const to = l.nodes.get(e.to);
                     if (!from || !to) continue;
+                    if (l.wrapped.get(e.to) !== e.from) continue;
                     const route = wrappedRoute(from, to);
-                    if (!route) continue;
                     wrappedSeen++;
                     for (const p of along(route)) {
                         for (const [key, n] of l.nodes) {
@@ -104,5 +107,28 @@ describe("the lines of a wrapped fleet", () => {
                 if (pane.w === 640) expect(wrappedSeen).toBeGreaterThan(0);
             }
         }
+    });
+});
+
+describe("which reports the layout says it wrapped", () => {
+    const g = () => {
+        const agents: AtlasAgent[] = [agent("agenty")];
+        for (let i = 0; i < 9; i++) agents.push(agent(`y${i}`, "agenty"));
+        return buildAtlasGraph([machine("m")], agents);
+    };
+
+    it("names only reports on a later row than the one under their lead, with their lead", () => {
+        const l = layoutAtlas(g(), { w: 640, h: 1700 });
+        expect(l.wrapped.size).toBeGreaterThan(0);
+        const lead = l.nodes.get("m/agenty")!;
+        for (const [report, leadKey] of l.wrapped) {
+            expect(leadKey).toBe("m/agenty");
+            expect(l.nodes.get(report)!.y).toBeGreaterThan(lead.y + NODE_H + GAP_Y + 1);
+        }
+    });
+
+    it("is empty when every lead's reports stand in one row", () => {
+        expect(layoutAtlas(g(), { w: 4000, h: 1500 }).wrapped.size).toBe(0);
+        expect(layoutAtlas(g()).wrapped.size).toBe(0);
     });
 });

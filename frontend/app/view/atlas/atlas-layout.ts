@@ -57,6 +57,11 @@ export interface AtlasLayout {
     nodes: Map<string, Placed>;
     width: number;
     height: number;
+    /**
+     * The reports the layout wrapped onto a later row than the one under their lead, by report key, with the lead's key:
+     * only the line from that lead to that report is drawn down the gap beside the rows above it (atlas-edge-path.ts).
+     */
+    wrapped: ReadonlyMap<string, string>;
 }
 
 /** The trees of one region: each root that has reports, with the subtree it heads, in the order given. */
@@ -89,6 +94,8 @@ interface RegionLayout {
     nodes: Map<string, Placed>;
     w: number;
     h: number;
+    /** The reports wrapped onto a later row than the one under their lead, by report key, with their lead's key. */
+    wrapped: Map<string, string>;
 }
 
 /**
@@ -105,6 +112,7 @@ function layoutRegion(
 ): RegionLayout {
     const { roots, loners, children } = treesOf(keys, edges);
     const nodes = new Map<string, Placed>();
+    const wrapped = new Map<string, string>();
     let slot = 0;
     /** The lowest edge of a node the trees have placed. */
     let bottom = 0;
@@ -123,6 +131,7 @@ function layoutRegion(
             kids.forEach((c, i) => {
                 seen.add(c);
                 const row = Math.floor(i / reportCols);
+                if (row > 0) wrapped.set(c, k);
                 put(c, (first + (i % reportCols)) * (NODE_W + GAP_X), (depth + 1) * (NODE_H + GAP_Y) + row * (NODE_H + REPORT_ROW_GAP));
             });
             slot += reportCols;
@@ -147,7 +156,7 @@ function layoutRegion(
     });
     const gridW = loners.length === 0 ? 0 : cols * (NODE_W + GAP_X) - GAP_X;
     const gridH = loners.length === 0 ? 0 : Math.ceil(loners.length / cols) * (NODE_H + GAP_X) - GAP_X;
-    return { nodes, w: Math.max(treeW, gridW), h: gridTop + gridH };
+    return { nodes, w: Math.max(treeW, gridW), h: gridTop + gridH, wrapped };
 }
 
 /** A pane's size, as the layout is formed for it. */
@@ -213,6 +222,7 @@ function slotOf(
 function shelfPack(slots: readonly Slot[], services: Slot | null, wrapW: number): AtlasLayout {
     const boxes: RegionBox[] = [];
     const nodes = new Map<string, Placed>();
+    const wrapped = new Map<string, string>();
     let x = 0;
     let y = 0;
     let rowH = 0;
@@ -227,6 +237,7 @@ function shelfPack(slots: readonly Slot[], services: Slot | null, wrapW: number)
         // The nodes are centred in the region when it is wider than they are.
         const offset = PAD + (s.w - PAD * 2 - s.inner.w) / 2;
         for (const [node, p] of s.inner.nodes) nodes.set(node, { x: x + offset + p.x, y: y + HEAD + PAD + p.y });
+        for (const [report, lead] of s.inner.wrapped) wrapped.set(report, lead);
         boxes.push({ key: s.key, x, y, w: s.w, h: s.h, foldY: y + HEAD + PAD + s.innerH + (s.innerH > 0 ? GAP_X : 0) });
         x += s.w + REGION_GAP;
         rowH = Math.max(rowH, s.h);
@@ -237,7 +248,7 @@ function shelfPack(slots: readonly Slot[], services: Slot | null, wrapW: number)
         if (x > 0) newRow();
         place(services);
     }
-    return { regions: boxes, nodes, width, height: boxes.length === 0 ? 0 : y + rowH };
+    return { regions: boxes, nodes, width, height: boxes.length === 0 ? 0 : y + rowH, wrapped };
 }
 
 /** The scale the fitted view would show `layout` at in `pane`, before the readable floor. */
@@ -357,10 +368,10 @@ function seatWithCols(graph: AtlasGraph, cols: number, reportCols = Number.POSIT
     for (const [key, p] of inner.nodes) nodes.set(key, { x: PAD + p.x, y: PAD + p.y });
     const servicesTop = keys.length === 0 ? 0 : inner.h + SERVICES_GAP;
     services.forEach((key, i) => nodes.set(key, { x: PAD + i * (NODE_W + GAP_X), y: PAD + servicesTop }));
-    if (nodes.size === 0) return { regions: [], nodes, width: 0, height: 0 };
+    if (nodes.size === 0) return { regions: [], nodes, width: 0, height: 0, wrapped: new Map() };
     const servicesW = services.length === 0 ? 0 : services.length * (NODE_W + GAP_X) - GAP_X;
     const h = services.length === 0 ? inner.h : servicesTop + NODE_H;
-    return { regions: [], nodes, width: Math.max(inner.w, servicesW) + PAD * 2, height: h + PAD * 2 };
+    return { regions: [], nodes, width: Math.max(inner.w, servicesW) + PAD * 2, height: h + PAD * 2, wrapped: inner.wrapped };
 }
 
 /** Where the folded chip stands in its region's box: its left and its size. */

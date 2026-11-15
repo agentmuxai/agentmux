@@ -288,7 +288,7 @@ function AtlasMap(props: {
                                 <path
                                     class="atlas-edge"
                                     classList={{ "atlas-edge--spawned": edge.kind === "spawned" }}
-                                    d={edgePath(from()!, to()!)}
+                                    d={edgePath(from()!, to()!, props.layout.wrapped.get(edge.to) === edge.from)}
                                 />
                             </Show>
                         );

@@ -6,7 +6,9 @@
  * bottom to the report's top. A report the layout wrapped onto a later row (`reportCols` in atlas-layout.ts) would
  * have that curve run behind the cards of the rows above it and come out of the bottom of one of them, as if it were
  * that card's report; its line instead runs along the top of the first row, down the gap left of the report's column,
- * and into the card's left side, so it crosses no card.
+ * and into the card's left side, so it crosses no card. Which reports were wrapped is the layout's to say
+ * (`AtlasLayout.wrapped`): a line between agents of two machines, or to a report of another lead, can also run far
+ * down the map, and is still the curve.
  */
 
 import { GAP_X, GAP_Y, NODE_H, NODE_W } from "./atlas-layout";
@@ -20,15 +22,13 @@ export interface Pt {
 const CORNER_R = 8;
 
 /**
- * The corners of the line to a report on a later row, or null when the report is on the row under its lead. The
- * line leaves the lead's bottom, runs along the middle of the gap above the first row, goes down the gap left of the
- * report's column to the middle of its card, and ends at the card's left edge.
+ * The corners of the line to a report the layout wrapped onto a later row. The line leaves the lead's bottom, runs
+ * along the middle of the gap above the first row, goes down the gap left of the report's column to the middle of its
+ * card, and ends at the card's left edge.
  */
-export function wrappedRoute(from: Pt, to: Pt): Pt[] | null {
+export function wrappedRoute(from: Pt, to: Pt): Pt[] {
     const x1 = from.x + NODE_W / 2;
     const y1 = from.y + NODE_H;
-    // One level down is the first row; further down is a wrapped row.
-    if (to.y - y1 <= GAP_Y + 1) return null;
     const bus = y1 + GAP_Y / 2;
     const railX = to.x - GAP_X / 2;
     const yMid = to.y + NODE_H / 2;
@@ -59,10 +59,9 @@ function roundedPath(pts: readonly Pt[]): string {
     return d;
 }
 
-/** The path of a line from a lead's node to a report's. */
-export function edgePath(from: Pt, to: Pt): string {
-    const route = wrappedRoute(from, to);
-    if (route) return roundedPath(route);
+/** The path of a line from a lead's node to a report's; `wrapped`: the layout wrapped that report onto a later row. */
+export function edgePath(from: Pt, to: Pt, wrapped = false): string {
+    if (wrapped) return roundedPath(wrappedRoute(from, to));
     const x1 = from.x + NODE_W / 2;
     const y1 = from.y + NODE_H;
     const x2 = to.x + NODE_W / 2;
