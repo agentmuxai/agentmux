@@ -55,6 +55,12 @@ pub enum RunEvent {
         #[ts(optional)]
         key: Option<String>,
     },
+    /// A Drone block started the drone `drone_id` (saved version `version`, 0 when
+    /// it was never saved) as a child run. Its own events are not sent here.
+    ChildStarted { run_id: String, block_id: String, child_run_id: String, drone_id: String, version: i64 },
+    /// The child run ended: `status` is `done`, `failed` or `cancelled`; `cost_usd`
+    /// is what it spent, which counts against the caller.
+    ChildEnded { run_id: String, block_id: String, child_run_id: String, status: String, cost_usd: f64 },
     /// The wait at `block_id` is over; `late` when the run was taken up after its time.
     WaitEnded { run_id: String, block_id: String, late: bool },
     /// The run's wait was answered: `choice` is `run_again` or `skip`. (A run that

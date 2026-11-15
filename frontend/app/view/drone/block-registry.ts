@@ -190,6 +190,19 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],
     },
+    drone: {
+        kind: "drone",
+        emoji: "🧩",
+        label: "Drone",
+        description: "Call another drone as a step. It runs on this run's remaining budget and is stopped with it. Inputs are read by the callee as {{trigger.name}}; what its Response says is {{this.value}}. A drone cannot call itself, and calls nest at most 4 deep.",
+        color: "#0ea5e9", // colour: fixed (the block's identity colour)
+        defaultData: {
+            drone: "",
+            inputs: {},
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     foreach: {
         kind: "foreach",
         emoji: "🔁",

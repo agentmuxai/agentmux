@@ -30,6 +30,7 @@ use super::retry;
 use super::schedule::{self, Guard, OnCap, Plan};
 use crate::drone::checkpoint::{Checkpoint, GraphRef};
 use crate::drone::data_flow::ExecutionScope;
+use crate::drone::host::DroneLookup;
 use crate::drone::recorder::{Persist, Recorder};
 use crate::drone::types::{BlockKind, BlockState, DroneGraph, FlowEdge, FlowNode};
 use agentmux_common::time::now_ms;
@@ -47,6 +48,10 @@ pub(super) struct Limits {
     pub(super) run_cap_usd: Option<f64>,
     pub(super) cancel: Cancel,
     pub(super) persist: Option<Persist>,
+    /// The drones above this one when it was called by a Drone block, outermost first.
+    pub(super) chain: Vec<String>,
+    /// Where a Drone block finds the drone it calls.
+    pub(super) lookup: Option<Arc<dyn DroneLookup>>,
 }
 
 /// How long a block may run when its graph does not say (`timeout_seconds`): an
@@ -58,6 +63,8 @@ fn default_timeout(kind: BlockKind) -> Option<Duration> {
         BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery | BlockKind::Spawn => Some(Duration::from_secs(5 * 60)),
         // A wait is for as long as it says, and its own `timeout_seconds` may cut it short.
         BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait => None,
+        // The callee has the limits of its own blocks, and the caller may set one for the whole call.
+        BlockKind::Drone => None,
     }
 }
 
@@ -149,6 +156,11 @@ struct Scheduler<'a> {
     resume_on: BTreeMap<String, String>,
     /// When the Wait block runs out of its own `timeout_seconds`.
     wait_timeouts: BTreeMap<String, i64>,
+    /// The drones above this one (a Drone block called it), and where to find a drone to call.
+    chain: Vec<String>,
+    lookup: Option<Arc<dyn DroneLookup>>,
+    /// What callees spent that nobody was waiting for any more, by child run: counted at the next block.
+    late_spend: Arc<call::LateSpend>,
     /// Writes the run's checkpoints, with the graph version they say the run is on.
     recorder: Option<(Recorder, GraphRef)>,
     started: Instant,
@@ -160,20 +172,32 @@ struct Scheduler<'a> {
 
 pub(super) async fn execute(
     run_id: &str,
-    (graph, trigger, limits, drone_id): (&DroneGraph, Value, Limits, &str),
+    args: (&DroneGraph, Value, Limits, &str),
     tx: &mpsc::UnboundedSender<RunEvent>,
     states: &States,
 ) -> Result<Value, RunEnd> {
+    execute_costed(run_id, args, tx, states).await.0
+}
+
+/// [`execute`], and with it what the run spent, which a caller counts against its own budget.
+pub(super) async fn execute_costed(
+    run_id: &str,
+    (graph, trigger, limits, drone_id): (&DroneGraph, Value, Limits, &str),
+    tx: &mpsc::UnboundedSender<RunEvent>,
+    states: &States,
+) -> (Result<Value, RunEnd>, f64) {
     if graph.nodes.is_empty() {
-        return Err(RunEnd::Failed("drone has no blocks".to_string()));
+        return (Err(RunEnd::Failed("drone has no blocks".to_string())), 0.0);
     }
-    let plan = schedule::analyze(graph).map_err(|issues| {
-        RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))
-    })?;
+    let plan = match schedule::analyze(graph) {
+        Ok(plan) => plan,
+        Err(issues) => return (Err(RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))), 0.0),
+    };
     let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::for_drone(drone_id, trigger), limits, tx, states);
     s.seed_roots();
     let started = s.checkpoint(None);
-    finish(&mut s, started).await
+    let ended = finish(&mut s, started).await;
+    (ended, s.spent)
 }
 
 /// Take up a run from its newest checkpoint, `c`, and run it to its end: the
@@ -208,6 +232,8 @@ async fn finish(s: &mut Scheduler<'_>, started: Result<(), String>) -> Result<Va
         Ok(()) => s.drive().await,
         Err(e) => Err(e),
     };
+    // However it ended (a stop included), what callees it stopped were spending is its own.
+    s.settle_late_spend().await;
     match ran {
         Ok(()) => Ok(s.response.take().unwrap_or(Value::Null)),
         Err(_) if s.cancelled => Err(RunEnd::Cancelled(s.cancel.reason())),
@@ -259,6 +285,9 @@ impl<'a> Scheduler<'a> {
             deadlines: BTreeMap::new(),
             resume_on: BTreeMap::new(),
             wait_timeouts: BTreeMap::new(),
+            chain: limits.chain,
+            lookup: limits.lookup,
+            late_spend: Arc::default(),
             recorder: limits.persist.map(|p| (Recorder::new(p.sink, run_id), p.graph)),
             started: Instant::now(),
             elapsed_before_ms: 0,
@@ -341,6 +370,7 @@ impl<'a> Scheduler<'a> {
             }
             return Ok(());
         }
+        self.settle_late_spend().await;
         if let Some(stopped) = over_run_cap(self.spent, self.run_cap_usd) {
             self.cap_reached(id, &stopped);
             return Err(stopped);
@@ -447,6 +477,9 @@ impl<'a> Scheduler<'a> {
         if kind == BlockKind::Wait {
             return self.run_wait(node).await;
         }
+        if kind == BlockKind::Drone {
+            return self.run_call(node).await;
+        }
         let scope = &mut self.scope;
         match kind {
             BlockKind::Variables => blocks::variables::run(node, scope).await,
@@ -460,7 +493,7 @@ impl<'a> Scheduler<'a> {
             BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
             BlockKind::Spawn => blocks::spawn::run(node, scope).await,
             BlockKind::Transform => blocks::transform::run(node, scope).await,
-            BlockKind::ForEach | BlockKind::Wait => unreachable!("handled above"),
+            BlockKind::ForEach | BlockKind::Wait | BlockKind::Drone => unreachable!("handled above"),
         }
     }
 
@@ -468,6 +501,7 @@ impl<'a> Scheduler<'a> {
     async fn run_block(&mut self, node: &'a FlowNode) -> Result<Value, String> {
         let id = node.id.as_str();
         let kind = kind_of(node)?;
+        self.settle_late_spend().await;
         let _ = self.tx.send(RunEvent::BlockStarted { run_id: self.run_id.to_string(), block_id: id.to_string() });
         // Captured once so the running, done and error states carry the same start.
         let started_at = now_ms();
@@ -479,7 +513,12 @@ impl<'a> Scheduler<'a> {
             completed_at: done.then(now_ms),
         };
         mark_state(self.states, id, state("running", None, None, false)).await;
+        let spent_before = self.spent;
         let result = self.guarded(node, kind).await;
+        // What a block spent and then failed (a callee that ran, then failed) was still spent: it
+        // is on the block's state, which is what the ledger sums.
+        // Only a Drone block: a for-each's body has put its own spend on its own state.
+        let failed_cost = (matches!(kind, BlockKind::Drone) && self.spent > spent_before).then(|| json!({ "cost_usd": self.spent - spent_before }));
         match result {
             Ok(mut output) => {
                 self.keep_history(id, &mut output);
@@ -498,12 +537,12 @@ impl<'a> Scheduler<'a> {
                 Ok(output)
             }
             Err(e) if self.cancelled => {
-                mark_state(self.states, id, state("cancelled", None, Some(e.clone()), true)).await;
+                mark_state(self.states, id, state("cancelled", failed_cost, Some(e.clone()), true)).await;
                 Err(e)
             }
             Err(e) => {
                 let _ = self.tx.send(RunEvent::BlockError { run_id: self.run_id.to_string(), block_id: id.to_string(), error: e.clone() });
-                mark_state(self.states, id, state("error", None, Some(e.clone()), true)).await;
+                mark_state(self.states, id, state("error", failed_cost, Some(e.clone()), true)).await;
                 Err(format!("block {id} failed: {e}"))
             }
         }
@@ -526,6 +565,8 @@ impl<'a> Scheduler<'a> {
             // What an event brought is outside text; a wait for a time brings nothing.
             BlockKind::Wait if node.data.get("on").is_some() => (true, false),
             BlockKind::Wait => (false, false),
+            // What a callee said is outside text: nothing yet promises its outputs are clean.
+            BlockKind::Drone => (true, false),
             BlockKind::Task | BlockKind::Notify | BlockKind::Spawn => (false, false),
         };
         self.scope.bits.insert(node.id.clone(), bits);
@@ -644,6 +685,7 @@ impl<'a> Scheduler<'a> {
 }
 
 mod attention;
+mod call;
 mod checkpoint;
 mod foreach;
 mod wait;

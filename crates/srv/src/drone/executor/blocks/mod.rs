@@ -5,6 +5,7 @@ pub mod agent;
 pub mod agent_output;
 pub mod app_query;
 pub mod api;
+pub mod call;
 pub mod condition;
 pub mod message;
 pub mod notify;

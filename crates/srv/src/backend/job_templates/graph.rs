@@ -23,7 +23,7 @@ pub const MAX_NODES: usize = 100;
 pub const MAX_EDGES: usize = 300;
 
 /// The node kinds this build has, for the error that names a missing one.
-const KINDS: &str = "agent, condition, api, response, variables, message, task, notify, app_query, spawn, transform, foreach, wait";
+const KINDS: &str = "agent, condition, api, response, variables, message, task, notify, app_query, spawn, transform, foreach, wait, drone";
 
 /// What the approval prompt shows of a template's graph.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, ts_rs::TS)]
@@ -63,7 +63,11 @@ pub fn check(graph: &DroneGraph) -> Result<(), String> {
         if node.id.trim().is_empty() || !ids.insert(node.id.as_str()) {
             return Err(format!("graph.json: node id {:?} is empty or used twice", node.id));
         }
-        kind_of(node)?;
+        // What another drone does is on the machine it is installed on, not in the template, so the
+        // prompt could not list it: a template does not call one.
+        if kind_of(node)? == BlockKind::Drone {
+            return Err(format!("graph.json: node {:?} calls another drone, and a template cannot: what that drone does could not be shown when the template is approved", node.id));
+        }
     }
     for edge in &graph.edges {
         for end in [&edge.source, &edge.target] {
