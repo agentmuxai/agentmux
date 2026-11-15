@@ -1,5 +1,7 @@
 # Agent Self-Compaction: Context, Compact, Fresh Session, and a Lower Auto-Compact Backstop
 
+**Area:** compaction
+
 **Date:** 2026-10-23
 **Status:** implemented — approved by the operator on 2026-10-23. PR 1 (§3.1, the backstop setting) in #5393; PR 2 (§3.2–§3.6: context, compact, the compact hint) in #5399; PR 3 (fresh, and the fresh hint) in #5411; Codex `fresh` in #5524.
 **Owner:** agent-pane lifecycle

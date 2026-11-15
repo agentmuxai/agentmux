@@ -13,26 +13,31 @@
 //! half-finished delivery leaves in the handler, and logs one warning. A panic costs the delivery it happened in, not
 //! the ones after it.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
-use super::handler::Handler;
+use super::handler::{Handler, ReactiveHandler};
 
 /// `Mutex<Handler>` whose locks recover from a poisoning panic instead of passing it on.
-pub(super) struct HandlerLock(Mutex<Handler>);
+pub(super) struct HandlerLock {
+    mutex: Mutex<Handler>,
+    /// How many times a poisoned lock was recovered since srv started: `/health` and the status bar report it.
+    recovered: AtomicU64,
+}
 
 impl HandlerLock {
     pub(super) fn new(handler: Handler) -> Self {
-        Self(Mutex::new(handler))
+        Self { mutex: Mutex::new(handler), recovered: AtomicU64::new(0) }
     }
 
     /// Waits for the lock. Never panics because another thread did.
     pub(super) fn lock(&self) -> MutexGuard<'_, Handler> {
-        self.0.lock().unwrap_or_else(|poisoned| self.recover(poisoned))
+        self.mutex.lock().unwrap_or_else(|poisoned| self.recover(poisoned))
     }
 
     /// Takes the lock if it is free right now; `None` when another thread holds it. A poisoned lock is recovered, not refused.
     pub(super) fn try_lock(&self) -> Option<MutexGuard<'_, Handler>> {
-        match self.0.try_lock() {
+        match self.mutex.try_lock() {
             Ok(guard) => Some(guard),
             Err(TryLockError::WouldBlock) => None,
             Err(TryLockError::Poisoned(poisoned)) => Some(self.recover(poisoned)),
@@ -43,15 +48,39 @@ impl HandlerLock {
     fn recover<'a>(&'a self, poisoned: PoisonError<MutexGuard<'a, Handler>>) -> MutexGuard<'a, Handler> {
         let mut handler = poisoned.into_inner();
         handler.reset_delivery_context();
+        self.recovered.fetch_add(1, Ordering::Relaxed);
         // Cleared while the guard is held: the next thread to lock sees a healthy lock, and the warning is written once per panic.
-        self.0.clear_poison();
+        self.mutex.clear_poison();
         tracing::warn!("reactive: a panic under the handler lock was recovered; the delivery it happened in is lost, messaging goes on");
         handler
     }
 
+    pub(super) fn recovered(&self) -> u64 {
+        self.recovered.load(Ordering::Relaxed)
+    }
+
     #[cfg(test)]
     fn is_poisoned(&self) -> bool {
-        self.0.is_poisoned()
+        self.mutex.is_poisoned()
+    }
+}
+
+impl ReactiveHandler {
+    /// How many times the handler's lock was found poisoned and recovered since srv started.
+    pub fn recovered_lock_count(&self) -> u64 {
+        self.inner.recovered()
+    }
+
+    /// Holds the lock until the guard is dropped: for a test of what health says about a lock that stays taken.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn hold_lock_for_test(&self) -> std::sync::MutexGuard<'_, Handler> {
+        self.inner.lock()
+    }
+
+    /// Whether the lock could be taken just now (and is let go at once): the pulse of the messaging path, for health. A lock held for
+    /// good, as a deadlock or a stuck delivery would, is never free.
+    pub fn lock_is_free(&self) -> bool {
+        self.inner.try_lock().is_some()
     }
 }
 
@@ -163,5 +192,38 @@ mod tests {
             panic!("and again");
         }));
         handler.try_register_agent_with_nonce("agent2", "block2", None, 1, None).expect("the spawn-path registration goes through");
+    }
+
+    #[test]
+    fn every_recovery_is_counted_for_health() {
+        let handler = ReactiveHandler::new();
+        assert_eq!(handler.recovered_lock_count(), 0);
+        for expected in 1..=2u64 {
+            assert!(panics_on_a_thread(|| {
+                let _guard = handler.inner.lock();
+                panic!("a panic while the lock is held");
+            }));
+            assert_eq!(handler.list_agents().len(), 0);
+            assert_eq!(handler.recovered_lock_count(), expected, "one recovery per poisoning, not one per later call");
+            handler.list_agents();
+            assert_eq!(handler.recovered_lock_count(), expected, "a healthy lock adds nothing");
+        }
+    }
+
+    #[test]
+    fn the_lock_is_free_unless_someone_holds_it() {
+        let handler = ReactiveHandler::new();
+        assert!(handler.lock_is_free());
+        let guard = handler.inner.lock();
+        assert!(!handler.lock_is_free(), "a lock held for good (a stuck delivery, a deadlock) is not free: health says so");
+        drop(guard);
+        assert!(handler.lock_is_free());
+        // A poisoned lock is recovered by the probe itself, and counted.
+        assert!(panics_on_a_thread(|| {
+            let _guard = handler.inner.lock();
+            panic!("a panic while the lock is held");
+        }));
+        assert!(handler.lock_is_free());
+        assert_eq!(handler.recovered_lock_count(), 1);
     }
 }

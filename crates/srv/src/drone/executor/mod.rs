@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod blocks;
+pub mod effect;
 pub mod engine;
 mod retry;
 pub mod schedule;

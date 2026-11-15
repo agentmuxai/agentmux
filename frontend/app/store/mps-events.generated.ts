@@ -89,6 +89,7 @@ import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
 import type { SigninLinkEvent } from "@/types/rpc/SigninLinkEvent";
 import type { SingletonClaimEvent } from "@/types/rpc/SingletonClaimEvent";
 import type { SrvInfo } from "@/types/rpc/SrvInfo";
+import type { SrvPanicsEvent } from "@/types/rpc/SrvPanicsEvent";
 import type { SubagentAbandonedEvent } from "@/types/rpc/SubagentAbandonedEvent";
 import type { SubagentActivityEvent } from "@/types/rpc/SubagentActivityEvent";
 import type { SubagentBackfillStatusEvent } from "@/types/rpc/SubagentBackfillStatusEvent";
@@ -214,6 +215,7 @@ export type MuxEventPayloads = {
   shell_node_create: ShellNodeCreateEvent;
   "singleton:claim": SingletonClaimEvent;
   "skills:changed": null;
+  "srv-panics": SrvPanicsEvent;
   srvinfo: SrvInfo;
   "subagent:abandoned": SubagentAbandonedEvent;
   "subagent:activity": SubagentActivityEvent;
@@ -350,6 +352,7 @@ export const TYPED_MUX_EVENTS = [
   "shell_node_create",
   "singleton:claim",
   "skills:changed",
+  "srv-panics",
   "srvinfo",
   "subagent:abandoned",
   "subagent:activity",

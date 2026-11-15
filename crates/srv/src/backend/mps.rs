@@ -111,6 +111,8 @@ pub const EVENT_AGENT_FAILURE: &str = "agentfailure";
 /// *correct* current state, not a stale echo — see
 /// `publish_resume_retry_status`'s own doc comment for why 2, not 1.
 pub const EVENT_AGENT_RESUME_RETRY: &str = "agent-resume-retry";
+/// srv's own panics, counted (`panic_watch`): warn above 20 in a minute, critical above 200. Persisted (1), so a window that opens mid-storm gets it.
+pub const EVENT_SRV_PANICS: &str = "srv-panics";
 /// A Claude CLI request is being retried, or no longer is
 /// (`backend::agent_api_retry`). Payload: `{ "retry": {…} | null }`. Not
 /// persisted: it carries time remaining as of sending.

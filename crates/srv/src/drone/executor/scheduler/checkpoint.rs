@@ -8,24 +8,20 @@
 //!
 //! A checkpoint is written when the scheduler is between blocks, so nothing is
 //! half done: the blocks that are ready, the edges decided, the outputs read
-//! so far, the variables with their taint bits, and what has been spent. A
-//! block's history (`{{block.history}}`) is not stored twice: the output
-//! already carries the earlier ones, so a restore rebuilds it from there.
+//! so far, the variables with their taint bits, each block's history
+//! (`{{block.history}}`), and what has been spent.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
-
-use super::{Scheduler, HISTORY_LEN};
+use super::{kind_of, Scheduler};
 use crate::drone::checkpoint::{self, Checkpoint, CheckpointError, Frontier, GraphRef, Position};
+use crate::drone::executor::effect::{effect_of, Effect};
 use crate::drone::executor::engine::{mark_state, RunEvent};
+use crate::drone::executor::schedule::foreach_config;
 use crate::drone::recorder::RecordError;
 use crate::drone::state::RunState;
-use crate::drone::types::BlockState;
-
-/// The fields a loop's exit adds to a block's output after its history was kept.
-const ADDED_AFTER_HISTORY: [&str; 2] = ["capped", "capped_reason"];
+use crate::drone::types::{BlockKind, BlockState, FlowNode};
 
 impl<'a> Scheduler<'a> {
     /// Keep the run as it stands as its next checkpoint, `after` the block that
@@ -33,6 +29,41 @@ impl<'a> Scheduler<'a> {
     /// keep a checkpoint goes on, and the next one is a diff from the last kept;
     /// a run that has used up its steps (§3.3: at most 1,000) ends, saying so.
     pub(super) fn checkpoint(&mut self, after: Option<&str>) -> Result<(), String> {
+        self.keep(after, false)
+    }
+
+    /// What `node` does to the world, which a for-each takes from its body.
+    fn effect_of_node(&self, node: &FlowNode, kind: BlockKind) -> Effect {
+        let body = match kind {
+            BlockKind::ForEach => foreach_config(node)
+                .ok()
+                .and_then(|cfg| self.node_of.get(cfg.body.as_str()).copied())
+                .and_then(|b| kind_of(b).ok().filter(|k| *k != BlockKind::ForEach).map(|k| effect_of(k, b, Effect::ReadOnly)))
+                .unwrap_or(Effect::Effectful),
+            _ => Effect::ReadOnly,
+        };
+        effect_of(kind, node, body)
+    }
+
+    /// Before a block with effects starts, keep a checkpoint that says it is
+    /// running. A restart that finds it as the newest knows the block may have
+    /// done its work already. When the run cannot keep it, the block does not
+    /// start: it would be a step no restart could account for.
+    pub(super) fn mark_in_flight(&mut self, node: &'a FlowNode, forced: bool) -> Result<(), String> {
+        if self.recorder.is_none() {
+            return Ok(());
+        }
+        let Ok(kind) = kind_of(node) else { return Ok(()) };
+        if self.effect_of_node(node, kind) != Effect::Effectful {
+            return Ok(());
+        }
+        self.in_flight = Some((node.id.as_str(), forced));
+        self.keep(Some(node.id.as_str()), true)
+    }
+
+    /// [`checkpoint`](Self::checkpoint), and with `required` a checkpoint that
+    /// could not be kept ends the run.
+    fn keep(&mut self, after: Option<&str>, required: bool) -> Result<(), String> {
         let Some(step) = self.recorder.as_ref().map(|(r, _)| r.next_step()) else { return Ok(()) };
         let c = self.snapshot(step);
         let Some((recorder, _)) = self.recorder.as_mut() else { return Ok(()) };
@@ -45,6 +76,9 @@ impl<'a> Scheduler<'a> {
                 let why = format!("stopped: a run keeps at most {max} steps and this one used them all");
                 self.cap_reached(after.unwrap_or_default(), &why);
                 Err(why)
+            }
+            Err(e) if required => {
+                Err(format!("stopped: the run could not keep its place before {}, which has effects, so it did not start it ({e})", after.unwrap_or_default()))
             }
             Err(e) => {
                 tracing::warn!(run_id = %self.run_id, error = %e, "drone: a checkpoint was not kept");
@@ -65,8 +99,14 @@ impl<'a> Scheduler<'a> {
             state: self.scope.state.snapshot(),
             frontier: Frontier {
                 ready: self.ready.iter().map(|(id, _)| id.to_string()).collect(),
-                forced: self.ready.iter().filter(|(_, forced)| *forced).map(|(id, _)| id.to_string()).collect(),
-                running: Vec::new(),
+                forced: self
+                    .ready
+                    .iter()
+                    .filter(|(_, forced)| *forced)
+                    .map(|(id, _)| id.to_string())
+                    .chain(self.in_flight.filter(|(_, forced)| *forced).map(|(id, _)| id.to_string()))
+                    .collect(),
+                running: self.in_flight.iter().map(|(id, _)| id.to_string()).collect(),
                 waiting: Vec::new(),
             },
             loop_counters: self.rounds.iter().map(|(id, n)| (id.to_string(), *n)).collect(),
@@ -80,6 +120,7 @@ impl<'a> Scheduler<'a> {
             run_cap_usd: self.run_cap_usd,
             outputs: self.scope.outputs.iter().map(|(id, v)| (id.clone(), v.clone())).collect(),
             bits: self.scope.bits.iter().map(|(id, b)| (id.clone(), *b)).collect(),
+            history: self.history.iter().map(|(id, past)| (id.to_string(), past.iter().cloned().collect())).collect(),
             position: Position {
                 decided: self.decided.iter().map(|(id, carries)| (id.to_string(), *carries)).collect(),
                 finished,
@@ -125,10 +166,8 @@ impl<'a> Scheduler<'a> {
             spent_by.insert(node(id)?, *usd);
         }
         let mut history = HashMap::new();
-        for (id, output) in &c.outputs {
-            if let Ok(id) = node(id) {
-                history.insert(id, history_of(output));
-            }
+        for (id, past) in &c.history {
+            history.insert(node(id)?, past.iter().cloned().collect::<VecDeque<_>>());
         }
         let now = Instant::now();
         let loop_started = c
@@ -138,6 +177,12 @@ impl<'a> Scheduler<'a> {
             .map(|(id, ms)| (id.clone(), now.checked_sub(Duration::from_millis(*ms)).unwrap_or(now)))
             .collect();
 
+        let in_flight = match c.frontier.running.as_slice() {
+            [] => None,
+            [id] => Some((node(id)?, c.frontier.forced.iter().any(|f| f == id))),
+            _ => return Err("the saved run has more than one block running, which this build does not run".to_string()),
+        };
+        self.in_flight = in_flight;
         self.ready = ready;
         self.queued = queued;
         self.decided = decided;
@@ -170,33 +215,6 @@ impl<'a> Scheduler<'a> {
             mark_state(self.states, id, BlockState { status: status.to_string(), output, error: None, started_at: None, completed_at: Some(agentmux_common::time::now_ms()) }).await;
         }
     }
-}
-
-/// A block's earlier outputs, newest last, from the output it was saved with:
-/// the ones its `history` lists, then its own without what was added around
-/// it. A handled failure (`{error, failed}`) is not one of them: the block's
-/// history never had it.
-fn history_of(output: &Value) -> VecDeque<Value> {
-    let mut past: VecDeque<Value> = output.get("history").and_then(Value::as_array).map(|a| a.iter().cloned().collect()).unwrap_or_default();
-    let mut plain = output.clone();
-    if let Some(map) = plain.as_object_mut() {
-        map.remove("history");
-        for key in ADDED_AFTER_HISTORY {
-            map.remove(key);
-        }
-        if is_handled_failure(map) {
-            return past;
-        }
-    }
-    past.push_back(plain);
-    while past.len() > HISTORY_LEN {
-        past.pop_front();
-    }
-    past
-}
-
-fn is_handled_failure(map: &serde_json::Map<String, Value>) -> bool {
-    map.len() == 2 && map.get("failed") == Some(&Value::Bool(true)) && map.contains_key("error")
 }
 
 #[cfg(test)]
