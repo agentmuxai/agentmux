@@ -261,11 +261,10 @@ pub async fn poll_due(scheduler: &CronScheduler, all: &[CronJob], check: &Check,
         if !st.baselined {
             if !plan.include_existing {
                 // The first poll of a job takes note of what is there, once.
-                match store.job_event_claim(&job.id, &marker, "", now) {
+                // The marker and what is there are claimed together, so the marker is never seen without them.
+                let ids: Vec<String> = items.iter().map(|(id, _)| event_id(&plan.query, id)).collect();
+                match store.job_event_claim_baseline(&job.id, &marker, &ids, now) {
                     Ok(true) => {
-                        for (id, _) in &items {
-                            let _ = store.job_event_claim(&job.id, &event_id(&plan.query, id), "", now);
-                        }
                         st.baselined = true;
                         st.seen = present;
                         continue;

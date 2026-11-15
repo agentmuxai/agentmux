@@ -51,6 +51,24 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Claim `marker` and every id in `ids` for `job_id` in one transaction, with no run (they are noted, not started).
+    /// `Ok(true)` when the marker was new: all of them are claimed, and nobody sees the marker without them.
+    /// `Ok(false)` when the marker was already there: nothing is written, so a half-finished first look elsewhere
+    /// (another instance, or a crash) is not completed here as if it were this one's.
+    pub fn job_event_claim_baseline(&self, job_id: &str, marker: &str, ids: &[String], now_ms: i64) -> Result<bool, StoreError> {
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        let first = tx.execute("INSERT OR IGNORE INTO db_job_trigger_events (job_id, event_id, run_id, at_ms) VALUES (?1, ?2, '', ?3)", params![job_id, marker, now_ms])? > 0;
+        if !first {
+            return Ok(false);
+        }
+        for id in ids {
+            tx.execute("INSERT OR IGNORE INTO db_job_trigger_events (job_id, event_id, run_id, at_ms) VALUES (?1, ?2, '', ?3)", params![job_id, id, now_ms])?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// Move the time `job_id` heard `event_id` forward to `now_ms`, so the retention sweep keeps it. Nothing else about
     /// the row changes, in particular not whether it counts as an event the job admitted. `Ok(true)` when it moved.
     pub fn job_event_touch(&self, job_id: &str, event_id: &str, now_ms: i64) -> Result<bool, StoreError> {
@@ -143,6 +161,25 @@ mod tests {
         assert!(!s.job_event_claim("job-a", "e1", "run-2", 200).unwrap(), "the same event again is nothing");
         assert!(s.job_event_claim("job-a", "e2", "run-3", 300).unwrap());
         assert!(s.job_event_claim("job-b", "e1", "run-4", 400).unwrap(), "another job hears the same id as new");
+    }
+
+    #[test]
+    fn a_baseline_claims_the_marker_and_every_id_together_or_nothing() {
+        let s = store();
+        let ids: Vec<String> = ["a", "b", "c"].iter().map(|x| x.to_string()).collect();
+        assert!(s.job_event_claim_baseline("job-a", "marker", &ids, 100).unwrap());
+        for id in &ids {
+            assert!(!s.job_event_claim("job-a", id, "", 200).unwrap(), "{id} was claimed with the marker");
+        }
+        assert_eq!(s.job_events_since("job-a", 0).unwrap(), 0, "noted, not started: none count as admitted");
+        assert!(!s.job_event_claim_baseline("job-a", "marker", &ids, 300).unwrap(), "the second first look is not one");
+
+        // A marker with items unclaimed (another instance mid-way, or a crash): this one writes nothing.
+        assert!(s.job_event_claim("job-b", "marker", "", 100).unwrap());
+        assert!(!s.job_event_claim_baseline("job-b", "marker", &ids, 200).unwrap());
+        for id in &ids {
+            assert!(s.job_event_claim("job-b", id, "run-x", 300).unwrap(), "{id} is still unclaimed: a baseline that did not run wrote nothing");
+        }
     }
 
     #[test]
