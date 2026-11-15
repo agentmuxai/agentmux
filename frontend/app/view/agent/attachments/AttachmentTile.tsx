@@ -112,20 +112,21 @@ function ProgressRing(props: { progress?: number }) {
 }
 
 /** The picture a tile shows, when it has one: a thumbnail, or a PDF's first page or a video's first frame. */
-function useTilePicture(tile: TileModel, thumbnail: () => boolean) {
-    const ready = () => tile.status === "ready" && !!tile.id;
-    const thumb = useAttachmentUrl(() => (thumbnail() ? tile.id : undefined), "thumb");
+function useTilePicture(tile: () => TileModel, thumbnail: () => boolean) {
+    // `tile` is read inside each accessor: the tray hands a new model on every progress tick, to a tile that stays mounted.
+    const ready = () => tile().status === "ready" && !!tile().id;
+    const thumb = useAttachmentUrl(() => (thumbnail() ? tile().id : undefined), "thumb");
     // A PDF's first page or a video's first frame, when the file is small enough to read for it.
-    const framed = () => ready() && wantsFrame(tile.kind, tile.bytes);
-    const frame = useAttachmentUrl(() => (framed() && tile.kind === "pdf" ? tile.id : undefined), "pdf-frame");
-    const clip = useAttachmentUrl(() => (framed() && tile.kind === "video" ? tile.id : undefined), "video-frame");
+    const framed = () => ready() && wantsFrame(tile().kind, tile().bytes);
+    const frame = useAttachmentUrl(() => (framed() && tile().kind === "pdf" ? tile().id : undefined), "pdf-frame");
+    const clip = useAttachmentUrl(() => (framed() && tile().kind === "video" ? tile().id : undefined), "video-frame");
     return { url: () => thumb() ?? frame() ?? clip(), clip };
 }
 
 export function AttachmentTile(props: Props) {
     const ready = () => props.tile.status === "ready" && !!props.tile.id;
     const picture = () => ready() && (props.tile.kind === "image" || props.tile.kind === "svg");
-    const { url, clip } = useTilePicture(props.tile, picture);
+    const { url, clip } = useTilePicture(() => props.tile, picture);
     const label = () => {
         const t = props.tile;
         const state =

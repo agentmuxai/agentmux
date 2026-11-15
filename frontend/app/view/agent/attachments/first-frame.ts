@@ -63,7 +63,10 @@ function within<T>(work: (signal: AbortSignal) => Promise<T | null>): Promise<T 
 async function pdfFirstPage(blob: Blob, signal: AbortSignal): Promise<Blob | null> {
     const { loadPdfjs, SAFE_DOCUMENT_OPTIONS } = await import("@/app/view/editor/viewers/pdf/pdfjs-runtime");
     const { pdfjs } = await loadPdfjs();
-    const task = pdfjs.getDocument({ ...SAFE_DOCUMENT_OPTIONS, data: new Uint8Array(await blob.arrayBuffer()) });
+    const data = new Uint8Array(await blob.arrayBuffer());
+    // Time ran out while the file was being read: nothing is opened.
+    if (signal.aborted) return null;
+    const task = pdfjs.getDocument({ ...SAFE_DOCUMENT_OPTIONS, data });
     // A page that takes too long is let go of: destroying the task ends its worker and what it holds.
     const stop = () => void task.destroy().catch(() => {});
     signal.addEventListener("abort", stop, { once: true });

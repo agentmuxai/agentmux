@@ -59,6 +59,19 @@ describe("AttachmentTile", () => {
         expect(container.querySelector(".agent-attachment-tile__pages")?.textContent).toBe("3 p");
     });
 
+    it("fetches a PDF's picture once the tile it was still processing becomes ready", async () => {
+        const fetchSpy = vi.fn(async (_url: string) => new Response(null, { status: 404 }));
+        vi.stubGlobal("fetch", fetchSpy);
+        const [model, setModel] = createSignal(tile({ status: "processing", id: undefined }));
+        render(() => <AttachmentTile tile={model()} onOpen={() => {}} />);
+        expect(fetchSpy).not.toHaveBeenCalled();
+        // The tray replaces the model on each progress tick and when processing ends; the tile stays mounted.
+        // Its own id: a file a test used a moment ago is still cached.
+        setModel(tile({ status: "ready", id: "c".repeat(64) }));
+        await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+        expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/original");
+    });
+
     it("renders a text preview as text, never as markup", async () => {
         const preview = "<img src=x onerror=alert(1)>\nline 2";
         // The text is read from the fetched file itself, not fetched again from its object URL.
