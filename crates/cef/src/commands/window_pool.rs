@@ -2187,6 +2187,7 @@ pub fn promote_pool_window_for_new_window(
         // same liveness confirmation as `pool:promote`. Empty workspace_id:
         // this path deliberately creates a fresh workspace, so the fallback
         // takes its new-window branch.
+        let (pos_x, pos_y) = agentmux_common::test_offscreen::place((pos_x, pos_y));
         arm_promote_liveness(
             state,
             &label,

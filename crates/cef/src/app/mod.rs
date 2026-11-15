@@ -133,9 +133,10 @@ wrap_window_delegate! {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
             // The main window was maximized when it last ran: its rect above is where
-            // it goes when restored.
+            // it goes when restored (a test build stays off-screen: maximizing puts it on a display).
             if self.window_registration.as_ref().is_some_and(|(_, label)| label == "main")
                 && crate::commands::window::main_window_state::take_start_maximized()
+                && !agentmux_common::test_offscreen::active()
             {
                 window.maximize();
             }

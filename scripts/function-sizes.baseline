@@ -61,7 +61,7 @@
 130 crates/cef/src/commands/window_pool.rs::arm_promote_liveness
 123 crates/cef/src/commands/window_pool.rs::demote_promoted_pool_window
 477 crates/cef/src/commands/window_pool.rs::promote_pool_window
-110 crates/cef/src/commands/window_pool.rs::promote_pool_window_for_new_window
+111 crates/cef/src/commands/window_pool.rs::promote_pool_window_for_new_window
 169 crates/cef/src/commands/window_pool.rs::spawn_pool_window
 159 crates/cef/src/credential_broker/mod.rs::run_challenge
 112 crates/cef/src/dev_authfile.rs::apply_owner_only_dacl
