@@ -1,0 +1,52 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The backdrop picker (BackdropPicker.tsx): an inline panel over the pane's body, drawn from the pane's own tokens, so
+// it reads like the pane it is changing.
+
+.backdrop-picker {
+    position: absolute;
+    inset-block-start: var(--space-8);
+    inset-inline-end: var(--space-2);
+    z-index: var(--z-pane-overlay);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    box-sizing: border-box;
+    width: min(20rem, calc(100% - var(--space-4)));
+    max-height: calc(100% - var(--space-10));
+    overflow-y: auto;
+    padding: var(--space-3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--elevated-bg-color);
+    color: var(--main-text-color);
+}
+
+.backdrop-picker-custom {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.backdrop-picker-color {
+    flex: none;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    cursor: pointer;
+}
+
+.backdrop-picker-readout {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+
+    // A target the backdrop could not reach: the same words, in the warning colour.
+    &.is-missed {
+        color: var(--warning-text-color);
+    }
+}
