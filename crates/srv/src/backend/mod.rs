@@ -45,6 +45,7 @@ pub mod vault;
 pub mod build_cache;
 pub mod build_cache_service;
 pub mod build_slot_idle;
+pub mod panic_watch;
 pub mod disk_notice;
 pub mod old_versions;
 pub mod old_versions_service;

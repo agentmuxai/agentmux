@@ -1,5 +1,7 @@
 # Why AgentA Started Blank on the v0.57.5 Build — Incident Report
 
+**Area:** history store
+
 **Date:** 2026-09-25
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), at operator request
 **Status:** analysis — a point-in-time incident report. Recommendation 1 (§6) ships in the same PR as this report; 2–5 are open.

@@ -1,5 +1,7 @@
 # SPEC: Session-scoped pane scrollback + a full "Agent History" view
 
+**Area:** history store
+
 **Date:** 2026-08-09
 **Status:** active — §3's clamp reversed 2026-10-01 (see §3 note); P1 shipped in PR #2507 (session-scope clamp + `resumed`-divider demotion); §4.4's `output.tsidx` capture + replay stamping shipped in PR #2508; P2's Agent History view (§4.1-4.3 `bodyMode` swap, day separators, §3.4 link row, control-bar entry) implemented 2026-08-10. Remaining: P3 (§4.5 archives section, jump-to-date, link-row session count).
 **Severity:** Medium — UX/correctness follow-up, no data loss involved

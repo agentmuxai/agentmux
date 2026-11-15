@@ -29,8 +29,9 @@ question, and only one of them is enforced ([`scripts/check-doc-status.sh`](../.
 kept current. So the directories stopped being an answer.
 
 **Do not reintroduce a second tree** to mean approved, active, or done. Set the
-Status line instead. If you want to find every implemented spec, read
-[`INDEX.md`](./INDEX.md), which is generated from Status.
+Status line instead. [`INDEX.md`](./INDEX.md) lists every spec once, grouped by
+its `**Area:**` line, with its Status in a column; find the implemented ones by
+that column.
 
 ## Status field
 
@@ -62,6 +63,32 @@ PR numbers, what remains. Example:
 ```
 **Status:** active — Phase 0 shipped in PR #2394; Phases 1-6 not started. Verified 2026-08-10.
 ```
+
+## Area and replacement lines (optional)
+
+[`INDEX.md`](./INDEX.md) is generated (`bash scripts/gen-docs-index.sh`; CI checks
+it is current). It reads three more lines from a spec's first 40 lines, so a
+reader can find the spec that is current and see what it replaced:
+
+```
+**Area:** history store
+**Supersedes:** SPEC_OLD_2026_09_01
+**Superseded-by:** SPEC_NEW_2026_10_21
+```
+
+- `**Area:**` is a short, plain name (words, digits, `/`, `&`, `+`, `-`; at most
+  39 characters). The index has one group per area, and a spec that names none,
+  or whose line is not such a name (a path, a link, a list), is listed under
+  **unsorted**, newest first, with its date. Nothing is hidden. Reuse an existing
+  area before you add one: `grep -h '^### ' docs/specs/INDEX.md`.
+- `**Supersedes:**` and `**Superseded-by:**` name specs in this directory, as a
+  bare name, a path, or a link, separated by commas. Say it on either spec: the
+  index shows both directions (`replaces X`, `replaced by Y`). A value that cites
+  a section (`§4.2 of X`) shows as "replaces part of X". A name that is not a spec
+  in this directory is ignored. A `superseded` Status still **requires** its
+  `**Superseded-by:**` line, as above.
+- Do not bulk-stamp these. An area or a replacement written from a title is worse
+  than none: add the lines when you touch a spec and know.
 
 ### Reader guardrail
 

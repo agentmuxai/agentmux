@@ -255,3 +255,74 @@ async fn a_run_with_nowhere_to_keep_checkpoints_runs_as_before() {
     assert_eq!(result, Ok(json!("hi!")));
     assert!(steps.is_empty());
 }
+
+/// `first` sets a variable, then `call` makes a request that cannot get anywhere
+/// (a scheme the API block refuses), so the block fails the moment it runs.
+fn calling(method: &str) -> DroneGraph {
+    let call = node("call", json!({ "kind": "api", "method": method, "url": "ftp://nowhere.invalid/x" }));
+    DroneGraph { nodes: vec![vars("first", "a", "1"), call], edges: vec![edge("e1", "first", "call", None)] }
+}
+
+fn calling_with_a_handler() -> DroneGraph {
+    let mut g = calling("POST");
+    g.nodes.push(response("handler", "caught: {{call.error}}"));
+    g.edges.push(edge("e2", "call", "handler", Some("error")));
+    g
+}
+
+fn step(n: u32, id: Option<&str>) -> (u32, Option<String>) {
+    (n, id.map(str::to_string))
+}
+
+#[tokio::test]
+async fn a_block_with_effects_is_marked_running_before_it_starts() {
+    let kept = run_kept(calling("POST"), Value::Null).await;
+    assert!(kept.result.is_err());
+    // Step 0, the checkpoint after `first`, then the mark before `call`: it failed, so nothing follows.
+    assert_eq!(kept.steps, vec![step(0, None), step(1, Some("first")), step(2, Some("call"))]);
+    let last = load(&kept.rows()).unwrap().unwrap();
+    assert_eq!(last.frontier.running, vec!["call".to_string()]);
+    assert!(!last.outputs.contains_key("call"));
+}
+
+#[tokio::test]
+async fn a_block_that_only_reads_is_not_marked() {
+    let kept = run_kept(calling("GET"), Value::Null).await;
+    assert_eq!(kept.steps, vec![step(0, None), step(1, Some("first"))]);
+    assert!(load(&kept.rows()).unwrap().unwrap().frontier.running.is_empty());
+}
+
+#[tokio::test]
+async fn a_failure_an_error_edge_handles_clears_the_mark() {
+    let kept = run_kept(calling_with_a_handler(), Value::Null).await;
+    // The mark before `call`, then the checkpoint after it (it failed, and its error edge carried on), then the handler.
+    assert_eq!(kept.steps, vec![step(0, None), step(1, Some("first")), step(2, Some("call")), step(3, Some("call")), step(4, Some("handler"))]);
+    let last = load(&kept.rows()).unwrap().unwrap();
+    assert!(last.frontier.running.is_empty(), "the block is over, however it ended");
+    assert_eq!(last.outputs["call"]["failed"], json!(true));
+}
+
+#[tokio::test]
+async fn a_restart_does_not_run_a_marked_block_again_on_its_own() {
+    let graph = calling("POST");
+    let kept = run_kept(graph.clone(), Value::Null).await;
+    let marked = resumed_from(&kept, &graph, 3).await;
+    let why = marked.result.unwrap_err();
+    assert!(why.contains("block call was running when the run stopped") && why.contains("not run again on its own"), "{why}");
+    assert!(marked.done.is_empty() && marked.steps.is_empty(), "nothing ran and nothing was kept");
+
+    // From before the mark the block has not started, so it is simply run.
+    let before = resumed_from(&kept, &graph, 2).await;
+    let why = before.result.unwrap_err();
+    assert!(why.contains("block call failed"), "{why}");
+}
+
+#[tokio::test]
+async fn a_mark_that_cannot_be_kept_stops_the_run_before_the_block_starts() {
+    let sink = Arc::new(MemorySink::default());
+    // Step 0 and the checkpoint after `first` are kept; the mark is refused.
+    sink.refuse.lock().unwrap().extend([false, false, true]);
+    let kept = run_kept_on(sink, calling("POST"), Value::Null).await;
+    let why = kept.result.unwrap_err();
+    assert!(why.contains("could not keep its place before call") && !why.contains("block call failed"), "{why}");
+}

@@ -16,6 +16,7 @@ mod http_action;
 mod http_action_routes;
 pub(crate) mod agent_move_here;
 pub(crate) mod lan_watch;
+pub(crate) mod messaging_health;
 pub(crate) mod agent_takeover;
 mod pane_binding;
 mod pane_commands;
