@@ -105,25 +105,54 @@ const COMPASS: Partial<Record<DropDirection, [number, number]>> = {
     [DropDirection.Left]: [-1, 0],
 };
 
+/** The spots of the compass side by side, and with a spot beside it on each side. */
+const [COMPASS_ACROSS, WITH_OUTER_ACROSS] = [3, 5];
+/** The room the spots leave to the pane's edges, both together, px. */
+const PANE_MARGIN = 16;
+
+/** The widest spot that leaves `across` of them, with their gaps, inside a pane `extent` long. */
+const fitOf = (extent: number, across: number): number => (extent - (across - 1) * SPOT_GAP - PANE_MARGIN) / across;
+
+/** How far from the pane's middle a spot at its edge stands, or none where that is not clear of the compass. */
+function edgeOf(extent: number, spot: number): number | undefined {
+    const edge = extent / 2 - EDGE_INSET - spot / 2;
+    // Clear of the compass: past its outer spot, with a gap a pointer can rest in.
+    return edge >= 2 * (spot + SPOT_GAP) + SPOT_GAP ? edge : undefined;
+}
+
+const isOuterX = (d: DropDirection): boolean => d === DropDirection.OuterLeft || d === DropDirection.OuterRight;
+const isOuterY = (d: DropDirection): boolean => d === DropDirection.OuterTop || d === DropDirection.OuterBottom;
+
 /**
  * The spots for the drops `options` over the pane at `rect`. `now` is every pane of the layout as it stands.
  * A drop beside the pane's whole group stands at the pane's edge where there is room clear of the compass,
- * and next to the compass's outer spot otherwise.
+ * and next to the compass's outer spot otherwise. Every spot is inside the pane: a pointer on a part of a spot
+ * that is over the next pane is over that pane, whose guide takes this one's place, so that part can not be
+ * chosen (found on macOS, 2026-11-15: a 174 px pane had its edge spot almost wholly over its neighbour). So
+ * the spots are sized for as many as stand side by side, and a pane too small for five of the smallest has no
+ * spot beside the compass on that axis: that drop is made over a larger pane of the same row or column.
  */
 export function guideSpots(rect: Dimensions, targetId: string, options: DropOption[], now: { id: string; rect: Dimensions }[]): GuideSpot[] {
     const bounds = boundsOf(now.map((p) => p.rect));
     // A spot has the layout's own proportions, within reason: a picture of it has to fit.
     const ratio = Math.min(1, Math.max(0.5, bounds.height / bounds.width));
-    const fit = Math.min((rect.width - 2 * SPOT_GAP - 16) / 3, (rect.height - 2 * SPOT_GAP - 16) / 3 / ratio);
-    const width = Math.round(Math.max(SPOT_W_MIN, Math.min(SPOT_W, fit)));
-    const height = Math.round(width * ratio);
+    const sized = (acrossX: number, acrossY: number): [number, number] => {
+        const fit = Math.min(fitOf(rect.width, acrossX), fitOf(rect.height, acrossY) / ratio);
+        const w = Math.round(Math.max(SPOT_W_MIN, Math.min(SPOT_W, fit)));
+        return [w, Math.round(w * ratio)];
+    };
+    let [width, height] = sized(COMPASS_ACROSS, COMPASS_ACROSS);
+    // A spot beside the compass where the pane's edge is not clear of it: five side by side on that axis.
+    const acrossX = options.some((o) => isOuterX(o.direction)) && edgeOf(rect.width, width) === undefined ? WITH_OUTER_ACROSS : COMPASS_ACROSS;
+    const acrossY = options.some((o) => isOuterY(o.direction)) && edgeOf(rect.height, height) === undefined ? WITH_OUTER_ACROSS : COMPASS_ACROSS;
+    if (acrossX !== COMPASS_ACROSS || acrossY !== COMPASS_ACROSS) [width, height] = sized(acrossX, acrossY);
     const [stepX, stepY] = [width + SPOT_GAP, height + SPOT_GAP];
     const [cx, cy] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
-    const edgeX = rect.width / 2 - EDGE_INSET - width / 2;
-    const edgeY = rect.height / 2 - EDGE_INSET - height / 2;
-    // Clear of the compass: past its outer spot, with a gap a pointer can rest in.
-    const outerX = edgeX >= 2 * stepX + SPOT_GAP ? edgeX : 2 * stepX;
-    const outerY = edgeY >= 2 * stepY + SPOT_GAP ? edgeY : 2 * stepY;
+    const outerX = edgeOf(rect.width, width) ?? 2 * stepX;
+    const outerY = edgeOf(rect.height, height) ?? 2 * stepY;
+    // Five of the smallest spots are still wider than the pane: none beside the compass.
+    const inside = (direction: DropDirection): boolean =>
+        !(isOuterX(direction) && outerX + width / 2 > rect.width / 2) && !(isOuterY(direction) && outerY + height / 2 > rect.height / 2);
     const place = (direction: DropDirection): [number, number] => {
         const at = COMPASS[direction];
         if (at) return [cx + at[0] * stepX, cy + at[1] * stepY];
@@ -138,7 +167,7 @@ export function guideSpots(rect: Dimensions, targetId: string, options: DropOpti
                 return [cx + outerX, cy];
         }
     };
-    return options.map((option) => {
+    return options.filter((option) => inside(option.direction)).map((option) => {
         const [x, y] = place(option.direction);
         return { direction: option.direction, x, y, width, height, panes: picture(option, targetId, now, bounds), join: !!option.join };
     });

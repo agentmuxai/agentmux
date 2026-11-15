@@ -11,8 +11,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { futureLayoutOf, type FutureLayout } from "@/layout/lib/futureLayout";
-import { dropActionOf, dropOptionsOf, nearestPane, resetDropOptions, type DropSubject } from "@/layout/lib/dropOptions";
-import { GUIDE_GRACE_MS, guideSpots, hideAllGuides, hideGuide, onGuidesShown, showGuide, spotAt } from "@/layout/lib/dropGuides";
+import { dropActionOf, dropOptionsOf, nearestPane, resetDropOptions, type DropOption, type DropSubject } from "@/layout/lib/dropOptions";
+import { GUIDE_GRACE_MS, guideSpots, hideAllGuides, hideGuide, onGuidesShown, showGuide, spotAt, type GuideSpot } from "@/layout/lib/dropGuides";
 import { pillStandIn } from "@/layout/lib/paneBodyDrop";
 import { walkNodes } from "@/layout/lib/layoutNode";
 import { DropDirection, FlexDirection, type LayoutNode } from "@/layout/lib/types";
@@ -175,6 +175,67 @@ describe("guideSpots", () => {
                 }
             }
         }
+    });
+
+    // A pane with a drop on each side and one beside its whole group on each side: the most spots across.
+    const ALL_AROUND: DropOption[] = [
+        DropDirection.Top,
+        DropDirection.Right,
+        DropDirection.Bottom,
+        DropDirection.Left,
+        DropDirection.Center,
+        DropDirection.OuterTop,
+        DropDirection.OuterRight,
+        DropDirection.OuterBottom,
+        DropDirection.OuterLeft,
+    ].map((direction) => ({ direction, join: true as const }));
+    const paneAt = (width: number, height: number) => ({ left: 400, top: 300, width, height });
+    const spotsIn = (width: number, height: number) => {
+        const rect = paneAt(width, height);
+        // A layout twice as wide as it is high, the hovered pane one of its panes.
+        const now = [{ id: "t", rect }, { id: "rest", rect: { left: 0, top: 0, width: 1600, height: 800 } }];
+        return { rect, spots: guideSpots(rect, "t", ALL_AROUND, now) };
+    };
+    const isInside = (spot: GuideSpot, rect: Dimensions): boolean =>
+        spot.x - spot.width / 2 >= rect.left &&
+        spot.x + spot.width / 2 <= rect.left + rect.width &&
+        spot.y - spot.height / 2 >= rect.top &&
+        spot.y + spot.height / 2 <= rect.top + rect.height;
+
+    it("keeps every spot inside the pane at any size, none over another: the part over the next pane can not be chosen", () => {
+        // 174 by 162 and 291 wide are the panes the macOS look check measured edge spots outside of.
+        for (const [width, height] of [[174, 162], [291, 347], [320, 200], [387, 347], [900, 600], [120, 500], [500, 90], [100, 100]]) {
+            const { rect, spots } = spotsIn(width, height);
+            for (const spot of spots) expect(isInside(spot, rect), `${DropDirection[spot.direction]} in ${width}x${height}`).toBe(true);
+            for (const a of spots) {
+                for (const b of spots) {
+                    if (a === b) continue;
+                    expect(Math.abs(a.x - b.x) >= a.width || Math.abs(a.y - b.y) >= a.height, `${width}x${height}`).toBe(true);
+                }
+            }
+        }
+    });
+
+    it("shrinks the spots for one beside the compass, and leaves that one out only where five of the smallest do not fit", () => {
+        const directions = (width: number, height: number) => spotsIn(width, height).spots.map((s) => s.direction);
+        // Room at the edges: full size, the outer spots at the pane's edges.
+        const roomy = spotsIn(900, 600).spots;
+        expect(roomy).toHaveLength(ALL_AROUND.length);
+        expect(roomy[0].width).toBe(56);
+        expect(roomy.find((s) => s.direction === DropDirection.OuterRight)!.x).toBe(400 + 900 - 12 - 28);
+        // 291 wide: five across, a little smaller, the outer spot next to the compass.
+        const narrow = spotsIn(291, 600).spots;
+        expect(narrow).toHaveLength(ALL_AROUND.length);
+        expect(narrow[0].width).toBeLessThan(56);
+        expect(narrow[0].width).toBeGreaterThan(28);
+        // Too narrow for five of the smallest: no spot beside the compass across, the ones above and below stay.
+        expect(directions(120, 500)).not.toContain(DropDirection.OuterLeft);
+        expect(directions(120, 500)).not.toContain(DropDirection.OuterRight);
+        expect(directions(120, 500)).toContain(DropDirection.OuterTop);
+        expect(directions(120, 500)).toContain(DropDirection.Left);
+        // And too low for five: none above and below.
+        expect(directions(500, 80)).not.toContain(DropDirection.OuterTop);
+        expect(directions(500, 80)).toContain(DropDirection.OuterRight);
     });
 });
 
