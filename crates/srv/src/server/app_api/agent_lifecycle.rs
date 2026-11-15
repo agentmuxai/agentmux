@@ -285,12 +285,8 @@ async fn delete(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Resu
 /// was never pushed, and deleting an agent is not a reason to lose it. (A new agent made with the same name
 /// gets this folder again, clone and all, unless its owner removes it first.)
 fn kept_workspace(def: &crate::backend::storage::AgentDefinition) -> Option<std::path::PathBuf> {
-    let configured = def.working_directory.trim();
-    let folder = if configured.is_empty() {
-        crate::backend::base::expand_home_dir_safe(&format!("~/.agentmux/agents/{}", def.slug))
-    } else {
-        crate::backend::base::expand_home_dir_safe(configured)
-    };
+    // Where the agent was launched, by the launch path's own rule (a blank folder is named from the agent's name).
+    let folder = crate::backend::base::expand_home_dir_safe(super::agent_open_steps::agent_work_dir(def).trim());
     folder.is_dir().then_some(folder)
 }
 

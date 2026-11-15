@@ -559,3 +559,29 @@ async fn an_agent_whose_image_has_the_tools_runs_its_turns_and_is_asked_about_it
     assert_eq!(texts, ["one", "two"]);
     assert_eq!(fake.execs(Kind::ImageCheck).len(), 1, "a container that passed is not asked again");
 }
+
+#[tokio::test]
+async fn a_start_that_replaces_the_stopped_controller_does_not_lose_the_messages_it_held() {
+    let fake = FakeDocker::start().await;
+    fake.script(vec![Turn { hold_open: true, ..Turn::says(&[INIT], 0) }, Turn::says(&[RESULT_OK], 0), Turn::says(&[RESULT_OK], 0)]);
+    let block = unique("blk");
+    let old = controller(&block, None);
+    let (cm, name) = (fake.manager(), unique("c"));
+    old.spawn_container_turn(cm.clone(), name.clone(), cli(), config("running")).unwrap();
+    wait_for("the CLI to be started", || old.session_id().as_deref() == Some("sid-one")).await;
+    old.spawn_container_turn(cm.clone(), name.clone(), cli(), config("queued behind")).unwrap();
+
+    // `Agents start` after a stop builds a new controller for the block (resync_existing): the old one is
+    // stopped for replacement and hands over what it holds.
+    Controller::stop_for_replace(old.as_ref(), STATUS_DONE).unwrap();
+    wait_done(&old).await;
+    old.hand_over_held_to_replacement();
+
+    let fresh = controller(&block, None);
+    assert_eq!(fresh.inner.lock().unwrap().held_after_stop.len(), 1, "the new controller holds it");
+    fresh.spawn_container_turn(cm, name, cli(), config("after the start")).unwrap();
+    wait_for("both turns", || fake.execs(Kind::Turn).len() == 3 && !fresh.run_lock.load(Ordering::SeqCst)).await;
+    let texts: Vec<String> = fake.uploads().into_iter().map(|u| u.3).collect();
+    assert_eq!(texts, ["running", "after the start", "queued behind"]);
+    assert!(controller(&block, None).inner.lock().unwrap().held_after_stop.is_empty(), "handed over once, not kept for the next");
+}

@@ -138,6 +138,10 @@ pub struct SubprocessSpawnConfig {
     pub record: Option<crate::backend::message_origin::RecordOrigin>,
 }
 
+/// Messages a stop held on a controller that was then replaced (an explicit start builds a new one for the
+/// block), by block id, until the replacement is made: they were accepted, so they are not lost with the old one.
+static HELD_ACROSS_REPLACE: Mutex<Option<HashMap<String, VecDeque<SubprocessSpawnConfig>>>> = Mutex::new(None);
+
 /// Inner state protected by mutex.
 struct SubprocessControllerInner {
     /// Current process status.
@@ -243,6 +247,7 @@ impl SubprocessController {
                 })
                 .ok()
         });
+        let held_by_a_replaced_controller = take_held_across_replace(&block_id);
         Self {
             tab_id,
             block_id,
@@ -256,7 +261,7 @@ impl SubprocessController {
                 current_pid: None,
                 kill_tx: None,
                 pending_messages: VecDeque::new(),
-                held_after_stop: VecDeque::new(),
+                held_after_stop: held_by_a_replaced_controller,
                 retired_sessions: Vec::new(),
             })),
             broker,
@@ -379,6 +384,16 @@ impl SubprocessController {
     #[allow(dead_code)]
     pub fn session_id(&self) -> Option<String> {
         self.inner.lock().unwrap().session_id.clone()
+    }
+
+    /// This controller is being replaced: what a stop held goes to the controller that takes its place.
+    pub(crate) fn hand_over_held_to_replacement(&self) {
+        let held = std::mem::take(&mut self.inner.lock().unwrap().held_after_stop);
+        if held.is_empty() {
+            return;
+        }
+        tracing::info!(block_id = %self.block_id, held = held.len(), "controller replaced: its held messages go to the new one");
+        HELD_ACROSS_REPLACE.lock().unwrap().get_or_insert_with(HashMap::new).entry(self.block_id.clone()).or_default().extend(held);
     }
 
     /// Whether a turn is running (or being started): a message sent now is queued behind it.
@@ -518,6 +533,11 @@ impl Controller for SubprocessController {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+}
+
+/// The messages [`SubprocessController::hand_over_held_to_replacement`] left for `block_id`'s next controller.
+fn take_held_across_replace(block_id: &str) -> VecDeque<SubprocessSpawnConfig> {
+    HELD_ACROSS_REPLACE.lock().unwrap().as_mut().and_then(|m| m.remove(block_id)).unwrap_or_default()
 }
 
 /// Output formats whose CLI never writes the user's prompt into its own
