@@ -23,7 +23,6 @@ use cef::*;
 use crate::state::AppState;
 
 mod window;
-mod test_veil;
 #[cfg(target_os = "windows")]
 mod main_focus;
 pub(crate) mod focus;
@@ -42,7 +41,6 @@ mod platform_macos;
 pub(crate) mod stall_watch;
 
 pub use window::*;
-pub(crate) use test_veil::veil_test_window;
 #[cfg(not(target_os = "windows"))]
 pub use window_maximized::*;
 pub use drag::*;

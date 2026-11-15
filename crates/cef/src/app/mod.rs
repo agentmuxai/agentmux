@@ -132,7 +132,6 @@ wrap_window_delegate! {
             if let Some((x, y, w, h)) = bounds.map(agentmux_common::test_offscreen::place_rect) {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
-            crate::ui_tasks::veil_test_window(window);
             // The main window was maximized when it last ran: its rect above is where
             // it goes when restored (a test build stays off-screen: maximizing puts it on a display).
             if self.window_registration.as_ref().is_some_and(|(_, label)| label == "main")
