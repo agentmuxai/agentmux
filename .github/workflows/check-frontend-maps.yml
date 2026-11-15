@@ -1,0 +1,84 @@
+# Does the Windows release's maps archive come out right on a Windows runner?
+#
+# The Windows release (build-windows.yml, through scripts/package.sh) packs the frontend's source maps into
+# AgentMux_<version>_windows-frontend-maps.tar.xz before it strips them from the portable. That pack runs in Git Bash
+# on the runner, with the runner's own tar and xz. build-windows.yml only builds main's history and release tags, so
+# a change to the pack cannot be tried there before it merges. This builds the frontend (no Rust), runs the same
+# script the same way, unpacks the archive and decodes a frame of one of its own chunks against it.
+# It uploads nothing and reads nothing secret.
+name: Check the frontend maps archive
+
+on:
+  pull_request:
+    paths:
+      - scripts/pack-frontend-maps.sh
+      - scripts/source-maps.mjs
+      - scripts/package.sh
+      - .github/workflows/check-frontend-maps.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-frontend-maps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack:
+    name: Pack and decode on Windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm install
+
+      - name: Build the frontend (production, with maps)
+        shell: bash
+        env:
+          VITE_PLATFORM: windows
+        run: bash scripts/vite-build.sh --mode production --config vite.config.ts
+
+      - name: Pack the maps, as the release does
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/maps-out"
+          bash scripts/pack-frontend-maps.sh windows 0.0.0-check "$RUNNER_TEMP/maps-out"
+          ls -l "$RUNNER_TEMP/maps-out"
+
+      - name: Unpack the archive and decode a frame against it
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/maps-out/AgentMux_0.0.0-check_windows-frontend-maps.tar.xz"
+          dest="$RUNNER_TEMP/maps-unpacked"
+          mkdir -p "$dest"
+          tar -xJf "$archive" -C "$dest"
+          packed=$(find "$dest" -name '*.map' | wc -l | tr -d ' ')
+          built=$(find dist/frontend -name '*.map' | wc -l | tr -d ' ')
+          echo "maps built: $built, maps unpacked: $packed"
+          [ "$packed" -gt 0 ] && [ "$packed" -eq "$built" ] || { echo "::error::the archive does not hold the build's maps"; exit 1; }
+          # A chunk of this build, named the way a stack names it.
+          chunk=$(cd "$dest/assets" && ls window-focus-*.js.map | head -1)
+          chunk="${chunk%.map}"
+          [ -n "$chunk" ] || { echo "::error::no window-focus chunk map in the archive"; exit 1; }
+          # Several columns of the first line: a minified line has code at most of them, and one is enough.
+          : > "$RUNNER_TEMP/stack.txt"
+          for col in 1 10 50 100 256 500; do
+            printf '    at f (http://127.0.0.1:1/assets/%s:1:%s)\n' "$chunk" "$col" >> "$RUNNER_TEMP/stack.txt"
+          done
+          out=$(node scripts/source-maps.mjs resolve "$dest" "$RUNNER_TEMP/stack.txt")
+          echo "$out"
+          if echo "$out" | grep -Eq '\.tsx?:[0-9]+:[0-9]+\)'; then
+            echo "decoded."
+          else
+            echo "::error::no frame decoded to a source file against the unpacked archive"
+            exit 1
+          fi
