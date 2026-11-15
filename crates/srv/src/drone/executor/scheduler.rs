@@ -62,7 +62,7 @@ fn default_timeout(kind: BlockKind) -> Option<Duration> {
         BlockKind::Agent => Some(Duration::from_secs(15 * 60)),
         BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery | BlockKind::Spawn => Some(Duration::from_secs(5 * 60)),
         // A wait is for as long as it says, and its own `timeout_seconds` may cut it short.
-        BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait => None,
+        BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait | BlockKind::Join => None,
         // The callee has the limits of its own blocks, and the caller may set one for the whole call.
         BlockKind::Drone => None,
     }
@@ -393,7 +393,7 @@ impl<'a> Scheduler<'a> {
         }
         let (output, failed) = match ran {
             Ok(output) => (output, false),
-            Err(e) if !self.cancelled && self.has_error_edge(id) => {
+            Err(e) if !self.cancelled && self.handles_failure(id) => {
                 // The graph has a handler for this block: its output says what
                 // went wrong, as text that came from outside, and the run goes on.
                 let output = json!({ "error": e, "failed": true });
@@ -480,6 +480,9 @@ impl<'a> Scheduler<'a> {
         if kind == BlockKind::Drone {
             return self.run_call(node).await;
         }
+        if kind == BlockKind::Join {
+            return self.run_join(node);
+        }
         let scope = &mut self.scope;
         match kind {
             BlockKind::Variables => blocks::variables::run(node, scope).await,
@@ -493,7 +496,7 @@ impl<'a> Scheduler<'a> {
             BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
             BlockKind::Spawn => blocks::spawn::run(node, scope).await,
             BlockKind::Transform => blocks::transform::run(node, scope).await,
-            BlockKind::ForEach | BlockKind::Wait | BlockKind::Drone => unreachable!("handled above"),
+            BlockKind::ForEach | BlockKind::Wait | BlockKind::Drone | BlockKind::Join => unreachable!("handled above"),
         }
     }
 
@@ -567,6 +570,7 @@ impl<'a> Scheduler<'a> {
             BlockKind::Wait => (false, false),
             // What a callee said is outside text: nothing yet promises its outputs are clean.
             BlockKind::Drone => (true, false),
+            BlockKind::Join => self.join_bits(&node.id),
             BlockKind::Task | BlockKind::Notify | BlockKind::Spawn => (false, false),
         };
         self.scope.bits.insert(node.id.clone(), bits);
@@ -688,6 +692,7 @@ mod attention;
 mod call;
 mod checkpoint;
 mod foreach;
+mod join;
 mod wait;
 
 #[cfg(test)]

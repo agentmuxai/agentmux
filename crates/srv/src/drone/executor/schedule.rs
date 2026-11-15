@@ -302,6 +302,16 @@ fn check_block_limits(sorted: &[&FlowNode], issues: &mut Vec<Issue>) {
     }
 }
 
+/// Each Join is set rightly and has branches to bring together.
+fn check_joins(sorted: &[&FlowNode], edges: &[(usize, usize, &FlowEdge)], issues: &mut Vec<Issue>) {
+    for (index, node) in sorted.iter().enumerate().filter(|(_, n)| kind_of(n) == "join") {
+        let branches = edges.iter().filter(|(_, t, _)| *t == index).count();
+        if let Err(message) = super::blocks::join::check(node, branches) {
+            issues.push(Issue::at(&node.id, message));
+        }
+    }
+}
+
 /// Check the graph's loops and say how the scheduler should run it. A graph
 /// with no cycle gets an empty plan.
 pub fn analyze(graph: &DroneGraph) -> Result<Plan, Vec<Issue>> {
@@ -358,6 +368,7 @@ pub fn analyze(graph: &DroneGraph) -> Result<Plan, Vec<Issue>> {
 
     check_foreach(&sorted, &edges, &mut plan, &mut issues);
     check_block_limits(&sorted, &mut issues);
+    check_joins(&sorted, &edges, &mut issues);
     super::writers::check(&sorted, &edges, &all, &plan, &mut issues);
 
     let (back_edges, unreached) = walk_back_edges(&ids, &edges);

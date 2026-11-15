@@ -190,6 +190,18 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],
     },
+    join: {
+        kind: "join",
+        emoji: "🔀",
+        label: "Join",
+        description: "Bring branches that split back together. mode: all (default), any or n_of_m (with n). on_branch_error: fail (default) or skip, which leaves a failed branch out. What each branch said is {{this.outputs.<block>}}.",
+        color: "#64748b", // colour: fixed (the block's identity colour)
+        defaultData: {
+            mode: "all",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     drone: {
         kind: "drone",
         emoji: "🧩",
