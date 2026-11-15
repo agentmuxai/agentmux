@@ -70,6 +70,13 @@ describe("read_back: a link or a plain button says something a reader can use", 
     });
 });
 
+describe("read_back: text is left whole for the host to mask, then shorten (Codex P1 on #7407)", () => {
+    it("does not cut the text itself: a secret crossing a length cut here would leave an unrecognizable fragment", () => {
+        const a = el("a", { href: "#", text: "x".repeat(300) });
+        expect(run.call(a).text).toHaveLength(300);
+    });
+});
+
 describe("read_back: a form field already has something to say, so it keeps its own fields only", () => {
     it("does not add text to an input that already reports a value", () => {
         const input = el("input", { hasValue: true, value: "lark@example.test", text: "ignored" });

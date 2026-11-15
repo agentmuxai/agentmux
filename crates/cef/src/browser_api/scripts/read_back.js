@@ -15,8 +15,10 @@ function () {
   // destination and visible text a reader can use, never a bare tag (and maybe a type) on their own.
   if (Object.keys(out).every((k) => k === "tag" || k === "type")) {
     if (this.tagName === "A" && this.hasAttribute("href")) out.href = this.href;
+    // Whole, not cut here: a secret crossing a length cut here would leave a fragment the host's masking
+    // no longer recognizes as the complete token (#7407). act.rs masks it, then shortens it.
     const text = (this.getAttribute("aria-label") || this.innerText || this.textContent || "").trim().replace(/\s+/g, " ");
-    if (text) out.text = text.slice(0, 200);
+    if (text) out.text = text;
   }
   return out;
 }

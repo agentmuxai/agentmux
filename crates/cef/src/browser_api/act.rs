@@ -948,7 +948,10 @@ pub async fn act_route(
     };
     let _ = cdp.close().await;
     match result {
-        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after: super::hidden_secrets::scrub_answer(after), page }))),
+        Ok(after) => {
+            let after = super::read_back_text::shorten(super::hidden_secrets::scrub_answer(after));
+            (StatusCode::OK, Json(ApiResponse::ok(ActData { after, page })))
+        }
         Err(e) => fail(e),
     }
 }
@@ -1228,6 +1231,8 @@ mod tests {
         assert_eq!(date_type(&facts("input", &[])), None);
         assert_eq!(date_type(&facts("div", &[("type", "date")])), None);
     }
+
+    // The read-back text's own masking-then-shortening is tested in read_back_text.rs.
 
     #[test]
     fn a_click_error_shows_the_pages_words_masked_then_shortened() {
