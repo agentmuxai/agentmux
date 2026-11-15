@@ -304,3 +304,94 @@ describe("layoutBySeat for a pane", () => {
         expect(shown(tall, { w: 640, h: 1700 }).k).toBeGreaterThanOrEqual(MIN_READABLE_K);
     });
 });
+
+
+/**
+ * A fleet like the one a Linux look check found clipped: one machine with two leaders that have 5 and 6 reports (its box is
+ * about 1,400 px wide with every report in one row), and four smaller machines.
+ */
+function wideLeaderFleet(midLeads = false) {
+    const machines = ["narko", "area54", "gamerlove", "starpower", "charlie"].map(machine);
+    const agents: AtlasAgent[] = [agent("agentx", "narko"), agent("agenty", "narko")];
+    for (let i = 0; i < 5; i++) agents.push(agent(`x${i}`, "narko", "agentx"));
+    if (midLeads) {
+        agents.push(agent("m1", "narko", "agenty"), agent("m2", "narko", "agenty"));
+        for (let i = 0; i < 3; i++) agents.push(agent(`ya${i}`, "narko", "m1"));
+        for (let i = 0; i < 4; i++) agents.push(agent(`yb${i}`, "narko", "m2"));
+    } else {
+        for (let i = 0; i < 6; i++) agents.push(agent(`y${i}`, "narko", "agenty"));
+    }
+    const counts: Record<string, number> = { area54: 10, gamerlove: 6, starpower: 4, charlie: 1 };
+    for (const [m, n] of Object.entries(counts)) for (let i = 0; i < n; i++) agents.push(agent(`${m}${i}`, m));
+    return buildAtlasGraph(machines, agents);
+}
+
+describe("layoutAtlas wraps a lead's reports for a pane", () => {
+    const panes: Record<string, PaneShape> = {
+        tall: { w: 640, h: 1700 },
+        square: { w: 1000, h: 1000 },
+        wide: { w: 1600, h: 700 },
+    };
+
+    it("fits a machine with wide leaders in a tall and a square pane at a readable card size", () => {
+        const g = wideLeaderFleet();
+        // Unwrapped, the machine's box alone is wider than either pane at the readable floor.
+        expect(fitScale(layoutAtlas(g), panes.tall)).toBeLessThan(MIN_READABLE_K);
+        for (const pane of [panes.tall, panes.square]) {
+            const l = layoutAtlas(g, pane);
+            expect(fitScale(l, pane)).toBeGreaterThanOrEqual(MIN_READABLE_K);
+        }
+    });
+
+    it("does not stand a node on another, or outside its machine's box", () => {
+        for (const g of [wideLeaderFleet(), wideLeaderFleet(true)]) {
+            for (const pane of Object.values(panes)) {
+                const l = layoutAtlas(g, pane);
+                const placed = [...l.nodes.values()];
+                for (let i = 0; i < placed.length; i++) {
+                    for (let j = i + 1; j < placed.length; j++) expect(overlap(placed[i], placed[j])).toBe(false);
+                }
+                for (const region of l.regions) {
+                    for (const [k, p] of l.nodes) {
+                        if (!k.startsWith(`${region.key}/`)) continue;
+                        expect(p.x + NODE_W).toBeLessThanOrEqual(region.x + region.w);
+                        expect(p.y + NODE_H).toBeLessThanOrEqual(region.y + region.h);
+                    }
+                }
+            }
+        }
+    });
+
+    it("wraps a lead's reports under it, centred, and keeps a lead above every report", () => {
+        const g = wideLeaderFleet();
+        const l = layoutAtlas(g, panes.tall);
+        const lead = l.nodes.get("narko/agenty")!;
+        const reports = [0, 1, 2, 3, 4, 5].map((i) => l.nodes.get(`narko/y${i}`)!);
+        expect(new Set(reports.map((r) => r.y)).size).toBeGreaterThan(1);
+        for (const r of reports) expect(r.y).toBeGreaterThan(lead.y);
+        const first = reports.filter((r) => r.y === Math.min(...reports.map((q) => q.y)));
+        const left = Math.min(...first.map((r) => r.x));
+        const right = Math.max(...first.map((r) => r.x)) + NODE_W;
+        expect(lead.x + NODE_W / 2).toBeCloseTo((left + right) / 2, 5);
+    });
+
+    it("leaves a lead's reports in one row when the pane is wide enough for it", () => {
+        const g = wideLeaderFleet();
+        const l = layoutAtlas(g, { w: 3000, h: 1200 });
+        const rows = new Set([0, 1, 2, 3, 4, 5].map((i) => l.nodes.get(`narko/y${i}`)!.y));
+        expect(rows.size).toBe(1);
+    });
+
+    it("never wraps a lead whose reports lead others, only the reports with none", () => {
+        const l = layoutAtlas(wideLeaderFleet(true), panes.tall);
+        const m1 = l.nodes.get("narko/m1")!;
+        const m2 = l.nodes.get("narko/m2")!;
+        expect(m1.y).toBe(m2.y);
+    });
+
+    it("fits the By seat layout the same way", () => {
+        const g = wideLeaderFleet();
+        const l = layoutBySeat(g, panes.tall);
+        expect(fitScale(l, panes.tall)).toBeGreaterThanOrEqual(MIN_READABLE_K);
+    });
+});
