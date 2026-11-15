@@ -814,3 +814,6 @@ mod file_watch_runs;
 
 #[path = "poll_runs_tests.rs"]
 mod poll_runs;
+
+#[path = "expect_runs_tests.rs"]
+mod expect_runs;
