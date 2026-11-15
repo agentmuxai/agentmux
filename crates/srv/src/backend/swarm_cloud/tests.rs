@@ -195,6 +195,39 @@ fn two_machines_with_one_name_and_channel_are_told_apart_by_id() {
 }
 
 #[test]
+fn a_stale_record_of_a_reinstalled_machine_is_hidden_and_a_fresh_one_is_not() {
+    // A machine reinstalled: the LAN lists it under its new id, and the cloud still holds the old install's record.
+    let old_install = |age_ms| install(7, "charlie", "stable", PRESENCE_VERSION_LINES, age_ms);
+    let lan = [peer_with_id("charlie", "stable", "the-new-id")];
+    assert_eq!(listed(&[old_install(STALE_AFTER_MS)], None, &lan).len(), 1, "quiet for exactly the stale time is still shown");
+    assert!(listed(&[old_install(STALE_AFTER_MS + 1)], None, &lan).is_empty(), "stale, and the LAN lists the machine under another id");
+    // The same record before it is stale may be a live second machine with the same name: it stays.
+    assert_eq!(listed(&[old_install(60_000)], None, &lan).len(), 1);
+}
+
+#[test]
+fn a_stale_record_stays_unless_host_name_and_channel_both_match() {
+    let record = install(7, "charlie", "stable", PRESENCE_VERSION_LINES, STALE_AFTER_MS + 1);
+    // The id differs in every case: it never makes a match by itself.
+    for lan in [peer_with_id("area54", "stable", "x"), peer_with_id("charlie", "dev", "x"), peer_with_id("charlie", "", "x"), peer_with_id("charlie", "stable", "")] {
+        let got = listed(std::slice::from_ref(&record), None, std::slice::from_ref(&lan)).len();
+        // A peer with no id is the older rule's: host and channel match and it hides the row, fresh or not.
+        let expected = if lan.install_id.is_empty() && lan.hostname == "charlie" && lan.channel == "stable" { 0 } else { 1 };
+        assert_eq!(got, expected, "{} / {} / {:?}", lan.hostname, lan.channel, lan.install_id);
+    }
+}
+
+#[test]
+fn of_two_installs_with_one_name_only_the_stale_one_goes() {
+    // Two installs, one stale, with one LAN peer that is the other one: the stale one goes, the live one stays.
+    let live = install(8, "charlie", "stable", PRESENCE_VERSION_LINES, 0);
+    let gone = install(7, "charlie", "stable", PRESENCE_VERSION_LINES, STALE_AFTER_MS + 1);
+    let got = listed(&[live.clone(), gone], None, &[peer_with_id("charlie", "stable", "the-new-id")]);
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].host_id, format!("cloud:charlie#{:08x}", fnv1a32(&live.record.instance_id)));
+}
+
+#[test]
 fn a_claimed_id_alone_hides_nothing() {
     let record = install(7, "charlie", "stable", PRESENCE_VERSION_LINES, 0);
     let id = record.record.instance_id.clone();
