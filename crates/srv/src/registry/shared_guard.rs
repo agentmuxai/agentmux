@@ -271,8 +271,7 @@ pub fn claim_at_boot(version: &str) {
             // start on data that needs it: it would run on files no migration has touched.
             if let Some(reason) = agentmux_common::DataPaths::from_env().and_then(|p| crate::migrations::data_needs_preparing(&p.data_dir, version)) {
                 tracing::error!(%reason, "shared guard: this srv's data needs preparing and the shared folder is held by another version; not starting");
-                eprintln!("agentmux-srv: {} is using the shared folder and this data needs preparing ({reason}). Close it and start this one again.", owner.label());
-                std::process::exit(1);
+                std::process::exit(refuse_beside(&owner, &reason));
             }
             DEFERRED.store(true, Ordering::Relaxed);
             tracing::warn!(owner_pid = owner.pid, owner_version = %owner.version, "shared guard: another version holds the shared folder; running without it");
@@ -303,12 +302,19 @@ pub(crate) fn claim_for_migrate(data_dir: &Path) -> Option<i32> {
     Some(migrate_exit_code(&owner, crate::migrations::data_needs_preparing(data_dir, version)))
 }
 
-/// `1` when another version holds the shared folder and this data needs preparing, `0` (nothing to do)
+/// `SHARED_FOLDER_HELD_EXIT` when another version holds the shared folder and this data needs preparing, `0` (nothing to do)
 /// when it holds it and the data is ready.
 fn migrate_exit_code(owner: &Writer, needs_preparing: Option<String>) -> i32 {
     let Some(reason) = needs_preparing else { return 0 };
+    refuse_beside(owner, &reason)
+}
+
+/// Say why this srv does not start (to the person, and as a line the supervisor reads) and return the exit code
+/// that tells a supervisor the refusal will not clear by itself.
+fn refuse_beside(owner: &Writer, reason: &str) -> i32 {
     eprintln!("agentmux-srv: {} is using the shared folder and this data needs preparing ({reason}). Close it and start this one again.", owner.label());
-    1
+    eprintln!("{}", agentmux_common::srv_stderr::shared_folder_held_line(&owner.label(), reason));
+    agentmux_common::srv_stderr::SHARED_FOLDER_HELD_EXIT
 }
 
 #[cfg(test)]
