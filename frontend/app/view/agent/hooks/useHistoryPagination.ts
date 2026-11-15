@@ -46,7 +46,7 @@ import { endHistoryLoad } from "@/app/store/agent-document-store";
 import { logAgentOpenRest, markAgentOpen } from "../open-trace";
 import { hiddenFill } from "./hidden-fill";
 import { linesBytes, planFill, runHistoryFill } from "./history-fill";
-import { OPEN_TAIL_BYTES, readOpenTail, startsAtTurn, type OpenTailResult } from "./open-tail";
+import { HUGE_TRANSCRIPT_BYTES, OPEN_TAIL_BYTES, readOpenTail, startsAtTurn, type OpenTailResult } from "./open-tail";
 
 export interface UseHistoryPaginationOptions {
     blockId: string;
@@ -511,13 +511,16 @@ async function openFirstScreen(opts: UseHistoryPaginationOptions, s: HistoryStat
     const format = opts.outputFormat();
     if (format && format !== CLAUDE_FORMAT) return firstScreenFallback(opts, "format");
     const tailTurns = opts.restoreTurns?.();
-    const tail = await readOpenTail({
-        block_id: opts.blockId,
-        filename: "output",
-        tail_bytes: OPEN_TAIL_BYTES,
-        ...(opts.definitionId ? { definition_id: opts.definitionId } : {}),
-        ...(tailTurns ? { tail_turns: tailTurns } : {}),
-    });
+    const tail = await readOpenTail(
+        {
+            block_id: opts.blockId,
+            filename: "output",
+            tail_bytes: OPEN_TAIL_BYTES,
+            ...(opts.definitionId ? { definition_id: opts.definitionId } : {}),
+            ...(tailTurns ? { tail_turns: tailTurns } : {}),
+        },
+        { stopped: () => !s.mounted },
+    );
     if (!s.mounted) return true;
     markAgentOpen(opts.blockId, "first_screen_attempt", { tail_lines: tail?.lines.length ?? 0 });
     if (!tail) return firstScreenFallback(opts, "no_tail");
@@ -525,7 +528,9 @@ async function openFirstScreen(opts: UseHistoryPaginationOptions, s: HistoryStat
     // The older part parses on its own later. A first screen that starts inside a
     // long response would show it as two rows once that part arrives, so such a
     // slice isn't used: the usual open parses it whole.
-    if (tail.start_line > 0 && !startsAtTurn(tail.lines[0])) {
+    // A transcript this large is not opened the usual way (srv refuses to read it whole, and its
+    // index can be minutes behind): its first screen is used as it is, seam and all.
+    if (tail.start_line > 0 && !startsAtTurn(tail.lines[0]) && (tail.size ?? 0) < HUGE_TRANSCRIPT_BYTES) {
         opts.log("history", "first screen starts mid-turn; opening the usual way");
         return firstScreenFallback(opts, "mid_turn");
     }

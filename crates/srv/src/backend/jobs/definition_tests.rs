@@ -91,6 +91,8 @@ fn an_event_trigger_is_a_source_and_a_plain_filter_on_a_drone_job() {
             event_source::APP_EVENT => json!({ "event": "agent.crashed" }),
             event_source::FILE_WATCH => json!({ "path": project_folder() }),
             event_source::WEBHOOK_LOCAL => json!({ "secret_sha256": "0".repeat(64) }),
+            event_source::POLL => json!({ "query": "tasks", "every_minutes": 15 }),
+            event_source::EXPECT => json!({ "job": "nightly", "within_minutes": 1500 }),
             _ => json!({}),
         };
         assert!(JobDefinition::parse(&with_trigger(json!({ "kind": "event", "source": source, "filter": filter })), create()).is_ok(), "{source}");
@@ -168,9 +170,14 @@ fn a_drone_action_needs_a_drone_and_takes_no_other_field() {
     let def = JobDefinition::parse(&ok, create()).unwrap();
     assert_eq!(def.action, Action::Drone { drone_id: "d-1".into() });
     assert!(def.action.starts_an_agent(), "a drone can run Agent blocks: the caps and the 15-minute floor apply");
-    // The example's policy asks for retries and a timeout, which a drone run can't have yet.
+    // The example's policy asks for retries, which a drone run can't have yet.
     let drone = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" }));
-    assert!(refused(drone).contains("timeout_minutes"));
+    assert!(refused(drone).contains("policy.retries"));
+    // A timeout and cancel_other stop the run through the engine.
+    let mut stops = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1" }));
+    stops["policy"] = json!({ "overlap": "cancel_other", "timeout_minutes": 30 });
+    let def = JobDefinition::parse(&stops, create()).unwrap();
+    assert_eq!((def.policy.overlap, def.policy.timeout_minutes), (Overlap::CancelOther, Some(30)));
     let blank = with(example(), "/action", json!({ "kind": "drone", "drone_id": " " }));
     assert_eq!(refused(blank), "action: drone needs a drone_id");
     let extra = with(example(), "/action", json!({ "kind": "drone", "drone_id": "d-1", "brief": "x" }));

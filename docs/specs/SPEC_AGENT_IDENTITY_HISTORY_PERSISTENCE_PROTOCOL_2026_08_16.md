@@ -1,5 +1,8 @@
 # Canonical Agent Identity/History Persistence Protocol — Synthesis with Mandatory ABF
 
+**Area:** history store
+**Supersedes:** §4.2 of REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16
+
 **Date:** 2026-08-16
 **Author:** Clamk (agent, `~/.agentmux/agents/clamk-0612a`), at operator request
 **Status:** active — the protocol is partly adopted, and the code now cites it as

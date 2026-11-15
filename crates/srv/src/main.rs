@@ -138,6 +138,10 @@ async fn app_main() {
     // 1. Init tracing (stderr + rolling file)
     let _log_guard = bootstrap::init_logging();
 
+    // 1'. Count every panic from here on (`backend::panic_watch`): the log keeps its lines, and the status bar, `/health` and the
+    //     agents hear of a storm (2026-11-15: 30,000 panics in two hours, and nothing said so).
+    backend::panic_watch::install_hook();
+
     // 1a'. What the machine's certificates allow: with none, https requests fail and the log says so here, once
     //      (http_client.rs); the server starts and runs either way.
     http_client::no_system_certs();

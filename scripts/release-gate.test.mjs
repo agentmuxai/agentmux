@@ -6,7 +6,7 @@
 // over `gh api` and is exercised by the first run of release-core.yml.
 
 import { describe, expect, it } from "vitest";
-import { VERSION_FILES, evaluateGate, parseVersions } from "./release-gate.mjs";
+import { VERSION_FILES, evaluateGate, parseVersions, pickPushRun } from "./release-gate.mjs";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const VERSION = "0.60.3";
@@ -23,10 +23,32 @@ const good = (over = {}) => ({
     sha: SHA,
     commit: { status: "behind", subject: `chore: release v${VERSION} (#5621)`, files: releaseFiles() },
     versions: Object.fromEntries(VERSION_FILES.map((f) => [f, VERSION])),
+    pushRun: { status: "completed", conclusion: "success", url: "https://github.com/agentmuxai/agentmux/actions/runs/1" },
     ...over,
 });
 
 const withCommit = (over) => good({ commit: { ...good().commit, ...over } });
+
+describe("pickPushRun", () => {
+    const run = (over) => ({ head_sha: SHA, event: "push", run_number: 5, run_attempt: 1, status: "completed", conclusion: "success", html_url: "u", ...over });
+
+    it("answers with the newest attempt of the commit's own push run", () => {
+        const runs = [run({ run_attempt: 1, conclusion: "failure", html_url: "first" }), run({ run_attempt: 2, conclusion: "success", html_url: "second" })];
+        expect(pickPushRun(runs, SHA)).toEqual({ status: "completed", conclusion: "success", url: "second" });
+        expect(pickPushRun([...runs].reverse(), SHA).url).toBe("second");
+    });
+
+    it("ignores other commits' runs and pull request runs, and answers null with none", () => {
+        const other = "f".repeat(40);
+        expect(pickPushRun([run({ head_sha: other }), run({ event: "pull_request" })], SHA)).toBeNull();
+        expect(pickPushRun([], SHA)).toBeNull();
+        expect(pickPushRun(undefined, SHA)).toBeNull();
+    });
+
+    it("keeps an unfinished run unfinished (no conclusion)", () => {
+        expect(pickPushRun([run({ status: "in_progress", conclusion: null })], SHA)).toEqual({ status: "in_progress", conclusion: null, url: "u" });
+    });
+});
 
 describe("evaluateGate", () => {
     it("passes a chore: release commit on main whose files and versions are the release's", () => {
@@ -47,6 +69,38 @@ describe("evaluateGate", () => {
 
     it("passes a release that consumed no changesets at all", () => {
         expect(evaluateGate(withCommit({ files: VERSION_FILES.map((filename) => ({ status: "modified", filename })) })).ok).toBe(true);
+    });
+
+    // 0.60.28 (2026-11-14): the release commit's own push run was red when it was tagged.
+    it("refuses a commit whose push run is red, and says which run", () => {
+        for (const conclusion of ["failure", "timed_out", "startup_failure", "cancelled", "skipped", "action_required", null]) {
+            const r = evaluateGate(good({ pushRun: { status: "completed", conclusion, url: "https://github.com/o/r/actions/runs/9" } }));
+            expect(r.ok, String(conclusion)).toBe(false);
+            expect(r.reasons.join(), String(conclusion)).toMatch(/push run of CI \(PR\) on main for this commit finished with/);
+        }
+        const failed = evaluateGate(good({ pushRun: { status: "completed", conclusion: "failure", url: "https://github.com/o/r/actions/runs/9" } }));
+        expect(failed.reasons.join()).toContain("https://github.com/o/r/actions/runs/9");
+    });
+
+    it("refuses a commit whose push run has not finished, or does not exist, or could not be read", () => {
+        for (const status of ["queued", "in_progress", "waiting", "pending", undefined]) {
+            const r = evaluateGate(good({ pushRun: { status, conclusion: null, url: "u" } }));
+            expect(r.ok, String(status)).toBe(false);
+            expect(r.reasons.join()).toMatch(/has not finished/);
+        }
+        expect(evaluateGate(good({ pushRun: null })).reasons.join()).toMatch(/was not found/);
+        expect(evaluateGate(good({ pushRun: undefined })).reasons.join()).toMatch(/could not be read/);
+        const noRun = good();
+        delete noRun.pushRun;
+        expect(evaluateGate(noRun).ok).toBe(false);
+    });
+
+    it("passes only a finished, successful push run, and still reports every other reason too", () => {
+        expect(evaluateGate(good({ pushRun: { status: "completed", conclusion: "success", url: null } })).ok).toBe(true);
+        const r = evaluateGate(withCommit({ status: "ahead" }));
+        expect(r.ok).toBe(false);
+        const both = evaluateGate({ ...withCommit({ status: "ahead" }), pushRun: null });
+        expect(both.reasons.length).toBe(r.reasons.length + 1);
     });
 
     it("refuses a branch run, or a ref that is not a release tag", () => {

@@ -54,7 +54,7 @@ impl Handler {
 impl ReactiveHandler {
     /// See the inner [`Handler::rebind_renamed`].
     pub(crate) fn rebind_renamed(&self, uid: &str, old_title: &str, title: &str) -> Option<RenamedBinding> {
-        self.inner.lock().unwrap().rebind_renamed(uid, old_title, title)
+        self.inner.lock().rebind_renamed(uid, old_title, title)
     }
 }
 

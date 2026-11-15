@@ -17,6 +17,7 @@ import { Button, CloseButton, TextArea, TextInput } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
 import { isModKey } from "@/util/platformutil";
 import { tip } from "@/app/element/tip";
+import { apiAuthFields, apiAuthPatch, type ApiAuthFields, type ApiAuthHow } from "./api-auth";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
 // drop handler. On the drag session, so every drone pane in the window sees it.
@@ -918,6 +919,7 @@ const ApiFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>)
                     placeholder="https://…/{{var.path}}"
                 />
             </NodeField>
+            <ApiAuthFieldsView node={p.node} update={update} />
             <NodeField label="Body">
                 <TextArea
                     variant="plain" class="drone-input drone-input--grow nodrag nowheel"
@@ -932,6 +934,51 @@ const ApiFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>)
                     onContextMenu={showTextInputContextMenu}
                 />
             </NodeField>
+        </>
+    );
+};
+
+/**
+ * The API block's Vault credential: the entry and the header it goes in. The first call asks the person in
+ * AgentMux; the value is never shown here or kept in the drone. The site must be written out in the URL.
+ */
+const ApiAuthFieldsView = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => {
+    const fields = () => apiAuthFields(p.node.data);
+    const write = (patch: Partial<ApiAuthFields>) => p.update(apiAuthPatch({ ...fields(), ...patch }));
+    return (
+        <>
+            <NodeField label="Vault entry">
+                <TextInput
+                    variant="plain" class="drone-input nodrag"
+                    value={fields().vault}
+                    onInput={(e) => write({ vault: e.currentTarget.value })}
+                    onContextMenu={showTextInputContextMenu}
+                    placeholder="api-key-github (none)"
+                />
+            </NodeField>
+            <Show when={fields().vault.trim() !== ""}>
+                <NodeField label="Send as">
+                    <select
+                        class="drone-input nodrag"
+                        value={fields().how}
+                        onChange={(e) => write({ how: e.currentTarget.value as ApiAuthHow })}
+                    >
+                        <option value="bearer">Authorization: Bearer</option>
+                        <option value="header">A header</option>
+                    </select>
+                </NodeField>
+                <Show when={fields().how === "header"}>
+                    <NodeField label="Header">
+                        <TextInput
+                            variant="plain" class="drone-input nodrag"
+                            value={fields().header}
+                            onInput={(e) => write({ header: e.currentTarget.value })}
+                            onContextMenu={showTextInputContextMenu}
+                            placeholder="X-Api-Key"
+                        />
+                    </NodeField>
+                </Show>
+            </Show>
         </>
     );
 };
@@ -1007,6 +1054,7 @@ const AppQueryFields = (p: { node: FlowNode; update: (patch: Record<string, unkn
                     onChange={(e) => p.update({ query: e.currentTarget.value })}
                 >
                     <option value="muxbus">MuxBus</option>
+                    <option value="agents">All agents</option>
                     <option value="agent">One agent</option>
                     <option value="tasks">Kanban tasks</option>
                     <option value="lan_peers">LAN peers</option>

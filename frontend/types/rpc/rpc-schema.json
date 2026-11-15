@@ -6610,6 +6610,44 @@
     }
   },
   {
+    "command": "resolvedronerun",
+    "request": "agentmux_srv::server::drone_handlers::ResolveRunReq",
+    "requestName": "ResolveRunReq",
+    "requestTs": {
+      "imports": [
+        "ResolveRunReq"
+      ],
+      "name": "ResolveRunReq"
+    },
+    "response": "agentmux_srv::server::drone_handlers::ResolveRunResp",
+    "responseName": "ResolveRunResp",
+    "responseTs": {
+      "imports": [
+        "ResolveRunResp"
+      ],
+      "name": "ResolveRunResp"
+    }
+  },
+  {
+    "command": "resumedronewait",
+    "request": "agentmux_srv::server::drone_handlers::ResumeWaitReq",
+    "requestName": "ResumeWaitReq",
+    "requestTs": {
+      "imports": [
+        "ResumeWaitReq"
+      ],
+      "name": "ResumeWaitReq"
+    },
+    "response": "agentmux_srv::server::drone_handlers::ResumeWaitResp",
+    "responseName": "ResumeWaitResp",
+    "responseTs": {
+      "imports": [
+        "ResumeWaitResp"
+      ],
+      "name": "ResumeWaitResp"
+    }
+  },
+  {
     "command": "routeannounce",
     "request": "serde_json::value::Value",
     "requestName": "Value",

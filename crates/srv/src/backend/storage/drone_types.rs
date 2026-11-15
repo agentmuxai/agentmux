@@ -31,6 +31,12 @@ pub enum BlockKind {
     #[serde(rename = "foreach")]
     ForEach,
     Spawn,
+    /// Stops the run for a time or for an event.
+    Wait,
+    /// Calls another drone as a step.
+    Drone,
+    /// Brings branches that split back together.
+    Join,
 }
 
 impl BlockKind {
@@ -48,6 +54,9 @@ impl BlockKind {
             "transform" => Some(Self::Transform),
             "foreach" => Some(Self::ForEach),
             "spawn" => Some(Self::Spawn),
+            "wait" => Some(Self::Wait),
+            "drone" => Some(Self::Drone),
+            "join" => Some(Self::Join),
             _ => None,
         }
     }
@@ -173,6 +182,13 @@ pub enum RunStatus {
     Running,
     Done,
     Failed,
+    /// Stopped on purpose: by a person, an agent, the job's timeout or its next run.
+    Cancelled,
+    /// Waiting for a person or an agent to say what to do with a step that may
+    /// already have done its work before AgentMux restarted.
+    NeedsAttention,
+    /// Stopped at a Wait block, for a time or for an event.
+    Waiting,
 }
 
 impl RunStatus {
@@ -181,6 +197,9 @@ impl RunStatus {
             Self::Running => "running",
             Self::Done => "done",
             Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::NeedsAttention => "needs_attention",
+            Self::Waiting => "waiting",
         }
     }
 }

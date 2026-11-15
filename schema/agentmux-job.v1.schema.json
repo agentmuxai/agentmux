@@ -83,12 +83,12 @@
           "description": "Something that happened on this computer starts a drone run with the event as its input, so the action must be a drone.",
           "properties": {
             "kind": { "const": "event" },
-            "source": { "enum": ["app_event", "file_watch", "webhook_local"] },
+            "source": { "enum": ["app_event", "file_watch", "webhook_local", "poll", "expect"] },
             "filter": {
               "type": "object",
               "maxProperties": 8,
               "additionalProperties": { "type": ["string", "number", "boolean"], "maxLength": 200 },
-              "description": "Plain values the source matches an event against; each source says which keys it reads. Never an expression. An app_event filter names its event (agent.turn_ended: agent, outcome, cost_usd; agent.crashed: agent, reason; app.started: version, upgraded, upgraded_from). A file_watch filter names a project folder as path, and optionally glob (like **/*.rs) and change (created, modified or removed). A webhook_local filter holds only secret_sha256, the SHA-256 (64 lowercase hex) of the secret a local script sends in the X-AgentMux-Hook-Secret header to POST /agentmux/hook/<job id>; the definition never holds the secret."
+              "description": "Plain values the source matches an event against; each source says which keys it reads. Never an expression. An app_event filter names its event (agent.turn_ended: agent, outcome, cost_usd; agent.crashed: agent, reason; app.started: version, upgraded, upgraded_from). A file_watch filter names a project folder as path, and optionally glob (like **/*.rs) and change (created, modified or removed). A webhook_local filter holds only secret_sha256, the SHA-256 (64 lowercase hex) of the secret a local script sends in the X-AgentMux-Hook-Secret header to POST /agentmux/hook/<job id>; the definition never holds the secret. A poll filter names a query (tasks, jobs, agents or lan_peers) and every_minutes (1 to 1440), and may add include_existing (true runs for what is already there on the first poll) and the query's own filters (tasks: holder, state, pr, limit; jobs: job, required, and limit). The answer is cut to limit (at most 200 tasks or 100 runs, which is what a poll asks for unless limit says less), so a new item past the cut is not seen. Each new item starts one run reading trigger.query, trigger.key and trigger.item. An expect filter names a job (job) and within_minutes (1 to 43200), and may add every_minutes (1 to 1440, default 5): it starts one run when that job has had no good run (finished, outcome ok or findings) within that long, reading trigger.expected, trigger.within_minutes, trigger.last_ok_ms, trigger.job_found and trigger.last_seen."
             },
             "delay": {
               "type": "integer",

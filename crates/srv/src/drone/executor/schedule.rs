@@ -267,10 +267,47 @@ fn check_foreach(sorted: &[&FlowNode], edges: &[(usize, usize, &FlowEdge)], plan
             issues.push(Issue::at(&node.id, "a for-each cannot be its own body"));
         } else if kind_of(body) == "foreach" {
             issues.push(Issue::at(&node.id, format!("the body {:?} is itself a for-each: nest loops with a sub-drone", body.id)));
+        } else if kind_of(body) == "wait" {
+            issues.push(Issue::at(&node.id, format!("the body {:?} is a Wait block: a wait is kept in the run as a whole, so put it before or after the for-each", body.id)));
         } else if wired {
             issues.push(Issue::at(&body.id, format!("{:?} is the body of the for-each {:?} and runs once per item: take its edges off", body.id, node.id)));
         } else if !plan.owned.insert(body.id.clone()) {
             issues.push(Issue::at(&node.id, format!("the body {:?} is already the body of another for-each", body.id)));
+        }
+    }
+}
+
+/// The longest a block may be given to run: a day.
+const MAX_TIMEOUT_SECONDS: u64 = 86_400;
+
+/// A block's own `timeout_seconds`, when it has one: a whole number from 1 to a day.
+pub(super) fn timeout_seconds(node: &FlowNode) -> Result<Option<u64>, String> {
+    match node.data.get("timeout_seconds") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .filter(|s| (1..=MAX_TIMEOUT_SECONDS).contains(s))
+            .map(Some)
+            .ok_or_else(|| format!("{}: timeout_seconds must be a whole number from 1 to {MAX_TIMEOUT_SECONDS}", node.id)),
+    }
+}
+
+/// Each block's own `timeout_seconds` and `retry` are well formed.
+fn check_block_limits(sorted: &[&FlowNode], issues: &mut Vec<Issue>) {
+    for node in sorted {
+        let wait = (kind_of(node) == "wait").then(|| super::blocks::wait::check(node).err()).flatten();
+        let call = (kind_of(node) == "drone").then(|| super::blocks::call::parse(node).err()).flatten();
+        let bad = timeout_seconds(node).err().into_iter().chain(super::retry::retry_of(node).err()).chain(wait).chain(call);
+        issues.extend(bad.map(|message| Issue { node: Some(node.id.clone()), message }));
+    }
+}
+
+/// Each Join is set rightly and has branches to bring together.
+fn check_joins(sorted: &[&FlowNode], edges: &[(usize, usize, &FlowEdge)], issues: &mut Vec<Issue>) {
+    for (index, node) in sorted.iter().enumerate().filter(|(_, n)| kind_of(n) == "join") {
+        let branches = edges.iter().filter(|(_, t, _)| *t == index).count();
+        if let Err(message) = super::blocks::join::check(node, branches) {
+            issues.push(Issue::at(&node.id, message));
         }
     }
 }
@@ -330,6 +367,8 @@ pub fn analyze(graph: &DroneGraph) -> Result<Plan, Vec<Issue>> {
     }
 
     check_foreach(&sorted, &edges, &mut plan, &mut issues);
+    check_block_limits(&sorted, &mut issues);
+    check_joins(&sorted, &edges, &mut issues);
     super::writers::check(&sorted, &edges, &all, &plan, &mut issues);
 
     let (back_edges, unreached) = walk_back_edges(&ids, &edges);
@@ -543,5 +582,14 @@ mod tests {
         let mut nested = foreach_graph(json!({ "body": "inner" }), false);
         nested.nodes.push(node("inner", "foreach", json!({ "items": "{{trigger.x}}", "body": "work" })));
         assert!(analyze(&nested).unwrap_err().iter().any(|i| i.message.contains("sub-drone")));
+    }
+
+    #[test]
+    fn a_wait_cannot_be_a_for_each_body() {
+        let mut g = foreach_graph(json!({}), false);
+        g.nodes.retain(|n| n.id != "work");
+        g.nodes.push(node("work", "wait", json!({ "for": "1m" })));
+        let issues = analyze(&g).unwrap_err();
+        assert!(issues.iter().any(|i| i.message.contains("is a Wait block")), "{issues:?}");
     }
 }

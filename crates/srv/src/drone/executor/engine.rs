@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! A run's handle and its event stream. The scheduler that runs the graph is
-//! `scheduler.rs`.
+//! A run's handle, its event stream and the way to stop it. The scheduler that
+//! runs the graph is `scheduler.rs`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,9 +10,19 @@ use std::sync::Arc;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use crate::drone::checkpoint::Checkpoint;
+use crate::drone::recorder::Persist;
 use crate::drone::types::{BlockState, DroneGraph};
 
 pub use crate::backend::drone_run_event::RunEvent;
+pub use crate::backend::drone_cancel::{cancel_run, Cancel};
+
+/// How the scheduler ended a run that did not finish.
+pub(super) enum RunEnd {
+    Failed(String),
+    Cancelled(String),
+}
+
 pub struct RunHandle {
     pub run_id: String,
     pub events: mpsc::UnboundedReceiver<RunEvent>,
@@ -24,18 +34,21 @@ pub struct RunHandle {
 /// snapshot for the run-history record. `trigger` is what started the run
 /// (`{{trigger.*}}`); `Null` when nothing did. `run_cap_usd` ends the run
 /// before its next block once its Agent blocks have spent that much (a job's
-/// per-run cap); `None` is no cap, as for a run started by hand.
+/// per-run cap); `None` is no cap, as for a run started by hand. `persist` says
+/// where to keep the run's checkpoints; `None` keeps none.
 pub async fn run_drone(
     drone_id: String,
     graph: DroneGraph,
     trigger: Value,
-    run_cap_usd: Option<f64>,
+    (run_cap_usd, persist): (Option<f64>, Option<Persist>),
 ) -> Result<RunHandle, String> {
     let run_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::unbounded_channel();
     let final_states: Arc<tokio::sync::Mutex<HashMap<String, BlockState>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
+    let cancel = Cancel::default();
+    crate::backend::drone_cancel::register_run(&run_id, &cancel);
     let states_for_task = final_states.clone();
     let drone_id_for_evt = drone_id.clone();
     let run_id_for_task = run_id.clone();
@@ -45,20 +58,10 @@ pub async fn run_drone(
             run_id: run_id_for_task.clone(),
             drone_id: drone_id_for_evt,
         });
-        match super::scheduler::execute(&run_id_for_task, (&graph, trigger, run_cap_usd, &drone_id), &tx_for_task, &states_for_task).await {
-            Ok(output) => {
-                let _ = tx_for_task.send(RunEvent::RunDone {
-                    run_id: run_id_for_task,
-                    output,
-                });
-            }
-            Err(e) => {
-                let _ = tx_for_task.send(RunEvent::RunFailed {
-                    run_id: run_id_for_task,
-                    error: e,
-                });
-            }
-        }
+        let limits = super::scheduler::Limits { run_cap_usd, cancel, persist, chain: Vec::new(), lookup: crate::drone::host::lookup() };
+        let ended = super::scheduler::execute(&run_id_for_task, (&graph, trigger, limits, &drone_id), &tx_for_task, &states_for_task).await;
+        crate::backend::drone_cancel::forget_run(&run_id_for_task);
+        let _ = tx_for_task.send(end_event(run_id_for_task, ended));
     });
 
     Ok(RunHandle {
@@ -66,6 +69,38 @@ pub async fn run_drone(
         events: rx,
         final_states,
     })
+}
+
+/// The event that closes a run's stream, from how it ended.
+fn end_event(run_id: String, ended: Result<Value, RunEnd>) -> RunEvent {
+    match ended {
+        Ok(output) => RunEvent::RunDone { run_id, output },
+        Err(RunEnd::Failed(error)) => RunEvent::RunFailed { run_id, error },
+        Err(RunEnd::Cancelled(reason)) => RunEvent::RunCancelled { run_id, reason },
+    }
+}
+
+/// Take a run up again after AgentMux restarted: from `checkpoint`, its newest,
+/// on `graph`, the graph the checkpoint was written on. The blocks that were done
+/// are not run again, and what they said is what the rest reads. The run goes
+/// on under the same id, keeps writing checkpoints through `persist`, and
+/// ends as any run does. `checkpoint.run_id` names it.
+pub async fn resume_drone(graph: DroneGraph, checkpoint: Checkpoint, persist: Persist) -> Result<RunHandle, String> {
+    let run_id = checkpoint.run_id.clone();
+    let (tx, rx) = mpsc::unbounded_channel();
+    let final_states: Arc<tokio::sync::Mutex<HashMap<String, BlockState>>> = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let cancel = Cancel::default();
+    crate::backend::drone_cancel::register_run(&run_id, &cancel);
+    let states = final_states.clone();
+    let id = run_id.clone();
+    tokio::spawn(async move {
+        let _ = tx.send(RunEvent::Resumed { run_id: id.clone(), step: checkpoint.step });
+        let limits = super::scheduler::Limits { run_cap_usd: checkpoint.run_cap_usd, cancel, persist: Some(persist), chain: Vec::new(), lookup: crate::drone::host::lookup() };
+        let ended = super::scheduler::resume((&graph, &checkpoint, limits), &tx, &states).await;
+        crate::backend::drone_cancel::forget_run(&id);
+        let _ = tx.send(end_event(id, ended));
+    });
+    Ok(RunHandle { run_id, events: rx, final_states })
 }
 
 pub(super) async fn mark_state(
@@ -140,7 +175,7 @@ mod tests {
             edges: vec![e("e1", "v1", "r1")],
         };
 
-        let handle = run_drone("wf1".to_string(), g, Value::Null, None).await.unwrap();
+        let handle = run_drone("wf1".to_string(), g, Value::Null, (None, None)).await.unwrap();
         let mut rx = handle.events;
         while let Some(ev) = rx.recv().await {
             if matches!(ev, RunEvent::RunDone { .. } | RunEvent::RunFailed { .. }) {
@@ -201,7 +236,7 @@ mod tests {
         resp.data = json!({ "kind": "response", "template": "done" });
         for cap in [None, Some(5.0), Some(0.0)] {
             let g = DroneGraph { nodes: vec![resp.clone()], edges: vec![] };
-            let mut handle = run_drone("wf1".to_string(), g, Value::Null, cap).await.unwrap();
+            let mut handle = run_drone("wf1".to_string(), g, Value::Null, (cap, None)).await.unwrap();
             let mut out = None;
             while let Some(ev) = handle.events.recv().await {
                 if let RunEvent::RunDone { output, .. } = ev {
@@ -219,7 +254,7 @@ mod tests {
         resp.data = json!({ "kind": "response", "template": "{{trigger.repo}}#{{trigger.pr.number}} {{trigger.none}}" });
         let g = DroneGraph { nodes: vec![resp], edges: vec![] };
         let input = json!({ "repo": "agentmux", "pr": { "number": 12 } });
-        let mut handle = run_drone("wf1".to_string(), g, input, None).await.unwrap();
+        let mut handle = run_drone("wf1".to_string(), g, input, (None, None)).await.unwrap();
         let mut out = None;
         while let Some(ev) = handle.events.recv().await {
             match ev {
@@ -272,7 +307,7 @@ mod tests {
             ],
         };
 
-        let handle = run_drone("wf1".to_string(), g, Value::Null, None).await.unwrap();
+        let handle = run_drone("wf1".to_string(), g, Value::Null, (None, None)).await.unwrap();
         // Drain events to completion.
         let mut rx = handle.events;
         let mut got_done_ids: Vec<String> = Vec::new();

@@ -76,6 +76,9 @@ export const WpsEvent = {
     // path — `{status:"retrying"|"resolved"}`. See
     // docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
     AgentResumeRetry: "agent-resume-retry",
+    // srv's own panics, counted by `backend::panic_watch`: a health-signal-shaped payload (`kind: "panics"`, a level, the counts).
+    // Persisted, so a window that opens mid-storm gets the current state. Mirrors EVENT_SRV_PANICS in mps.rs.
+    SrvPanics: "srv-panics",
     // A Claude CLI request is being retried, or no longer is (`{ retry }`,
     // `null` when cleared); see useApiRetryState.ts.
     AgentApiRetry: "agent-api-retry",
