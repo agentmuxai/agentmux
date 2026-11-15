@@ -16,7 +16,7 @@ import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "
 import { modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
 import { AgentMuxConnectBody, type MuxBusController } from "./AgentMuxConnectPanel";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
-import { ProviderGuideDetails } from "./ProviderGuideDetails";
+import { ProviderGuideDetails, ProviderGuideInside } from "./ProviderGuideDetails";
 import { ProviderLoginPanel } from "./ProviderLoginPanel";
 import { guideFor, optionForMode, shown } from "./provider-guide";
 import { githubStatusLine } from "./github-account-copy";
@@ -83,6 +83,7 @@ export function AddAccountSection(props: {
                     <p>{githubStatusLine(model.accountsByProvider().get("github") ?? [], ghAgentHere())}</p>
                 </div>
             </Show>
+            <Show when={guide}>{(g) => <ProviderGuideInside guide={g()} />}</Show>
             <Show when={tile.id !== "agentmux" && mode() === null}>
                 <div class="accounts-chooser accounts-chooser--inline">
                     <div class="accounts-chooser-modes">

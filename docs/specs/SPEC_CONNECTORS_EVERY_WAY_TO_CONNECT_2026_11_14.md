@@ -1,6 +1,6 @@
 # Spec: Connectors show every way to connect each provider, with plain explanations
 
-**Status:** draft for the operator's OK (task #27097; the build is #27098)
+**Status:** active — PR 1 (the guide data, the explanations on the Anthropic, OpenAI and Google tiles, the ChatGPT sign-in, the panel rename) in #7409, merging when the operator approves this spec (task #27097; the build is #27098). PR 2 (§8: device code, Reconnect for a CLI sign-in, the xAI, Moonshot and Copilot entries, the other agents) is not started.
 **Date:** 2026-11-14
 **Author:** Naki-2@narko
 **Verified against:** `agentmux` `main` @ `086e28e98` (code read) and the vendor pages named in §6, fetched 2026-11-14.

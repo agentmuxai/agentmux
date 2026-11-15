@@ -12,7 +12,7 @@ const openLink = vi.hoisted(() => vi.fn());
 vi.mock("@/app/store/global", () => ({ openLink }));
 
 import { SERVICE_CATALOG } from "./accounts-catalog";
-import { ProviderGuideDetails } from "./ProviderGuideDetails";
+import { ProviderGuideDetails, ProviderGuideInside } from "./ProviderGuideDetails";
 import { guideFor, optionForMode, PROVIDER_GUIDES, shown, type Fact, type ProviderGuide } from "./provider-guide";
 
 afterEach(() => {
@@ -126,6 +126,24 @@ describe("ProviderGuideDetails", () => {
     it("says the key's start only where a vendor page states it", () => {
         render(() => <ProviderGuideDetails guide={guideFor("anthropic")!} />);
         expect(screen.getByText("sk-ant-api")).toBeTruthy();
+    });
+
+    it("draws nothing to pick between for a brand whose agents sign in inside the agent", () => {
+        const { container } = render(() => <ProviderGuideDetails guide={guideFor("google")!} />);
+        expect(container.querySelector(".accounts-guide")).toBeNull();
+        expect(screen.queryByText("Which one should I pick?")).toBeNull();
+    });
+
+    it("says what Google's agents ask for inside the agent in plain view, with no disclosure", () => {
+        const { container } = render(() => <ProviderGuideInside guide={guideFor("google")!} />);
+        expect(screen.getByText("Google's coding agents sign in inside the agent")).toBeTruthy();
+        expect(container.querySelector("details")).toBeNull();
+        expect(screen.getByText(/Antigravity signs in with the Google account/)).toBeTruthy();
+    });
+
+    it("shows nothing inside for a brand with a sign-in and a key to pick between", () => {
+        const { container } = render(() => <ProviderGuideInside guide={guideFor("openai")!} />);
+        expect(container.querySelector(".accounts-guide")).toBeNull();
     });
 
     it("leaves out a fact that names no source", () => {

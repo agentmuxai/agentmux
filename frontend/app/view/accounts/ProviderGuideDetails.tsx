@@ -91,30 +91,55 @@ function OptionDetails(props: { option: ConnectOption }): JSX.Element {
     );
 }
 
-export function ProviderGuideDetails(props: { guide: ProviderGuide }): JSX.Element {
+/** The ways to connect the person picks between (a sign-in, a key), not the ones the agent's own CLI asks for. */
+const choices = (guide: ProviderGuide) => guide.options.filter((o) => o.kind !== "inside");
+
+function Pointers(props: { guide: ProviderGuide }): JSX.Element {
     const pointers = () => props.guide.pointers.filter((p) => shown(p.url));
     return (
-        <details class="accounts-guide">
-            <summary class="accounts-guide-summary">Which one should I pick?</summary>
-            <For each={props.guide.options}>{(o) => <OptionDetails option={o} />}</For>
-            <Show when={pointers().length > 0}>
-                <div class="accounts-guide-pointers">
-                    <For each={pointers()}>
-                        {(p) => (
-                            <Button
-                                density="compact"
-                                tone="quiet"
-                                icon="arrow-up-right-from-square"
-                                onClick={() => openLink(p.url.value)}
-                                {...tip(sourceTip(p.url))}
-                            >
-                                {p.label}
-                            </Button>
-                        )}
-                    </For>
-                </div>
-            </Show>
-        </details>
+        <Show when={pointers().length > 0}>
+            <div class="accounts-guide-pointers">
+                <For each={pointers()}>
+                    {(p) => (
+                        <Button
+                            density="compact"
+                            tone="quiet"
+                            icon="arrow-up-right-from-square"
+                            onClick={() => openLink(p.url.value)}
+                            {...tip(sourceTip(p.url))}
+                        >
+                            {p.label}
+                        </Button>
+                    )}
+                </For>
+            </div>
+        </Show>
+    );
+}
+
+/** "Which one should I pick?": the sign-in and the key side by side. Nothing for a brand with nothing to pick between. */
+export function ProviderGuideDetails(props: { guide: ProviderGuide }): JSX.Element {
+    return (
+        <Show when={choices(props.guide).length > 0}>
+            <details class="accounts-guide">
+                <summary class="accounts-guide-summary">Which one should I pick?</summary>
+                <For each={choices(props.guide)}>{(o) => <OptionDetails option={o} />}</For>
+                <Pointers guide={props.guide} />
+            </details>
+        </Show>
+    );
+}
+
+/** What a brand's agents ask for inside the agent, in plain view above the tile's form: there is no choice to open. */
+export function ProviderGuideInside(props: { guide: ProviderGuide }): JSX.Element {
+    const inside = () => props.guide.options.filter((o) => o.kind === "inside");
+    return (
+        <Show when={inside().length > 0}>
+            <div class="accounts-guide accounts-guide--inside">
+                <For each={inside()}>{(o) => <OptionDetails option={o} />}</For>
+                <Pointers guide={props.guide} />
+            </div>
+        </Show>
     );
 }
 
