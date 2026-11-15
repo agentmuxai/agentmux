@@ -180,6 +180,34 @@ function toneSignal(hex: string, against: string, light: boolean): string {
     return solveTone(against, light, o.h, o.c, INK_TARGETS.signal.aim, o.l).hex;
 }
 
+/** What `toneMove` did to a colour. */
+export interface ToneMoved {
+    /** The colour to use: `hex` itself when it already reads, else the same hue and chroma moved in lightness. */
+    hex: string;
+    /** The WCAG ratio of `hex` on the surface. */
+    ratio: number;
+    /** `ratio` reaches the target. False only when no lightness of this hue does (the farthest one is returned). */
+    met: boolean;
+    /** The colour was changed. */
+    moved: boolean;
+}
+
+/**
+ * A colour made to read on a surface (spec §6, the transcript's syntax and status colours): kept as it is when it
+ * already reaches `target` against `surface`, otherwise moved in OKLCH lightness only, keeping its hue and chroma,
+ * until the WCAG ratio on the real `#rrggbb` reaches `target` (with `solveTone`'s small margin, so a hex rounded to
+ * 8 bits still clears it). It moves toward whichever of white and black the surface has more contrast with. When
+ * even that end falls short, the farthest colour is returned with `met: false`, so the caller can say so.
+ */
+export function toneMove(hex: string, surface: string, target: number): ToneMoved {
+    const o = oklchOfHex(hex);
+    const have = contrastRatio(hex, surface);
+    if (!o || have >= target) return { hex, ratio: have, met: have >= target, moved: false };
+    const light = bestPossible(surface, true) >= bestPossible(surface, false);
+    const solved = solveTone(surface, light, o.h, o.c, target, o.l);
+    return { hex: solved.hex, ratio: solved.ratio, met: solved.ratio >= target, moved: solved.hex !== hex };
+}
+
 /**
  * Every ink for a surface. `signals` are the app's status hues (default: the default theme's).
  * Deterministic and pure: the same colour always gives the same backdrop, so it is stored as the colour alone.
