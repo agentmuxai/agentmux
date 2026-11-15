@@ -78,6 +78,11 @@ export function applyHealthEvent(signals: HealthSignal[], p: HealthPayload, now:
     );
 }
 
+/** The signals without one kind; `signals` itself when it wasn't active. */
+export function dropKind(signals: HealthSignal[], kind: HealthKind): HealthSignal[] {
+    return signals.some((s) => s.kind === kind) ? signals.filter((s) => s.kind !== kind) : signals;
+}
+
 export function worstLevel(signals: HealthSignal[]): HealthLevel {
     return signals[0]?.level ?? "normal";
 }
@@ -107,18 +112,25 @@ let stop: (() => void) | undefined;
 export function startHealthSignals(): () => void {
     if (stop) return () => {};
     const heard = new Set<HealthKind>();
-    let unlisten: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
     let stopped = false;
     const api = getApi();
-    void api
-        .listen<HealthPayload>("health-signal", (p) => {
+    const track = (listening: Promise<() => void>) => {
+        void listening.then((u) => {
+            if (stopped) u();
+            else unlisteners.push(u);
+        });
+    };
+    track(
+        api.listen<HealthPayload>("health-signal", (p) => {
             if (p?.kind) heard.add(p.kind);
             setSignals((s) => applyHealthEvent(s, p, Date.now()));
         })
-        .then((u) => {
-            if (stopped) u();
-            else unlisten = u;
-        });
+    );
+    // A backend that has just started has no panics yet, and says nothing about the last one's storm (srv publishes
+    // `normal` only when a storm clears), so the previous srv's warning goes when the new one is ready. If the new srv
+    // is already panicking, its persisted event arrives over the reconnected socket after this.
+    track(api.listen("backend-ready", () => setSignals((s) => dropKind(s, "panics"))));
     void api
         .getHealthSignals?.()
         .then((snapshot) => {
@@ -133,7 +145,7 @@ export function startHealthSignals(): () => void {
     });
     stop = () => {
         stopped = true;
-        unlisten?.();
+        unlisteners.splice(0).forEach((u) => u());
         unlistenPanics();
         stop = undefined;
     };

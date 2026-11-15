@@ -7,7 +7,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mux = vi.hoisted(() => ({ handlers: [] as Array<(p: unknown) => void>, off: vi.fn() }));
+const mux = vi.hoisted(() => ({
+    handlers: [] as Array<(p: unknown) => void>,
+    off: vi.fn(),
+    host: new Map<string, (p: unknown) => void>(),
+}));
 
 vi.mock("@/app/store/mps", () => ({
     onMuxEvent: (_type: string, handler: (p: unknown) => void) => {
@@ -17,7 +21,10 @@ vi.mock("@/app/store/mps", () => ({
 }));
 vi.mock("@/util/app-api", () => ({
     getApi: () => ({
-        listen: async () => () => {},
+        listen: async (event: string, handler: (p: unknown) => void) => {
+            mux.host.set(event, handler);
+            return () => mux.host.delete(event);
+        },
         getHealthSignals: async () => [],
     }),
 }));
@@ -70,6 +77,27 @@ describe("startHealthSignals follows srv-panics", () => {
         expect(healthSignals()).toHaveLength(1);
         mux.handlers[0](panics("normal"));
         expect(healthSignals()).toEqual([]);
+    });
+
+    it("drops the panics warning when the backend is restarted, and only that one", async () => {
+        await Promise.resolve();
+        mux.host.get("health-signal")!({ kind: "disk", level: "warn" });
+        mux.handlers[0](panics("warn"));
+        expect(healthSignals().map((s) => s.kind).sort()).toEqual(["disk", "panics"]);
+        mux.host.get("backend-ready")!({ payload: { ws: "127.0.0.1:1", web: "127.0.0.1:2" } });
+        expect(healthSignals().map((s) => s.kind)).toEqual(["disk"]);
+        // The new srv's own event, if it is panicking already, comes after.
+        mux.handlers[0](panics("warn"));
+        expect(healthSignals().map((s) => s.kind).sort()).toEqual(["disk", "panics"]);
+        mux.host.get("health-signal")!({ kind: "disk", level: "normal" });
+        mux.handlers[0](panics("normal"));
+        expect(healthSignals()).toEqual([]);
+    });
+
+    it("leaves the signals alone on a restart when no panics warning was up", () => {
+        const before = healthSignals();
+        mux.host.get("backend-ready")!({});
+        expect(healthSignals()).toBe(before);
     });
 
     it("stops listening when stopped", () => {
