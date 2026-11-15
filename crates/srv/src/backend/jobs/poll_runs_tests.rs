@@ -19,6 +19,9 @@ fn a_poll_filter_names_a_query_and_how_often_and_only_that_querys_own_keys() {
     assert!(poll::validate_filter(&filter(json!({ "query": "tasks", "every_minutes": 15 }))).is_ok());
     assert!(poll::validate_filter(&filter(json!({ "query": "tasks", "every_minutes": 1, "holder": "agent2", "state": "todo", "pr": "https://example.org/pr/1", "limit": 10, "include_existing": true }))).is_ok());
     assert!(poll::validate_filter(&filter(json!({ "query": "jobs", "every_minutes": 1440, "job": "nightly", "limit": 5 }))).is_ok());
+    let all_jobs = poll::validate_filter(&filter(json!({ "query": "jobs", "every_minutes": 5 }))).unwrap_err();
+    assert!(all_jobs.contains("has job"), "a poll of every job's newest run would lose runs: {all_jobs}");
+    assert!(poll::validate_filter(&filter(json!({ "query": "jobs", "every_minutes": 5, "job": "  " }))).is_err());
     assert!(poll::validate_filter(&filter(json!({ "query": "agents", "every_minutes": 5 }))).is_ok());
     assert!(poll::validate_filter(&filter(json!({ "query": "lan_peers", "every_minutes": 5 }))).is_ok());
 
@@ -93,7 +96,7 @@ async fn a_new_item_starts_one_run_and_what_was_already_there_starts_none() {
     let t0 = agentmux_common::time::now_ms();
 
     assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0).await, 0, "the first poll only takes note");
-    assert_eq!(*asked.lock().unwrap(), [json!({ "query": "tasks", "state": "todo" })], "it asks the query with its own filters, not how often");
+    assert_eq!(*asked.lock().unwrap(), [json!({ "query": "tasks", "state": "todo", "limit": 200 })], "it asks the query with its own filters and the most it gives, not how often");
     assert!(rig.runs("j-poll").is_empty());
 
     assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0 + MIN).await, 0, "not due yet: nothing asked");

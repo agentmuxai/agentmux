@@ -8,14 +8,17 @@
 //! The job's filter says what to ask and how often:
 //!   * `query`           required: `tasks`, `jobs`, `agents` or `lan_peers`, as the App query block reads them.
 //!   * `every_minutes`   required: 1 to 1440.
-//!   * `holder`, `state`, `pr`   (`tasks`) and `job` (`jobs`), `limit` (both): the App query's own filters.
+//!   * `holder`, `state`, `pr`   (`tasks`) and `job` (`jobs`, required: the runs of that one job), `limit` (both):
+//!     the App query's own filters. An answer is cut to `limit`, which a poll leaves at the most the query gives (200
+//!     tasks, 100 runs): a new item past the cut, because more than that appeared between two looks, is never seen.
+//!     `agents` lists at most 20 problems.
 //!   * `include_existing`   optional true: the items that are already there when the job is turned on run too.
 //!     Left out, the first poll only takes note of them, so turning a job on does not start a run for everything
 //!     that happened before.
 //!
 //! What counts as an item, and what makes it new:
 //!   * `tasks`      each task, by its number.
-//!   * `jobs`       each run, by its id.
+//!   * `jobs`       each run of the named job, by its id.
 //!   * `agents`     each agent that is wanted running and is not up, by its name and state: an agent that goes down
 //!                  again in another way is new.
 //!   * `lan_peers`  each machine, by its host name.
@@ -44,6 +47,9 @@ use crate::backend::storage::store::Store;
 pub const QUERIES: [&str; 4] = ["tasks", "jobs", "agents", "lan_peers"];
 pub const MIN_EVERY_MINUTES: u64 = 1;
 pub const MAX_EVERY_MINUTES: u64 = 24 * 60;
+/// The most tasks and runs the App query returns (its own caps), which is what a poll asks for unless `limit` says less.
+const MAX_TASKS: u64 = 200;
+const MAX_RUNS: u64 = 100;
 /// The most new items one poll starts a run for.
 pub const MAX_NEW_PER_POLL: usize = 20;
 /// How often the poller looks at which jobs are due.
@@ -104,6 +110,10 @@ pub fn validate_filter(filter: &Map<String, Value>) -> Result<(), String> {
             return Err(format!("trigger: poll filter {key:?} is text"));
         }
     }
+    if query == "jobs" && !filter.get("job").and_then(Value::as_str).is_some_and(|j| !j.trim().is_empty()) {
+        // Without `job` the query lists only the newest run of each job, so a job that finishes two runs between looks would lose one.
+        return Err("trigger: a poll of jobs has job, the name or id of the job whose runs it watches".to_string());
+    }
     if filter.get("limit").is_some_and(|v| !v.as_u64().is_some_and(|n| (1..=200).contains(&n))) {
         return Err("trigger: poll filter \"limit\" is a whole number of 1 to 200".to_string());
     }
@@ -134,6 +144,16 @@ fn plan_of(job: &CronJob) -> Option<Plan> {
     validate_filter(filter).ok()?;
     let mut ask = filter.clone();
     ask.remove("every_minutes");
+    // Ask for the most the query gives: an answer is cut to `limit`, and a new item past the cut is not seen.
+    match filter.get("query").and_then(Value::as_str) {
+        Some("tasks") => {
+            ask.entry("limit").or_insert(json!(MAX_TASKS));
+        }
+        Some("jobs") => {
+            ask.entry("limit").or_insert(json!(MAX_RUNS));
+        }
+        _ => {}
+    }
     let include_existing = ask.remove("include_existing").and_then(|v| v.as_bool()).unwrap_or(false);
     let signature = hex::encode(&Sha256::digest(Value::Object(ask.clone()).to_string().as_bytes())[..6]);
     Some(Plan {
@@ -218,16 +238,27 @@ pub async fn poll_due(scheduler: &CronScheduler, store: &Store, all: &[CronJob],
         let items = items_of(&plan.query, &answer);
         let present: HashSet<String> = items.iter().map(|(id, _)| id.clone()).collect();
         if !st.baselined {
-            st.baselined = true;
-            // The first poll of a job takes note of what is there, once: the marker is kept with the job's event ids.
-            let marker = format!("poll:baseline:{}", plan.signature);
-            if !plan.include_existing && store.job_event_claim(&job.id, &marker, "", now).unwrap_or(false) {
-                for (id, _) in &items {
-                    let _ = store.job_event_claim(&job.id, &event_id(&plan.query, id), "", now);
+            if !plan.include_existing {
+                // The first poll of a job takes note of what is there, once: the marker is kept with the job's event ids.
+                let marker = format!("poll:baseline:{}", plan.signature);
+                match store.job_event_claim(&job.id, &marker, "", now) {
+                    Ok(true) => {
+                        for (id, _) in &items {
+                            let _ = store.job_event_claim(&job.id, &event_id(&plan.query, id), "", now);
+                        }
+                        st.baselined = true;
+                        st.seen = present;
+                        continue;
+                    }
+                    Ok(false) => {}
+                    Err(e) => {
+                        // Not knowing whether this is the first poll must not start a run for everything that is there.
+                        tracing::warn!(job_id = %job.id, error = %e, "jobs: a poll couldn't record its first look; trying again next time");
+                        continue;
+                    }
                 }
-                st.seen = present;
-                continue;
             }
+            st.baselined = true;
         }
         let mut started = 0;
         for (id, item) in items {
