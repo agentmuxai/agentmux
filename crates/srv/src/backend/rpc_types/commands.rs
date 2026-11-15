@@ -455,6 +455,7 @@ pub const COMMAND_RUN_DRONE: &str = "rundrone";
 pub const COMMAND_LIST_DRONE_RUNS: &str = "listdroneruns";
 pub const COMMAND_RESOLVE_DRONE_RUN: &str = "resolvedronerun";
 pub const COMMAND_RESUME_DRONE_WAIT: &str = "resumedronewait";
+pub const COMMAND_REPLAY_DRONE_RUN: &str = "replaydronerun";
 
 // MuxAPI Tier 1 — agent lifecycle commands
 pub const COMMAND_AGENT_OPEN: &str = "agent.open";

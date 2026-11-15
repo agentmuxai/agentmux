@@ -492,7 +492,7 @@ const ENTER_HTML: &str = r#"<!doctype html>
 <h1>AgentMux</h1>
 <p id="msg">Signing in&hellip;</p>
 <p id="phrase" hidden></p>
-<p id="hint" hidden>Compare this with the terminal where you ran <code>agentmux-srv open</code>. Answer <code>y</code> there only if the two match.</p>
+<p id="hint" hidden>Compare this with the terminal where you ran <code>agentmux open</code>. Answer <code>y</code> there only if the two match.</p>
 </main>
 <script src="/auth/enter.js"></script>
 </body>

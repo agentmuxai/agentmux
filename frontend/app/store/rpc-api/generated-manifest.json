@@ -1339,6 +1339,10 @@
             "method": "ResumeDroneWaitCommand"
         },
         {
+            "command": "replaydronerun",
+            "method": "ReplayDroneRunCommand"
+        },
+        {
             "command": "layout.save",
             "method": "SaveLayoutCommand"
         },

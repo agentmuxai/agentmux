@@ -19,6 +19,8 @@
 //! The run keeps a checkpoint that lists every block of the batch that has effects as
 //! running before any of them starts, so a restart asks about each of them in turn.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -90,7 +92,14 @@ impl<'a> Scheduler<'a> {
             began.push((node, kind, self.begin_block(node).await));
         }
         let spent_before = self.spent;
-        let runs: Vec<_> = began.iter().map(|(node, kind, _)| run_pure(node, *kind, self.scope.clone(), self.cancel.clone())).collect();
+        let runs: Vec<Pin<Box<dyn Future<Output = Pure> + Send + '_>>> = began
+            .iter()
+            .map(|(node, kind, _)| match self.stub_of(node, *kind) {
+                // A replay does not repeat the world: the block says what it said before.
+                Some(said) => Box::pin(async move { Pure { result: Ok(said), cancelled: false, bits: None } }) as Pin<Box<dyn Future<Output = Pure> + Send + '_>>,
+                None => Box::pin(run_pure(node, *kind, self.scope.clone(), self.cancel.clone())),
+            })
+            .collect();
         let results = futures_util::future::join_all(runs).await;
         let mut first_failure = None;
         for ((node, kind, started_at), pure) in began.into_iter().zip(results) {

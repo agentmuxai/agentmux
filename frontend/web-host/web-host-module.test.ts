@@ -4,10 +4,11 @@
 //
 // The browser host's startup: srv is reached on the page's own origin, and window.api is the browser AppApi.
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { endpointsFor, hostModule } from "./web-host-module";
 
 afterEach(() => {
+    vi.unstubAllGlobals();
     delete (window as any).api;
     delete window.__WAVE_SERVER_WEB_ENDPOINT__;
     delete window.__WAVE_SERVER_WS_ENDPOINT__;
@@ -20,6 +21,14 @@ describe("the browser host module", () => {
             ws: "ws://localhost:8180",
         });
         expect(endpointsFor("https://box.example")).toEqual({ web: "https://box.example", ws: "wss://box.example" });
+    });
+
+    it("installs window.api only once the server has accepted this browser, so nothing else starts the app before", async () => {
+        vi.stubGlobal("fetch", vi.fn(async () => ({ status: 401 })));
+        document.body.innerHTML = '<div id="main"></div>';
+        await expect(hostModule.setup()).rejects.toThrow("not signed in");
+        expect((window as any).api).toBeUndefined();
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain("agentmux open");
     });
 
     it("points srv's endpoints at the page's own origin and installs window.api", async () => {
