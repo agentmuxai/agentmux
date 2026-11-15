@@ -154,3 +154,18 @@ export function githubRepoOf(url: string): string {
     const m = /^https:\/\/api\.github\.com\/repos\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)(?:[/?]|$)/.exec(url.trim());
     return m ? m[1] : "";
 }
+
+/** The words of the preset picker. Kept here, not in the JSX, until the drone view's text moves into the dictionary. */
+export const PRESET_TEXT = {
+    repoLabel: "GitHub repo",
+    repoPlaceholder: "owner/name",
+    presetLabel: "GitHub preset",
+    fill: "Fill from a preset…",
+    needRepo: "Give the repository as owner/name first.",
+    writesNote: "Changes something on GitHub. ",
+} as const;
+
+/** A preset's name in the list; a preset that changes something on GitHub says so. */
+export function presetOptionLabel(g: Pick<GithubPreset, "label" | "writes">): string {
+    return g.writes ? `${g.label} (writes)` : g.label;
+}

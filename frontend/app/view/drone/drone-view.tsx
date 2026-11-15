@@ -19,7 +19,7 @@ import { isModKey } from "@/util/platformutil";
 import { tip } from "@/app/element/tip";
 import { describeRef, judge, triggerPathsIn } from "./payload-schema";
 import { apiAuthFields, apiAuthPatch, type ApiAuthFields, type ApiAuthHow } from "./api-auth";
-import { GITHUB_PRESETS, githubPresetById, githubPresetPatch, githubRepoOf, type GithubPreset } from "./github-presets";
+import { GITHUB_PRESETS, githubPresetById, githubPresetPatch, githubRepoOf, presetOptionLabel, PRESET_TEXT, type GithubPreset } from "./github-presets";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
 // drop handler. On the drag session, so every drone pane in the window sees it.
@@ -976,7 +976,7 @@ const GithubPresetPicker = (p: { node: FlowNode; update: (patch: Record<string, 
         if (!preset) return;
         const patch = githubPresetPatch(preset, repo());
         if (!patch) {
-            setProblem("Give the repository as owner/name first.");
+            setProblem(PRESET_TEXT.needRepo);
             return;
         }
         setProblem("");
@@ -985,16 +985,16 @@ const GithubPresetPicker = (p: { node: FlowNode; update: (patch: Record<string, 
     };
     return (
         <>
-            <NodeField label="GitHub repo">
+            <NodeField label={PRESET_TEXT.repoLabel}>
                 <TextInput
                     variant="plain" class="drone-input nodrag"
                     value={repo()}
                     onInput={(e) => setRepo(e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="owner/name"
+                    placeholder={PRESET_TEXT.repoPlaceholder}
                 />
             </NodeField>
-            <NodeField label="GitHub preset">
+            <NodeField label={PRESET_TEXT.presetLabel}>
                 <select
                     class="drone-input nodrag"
                     value=""
@@ -1003,8 +1003,8 @@ const GithubPresetPicker = (p: { node: FlowNode; update: (patch: Record<string, 
                         e.currentTarget.value = "";
                     }}
                 >
-                    <option value="">Fill from a preset…</option>
-                    <For each={GITHUB_PRESETS}>{(g) => <option value={g.id}>{g.writes ? `${g.label} (writes)` : g.label}</option>}</For>
+                    <option value="">{PRESET_TEXT.fill}</option>
+                    <For each={GITHUB_PRESETS}>{(g) => <option value={g.id}>{presetOptionLabel(g)}</option>}</For>
                 </select>
             </NodeField>
             <Show when={problem()}>
@@ -1013,7 +1013,7 @@ const GithubPresetPicker = (p: { node: FlowNode; update: (patch: Record<string, 
             <Show when={picked()}>
                 {(g) => (
                     <div class="drone-field-note">
-                        {g().writes ? "Changes something on GitHub. " : ""}
+                        {g().writes ? PRESET_TEXT.writesNote : ""}
                         {g().hint}
                     </div>
                 )}
