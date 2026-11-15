@@ -50,7 +50,7 @@ describe("previewImport", () => {
     it("refuses a key the system takes before the app, as the recorder does, but not an unbind of it", () => {
         const p = previewImport([], [
             { command: "tab:close", key: "meta+q", platform: "mac" },
-            { command: "tab:close", key: "alt+F4" },
+            { command: "tab:close", key: "alt+F4", platform: "other" },
             { command: "-tab:close", key: "meta+q", platform: "mac" },
             { command: "tab:close", key: "ctrl+alt+t", platform: "other" },
             { command: "tab:close", key: "meta+q", platform: "other" },
@@ -60,6 +60,20 @@ describe("previewImport", () => {
         expect(p.unusable[1].message).toMatch(/^alt\+F4 cannot be used: Windows takes Alt\+F4/);
         // An unbind, and a key only the desktop often takes (the recorder asks "Use it anyway"), are imported.
         expect(p.usable).toHaveLength(2);
+    });
+
+    it("imports a key the system takes on one platform only for the other, and refuses one taken on both", () => {
+        const p = previewImport([], [
+            { command: "tab:new", key: "meta+shift+y" },
+            { command: "tab:close", key: "alt+F4" },
+            { command: "tab:next", key: "Escape" },
+        ]);
+        // ⌘ is the Windows key on Windows, which takes it; Alt+F4 means nothing to macOS; Escape is fixed everywhere.
+        expect(p.usable).toEqual([
+            { command: "tab:new", key: "meta+shift+y", platform: "mac" },
+            { command: "tab:close", key: "alt+F4", platform: "mac" },
+        ]);
+        expect(p.unusable).toEqual([{ index: 2, message: expect.stringMatching(/^Escape cannot be used: Escape closes dialogs/) }]);
     });
 
     it("counts the commands whose keys of your own the import replaces", () => {
