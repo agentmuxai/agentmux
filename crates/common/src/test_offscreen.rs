@@ -4,7 +4,7 @@
 //! A test build that never shows a window on a real display.
 //!
 //! A tester starts an isolated build with `AGENTMUX_TEST_OFFSCREEN=1`. Every window the host
-//! creates then goes to [`ORIGIN`], far outside any display, and nothing saves that place as the
+//! creates then goes to [`ORIGIN`], far above every display, and nothing saves that place as the
 //! person's window position. Before this, the window opened on screen and a separate script
 //! raced to move it, and three times (2026-11-15) a tester's window showed on a shared screen.
 //!
@@ -12,18 +12,18 @@
 //! ignores the variable, so one inherited from a test instance's shell cannot hide a person's
 //! windows. The decision is the binary's, never the variable's alone.
 //!
-//! Windows and Linux/X11 place a window anywhere; macOS places a pool window at the same
-//! place already. Wayland cannot place a window at all, so there the flag does nothing and a
-//! tester must use X11 (or XWayland) for a test build.
+//! Windows and Linux/X11 place a window anywhere. Wayland cannot place a window at all, so there
+//! the flag does nothing and a tester must use X11 (or XWayland) for a test build.
 
 use crate::build_kind::{build_kind, BuildKind};
 
 /// The environment variable a launch sets.
 pub const ENV: &str = "AGENTMUX_TEST_OFFSCREEN";
 
-/// Where a window goes, in both axes: the same corner the window pool parks its spare windows in
-/// (`POOL_OFFSCREEN_X/Y`), and the one Windows itself uses for a hidden window.
-pub const ORIGIN: i32 = -32000;
+/// Where a window goes: far above every display, with its left edge at 0. Not the pool's corner
+/// (-32000, -32000): the host reads a window whose left edge is under -20000 as a spare pool window
+/// (`OFFSCREEN_POOL_THRESHOLD_X`), counts it as closed, and ends the app when it is the only one.
+pub const ORIGIN: (i32, i32) = (0, -32000);
 
 /// Whether a build of this `kind` started with `value` in [`ENV`] runs off-screen.
 pub fn requested_by(kind: BuildKind, value: Option<&str>) -> bool {
@@ -39,7 +39,7 @@ pub fn active() -> bool {
 /// `(x, y)` for a window that is off-screen, or `pos` when this process is not.
 pub fn place(pos: (i32, i32)) -> (i32, i32) {
     if active() {
-        (ORIGIN, ORIGIN)
+        ORIGIN
     } else {
         pos
     }
@@ -54,7 +54,7 @@ pub fn place_rect((x, y, w, h): (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
 /// The rect a window of `width` x `height` is created at when this process is off-screen: CEF
 /// places a window whose initial bounds are empty at (0, 0), so the window must say where it starts.
 pub fn initial_rect(width: i32, height: i32) -> Option<(i32, i32, i32, i32)> {
-    active().then_some((ORIGIN, ORIGIN, width, height))
+    active().then_some((ORIGIN.0, ORIGIN.1, width, height))
 }
 
 /// Log [`start_line`] for `process`, if there is one.
@@ -69,7 +69,7 @@ pub fn log_start(process: &str) {
 pub fn start_line(process: &str) -> Option<String> {
     let value = std::env::var(ENV).ok().filter(|v| !v.trim().is_empty())?;
     Some(if active() {
-        format!("{process}: test window mode: every window is created off-screen at ({ORIGIN}, {ORIGIN}) and its place is not saved")
+        format!("{process}: test window mode: every window is created off-screen at ({}, {}) and its place is not saved", ORIGIN.0, ORIGIN.1)
     } else {
         format!("{process}: {ENV}={value} ignored: only a dev or local build runs off-screen")
     })
@@ -111,7 +111,9 @@ mod tests {
 
     #[test]
     fn the_corner_is_far_outside_any_display() {
-        // Wider than 8K, so no arrangement of displays reaches it.
-        assert!(ORIGIN <= -16000);
+        // Higher than any arrangement of displays reaches.
+        assert!(ORIGIN.1 <= -16000);
+        // And not under the host's pool threshold, which reads such a window as a spare one.
+        assert!(ORIGIN.0 > -20000);
     }
 }

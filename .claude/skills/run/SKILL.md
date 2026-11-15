@@ -186,7 +186,7 @@ scripts/offscreen-check.sh <launcher> <host>   # refuses (exit 1) a build from b
 AGENTMUX_TEST_OFFSCREEN=1 task dev             # or the same variable before a packaged build's launcher
 ```
 
-- Every window of the instance is created at (-32000, -32000): the first one, new and torn-off ones, pooled
+- Every window of the instance is created at (0, -32000), far above every display: the first one, new and torn-off ones, pooled
   and floating ones, and the splash is off. Nothing saves that place as the person's window position, and the
   launcher does not move the window back. Screenshots and the Browser and UI tools work on the page as on any
   window (they read the page, not the screen).
