@@ -161,7 +161,7 @@ describe("openAgentInActiveTab", () => {
                 const note = pushNotification.mock.calls[0][0];
                 expect(note.type).toBe("info");
                 expect(note.icon).not.toContain("exclamation");
-                expect(note.message).toBe("Ada is open. Its tab is still loading, and it will show when the window is ready.");
+                expect(note.message).toBe("Ada is open, but its tab was too slow to show it. Click it again to bring it to the front.");
                 expect(note.expiration).toBeGreaterThan(Date.now());
                 expect(note.expiration).toBeLessThanOrEqual(Date.now() + 10_000);
             }

@@ -67,11 +67,10 @@ export async function openAgentInActiveTab(
     }
 }
 
-/** What reopening a parked agent reads and does; `open` is agent.open for this agent in the given tab. */
 /** How long the notice for a pane that is open and not yet shown stays. */
 const SLOW_SHOW_NOTICE_MS = 8000;
 
-/** One neutral, temporary notice: the pane is open, and the window is slow to show it. Not an error. */
+/** One neutral, temporary notice: the pane is open, and the window was too slow to show it. Not an error. */
 function noteSlowShow(name: string): void {
     pushNotification({
         id: `slow-show:${name}`,
@@ -84,6 +83,7 @@ function noteSlowShow(name: string): void {
     });
 }
 
+/** What reopening a parked agent reads and does; `open` is agent.open for this agent in the given tab. */
 const parkedDeps = (open: (tabId: string) => Promise<unknown>, name: string): ParkedReopenDeps => ({
     // A parked agent's block is the one this window is least likely to have: load it rather than read an empty cache.
     blockMeta: async (blockId) => {
@@ -115,7 +115,8 @@ const parkedDeps = (open: (tabId: string) => Promise<unknown>, name: string): Pa
         // A newer reveal took over: it shows the pane, and says why itself when it cannot.
         if (result.reason === "superseded") return { ok: false, superseded: true };
         // The attach worked, so the pane is back; the reveal only ran out of time waiting for a slow window. Not a
-        // failure of the open, and not an error on anyone's row: one neutral notice, and the pane shows when it can.
+        // failure of the open, and not an error on anyone's row: one neutral notice. No reveal stays pending after
+        // the deadline, so the notice does not promise the pane will show by itself.
         if (isSlowShow(result)) {
             noteSlowShow(name);
             return { ok: true };

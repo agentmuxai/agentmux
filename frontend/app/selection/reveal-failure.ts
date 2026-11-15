@@ -56,5 +56,5 @@ export function isSlowShow(result: SelectionResult): boolean {
 
 /** The neutral notice for a pane that is open and not yet shown because the window is slow. */
 export function slowShowText(name: string): string {
-    return `${name} is open. Its tab is still loading, and it will show when the window is ready.`;
+    return `${name} is open, but its tab was too slow to show it. Click it again to bring it to the front.`;
 }
