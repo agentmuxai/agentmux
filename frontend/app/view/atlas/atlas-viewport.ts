@@ -62,9 +62,22 @@ export function localPoint(
     rect: { left: number; top: number; width: number; height: number },
     own: { w: number; h: number }
 ): { x: number; y: number } {
-    const sx = own.w > 0 && rect.width > 0 ? rect.width / own.w : 1;
-    const sy = own.h > 0 && rect.height > 0 ? rect.height / own.h : 1;
+    const { sx, sy } = pointerScale(rect, own);
     return { x: (clientX - rect.left) / sx, y: (clientY - rect.top) / sy };
+}
+
+/**
+ * How many screen pixels one of the map's own pixels is: 1 in a pane at its normal zoom, the pane zoom in one the
+ * person zoomed. A pointer's travel on screen is divided by this to be the map's travel.
+ */
+export function pointerScale(
+    rect: { width: number; height: number },
+    own: { w: number; h: number }
+): { sx: number; sy: number } {
+    return {
+        sx: own.w > 0 && rect.width > 0 ? rect.width / own.w : 1,
+        sy: own.h > 0 && rect.height > 0 ? rect.height / own.h : 1,
+    };
 }
 
 /**
