@@ -23,6 +23,12 @@ fn a_stub_says_what_the_block_said_before_and_that_it_is_a_stub() {
 }
 
 #[test]
+fn a_stub_costs_nothing_whatever_the_block_cost_before() {
+    let r = replay(&[("ask", json!({ "response": "ok", "cost_usd": 1.25 }))]);
+    assert_eq!(r.stub("ask"), json!({ "response": "ok", "stubbed": true }));
+}
+
+#[test]
 fn a_block_that_said_nothing_before_says_only_that_it_was_stubbed() {
     assert_eq!(replay(&[]).stub("send"), json!({ "stubbed": true }));
     assert_eq!(replay(&[("n", json!(7))]).stub("n"), json!({ "stubbed": true, "value": 7 }));

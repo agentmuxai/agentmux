@@ -118,3 +118,15 @@ async fn a_replay_taken_up_after_a_restart_is_still_a_replay() {
     // A run that is not a replay has none.
     assert!(replay_for(&state, &load(&state.mstore.drone_checkpoints_for(&first).unwrap()).unwrap().unwrap()).unwrap().is_none());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_is_found_by_its_id_however_many_runs_came_after_it() {
+    let state = crate::server::tests::test_state();
+    let drone = saved(&state);
+    for i in 0..1_100 {
+        let row = DroneRun { id: format!("r{i}"), drone_id: drone.id.clone(), status: "done".into(), started_at: i, ended_at: i, block_states: Default::default(), output: String::new(), error: String::new() };
+        state.mstore.drone_run_insert(&row).unwrap();
+    }
+    assert_eq!(state.mstore.drone_run_get("r0").unwrap().map(|r| r.started_at), Some(0), "the oldest of 1,100");
+    assert!(state.mstore.drone_run_get("nope").unwrap().is_none());
+}

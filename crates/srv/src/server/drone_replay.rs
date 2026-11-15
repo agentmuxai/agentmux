@@ -77,10 +77,8 @@ pub(crate) async fn replay_drone_run(state: &AppState, cmd: ReplayRunReq) -> Res
     let drone_id = at.drone_id.clone();
     let row = state
         .mstore
-        .drone_runs_for(&drone_id, 1_000)
+        .drone_run_get(&cmd.run_id)
         .map_err(|e| why(e.to_string()))?
-        .into_iter()
-        .find(|r| r.id == cmd.run_id)
         .ok_or_else(|| why(format!("there is no run {} of drone {drone_id}", cmd.run_id)))?;
     ended(&row).map_err(why)?;
     let graph = graph_of(state, &drone_id, &at.graph).map_err(|e| why(format!("the graph it ran on is not available: {e}")))?;

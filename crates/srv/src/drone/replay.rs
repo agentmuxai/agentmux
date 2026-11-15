@@ -25,13 +25,15 @@ pub struct Replay {
 }
 
 impl Replay {
-    /// What a stubbed block says: what it said in the run replayed, marked `stubbed`; a block
-    /// that said nothing there (it had not run, or failed) says only that it was stubbed.
+    /// What a stubbed block says: what it said in the run replayed, marked `stubbed`, without what
+    /// it cost there (nothing ran, so the replay spends nothing); a block that said nothing there
+    /// (it had not run, or failed) says only that it was stubbed.
     pub fn stub(&self, block_id: &str) -> Value {
         match self.original.get(block_id) {
             Some(Value::Object(said)) => {
                 let mut said = said.clone();
                 said.remove("history");
+                said.remove("cost_usd");
                 said.insert("stubbed".to_string(), json!(true));
                 Value::Object(said)
             }

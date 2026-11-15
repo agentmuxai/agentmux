@@ -66,6 +66,8 @@ pub trait DroneStore {
         drone_id: &str,
         limit: i64,
     ) -> Result<Vec<DroneRun>, StoreError>;
+    /// One run by its id, whatever its age.
+    fn drone_run_get(&self, run_id: &str) -> Result<Option<DroneRun>, StoreError>;
     /// Delete every run of `drone_id` from this store. Runs live in the
     /// version's `objects.db` and definitions in the shared store, so no FK
     /// cascades a definition's delete to its runs (m0038); the delete handler
@@ -276,6 +278,28 @@ impl DroneStore for Store {
             ),
             args.as_slice(),
         )?)
+    }
+
+    fn drone_run_get(&self, run_id: &str) -> Result<Option<DroneRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, drone_id, status, started_at, ended_at, block_states, output, error
+             FROM db_drone_runs WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![run_id], |row| {
+            let block_states_s: String = row.get(5)?;
+            Ok(DroneRun {
+                id: row.get(0)?,
+                drone_id: row.get(1)?,
+                status: row.get(2)?,
+                started_at: row.get(3)?,
+                ended_at: row.get(4)?,
+                block_states: serde_json::from_str(&block_states_s).unwrap_or_default(),
+                output: row.get(6)?,
+                error: row.get(7)?,
+            })
+        })?;
+        rows.next().transpose().map_err(Into::into)
     }
 
     fn drone_runs_running(&self) -> Result<Vec<DroneRun>, StoreError> {
