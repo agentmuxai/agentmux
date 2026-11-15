@@ -52,7 +52,7 @@ describe("LanPeerList", () => {
         fireEvent.click(screen.getByRole("button", { name: /charlie/ }));
         expect(screen.getByText("203.0.113.30:4100")).toBeTruthy();
         expect(screen.getByText("Linux")).toBeTruthy();
-        expect(screen.getByTestId("lan-peer-data-channel").textContent).toBe("Data instable");
+        expect(screen.getByTestId("lan-peer-data-channel").textContent).toBe("Channelstable");
         expect(screen.getByText(/42 sec\. ago/)).toBeTruthy();
     });
 
@@ -62,7 +62,7 @@ describe("LanPeerList", () => {
         render(() => <LanPeerList peers={[upgraded]} />);
         fireEvent.click(screen.getByRole("button", { name: /charlie/ }));
         expect(screen.getByText("Linux · release · AppImage")).toBeTruthy();
-        expect(screen.getByTestId("lan-peer-data-channel").textContent).toBe("Data inlocal-main-b28b7a-0000000a");
+        expect(screen.getByTestId("lan-peer-data-channel").textContent).toBe("Channellocal-main-b28b7a-0000000a");
         expect(screen.queryByText(/local build/)).toBeNull();
     });
 
