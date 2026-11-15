@@ -63,8 +63,8 @@ pub fn prune_stale_integration_dirs(
         }
         match std::fs::read_to_string(path.join(INSTANCE_MARKER)) {
             Ok(recorded) => {
-                let recorded = recorded.trim();
-                if !recorded.is_empty() && definitely_gone(Path::new(recorded)) {
+                // Verbatim: a data dir's name may end in whitespace, and `stamp_instance` writes no newline.
+                if !recorded.is_empty() && definitely_gone(Path::new(&recorded)) {
                     match std::fs::remove_dir_all(&path) {
                         Ok(()) => report.removed += 1,
                         Err(e) => tracing::debug!("shell integration: could not remove {}: {}", path.display(), e),
@@ -137,6 +137,20 @@ mod tests {
         let report = prune_stale_integration_dirs(&root, &current, &[]);
         assert_eq!(report.removed, 1);
         assert!(!matched.exists() && unknown.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_data_dir_whose_name_ends_in_whitespace_is_still_found_alive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("shell");
+        let data = tmp.path().join("data ");
+        std::fs::create_dir_all(&data).unwrap();
+        let live = folder(&root, "aaaaaaaaaaaaaaaa");
+        stamp_instance(&live, &data);
+        let report = prune_stale_integration_dirs(&root, &root.join("cccccccccccccccc"), &[]);
+        assert_eq!(report, PruneReport::default());
+        assert!(live.exists());
     }
 
     #[test]
