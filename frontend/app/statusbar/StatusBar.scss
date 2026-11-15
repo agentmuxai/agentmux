@@ -590,3 +590,13 @@
         color: var(--error-text-color);
     }
 }
+
+// The last-sound item changes its text with every sound and every second ("4s ago"). A width that follows the text
+// resizes the bar's right part each time, and each resize fits the bar again, which lays the page out.
+.status-bar-item.status-last-sound {
+    width: 26ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
