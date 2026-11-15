@@ -324,6 +324,8 @@ import type { EnsureProviderAuthDirResult } from "@/types/rpc/EnsureProviderAuth
 import type { ExportAgentDefinitionsResult } from "@/types/rpc/ExportAgentDefinitionsResult";
 import type { FileProbeReq } from "@/types/rpc/FileProbeReq";
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
+import type { FileSearchBytesReq } from "@/types/rpc/FileSearchBytesReq";
+import type { FileSearchBytesResult } from "@/types/rpc/FileSearchBytesResult";
 import type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 import type { FleetGroup } from "@/types/rpc/FleetGroup";
 import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
@@ -2375,6 +2377,10 @@ export const GeneratedApi = {
   // command "fileprobe"
   FileProbeCommand(client: RpcClient, data: FileProbeReq, opts?: RpcOpts): Promise<FileProbeResult> {
     return client.rpcCall("fileprobe", data, opts);
+  },
+  // command "filesearchbytes"
+  FileSearchBytesCommand(client: RpcClient, data: FileSearchBytesReq, opts?: RpcOpts): Promise<FileSearchBytesResult> {
+    return client.rpcCall("filesearchbytes", data, opts);
   },
   // command "readeditorfile"
   ReadEditorFileCommand(

@@ -242,3 +242,42 @@ pub struct FileProbeResult {
     pub binary_reason: Option<String>,
     pub read_only: bool,
 }
+
+/// Request for `filesearchbytes`: the next match of a byte pattern in a file,
+/// read on srv so a file bigger than memory can be searched.
+/// docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.5.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FileSearchBytesReq {
+    pub path: String,
+    /// Hex bytes, `??` for any byte: "DE AD ?? EF" (spaces optional). 1 to 256
+    /// bytes, with at least one that is not `??`.
+    pub pattern: String,
+    /// Forward: the first match that starts at or after this offset.
+    /// Backward: the last match that starts at or before it.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub from: u64,
+    #[serde(default)]
+    pub backward: bool,
+}
+
+/// Response for `filesearchbytes`. A search is bounded in work per call: when
+/// it neither found a match nor reached the end of the file, `done` is false
+/// and the search goes on from `next_from`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FileSearchBytesResult {
+    pub found: bool,
+    /// Where the match starts (0 when not found).
+    #[ts(type = "number")]
+    pub offset: u64,
+    /// The pattern's length in bytes.
+    #[ts(type = "number")]
+    pub length: u64,
+    /// The search reached the end of the file (the start, going backward).
+    pub done: bool,
+    /// Where to go on from when not found and not done.
+    #[ts(type = "number")]
+    pub next_from: u64,
+}

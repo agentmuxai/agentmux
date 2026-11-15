@@ -1248,6 +1248,10 @@
             "method": "FileProbeCommand"
         },
         {
+            "command": "filesearchbytes",
+            "method": "FileSearchBytesCommand"
+        },
+        {
             "command": "readeditorfile",
             "method": "ReadEditorFileCommand"
         },

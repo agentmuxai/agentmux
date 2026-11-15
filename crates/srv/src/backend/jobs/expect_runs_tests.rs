@@ -185,3 +185,44 @@ async fn a_gap_that_lasts_past_the_weekly_sweep_does_not_start_a_second_run() {
     assert_eq!(expect::expect_due(&rig.sched, &all, &check, &mut state, t0 + 8 * day).await, 0, "the week's sweep did not take the gap's id");
     assert_eq!(rig.runs("j-week").len(), 1);
 }
+
+/// Keeping a days-old gap's id through the sweep is not an event the job admitted this hour: with a limit of one an
+/// hour, a new gap after the job recovered still starts its run.
+#[tokio::test(flavor = "multi_thread")]
+async fn keeping_an_old_gap_does_not_use_up_the_hourly_limit_of_the_next_gap() {
+    let rig = rig();
+    let ledger_for_runs = rig.ledger.clone();
+    rig.sched.install_actions(Arc::new(move |_, run_id| {
+        ledger_for_runs.drone_attached(&run_id, &format!("dr-{run_id}"), &Value::Null, agentmux_common::time::now_ms());
+        ledger_for_runs.drone_finished(&run_id, true, &Default::default(), "");
+        Box::pin(async { ActionOutcome::Drone })
+    }));
+    let mut job = test_job("j-hour", "", "", "", "");
+    job.created_by = BY_OPERATOR.to_string();
+    job.trigger_kind = trigger_kind::EVENT.to_string();
+    job.trigger_event = json!({ "source": "expect", "filter": { "job": "nightly", "within_minutes": 60, "every_minutes": 5 }, "max_per_hour": 1 });
+    job.action_kind = "drone".to_string();
+    job.action = json!({ "kind": "drone", "drone_id": "d-1" });
+    rig.store.cron_create(&job).unwrap();
+    let reply = Arc::new(Mutex::new(json!({ "found": true, "count": 0, "runs": [], "last_ok": null })));
+    let check = fake(&reply, &Arc::default());
+    let all = [job];
+    let mut state = ExpectState::default();
+    let t0 = agentmux_common::time::now_ms();
+    let at = |min: i64| t0 + min * MIN;
+
+    assert_eq!(expect::expect_due(&rig.sched, &all, &check, &mut state, at(0)).await, 1, "the gap");
+    // That gap was heard three days ago, as if the watched job had been down since.
+    rig.store
+        .conn()
+        .lock()
+        .unwrap()
+        .execute("UPDATE db_job_trigger_events SET at_ms = ?1 WHERE job_id = 'j-hour'", [t0 - 3 * 24 * 60 * MIN])
+        .unwrap();
+    assert_eq!(expect::expect_due(&rig.sched, &all, &check, &mut state, at(5)).await, 0, "the same gap, looked at again and kept");
+
+    *reply.lock().unwrap() = json!({ "found": true, "count": 1, "runs": [{ "id": "r1", "state": "finished", "outcome": "ok", "started_ms": at(6), "ended_ms": at(7) }] });
+    assert_eq!(expect::expect_due(&rig.sched, &all, &check, &mut state, at(10)).await, 0, "the job recovered");
+    assert_eq!(expect::expect_due(&rig.sched, &all, &check, &mut state, at(70)).await, 1, "a new gap within the hour of the look is admitted");
+    assert_eq!(rig.runs("j-hour").iter().filter(|r| r.state != "skipped").count(), 2);
+}

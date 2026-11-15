@@ -19,10 +19,13 @@ import { forgetHexMemory } from "./hex-viewer-state";
 const fetchMediaRange = vi.hoisted(() => vi.fn());
 const writeText = vi.hoisted(() => vi.fn(async (_text: string) => {}));
 const pushNotification = vi.hoisted(() => vi.fn());
+const searchBytes = vi.hoisted(() => vi.fn());
 
 vi.mock("@/app/element/local-media", async (actual) => ({ ...(await actual<object>()), fetchMediaRange }));
 vi.mock("@/util/clipboard", () => ({ writeText }));
 vi.mock("@/app/store/global", () => ({ pushNotification }));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { FileSearchBytesCommand: searchBytes } }));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 /** 200,000 bytes: byte n is n mod 251, so every offset's byte is known. */
 const FILE = Uint8Array.from({ length: 200_000 }, (_, i) => i % 251);
@@ -69,6 +72,7 @@ describe("the hex viewer", () => {
         forgetHexMemory();
         fetchMediaRange.mockReset();
         writeText.mockClear();
+        searchBytes.mockReset();
         pushNotification.mockClear();
         serve(FILE);
         // A view ten rows tall under the header row.
@@ -359,6 +363,49 @@ describe("the hex viewer", () => {
         const down = new WheelEvent("wheel", { deltaX: 0, deltaY: 40, bubbles: true, cancelable: true });
         grid().dispatchEvent(down);
         expect(down.defaultPrevented).toBe(true);
+    });
+
+    it("finds a pattern on srv from just past the selection, selects the match, and goes on from it", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        const box = screen.getByLabelText("Find in the file", { selector: "input" }) as HTMLInputElement;
+        expect(document.activeElement).toBe(box);
+        searchBytes.mockResolvedValue({ found: true, offset: 0x41, length: 3, done: false, next_from: 0 });
+        fireEvent.input(box, { target: { value: "41 ?? 43" } });
+        fireEvent.keyDown(box, { key: "Enter" });
+        await settle();
+        expect(searchBytes).toHaveBeenLastCalledWith({}, { path: "C:/bin/a.bin", pattern: "41 ?? 43", from: 1, backward: false });
+        expect(selected()).toEqual([0x41, 0x42, 0x43]);
+        expect(document.querySelector(".hex-find-status")!.textContent).toContain("Found at 0x41");
+        // The next one starts past the selection; the previous one, before it.
+        searchBytes.mockResolvedValue({ found: true, offset: 0x300, length: 3, done: false, next_from: 0 });
+        fireEvent.keyDown(box, { key: "Enter" });
+        await settle();
+        expect(searchBytes).toHaveBeenLastCalledWith({}, { path: "C:/bin/a.bin", pattern: "41 ?? 43", from: 0x44, backward: false });
+        fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
+        await settle();
+        expect(searchBytes).toHaveBeenLastCalledWith({}, { path: "C:/bin/a.bin", pattern: "41 ?? 43", from: 0x2ff, backward: true });
+    });
+
+    it("says there is no match, refuses a pattern it cannot read without asking srv, and closes on Escape", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        const box = screen.getByLabelText("Find in the file", { selector: "input" }) as HTMLInputElement;
+        fireEvent.input(box, { target: { value: "DEA" } });
+        fireEvent.keyDown(box, { key: "Enter" });
+        await settle();
+        expect(searchBytes).not.toHaveBeenCalled();
+        expect(document.querySelector(".hex-find-error")!.textContent).toContain("Whole bytes");
+        searchBytes.mockResolvedValue({ found: false, offset: 0, length: 2, done: true, next_from: 0 });
+        fireEvent.input(box, { target: { value: "FE FE" } });
+        fireEvent.keyDown(box, { key: "Enter" });
+        await settle();
+        expect(document.querySelector(".hex-find-status")!.textContent).toBe("No match");
+        fireEvent.keyDown(box, { key: "Escape" });
+        expect(screen.queryByRole("search")).toBeNull();
+        expect(document.activeElement).toBe(grid());
     });
 
     it("goes to an offset from a toolbar button's focus too", async () => {

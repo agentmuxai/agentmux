@@ -7,7 +7,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} as Record<string, unknown> }));
 
 import { RpcApi } from "@/app/store/rpc-api";
-import { __resetOpenTailForTests, readOpenTail, startsAtTurn, usableOpenTail, type OpenTailResult } from "./open-tail";
+import { __resetOpenTailForTests, COUNT_GIVE_UP_MS, COUNT_POLL_MS, readOpenTail, startsAtTurn, usableOpenTail, type OpenTailResult } from "./open-tail";
 
 const good = (over: Partial<OpenTailResult> = {}): OpenTailResult => ({
     lines: ["a", "b", "c"],
@@ -88,6 +88,45 @@ describe("readOpenTail", () => {
         expect(await readOpenTail(REQ, { call })).toBeNull();
         expect(await readOpenTail(REQ, { call })).not.toBeNull();
         expect(call).toHaveBeenCalledTimes(2);
+    });
+
+    it("asks again while srv counts the transcript, and returns the answer once it has line positions", async () => {
+        const counting: OpenTailResult = { lines: [], counting: true, size: 3_000_000_000 };
+        const call = vi.fn().mockResolvedValueOnce(counting).mockResolvedValueOnce(counting).mockResolvedValueOnce(good());
+        const sleep = vi.fn().mockResolvedValue(undefined);
+        expect(await readOpenTail(REQ, { call, sleep })).toMatchObject({ end_line: 10 });
+        expect(call).toHaveBeenCalledTimes(3);
+        expect(sleep).toHaveBeenCalledTimes(2);
+        expect(sleep).toHaveBeenCalledWith(COUNT_POLL_MS);
+    });
+
+    it("stops asking when the pane is gone", async () => {
+        const call = vi.fn().mockResolvedValue({ lines: [], counting: true });
+        let gone = false;
+        const sleep = vi.fn(async () => {
+            gone = true;
+        });
+        expect(await readOpenTail(REQ, { call, sleep, stopped: () => gone })).toBeNull();
+        expect(call).toHaveBeenCalledTimes(1);
+    });
+
+    it("gives up after two minutes of counting, so the pane opens the usual way", async () => {
+        const call = vi.fn().mockResolvedValue({ lines: [], counting: true });
+        let t = 0;
+        const sleep = vi.fn(async (ms: number) => {
+            t += ms;
+        });
+        expect(await readOpenTail(REQ, { call, sleep, now: () => t })).toBeNull();
+        expect(t).toBeGreaterThanOrEqual(COUNT_GIVE_UP_MS);
+        expect(call.mock.calls.length).toBeLessThanOrEqual(COUNT_GIVE_UP_MS / COUNT_POLL_MS + 2);
+    });
+
+    it("does not wait for an answer that is not counting and has no positions", async () => {
+        const call = vi.fn().mockResolvedValue({ lines: [], size: 5 });
+        const sleep = vi.fn();
+        expect(await readOpenTail(REQ, { call, sleep })).toBeNull();
+        expect(call).toHaveBeenCalledTimes(1);
+        expect(sleep).not.toHaveBeenCalled();
     });
 
     it("stops asking once srv says it doesn't know the command", async () => {
