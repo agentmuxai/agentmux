@@ -51,12 +51,21 @@ impl<'a> Scheduler<'a> {
         let (at, event) = match &wait {
             Wait::For(ms) => (Some(restored_at.unwrap_or(now.saturating_add(*ms))), None),
             Wait::Until(at) => (Some(*at), None),
+            // The limit passed while AgentMux was stopped: the key is not opened again, so an event that
+            // is sent again now cannot end a wait that is already over.
+            Wait::On(_) if timeout_at.is_some_and(|t| t <= now) => return timed_out(),
             Wait::On(label) => {
                 let key = restored_key.unwrap_or_else(drone_wait::new_key);
                 let rx = drone_wait::open(&key);
                 (None, Some((label.clone(), key, rx)))
             }
         };
+        // A timed wait whose limit came first and is already past fails the same way, before it says it waits.
+        if let (Some(at), Some(t)) = (at, timeout_at) {
+            if t < at && t <= now {
+                return timed_out();
+            }
+        }
         let _open = event.as_ref().map(|(_, key, _)| OpenKey(key.clone()));
         if let Some(at) = at {
             self.deadlines.insert(id.to_string(), at);
@@ -98,8 +107,9 @@ impl<'a> Scheduler<'a> {
         let Some((label, _, rx)) = event else { return Err("the wait has nothing to wait for".to_string()) };
         let payload = match until_timeout() {
             Some(t) => tokio::select! {
-                payload = rx => payload,
+                biased;
                 () = tokio::time::sleep(std::time::Duration::from_millis(t)) => return timed_out(),
+                payload = rx => payload,
             },
             None => rx.await,
         }
