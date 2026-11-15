@@ -171,8 +171,6 @@ pub(super) async fn execute(
 /// Take up a run from its newest checkpoint, `c`, and run it to its end: the
 /// blocks that were finished stay finished and what they said is what the rest
 /// read. `graph` must be the graph the checkpoint was written on.
-// Called when AgentMux starts and finds runs left running (the next change).
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) async fn resume(
     (graph, c, limits): (&DroneGraph, &Checkpoint, Limits),
     tx: &mpsc::UnboundedSender<RunEvent>,

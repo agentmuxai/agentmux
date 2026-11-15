@@ -228,7 +228,7 @@ fn insert_run_placeholder(state: &AppState, run_id: &str, drone_id: &str, starte
 
 /// Drain a run's events on a background task; on completion, UPDATE the
 /// placeholder row in place and close the run ledger's row.
-fn spawn_run_drain(
+pub(crate) fn spawn_run_drain(
     state: &AppState,
     mut handle: crate::drone::executor::engine::RunHandle,
     drone_id: String,
