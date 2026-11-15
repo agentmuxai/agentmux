@@ -217,6 +217,18 @@ describe("layoutAtlas for a pane", () => {
         wide: { w: 1600, h: 700 },
     };
 
+    it("lays out an empty fleet and one with only the services, in a pane, without throwing", () => {
+        const pane = panes.tall;
+        expect(layoutAtlas(buildAtlasGraph([], []), pane)).toMatchObject({ width: 0, height: 0 });
+        const services: AtlasExtras = {
+            orphans: [],
+            services: [{ key: "service:ci", name: "CI", icon: "circle-check", state: "ok", sub: "", lines: [] }],
+        };
+        const l = layoutAtlas(buildAtlasGraph([], [], services), pane);
+        expect(l.regions.map((r) => r.key)).toEqual([SERVICES_REGION]);
+        expect(l.nodes.has("service:ci")).toBe(true);
+    });
+
     it("fills a tall, a square and a wide pane with cards a person can read", () => {
         const g = fleet();
         for (const [name, pane] of Object.entries(panes)) {

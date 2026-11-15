@@ -269,7 +269,9 @@ export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape): AtlasLayout {
     const candidates: AtlasLayout[] = [];
     for (const cols of GRID_COLS_CHOICES) {
         const { slots, services } = build(cols);
-        for (const wrapW of wrapWidths(slots)) candidates.push(shelfPack(slots, services, wrapW));
+        // With no machine box (an empty or not-yet-loaded fleet, or only the services) there is no width to choose.
+        const wraps = slots.length > 0 ? wrapWidths(slots) : [ROW_MAX_W];
+        for (const wrapW of wraps) candidates.push(shelfPack(slots, services, wrapW));
     }
     return pickBest(candidates, pane);
 }

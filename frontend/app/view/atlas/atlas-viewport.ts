@@ -80,8 +80,9 @@ export function pointerScale(
 }
 
 /**
- * The view that shows a `width` by `height` map whole in a `w` by `h` pane, no larger than life size, from the
- * top left: the map does not move about as agents come and go and it grows.
+ * The view that shows a `width` by `height` map whole in a `w` by `h` pane, from the top left: the map does not
+ * move about as agents come and go and it grows. It is no larger than `limits.max` (life size when absent) and no
+ * smaller than `limits.min` (a readable floor, where the map then overflows the pane the long way).
  */
 export function fitView(
     width: number,
