@@ -182,6 +182,28 @@ The nextest step itself no longer costs 40 silent minutes when a runner stalls: 
 and swap are both nearly gone (the runner starves and cannot even stream its log), limits an attempt to 25 minutes (12
 in the queue) and retries a stalled attempt once.
 
+### R9 — The production frontend build runs on a PR unless only Rust files changed (added 2026-11-15)
+
+No PR job built the frontend; only the release and nightly packaging did. `tsc` and vitest read past what only the
+bundler rejects, so on 2026-11-15 a source file with a byte that is not UTF-8 passed every PR check and broke the
+Linux packaging on main. The UTF-8 gate closes that one cause; this closes the class.
+
+The frontend job's second leg now runs the build the packaging runs (`scripts/vite-build.sh --mode production`,
+`VITE_PLATFORM=linux`) as a step after vitest. A step and not a job: the checkout and `npm ci` are already paid for
+there, and that leg is the shorter of the two, so the lane takes no longer. The crates' licence list (`cargo
+metadata`, in the notices plugin) is left out with `AGENTMUX_NOTICES_SKIP_RUST`, since that runner has neither the
+toolchain nor the crates; a release build still fails without the list.
+
+`classifyChanges` sets `frontend_build` false only when every non-documentation file is one of `BUILD_NEVER_READS`:
+`crates/`, the Cargo manifests and lock file, the toolchain pin, `.cargo/` and the nextest config. Any other file
+runs the build, whether or not a list names it (the frontend, the vite and ts configs, the scripts the vite config
+imports, the npm manifests, `schema/`, `licenses/`, a workflow), and so does missing or malformed input (R2). A test
+scans what the build bundles for a path that reaches into `crates/`. The merge queue and a push to main run it.
+
+It needs no change to the branch protection. A failing step fails the frontend job, which `CI required` reads (R5's
+aggregate). Where the step does not run it is skipped inside a job that reports as usual, so no check is left
+pending.
+
 ## 3. Design
 
 ```

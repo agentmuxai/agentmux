@@ -140,6 +140,8 @@ jobs:
     outputs:
       rust: ${{ steps.classify.outputs.rust }}
       frontend: ${{ steps.classify.outputs.frontend }}
+      # Whether the frontend job also runs the production build (the classifier's R9).
+      frontend_build: ${{ steps.classify.outputs.frontend_build }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       docs_index: ${{ steps.classify.outputs.docs_index }}
       version_only: ${{ steps.classify.outputs.version_only }}
@@ -171,7 +173,7 @@ jobs:
         # whole design exists to prevent.
         run: |
           run_everything() {
-            printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\nversion_only=false\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\n' >> "$GITHUB_OUTPUT"
             echo "::notice::running all checks — $1"
           }
 
@@ -182,7 +184,7 @@ jobs:
           # vitest). The rest of the Rust tests ran on each PR and run again on the push
           # to main.
           if [ "${{ github.event_name }}" = "merge_group" ]; then
-            printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\nversion_only=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
             printf 'rust_os=["ubuntu-latest"]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
             echo "::notice::merge queue: fast gates and the tests that read the tree"
             exit 0
@@ -1230,7 +1232,31 @@ jobs:
       # Also in the merge queue: a vitest test can read the source tree or the installed packages (the
       # i18n and colour ratchets, Shiki's bundle), so it can fail on two PRs that each passed it alone.
       - name: vitest run
+        id: vitest
         run: npx vitest run --shard=${{ matrix.shard }}/2
+      # The production build the packaging runs (Taskfile.yml `build:frontend`, on Linux). tsc and vitest read past
+      # what only the bundler rejects: on 2026-11-15 a byte that is not UTF-8 in one source file passed every PR
+      # check and broke the Linux packaging on main. No PR job built the frontend; only the release and nightly
+      # packaging did. One build, on Linux, as a step of this leg and not a job of its own: the checkout and
+      # `npm ci` are already paid for here, and this leg is the shorter of the two, so the lane takes no longer.
+      #
+      # It runs unless the PR changes only Rust files and documentation (the classifier's R9, which fails toward
+      # running), and in the merge queue and on a push to main, as the rest of this job does. It also runs when
+      # vitest above failed, so one push shows both failures; not when an earlier step did, or on a cancel.
+      #
+      # The crates' licence list is left out (AGENTMUX_NOTICES_SKIP_RUST): it is `cargo metadata`, which on this
+      # runner would fetch the toolchain and every crate to prove nothing about the bundle. With no
+      # RELEASE_CHANNEL the notices plugin warns about that and the build goes on; a release build fails on it.
+      #
+      # Required with no change to the branch protection: a failing step fails this job, which `CI required`
+      # reads. Where it does not run, the step is skipped inside a job that reports as usual, so no check is
+      # left pending.
+      - name: production frontend build (vite, linux)
+        if: ${{ (success() || steps.vitest.outcome == 'failure') && matrix.shard == 2 && needs.changes.outputs.frontend_build != 'false' }}
+        env:
+          VITE_PLATFORM: linux
+          AGENTMUX_NOTICES_SKIP_RUST: "1"
+        run: bash scripts/vite-build.sh --mode production --config vite.config.ts
 
   # Single context for branch protection to point at, instead of pinning
   # `rust` and `frontend` individually. #3506: `rust` is a matrix job, and a
