@@ -35,6 +35,14 @@ on:
         description: 'EXPERIMENT: measure B with the frontend folder of A (all) or only its stylesheet (css), to place a change in the frontend or behind it'
         required: false
         default: ''
+      a-frontend-build-ref:
+        description: 'EXPERIMENT: commit whose frontend is built here and put in A (blank: A keeps its own)'
+        required: false
+        default: ''
+      b-frontend-build-ref:
+        description: 'EXPERIMENT: commit whose frontend is built here and put in B (blank: B keeps its own)'
+        required: false
+        default: ''
       runs:
         description: 'Runs of the lab per side (the nightly does 4)'
         required: false
@@ -149,6 +157,27 @@ jobs:
             *) echo "::error::b-frontend-from-a is all or css"; exit 1 ;;
           esac
           echo "B now has A's frontend ($SWAP)"
+
+      - name: Build a frontend at a given commit into A and/or B (experiment, only when asked)
+        if: ${{ inputs.a-frontend-build-ref != '' || inputs.b-frontend-build-ref != '' }}
+        shell: bash
+        env:
+          A_REF: ${{ inputs.a-frontend-build-ref }}
+          B_REF: ${{ inputs.b-frontend-build-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          put() {
+            local side=$1 ref=$2
+            [ -z "$ref" ] && return 0
+            git fetch --depth=1 origin "$ref"
+            git worktree add "fe-$side" "$ref"
+            (cd "fe-$side" && npm ci --ignore-scripts && bash scripts/vite-build.sh --mode production --config vite.config.ts)
+            dest=$(dirname "$(find "portable-$side" -name index.html -path '*frontend*' | head -n 1)")
+            rm -rf "$dest" && cp -r "fe-$side/dist/frontend" "$dest"
+            echo "$side now has the frontend built at $ref: $(ls "$dest/assets" | wc -l) assets"
+          }
+          put a "$A_REF"
+          put b "$B_REF"
 
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@v2
