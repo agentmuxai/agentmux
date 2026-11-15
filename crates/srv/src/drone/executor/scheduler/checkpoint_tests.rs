@@ -653,3 +653,73 @@ async fn a_wait_set_wrongly_is_refused_before_the_run_starts_and_a_limit_ends_an
     let limited = run_kept(waiting(json!({ "on": "never", "timeout_seconds": 1 }), "x"), Value::Null).await;
     assert!(limited.result.unwrap_err().contains("block wait failed: timed out after 1 seconds"));
 }
+
+/// The run at its wait, stopped there: what it has kept is what a restart would find.
+async fn stopped_at_its_wait(graph: &DroneGraph) -> Checkpoint {
+    let sink = Arc::new(MemorySink::default());
+    let mut handle = run_drone("d".to_string(), graph.clone(), Value::Null, (None, Some(Persist { sink: sink.clone(), graph: graph_ref() }))).await.unwrap();
+    while let Some(ev) = handle.events.recv().await {
+        if matches!(ev, RunEvent::Waiting { .. }) {
+            break;
+        }
+    }
+    assert!(crate::backend::drone_cancel::cancel_run(&handle.run_id, "test over"));
+    while handle.events.recv().await.is_some() {}
+    load(&sink.rows_of(&handle.run_id)).unwrap().unwrap()
+}
+
+/// What a resumed run came to: its result and how long it took.
+async fn taken_up(graph: &DroneGraph, c: &Checkpoint) -> (Result<Value, String>, std::time::Duration) {
+    let started = std::time::Instant::now();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let ended = resume((graph, c, Limits::default()), &tx, &states).await;
+    let result = match ended {
+        Ok(v) => Ok(v),
+        Err(RunEnd::Failed(e) | RunEnd::Cancelled(e)) => Err(e),
+    };
+    (result, started.elapsed())
+}
+
+#[tokio::test]
+async fn a_waits_own_time_out_is_kept_and_a_restart_does_not_give_it_its_whole_time_again() {
+    let graph = waiting(json!({ "for": "1h", "timeout_seconds": 60 }), "late={{wait.late}}");
+    let c = stopped_at_its_wait(&graph).await;
+    let now = agentmux_common::time::now_ms();
+    assert!((c.wait_timeouts["wait"] - now - 60_000).abs() < 5_000, "the limit was kept with the wait");
+
+    // AgentMux was stopped for two hours: both the time and the limit are past, and the limit came first.
+    let mut after = c.clone();
+    after.deadlines.insert("wait".to_string(), now - 3_600_000);
+    after.wait_timeouts.insert("wait".to_string(), now - 7_200_000 + 60_000);
+    let (result, took) = taken_up(&graph, &after).await;
+    assert!(result.unwrap_err().contains("block wait failed: timed out after 1 minutes"));
+    assert!(took < std::time::Duration::from_secs(2), "it did not wait again: {took:?}");
+}
+
+#[tokio::test]
+async fn an_event_wait_whose_time_out_passed_while_stopped_fails_at_once_and_one_with_time_left_gets_only_that() {
+    let graph = waiting(json!({ "on": "never", "timeout_seconds": 600 }), "unreached");
+    let c = stopped_at_its_wait(&graph).await;
+    let now = agentmux_common::time::now_ms();
+
+    let mut past = c.clone();
+    past.wait_timeouts.insert("wait".to_string(), now - 1_000);
+    let (result, took) = taken_up(&graph, &past).await;
+    assert!(result.unwrap_err().contains("timed out after 10 minutes"));
+    assert!(took < std::time::Duration::from_secs(2), "{took:?}");
+
+    let mut left = c.clone();
+    left.wait_timeouts.insert("wait".to_string(), now + 400);
+    let (result, took) = taken_up(&graph, &left).await;
+    assert!(result.unwrap_err().contains("timed out after 10 minutes"));
+    assert!(took >= std::time::Duration::from_millis(300) && took < std::time::Duration::from_secs(3), "only what was left: {took:?}");
+}
+
+#[tokio::test]
+async fn a_wait_that_ends_in_time_leaves_no_limit_behind() {
+    let graph = waiting(json!({ "for": "100ms", "timeout_seconds": 60 }), "late={{wait.late}}");
+    let kept = run_kept(graph, Value::Null).await;
+    assert_eq!(kept.result, Ok(json!("late=false")));
+    assert!(load(&kept.rows()).unwrap().unwrap().wait_timeouts.is_empty());
+}

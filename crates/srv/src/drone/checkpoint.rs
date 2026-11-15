@@ -88,6 +88,10 @@ pub struct Checkpoint {
     pub deadlines: BTreeMap<String, i64>,
     /// The event key each waiting node resumes on, by node id.
     pub resume_on: BTreeMap<String, String>,
+    /// When a waiting node runs out of its own `timeout_seconds` (ms epoch), by node
+    /// id: kept so a restart does not give the wait its whole time again.
+    #[serde(default)]
+    pub wait_timeouts: BTreeMap<String, i64>,
     pub graph: GraphRef,
     /// The drone the run belongs to.
     #[serde(default)]
@@ -138,6 +142,8 @@ pub struct CheckpointDiff {
     pub deadlines: Option<BTreeMap<String, i64>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_on: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_timeouts: Option<BTreeMap<String, i64>>,
     /// Outputs that are new or different. A block's output is never taken back.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub changed_outputs: BTreeMap<String, serde_json::Value>,
@@ -265,6 +271,9 @@ pub fn diff(prev: &Checkpoint, next: &Checkpoint) -> Result<CheckpointDiff, Chec
     if prev.resume_on != next.resume_on {
         d.resume_on = Some(next.resume_on.clone());
     }
+    if prev.wait_timeouts != next.wait_timeouts {
+        d.wait_timeouts = Some(next.wait_timeouts.clone());
+    }
     d.changed_outputs = changed_map(&prev.outputs, &next.outputs);
     d.changed_bits = changed_map(&prev.bits, &next.bits);
     d.changed_history = changed_map(&prev.history, &next.history);
@@ -339,6 +348,9 @@ pub fn apply(prev: &Checkpoint, d: &CheckpointDiff) -> Result<Checkpoint, Checkp
     if let Some(resume_on) = &d.resume_on {
         out.resume_on = resume_on.clone();
     }
+    if let Some(wait_timeouts) = &d.wait_timeouts {
+        out.wait_timeouts = wait_timeouts.clone();
+    }
     out.outputs.extend(d.changed_outputs.iter().map(|(id, v)| (id.clone(), v.clone())));
     out.bits.extend(d.changed_bits.iter().map(|(id, b)| (id.clone(), *b)));
     out.history.extend(d.changed_history.iter().map(|(id, h)| (id.clone(), h.clone())));
@@ -401,6 +413,7 @@ pub(crate) fn sample(step: u32) -> Checkpoint {
         elapsed_ms: 1_500,
         deadlines: BTreeMap::from([("w1".to_string(), 1_800_000_000_000)]),
         resume_on: BTreeMap::new(),
+        wait_timeouts: BTreeMap::from([("w1".to_string(), 1_800_000_060_000)]),
         graph: GraphRef { version: 3, hash: "abc".into() },
         drone_id: "drone-1".into(),
         trigger: serde_json::json!({ "pr": 12 }),
@@ -436,6 +449,7 @@ mod tests {
         c.loop_counters = (0..seed % 3).map(|i| (format!("g{i}"), i + seed)).collect();
         c.deadlines = (0..seed % 2).map(|i| (format!("d{i}"), i64::from(i))).collect();
         c.resume_on = (0..seed % 2).map(|i| (format!("r{i}"), format!("key{i}"))).collect();
+        c.wait_timeouts = (0..seed % 3).map(|i| (format!("t{i}"), i64::from(i) + 9)).collect();
         c.state.vars.clear();
         c.state.reducers.clear();
         for i in 0..=seed % 5 {
@@ -473,6 +487,7 @@ mod tests {
         next.loop_counters.insert("g0".into(), step + seed);
         next.deadlines.insert(format!("d{step}"), i64::from(step));
         next.resume_on.insert(format!("r{seed}"), format!("k{step}"));
+        next.wait_timeouts.insert(format!("t{step}"), i64::from(step));
         next
     }
 
