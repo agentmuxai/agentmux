@@ -8,7 +8,7 @@
 #[cfg(windows)]
 use agentmux_common::win32::NoWindow;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -98,10 +98,22 @@ pub fn bundled_tools_dir() -> Option<PathBuf> {
         return None;
     }
 
-    let bundled = exe_dir.join("tools").join("bin");
+    let bundled = bundled_dir_in(exe_dir);
     // A Store (MSIX) install can't run its tools from inside the package, so
     // they run from a copy (see `packaged_tools`); anything else is unchanged.
     Some(crate::backend::packaged_tools::runnable(bundled))
+}
+
+/// The tools folder of an install whose server program is in `exe_dir`: `tools/bin` below it (the desktop app), or the
+/// folder itself when that has no `tools/bin` and holds the helpers beside the server (the server package keeps
+/// `bin/agentmux-bashwrap` next to `bin/agentmux-srv`).
+fn bundled_dir_in(exe_dir: &Path) -> PathBuf {
+    let tools = exe_dir.join("tools").join("bin");
+    let wrapper = if cfg!(windows) { "agentmux-bashwrap.exe" } else { "agentmux-bashwrap" };
+    if !tools.exists() && exe_dir.join(wrapper).is_file() {
+        return exe_dir.to_path_buf();
+    }
+    tools
 }
 
 /// Returns `~/.agentmux/tools/bin/`.
@@ -682,5 +694,35 @@ mod tools_path_tests {
             compose_tools_path("", Some(Path::new("B")), None, UserToolsPrecedence::AfterExisting),
             Some("B".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod bundled_dir_tests {
+    use super::bundled_dir_in;
+
+    fn wrapper() -> &'static str {
+        if cfg!(windows) { "agentmux-bashwrap.exe" } else { "agentmux-bashwrap" }
+    }
+
+    #[test]
+    fn the_desktop_keeps_its_tools_below_the_server() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("tools").join("bin")).unwrap();
+        std::fs::write(dir.path().join(wrapper()), b"x").unwrap();
+        assert_eq!(bundled_dir_in(dir.path()), dir.path().join("tools").join("bin"), "tools/bin wins where it exists");
+    }
+
+    #[test]
+    fn the_server_package_keeps_its_helpers_beside_the_server() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(wrapper()), b"x").unwrap();
+        assert_eq!(bundled_dir_in(dir.path()), dir.path());
+    }
+
+    #[test]
+    fn a_folder_with_neither_is_still_the_tools_folder_that_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(bundled_dir_in(dir.path()), dir.path().join("tools").join("bin"));
     }
 }
