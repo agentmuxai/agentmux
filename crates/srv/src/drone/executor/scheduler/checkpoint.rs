@@ -32,17 +32,27 @@ impl<'a> Scheduler<'a> {
         self.keep(after, false)
     }
 
+    /// The checkpoint a run keeps before it stops at `id`: without it a restart could not
+    /// take the wait up again, so a run that cannot keep it ends.
+    pub(super) fn checkpoint_required(&mut self, id: &str) -> Result<(), String> {
+        self.keep(Some(id), true)
+    }
+
     /// What `node` does to the world, which a for-each takes from its body.
     fn effect_of_node(&self, node: &FlowNode, kind: BlockKind) -> Effect {
+        let resolve = |template: &str| self.scope.resolve(template);
         let body = match kind {
             BlockKind::ForEach => foreach_config(node)
                 .ok()
                 .and_then(|cfg| self.node_of.get(cfg.body.as_str()).copied())
-                .and_then(|b| kind_of(b).ok().filter(|k| *k != BlockKind::ForEach).map(|k| effect_of(k, b, Effect::ReadOnly)))
+                .and_then(|b| kind_of(b).ok().filter(|k| *k != BlockKind::ForEach).map(|k| effect_of(k, b, Effect::ReadOnly, &resolve)))
+                // A key can depend on the item, which is not known here, so a body that
+                // relies on one cannot be told to be safe to run again.
+                .map(|e| if e == Effect::Idempotent { Effect::Effectful } else { e })
                 .unwrap_or(Effect::Effectful),
             _ => Effect::ReadOnly,
         };
-        effect_of(kind, node, body)
+        effect_of(kind, node, body, &resolve)
     }
 
     /// Before a block with effects starts, keep a checkpoint that says it is
@@ -57,8 +67,29 @@ impl<'a> Scheduler<'a> {
         if self.effect_of_node(node, kind) != Effect::Effectful {
             return Ok(());
         }
-        self.in_flight = Some((node.id.as_str(), forced));
+        self.in_flight.push((node.id.as_str(), forced));
         self.keep(Some(node.id.as_str()), true)
+    }
+
+    /// [`mark_in_flight`](Self::mark_in_flight) for a batch of blocks that start together: the
+    /// ones with effects are listed as running in one checkpoint, kept before any starts, and
+    /// the others are listed as ready until they finish.
+    pub(super) fn mark_batch_in_flight(&mut self, batch: &[(&'a str, bool)]) -> Result<(), String> {
+        let mut effectful = false;
+        for &(id, forced) in batch {
+            let node = self.node_of[id];
+            let effect = kind_of(node).map(|kind| self.effect_of_node(node, kind));
+            if self.recorder.is_some() && effect == Ok(Effect::Effectful) {
+                self.in_flight.push((id, forced));
+                effectful = true;
+            } else {
+                self.running_ro.push((id, forced));
+            }
+        }
+        if effectful {
+            return self.keep(batch.first().map(|(id, _)| *id), true);
+        }
+        Ok(())
     }
 
     /// [`checkpoint`](Self::checkpoint), and with `required` a checkpoint that
@@ -78,7 +109,7 @@ impl<'a> Scheduler<'a> {
                 Err(why)
             }
             Err(e) if required => {
-                Err(format!("stopped: the run could not keep its place before {}, which has effects, so it did not start it ({e})", after.unwrap_or_default()))
+                Err(format!("stopped: the run could not keep its place before {}, so it did not start it ({e})", after.unwrap_or_default()))
             }
             Err(e) => {
                 tracing::warn!(run_id = %self.run_id, error = %e, "drone: a checkpoint was not kept");
@@ -98,22 +129,25 @@ impl<'a> Scheduler<'a> {
             step,
             state: self.scope.state.snapshot(),
             frontier: Frontier {
-                ready: self.ready.iter().map(|(id, _)| id.to_string()).collect(),
+                ready: self.running_ro.iter().chain(self.ready.iter()).map(|(id, _)| id.to_string()).collect(),
                 forced: self
-                    .ready
+                    .running_ro
                     .iter()
+                    .chain(self.ready.iter())
                     .filter(|(_, forced)| *forced)
                     .map(|(id, _)| id.to_string())
-                    .chain(self.in_flight.filter(|(_, forced)| *forced).map(|(id, _)| id.to_string()))
+                    .chain(self.in_flight.iter().filter(|(_, forced)| *forced).map(|(id, _)| id.to_string()))
+                    .chain(self.waiting.filter(|(_, forced)| *forced).map(|(id, _)| id.to_string()))
                     .collect(),
                 running: self.in_flight.iter().map(|(id, _)| id.to_string()).collect(),
-                waiting: Vec::new(),
+                waiting: self.waiting.iter().map(|(id, _)| id.to_string()).collect(),
             },
             loop_counters: self.rounds.iter().map(|(id, n)| (id.to_string(), *n)).collect(),
             cost_usd: self.spent,
             elapsed_ms: self.elapsed_before_ms + ms(&self.started),
-            deadlines: BTreeMap::new(),
-            resume_on: BTreeMap::new(),
+            deadlines: self.deadlines.clone(),
+            resume_on: self.resume_on.clone(),
+            wait_timeouts: self.wait_timeouts.clone(),
             graph: self.recorder.as_ref().map(|(_, g)| g.clone()).unwrap_or(GraphRef { version: 0, hash: String::new() }),
             drone_id: self.scope.drone_id.clone(),
             trigger: self.scope.trigger.clone(),
@@ -177,11 +211,21 @@ impl<'a> Scheduler<'a> {
             .map(|(id, ms)| (id.clone(), now.checked_sub(Duration::from_millis(*ms)).unwrap_or(now)))
             .collect();
 
-        let in_flight = match c.frontier.running.as_slice() {
-            [] => None,
-            [id] => Some((node(id)?, c.frontier.forced.iter().any(|f| f == id))),
-            _ => return Err("the saved run has more than one block running, which this build does not run".to_string()),
-        };
+        let mut in_flight = Vec::new();
+        for id in &c.frontier.running {
+            in_flight.push((node(id)?, c.frontier.forced.iter().any(|f| f == id)));
+        }
+        // A block that was waiting is run again from its start, and takes the wait it finds.
+        let mut ready = ready;
+        for id in c.frontier.waiting.iter().rev() {
+            let id = node(id)?;
+            if queued.insert(id) {
+                ready.push_front((id, c.frontier.forced.iter().any(|f| f == id)));
+            }
+        }
+        self.deadlines = c.deadlines.clone();
+        self.resume_on = c.resume_on.clone();
+        self.wait_timeouts = c.wait_timeouts.clone();
         self.in_flight = in_flight;
         self.ready = ready;
         self.queued = queued;

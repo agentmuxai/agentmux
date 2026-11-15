@@ -19,7 +19,7 @@ fn auth() -> UiAutomationAuth {
 }
 
 fn request(into: Option<CaptureAs>, entry: Option<&str>) -> CaptureRequest {
-    CaptureRequest { auth: auth(), pane: None, ref_: Some("e3".into()), card: None, into, entry: entry.map(String::from), download: false, timeout_ms: None, reason: Some("keep the token for the test".into()) }
+    CaptureRequest { auth: auth(), pane: None, ref_: Some("e3".into()), card: None, into, entry: entry.map(String::from), download: false, timeout_ms: None, reason: Some("keep the token for the test".into()), near: None, prefix: None, shape: None, min_length: None, max_length: None, copy: false }
 }
 
 fn new_as(kind: Option<&str>, label: &str) -> CaptureAs {

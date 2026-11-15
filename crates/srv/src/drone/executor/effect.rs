@@ -19,34 +19,35 @@ pub enum Effect {
     /// Reads, or only works on what the run already holds.
     ReadOnly,
     /// Does something, but doing it twice leaves the world as doing it once
-    /// (a request that carries an idempotency key, a task with a dedupe key).
+    /// (a request that carries an idempotency key).
     Idempotent,
     /// Does something that a second time would repeat: sends, starts, writes.
     Effectful,
 }
 
 /// What `node`, a block of `kind`, does. `body` is what a for-each's body block
-/// does, and is ignored for any other kind.
-pub fn effect_of(kind: BlockKind, node: &FlowNode, body: Effect) -> Effect {
+/// does, and is ignored for any other kind. `resolve` fills in a template with what
+/// the run holds now: a key is a key only when it has text once it is filled in.
+pub fn effect_of(kind: BlockKind, node: &FlowNode, body: Effect, resolve: &dyn Fn(&str) -> String) -> Effect {
     match kind {
-        BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::AppQuery => Effect::ReadOnly,
-        BlockKind::Api => api_effect(node),
-        BlockKind::Task if has_text(node, "dedupe") => Effect::Idempotent,
+        BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::AppQuery | BlockKind::Wait | BlockKind::Join => Effect::ReadOnly,
+        BlockKind::Api => api_effect(node, resolve),
         // An Agent block starts a session that costs money and may act; a Message,
-        // a Notify and a Spawn reach someone or start something.
+        // a Notify and a Spawn reach someone or start something. A Task is filed
+        // again once the task it dedupes against is over, so its `dedupe` key does
+        // not make a second run of it harmless.
         BlockKind::Task | BlockKind::Agent | BlockKind::Message | BlockKind::Notify | BlockKind::Spawn => Effect::Effectful,
+        // The callee may do anything, and a restart cannot tell how far it got.
+        BlockKind::Drone => Effect::Effectful,
         // The items already done would be done again, so it is as the body is.
         BlockKind::ForEach => body,
     }
 }
 
-fn has_text(node: &FlowNode, key: &str) -> bool {
-    node.data.get(key).and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty())
-}
-
 /// A request that only reads is read-only; one that writes is idempotent when it
-/// sends an `Idempotency-Key` header, and effectful when it does not.
-fn api_effect(node: &FlowNode) -> Effect {
+/// sends an `Idempotency-Key` header that has text once filled in, and effectful
+/// when it does not.
+fn api_effect(node: &FlowNode, resolve: &dyn Fn(&str) -> String) -> Effect {
     let method = node.data.get("method").and_then(Value::as_str).unwrap_or("GET").to_uppercase();
     if matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS") {
         return Effect::ReadOnly;
@@ -55,7 +56,7 @@ fn api_effect(node: &FlowNode) -> Effect {
         .data
         .get("headers")
         .and_then(Value::as_object)
-        .is_some_and(|h| h.iter().any(|(name, v)| name.eq_ignore_ascii_case("idempotency-key") && v.as_str().is_some_and(|t| !t.trim().is_empty())));
+        .is_some_and(|h| h.iter().any(|(name, v)| name.eq_ignore_ascii_case("idempotency-key") && v.as_str().is_some_and(|t| !resolve(t).trim().is_empty())));
     if keyed {
         Effect::Idempotent
     } else {
@@ -74,7 +75,7 @@ mod tests {
     }
 
     fn of(kind: BlockKind, data: Value) -> Effect {
-        effect_of(kind, &node(data), Effect::ReadOnly)
+        effect_of(kind, &node(data), Effect::ReadOnly, &|t| t.to_string())
     }
 
     #[test]
@@ -100,18 +101,28 @@ mod tests {
     }
 
     #[test]
-    fn what_sends_starts_or_costs_is_effectful_and_a_task_with_a_dedupe_key_is_idempotent() {
+    fn what_sends_starts_or_costs_is_effectful_and_so_is_a_task_whatever_its_dedupe_key() {
         for kind in [BlockKind::Agent, BlockKind::Message, BlockKind::Notify, BlockKind::Spawn] {
             assert_eq!(of(kind, json!({})), Effect::Effectful, "{kind:?}");
         }
         assert_eq!(of(BlockKind::Task, json!({ "title": "x" })), Effect::Effectful);
-        assert_eq!(of(BlockKind::Task, json!({ "title": "x", "dedupe": "{{a.id}}" })), Effect::Idempotent);
+        // A dedupe key reuses only a task that is still open: one that finished before the restart is filed again.
+        assert_eq!(of(BlockKind::Task, json!({ "title": "x", "dedupe": "{{a.id}}" })), Effect::Effectful);
+    }
+
+    #[test]
+    fn a_key_that_is_empty_once_filled_in_is_no_key() {
+        let keyed = node(json!({ "method": "POST", "headers": { "Idempotency-Key": "{{trigger.key}}" } }));
+        let with = |key: &'static str| effect_of(BlockKind::Api, &keyed, Effect::ReadOnly, &move |_| key.to_string());
+        assert_eq!(with("abc"), Effect::Idempotent);
+        assert_eq!(with(""), Effect::Effectful, "the request goes out with an empty key");
+        assert_eq!(with("  "), Effect::Effectful);
     }
 
     #[test]
     fn a_for_each_is_as_its_body_is() {
         for body in [Effect::ReadOnly, Effect::Idempotent, Effect::Effectful] {
-            assert_eq!(effect_of(BlockKind::ForEach, &node(json!({})), body), body);
+            assert_eq!(effect_of(BlockKind::ForEach, &node(json!({})), body, &|t| t.to_string()), body);
         }
     }
 }

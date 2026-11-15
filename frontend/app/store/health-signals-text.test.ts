@@ -11,7 +11,42 @@ import {
     healthLabel,
     messageFor,
     pagefileGuidance,
+    panicsMessage,
+    shortPlace,
 } from "./health-signals-text";
+
+describe("srv panics", () => {
+    const top = [
+        { location: "backend/reactive/handler.rs:1416", count: 900 },
+        { location: "server/x.rs:9", count: 3 },
+    ];
+
+    it("is labelled, and the notice says how often, where most, and what it means for messaging", () => {
+        expect(healthLabel("panics")).toBe("srv panics");
+        expect(panicsMessage("warn", { kind: "panics", level: "warn", last_minute: 41, top })).toBe(
+            "srv is panicking: 41 times in the last minute (top place: handler.rs:1416). Agents may not hear each other; restarting AgentMux clears a stuck messaging path."
+        );
+        expect(messageFor("panics", "warn", { kind: "panics", level: "warn", last_minute: 41, top })).toContain(
+            "41 times in the last minute"
+        );
+    });
+
+    it("says constantly at critical, and shows one place only", () => {
+        const text = panicsMessage("critical", { kind: "panics", level: "critical", last_minute: 1, top });
+        expect(text).toMatch(/^srv is panicking constantly: 1 time in the last minute \(top place: handler\.rs:1416\)\./);
+        expect(text).not.toContain("x.rs");
+    });
+
+    it("leaves out what srv didn't send", () => {
+        expect(panicsMessage("warn", { kind: "panics", level: "warn" })).toMatch(/^srv is panicking: repeatedly\. Agents/);
+    });
+
+    it("shortens a place to its file and line", () => {
+        expect(shortPlace("backend/reactive/handler.rs:1416")).toBe("handler.rs:1416");
+        expect(shortPlace("a\\b\\c.rs:2")).toBe("c.rs:2");
+        expect(shortPlace("c.rs:2")).toBe("c.rs:2");
+    });
+});
 
 describe("healthLabel", () => {
     it("names each kind, with the backend's average when known", () => {

@@ -242,6 +242,8 @@ pub mod work_claims;
 pub mod prompt_events;
 pub mod drone_run_event;
 pub mod drone_cancel;
+pub mod drone_decision;
+pub mod drone_wait;
 /// Replies that say nothing are not sent (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).
 pub mod ack_policy;
 pub mod jekt_seal;

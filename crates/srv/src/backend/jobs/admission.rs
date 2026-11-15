@@ -257,6 +257,18 @@ impl RunLedger {
         stopped
     }
 
+    /// A Drone run a restart left open, that a job started and whose job's
+    /// `timeout_minutes` ran out while AgentMux was down: close it as timed out
+    /// (the way the timeout pass does) and say so, so it is not taken up again
+    /// and able to act before the first pass. `false` for a run with no such
+    /// timeout, or one that has time left.
+    pub fn close_if_past_timeout(&self, drone_run_id: &str) -> bool {
+        let Some(run) = self.open_run_of_drone(drone_run_id).and_then(|id| self.store.job_run_get(&id).ok().flatten()) else { return false };
+        let Some(minutes) = self.job(&run.job_id).and_then(|j| j.policy.timeout_minutes) else { return false };
+        now_ms() - run.started_at_ms >= i64::from(minutes) * 60_000
+            && self.stop_run(&run, infra::TIMEOUT, reason::TIMEOUT, &format!("stopped after {minutes} minutes (timeout_minutes)"))
+    }
+
     /// [`policy::decide`] for `job` now.
     fn decide(&self, job: &CronJob, waiting: bool) -> Decision {
         policy::decide(job, &self.occupancy(job), waiting)

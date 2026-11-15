@@ -33,7 +33,7 @@ const DRONE_ENV_PREFIX: &str = "AGENTMUX_DR_";
 ///   * `drone_id` — the drone the run belongs to, for what a block keeps across
 ///     runs and must not share with another drone (the Task block's dedupe key);
 ///     empty for a scope built outside a run
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ExecutionScope {
     pub outputs: HashMap<String, Value>,
     /// What `{{var.name}}` reads: a mirror of [`state`](Self::state)'s values.

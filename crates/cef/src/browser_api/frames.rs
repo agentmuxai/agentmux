@@ -573,7 +573,7 @@ pub async fn read_frames(
                 super::snapshot::add_hidden_choices(&mut tree.nodes, &hidden);
                 // A frame is read whole, hidden text and all: what it hides is withheld as on the top page.
                 let layout = super::visibility::capture(&mut on).await;
-                super::hidden_secrets::withhold(&mut tree.nodes, &layout.hidden, layout.unknown);
+                super::visibility::guard(&mut tree.nodes, &layout);
                 for (backend, name) in nodes_needing_facts(&tree.nodes) {
                     if *describes_left == 0 {
                         break;

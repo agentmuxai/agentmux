@@ -201,13 +201,22 @@ fn clean(credential: &Option<Credential>, text: String) -> String {
     }
 }
 
+/// A failure while reading the body: a timeout is worded apart from the rest (see [`exchange`]).
+fn read_error(e: &reqwest::Error, timeout_ms: u64) -> String {
+    if e.is_timeout() {
+        format!("timed out after {} seconds: {e}", timeout_ms.div_ceil(1000))
+    } else {
+        format!("read body: {e}")
+    }
+}
+
 /// The response's body up to [`MAX_RESPONSE_BYTES`].
-async fn read_capped(mut resp: reqwest::Response) -> Result<Vec<u8>, String> {
+async fn read_capped(mut resp: reqwest::Response, timeout_ms: u64) -> Result<Vec<u8>, String> {
     if resp.content_length().is_some_and(|n| n > MAX_RESPONSE_BYTES as u64) {
         return Err(format!("the response is longer than {} MiB", MAX_RESPONSE_BYTES / (1024 * 1024)));
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("read body: {e}"))? {
+    while let Some(chunk) = resp.chunk().await.map_err(|e| read_error(&e, timeout_ms))? {
         if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES {
             return Err(format!("the response is longer than {} MiB", MAX_RESPONSE_BYTES / (1024 * 1024)));
         }
@@ -274,14 +283,9 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
             req = req.body(b);
         }
     }
-    let resp = req.send().await.map_err(|e| clean(&credential, format!("request failed: {e}")))?;
-    let status = resp.status().as_u16();
-    let resp_headers: HashMap<String, String> = resp
-        .headers()
-        .iter()
-        .map(|(k, v)| (k.to_string(), clean(&credential, v.to_str().unwrap_or("").to_string())))
-        .collect();
-    let bytes = read_capped(resp).await?;
+    let (status, resp_headers, bytes) = exchange(req, timeout_ms).await.map_err(|e| clean(&credential, e))?;
+    let resp_headers: HashMap<String, String> =
+        resp_headers.into_iter().map(|(k, v)| (k, clean(&credential, v))).collect();
     let text = clean(&credential, String::from_utf8_lossy(&bytes).to_string());
     // Try to parse as JSON for downstream `{{api.body.field}}` access.
     let body_val: Value = serde_json::from_str(&text).unwrap_or(Value::String(text));
@@ -293,9 +297,60 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
     }))
 }
 
+/// Send the request and read the whole answer. A timeout says nothing about
+/// whether the other side did the work, so it is worded apart from a failure to
+/// connect: the retry policy runs the second again and never the first.
+async fn exchange(req: reqwest::RequestBuilder, timeout_ms: u64) -> Result<(u16, HashMap<String, String>, Vec<u8>), String> {
+    let timed_out = |e: &reqwest::Error| format!("timed out after {} seconds: {e}", timeout_ms.div_ceil(1000));
+    let resp = req.send().await.map_err(|e| if e.is_timeout() { timed_out(&e) } else { format!("request failed: {e}") })?;
+    let status = resp.status().as_u16();
+    let headers: HashMap<String, String> = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+    let bytes = read_capped(resp, timeout_ms).await?;
+    Ok((status, headers, bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A loopback server that answers with `reply` and then says nothing more.
+    async fn stalled(reply: &'static [u8]) -> String {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let _ = socket.write_all(reply).await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn a_request_that_times_out_says_so_apart_from_one_that_could_not_connect() {
+        let client = reqwest::Client::new();
+        let url = stalled(b"").await;
+        let err = exchange(client.get(&url).timeout(Duration::from_millis(150)), 150).await.unwrap_err();
+        assert!(err.starts_with("timed out after 1 seconds:"), "{err}");
+
+        let url = stalled(b"HTTP/1.1 200 OK
+Content-Length: 10
+
+abc").await;
+        let err = exchange(client.get(&url).timeout(Duration::from_millis(300)), 300).await.unwrap_err();
+        assert!(err.starts_with("timed out after 1 seconds:"), "a body that stalls is a timeout too: {err}");
+
+        let refused = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            format!("http://{}/", l.local_addr().unwrap())
+        };
+        let err = exchange(client.get(&refused).timeout(Duration::from_secs(5)), 5000).await.unwrap_err();
+        assert!(err.starts_with("request failed:"), "a refused connection is the world's failure: {err}");
+    }
 
     #[test]
     fn ssrf_rejects_loopback() {
@@ -432,16 +487,16 @@ mod tests {
     async fn a_response_is_read_up_to_the_cap_and_no_further() {
         let small = serve("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n", b"hello".to_vec()).await;
         let resp = reqwest::get(&small).await.unwrap();
-        assert_eq!(read_capped(resp).await.unwrap(), b"hello");
+        assert_eq!(read_capped(resp, 5000).await.unwrap(), b"hello");
         // One that says how long it is, too long.
         let long = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", MAX_RESPONSE_BYTES + 1);
         let head: &'static str = Box::leak(long.into_boxed_str());
         let url = serve(head, Vec::new()).await;
-        let err = read_capped(reqwest::get(&url).await.unwrap()).await.unwrap_err();
+        let err = read_capped(reqwest::get(&url).await.unwrap(), 5000).await.unwrap_err();
         assert!(err.contains("longer than"), "{err}");
         // One that doesn't say, and goes on past it.
         let url = serve("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n", vec![b'x'; MAX_RESPONSE_BYTES + 10]).await;
-        let err = read_capped(reqwest::get(&url).await.unwrap()).await.unwrap_err();
+        let err = read_capped(reqwest::get(&url).await.unwrap(), 5000).await.unwrap_err();
         assert!(err.contains("longer than"), "{err}");
     }
 

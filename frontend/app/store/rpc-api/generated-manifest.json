@@ -1327,6 +1327,14 @@
             "method": "RunDroneCommand"
         },
         {
+            "command": "resolvedronerun",
+            "method": "ResolveDroneRunCommand"
+        },
+        {
+            "command": "resumedronewait",
+            "method": "ResumeDroneWaitCommand"
+        },
+        {
             "command": "layout.save",
             "method": "SaveLayoutCommand"
         },

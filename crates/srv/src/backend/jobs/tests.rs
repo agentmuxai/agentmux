@@ -817,3 +817,40 @@ mod poll_runs;
 
 #[path = "expect_runs_tests.rs"]
 mod expect_runs;
+
+/// A Drone run that is being taken up again from its checkpoints is not closed
+/// by the restart: its ledger row and its `db_drone_runs` row stay open.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_run_that_is_resuming_is_left_open_by_the_restart() {
+    use crate::backend::storage::drone_types::DroneRun;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap());
+    let mstore = Arc::new(Store::open_in_memory().unwrap());
+    let ledger = RunLedger::new(store.clone(), Some(mstore.clone()), Arc::new(Broker::new()));
+    let row = |id: &str| DroneRun {
+        id: id.into(),
+        drone_id: "d1".into(),
+        status: "running".into(),
+        started_at: 1,
+        ended_at: 0,
+        block_states: Default::default(),
+        output: String::new(),
+        error: String::new(),
+    };
+    for id in ["dr-resume", "dr-lost"] {
+        mstore.drone_run_insert(&row(id)).unwrap();
+    }
+    let resumed = ledger.drone_started("dr-resume", "d1", "My drone", 1, &Value::Null).unwrap();
+    let lost = ledger.drone_started("dr-lost", "d1", "My drone", 2, &Value::Null).unwrap();
+    assert_eq!(ledger.open_run_of_drone("dr-resume"), Some(resumed.clone()));
+    assert_eq!(ledger.open_run_of_drone("dr-none"), None);
+
+    let resuming: std::collections::HashSet<String> = ["dr-resume".to_string()].into();
+    assert_eq!(ledger.recover_after_restart_except(&resuming), 1);
+    assert_eq!(store.job_run_get(&resumed).unwrap().unwrap().state, state::RUNNING);
+    let lost_row = store.job_run_get(&lost).unwrap().unwrap();
+    assert_eq!((lost_row.state.as_str(), lost_row.infra.as_str()), (state::FINISHED, infra::INTERRUPTED));
+    let drone: std::collections::HashMap<String, String> = mstore.drone_runs_for("d1", 10).unwrap().into_iter().map(|r| (r.id, r.status)).collect();
+    assert_eq!((drone["dr-resume"].as_str(), drone["dr-lost"].as_str()), ("running", DRONE_STATUS_INTERRUPTED));
+    assert_eq!(ledger.open_run_of_drone("dr-lost"), None, "a closed row is not open");
+}
