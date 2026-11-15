@@ -27,6 +27,10 @@ on:
         description: 'Run of "CI — nightly artifacts" to test as B (blank: the latest with a windows-portable artifact)'
         required: false
         default: ''
+      a-run:
+        description: 'Run of "CI — nightly artifacts" to test as A (blank: the newest nightly before B with another commit)'
+        required: false
+        default: ''
       runs:
         description: 'Runs of the lab per side (the nightly does 4)'
         required: false
@@ -81,9 +85,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           B_RUN: ${{ inputs.b-run }}
+          A_RUN: ${{ inputs.a-run }}
         run: |
           args=()
           [ -n "$B_RUN" ] && args+=(--b-run "$B_RUN")
+          [ -n "$A_RUN" ] && args+=(--a-run "$A_RUN")
           node scripts/perf/memory-lab/nightly.mjs plan --out plan.json "${args[@]}"
 
       - uses: actions/download-artifact@v4

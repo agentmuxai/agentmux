@@ -4,7 +4,7 @@
 //
 // The glue between the nightly performance workflow (.github/workflows/perf-regression.yml) and GitHub.
 //
-//   node nightly.mjs plan   [--b-run <id>] --out plan.json   picks the builds to compare, writes plan.json and the step outputs
+//   node nightly.mjs plan   [--b-run <id>] [--a-run <id>] --out plan.json   picks the builds to compare, writes plan.json and the step outputs
 //   node nightly.mjs report --plan plan.json [--compare compare.md] [--spread spread.md]   the markdown for the job summary
 //   node nightly.mjs flagged --compare compare.json   whether the first matrix flagged anything (sets the `flagged` output)
 //   node nightly.mjs issue --plan plan.json --initial compare.json --final final.json [--history history.jsonl --result result.json]
@@ -70,7 +70,7 @@ function plan(argv) {
     const repo = process.env.GITHUB_REPOSITORY;
     if (!repo) throw new Error("GITHUB_REPOSITORY is not set");
     const out = flag(argv, "--out") ?? "plan.json";
-    const picked = pickBuilds(fetchRuns(repo), { bRunId: flag(argv, "--b-run") });
+    const picked = pickBuilds(fetchRuns(repo), { bRunId: flag(argv, "--b-run"), aRunId: flag(argv, "--a-run") });
     if (!picked.b) throw new Error(picked.reason);
     const merges = picked.a ? mergesOf(gh(["api", "--method", "GET", `repos/${repo}/compare/${picked.a.sha}...${picked.b.sha}`])) : null;
     const aClaude = picked.a ? claudePinAt(repo, picked.a.sha) : null;
