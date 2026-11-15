@@ -16,6 +16,8 @@ press 9 DevTools
 toggleDevtools
 press 10 Online Docs
 openExternal https://docs.agentmux.ai
-press 12 Exit
+press 11 Reload Window
+reloadWindow
+press 13 Exit
 fireAndForget
 requestCloseWindow

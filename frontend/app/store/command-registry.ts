@@ -372,6 +372,16 @@ function registerWorkspaceCommands(): void {
     workspaceCommand("workspace:delete", "Delete Workspace…", "trash-can", (m) => m.deleteWorkspacePrompt());
     workspaceCommand("workspace:export", "Export Workspace…", "file-export", (m) => m.exportWorkspace());
     workspaceCommand("workspace:import", "Import Workspace…", "file-import", (m) => m.importWorkspace());
+    // The way out of a window that shows nothing or has stopped following its tabs:
+    // it reloads at once, where "Free Memory" waits for what a reload would lose.
+    commandRegistry.register({
+        id: "window:reload",
+        label: "Reload Window",
+        category: "Window",
+        icon: "rotate-right",
+        keywords: "reload refresh blank stuck frozen empty broken",
+        execute: () => getApi().reloadWindow(),
+    });
     commandRegistry.register({
         id: "window:recycle",
         label: "Reload Window (Free Memory)",
