@@ -175,6 +175,9 @@ pub enum RunStatus {
     Failed,
     /// Stopped on purpose: by a person, an agent, the job's timeout or its next run.
     Cancelled,
+    /// Waiting for a person or an agent to say what to do with a step that may
+    /// already have done its work before AgentMux restarted.
+    NeedsAttention,
 }
 
 impl RunStatus {
@@ -184,6 +187,7 @@ impl RunStatus {
             Self::Done => "done",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
+            Self::NeedsAttention => "needs_attention",
         }
     }
 }

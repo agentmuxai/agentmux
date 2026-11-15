@@ -517,6 +517,8 @@ import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
 import type { ResolveInstallCommandResult } from "@/types/rpc/ResolveInstallCommandResult";
 import type { ResolvePrereqsReq } from "@/types/rpc/ResolvePrereqsReq";
 import type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
+import type { ResolveRunReq } from "@/types/rpc/ResolveRunReq";
+import type { ResolveRunResp } from "@/types/rpc/ResolveRunResp";
 import type { RestoreOtherBuildLayoutResult } from "@/types/rpc/RestoreOtherBuildLayoutResult";
 import type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
 import type { RunDroneReq } from "@/types/rpc/RunDroneReq";
@@ -2463,6 +2465,10 @@ export const GeneratedApi = {
   // command "rundrone"
   RunDroneCommand(client: RpcClient, data: RunDroneReq, opts?: RpcOpts): Promise<RunDroneResp> {
     return client.rpcCall("rundrone", data, opts);
+  },
+  // command "resolvedronerun"
+  ResolveDroneRunCommand(client: RpcClient, data: ResolveRunReq, opts?: RpcOpts): Promise<ResolveRunResp> {
+    return client.rpcCall("resolvedronerun", data, opts);
   },
   // command "layout.save"
   SaveLayoutCommand(client: RpcClient, data: CommandLayoutSaveData, opts?: RpcOpts): Promise<LayoutSaveResult> {

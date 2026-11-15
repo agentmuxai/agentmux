@@ -13,7 +13,7 @@ use crate::drone::executor::run_drone;
 use crate::drone::recorder::MemorySink;
 use crate::drone::types::{DroneDefinition, FlowEdge, FlowNode, NodePosition, RunStatus};
 use crate::drone::versions::Pin;
-use crate::server::drone_handlers::upsert_drone;
+use crate::server::drone_handlers::{resolve_drone_run, upsert_drone, ResolveRunReq};
 
 fn node(id: &str, data: Value) -> FlowNode {
     FlowNode { id: id.to_string(), position: NodePosition::default(), data, node_type: None }
@@ -82,11 +82,11 @@ async fn crashed_after(state: &AppState, drone: &DroneDefinition, kept: usize) -
     Crashed { drone_id: drone.id.clone(), run_id: handle.run_id, output, rows }
 }
 
-/// The run's row once it is no longer `running` (the drain writes it as the run ends).
+/// The run's row once it has ended: not `running`, and not waiting (the drain writes it as the run ends).
 async fn ended(state: &AppState, c: &Crashed) -> DroneRun {
     for _ in 0..200 {
         let row = state.mstore.drone_runs_for(&c.drone_id, 10).unwrap().into_iter().find(|r| r.id == c.run_id).unwrap();
-        if row.status != RunStatus::Running.as_str() {
+        if row.status != RunStatus::Running.as_str() && row.status != RunStatus::NeedsAttention.as_str() {
             return row;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -144,10 +144,8 @@ async fn a_run_whose_graph_was_edited_and_not_kept_is_not_taken_up() {
     assert!(resume_runs(&state, None).await.is_empty());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_run_stopped_in_a_step_with_effects_is_not_run_again_on_its_own() {
-    let state = crate::server::tests::test_state();
-    // `call` is a POST the API block refuses, so its mark is the newest checkpoint.
+/// A run whose newest checkpoint marks `call`, a POST the API block refuses, as running.
+async fn marked_run(state: &AppState) -> Crashed {
     let graph = DroneGraph {
         nodes: vec![
             node("first", json!({ "kind": "variables", "entries": [{ "name": "a", "value": "1" }] })),
@@ -155,10 +153,69 @@ async fn a_run_stopped_in_a_step_with_effects_is_not_run_again_on_its_own() {
         ],
         edges: vec![edge("e1", "first", "call")],
     };
-    let drone = saved(&state, graph);
-    let c = crashed_after(&state, &drone, 3).await;
+    let drone = saved(state, graph);
+    crashed_after(state, &drone, 3).await
+}
+
+/// The run's row once it has this status.
+async fn has_status(state: &AppState, c: &Crashed, status: &str) -> DroneRun {
+    for _ in 0..200 {
+        let row = state.mstore.drone_runs_for(&c.drone_id, 10).unwrap().into_iter().find(|r| r.id == c.run_id).unwrap();
+        if row.status == status {
+            return row;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the run never had the status {status}");
+}
+
+fn resolve(c: &Crashed, action: &str, output: Option<Value>) -> Result<(), String> {
+    resolve_drone_run(ResolveRunReq { run_id: c.run_id.clone(), action: action.to_string(), output }).map(|_| ())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_stopped_in_a_step_with_effects_waits_and_a_skip_lets_it_go_on() {
+    let state = crate::server::tests::test_state();
+    let c = marked_run(&state).await;
     assert_eq!(resume_runs(&state, None).await.len(), 1);
+    let row = has_status(&state, &c, "needs_attention").await;
+    assert!(row.error.contains("block call was running when the run stopped") && row.ended_at == 0, "{row:?}");
+
+    assert_eq!(resolve(&c, "skip", None).unwrap_err(), "resolvedronerun: `skip` needs `output`, what the step is taken to have said");
+    assert!(resolve(&c, "later", None).unwrap_err().contains("unknown action"));
+    resolve(&c, "skip", Some(json!({ "value": "given" }))).unwrap();
+    let row = ended(&state, &c).await;
+    assert_eq!(row.status, RunStatus::Done.as_str(), "{row:?}");
+    assert_eq!(row.block_states["call"].output, Some(json!({ "value": "given" })));
+    assert!(resolve(&c, "run_again", None).unwrap_err().contains("is not waiting for an answer"), "answered once");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_told_to_cancel_at_a_step_that_needs_attention_ends_cancelled() {
+    let state = crate::server::tests::test_state();
+    let c = marked_run(&state).await;
+    assert_eq!(resume_runs(&state, None).await.len(), 1);
+    has_status(&state, &c, "needs_attention").await;
+    resolve(&c, "cancel", None).unwrap();
+    let row = ended(&state, &c).await;
+    assert_eq!(row.status, RunStatus::Cancelled.as_str());
+    assert!(row.error.contains("cancelled when asked what to do"), "{}", row.error);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_told_to_run_the_step_again_runs_it_and_ends_as_that_ends() {
+    let state = crate::server::tests::test_state();
+    let c = marked_run(&state).await;
+    assert_eq!(resume_runs(&state, None).await.len(), 1);
+    has_status(&state, &c, "needs_attention").await;
+    resolve(&c, "run_again", None).unwrap();
     let row = ended(&state, &c).await;
     assert_eq!(row.status, RunStatus::Failed.as_str());
-    assert!(row.error.contains("block call was running when the run stopped") && row.error.contains("not run again on its own"), "{}", row.error);
+    assert!(row.error.contains("block call failed"), "it was run: {}", row.error);
+}
+
+#[tokio::test]
+async fn nobody_can_answer_a_run_that_is_not_waiting() {
+    let err = resolve_drone_run(ResolveRunReq { run_id: "no-such-run".into(), action: "cancel".into(), output: None }).unwrap_err();
+    assert_eq!(err, "resolvedronerun: run no-such-run is not waiting for an answer");
 }

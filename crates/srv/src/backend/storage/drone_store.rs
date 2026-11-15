@@ -78,8 +78,9 @@ pub trait DroneStore {
     /// The runs in `except` are the ones that are being taken up again from
     /// their checkpoints, and stay as they are. Returns rows changed.
     fn drone_runs_mark_interrupted(&self, status: &str, now_ms: i64, except: &[String]) -> Result<usize, StoreError>;
-    /// The runs still `running`, oldest first: after a restart, the ones the
-    /// old process left (their checkpoints say whether they can go on).
+    /// The runs still `running` or waiting for attention, oldest first: after a
+    /// restart, the ones the old process left (their checkpoints say whether
+    /// they can go on).
     fn drone_runs_running(&self) -> Result<Vec<DroneRun>, StoreError>;
     /// Keep checkpoint `step` of `run_id` (`kind` is `full` or `diff`). Writing a step that
     /// is already there is an error: a checkpoint is never rewritten.
@@ -271,7 +272,7 @@ impl DroneStore for Store {
             &format!(
                 "UPDATE db_drone_runs SET status = ?1, ended_at = ?2,
                         error = CASE WHEN error = '' THEN 'interrupted: AgentMux restarted during this run' ELSE error END
-                  WHERE status = 'running' AND id NOT IN ({skip})"
+                  WHERE status IN ('running', 'needs_attention') AND id NOT IN ({skip})"
             ),
             args.as_slice(),
         )?)
@@ -281,7 +282,7 @@ impl DroneStore for Store {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, drone_id, status, started_at, ended_at, block_states, output, error
-             FROM db_drone_runs WHERE status = 'running' ORDER BY started_at",
+             FROM db_drone_runs WHERE status IN ('running', 'needs_attention') ORDER BY started_at",
         )?;
         let iter = stmt.query_map([], |row| {
             let block_states_s: String = row.get(5)?;

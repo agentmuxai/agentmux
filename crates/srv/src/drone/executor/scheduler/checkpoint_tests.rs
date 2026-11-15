@@ -303,13 +303,16 @@ async fn a_failure_an_error_edge_handles_clears_the_mark() {
 }
 
 #[tokio::test]
-async fn a_restart_does_not_run_a_marked_block_again_on_its_own() {
+async fn a_restart_waits_before_running_a_marked_block_again() {
     let graph = calling("POST");
     let kept = run_kept(graph.clone(), Value::Null).await;
-    let marked = resumed_from(&kept, &graph, 3).await;
-    let why = marked.result.unwrap_err();
-    assert!(why.contains("block call was running when the run stopped") && why.contains("not run again on its own"), "{why}");
-    assert!(marked.done.is_empty() && marked.steps.is_empty(), "nothing ran and nothing was kept");
+    let mut parked = park(&kept, &graph, 3);
+    let (block, why) = attention(&mut parked).await;
+    assert_eq!(block, "call");
+    assert!(why.contains("block call was running when the run stopped") && why.contains("may already have done its work"), "{why}");
+    assert!(!parked.task.is_finished(), "the run waits instead of running it");
+    parked.cancel.cancel("test over");
+    assert!(parked.task.await.unwrap().unwrap_err().starts_with("cancelled: "));
 
     // From before the mark the block has not started, so it is simply run.
     let before = resumed_from(&kept, &graph, 2).await;
@@ -325,4 +328,116 @@ async fn a_mark_that_cannot_be_kept_stops_the_run_before_the_block_starts() {
     let kept = run_kept_on(sink, calling("POST"), Value::Null).await;
     let why = kept.result.unwrap_err();
     assert!(why.contains("could not keep its place before call") && !why.contains("block call failed"), "{why}");
+}
+
+use crate::backend::drone_decision::{decide, is_waiting, Decision};
+use crate::drone::executor::engine::Cancel;
+
+/// `first`, then `call` (a POST that cannot get anywhere), then a response that reads what `call` said.
+fn calling_then_answering() -> DroneGraph {
+    let mut g = calling("POST");
+    g.nodes.push(response("done", "{{call.value}}"));
+    g.edges.push(edge("e2", "call", "done", None));
+    g
+}
+
+/// A resumed run in the background, as the server runs it: its events, its way
+/// to be stopped, and where it keeps checkpoints.
+struct Parked {
+    task: tokio::task::JoinHandle<Result<Value, String>>,
+    events: mpsc::UnboundedReceiver<RunEvent>,
+    cancel: Cancel,
+    sink: Arc<MemorySink>,
+    run_id: String,
+}
+
+fn park(kept: &Kept, graph: &DroneGraph, n: usize) -> Parked {
+    let rows = kept.rows();
+    let sink = Arc::new(MemorySink::default());
+    for row in &rows[..n] {
+        sink.rows.lock().unwrap().push((kept.run_id.clone(), row.clone()));
+    }
+    let c = load(&rows[..n]).unwrap().unwrap();
+    let (tx, events) = mpsc::unbounded_channel();
+    let cancel = Cancel::default();
+    let limits = Limits { persist: Some(Persist { sink: sink.clone(), graph: c.graph.clone() }), cancel: cancel.clone(), ..Limits::default() };
+    let graph = graph.clone();
+    let task = tokio::spawn(async move {
+        let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        match resume((&graph, &c, limits), &tx, &states).await {
+            Ok(v) => Ok(v),
+            Err(RunEnd::Failed(e)) => Err(e),
+            Err(RunEnd::Cancelled(e)) => Err(format!("cancelled: {e}")),
+        }
+    });
+    Parked { task, events, cancel, sink, run_id: kept.run_id.clone() }
+}
+
+/// The block a parked run needs attention for, and why.
+async fn attention(p: &mut Parked) -> (String, String) {
+    while let Some(ev) = p.events.recv().await {
+        if let RunEvent::NeedsAttention { block_id, reason, .. } = ev {
+            return (block_id, reason);
+        }
+    }
+    panic!("the run ended without asking");
+}
+
+/// What a parked run sends after it was answered, until it ends.
+async fn the_rest(events: &mut mpsc::UnboundedReceiver<RunEvent>) -> Vec<RunEvent> {
+    let mut out = Vec::new();
+    while let Some(ev) = events.recv().await {
+        out.push(ev);
+    }
+    out
+}
+
+#[tokio::test]
+async fn a_run_told_to_skip_the_step_goes_on_with_the_output_it_was_given_as_outside_text() {
+    let graph = calling_then_answering();
+    let kept = run_kept(graph.clone(), Value::Null).await;
+    let mut p = park(&kept, &graph, 3);
+    attention(&mut p).await;
+    assert!(is_waiting(&p.run_id));
+    decide(&p.run_id, Decision::Skip { output: json!({ "value": "given" }) }).unwrap();
+    assert_eq!(p.task.await.unwrap(), Ok(json!("given")));
+    let events = the_rest(&mut p.events).await;
+    assert!(events.iter().any(|e| matches!(e, RunEvent::AttentionAnswered { choice, .. } if choice == "skip")));
+    assert!(events.iter().any(|e| matches!(e, RunEvent::BlockDone { block_id, .. } if block_id == "call")), "the skipped step shows as done");
+    assert!(!events.iter().any(|e| matches!(e, RunEvent::BlockStarted { block_id, .. } if block_id == "call")), "it was not run");
+    let last = load(&p.sink.rows_of(&p.run_id)).unwrap().unwrap();
+    assert_eq!(last.bits["call"], (true, false), "what was supplied is outside text");
+    assert_eq!(last.bits["done"], (true, false), "and so is what is made of it");
+    assert!(last.frontier.running.is_empty());
+}
+
+#[tokio::test]
+async fn a_run_told_to_run_the_step_again_marks_it_and_runs_it() {
+    let graph = calling_then_answering();
+    let kept = run_kept(graph.clone(), Value::Null).await;
+    let mut p = park(&kept, &graph, 3);
+    attention(&mut p).await;
+    decide(&p.run_id, Decision::RunAgain).unwrap();
+    let why = p.task.await.unwrap().unwrap_err();
+    assert!(why.contains("block call failed"), "it ran again, and failed as it did the first time: {why}");
+    let events = the_rest(&mut p.events).await;
+    assert!(events.iter().any(|e| matches!(e, RunEvent::AttentionAnswered { choice, .. } if choice == "run_again")));
+    assert!(events.iter().any(|e| matches!(e, RunEvent::BlockStarted { block_id, .. } if block_id == "call")));
+    let rows = p.sink.rows_of(&p.run_id);
+    assert_eq!(rows.len(), 4, "the mark is kept again before it runs: {rows:?}");
+}
+
+#[tokio::test]
+async fn a_run_that_is_cancelled_while_it_waits_ends_cancelled_and_stops_waiting() {
+    let graph = calling_then_answering();
+    let kept = run_kept(graph.clone(), Value::Null).await;
+    let mut p = park(&kept, &graph, 3);
+    attention(&mut p).await;
+    assert!(p.cancel.cancel("its job's timeout"));
+    let why = p.task.await.unwrap().unwrap_err();
+    assert_eq!(why, "cancelled: its job's timeout");
+    assert!(!is_waiting(&p.run_id));
+    assert!(decide(&p.run_id, Decision::RunAgain).is_err(), "nothing is left to answer");
+    let events = the_rest(&mut p.events).await;
+    assert!(!events.iter().any(|e| matches!(e, RunEvent::BlockStarted { .. })), "the step was never run");
 }

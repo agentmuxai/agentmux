@@ -453,6 +453,7 @@ pub const COMMAND_UPSERT_DRONE: &str = "upsertdrone";
 pub const COMMAND_DELETE_DRONE: &str = "deletedrone";
 pub const COMMAND_RUN_DRONE: &str = "rundrone";
 pub const COMMAND_LIST_DRONE_RUNS: &str = "listdroneruns";
+pub const COMMAND_RESOLVE_DRONE_RUN: &str = "resolvedronerun";
 
 // MuxAPI Tier 1 — agent lifecycle commands
 pub const COMMAND_AGENT_OPEN: &str = "agent.open";

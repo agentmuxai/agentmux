@@ -225,13 +225,14 @@ fn the_runs_still_running_are_listed_and_a_restart_can_leave_some_alone() {
     store.drone_run_insert(&run("late", "a", "running", 9)).unwrap();
     store.drone_run_insert(&run("early", "a", "running", 2)).unwrap();
     store.drone_run_insert(&run("kept", "b", "running", 5)).unwrap();
+    store.drone_run_insert(&run("waiting", "b", "needs_attention", 7)).unwrap();
     let mut done = run("done", "a", "done", 1);
     done.ended_at = 3;
     store.drone_run_insert(&done).unwrap();
     let ids = |rows: Vec<crate::drone::types::DroneRun>| rows.into_iter().map(|r| r.id).collect::<Vec<_>>();
-    assert_eq!(ids(store.drone_runs_running().unwrap()), ["early", "kept", "late"]);
+    assert_eq!(ids(store.drone_runs_running().unwrap()), ["early", "kept", "waiting", "late"]);
 
-    assert_eq!(store.drone_runs_mark_interrupted("interrupted", 77, &["kept".to_string(), "late".to_string()]).unwrap(), 1);
-    assert_eq!(ids(store.drone_runs_running().unwrap()), ["kept", "late"], "the runs being taken up again stay running");
+    assert_eq!(store.drone_runs_mark_interrupted("interrupted", 77, &["kept".to_string(), "late".to_string()]).unwrap(), 2);
+    assert_eq!(ids(store.drone_runs_running().unwrap()), ["kept", "late"], "the runs being taken up again stay running; a waiting one that cannot go on is closed");
     assert_eq!(store.drone_runs_for("a", 10).unwrap().iter().find(|r| r.id == "early").unwrap().status, "interrupted");
 }

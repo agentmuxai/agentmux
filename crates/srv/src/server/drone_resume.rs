@@ -38,6 +38,9 @@ pub(crate) async fn resume_runs(state: &AppState, ledger: Option<&Arc<RunLedger>
     };
     for run in running {
         match checkpoint_and_graph(state, &run) {
+            Ok(Some(_)) if ledger.is_some_and(|l| l.close_if_past_timeout(&run.id)) => {
+                tracing::info!(run_id = %run.id, "drone: a run is not taken up again: its job's timeout ran out while AgentMux was stopped");
+            }
             Ok(Some((checkpoint, graph))) => {
                 let persist = Persist { sink: state.mstore.clone(), graph: checkpoint.graph.clone() };
                 let step = checkpoint.step;

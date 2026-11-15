@@ -34,6 +34,13 @@ pub enum RunEvent {
     /// The run was taken up again after AgentMux restarted, from checkpoint
     /// `step`: the blocks before it are not run again.
     Resumed { run_id: String, step: u32 },
+    /// A step that may already have done its work before the restart was found
+    /// running: the run waits, `needs_attention`, for it to be run again, skipped
+    /// (with an output) or the run cancelled (`resolvedronerun`).
+    NeedsAttention { run_id: String, block_id: String, reason: String },
+    /// The run's wait was answered: `choice` is `run_again` or `skip`. (A run that
+    /// is cancelled ends with `RunCancelled`.)
+    AttentionAnswered { run_id: String, block_id: String, choice: String },
     /// The run's state was kept as checkpoint `step` (0 is the start, before any
     /// block); `block_id` is the block it follows.
     StepCheckpointed {
