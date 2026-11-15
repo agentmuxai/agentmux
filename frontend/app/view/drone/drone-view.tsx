@@ -18,6 +18,7 @@ import { focusWhenRendered } from "@/util/focusutil";
 import { isModKey } from "@/util/platformutil";
 import { tip } from "@/app/element/tip";
 import { apiAuthFields, apiAuthPatch, type ApiAuthFields, type ApiAuthHow } from "./api-auth";
+import { GITHUB_PRESETS, githubPresetById, githubPresetPatch, githubRepoOf, type GithubPreset } from "./github-presets";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
 // drop handler. On the drag session, so every drone pane in the window sees it.
@@ -919,6 +920,7 @@ const ApiFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>)
                     placeholder="https://…/{{var.path}}"
                 />
             </NodeField>
+            <GithubPresetPicker node={p.node} update={update} />
             <ApiAuthFieldsView node={p.node} update={update} />
             <NodeField label="Body">
                 <TextArea
@@ -934,6 +936,65 @@ const ApiFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>)
                     onContextMenu={showTextInputContextMenu}
                 />
             </NodeField>
+        </>
+    );
+};
+
+/**
+ * Fills the API block for a common GitHub read or write (github-presets.ts): the person gives the repository
+ * once and picks what to do, and the method, URL, headers and body are set. The node stays an ordinary API node.
+ */
+const GithubPresetPicker = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => {
+    const [repo, setRepo] = createSignal(githubRepoOf((p.node.data["url"] as string) ?? ""));
+    const [picked, setPicked] = createSignal<GithubPreset | undefined>();
+    const [problem, setProblem] = createSignal("");
+    const choose = (id: string) => {
+        const preset = githubPresetById(id);
+        if (!preset) return;
+        const patch = githubPresetPatch(preset, repo());
+        if (!patch) {
+            setProblem("Give the repository as owner/name first.");
+            return;
+        }
+        setProblem("");
+        setPicked(preset);
+        p.update(patch);
+    };
+    return (
+        <>
+            <NodeField label="GitHub repo">
+                <TextInput
+                    variant="plain" class="drone-input nodrag"
+                    value={repo()}
+                    onInput={(e) => setRepo(e.currentTarget.value)}
+                    onContextMenu={showTextInputContextMenu}
+                    placeholder="owner/name"
+                />
+            </NodeField>
+            <NodeField label="GitHub preset">
+                <select
+                    class="drone-input nodrag"
+                    value=""
+                    onChange={(e) => {
+                        choose(e.currentTarget.value);
+                        e.currentTarget.value = "";
+                    }}
+                >
+                    <option value="">Fill from a preset…</option>
+                    <For each={GITHUB_PRESETS}>{(g) => <option value={g.id}>{g.writes ? `${g.label} (writes)` : g.label}</option>}</For>
+                </select>
+            </NodeField>
+            <Show when={problem()}>
+                <div class="drone-field-note drone-field-note--error">{problem()}</div>
+            </Show>
+            <Show when={picked()}>
+                {(g) => (
+                    <div class="drone-field-note">
+                        {g().writes ? "Changes something on GitHub. " : ""}
+                        {g().hint}
+                    </div>
+                )}
+            </Show>
         </>
     );
 };

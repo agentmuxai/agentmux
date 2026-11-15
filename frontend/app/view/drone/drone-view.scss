@@ -473,3 +473,14 @@
     font-size: var(--text-xs);
     color: var(--error-text-color);
 }
+
+/* A line under a node's field that says what a preset did. */
+.drone-field-note {
+    font-size: var(--font-size-small, 11px);
+    color: var(--secondary-text-color);
+    line-height: 1.35;
+
+    &--error {
+        color: var(--error-text-color);
+    }
+}
