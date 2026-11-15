@@ -120,7 +120,7 @@ export function LanPeerRow(props: {
                     </Show>
                     <Show when={props.peer.channel}>
                         <div class="status-bar-popover-row" data-testid="lan-peer-data-channel">
-                            <span class="status-bar-popover-label">Data in</span>
+                            <span class="status-bar-popover-label">Channel</span>
                             <span class="status-bar-popover-mono lan-peer-data-channel">{props.peer.channel}</span>
                         </div>
                     </Show>
