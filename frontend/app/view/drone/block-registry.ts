@@ -34,7 +34,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "variables",
         emoji: "🔢",
         label: "Variables",
-        description: "Declare drone-scope variables. Read via {{var.name}}; any {{reference}} takes filters: {{a.log | tail:20 | lower}} (tail, head, json:path, lower, trunc, default).",
+        description: "Declare drone-scope variables. Read via {{var.name}}; any {{reference}} takes filters: {{a.log | tail:20 | lower}} (tail, head, json:path, lower, trunc, default, jsonstr: text safe inside a JSON string).",
         color: "#a855f7",
         defaultData: {
             entries: [{ name: "example", value: "hello" }],
@@ -139,7 +139,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "api",
         emoji: "🌐",
         label: "API",
-        description: "Make an HTTP request. Headers and body support {{...}}.",
+        description: "Make an HTTP request. Headers and body support {{...}}. A Vault entry can supply the Authorization header.",
         color: "#10b981",
         defaultData: {
             method: "GET",
@@ -174,6 +174,56 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         defaultData: {
             input: "",
             ops: [],
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    wait: {
+        kind: "wait",
+        emoji: "⏳",
+        label: "Wait",
+        description: "Stop the run for a time (for: 30m, until: 2026-12-01T09:00:00Z) or for an event (on: a name; the run's Waiting event gives the key that ends it). It holds no process while it waits.",
+        color: "#64748b", // colour: fixed (the block's identity colour)
+        defaultData: {
+            for: "30m",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    join: {
+        kind: "join",
+        emoji: "🔀",
+        label: "Join",
+        description: "Bring branches that split back together. mode: all (default), any or n_of_m (with n). on_branch_error: fail (default) or skip, which leaves a failed branch out. What each branch said is {{this.outputs.<block>}}.",
+        color: "#64748b", // colour: fixed (the block's identity colour)
+        defaultData: {
+            mode: "all",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    run: {
+        kind: "run",
+        emoji: "⚙️",
+        label: "Run",
+        description: "Run a fixed command in a container with no network and no mounts. command is a list: the program, then its arguments (no shell). Values from outside the drone (an event, a web response, an agent's answer) are refused in command, env and cwd. What it printed is {{this.stdout}}, {{this.stderr}} and {{this.exit_code}}. A non-zero exit fails the block unless it is in ok_exit_codes. timeout_seconds is at most 3600 (5 minutes when absent).",
+        color: "#a16207", // colour: fixed (the block's identity colour)
+        defaultData: {
+            command: [],
+            timeout_seconds: 300,
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    drone: {
+        kind: "drone",
+        emoji: "🧩",
+        label: "Drone",
+        description: "Call another drone as a step. It runs on this run's remaining budget and is stopped with it. Inputs are read by the callee as {{trigger.name}}; what its Response says is {{this.value}}. A drone cannot call itself, and calls nest at most 4 deep.",
+        color: "#0ea5e9", // colour: fixed (the block's identity colour)
+        defaultData: {
+            drone: "",
+            inputs: {},
         },
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],

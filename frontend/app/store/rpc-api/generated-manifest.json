@@ -907,6 +907,10 @@
             "send": "data ?? {}"
         },
         {
+            "command": "getdronepayloadschema",
+            "method": "GetDronePayloadSchemaCommand"
+        },
+        {
             "command": "listdroneruns",
             "method": "ListDroneRunsCommand"
         },
@@ -1248,6 +1252,10 @@
             "method": "FileProbeCommand"
         },
         {
+            "command": "filesearchbytes",
+            "method": "FileSearchBytesCommand"
+        },
+        {
             "command": "readeditorfile",
             "method": "ReadEditorFileCommand"
         },
@@ -1325,6 +1333,18 @@
         {
             "command": "rundrone",
             "method": "RunDroneCommand"
+        },
+        {
+            "command": "resolvedronerun",
+            "method": "ResolveDroneRunCommand"
+        },
+        {
+            "command": "resumedronewait",
+            "method": "ResumeDroneWaitCommand"
+        },
+        {
+            "command": "replaydronerun",
+            "method": "ReplayDroneRunCommand"
         },
         {
             "command": "layout.save",

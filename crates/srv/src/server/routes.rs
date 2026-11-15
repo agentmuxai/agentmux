@@ -107,8 +107,16 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     // A headless srv serving its own UI also serves the browser sign-in (`local_session_routes`).
     let sign_in = if super::local_session_routes::enabled() { super::local_session_routes::routes() } else { Router::new() };
 
+    // A script on this computer starts an event job's run (`server::hook_handlers`): full router only, never the
+    // LAN, and the job's own secret is its key.
+    let local_hook = Router::new().route(
+        "/agentmux/hook/:job",
+        post(super::hook_handlers::handle_hook).layer(axum::extract::DefaultBodyLimit::max(crate::backend::jobs::webhook_local::MAX_BODY)),
+    );
+
     let full = Router::new()
         .merge(full_health)
+        .merge(local_hook)
         .merge(sign_in)
         .merge(widget_files)
         .merge(model_gateway)
@@ -611,6 +619,8 @@ fn muxspect_routes() -> Router<AppState> {
         // The recent reviews, check results and merges of agents' PRs, ids, states and times only, for the Atlas map's review bot and
         // CI nodes on open (`backend::pr_flow`). Read-only.
         .route("/api/v1/pr-flow", get(pr_flow_handler::handle_pr_flow))
+        // Every PR a task names, with its review, checks and merge state and what it waits on (`backend::reviews`). Read-only.
+        .route("/api/v1/reviews", get(reviews_handler::handle_reviews))
         // ClaimWork / ReleaseWork (same spec, §3.4): informational claims,
         // never a lock.
         // PostToChannel / ReadChannel: a repository's coordination channel
@@ -904,6 +914,7 @@ fn forward_messaging_and_work_routes() -> Router<AppState> {
         .route("/agentmux/quit-question", get(super::quit_question::handle_quit_question))
         .route("/agentmux/work", get(work_queue::handle_work_list))
         .route("/agentmux/work/boards", get(work_boards::handle_boards_list))
+        .route("/agentmux/work/:id", get(work_tasks::handle_work_get))
         // Kanban: an agent's decision on a task in review (signed, not a token).
         .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
         .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
@@ -974,7 +985,11 @@ pub(super) fn with_frontend(router: Router<AppState>, dir: &std::path::Path) -> 
     use tower_http::services::{ServeDir, ServeFile};
     let index = ServeFile::new(dir.join("index.html"));
     // The UI's files carry the sign-in's policy (CSP, framing) when srv signs a browser in.
-    let files = Router::new().fallback_service(ServeDir::new(dir).fallback(index)).layer(middleware::from_fn(super::local_session_routes::ui_headers));
+    let files = Router::new()
+        .fallback_service(ServeDir::new(dir).fallback(index))
+        // How a browser caches them: the page and the files without a hash are revalidated (ui_cache.rs).
+        .layer(middleware::from_fn(super::ui_cache::ui_cache))
+        .layer(middleware::from_fn(super::local_session_routes::ui_headers));
     router.fallback_service(files)
 }
 

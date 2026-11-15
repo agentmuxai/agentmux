@@ -50,7 +50,11 @@ pub mod event_source {
     pub const FILE_WATCH: &str = "file_watch";
     /// A POST arrived on this computer's loopback hook address.
     pub const WEBHOOK_LOCAL: &str = "webhook_local";
-    pub const ALL: [&str; 3] = [APP_EVENT, FILE_WATCH, WEBHOOK_LOCAL];
+    /// AgentMux's own state is asked every so often and each new item starts a run.
+    pub const POLL: &str = "poll";
+    /// A job it watches has not had a good run lately (a dead man's switch).
+    pub const EXPECT: &str = "expect";
+    pub const ALL: [&str; 5] = [APP_EVENT, FILE_WATCH, WEBHOOK_LOCAL, POLL, EXPECT];
 }
 
 /// The most entries an event trigger's filter holds, and the longest a filter key or text value may be.
@@ -188,6 +192,15 @@ impl EventTrigger {
         }
         if self.source == event_source::FILE_WATCH {
             super::file_watch::validate_filter(&self.filter)?;
+        }
+        if self.source == event_source::WEBHOOK_LOCAL {
+            super::webhook_local::validate_filter(&self.filter)?;
+        }
+        if self.source == event_source::POLL {
+            super::poll::validate_filter(&self.filter)?;
+        }
+        if self.source == event_source::EXPECT {
+            super::expect::validate_filter(&self.filter)?;
         }
         Ok(())
     }
@@ -459,22 +472,16 @@ impl JobDefinition {
         validate_secrets(&self.secrets)
     }
 
-    /// A Drone run can't be stopped or run again yet, and each of those
-    /// would close the job's row while the drone goes on, so a drone job
-    /// can't ask for them until the engine can cancel a run. Its spending is
-    /// held by admission, as an agent job's is (`policy::starts_an_agent`): a
-    /// run that would pass the day's cap does not start.
+    /// A Drone run is not run again yet, so a drone job can't ask for
+    /// retries. A timeout or `cancel_other` stops the run through the engine's
+    /// cancel (`stop_run`). Its spending is held by admission, as an agent
+    /// job's is (`policy::starts_an_agent`): a run that would pass the day's
+    /// cap does not start.
     fn validate_drone_policy(&self) -> Result<(), String> {
         if !matches!(self.action, Action::Drone { .. }) {
             return Ok(());
         }
         let p = &self.policy;
-        if p.timeout_minutes.is_some() {
-            return Err(format!("policy.timeout_minutes: a drone run can't be stopped yet, so a timeout can't end it; leave it unset (stopping runs is {LATER})"));
-        }
-        if p.overlap == Overlap::CancelOther {
-            return Err(format!("policy.overlap: cancel_other would have to stop the earlier drone run, which can't be stopped yet; use skip or buffer_one (stopping runs is {LATER})"));
-        }
         if p.retries > 0 {
             return Err(format!("policy.retries: a failed drone run is not run again yet; leave retries at 0 and run it again by hand (retries are {LATER})"));
         }

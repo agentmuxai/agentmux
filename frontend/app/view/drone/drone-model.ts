@@ -27,6 +27,7 @@ import {
 } from "@/app/store/drone-run-state-store";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
+import type { PayloadSchemaResp } from "@/types/rpc/PayloadSchemaResp";
 import type { RunEvent } from "@/types/rpc/RunEvent";
 import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -163,6 +164,12 @@ export class DroneViewModel {
     runsAtom: Accessor<DroneRun[]> = this._runs[0];
     setRuns = this._runs[1];
 
+    /** What the open drone can read of what starts it; null until srv has answered. */
+    private _payloadSchema = createSignal<PayloadSchemaResp | null>(null);
+    payloadSchemaAtom: Accessor<PayloadSchemaResp | null> = this._payloadSchema[0];
+    setPayloadSchema = this._payloadSchema[1];
+    private payloadSchemaAsk = 0;
+
     private _error = createSignal<string | null>(null);
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
@@ -241,6 +248,7 @@ export class DroneViewModel {
                 this.setViewport(wf.viewport ?? defaultViewport());
                 this.dispatchIfAlive({ type: "Reset" }, "user");
                 await this.refreshRuns(id);
+                void this.refreshPayloadSchema(id);
             }
         } catch (e) {
             this.setError(`Failed to open drone: ${(e as Error).message ?? e}`);
@@ -253,6 +261,8 @@ export class DroneViewModel {
         this.setSelected(null);
         this.setViewport(defaultViewport());
         this.setRuns([]);
+        this.payloadSchemaAsk++;
+        this.setPayloadSchema(null);
         this.dispatchIfAlive({ type: "Reset" }, "user");
         if (this.activeRunUnsub) {
             this.activeRunUnsub();
@@ -337,7 +347,7 @@ export class DroneViewModel {
         }
         this.activeRunUnsub = onMuxEvent(`dronerun:${runId}`, (data) => {
             this.dispatchWireEvent(data);
-            if (data.kind === "run_done" || data.kind === "run_failed") {
+            if (data.kind === "run_done" || data.kind === "run_failed" || data.kind === "run_cancelled") {
                 // Backend writes the row update BEFORE publishing
                 // the terminal event (codex P2 on #843), so a
                 // refresh here lands the final state.
@@ -395,6 +405,14 @@ export class DroneViewModel {
                     error: ev.error ?? "run failed",
                 });
                 break;
+            case "run_cancelled":
+                // The inspector has no separate cancelled state yet: it shows the
+                // run as ended, with the reason in the error line.
+                this.dispatchIfAlive({
+                    type: "RunFailed",
+                    error: `Stopped: ${ev.reason ?? "cancelled"}`,
+                });
+                break;
         }
     }
 
@@ -409,7 +427,7 @@ export class DroneViewModel {
         // a partial-but-correct mid-flight backlog.
         if (Object.keys(this.blockResultsAtom()).length > 0) return;
         const row = this.runsAtom().find((r) => r.id === runId);
-        if (!row || (row.status !== "done" && row.status !== "failed")) return;
+        if (!row || (row.status !== "done" && row.status !== "failed" && row.status !== "cancelled")) return;
         const blocks = Object.entries(row.block_states ?? {}).map(
             ([blockId, st]) => ({
                 blockId,
@@ -425,7 +443,7 @@ export class DroneViewModel {
                 droneId,
                 status: row.status === "done" ? "done" : "failed",
                 output: row.output,
-                error: row.error,
+                error: row.status === "cancelled" ? `Stopped: ${row.error}` : row.error,
                 blocks,
             },
             "system",
@@ -433,6 +451,19 @@ export class DroneViewModel {
         if (this.activeRunUnsub) {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
+        }
+    }
+
+    /** What this drone can read of what starts it: one answer per job that runs it. A hint only, so a failure shows nothing. */
+    async refreshPayloadSchema(droneId: string): Promise<void> {
+        // Another drone opened, or a blank one, while this was asked: its answer is not for the canvas now.
+        const ask = ++this.payloadSchemaAsk;
+        this.setPayloadSchema(null);
+        try {
+            const schema = await RpcApi.GetDronePayloadSchemaCommand(TabRpcClient, { drone_id: droneId });
+            if (!this.disposed && ask === this.payloadSchemaAsk) this.setPayloadSchema(schema);
+        } catch {
+            // non-fatal
         }
     }
 

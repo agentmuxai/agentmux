@@ -3153,6 +3153,25 @@
     }
   },
   {
+    "command": "filesearchbytes",
+    "request": "agentmux_srv::backend::rpc_types::editor_read::FileSearchBytesReq",
+    "requestName": "FileSearchBytesReq",
+    "requestTs": {
+      "imports": [
+        "FileSearchBytesReq"
+      ],
+      "name": "FileSearchBytesReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::editor_read::FileSearchBytesResult",
+    "responseName": "FileSearchBytesResult",
+    "responseTs": {
+      "imports": [
+        "FileSearchBytesResult"
+      ],
+      "name": "FileSearchBytesResult"
+    }
+  },
+  {
     "command": "fleet.broadcast",
     "request": "agentmux_srv::backend::rpc_types::fleet::CommandFleetBroadcastData",
     "requestName": "CommandFleetBroadcastData",
@@ -3758,6 +3777,25 @@
         "DroneDefinition"
       ],
       "name": "DroneDefinition | null"
+    }
+  },
+  {
+    "command": "getdronepayloadschema",
+    "request": "agentmux_srv::server::drone_payload::PayloadSchemaReq",
+    "requestName": "PayloadSchemaReq",
+    "requestTs": {
+      "imports": [
+        "PayloadSchemaReq"
+      ],
+      "name": "PayloadSchemaReq"
+    },
+    "response": "agentmux_srv::server::drone_payload::PayloadSchemaResp",
+    "responseName": "PayloadSchemaResp",
+    "responseTs": {
+      "imports": [
+        "PayloadSchemaResp"
+      ],
+      "name": "PayloadSchemaResp"
     }
   },
   {
@@ -6553,6 +6591,25 @@
     }
   },
   {
+    "command": "replaydronerun",
+    "request": "agentmux_srv::server::drone_replay::ReplayRunReq",
+    "requestName": "ReplayRunReq",
+    "requestTs": {
+      "imports": [
+        "ReplayRunReq"
+      ],
+      "name": "ReplayRunReq"
+    },
+    "response": "agentmux_srv::server::drone_replay::ReplayRunResp",
+    "responseName": "ReplayRunResp",
+    "responseTs": {
+      "imports": [
+        "ReplayRunResp"
+      ],
+      "name": "ReplayRunResp"
+    }
+  },
+  {
     "command": "reseedagents",
     "request": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandReseedAgentsData>",
     "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::agent::CommandReseedAgentsData>",
@@ -6607,6 +6664,44 @@
         "ResolveCliResult"
       ],
       "name": "ResolveCliResult"
+    }
+  },
+  {
+    "command": "resolvedronerun",
+    "request": "agentmux_srv::server::drone_handlers::ResolveRunReq",
+    "requestName": "ResolveRunReq",
+    "requestTs": {
+      "imports": [
+        "ResolveRunReq"
+      ],
+      "name": "ResolveRunReq"
+    },
+    "response": "agentmux_srv::server::drone_handlers::ResolveRunResp",
+    "responseName": "ResolveRunResp",
+    "responseTs": {
+      "imports": [
+        "ResolveRunResp"
+      ],
+      "name": "ResolveRunResp"
+    }
+  },
+  {
+    "command": "resumedronewait",
+    "request": "agentmux_srv::server::drone_handlers::ResumeWaitReq",
+    "requestName": "ResumeWaitReq",
+    "requestTs": {
+      "imports": [
+        "ResumeWaitReq"
+      ],
+      "name": "ResumeWaitReq"
+    },
+    "response": "agentmux_srv::server::drone_handlers::ResumeWaitResp",
+    "responseName": "ResumeWaitResp",
+    "responseTs": {
+      "imports": [
+        "ResumeWaitResp"
+      ],
+      "name": "ResumeWaitResp"
     }
   },
   {

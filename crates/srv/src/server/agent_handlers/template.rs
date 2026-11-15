@@ -212,7 +212,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state_act = state.clone();
     engine.register_typed(COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE, move |cmd: CommandAgentDefCreateFromTemplateData, _ctx| {
         let state = state_act.clone();
-        async move { create_from_template(&state.mstore, &state.id_store, &state.broker, cmd) }
+        async move { create_from_template(&state.mstore, &state.id_store, &state.identity_store, &state.broker, cmd) }
     });
 
     // Registered through `register_typed` (rather than `register_handler`) so each command's request/response
@@ -997,6 +997,83 @@ mod tests {
 
         let env = first_spawn_env(&state, &fork.id).expect("the fork must start on the account its source runs on");
         assert_eq!(env.get("CLAUDE_CONFIG_DIR").map(String::as_str), Some(dir_t.as_str()));
+    }
+
+    // ---- A new agent starts on the account it is created with (#47722) ----
+    //
+    // Created from a template, an agent had its account link written by the launch, after the controller
+    // started: the first spawn found none and refused, while Accounts counted the link made a moment later.
+
+    async fn create_via_rpc(state: &AppState, name: &str, identity_id: Option<&str>) -> AgentDefCreateFromTemplateResult {
+        let mut tpl = crate::backend::storage::agents::test_agent_def("tpl-new", "Template New", "claude", "host", 0, "");
+        tpl.is_seeded = 1;
+        if state.mstore.agent_def_get("tpl-new").unwrap().is_none() {
+            state.mstore.agent_def_insert(&mut tpl).unwrap();
+        }
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, state);
+        engine.handle_message(RpcMessage {
+            command: COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE.to_string(),
+            reqid: "req-create".to_string(),
+            data: Some(serde_json::json!({ "template_id": "tpl-new", "name": name, "identity_id": identity_id })),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv()).await.unwrap().unwrap();
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        serde_json::from_value(resp.data.expect("expected result data")).unwrap()
+    }
+
+    fn links_of(state: &AppState, agent_id: &str) -> Vec<(String, String)> {
+        let links = state.identity_store.agent_identity_list_for_agent(agent_id).unwrap();
+        links.into_iter().map(|l| (l.provider, l.account_id)).collect()
+    }
+
+    #[tokio::test]
+    async fn a_new_agent_starts_on_the_account_it_was_created_with() {
+        let state = test_state();
+        let dir_a = seed_oauth_account(&state, "acct-a", "claude");
+        seed_oauth_account(&state, "acct-b", "claude");
+
+        let made = create_via_rpc(&state, "Quill", Some("acct-a")).await;
+
+        assert_eq!(links_of(&state, &made.definition_id), vec![("claude".to_string(), "acct-a".to_string())]);
+        let env = first_spawn_env(&state, &made.definition_id).expect("the first spawn must pass the credential gate");
+        assert_eq!(env.get("CLAUDE_CONFIG_DIR").map(String::as_str), Some(dir_a.as_str()));
+    }
+
+    #[tokio::test]
+    async fn a_new_agent_takes_the_providers_only_account_when_none_is_chosen() {
+        let state = test_state();
+        seed_oauth_account(&state, "acct-only", "claude");
+        seed_oauth_account(&state, "acct-other", "openai");
+
+        let made = create_via_rpc(&state, "Quill", None).await;
+
+        assert_eq!(links_of(&state, &made.definition_id), vec![("claude".to_string(), "acct-only".to_string())]);
+        assert!(first_spawn_env(&state, &made.definition_id).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_new_agent_with_two_accounts_and_none_chosen_stays_unbound() {
+        let state = test_state();
+        seed_oauth_account(&state, "acct-a", "claude");
+        seed_oauth_account(&state, "acct-b", "claude");
+
+        let made = create_via_rpc(&state, "Quill", Some("")).await;
+
+        assert!(links_of(&state, &made.definition_id).is_empty(), "two accounts is a choice for the person");
+    }
+
+    #[tokio::test]
+    async fn a_new_agent_is_not_linked_to_an_account_of_another_provider_or_one_that_is_gone() {
+        let state = test_state();
+        seed_oauth_account(&state, "acct-openai", "openai");
+
+        let wrong = create_via_rpc(&state, "Quill", Some("acct-openai")).await;
+        let gone = create_via_rpc(&state, "Marlo", Some("no-such-account")).await;
+
+        assert!(links_of(&state, &wrong.definition_id).is_empty());
+        assert!(links_of(&state, &gone.definition_id).is_empty());
     }
 
     // #2721 Phase 1 (Codex's review) — the auto-suggested name must be a

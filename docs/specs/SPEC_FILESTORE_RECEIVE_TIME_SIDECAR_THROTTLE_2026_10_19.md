@@ -1,5 +1,7 @@
 # Spec: the receive-time sidecar is written at most once a second per file
 
+**Area:** history store
+
 **Date:** 2026-10-19
 **Author:** Maricon@charlie
 **Type:** Spec (a write-volume change; what readers see differs by under a second)

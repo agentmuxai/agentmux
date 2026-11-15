@@ -5,11 +5,11 @@
 // Tests for scripts/gen-docs-index.mjs, the Node port of the specs-index
 // generator (docs/specs/SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md §7).
 //
-// The *.golden files under test-fixtures/gen-docs-index/ were produced by the
-// ORIGINAL shell generator over the same fixture trees (make-goldens.mjs), so
-// "matches the golden" means "byte-identical to the implementation it
-// replaced". Cases where the port deliberately differs (spec §6) are asserted
-// separately and say so.
+// The *.golden files under test-fixtures/gen-docs-index/ are this generator's own
+// output over the fixture trees (make-goldens.mjs), read through once by a person
+// when the grouping changed (2026-11-14: by area, with a Status column). They
+// were byte-identical to the original shell generator's until then; the port's
+// deliberate differences from it (spec §6) are asserted separately and say so.
 //
 // Runs on Linux, macOS and Windows in CI ("specs index (<os>)" in ci-pr.yml).
 
@@ -25,8 +25,11 @@ import {
     bytes,
     lineDiff,
     main,
+    areaOf,
+    dateOf,
     spliceHead,
     statusOf,
+    targetsOf,
     titleOf,
 } from "./gen-docs-index.mjs";
 import {
@@ -231,7 +234,7 @@ describe("lineDiff (diff(1) normal format)", () => {
 
 // ── Golden trees: byte-identical to the shell generator ─────────────────────
 
-describe("matches the shell generator byte-for-byte", () => {
+describe("matches its golden output byte-for-byte", () => {
     for (const [name, build] of Object.entries(GOLDEN_CASES)) {
         it(
             name,
@@ -297,7 +300,7 @@ describe("deliberate differences (spec §6)", () => {
             const res = run(root);
             expect(res.code).toBe(0);
             expect(res.err).toContain("3 specs under docs/specs/");
-            expect(indexOf(root).toString("utf8")).toContain("| [`Café`](Café.md) | Accented name |\n");
+            expect(indexOf(root).toString("utf8")).toContain("| [`Café`](Café.md) | Accented name | draft |  |  |\n");
         },
         TIMEOUT
     );
@@ -364,10 +367,9 @@ describe("--check", () => {
             expect(res.code).toBe(1);
             expect(res.out).toContain("gen-docs-index: INDEX.md is STALE.");
             expect(res.out).toContain("Run: bash scripts/gen-docs-index.sh");
-            // two.md moved from draft to implemented. Its row is identical on
-            // both sides, so the minimal diff keeps it and deletes the draft
-            // section around it — what diff(1) reports too.
-            expect(res.out).toContain("    < ### draft");
+            // two.md moved from draft to implemented: only its Status cell differs.
+            expect(res.out).toContain("    < | [`two`](two.md) | Two | draft |  |  |");
+            expect(res.out).toContain("    > | [`two`](two.md) | Two | implemented |  |  |");
             expect(res.out).toMatch(/\n {4}\d+(,\d+)?[acd]\d+(,\d+)?\n/);
             expect(indexOf(root).equals(before)).toBe(true);
         },
@@ -487,7 +489,7 @@ describe("failure handling", () => {
         () => {
             const root = fixture(buildNoMarker);
             const before = indexOf(root);
-            const res = run(root, [], { transformRows: (m) => m.get("draft").pop() });
+            const res = run(root, [], { transformRows: (m) => m.get("").pop() });
             expect(res.code).toBe(3);
             expect(res.err).toContain("gen-docs-index: FATAL — emitted 1 rows for 2 specs;");
             expect(res.err).toContain("refusing to write it.");
@@ -592,4 +594,141 @@ it("every golden file has a fixture and every fixture has a golden", () => {
         .sort();
     expect(goldens).toEqual(Object.keys(GOLDEN_CASES).sort());
     for (const g of goldens) expect(existsSync(join(GOLDEN_DIR, `${g}.golden`))).toBe(true);
+});
+
+// ── Areas, dates and what replaces what (task #47664) ───────────────────────
+
+describe("areaOf", () => {
+    it("reads the first Area line, lowercased, blanks collapsed", () => {
+        expect(areaOf("# T\n\n**Area:**   History  Store\n")).toBe("history store");
+        expect(areaOf("**AREA:** Floating panes / drag-and-dock\n**Area:** second\n")).toBe("floating panes / drag-and-dock");
+    });
+    it("is empty when the line is not a short plain name (paths, links, lists, a table pipe)", () => {
+        expect(areaOf("**Area:** `frontend/app/element/`\n")).toBe("");
+        expect(areaOf("**Area:** agent pane (frontend)\n")).toBe("");
+        expect(areaOf("**Area:** [`a`](../a), b\n")).toBe("");
+        expect(areaOf("**Area:** a | b\n")).toBe("");
+        expect(areaOf(`**Area:** ${"x".repeat(40)}\n`)).toBe("");
+    });
+    it("is empty without an Area line, with an empty one, or past line 40", () => {
+        expect(areaOf("# T\n**Status:** draft\n")).toBe("");
+        expect(areaOf("**Area:**\n")).toBe("");
+        expect(areaOf("filler\n".repeat(40) + "**Area:** late\n")).toBe("");
+    });
+});
+
+describe("dateOf", () => {
+    it("reads the last date in a file name", () => {
+        expect(dateOf("SPEC_HISTORY_STORE_2026_10_21.md")).toBe("2026-10-21");
+        expect(dateOf("SPEC_X_2026_09_01_FOLLOWUP_2026_10_05.md")).toBe("2026-10-05");
+    });
+    it("is empty when the name has no date", () => {
+        expect(dateOf("README_ish.md")).toBe("");
+        expect(dateOf("SPEC_V_20261021.md")).toBe("");
+    });
+});
+
+describe("targetsOf", () => {
+    const known = new Set(["SPEC_A_2026_01_01", "SPEC_B_2026_02_02", "SPEC_C"]);
+    it("reads paths, links, backticks and lists, keeping only specs in the tree", () => {
+        expect(targetsOf("docs/specs/SPEC_A_2026_01_01.md", known)).toEqual(["SPEC_A_2026_01_01"]);
+        expect(targetsOf("[the old one](SPEC_A_2026_01_01.md), `SPEC_B_2026_02_02`", known)).toEqual(["SPEC_A_2026_01_01", "SPEC_B_2026_02_02"]);
+        expect(targetsOf("SPEC_A_2026_01_01; SPEC_C — and a missing SPEC_Z.", known)).toEqual(["SPEC_A_2026_01_01", "SPEC_C"]);
+    });
+    it("is empty for no value or only prose", () => {
+        expect(targetsOf(null, known)).toEqual([]);
+        expect(targetsOf("replaced in a later rewrite", known)).toEqual([]);
+    });
+});
+
+function buildAreas(root) {
+    initRepo(root);
+    put(root, "docs/specs/INDEX.md", "# Specs index\n");
+    put(root, "docs/specs/SPEC_OLD_2026_09_01.md", "# Old way\n\n**Status:** superseded\n**Superseded-by:** SPEC_NEW_2026_10_21.md\n**Area:** History Store\n");
+    put(root, "docs/specs/SPEC_NEW_2026_10_21.md", "# New way\n\n**Status:** implemented — #5324\n**Area:** history store\n");
+    put(root, "docs/specs/SPEC_NEWER_2026_11_01.md", "# Newest way\n\n**Status:** proposed\n**Area:** history store\n**Supersedes:** [new](SPEC_NEW_2026_10_21.md)\n");
+    put(root, "docs/specs/SPEC_AGENTS_2026_10_01.md", "# About agents\n\n**Status:** living\n**Area:** agent pane\n");
+    put(root, "docs/specs/SPEC_LOOSE_2026_10_30.md", "# Loose\n\n**Status:** draft\n");
+    put(root, "docs/specs/SPEC_LOOSER_2026_08_15.md", "# Looser\n\n**Status:** draft\n");
+    put(root, "docs/specs/NOTES_UNDATED.md", "# Undated\n");
+    commitAll(root);
+}
+
+describe("grouping by area", () => {
+    const section = (root) => indexOf(root).toString("utf8");
+    const rowOf = (text, stem) => text.split("\n").find((l) => l.startsWith(`| [\`${stem}\`]`));
+
+    it(
+        "lists each spec once, areas alphabetical, unsorted last and newest first",
+        () => {
+            const root = fixture(buildAreas);
+            const res = run(root);
+            expect(res.code, res.out + res.err).toBe(0);
+            const text = section(root);
+            const headings = text.split("\n").filter((l) => l.startsWith("### "));
+            expect(headings).toEqual(["### agent pane", "### history store", "### unsorted"]);
+            const stems = [...text.matchAll(/^\| \[`([^`]+)`\]/gm)].map((m) => m[1]);
+            expect(stems).toEqual([
+                "SPEC_AGENTS_2026_10_01",
+                "SPEC_NEWER_2026_11_01",
+                "SPEC_NEW_2026_10_21",
+                "SPEC_OLD_2026_09_01",
+                "SPEC_LOOSE_2026_10_30",
+                "SPEC_LOOSER_2026_08_15",
+                "NOTES_UNDATED",
+            ]);
+            expect(new Set(stems).size).toBe(stems.length);
+            expect(res.err).toContain("7 specs under docs/specs/");
+        },
+        TIMEOUT
+    );
+
+    it(
+        "shows Status and date, and a replacement from either side in both directions",
+        () => {
+            const root = fixture(buildAreas);
+            run(root);
+            const text = section(root);
+            expect(rowOf(text, "SPEC_NEW_2026_10_21")).toBe(
+                "| [`SPEC_NEW_2026_10_21`](SPEC_NEW_2026_10_21.md) | New way | implemented | 2026-10-21 | replaces [`SPEC_OLD_2026_09_01`](SPEC_OLD_2026_09_01.md); replaced by [`SPEC_NEWER_2026_11_01`](SPEC_NEWER_2026_11_01.md) |"
+            );
+            expect(rowOf(text, "SPEC_OLD_2026_09_01")).toContain("| superseded | 2026-09-01 | replaced by [`SPEC_NEW_2026_10_21`](SPEC_NEW_2026_10_21.md) |");
+            expect(rowOf(text, "SPEC_NEWER_2026_11_01")).toContain("| proposed | 2026-11-01 | replaces [`SPEC_NEW_2026_10_21`](SPEC_NEW_2026_10_21.md) |");
+            expect(rowOf(text, "NOTES_UNDATED")).toBe("| [`NOTES_UNDATED`](NOTES_UNDATED.md) | Undated | none |  |  |");
+        },
+        TIMEOUT
+    );
+
+    it(
+        "a replacement of one section says so",
+        () => {
+            const root = fixture((r) => {
+                initRepo(r);
+                put(r, "docs/specs/INDEX.md", "# Specs index\n");
+                put(r, "docs/specs/base.md", "# Base\n\n**Status:** active\n");
+                put(r, "docs/specs/part.md", "# Part\n\n**Status:** implemented\n**Supersedes:** §4.2 of `base.md`\n");
+                commitAll(r);
+            });
+            expect(run(root).code).toBe(0);
+            const text = section(root);
+            expect(rowOf(text, "part")).toBe("| [`part`](part.md) | Part | implemented |  | replaces part of [`base`](base.md) |");
+            expect(rowOf(text, "base")).toBe("| [`base`](base.md) | Base | active |  | partly replaced by [`part`](part.md) |");
+        },
+        TIMEOUT
+    );
+
+    it(
+        "a pointer to a spec that is not in the tree is left out rather than guessed",
+        () => {
+            const root = fixture((r) => {
+                initRepo(r);
+                put(r, "docs/specs/INDEX.md", "# Specs index\n");
+                put(r, "docs/specs/a.md", "# A\n\n**Status:** superseded\n**Superseded-by:** docs/specs/gone.md\n");
+                commitAll(r);
+            });
+            expect(run(root).code).toBe(0);
+            expect(rowOf(section(root), "a")).toBe("| [`a`](a.md) | A | superseded |  |  |");
+        },
+        TIMEOUT
+    );
 });

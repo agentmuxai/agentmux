@@ -3,7 +3,7 @@
 
 /** What an agent's Swarm row does with a press, a click and a key, and how its summary flashes on a change. */
 
-import { createEffect, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, untrack, type Accessor } from "solid-js";
 import { openAgentInActiveTab } from "@/app/store/agent-runtime-live";
 import { revealBlock } from "@/app/util/reveal-block";
 import { scaledMs } from "@/app/motion/motion";
@@ -14,6 +14,9 @@ import type { AgentTreeNode } from "./swarm-model";
 /** How long a changed summary keeps its flash class: the flash runs for
  *  --duration-emphasis, scaled, and the class stays 100 ms longer. */
 const summaryFlashMs = () => scaledMs(DURATION_EMPHASIS_MS) + 100;
+
+/** How long a note about an open stays when the agent's pane is already back: it is about a moment, not a state. */
+export const OPEN_NOTE_MS = 8000;
 
 /** Whether the row's summary is flashing: set when it changes to a new one, not for the one the row mounts with. */
 export function useSummaryFlash(node: Accessor<AgentTreeNode>): Accessor<boolean> {
@@ -68,7 +71,30 @@ export function useAgentRowActivation(node: Accessor<AgentTreeNode>, blockMeta: 
     // mark is read when the click lands, so a pane that appeared meanwhile (another window) is focused.
     const isParked = () => isParkedMeta(blockMeta());
     const [opening, setOpening] = createSignal(false);
-    const [openRefused, setOpenRefused] = createSignal("");
+    const [openRefused, setOpenRefusedRaw] = createSignal("");
+    // A note has a lifetime. One about an agent that is still parked (srv refused to put its pane back) stays until
+    // the next try, because it stays true. One about a pane that is already back (the attach worked, then something
+    // after it did not) is about a moment: it goes after OPEN_NOTE_MS, and when the pane appears.
+    let noteTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearNote = () => {
+        clearTimeout(noteTimer);
+        setOpenRefusedRaw("");
+    };
+    const setOpenRefused = (why: string) => {
+        clearTimeout(noteTimer);
+        setOpenRefusedRaw(why);
+        if (why && !untrack(isParked)) noteTimer = setTimeout(() => setOpenRefusedRaw(""), OPEN_NOTE_MS);
+    };
+    createEffect(
+        on(
+            isParked,
+            (parked) => {
+                if (!parked) clearNote();
+            },
+            { defer: true }
+        )
+    );
+    onCleanup(() => clearTimeout(noteTimer));
     const openParked = async () => {
         if (opening()) return;
         const agentId = agentUidOfBlockMeta(untrack(blockMeta));
@@ -76,7 +102,7 @@ export function useAgentRowActivation(node: Accessor<AgentTreeNode>, blockMeta: 
             selectAgent();
             return;
         }
-        setOpenRefused("");
+        clearNote();
         setOpening(true);
         try {
             const why = await openAgentInActiveTab({ agent_id: agentId, name: untrack(() => node().agentName) });

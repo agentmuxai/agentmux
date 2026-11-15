@@ -324,6 +324,8 @@ import type { EnsureProviderAuthDirResult } from "@/types/rpc/EnsureProviderAuth
 import type { ExportAgentDefinitionsResult } from "@/types/rpc/ExportAgentDefinitionsResult";
 import type { FileProbeReq } from "@/types/rpc/FileProbeReq";
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
+import type { FileSearchBytesReq } from "@/types/rpc/FileSearchBytesReq";
+import type { FileSearchBytesResult } from "@/types/rpc/FileSearchBytesResult";
 import type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 import type { FleetGroup } from "@/types/rpc/FleetGroup";
 import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
@@ -497,6 +499,8 @@ import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResul
 import type { PaneConfirmDecideResult } from "@/types/rpc/PaneConfirmDecideResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
+import type { PayloadSchemaReq } from "@/types/rpc/PayloadSchemaReq";
+import type { PayloadSchemaResp } from "@/types/rpc/PayloadSchemaResp";
 import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { PollSessionResult } from "@/types/rpc/PollSessionResult";
@@ -512,12 +516,18 @@ import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
 import type { RemoteSshLocation } from "@/types/rpc/RemoteSshLocation";
 import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
 import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
+import type { ReplayRunReq } from "@/types/rpc/ReplayRunReq";
+import type { ReplayRunResp } from "@/types/rpc/ReplayRunResp";
 import type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";
 import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
 import type { ResolveInstallCommandResult } from "@/types/rpc/ResolveInstallCommandResult";
 import type { ResolvePrereqsReq } from "@/types/rpc/ResolvePrereqsReq";
 import type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
+import type { ResolveRunReq } from "@/types/rpc/ResolveRunReq";
+import type { ResolveRunResp } from "@/types/rpc/ResolveRunResp";
 import type { RestoreOtherBuildLayoutResult } from "@/types/rpc/RestoreOtherBuildLayoutResult";
+import type { ResumeWaitReq } from "@/types/rpc/ResumeWaitReq";
+import type { ResumeWaitResp } from "@/types/rpc/ResumeWaitResp";
 import type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
 import type { RunDroneReq } from "@/types/rpc/RunDroneReq";
 import type { RunDroneResp } from "@/types/rpc/RunDroneResp";
@@ -1914,6 +1924,10 @@ export const GeneratedApi = {
   ListBundlesCommand(client: RpcClient, data?: CommandListBundlesData, opts?: RpcOpts): Promise<Array<Bundle>> {
     return client.rpcCall("listmemories", data ?? {}, opts);
   },
+  // command "getdronepayloadschema"
+  GetDronePayloadSchemaCommand(client: RpcClient, data: PayloadSchemaReq, opts?: RpcOpts): Promise<PayloadSchemaResp> {
+    return client.rpcCall("getdronepayloadschema", data, opts);
+  },
   // command "listdroneruns"
   ListDroneRunsCommand(client: RpcClient, data: ListRunsReq, opts?: RpcOpts): Promise<Array<DroneRun>> {
     return client.rpcCall("listdroneruns", data, opts);
@@ -2372,6 +2386,10 @@ export const GeneratedApi = {
   FileProbeCommand(client: RpcClient, data: FileProbeReq, opts?: RpcOpts): Promise<FileProbeResult> {
     return client.rpcCall("fileprobe", data, opts);
   },
+  // command "filesearchbytes"
+  FileSearchBytesCommand(client: RpcClient, data: FileSearchBytesReq, opts?: RpcOpts): Promise<FileSearchBytesResult> {
+    return client.rpcCall("filesearchbytes", data, opts);
+  },
   // command "readeditorfile"
   ReadEditorFileCommand(
     client: RpcClient,
@@ -2463,6 +2481,18 @@ export const GeneratedApi = {
   // command "rundrone"
   RunDroneCommand(client: RpcClient, data: RunDroneReq, opts?: RpcOpts): Promise<RunDroneResp> {
     return client.rpcCall("rundrone", data, opts);
+  },
+  // command "resolvedronerun"
+  ResolveDroneRunCommand(client: RpcClient, data: ResolveRunReq, opts?: RpcOpts): Promise<ResolveRunResp> {
+    return client.rpcCall("resolvedronerun", data, opts);
+  },
+  // command "resumedronewait"
+  ResumeDroneWaitCommand(client: RpcClient, data: ResumeWaitReq, opts?: RpcOpts): Promise<ResumeWaitResp> {
+    return client.rpcCall("resumedronewait", data, opts);
+  },
+  // command "replaydronerun"
+  ReplayDroneRunCommand(client: RpcClient, data: ReplayRunReq, opts?: RpcOpts): Promise<ReplayRunResp> {
+    return client.rpcCall("replaydronerun", data, opts);
   },
   // command "layout.save"
   SaveLayoutCommand(client: RpcClient, data: CommandLayoutSaveData, opts?: RpcOpts): Promise<LayoutSaveResult> {

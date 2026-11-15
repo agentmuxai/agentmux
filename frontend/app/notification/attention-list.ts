@@ -33,6 +33,8 @@ export interface AttentionItem {
     what: string;
     /** When it began to wait (unix ms) as this window saw it. */
     since: number;
+    /** The srv kinds of what it waits on (`vault`, `browser`, `consent`…); empty for its own question or permission. */
+    kinds?: string[];
     /** False only when the pane is known to be in another window; a pane this window cannot place counts as here. */
     local: boolean;
 }
@@ -63,6 +65,7 @@ export function mergeAttention(
             color: row?.color,
             what: p.what,
             since: p.since,
+            kinds: p.kinds ?? [],
             local: true,
             ...(own ? { pane: true as const } : {}),
         };
@@ -82,6 +85,9 @@ export function mergeAttention(
             color: r.color,
             what: r.waiting_in ? BROWSER_WHAT : REMOTE_WHAT,
             since: seen(blockId),
+            // A wait only srv's row reports says nothing of what it waits on, so it is kept as an ask: a pending Vault
+            // request of that pane does not prove it waits on nothing else (it may have asked a question since).
+            kinds: r.waiting_in ? ["browser"] : [],
             local: here(blockId) !== false,
         });
     }

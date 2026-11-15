@@ -26,6 +26,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "WorkAccept" | "WorkSendBack" => run_work_accept(name, arguments, cx).await,
         "WorkEdit" | "WorkMove" | "WorkStart" | "WorkAnswer" | "WorkCancel" | "WorkReopen" | "WorkRetry" | "WorkTakeBack" | "WorkReassign" => run_work_edit(name, arguments, cx).await,
         "WorkList" => run_work_list(arguments, cx).await,
+        "WorkGet" => run_work_get(arguments, cx).await,
         _ => Err(not_in_family()),
     }
 }
@@ -657,6 +658,116 @@ async fn run_work_list(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     }
     out.push_str(note.trim_start_matches('\n'));
     Ok(out)
+}
+
+/// One task whole (`GET /agentmux/work/:id`): the instruction it was filed with and everything the board holds about it.
+async fn run_work_get(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let id = task_id(arguments)?;
+    let url = format!("{}/agentmux/work/{}", local_url.trim_end_matches('/'), path_seg(id));
+    let resp = client
+        .get(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("work get request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        anyhow::bail!("Tasks get: no task {} that you can see. Tasks list shows the ones on your boards.", shown_id(id));
+    }
+    if !status.is_success() {
+        anyhow::bail!("Tasks get failed: HTTP {status} — {}", refusal_words(&text));
+    }
+    let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+    Ok(task_text(&v, id, agentmux_common::time::now_ms()))
+}
+
+/// How long ago, in the words a history line uses.
+fn ago_words(ms: i64) -> String {
+    let s = ms.max(0) / 1000;
+    match s {
+        0..=89 => format!("{s} s ago"),
+        90..=5_399 => format!("{} min ago", (s + 30) / 60),
+        5_400..=129_599 => format!("{} h ago", (s + 1_800) / 3_600),
+        _ => format!("{} d ago", (s + 43_200) / 86_400),
+    }
+}
+
+/// A task as `get` shows it: who it is for and who holds it, its links, the instruction it was filed with,
+/// then the holder's note, question and checklist, what it starts after, and its last history lines.
+fn task_text(v: &Value, id: &str, now_ms: i64) -> String {
+    let s = |o: &Value, k: &str| o.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let card = v.get("card").cloned().unwrap_or(serde_json::json!({}));
+    let name = match (s(&card, "task_ref"), card.get("num").and_then(|n| n.as_i64())) {
+        (r, _) if !r.is_empty() => format!("task {r}"),
+        (_, Some(n)) => format!("task #{n}"),
+        _ => format!("work item {id}"),
+    };
+    let (target, holder) = (s(v, "target_agent"), s(v, "claimed_by"));
+    let mut head = format!("{name} ({}", s(v, "state"));
+    if !target.is_empty() && target != holder {
+        head.push_str(&format!(", for {target}"));
+    }
+    if !holder.is_empty() {
+        head.push_str(&format!(", held by {holder}"));
+    }
+    head.push(')');
+    let mut out = format!("{head}\nTitle: {}\n", s(v, "title"));
+    let mut links = Vec::new();
+    for (key, label) in [("repo", "repo"), ("branch", "branch"), ("pr_url", "PR"), ("doc", "document")] {
+        let val = s(&card, key);
+        if !val.is_empty() {
+            links.push(format!("{label}: {val}"));
+        }
+    }
+    if !links.is_empty() {
+        out.push_str(&format!("Links: {}\n", links.join("; ")));
+    }
+    let kind = s(v, "kind");
+    if !kind.is_empty() {
+        out.push_str(&format!("Kind: {kind}\n"));
+    }
+    for (key, label) in [("question", "Open question"), ("note", "Holder's last note")] {
+        let val = s(&card, key);
+        if !val.is_empty() {
+            out.push_str(&format!("{label}: {val}\n"));
+        }
+    }
+    if let Some(items) = card.get("checklist").and_then(|c| c.as_array()).filter(|c| !c.is_empty()) {
+        out.push_str("Checklist:\n");
+        for it in items {
+            let mark = match s(it, "status").as_str() {
+                "completed" => "x",
+                "in_progress" => "~",
+                _ => " ",
+            };
+            out.push_str(&format!("  [{mark}] {}\n", s(it, "text")));
+        }
+    }
+    out.push_str(&format!("\nThe task as it was filed (its payload):\n{}\n", s(v, "payload")));
+    let result = s(v, "result");
+    if !result.is_empty() {
+        out.push_str(&format!("\nResult recorded on it: {result}\n"));
+    }
+    out.push_str(&starts_after_text(card.get("after")));
+    if let Some(events) = v.get("history").and_then(|h| h.as_array()).filter(|h| !h.is_empty()) {
+        out.push_str(&format!("\n\nHistory (last {}):\n", events.len()));
+        for ev in events {
+            let at = ev.get("at").and_then(|a| a.as_i64()).unwrap_or(0);
+            let (from, to) = (s(ev, "from_state"), s(ev, "to_state"));
+            let moved = match (from.as_str(), to.as_str()) {
+                (f, t) if f == t => String::new(),
+                ("", t) => format!(" {t}"),
+                (f, t) => format!(" {f} -> {t}"),
+            };
+            let body = s(ev, "body");
+            let body = if body.is_empty() { String::new() } else { format!(": {body}") };
+            out.push_str(&format!("  {} {} {}{moved}{body}\n", ago_words(now_ms - at), s(ev, "actor"), s(ev, "kind")));
+        }
+    }
+    out.trim_end().to_string()
 }
 
 /// The boards, and managing them (`GET` and `POST /agentmux/work/boards`).

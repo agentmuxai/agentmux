@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createResource, createSignal, For, onCleanup, onMount, Show, type Accessor, type JSX, type Setter } from "solid-js";
+import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import { beginDrag, endDrag, session, type DragEndReason } from "@/app/drag/drag-session";
 
 import { RpcApi } from "@/app/store/rpc-api";
@@ -17,6 +17,9 @@ import { Button, CloseButton, TextArea, TextInput } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
 import { isModKey } from "@/util/platformutil";
 import { tip } from "@/app/element/tip";
+import { describeRef, judge, triggerPathsIn } from "./payload-schema";
+import { apiAuthFields, apiAuthPatch, type ApiAuthFields, type ApiAuthHow } from "./api-auth";
+import { GITHUB_PRESETS, githubPresetById, githubPresetPatch, githubRepoOf, presetOptionLabel, PRESET_TEXT, type GithubPreset } from "./github-presets";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
 // drop handler. On the drag session, so every drone pane in the window sees it.
@@ -887,7 +890,29 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                     onChange={(entries) => update({ entries })}
                 />
             </Show>
+            <TriggerRefsNote model={p.model} node={p.node} />
         </div>
+    );
+};
+
+/**
+ * The `{{trigger.…}}` fields a node reads, each said to be typed or outside text (a title, a log, a file name: words
+ * somebody outside the person's own design wrote). The fields come from the jobs that run this drone.
+ */
+const TriggerRefsNote = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element => {
+    const refs = createMemo(() => judge(p.model.payloadSchemaAtom(), triggerPathsIn(p.node.data)));
+    return (
+        <Show when={refs().length > 0}>
+            <div class="drone-trigger-refs nodrag" data-testid="drone-trigger-refs">
+                <For each={refs()}>
+                    {(r) => (
+                        <span class="drone-trigger-ref" classList={{ "drone-trigger-ref--outside": r.outside }}>
+                            {describeRef(r)}
+                        </span>
+                    )}
+                </For>
+            </div>
+        </Show>
     );
 };
 
@@ -918,6 +943,8 @@ const ApiFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>)
                     placeholder="https://…/{{var.path}}"
                 />
             </NodeField>
+            <GithubPresetPicker node={p.node} update={update} />
+            <ApiAuthFieldsView node={p.node} update={update} />
             <NodeField label="Body">
                 <TextArea
                     variant="plain" class="drone-input drone-input--grow nodrag nowheel"
@@ -932,6 +959,110 @@ const ApiFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>)
                     onContextMenu={showTextInputContextMenu}
                 />
             </NodeField>
+        </>
+    );
+};
+
+/**
+ * Fills the API block for a common GitHub read or write (github-presets.ts): the person gives the repository
+ * once and picks what to do, and the method, URL, headers and body are set. The node stays an ordinary API node.
+ */
+const GithubPresetPicker = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => {
+    const [repo, setRepo] = createSignal(githubRepoOf((p.node.data["url"] as string) ?? ""));
+    const [picked, setPicked] = createSignal<GithubPreset | undefined>();
+    const [problem, setProblem] = createSignal("");
+    const choose = (id: string) => {
+        const preset = githubPresetById(id);
+        if (!preset) return;
+        const patch = githubPresetPatch(preset, repo());
+        if (!patch) {
+            setProblem(PRESET_TEXT.needRepo);
+            return;
+        }
+        setProblem("");
+        setPicked(preset);
+        p.update(patch);
+    };
+    return (
+        <>
+            <NodeField label={PRESET_TEXT.repoLabel}>
+                <TextInput
+                    variant="plain" class="drone-input nodrag"
+                    value={repo()}
+                    onInput={(e) => setRepo(e.currentTarget.value)}
+                    onContextMenu={showTextInputContextMenu}
+                    placeholder={PRESET_TEXT.repoPlaceholder}
+                />
+            </NodeField>
+            <NodeField label={PRESET_TEXT.presetLabel}>
+                <select
+                    class="drone-input nodrag"
+                    value=""
+                    onChange={(e) => {
+                        choose(e.currentTarget.value);
+                        e.currentTarget.value = "";
+                    }}
+                >
+                    <option value="">{PRESET_TEXT.fill}</option>
+                    <For each={GITHUB_PRESETS}>{(g) => <option value={g.id}>{presetOptionLabel(g)}</option>}</For>
+                </select>
+            </NodeField>
+            <Show when={problem()}>
+                <div class="drone-field-note drone-field-note--error">{problem()}</div>
+            </Show>
+            <Show when={picked()}>
+                {(g) => (
+                    <div class="drone-field-note">
+                        {g().writes ? PRESET_TEXT.writesNote : ""}
+                        {g().hint}
+                    </div>
+                )}
+            </Show>
+        </>
+    );
+};
+
+/**
+ * The API block's Vault credential: the entry and the header it goes in. The first call asks the person in
+ * AgentMux; the value is never shown here or kept in the drone. The site must be written out in the URL.
+ */
+const ApiAuthFieldsView = (p: { node: FlowNode; update: (patch: Record<string, unknown>) => void }): JSX.Element => {
+    const fields = () => apiAuthFields(p.node.data);
+    const write = (patch: Partial<ApiAuthFields>) => p.update(apiAuthPatch({ ...fields(), ...patch }));
+    return (
+        <>
+            <NodeField label="Vault entry">
+                <TextInput
+                    variant="plain" class="drone-input nodrag"
+                    value={fields().vault}
+                    onInput={(e) => write({ vault: e.currentTarget.value })}
+                    onContextMenu={showTextInputContextMenu}
+                    placeholder="api-key-github (none)"
+                />
+            </NodeField>
+            <Show when={fields().vault.trim() !== ""}>
+                <NodeField label="Send as">
+                    <select
+                        class="drone-input nodrag"
+                        value={fields().how}
+                        onChange={(e) => write({ how: e.currentTarget.value as ApiAuthHow })}
+                    >
+                        <option value="bearer">Authorization: Bearer</option>
+                        <option value="header">A header</option>
+                    </select>
+                </NodeField>
+                <Show when={fields().how === "header"}>
+                    <NodeField label="Header">
+                        <TextInput
+                            variant="plain" class="drone-input nodrag"
+                            value={fields().header}
+                            onInput={(e) => write({ header: e.currentTarget.value })}
+                            onContextMenu={showTextInputContextMenu}
+                            placeholder="X-Api-Key"
+                        />
+                    </NodeField>
+                </Show>
+            </Show>
         </>
     );
 };
@@ -1007,6 +1138,7 @@ const AppQueryFields = (p: { node: FlowNode; update: (patch: Record<string, unkn
                     onChange={(e) => p.update({ query: e.currentTarget.value })}
                 >
                     <option value="muxbus">MuxBus</option>
+                    <option value="agents">All agents</option>
                     <option value="agent">One agent</option>
                     <option value="tasks">Kanban tasks</option>
                     <option value="lan_peers">LAN peers</option>

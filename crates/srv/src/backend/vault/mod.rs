@@ -11,6 +11,7 @@
 
 pub mod aws_import;
 pub mod capture;
+pub mod changes;
 pub mod card;
 pub mod card_fill;
 pub mod card_target;

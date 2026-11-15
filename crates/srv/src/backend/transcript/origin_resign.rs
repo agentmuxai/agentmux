@@ -19,6 +19,23 @@ use super::origin_sig::{resign_line, SIG_LEN};
 /// widens the read.
 const CHUNK: i64 = 4 * 1024 * 1024;
 
+/// [`resign_zone`] for bytes in memory (whole lines): a copy signed before it is written needs no
+/// rewrite in place, which would drop the file's line epoch. How many lines it signed.
+pub fn resign_buffer(data: &mut [u8], from_owner: &str, to_owner: &str) -> u64 {
+    let (mut line_start, mut signed) = (0usize, 0u64);
+    while line_start < data.len() {
+        let line_end = data[line_start..].iter().position(|b| *b == b'\n').map_or(data.len(), |i| line_start + i + 1);
+        if let Some((sig_at, new)) = resign_line(from_owner, to_owner, &data[line_start..line_end]) {
+            debug_assert_eq!(new.len(), SIG_LEN);
+            let at = line_start + sig_at;
+            data[at..at + SIG_LEN].copy_from_slice(new.as_bytes());
+            signed += 1;
+        }
+        line_start = line_end;
+    }
+    signed
+}
+
 /// Sign for `to_owner` the lines of `file` in `zone` that verify for `from_owner`; how many it signed.
 pub fn resign_zone(gfs: &FileStore, zone: &str, file: &str, from_owner: &str, to_owner: &str) -> Result<u64, String> {
     let Some(stat) = gfs.stat(zone, file).map_err(|e| format!("stat transcript: {e}"))? else { return Ok(0) };

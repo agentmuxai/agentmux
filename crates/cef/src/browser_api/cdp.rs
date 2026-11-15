@@ -470,6 +470,7 @@ fn release_browser(browser_id: i32, reason: &str) {
 pub fn on_browser_closed(browser_id: i32) {
     release_browser(browser_id, "browser closed");
     crate::browser_pane::side_button_cdp::forget(browser_id);
+    crate::browser_pane::agent_input::forget(browser_id);
 }
 
 // ── Session ─────────────────────────────────────────────────────────────────
@@ -570,6 +571,8 @@ impl CdpSession {
             let _ = Box::pin(page.call(LIFECYCLE_METHOD, json!({ "state": "active" }))).await;
             crate::browser_pane::side_button_cdp::on_thaw(browser_id);
         }
+        // An agent clicking or typing: the saved sign-ins' list stays shut while it does (§P2.4 item 1).
+        let _agent_input = crate::browser_pane::agent_input::is_input(method).then(|| crate::browser_pane::agent_input::begin(browser_id));
         let (id, rx) = PENDING.lock().register(browser_id, method);
         let mut message = json!({ "id": id, "method": method, "params": params });
         if let Some(session) = &self.session {

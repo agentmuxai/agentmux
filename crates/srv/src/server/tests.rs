@@ -7732,7 +7732,9 @@ fn frontend_fixture() -> tempfile::TempDir {
 }
 
 async fn get_body(router: Router, uri: &str) -> (StatusCode, String) {
-    let resp = router.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+    // The Host a browser sends to this server: where the shape of the local sign-in has been set (by a test of the same
+    // process), the UI's files are served only on the server's own addresses.
+    let resp = router.oneshot(Request::builder().uri(uri).header("host", "127.0.0.1:7777").body(Body::empty()).unwrap()).await.unwrap();
     let status = resp.status();
     let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     (status, String::from_utf8_lossy(&bytes).into_owned())
@@ -7778,6 +7780,7 @@ async fn frontend_responses_get_the_version_header_and_cors() {
     for uri in ["/", "/assets/app.js", "/some/view"] {
         let req = Request::builder()
             .uri(uri)
+            .header("host", "127.0.0.1:7777")
             .header("Origin", "http://127.0.0.1:5173")
             .body(Body::empty())
             .unwrap();

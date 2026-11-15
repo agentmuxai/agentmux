@@ -33,6 +33,12 @@ pub(crate) const SCHEMA: &str = "
     );
     CREATE INDEX IF NOT EXISTS idx_ids_job_event_inputs_at ON db_job_event_inputs(at_ms);";
 
+/// Columns added to `db_job_trigger_events` after its first shape, run on every open with [`SCHEMA`] (a table an earlier
+/// build created gains them; a default needs no schema version bump). `seen_ms` is the last time a look saw the event
+/// again ([`Store::job_event_touch`]): the sweep keeps an id until a week after the later of `at_ms` and `seen_ms`, while
+/// `at_ms` stays the time the job heard it, which is what the hourly limit counts.
+pub(crate) const COLUMNS: [&str; 1] = ["ALTER TABLE db_job_trigger_events ADD COLUMN seen_ms INTEGER NOT NULL DEFAULT 0"];
+
 /// How long a job remembers an event id.
 pub const KEEP_MS: i64 = 7 * 24 * 3600 * 1000;
 /// How long a run's input is kept, from the event: a run may be held back by a delay of up to a week and then wait
@@ -51,10 +57,40 @@ impl Store {
         Ok(n > 0)
     }
 
-    /// Forget the ids heard before `before_ms`. How many went.
+    /// Claim `marker` and every id in `ids` for `job_id` in one transaction, with no run (they are noted, not started).
+    /// `Ok(true)` when the marker was new: all of them are claimed, and nobody sees the marker without them.
+    /// `Ok(false)` when the marker was already there: nothing is written, so a half-finished first look elsewhere
+    /// (another instance, or a crash) is not completed here as if it were this one's.
+    pub fn job_event_claim_baseline(&self, job_id: &str, marker: &str, ids: &[String], now_ms: i64) -> Result<bool, StoreError> {
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        let first = tx.execute("INSERT OR IGNORE INTO db_job_trigger_events (job_id, event_id, run_id, at_ms) VALUES (?1, ?2, '', ?3)", params![job_id, marker, now_ms])? > 0;
+        if !first {
+            return Ok(false);
+        }
+        for id in ids {
+            tx.execute("INSERT OR IGNORE INTO db_job_trigger_events (job_id, event_id, run_id, at_ms) VALUES (?1, ?2, '', ?3)", params![job_id, id, now_ms])?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Note that `job_id` saw `event_id` again at `now_ms`, so the retention sweep keeps it a week from now. The time
+    /// the job heard it (`at_ms`) is left alone, so a touch neither makes the row an event the job admitted nor counts it
+    /// again toward the hourly limit. `Ok(true)` when it moved.
+    pub fn job_event_touch(&self, job_id: &str, event_id: &str, now_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n = conn.execute(
+            "UPDATE db_job_trigger_events SET seen_ms = ?3 WHERE job_id = ?1 AND event_id = ?2 AND MAX(at_ms, seen_ms) < ?3",
+            params![job_id, event_id, now_ms],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Forget the ids neither heard nor seen again since `before_ms`. How many went.
     pub fn job_events_forget_before(&self, before_ms: i64) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
-        Ok(conn.execute("DELETE FROM db_job_trigger_events WHERE at_ms < ?1", params![before_ms])?)
+        Ok(conn.execute("DELETE FROM db_job_trigger_events WHERE MAX(at_ms, seen_ms) < ?1", params![before_ms])?)
     }
 
     /// Let go of the inputs kept before `before_ms` (event time). How many went. A run still waiting that long after
@@ -121,7 +157,10 @@ mod tests {
 
     fn store() -> Store {
         let store = Store::open_in_memory().unwrap();
-        store.conn().lock().unwrap().execute_batch(SCHEMA).unwrap();
+        let conn = store.conn().lock().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        crate::backend::storage::migrations::apply_additive_columns(&conn, COLUMNS).unwrap();
+        drop(conn);
         store
     }
 
@@ -132,6 +171,77 @@ mod tests {
         assert!(!s.job_event_claim("job-a", "e1", "run-2", 200).unwrap(), "the same event again is nothing");
         assert!(s.job_event_claim("job-a", "e2", "run-3", 300).unwrap());
         assert!(s.job_event_claim("job-b", "e1", "run-4", 400).unwrap(), "another job hears the same id as new");
+    }
+
+    #[test]
+    fn a_baseline_claims_the_marker_and_every_id_together_or_nothing() {
+        let s = store();
+        let ids: Vec<String> = ["a", "b", "c"].iter().map(|x| x.to_string()).collect();
+        assert!(s.job_event_claim_baseline("job-a", "marker", &ids, 100).unwrap());
+        for id in &ids {
+            assert!(!s.job_event_claim("job-a", id, "", 200).unwrap(), "{id} was claimed with the marker");
+        }
+        assert_eq!(s.job_events_since("job-a", 0).unwrap(), 0, "noted, not started: none count as admitted");
+        assert!(!s.job_event_claim_baseline("job-a", "marker", &ids, 300).unwrap(), "the second first look is not one");
+
+        // A marker with items unclaimed (another instance mid-way, or a crash): this one writes nothing.
+        assert!(s.job_event_claim("job-b", "marker", "", 100).unwrap());
+        assert!(!s.job_event_claim_baseline("job-b", "marker", &ids, 200).unwrap());
+        for id in &ids {
+            assert!(s.job_event_claim("job-b", id, "run-x", 300).unwrap(), "{id} is still unclaimed: a baseline that did not run wrote nothing");
+        }
+    }
+
+    #[test]
+    fn touching_an_id_keeps_it_through_the_sweep_without_making_it_an_admitted_event() {
+        let s = store();
+        assert!(s.job_event_claim("job-a", "marker", "", 100).unwrap());
+        assert!(s.job_event_touch("job-a", "marker", 500).unwrap());
+        assert!(!s.job_event_touch("job-a", "marker", 400).unwrap(), "never backwards");
+        assert!(!s.job_event_touch("job-a", "nothing", 500).unwrap());
+        assert_eq!(s.job_events_forget_before(300).unwrap(), 0, "it was touched, so it is not old");
+        assert_eq!(s.job_events_since("job-a", 0).unwrap(), 0, "a marker with no run is not an admitted event");
+        assert!(!s.job_event_claim("job-a", "marker", "", 600).unwrap());
+    }
+
+    #[test]
+    fn touching_an_old_admitted_event_does_not_count_it_again_toward_the_hour() {
+        // An expect's gap, heard days ago and admitted (it started a run), is seen again now and touched to keep it.
+        let s = store();
+        let hour = 3_600_000;
+        let day = 24 * hour;
+        let now = 10 * day;
+        assert!(s.job_event_claim("job-a", "gap-old", "run-1", now - 3 * day).unwrap());
+        assert!(s.job_event_touch("job-a", "gap-old", now).unwrap());
+        assert_eq!(s.job_events_since("job-a", now - hour).unwrap(), 0, "the touch is not an event admitted this hour");
+
+        // The watched job recovers, then a new gap opens within the hour: with a limit of one an hour it is the first.
+        assert!(s.job_event_claim("job-a", "gap-new", "run-2", now + 20 * 60_000).unwrap());
+        assert_eq!(s.job_events_since("job-a", now + 20 * 60_000 - hour).unwrap(), 1, "only the new gap counts");
+
+        // The touch still keeps the old gap's id past the week from when it was heard.
+        assert_eq!(s.job_events_forget_before(now - 1).unwrap(), 0);
+        assert!(!s.job_event_claim("job-a", "gap-old", "run-3", now + hour).unwrap(), "still heard: the same gap is nothing");
+        assert_eq!(s.job_events_forget_before(now + 1).unwrap(), 1, "a week after the last look it goes");
+    }
+
+    #[test]
+    fn the_seen_column_is_added_to_a_table_an_earlier_build_made() {
+        let store = Store::open_in_memory().unwrap();
+        let conn = store.conn().lock().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE db_job_trigger_events (job_id TEXT NOT NULL, event_id TEXT NOT NULL, run_id TEXT NOT NULL DEFAULT '', \
+             at_ms INTEGER NOT NULL, PRIMARY KEY (job_id, event_id));
+             INSERT INTO db_job_trigger_events VALUES ('job-a', 'e1', 'run-1', 100);",
+        )
+        .unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        crate::backend::storage::migrations::apply_additive_columns(&conn, COLUMNS).unwrap();
+        crate::backend::storage::migrations::apply_additive_columns(&conn, COLUMNS).unwrap();
+        drop(conn);
+        assert!(store.job_event_touch("job-a", "e1", 500).unwrap());
+        assert_eq!(store.job_events_since("job-a", 200).unwrap(), 0, "the old row keeps its own time");
+        assert_eq!(store.job_events_forget_before(300).unwrap(), 0);
     }
 
     #[test]

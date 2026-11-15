@@ -255,6 +255,21 @@ If you kill a background `task dev` job yourself later (e.g. via
 `taskkill`), that's you, not the environment — don't mistake it for an
 external interrupt.
 
+**A long-lived dev instance: the time limit ends the wrapper, not the build.**
+The way to keep a dev instance for a long session is the one above: `task dev`
+as the whole `run_in_background` command (with a `timeout` as long as the
+session needs). When a background Bash job reaches its time limit the harness
+stops the *wrapper* and sends a "stopped after reaching its background time
+limit" notice; the dev tree (`task.exe` → launcher → host and srv, and Vite)
+keeps running (seen 2026-11-15, 35 minutes in, #46). So after that notice, do
+not assume the window is gone and do not start a second `task dev`: look at
+`<clone>/.dev-home/<port>/dev/*/*/data/authkey.dev`, whose `debug_port` and
+`host_pid` say whether the build is up, or poll the debugging port. To end it,
+find its `task.exe` by the `TITLE=` on its command line and `taskkill /F /T
+/PID <that pid>` after §4's ownership check. A `TITLE` with spaces or `#` goes
+in double quotes: `task dev TITLE="zoom-fix: PR #1234"`; through
+`scripts/dev-agent.cmd` it is passed on as given (its header shows the form).
+
 ## Linux: a `task dev` build the AppArmor sandbox policy blocks
 
 On Ubuntu with AppArmor's restriction on unprivileged user namespaces, a `task dev` build is not covered by AgentMux's one-time fix (it lives in `dist/cef-dev`, not in an AppImage or a `.deb`/`.rpm` path). Since #610 an agent's `task dev` does not wait behind the "sandbox blocked by system policy" dialog (a build once sat behind it for 1 h 44 min with the debug port never opening):

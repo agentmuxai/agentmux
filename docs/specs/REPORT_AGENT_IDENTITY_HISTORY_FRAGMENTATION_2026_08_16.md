@@ -1,5 +1,7 @@
 # Agent Identity/History Fragmentation Across Builds — Root Cause and a Fast-Lookup Design
 
+**Area:** history store
+
 **Date:** 2026-08-16
 **Author:** Clamk (agent, `~/.agentmux/agents/clamk-0612a`)
 **Status:** historical — Report — root cause confirmed and code-cited end to end; proposed fix is a design, not yet

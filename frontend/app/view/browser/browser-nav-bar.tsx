@@ -7,6 +7,7 @@ import { browserStartPageAtom } from "@/store/config-signals";
 import { DEFAULT_BROWSER_URL } from "./browser-model";
 import { BrowserProfileButton, openIncognitoTab } from "./browser-profile-menu";
 import { BrowserSigninKey } from "./browser-signin-key";
+import { BrowserSigninList } from "./browser-signin-list";
 import { useBookmarkList, useBookmarkMenuItems, useStartPage } from "./browser-bookmarks-menu";
 import { useAddressBarState, useAddressNavigation, type BrowserNavBarProps } from "./browser-nav-address";
 import { useBrowserPaneShortcuts } from "./browser-nav-shortcuts";
@@ -81,6 +82,7 @@ export function BrowserNavBar(props: BrowserNavBarProps): JSX.Element {
                     <div class="browser-nav-break" aria-hidden="true" />
                     <AddressInput bar={props} address={address} nav={nav} />
                     <div class="browser-nav-group browser-nav-group--profile">
+                        <BrowserSigninList blockId={model.blockId} meta={() => model.meta()} />
                         <BrowserSigninKey blockId={model.blockId} meta={() => model.meta()} />
                         <BrowserProfileButton model={model} home={home} containWithin={pane} />
                     </div>

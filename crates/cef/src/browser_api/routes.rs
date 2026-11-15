@@ -809,10 +809,7 @@ pub async fn dispatch_key(
     if let Some(text) = &req.text {
         // Input.insertText is atomic and handles IME / composition
         // correctly. Preferred over key-by-key dispatch for strings.
-        if let Err(e) = cdp
-            .call("Input.insertText", json!({ "text": text }))
-            .await
-        {
+        if let Err(e) = cdp.call("Input.insertText", json!({ "text": text })).await {
             let _ = cdp.close().await;
             return ok_body(ApiResponse::err(format!("CDP Input.insertText: {e}")));
         }
@@ -858,6 +855,7 @@ pub async fn dispatch_key(
         }
     }
 
+    if writes { super::filled::mark_active(&mut cdp).await; }
     let after = match before {
         Some(_) => Some(super::page_state::focused_state(&mut cdp).await),
         None => None,

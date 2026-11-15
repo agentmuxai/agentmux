@@ -88,6 +88,10 @@ pub(super) async fn handle_credential_service(state: &AppState, call: &WebCallTy
         "Form" => handle_form(state, call),
         "Signup" => handle_signup(state, call),
         "SignupSent" => handle_signup_sent(state, call),
+        "ChangeSent" => handle_change_sent(state, call),
+        "FieldOpen" => handle_field_open(state, call),
+        "FieldKey" => handle_field_key(state, call),
+        "FieldClose" => handle_field_close(state, call),
         _ => WebReturnType::error(format!("unknown credential method: {}", call.method)),
     }
 }
@@ -327,7 +331,55 @@ fn handle_navigated(state: &AppState, call: &WebCallType) -> WebReturnType {
     crate::server::browser_signin_offer::settled(state, &args.block_id);
     crate::server::browser_signin_fill::navigated(state, &args.block_id);
     crate::server::browser_signup::navigated(state, &args.block_id);
+    crate::server::browser_signin_list::navigated(state, &args.block_id);
     WebReturnType::success_empty()
+}
+
+#[derive(Deserialize)]
+struct FieldArgs {
+    block_id: String,
+    #[serde(default)]
+    origin: String,
+    #[serde(default)]
+    role: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    key: String,
+}
+
+fn field_args(call: &WebCallType, what: &str) -> Result<FieldArgs, WebReturnType> {
+    get_arg(&call.args, 0).map_err(|e| WebReturnType::error(format!("credential.{what}: {e}")))
+}
+
+/// The person clicked, or pressed Up or Down, in a login field in pane `block_id`: the list of saved
+/// sign-ins ([`crate::server::browser_signin_list`]). The answer tells the host what the page's listener
+/// is to be told.
+fn handle_field_open(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args = match field_args(call, "FieldOpen") {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let answer = crate::server::browser_signin_list::open(state, &args.block_id, &args.origin, &args.role, args.text.as_deref().unwrap_or(""));
+    WebReturnType::success(answer.to_json())
+}
+
+/// A key the list took in pane `block_id`.
+fn handle_field_key(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args = match field_args(call, "FieldKey") {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    WebReturnType::success(crate::server::browser_signin_list::key(state, &args.block_id, &args.key).to_json())
+}
+
+/// The person pressed elsewhere on the page in pane `block_id`.
+fn handle_field_close(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args = match field_args(call, "FieldClose") {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    WebReturnType::success(crate::server::browser_signin_list::close(state, &args.block_id).to_json())
 }
 
 #[derive(Deserialize)]
@@ -390,6 +442,18 @@ fn handle_signup_sent(state: &AppState, call: &WebCallType) -> WebReturnType {
     };
     let Some(password) = args.password.filter(|p| !p.is_empty()).map(zeroize::Zeroizing::new) else { return WebReturnType::success_empty() };
     crate::server::browser_signup::sent(state, &args.block_id, &args.origin, zeroize::Zeroizing::new(args.username), password);
+    WebReturnType::success_empty()
+}
+
+/// A password-change form a page in pane `block_id` sent: the password an agent made for it becomes the
+/// saved sign-in's, or the password is offered "Update password?". Never logged.
+fn handle_change_sent(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args: OfferArgs = match get_arg(&call.args, 0) {
+        Ok(a) => a,
+        Err(_) => return WebReturnType::error("credential.ChangeSent: bad arguments"),
+    };
+    let Some(password) = args.password.filter(|p| !p.is_empty()).map(zeroize::Zeroizing::new) else { return WebReturnType::success_empty() };
+    crate::server::browser_change::sent(state, &args.block_id, &args.origin, zeroize::Zeroizing::new(args.username), password);
     WebReturnType::success_empty()
 }
 

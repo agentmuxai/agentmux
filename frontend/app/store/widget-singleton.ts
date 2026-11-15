@@ -26,6 +26,7 @@ export const BUILTIN_SINGLETON_VIEWS: ReadonlySet<string> = new Set([
     "history",
     "kanban",
     "memory",
+    "reviews",
     "settings",
     "swarm",
     "toolchain",

@@ -50,11 +50,18 @@ pub struct SignupFillData {
 /// offered is the field found here. The one filled must also be [`VISIBLE`].
 pub(super) const SHOWN: &str = r#"(el) => el.isConnected && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden""#;
 
+/// A password change's field for the new password (§7.3), given the form's visible `passwords`, its
+/// `current` one and the `others`: the one marked `new-password`, else the first after the current one.
+/// The listener (`signin_notice.js`) and the probe say the same.
+pub(super) const CHANGE_NEW_RULE: &str =
+    r#"others.find((i) => ac(i).includes("new-password")) || others.find((i) => passwords.indexOf(i) > passwords.indexOf(current))"#;
+
 /// The field the listener offered, by its token, if it is still a visible
 /// field for a new password: marked `new-password`, the first of two password
 /// fields whose second says confirm, or a form's one password field with a
-/// button like "Create account"; never in a form with a `current-password`
-/// field (a password change, §7.3).
+/// button like "Create account". In a form with a `current-password` field (a
+/// password change, §7.3) only that form's field for the new password, never
+/// the current one.
 fn find_new_password(token: &str) -> String {
     let token = serde_json::to_string(token).unwrap_or_default();
     format!(
@@ -70,7 +77,12 @@ fn find_new_password(token: &str) -> String {
     if (p.getAttribute("data-agentmux-signup") !== token) continue;
     const group = p.form || p.closest("form");
     const passwords = [...(group || document).querySelectorAll("input[type=password]")].filter(shown);
-    if (passwords.some((i) => ac(i).includes("current-password"))) continue;
+    const current = passwords.find((i) => ac(i).includes("current-password"));
+    if (current) {{
+      const others = passwords.filter((i) => !ac(i).includes("current-password"));
+      if (p === ({CHANGE_NEW_RULE})) return p;
+      continue;
+    }}
     if (ac(p).includes("new-password")) return p;
     if (passwords.length === 2 && p === passwords[0] && confirmWords.test(described(passwords[1]))) return p;
     if (passwords.length === 1 && group && [...group.querySelectorAll("button, input[type=submit]")].some((b) => signupWords.test(b.textContent || b.value || ""))) return p;
@@ -81,16 +93,19 @@ fn find_new_password(token: &str) -> String {
 }
 
 /// The other field of the pair `this` belongs to: the other of exactly two
-/// password fields its form (or the page) renders, whichever of the two was
-/// offered (both can be marked `new-password`), so the new password and its
-/// confirmation always get the same value. It is filled only if it is
-/// [`VISIBLE`] too (`type_into` checks).
+/// password fields its form (or the page) renders besides the current one of a
+/// password change, whichever of the two was offered (both can be marked
+/// `new-password`), so the new password and its confirmation always get the
+/// same value. The current password is never one of them. It is filled only if
+/// it is [`VISIBLE`] too (`type_into` checks).
 fn confirm_for() -> String {
     format!(
         r#"function () {{
   const shown = {SHOWN};
-  const passwords = [...((this.form || this.closest("form")) || document).querySelectorAll("input[type=password]")].filter(shown);
-  return passwords.length === 2 && passwords.includes(this) ? passwords.find((p) => p !== this) : null;
+  const pair = [...((this.form || this.closest("form")) || document).querySelectorAll("input[type=password]")]
+    .filter(shown)
+    .filter((p) => !(p.getAttribute("autocomplete") || "").toLowerCase().includes("current-password"));
+  return pair.length === 2 && pair.includes(this) ? pair.find((p) => p !== this) : null;
 }}"#
     )
 }
@@ -104,6 +119,10 @@ pub async fn signup_fill_route(State(state): State<Arc<AppState>>, headers: Head
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    // srv closed the list as it started this: the page's listener is told, so its keys are the page's again.
+    if let Some(id) = cdp.browser_id() {
+        crate::browser_pane::signin_list::clear(id).await;
+    }
     let result = fill(&mut cdp, &req).await;
     let _ = cdp.close().await;
     match result {
@@ -143,9 +162,11 @@ mod tests {
             assert!(find.contains(needle), "{needle}");
         }
         let at = |needle: &str| find.find(needle).unwrap_or_else(|| panic!("{needle}"));
-        assert!(at(r#"ac(i).includes("current-password")"#) < at(r#"ac(p).includes("new-password")"#), "a password change is skipped first");
+        assert!(at(r#"ac(i).includes("current-password")"#) < at(r#"ac(p).includes("new-password")"#), "a password change is handled first");
+        assert!(find.contains(&format!("if (p === ({CHANGE_NEW_RULE})) return p;")), "in a password change only its field for the new password");
         let confirm = confirm_for();
-        assert!(confirm.contains("passwords.length === 2 && passwords.includes(this) ? passwords.find((p) => p !== this)"), "either field of the pair fills the other");
+        assert!(confirm.contains("pair.length === 2 && pair.includes(this) ? pair.find((p) => p !== this)"), "either field of the pair fills the other");
+        assert!(confirm.contains(r#"includes("current-password")"#), "the current password is never the confirmation");
     }
 
     #[test]

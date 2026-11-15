@@ -1,7 +1,7 @@
 # SPEC: Editor revamp — one pane for every file (PDF, images, audio/video, binary, large files), and the Media pane folded into it
 
 **Date:** 2026-10-15
-**Status:** active — phase 1 built in #5016, phase 2 (PDF) in #5025 (see "Phase 1 as built" and "Phase 2 as built" at the end); phases 3–5 to follow. Written against `main` @ `521daa2ad`.
+**Status:** active — phase 1 built in #5016, phase 2 (PDF) in #5025 (see "Phase 1 as built" and "Phase 2 as built" at the end); of phase 3, the hex viewer and its find are built ("Phase 3 as built, the hex viewer"); of phase 5, the video and audio extras (#6187). The rest of phases 3–5 is to follow. Written against `main` @ `521daa2ad`.
 **Author:** Korp@narko
 **Requested by:** the repo owner:
 > *"does agentmux editor support pdf? lets write a quick spec to support pdfs and images in the editor. we need to get the editor wide-ranging editor access, including binary if it detects it, images, etc. we want wide coverage, research latest best practices."*
@@ -815,3 +815,17 @@ The PDF viewer (`frontend/app/view/editor/viewers/pdf/`), with pdf.js 6.4.299. D
 ## Phase 5 as built, video and audio extras (2026-11-02)
 
 The audio and video viewer's bar has a loop toggle, speed in quarter steps (0.25× to 4×, with a readout that resets to 1×) and, for video, a one-frame step back and forward. The keys are YouTube's: `L`, `<` `>`, `,` `.`; a modified key is left to the app. A step pauses the video. The frame length is the shortest gap between two shown frames, measured from `requestVideoFrameCallback` while the video plays (a seek forgets the last frame; a new file forgets the measure), and is 1/30 s until then, so a step on a video that was never played moves 33 ms. A new file starts at normal speed without a loop. Not yet: previous/next file in the folder, compare A/B, PNG metadata (the other items of phase 5 item 2).
+
+## Phase 3 as built, the hex viewer (2026-11-14)
+
+The hex viewer (`frontend/app/view/editor/viewers/hex/`), §4.4.5. Built as designed, with these differences:
+
+1. **Which files open in it.** A binary file of no kind the probe knows (`other`: a program, a library, raw data) opens as hex. A kind with a name and no viewer yet (an archive, a database, a font, an Office document, TIFF, HEIC) keeps the info card, which says what the file is and opens it with the system's app; the card has **Open as hex**. Every other file can be shown as hex too, from the viewer switch. A dropped file with no host path has the switch as well (its own viewer, the card, hex).
+2. **Show As, on the tab's menu.** The viewers the tab's file can be shown in, the one showing it checked. It is §4.2's "Reopen with…" for every viewer, and the only way to another viewer for a text file, whose tab has no viewer bar. Off while the tab has unsaved changes.
+3. **No size cap.** The viewer reads 64 KB at a time and keeps the 64 parts used last, so the 4 GB limit of §4.4.5 isn't needed. srv's 500 MB cap on `stream-local-file` is now a cap on what one request reads: a part of a larger file is served (§4.6).
+4. **Rows past what an element can be tall.** A file with more rows than fit in 8 million pixels scrolls in proportion, and there the wheel moves it a row at a time (Ctrl+wheel stays pane zoom).
+5. **The keys.** As §4.5, and: Shift with a move key extends the selection, Ctrl+Home and Ctrl+End go to the file's ends, Ctrl+A selects everything, Ctrl+C copies the selection (hex in the hex column, the text in the text column). Tab goes from the hex column to the text column and then on out of the grid, Shift+Tab the other way, so the grid is no keyboard trap. A modified arrow is left to the app.
+6. **Copy** takes a megabyte at most (its text is three to six times as long), and says so past it.
+7. **Where a tab was** (the rows on screen, the cursor and selection, the row width, the inspector) is kept while the app runs, so coming back to the tab doesn't start at 0. Not saved with the tab.
+8. **Find** (a later slice, built): `Ctrl+F` opens a strip over the grid with a pattern, a mode (Hex, UTF-8, UTF-16) and next and previous (Enter, Shift+Enter; Escape closes). Hex takes bytes with `??` for any byte (`DE AD ?? EF`, 1 to 256 bytes, not all `??`); text is encoded to its bytes first. The search is srv's `filesearchbytes {path, pattern, from, backward}`: it reads the file in 1 MB blocks, local files only, and each call is bounded (256 MB or 1.5 s), so a long search is a run of calls, each handing back `next_from`, ended by a newer search, an edit or closing the strip. A match is selected and scrolled to; past the end of the file the search goes on from the other end and says so. A file dropped in with no path on disk cannot be searched.
+9. **Not in this slice:** `editor:viewer.associations`, and `OpenEditor {offset}`. Editing stays out of this spec's phases.

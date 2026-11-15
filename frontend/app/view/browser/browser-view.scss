@@ -329,6 +329,16 @@ $browser-nav-stack-below: 388px;
     color: var(--error-text-color);
 }
 
+// The list of saved sign-ins under a login field (browser-signin-list.tsx): the anchor only marks where
+// the nav bar's group is; the panel is the kit's menu look and takes no focus.
+.browser-signin-list-anchor {
+    display: none;
+}
+
+.browser-signin-list .browser-signin-list-error {
+    color: var(--error-text-color);
+}
+
 .browser-attention {
     display: flex;
     flex-direction: column;
@@ -378,6 +388,15 @@ $browser-nav-stack-below: 388px;
         td:first-child {
             color: var(--secondary-text-color);
             white-space: nowrap;
+        }
+
+        // A value the page already had: shown, but quieter than what the agent changed.
+        .browser-attention-field-kept {
+            color: var(--secondary-text-color);
+        }
+
+        .browser-attention-field-note {
+            font-style: italic;
         }
     }
 

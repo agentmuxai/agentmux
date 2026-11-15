@@ -31,4 +31,58 @@ pub enum RunEvent {
         output: Value,
     },
     RunFailed { run_id: String, error: String },
+    /// The run was taken up again after AgentMux restarted, from checkpoint
+    /// `step`: the blocks before it are not run again.
+    Resumed { run_id: String, step: u32 },
+    /// A step that may already have done its work before the restart was found
+    /// running: the run waits, `needs_attention`, for it to be run again, skipped
+    /// (with an output) or the run cancelled (`resolvedronerun`).
+    NeedsAttention { run_id: String, block_id: String, reason: String },
+    /// The run stopped at a Wait block and holds no process while it waits.
+    /// `resume_at` is the time it goes on (milliseconds since 1970); `on` and
+    /// `key` are for a wait on an event: what it is for, and the key that ends it
+    /// (`resumedronewait`). A restart sends it again for the wait it took up.
+    Waiting {
+        run_id: String,
+        block_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        resume_at: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        on: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        key: Option<String>,
+    },
+    /// A Drone block started the drone `drone_id` (saved version `version`, 0 when
+    /// it was never saved) as a child run. Its own events are not sent here.
+    ChildStarted { run_id: String, block_id: String, child_run_id: String, drone_id: String, version: i64 },
+    /// The child run ended: `status` is `done`, `failed` or `cancelled`; `cost_usd`
+    /// is what it spent, which counts against the caller.
+    ChildEnded { run_id: String, block_id: String, child_run_id: String, status: String, cost_usd: f64 },
+    /// The wait at `block_id` is over; `late` when the run was taken up after its time.
+    WaitEnded { run_id: String, block_id: String, late: bool },
+    /// The run's wait was answered: `choice` is `run_again` or `skip`. (A run that
+    /// is cancelled ends with `RunCancelled`.)
+    AttentionAnswered { run_id: String, block_id: String, choice: String },
+    /// The run's state was kept as checkpoint `step` (0 is the start, before any
+    /// block); `block_id` is the block it follows.
+    StepCheckpointed {
+        run_id: String,
+        step: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        block_id: Option<String>,
+    },
+    /// A loop's guard sent the run round again: `iteration` is the pass that is
+    /// starting (the first pass has no event).
+    LoopIteration { run_id: String, block_id: String, iteration: u32 },
+    /// A limit (a loop's iterations, cost or time, a for-each's items, the run's
+    /// dollar cap) stopped something; `block_id` is the block it was met at.
+    /// The run may go on (`on_cap: exit_loop`) or end, as the reason says.
+    CapReached { run_id: String, block_id: String, reason: String },
+    /// The run was stopped on purpose (`cancel_run`): a person, an agent, the
+    /// job's timeout or the job's next run. `reason` says which, in plain words.
+    RunCancelled { run_id: String, reason: String },
 }

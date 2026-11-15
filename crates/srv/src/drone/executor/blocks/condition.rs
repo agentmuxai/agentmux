@@ -310,4 +310,24 @@ mod tests {
         let err = ask("{{a.response}} && true", &scope).await.unwrap_err();
         assert!(err.contains("true or false is expected"), "{err}");
     }
+
+    /// The after-upgrade health check's own condition, as the template ships it, over what its three queries answer.
+    #[tokio::test]
+    async fn the_after_upgrade_checks_condition_is_true_only_when_agents_muxbus_and_peers_are_all_up() {
+        use crate::backend::job_templates::{graph, package, DRONE_BUILTINS};
+        let b = DRONE_BUILTINS.iter().find(|b| b.id == "agentmux.after-upgrade-check").unwrap();
+        let pkg = package::load_embedded(b.id, b.files).unwrap();
+        let given = json!({ "leader": "agenty", "steward": "masty" }).as_object().cloned().unwrap();
+        let g = graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given).unwrap();
+        let cond = g.nodes.iter().find(|n| n.id == "healthy").unwrap();
+        let ask = |all_up: bool, connected: bool, answered: u32, count: u32| {
+            let scope = scope_with(json!({ "agents": { "all_up": all_up }, "muxbus": { "connected": connected }, "peers": { "answered": answered, "count": count } }));
+            async move { run(cond, &scope).await.unwrap()["result"].clone() }
+        };
+        assert_eq!(ask(true, true, 3, 3).await, json!(true), "everything up");
+        assert_eq!(ask(true, true, 0, 0).await, json!(true), "a machine with no peers has none to miss");
+        assert_eq!(ask(false, true, 3, 3).await, json!(false), "an agent down");
+        assert_eq!(ask(true, false, 3, 3).await, json!(false), "MuxBus down");
+        assert_eq!(ask(true, true, 2, 3).await, json!(false), "a peer silent");
+    }
 }

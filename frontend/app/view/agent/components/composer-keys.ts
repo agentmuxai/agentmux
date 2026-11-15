@@ -6,6 +6,7 @@
  * and stops at the first that takes the key; each returns whether it did.
  */
 
+import { isModifiedArrow } from "./arrow-keys";
 import { caretAtSelectionEdge } from "./composer-caret";
 import { loadOlderAgentHistory } from "../agent-input-history";
 import type { ComposerCtx } from "./composer-context";
@@ -212,6 +213,7 @@ export function handleKeyDown(c: ComposerCtx, e: KeyboardEvent): void {
     // or navigate composition candidates and the IME owns them. `keyCode === 229` is Safari's synthetic
     // keydown for IME events without `isComposing`; both checks are load-bearing (SPEC_INPUT_RESPONSIVENESS §6.2).
     if (e.isComposing || e.keyCode === 229) return;
+    if (isModifiedArrow(e)) return;
     if (keyBackspaceToTray(c, e)) return;
     if (keyPageScroll(c, e)) return;
     if (keyAcceptSuggestion(c, e)) return;

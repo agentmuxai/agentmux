@@ -32,6 +32,8 @@ pub mod accessible_name;
 pub mod act;
 pub mod capture;
 pub mod capture_download;
+mod capture_copy;
+mod capture_near;
 pub mod cdp;
 pub mod chooser_files;
 pub mod click_delivery;
@@ -39,11 +41,13 @@ pub mod clickable;
 pub mod combobox;
 pub mod dates;
 pub mod file_chooser;
+mod filled;
 pub mod frame_scope;
 pub mod frames;
 pub mod hibernation;
 pub mod hidden_choices;
 mod hidden_secrets;
+mod icon_hints;
 pub mod key_typing;
 pub mod last_input;
 pub mod nav_settle;
@@ -51,6 +55,7 @@ mod orphan_labels;
 pub mod page_state;
 pub mod page_url;
 pub mod press;
+mod read_back_text;
 pub mod ref_tables;
 pub mod resolver;
 pub mod routes;
@@ -103,6 +108,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/capture_value", post(capture::capture_value_route))
         .route("/agentmux/browser/capture_mark", post(capture::capture_mark_route))
         .route("/agentmux/browser/capture_download", post(capture_download::capture_download_route))
+        .route("/agentmux/browser/capture_copy", post(capture_copy::capture_copy_route))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))

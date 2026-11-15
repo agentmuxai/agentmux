@@ -215,8 +215,8 @@ fn mime_from_path(path: &std::path::Path) -> &'static str {
 /// see the "root scoping, not a sandbox" note on the macOS `list_drives` in
 /// `editor_handlers.rs`) so
 /// this route isn't a stricter one-off next to an already-shipped read path
-/// with the same shape. Size-capped (see `STREAM_LOCAL_FILE_MAX_BYTES`)
-/// rather than truly unbounded.
+/// with the same shape. One request reads at most
+/// `STREAM_LOCAL_FILE_MAX_BYTES`; a part of a larger file is served.
 ///
 /// Honours a single `Range` (`206 Partial Content`), so a `<video>` poster can
 /// read just the start of a file.
@@ -266,19 +266,17 @@ pub(super) async fn handle_stream_local_file(
         )
             .into_response();
     }
-    if metadata.len() > STREAM_LOCAL_FILE_MAX_BYTES {
-        return (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Json(json!({"error": "stream-local-file: file too large (>500MB)"})),
-        )
-            .into_response();
-    }
 
     let total = metadata.len();
     let range = headers
         .get(header::RANGE)
         .and_then(|v| v.to_str().ok())
         .map_or(ByteRange::Full, |h| parse_byte_range(h, total));
+    // The cap is on what one request reads, not on the file: a part of a
+    // larger file is served (the hex viewer reads 64 KB at a time).
+    if bytes_asked(&range, total) > STREAM_LOCAL_FILE_MAX_BYTES {
+        return too_much_at_once();
+    }
     if range == ByteRange::Unsatisfiable {
         return Response::builder()
             .status(StatusCode::RANGE_NOT_SATISFIABLE)
@@ -337,6 +335,24 @@ pub(super) enum ByteRange {
     Partial(u64, u64),
     /// A valid range that starts past the end (`416`).
     Unsatisfiable,
+}
+
+/// The refusal for a request that would read more than the cap.
+fn too_much_at_once() -> Response {
+    (
+        StatusCode::PAYLOAD_TOO_LARGE,
+        Json(json!({"error": "stream-local-file: more than 500 MB asked for at once; ask for a part of the file with a Range"})),
+    )
+        .into_response()
+}
+
+/// How many bytes answering `range` reads from a file of `total` bytes.
+pub(super) fn bytes_asked(range: &ByteRange, total: u64) -> u64 {
+    match range {
+        ByteRange::Partial(start, end) => end - start + 1,
+        ByteRange::Full => total,
+        ByteRange::Unsatisfiable => 0,
+    }
 }
 
 /// Parses a single `bytes=` range (`a-b`, `a-`, or the suffix form `-n`).
@@ -421,6 +437,21 @@ mod stream_local_file_range_tests {
         for h in ["bytes=5-2", "bytes=abc-", "items=0-1", "bytes=0-1,5-9", "bytes=-", ""] {
             assert_eq!(parse_byte_range(h, 1000), ByteRange::Full, "{h:?}");
         }
+    }
+
+    // ── the size cap ────────────────────────────────────────────────────
+
+    /// The cap is on one request's bytes: a part of a file larger than the
+    /// cap is served, the whole of it (or a part as large) is not.
+    #[test]
+    fn the_cap_counts_the_bytes_asked_for_not_the_file() {
+        let big = STREAM_LOCAL_FILE_MAX_BYTES * 8;
+        assert_eq!(bytes_asked(&parse_byte_range("bytes=0-65535", big), big), 65536);
+        assert_eq!(bytes_asked(&parse_byte_range("bytes=-16", big), big), 16);
+        assert!(bytes_asked(&ByteRange::Full, big) > STREAM_LOCAL_FILE_MAX_BYTES);
+        assert!(bytes_asked(&parse_byte_range("bytes=0-", big), big) > STREAM_LOCAL_FILE_MAX_BYTES);
+        assert_eq!(bytes_asked(&ByteRange::Unsatisfiable, big), 0);
+        assert_eq!(bytes_asked(&ByteRange::Full, 10), 10);
     }
 
     // ── handler ─────────────────────────────────────────────────────────

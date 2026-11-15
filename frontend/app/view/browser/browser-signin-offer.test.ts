@@ -79,4 +79,10 @@ describe("an agent's sign-in notice", () => {
         expect(signinPendingText(p, 6_200)).toBe("Agent1 is creating an account on https://shop.example.com: the password comes from your Vault (4 s)");
         expect(readSigninPending({ "browser:signin_pending": { ...made["browser:signin_pending"], kind: "other" } })!.kind).toBe("signin");
     });
+    it("says an agent is changing a saved password, and that the old one is kept", () => {
+        const made = { "browser:signin_pending": { id: "n3", agent: "Agent1", origin: "https://shop.example.com", user: "al***", kind: "change", deadline_ms: 10_000 } };
+        const p = readSigninPending(made)!;
+        expect(p.kind).toBe("change");
+        expect(signinPendingText(p, 6_200)).toBe("Agent1 is changing your password on https://shop.example.com: the new one comes from your Vault and the old one is kept for 7 days (4 s)");
+    });
 });

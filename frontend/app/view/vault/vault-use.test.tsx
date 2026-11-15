@@ -32,6 +32,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     replaces: false,
     signin: false,
     account: false,
+    change: false,
     requested_ms: 1,
     block_id: "pane-1",
     deadline_ms: 1,

@@ -79,6 +79,7 @@ export function promptTitle(u: UseRequest, short = false): string {
         if (!u.link.from) return `${agent} wants to record where the machine copy of ${label} is`;
         return u.link.to ? `${agent} wants to change where the machine copy of ${label} is` : `${agent} wants to remove where the machine copy of ${label} is`;
     }
+    if (u.account && u.change) return `${agent} wants to change your password on ${siteOf(u.origin)}`;
     if (u.account) return `${agent} wants to create an account on ${siteOf(u.origin)}`;
     if (u.signin) return `${agent} wants to sign in to ${siteOf(u.origin)} as ${short ? clip(u.field, CLIP.label) : u.field}`;
     if (u.replaces) return `${agent} wants to replace ${label} with what a command prints`;
@@ -92,6 +93,7 @@ function promptNote(u: UseRequest): string {
     if (u.link) return "The place decides what a check of this entry reads. No value is in it, and the agent never sees one.";
     if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
     if (u.command) return "The agent never sees the value, and the command's output is cleaned of it.";
+    if (u.account && u.change) return "The Vault makes the new password. The agent never sees it. The old one is kept for 7 days, and you can put it back. Check the site is the one you expect.";
     if (u.account) return "The Vault makes the password and keeps it for you. The agent never sees it. Check the site is the one you expect.";
     if (u.signin) return "The agent never sees the user name or the password. Check the site is the one you expect.";
     return "The agent never sees the value. Check the site is the one you expect.";
@@ -136,7 +138,9 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
         >
             <p>
                 <Show when={u.account} fallback={<>The user name and password are typed into the sign-in form on</>}>
-                    A password the Vault makes is kept in your Vault and typed into the sign-up form on
+                    <Show when={u.change} fallback={<>A password the Vault makes is kept in your Vault and typed into the sign-up form on</>}>
+                        A new password the Vault makes is typed into the password-change form on
+                    </Show>
                 </Show>{" "}
                 <strong>{siteOf(u.origin)}</strong>
                 <span class="warden-manager-dim"> ({u.origin})</span> in <Clipped text={u.agent} max={CLIP.name} />

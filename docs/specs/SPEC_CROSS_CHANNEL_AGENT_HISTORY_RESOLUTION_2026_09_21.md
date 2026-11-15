@@ -1,5 +1,7 @@
 # SPEC: cross-channel agent history resolution
 
+**Area:** history store
+
 **Date:** 2026-09-21
 **Status:** active — §3.1 shipped in #3480; §3.2/§3.3 (link history,
 shared-store persistence) remain proposed. Root cause originally confirmed by

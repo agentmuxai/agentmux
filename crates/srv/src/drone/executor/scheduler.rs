@@ -16,25 +16,94 @@
 //! leaves a loop by an edge that is not taken, the decision is held until
 //! nothing else can run, because a later iteration may still take it.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::blocks;
-use super::engine::{mark_state, RunEvent};
+use super::engine::{mark_state, Cancel, RunEnd, RunEvent};
+use super::retry;
 use super::schedule::{self, Guard, OnCap, Plan};
+use crate::drone::checkpoint::{Checkpoint, GraphRef};
 use crate::drone::data_flow::ExecutionScope;
+use crate::drone::host::DroneLookup;
+use crate::drone::recorder::{Persist, Recorder};
+use crate::drone::replay::Replay;
 use crate::drone::types::{BlockKind, BlockState, DroneGraph, FlowEdge, FlowNode};
 use agentmux_common::time::now_ms;
+
+/// The code of a block that reads and writes only the run's scope.
+pub(super) async fn dispatch_scoped(node: &FlowNode, kind: BlockKind, scope: &mut ExecutionScope) -> Result<Value, String> {
+    match kind {
+        BlockKind::Variables => blocks::variables::run(node, scope).await,
+        BlockKind::Api => blocks::api::run(node, scope).await,
+        BlockKind::Condition => blocks::condition::run(node, scope).await,
+        BlockKind::Response => blocks::response::run(node, scope).await,
+        BlockKind::Agent => blocks::agent::run(node, scope).await,
+        BlockKind::Message => blocks::message::run(node, scope).await,
+        BlockKind::Task => blocks::task::run(node, scope).await,
+        BlockKind::Notify => blocks::notify::run(node, scope).await,
+        BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
+        BlockKind::Spawn => blocks::spawn::run(node, scope).await,
+        BlockKind::Transform => blocks::transform::run(node, scope).await,
+        BlockKind::Run => blocks::run::run(node, scope).await,
+        BlockKind::ForEach | BlockKind::Wait | BlockKind::Drone | BlockKind::Join => unreachable!("the scheduler runs these"),
+    }
+}
 
 /// How many earlier outputs of a block a later iteration can read as
 /// `{{block.history}}`.
 const HISTORY_LEN: usize = 50;
 
 type States = Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>;
+
+/// What a run is given besides its graph: its dollar cap, the way to cancel it,
+/// and where to keep its checkpoints (none for a run that is not kept).
+#[derive(Default)]
+pub(super) struct Limits {
+    pub(super) run_cap_usd: Option<f64>,
+    pub(super) cancel: Cancel,
+    pub(super) persist: Option<Persist>,
+    /// The drones above this one when it was called by a Drone block, outermost first.
+    pub(super) chain: Vec<String>,
+    /// Where a Drone block finds the drone it calls.
+    pub(super) lookup: Option<Arc<dyn DroneLookup>>,
+    /// Set on a run that replays an earlier one: what its blocks with effects say instead of doing them.
+    pub(super) replay: Option<Arc<Replay>>,
+}
+
+/// How long a block may run when its graph does not say (`timeout_seconds`): an
+/// Agent block 15 minutes, a block that reaches outside the run 5. An API block
+/// has its own request timeout, and the rest do no waiting.
+fn default_timeout(kind: BlockKind) -> Option<Duration> {
+    match kind {
+        BlockKind::Agent => Some(Duration::from_secs(15 * 60)),
+        BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery | BlockKind::Spawn | BlockKind::Run => Some(Duration::from_secs(5 * 60)),
+        // A wait is for as long as it says, and its own `timeout_seconds` may cut it short.
+        BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait | BlockKind::Join => None,
+        // The callee has the limits of its own blocks, and the caller may set one for the whole call.
+        BlockKind::Drone => None,
+    }
+}
+
+fn plain_duration(d: Duration) -> String {
+    let secs = d.as_secs();
+    match secs {
+        s if s >= 3600 && s % 3600 == 0 => format!("{} hours", s / 3600),
+        s if s >= 60 && s % 60 == 0 => format!("{} minutes", s / 60),
+        s => format!("{s} seconds"),
+    }
+}
+
+/// `work`, or its failure when it takes longer than `limit`.
+async fn within<T>(limit: Option<Duration>, work: impl Future<Output = Result<T, String>>) -> Result<T, String> {
+    let Some(limit) = limit else { return work.await };
+    tokio::time::timeout(limit, work).await.unwrap_or_else(|_| Err(format!("timed out after {}", plain_duration(limit))))
+}
 
 /// Why the run must not start another block: what its Agent blocks have spent
 /// has reached its cap (`caps::reached`: a run that spent nothing has not
@@ -51,7 +120,15 @@ fn kind_of(node: &FlowNode) -> Result<BlockKind, String> {
 
 /// Whether `edge` carries the run on once its source has run: a Condition's
 /// edge only when its handle matches the result.
-fn carries_on(edge: &FlowEdge, source: &FlowNode, output: &Value) -> bool {
+fn carries_on(edge: &FlowEdge, source: &FlowNode, output: &Value, failed: bool) -> bool {
+    // An error edge is for a block that failed, and only it: a block that
+    // failed takes no other.
+    if edge.source_handle.as_deref() == Some("error") {
+        return failed;
+    }
+    if failed {
+        return false;
+    }
     if source.data.get("kind").and_then(|v| v.as_str()) != Some("condition") {
         return true;
     }
@@ -75,6 +152,8 @@ struct Scheduler<'a> {
     decided: HashMap<&'a str, bool>,
     /// Blocks that ran or were skipped this pass of their loop.
     finished: HashSet<&'a str>,
+    /// The blocks that failed this pass of their loop and whose failure the graph handled.
+    failed: HashSet<&'a str>,
     ready: VecDeque<(&'a str, bool)>,
     queued: HashSet<&'a str>,
     /// Edges out of a loop that were not taken, decided when nothing can run.
@@ -88,25 +167,123 @@ struct Scheduler<'a> {
     scope: ExecutionScope,
     response: Option<Value>,
     run_cap_usd: Option<f64>,
+    cancel: Cancel,
+    /// Set when the run ended because `cancel` did, so that is not taken for a failure.
+    cancelled: bool,
+    /// The blocks that are running while they have effects, and whether each was forced:
+    /// the ones a restart must not run again on its own.
+    in_flight: Vec<(&'a str, bool)>,
+    /// The blocks of the batch that is running and have no effects: a restart runs them again.
+    running_ro: Vec<(&'a str, bool)>,
+    /// The Wait block the run is stopped at, and whether it was forced, and what
+    /// it waits for: a time, as milliseconds since 1970, or the key of an event.
+    waiting: Option<(&'a str, bool)>,
+    deadlines: BTreeMap<String, i64>,
+    resume_on: BTreeMap<String, String>,
+    /// When the Wait block runs out of its own `timeout_seconds`.
+    wait_timeouts: BTreeMap<String, i64>,
+    /// The drones above this one (a Drone block called it), and where to find a drone to call.
+    chain: Vec<String>,
+    lookup: Option<Arc<dyn DroneLookup>>,
+    /// What callees spent that nobody was waiting for any more, by child run: counted at the next block.
+    late_spend: Arc<call::LateSpend>,
+    replay: Option<Arc<Replay>>,
+    /// Writes the run's checkpoints, with the graph version they say the run is on.
+    recorder: Option<(Recorder, GraphRef)>,
+    started: Instant,
+    /// How long the run had already run before this process took it up, when it is resumed.
+    elapsed_before_ms: u64,
     tx: &'a mpsc::UnboundedSender<RunEvent>,
     states: &'a States,
 }
 
 pub(super) async fn execute(
     run_id: &str,
-    (graph, trigger, run_cap_usd, drone_id): (&DroneGraph, Value, Option<f64>, &str),
+    args: (&DroneGraph, Value, Limits, &str),
     tx: &mpsc::UnboundedSender<RunEvent>,
     states: &States,
-) -> Result<Value, String> {
+) -> Result<Value, RunEnd> {
+    execute_costed(run_id, args, tx, states).await.0
+}
+
+/// [`execute`], and with it what the run spent, which a caller counts against its own budget.
+pub(super) async fn execute_costed(
+    run_id: &str,
+    (graph, trigger, limits, drone_id): (&DroneGraph, Value, Limits, &str),
+    tx: &mpsc::UnboundedSender<RunEvent>,
+    states: &States,
+) -> (Result<Value, RunEnd>, f64) {
     if graph.nodes.is_empty() {
-        return Err("drone has no blocks".to_string());
+        return (Err(RunEnd::Failed("drone has no blocks".to_string())), 0.0);
     }
+    let plan = match schedule::analyze(graph) {
+        Ok(plan) => plan,
+        Err(issues) => return (Err(RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))), 0.0),
+    };
+    let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::for_drone(drone_id, trigger), limits, tx, states);
+    s.seed_roots();
+    let started = s.checkpoint(None);
+    let ended = finish(&mut s, started).await;
+    (ended, s.spent)
+}
+
+/// Take up a run from its newest checkpoint, `c`, and run it to its end: the
+/// blocks that were finished stay finished and what they said is what the rest
+/// read. `graph` must be the graph the checkpoint was written on.
+pub(super) async fn resume(
+    (graph, c, limits): (&DroneGraph, &Checkpoint, Limits),
+    tx: &mpsc::UnboundedSender<RunEvent>,
+    states: &States,
+) -> Result<Value, RunEnd> {
     let plan = schedule::analyze(graph).map_err(|issues| {
-        issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; ")
+        RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))
     })?;
-    let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::for_drone(drone_id, trigger), run_cap_usd, tx, states);
-    s.run().await?;
-    Ok(s.response.unwrap_or(Value::Null))
+    let mut s = Scheduler::new(&c.run_id, graph, plan, ExecutionScope::for_drone(&c.drone_id, c.trigger.clone()), limits, tx, states);
+    s.restore(c).map_err(RunEnd::Failed)?;
+    s.show_restored().await;
+    // They may have done their work before the machine stopped, and a second time
+    // would repeat it: none is run again on its own, the run waits to be told, one by one.
+    // Each stays listed until it is answered, so a checkpoint kept meanwhile still has it.
+    for (id, forced) in s.in_flight.clone() {
+        if let Err(why) = s.settle_in_flight(id, forced).await {
+            return Err(if s.cancelled { RunEnd::Cancelled(s.cancel.reason()) } else { RunEnd::Failed(why) });
+        }
+    }
+    finish(&mut s, Ok(())).await
+}
+
+/// Run a replay from `first`, the new run's first checkpoint (`replay::fork_checkpoint`), to its end.
+/// `graph` must be the graph the replayed run was on. Its own checkpoints begin at step 0.
+pub(super) async fn replay(
+    (graph, first, limits): (&DroneGraph, &Checkpoint, Limits),
+    tx: &mpsc::UnboundedSender<RunEvent>,
+    states: &States,
+) -> Result<Value, RunEnd> {
+    let plan = schedule::analyze(graph).map_err(|issues| {
+        RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))
+    })?;
+    let mut s = Scheduler::new(&first.run_id, graph, plan, ExecutionScope::for_drone(&first.drone_id, first.trigger.clone()), limits, tx, states);
+    s.restore_state(first).map_err(RunEnd::Failed)?;
+    s.show_restored().await;
+    let started = s.checkpoint(None);
+    finish(&mut s, started).await
+}
+
+/// Run what is left of a run that is set up, and say how it ended. `started` is
+/// how setting it up went: a run that could not even keep its first checkpoint
+/// ends before its first block.
+async fn finish(s: &mut Scheduler<'_>, started: Result<(), String>) -> Result<Value, RunEnd> {
+    let ran = match started {
+        Ok(()) => s.drive().await,
+        Err(e) => Err(e),
+    };
+    // However it ended (a stop included), what callees it stopped were spending is its own.
+    s.settle_late_spend().await;
+    match ran {
+        Ok(()) => Ok(s.response.take().unwrap_or(Value::Null)),
+        Err(_) if s.cancelled => Err(RunEnd::Cancelled(s.cancel.reason())),
+        Err(e) => Err(RunEnd::Failed(e)),
+    }
 }
 
 impl<'a> Scheduler<'a> {
@@ -115,7 +292,7 @@ impl<'a> Scheduler<'a> {
         graph: &'a DroneGraph,
         plan: Plan,
         scope: ExecutionScope,
-        run_cap_usd: Option<f64>,
+        limits: Limits,
         tx: &'a mpsc::UnboundedSender<RunEvent>,
         states: &'a States,
     ) -> Self {
@@ -135,6 +312,7 @@ impl<'a> Scheduler<'a> {
             outgoing,
             decided: HashMap::new(),
             finished: HashSet::new(),
+            failed: HashSet::new(),
             ready: VecDeque::new(),
             queued: HashSet::new(),
             held: Vec::new(),
@@ -145,20 +323,46 @@ impl<'a> Scheduler<'a> {
             history: HashMap::new(),
             scope,
             response: None,
-            run_cap_usd,
+            run_cap_usd: limits.run_cap_usd,
+            cancel: limits.cancel,
+            cancelled: false,
+            in_flight: Vec::new(),
+            running_ro: Vec::new(),
+            waiting: None,
+            deadlines: BTreeMap::new(),
+            resume_on: BTreeMap::new(),
+            wait_timeouts: BTreeMap::new(),
+            chain: limits.chain,
+            lookup: limits.lookup,
+            late_spend: Arc::default(),
+            replay: limits.replay,
+            recorder: limits.persist.map(|p| (Recorder::new(p.sink, run_id), p.graph)),
+            started: Instant::now(),
+            elapsed_before_ms: 0,
             tx,
             states,
         }
     }
 
-    async fn run(&mut self) -> Result<(), String> {
+    /// The blocks nothing leads to are ready first.
+    fn seed_roots(&mut self) {
         let mut roots: Vec<&str> = self.node_of.keys().copied().filter(|id| !self.plan.owned.contains(*id) && self.incoming.get(id).is_none_or(|v| v.is_empty())).collect();
         roots.sort_unstable();
         for id in roots {
             self.enqueue(id, false);
         }
+    }
+
+    /// Run blocks until none is ready and no edge is left to decide.
+    async fn drive(&mut self) -> Result<(), String> {
         loop {
-            while let Some((id, forced)) = self.ready.pop_front() {
+            while !self.ready.is_empty() {
+                let batch = self.next_batch();
+                if batch.len() > 1 {
+                    self.step_batch(batch).await?;
+                    continue;
+                }
+                let Some((id, forced)) = self.ready.pop_front() else { break };
                 self.queued.remove(id);
                 self.step(id, forced).await?;
             }
@@ -203,11 +407,14 @@ impl<'a> Scheduler<'a> {
     }
 
     async fn step(&mut self, id: &'a str, forced: bool) -> Result<(), String> {
+        if self.cancel.is_cancelled() {
+            self.cancelled = true;
+            return Err(format!("stopped: {}", self.cancel.reason()));
+        }
         let node = self.node_of[id];
-        let ins = self.incoming.get(id).cloned().unwrap_or_default();
-        let runs = ins.is_empty() || forced || ins.iter().any(|e| self.decided.get(e.id.as_str()) == Some(&true));
-        if !runs {
+        if !self.will_run(id, forced) {
             self.finished.insert(id);
+            self.failed.remove(id);
             mark_state(self.states, id, BlockState { status: "skipped".to_string(), output: None, error: None, started_at: None, completed_at: Some(now_ms()) }).await;
             for edge in self.outgoing.get(id).cloned().unwrap_or_default() {
                 if !self.plan.back_edges.contains(&edge.id) {
@@ -216,7 +423,9 @@ impl<'a> Scheduler<'a> {
             }
             return Ok(());
         }
+        self.settle_late_spend().await;
         if let Some(stopped) = over_run_cap(self.spent, self.run_cap_usd) {
+            self.cap_reached(id, &stopped);
             return Err(stopped);
         }
         // A loop's time runs from the first block of its cycle, not from the
@@ -225,9 +434,110 @@ impl<'a> Scheduler<'a> {
         for guard in guards {
             self.loop_started.entry(guard).or_insert_with(Instant::now);
         }
-        let output = self.run_block(node).await?;
+        self.mark_in_flight(node, forced)?;
+        let waits = kind_of(node).is_ok_and(|k| k == BlockKind::Wait);
+        if waits {
+            self.waiting = Some((id, forced));
+        }
+        let ran = self.run_block(node).await;
+        if waits {
+            let late = ran.as_ref().is_ok_and(|o| o.get("late").and_then(Value::as_bool).unwrap_or(false));
+            self.end_wait(id, late);
+        }
+        self.finish_step(node, ran)
+    }
+
+    /// What a block came to is taken up: a failure its graph handles becomes its output, the
+    /// block is finished and the run goes on from it.
+    fn finish_step(&mut self, node: &'a FlowNode, ran: Result<Value, String>) -> Result<(), String> {
+        let id = node.id.as_str();
+        let (output, failed) = match ran {
+            Ok(output) => (output, false),
+            Err(e) if !self.cancelled && self.handles_failure(id) => {
+                // The graph has a handler for this block: its output says what
+                // went wrong, as text that came from outside, and the run goes on.
+                let output = json!({ "error": e, "failed": true });
+                self.scope.outputs.insert(id.to_string(), output.clone());
+                self.scope.bits.insert(id.to_string(), (true, false));
+                (output, true)
+            }
+            Err(e) => return Err(e),
+        };
         self.finished.insert(id);
-        self.route(node, &output)
+        if failed {
+            self.failed.insert(id);
+        } else {
+            self.failed.remove(id);
+        }
+        self.in_flight.retain(|(b, _)| *b != id);
+        self.running_ro.retain(|(b, _)| *b != id);
+        self.route(node, &output, failed)?;
+        self.checkpoint(Some(id))
+    }
+
+    /// Whether a ready block runs: it is a root, or was forced, or an edge into it was taken, or it
+    /// is a Join that a branch failed into. Otherwise it is skipped.
+    fn will_run(&self, id: &str, forced: bool) -> bool {
+        let ins = self.incoming.get(id).map(Vec::as_slice).unwrap_or_default();
+        ins.is_empty() || forced || ins.iter().any(|e| self.decided.get(e.id.as_str()) == Some(&true)) || self.join_has_failed_branch(id)
+    }
+
+    fn has_error_edge(&self, id: &str) -> bool {
+        self.outgoing.get(id).is_some_and(|edges| edges.iter().any(|e| e.source_handle.as_deref() == Some("error")))
+    }
+
+    fn cap_reached(&self, block_id: &str, reason: &str) {
+        let _ = self.tx.send(RunEvent::CapReached { run_id: self.run_id.to_string(), block_id: block_id.to_string(), reason: reason.to_string() });
+    }
+
+    /// A block's code, ended when the run is cancelled (an Agent block's process
+    /// goes with it) or the block passes its timeout.
+    async fn guarded(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
+        let retry = retry::retry_of(node)?;
+        let mut ran = 0;
+        loop {
+            let result = self.attempt(node, kind).await;
+            ran += 1;
+            if self.cancelled || !retry::again(retry, kind, &result, ran) {
+                return match result {
+                    Err(e) if ran > 1 => Err(format!("{e} (after {ran} tries)")),
+                    Ok(Value::Object(mut out)) if ran > 1 => {
+                        out.insert("tries".to_string(), json!(ran));
+                        Ok(Value::Object(out))
+                    }
+                    other => other,
+                };
+            }
+            let wait = retry.map_or(Duration::ZERO, |r| retry::delay(&r, ran));
+            let cancel = self.cancel.clone();
+            tokio::select! {
+                biased;
+                () = cancel.cancelled() => {
+                    self.cancelled = true;
+                    return Err(format!("stopped: {}", cancel.reason()));
+                }
+                () = tokio::time::sleep(wait) => {}
+            }
+        }
+    }
+
+    /// One run of a block's code, within its time limit.
+    async fn attempt(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
+        // A wait keeps its own time out in the checkpoint, so a restart does not start it over.
+        let limit = match schedule::timeout_seconds(node)? {
+            _ if kind == BlockKind::Wait => None,
+            Some(secs) => Some(Duration::from_secs(secs)),
+            None => default_timeout(kind),
+        };
+        let cancel = self.cancel.clone();
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => {
+                self.cancelled = true;
+                Err(format!("stopped: {}", cancel.reason()))
+            }
+            result = within(limit, self.dispatch(node, kind)) => result,
+        }
     }
 
     /// Hand a block to the code for its kind. A for-each runs its body block
@@ -237,30 +547,46 @@ impl<'a> Scheduler<'a> {
         if kind == BlockKind::ForEach {
             return self.run_foreach(node).await;
         }
-        let scope = &mut self.scope;
-        match kind {
-            BlockKind::Variables => blocks::variables::run(node, scope).await,
-            BlockKind::Api => blocks::api::run(node, scope).await,
-            BlockKind::Condition => blocks::condition::run(node, scope).await,
-            BlockKind::Response => blocks::response::run(node, scope).await,
-            BlockKind::Agent => blocks::agent::run(node, scope).await,
-            BlockKind::Message => blocks::message::run(node, scope).await,
-            BlockKind::Task => blocks::task::run(node, scope).await,
-            BlockKind::Notify => blocks::notify::run(node, scope).await,
-            BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
-            BlockKind::Spawn => blocks::spawn::run(node, scope).await,
-            BlockKind::Transform => blocks::transform::run(node, scope).await,
-            BlockKind::ForEach => unreachable!("handled above"),
+        if kind == BlockKind::Wait {
+            return self.run_wait(node).await;
         }
+        if kind == BlockKind::Drone {
+            return self.run_call(node).await;
+        }
+        if kind == BlockKind::Join {
+            return self.run_join(node);
+        }
+        dispatch_scoped(node, kind, &mut self.scope).await
     }
 
     /// Run one block with its events and its recorded state.
     async fn run_block(&mut self, node: &'a FlowNode) -> Result<Value, String> {
-        let id = node.id.as_str();
         let kind = kind_of(node)?;
+        self.settle_late_spend().await;
+        let started_at = self.begin_block(node).await;
+        let spent_before = self.spent;
+        // A replay does not repeat the world: a block with effects says what it said before.
+        let result = match self.stub_of(node, kind) {
+            Some(said) => Ok(said),
+            None => self.guarded(node, kind).await,
+        };
+        self.end_block(node, kind, result, (started_at, spent_before)).await
+    }
+
+    /// A block starts: its event and its running state. Gives when it started, which the
+    /// states it ends with carry too.
+    async fn begin_block(&mut self, node: &'a FlowNode) -> i64 {
+        let id = node.id.as_str();
         let _ = self.tx.send(RunEvent::BlockStarted { run_id: self.run_id.to_string(), block_id: id.to_string() });
-        // Captured once so the running, done and error states carry the same start.
         let started_at = now_ms();
+        let running = BlockState { status: "running".to_string(), output: None, error: None, started_at: Some(started_at), completed_at: None };
+        mark_state(self.states, id, running).await;
+        started_at
+    }
+
+    /// A block ends with `result`: its output is kept, its cost counted, its event and its state.
+    async fn end_block(&mut self, node: &'a FlowNode, kind: BlockKind, result: Result<Value, String>, (started_at, spent_before): (i64, f64)) -> Result<Value, String> {
+        let id = node.id.as_str();
         let state = |status: &str, output: Option<Value>, error: Option<String>, done: bool| BlockState {
             status: status.to_string(),
             output,
@@ -268,8 +594,10 @@ impl<'a> Scheduler<'a> {
             started_at: Some(started_at),
             completed_at: done.then(now_ms),
         };
-        mark_state(self.states, id, state("running", None, None, false)).await;
-        let result = self.dispatch(node, kind).await;
+        // What a block spent and then failed (a callee that ran, then failed) was still spent: it
+        // is on the block's state, which is what the ledger sums.
+        // Only a Drone block: a for-each's body has put its own spend on its own state.
+        let failed_cost = (matches!(kind, BlockKind::Drone) && self.spent > spent_before).then(|| json!({ "cost_usd": self.spent - spent_before }));
         match result {
             Ok(mut output) => {
                 self.keep_history(id, &mut output);
@@ -287,9 +615,13 @@ impl<'a> Scheduler<'a> {
                 }
                 Ok(output)
             }
+            Err(e) if self.cancelled => {
+                mark_state(self.states, id, state("cancelled", failed_cost, Some(e.clone()), true)).await;
+                Err(e)
+            }
             Err(e) => {
                 let _ = self.tx.send(RunEvent::BlockError { run_id: self.run_id.to_string(), block_id: id.to_string(), error: e.clone() });
-                mark_state(self.states, id, state("error", None, Some(e.clone()), true)).await;
+                mark_state(self.states, id, state("error", failed_cost, Some(e.clone()), true)).await;
                 Err(format!("block {id} failed: {e}"))
             }
         }
@@ -302,13 +634,20 @@ impl<'a> Scheduler<'a> {
     fn mark_bits(&mut self, node: &FlowNode, kind: BlockKind) {
         let read = |key: &str| node.data.get(key).and_then(Value::as_str).map(|t| self.scope.bits_of(t)).unwrap_or((false, false));
         let bits = match kind {
-            BlockKind::Agent | BlockKind::Api | BlockKind::Message | BlockKind::AppQuery => (true, false),
+            // What a command printed is outside text, as an API response is.
+            BlockKind::Agent | BlockKind::Api | BlockKind::Message | BlockKind::AppQuery | BlockKind::Run => (true, false),
             BlockKind::Condition => {
                 let (tainted, derived) = read("expr");
                 (false, tainted || derived)
             }
             BlockKind::Response => read("template"),
             BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach => return,
+            // What an event brought is outside text; a wait for a time brings nothing.
+            BlockKind::Wait if node.data.get("on").is_some() => (true, false),
+            BlockKind::Wait => (false, false),
+            // What a callee said is outside text: nothing yet promises its outputs are clean.
+            BlockKind::Drone => (true, false),
+            BlockKind::Join => self.join_bits(&node.id),
             BlockKind::Task | BlockKind::Notify | BlockKind::Spawn => (false, false),
         };
         self.scope.bits.insert(node.id.clone(), bits);
@@ -335,20 +674,24 @@ impl<'a> Scheduler<'a> {
 
     /// Send the run along the edges out of a block that ran, and count a loop's
     /// iteration when a guard takes it round.
-    fn route(&mut self, node: &'a FlowNode, output: &Value) -> Result<(), String> {
+    fn route(&mut self, node: &'a FlowNode, output: &Value, failed: bool) -> Result<(), String> {
         let id = node.id.as_str();
         let edges = self.outgoing.get(id).cloned().unwrap_or_default();
-        let mut carry: Vec<bool> = edges.iter().map(|e| carries_on(e, node, output)).collect();
+        let mut carry: Vec<bool> = edges.iter().map(|e| carries_on(e, node, output, failed)).collect();
         if let Some(guard) = self.plan.guards.get(id).cloned() {
             let goes_round = edges.iter().zip(&carry).any(|(e, c)| *c && guard.loop_edges.contains(&e.id));
             if goes_round {
                 if let Some(why) = self.loop_cap(id, &guard) {
+                    self.cap_reached(id, &why);
                     match guard.on_cap {
                         OnCap::EndRun => return Err(why),
                         OnCap::ExitLoop => {
-                            // Leaving the loop takes every edge that is not one of its own.
+                            // Leaving the loop takes every edge that is not one of its own,
+                            // except that an error edge is for a block that failed, and
+                            // only it (`carries_on`).
                             for (e, c) in edges.iter().zip(carry.iter_mut()) {
-                                *c = !guard.loop_edges.contains(&e.id);
+                                let error_edge = e.source_handle.as_deref() == Some("error");
+                                *c = !guard.loop_edges.contains(&e.id) && error_edge == failed;
                             }
                             if let Some(map) = self.scope.outputs.get_mut(id).and_then(Value::as_object_mut) {
                                 map.insert("capped".to_string(), Value::Bool(true));
@@ -357,7 +700,9 @@ impl<'a> Scheduler<'a> {
                         }
                     }
                 } else {
-                    *self.rounds.entry(id).or_default() += 1;
+                    let rounds = self.rounds.entry(id).or_default();
+                    *rounds += 1;
+                    let _ = self.tx.send(RunEvent::LoopIteration { run_id: self.run_id.to_string(), block_id: id.to_string(), iteration: *rounds + 1 });
                 }
             }
         }
@@ -403,6 +748,7 @@ impl<'a> Scheduler<'a> {
         let group = self.plan.cycle_of.get(head).cloned().unwrap_or_default();
         for id in &group {
             self.finished.remove(id.as_str());
+            self.failed.remove(id.as_str());
         }
         let inner: Vec<&'a str> = self
             .incoming
@@ -420,7 +766,14 @@ impl<'a> Scheduler<'a> {
     }
 }
 
+mod attention;
+mod call;
+mod checkpoint;
 mod foreach;
+mod join;
+mod parallel;
+mod replay;
+mod wait;
 
 #[cfg(test)]
 #[path = "scheduler_tests.rs"]

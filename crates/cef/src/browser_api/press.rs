@@ -129,7 +129,9 @@ async fn read_back(cdp: &mut super::cdp::CdpSession, object_id: &str, before: &D
     };
     // No secret-shaped text the page's own script read (a value, a text) goes back to the agent.
     super::hidden_secrets::scrub_value(&mut after);
-    after
+    // Masked, then shortened, the same as act_route's read-back (#7407): a link, button or div
+    // pressed by key can wrap as much text as one clicked through `act`.
+    super::read_back_text::shorten(after)
 }
 
 fn refused(key: &str, why: &str) -> String {
@@ -182,6 +184,7 @@ async fn press(root: &mut super::cdp::CdpSession, req: &PressReq) -> Result<Valu
         refuse_typing_into_secret_field(root).await?;
         let before = facts_of(root, focused).await;
         insert_text(root, " ").await?;
+        super::filled::mark(root, focused).await;
         // Without the field's facts nothing is shown of it: it could hold a secret.
         let after = match before {
             Some(before) => read_back(root, focused, &before).await,

@@ -320,3 +320,102 @@ fn an_odd_shaped_value_a_row_withheld_is_still_taken_out_of_a_siblings_descripti
     assert!(!said.contains("q7Zp") && said.contains("to the clipboard"), "{said}");
     assert!(!shown(&nodes, None).text.contains("q7Zp"));
 }
+
+#[test]
+fn an_unreadable_layout_withholds_an_odd_token_in_a_secret_row_and_keeps_a_phrase_beside_a_password_field() {
+    let unknown = Layout { unknown: true, ..Layout::default() };
+    // The odd-shaped value in a "Signing key" row, with no key shape of its own.
+    let mut nodes = row("Signing key", "q7Zp-93xaLm2Rt");
+    visibility::apply(&mut nodes, &unknown, true);
+    let out = shown(&nodes, None);
+    assert!(!out.text.contains("q7Zp") && out.text.contains(WITHHELD), "{}", out.text);
+    // Help text beside a password field is a phrase, not a token.
+    let mut nodes = row("Password", "At least eight characters");
+    visibility::apply(&mut nodes, &unknown, true);
+    assert!(shown(&nodes, None).text.contains("At least eight characters"));
+    // With the layout read, the same odd token is withheld as before.
+    let mut nodes = row("Signing key", "q7Zp-93xaLm2Rt");
+    visibility::apply(&mut nodes, &layout(&[9]), true);
+    assert!(!shown(&nodes, None).text.contains("q7Zp"));
+}
+
+#[test]
+fn an_answer_with_an_approval_request_in_it_is_left_as_the_person_is_shown_it() {
+    let ask = json!({ "needs_approval": { "what": "Click \"Save\"", "fields": [["Key", "ghp_abcdefghij12", true]] } });
+    assert_eq!(scrub_answer(ask.clone()), ask);
+    let answered = scrub_answer(json!({ "value": "ghp_abcdefghij12", "checked": true }));
+    assert_eq!(answered["value"], json!(WITHHELD));
+    assert_eq!(answered["checked"], json!(true));
+}
+
+#[test]
+fn a_cell_whose_only_content_is_the_withheld_text_has_the_reference_for_capture() {
+    // A table cell named from its one hidden text: the marker is the cell's name, and the cell's line has a ref.
+    let mut nodes = vec![
+        n("1", None, "RootWebArea", "Settings", 1, &["2"]),
+        n("2", Some("1"), "cell", SECRET, 2, &["3"]),
+        n("3", Some("2"), "StaticText", SECRET, 9, &[]),
+    ];
+    visibility::apply(&mut nodes, &layout(&[9]), true);
+    let out = shown(&nodes, None);
+    assert!(!out.text.contains(SECRET) && out.text.contains(WITHHELD), "{}", out.text);
+    assert!(out.refs.iter().any(|(_, b)| *b == 2), "the cell has a reference: {:?} {}", out.refs, out.text);
+}
+
+/// A settings row after its eye button was pressed: the label, the secret in plain sight (backend 4), a Hide button.
+fn revealed(label: &str, text: &str) -> Vec<Value> {
+    vec![
+        n("1", None, "RootWebArea", "Settings", 1, &["2"]),
+        n("2", Some("1"), "generic", "", 2, &["3", "4", "5"]),
+        n("3", Some("2"), "StaticText", label, 3, &[]),
+        n("4", Some("2"), "StaticText", text, 4, &[]),
+        n("5", Some("2"), "button", "Hide", 5, &[]),
+    ]
+}
+
+#[test]
+fn a_secret_revealed_in_plain_sight_is_listed_unread_with_a_reference() {
+    let mut nodes = revealed("Client secret", SECRET);
+    visibility::apply(&mut nodes, &layout(&[]), false);
+    let out = shown(&nodes, None);
+    assert!(!out.text.contains(SECRET), "{}", out.text);
+    assert!(out.text.contains(UNREAD), "the row says there is an unread secret: {}", out.text);
+    assert!(out.refs.iter().any(|(_, b)| *b == 4), "capture can name it: {:?}", out.refs);
+    // `find` lists it by the marker and never matches the secret a piece at a time.
+    let by_marker = ElementQuery { role: Some("text".into()), name: "unread secret".into(), exact: false };
+    assert_eq!(snapshot::find(&nodes, &HashMap::new(), &by_marker, "").total, 1);
+    let by_piece = ElementQuery { role: Some("text".into()), name: "xK9fQ2".into(), exact: false };
+    assert_eq!(snapshot::find(&nodes, &HashMap::new(), &by_piece, "").total, 0);
+}
+
+#[test]
+fn plain_text_that_is_no_secret_or_in_no_secret_row_is_left_alone() {
+    // An odd token in a row about something else (an order number), and a word in a secret row.
+    for (label, text) in [("Order reference", SECRET), ("API key", "Production"), ("API key", "Created 3 days ago")] {
+        let mut nodes = revealed(label, text);
+        visibility::apply(&mut nodes, &layout(&[]), false);
+        let out = shown(&nodes, None);
+        assert!(out.text.contains(text) && !out.text.contains(UNREAD), "{label}: {}", out.text);
+    }
+}
+
+#[test]
+fn a_name_made_from_the_revealed_text_does_not_carry_it() {
+    let mut nodes = revealed("Client secret", SECRET);
+    nodes[1]["name"]["value"] = json!(format!("Client secret {SECRET} Hide"));
+    visibility::apply(&mut nodes, &layout(&[]), false);
+    let out = shown(&nodes, None);
+    assert!(!out.text.contains(SECRET), "{}", out.text);
+}
+
+#[test]
+fn a_tooltip_that_repeats_a_withheld_secret_does_not_carry_it_into_an_icon_buttons_name() {
+    let token = "q7Zp-93xaLm2Rt";
+    let mut nodes = row("Signing key", token);
+    nodes[5]["name"]["value"] = json!("");
+    let layout = Layout { hidden: HashSet::from([9]), hints: HashMap::from([(6, format!("title \"{token}\""))]), ..Layout::default() };
+    visibility::apply(&mut nodes, &layout, true);
+    let out = shown(&nodes, None);
+    assert!(!out.text.contains(token), "{}", out.text);
+    assert!(out.text.contains("no name"), "the button is still named for what it is: {}", out.text);
+}

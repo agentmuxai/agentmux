@@ -75,6 +75,7 @@ fn todays_refused() -> Vec<(Match, &'static str)> {
         (Match::Exact("/api/v1/agent/self/mcp-beat"), "health beats belong to persistent controllers; a container's turns are per-exec."),
         (Match::Exact("/agentmux/reactive/register"), SRV_DOES_IT),
         (Match::Exact("/agentmux/jobs/stop-run"), INSTANCE_ONLY),
+        (Match::Route("/agentmux/hook/:job"), LOCAL_SCRIPTS),
         (Match::Prefix("/agentmux/viewer/"), INSTANCE_ONLY),
         (Match::Prefix("/.well-known/"), INSTANCE_ONLY),
     ]

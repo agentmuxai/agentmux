@@ -424,7 +424,7 @@ function ctxSlot(props: AgentComposerStripProps, d: StripDerived): Slot {
                         density="compact"
                         class="agent-composer-strip-compact-btn"
                         data-strip-button
-                        icon={compact() ? "compress" : undefined}
+                        icon={compact() ? "custom@arrows-to-dot" : undefined}
                         aria-label={compact() ? "Compact" : undefined}
                         disabled={!d.canCompact()}
                         title={

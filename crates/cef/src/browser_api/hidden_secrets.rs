@@ -24,8 +24,9 @@
 //! matches on, so `find` can't count a secret out a piece at a time.
 //!
 //! When the page's layout can't be read, nothing is known to be hidden, so every text node counts as
-//! hidden and the shape rule alone applies: a secret's shape is withheld wherever it is, rather than shown
-//! for want of an answer (the row rule needs to know what is hidden, and is not applied).
+//! hidden: a secret's shape is withheld wherever it is, and text in a secret row when it is one odd token
+//! (an id, a key a page makes up), rather than shown for want of an answer. A phrase beside a password field
+//! is kept.
 //!
 //! [`scrub`] is the shape rule alone, for the strings read from a page's own script (the state an action
 //! reports, a name read for one element): there is no tree to climb, and a secret shape is withheld
@@ -40,8 +41,9 @@ use serde_json::Value;
 
 use super::snapshot::str_of;
 
-/// What an agent reads in place of withheld hidden text.
-pub const WITHHELD: &str = "[hidden text withheld: it may be a secret; use Browser capture to save it]";
+pub use agentmux_common::secret_shape::{UNREAD, WITHHELD};
+pub(super) use agentmux_common::secret_shape::scrub;
+use agentmux_common::secret_shape::{has_key_shape, token_like};
 
 /// Set on a text node whose text was withheld, so its line gets a reference.
 const FLAG: &str = "agentmuxWithheld";
@@ -71,34 +73,6 @@ const NOT_A_ROW: &[&str] = &["navigation", "banner", "complementary", "contentin
 /// from its contents), and from any node at all.
 const ECHO_BELOW: usize = 3;
 const ECHO_ANYWHERE: usize = 6;
-
-/// Prefixes of keys, tokens and signing secrets that are short enough to miss the one-time shape.
-const KEY_PREFIXES: &[&str] = &["sk_", "rk_", "pk_", "whsec_", "ghp_", "gho_", "ghs_", "github_pat_", "xoxb-", "xoxp-", "xoxa-", "eyj"];
-
-/// A cloud access key id: four capital letters and sixteen capitals or digits, as one word.
-fn is_access_key_id(t: &str) -> bool {
-    t.len() == 20 && (t.starts_with("AKIA") || t.starts_with("ASIA")) && t.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
-}
-
-fn has_key_shape(text: &str) -> bool {
-    agentmux_common::shown_once::has_shown_once(text)
-        || text.to_ascii_lowercase().contains("-----begin")
-        || text.split_whitespace().any(|t| {
-            let lower = t.to_ascii_lowercase();
-            is_access_key_id(t) || (t.len() >= 12 && KEY_PREFIXES.iter().any(|p| lower.starts_with(p)))
-        })
-}
-
-/// One long word with a digit and a letter in it, which words are not: an odd-shaped value (an id, a key a
-/// page makes up) that is safe to take out of unrelated nodes' names.
-fn token_like(text: &str) -> bool {
-    let t = text.trim();
-    t.chars().count() >= 12
-        && !t.chars().any(char::is_whitespace)
-        && t.chars().any(|c| c.is_ascii_digit())
-        && t.chars().any(char::is_alphabetic)
-        && t.chars().all(|c| c.is_alphanumeric() || "-_=+/.:".contains(c))
-}
 
 /// The words of a name, lowercased, split on anything that is not a letter or digit and on a lower-to-upper
 /// step (`apiKey` is `api`, `key`).
@@ -197,7 +171,7 @@ impl Tree<'_> {
         }
         inside.into_iter().any(|i| {
             let node = &self.nodes[i];
-            i != skip && !ignored(node) && !(is_text(node) && self.is_hidden(node)) && says_secret(str_of(node, "name"))
+            i != skip && !ignored(node) && !(is_text(node) && !self.unknown && self.is_hidden(node)) && says_secret(str_of(node, "name"))
         })
     }
 
@@ -222,25 +196,79 @@ fn squeezed(text: &str) -> String {
     text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
+/// Take the withheld pieces out of the other nodes' names, values and descriptions: those above a withheld text
+/// (`above`, by node) at any length, and every node for the pieces in `anywhere`.
+fn clean_echoes(nodes: &mut [Value], chosen: &HashSet<usize>, above: &HashMap<usize, Vec<String>>, anywhere: &[String]) {
+    for (i, node) in nodes.iter_mut().enumerate() {
+        if chosen.contains(&i) || ignored(node) {
+            continue;
+        }
+        let near = above.get(&i);
+        for field in FIELDS {
+            let text = str_of(node, field).to_string();
+            if text.is_empty() || text == WITHHELD {
+                continue;
+            }
+            let mut now = text.clone();
+            for p in anywhere.iter().chain(near.into_iter().flatten()) {
+                now = now.replace(p.as_str(), WITHHELD);
+            }
+            // An ancestor's name is made from its contents, so the text may come apart (spaces, line breaks).
+            if let Some(near) = near {
+                let squeezed_now = squeezed(&now);
+                if near.iter().any(|p| !p.is_empty() && squeezed_now.contains(&squeezed(p))) {
+                    now = WITHHELD.to_string();
+                }
+            }
+            if now != text {
+                // A cell or row named from the text it holds shows the marker as its name, and is the line
+                // that carries the reference `capture` needs (its text node is not listed apart from it).
+                if now.contains(WITHHELD) && !super::snapshot::is_actionable_role(str_of(node, "role")) {
+                    node[FLAG] = Value::Bool(true);
+                }
+                node[field]["value"] = Value::String(now);
+            }
+        }
+    }
+}
+
+/// Whether a text node holds one odd token or a key's shape: what a page shows as a secret.
+fn looks_secret(node: &Value) -> bool {
+    is_text(node) && FIELDS.iter().any(|f| has_key_shape(str_of(node, f)) || token_like(str_of(node, f)))
+}
+
 /// Replace, in `nodes`, the text the page hides (`hidden`: backend ids; every text node when `unknown`) that
 /// has a secret's shape or sits in a row named like a secret, and what repeats it in another node's name,
-/// value or description. Returns how many text nodes were withheld.
+/// value or description; and the text the page shows plainly (a secret revealed with an eye button) when it
+/// is one odd token or has a key's shape and sits in such a row, as [`UNREAD`]. Returns how many text nodes
+/// were withheld.
 pub(super) fn withhold(nodes: &mut [Value], hidden: &HashSet<i64>, unknown: bool) -> usize {
-    if hidden.is_empty() && !unknown {
+    if hidden.is_empty() && !unknown && !nodes.iter().any(looks_secret) {
         return 0;
     }
     let by_id: HashMap<String, usize> = nodes.iter().enumerate().filter_map(|(i, n)| Some((n.get("nodeId")?.as_str()?.to_string(), i))).collect();
+    // The chosen nodes the page shows (the rest are hidden).
+    let mut shown: HashSet<usize> = HashSet::new();
     let (chosen, pieces_of) = {
         let tree = Tree { nodes, by_id: by_id.clone(), hidden, unknown };
         let mut chosen: Vec<usize> = Vec::new();
         for (i, node) in nodes.iter().enumerate() {
-            if ignored(node) || !tree.is_hidden(node) {
+            if ignored(node) {
+                continue;
+            }
+            if !tree.is_hidden(node) {
+                if looks_secret(node) && tree.in_secret_row(i) {
+                    chosen.push(i);
+                    shown.insert(i);
+                }
                 continue;
             }
             let shaped = FIELDS.iter().any(|f| has_key_shape(str_of(node, f)));
             let holds_text = FIELDS.iter().any(|f| !str_of(node, f).trim().is_empty());
-            // Without a layout nothing is known of rows: the shape rule alone.
-            if shaped || (!unknown && is_text(node) && holds_text && tree.in_secret_row(i)) {
+            // Without a layout, text in a secret row is withheld only when it is one odd token (a phrase beside a
+            // password field is kept): the row's own words are all that can be told.
+            let odd = !unknown || FIELDS.iter().any(|f| token_like(str_of(node, f)));
+            if shaped || (is_text(node) && holds_text && odd && tree.in_secret_row(i)) {
                 chosen.push(i);
             }
         }
@@ -278,9 +306,10 @@ pub(super) fn withhold(nodes: &mut [Value], hidden: &HashSet<i64>, unknown: bool
     }
     let chosen_set: HashSet<usize> = chosen.iter().copied().collect();
     for i in chosen.iter().copied() {
+        let marker = if shown.contains(&i) { UNREAD } else { WITHHELD };
         for field in FIELDS {
             if !str_of(&nodes[i], field).trim().is_empty() {
-                nodes[i][field]["value"] = Value::String(WITHHELD.to_string());
+                nodes[i][field]["value"] = Value::String(marker.to_string());
             }
         }
         if str_of(&nodes[i], "role") == "StaticText" {
@@ -294,41 +323,17 @@ pub(super) fn withhold(nodes: &mut [Value], hidden: &HashSet<i64>, unknown: bool
             }
         }
     }
-    for (i, node) in nodes.iter_mut().enumerate() {
-        if chosen_set.contains(&i) || ignored(node) {
-            continue;
-        }
-        let near = above.get(&i);
-        for field in FIELDS {
-            let text = str_of(node, field).to_string();
-            if text.is_empty() || text == WITHHELD {
-                continue;
-            }
-            let mut now = text.clone();
-            for p in anywhere.iter().chain(near.into_iter().flatten()) {
-                now = now.replace(p.as_str(), WITHHELD);
-            }
-            // An ancestor's name is made from its contents, so the text may come apart (spaces, line breaks).
-            if let Some(near) = near {
-                let squeezed_now = squeezed(&now);
-                if near.iter().any(|p| !p.is_empty() && squeezed_now.contains(&squeezed(p))) {
-                    now = WITHHELD.to_string();
-                }
-            }
-            if now != text {
-                node[field]["value"] = Value::String(now);
-            }
-        }
-    }
+    clean_echoes(nodes, &chosen_set, &above, &anywhere);
     changed
 }
 
-/// `text` with every word that has a secret's shape replaced by [`WITHHELD`]; the text itself when none has.
-pub(super) fn scrub(text: &str) -> String {
-    if !has_key_shape(text) {
-        return text.to_string();
+/// An action's answer about the element: no secret-shaped text in it. An approval request (a click that asks
+/// the person first) is left as it is: the agent never receives it (its notice is scrubbed on srv's side).
+pub(super) fn scrub_answer(mut after: Value) -> Value {
+    if after.get("needs_approval").is_none() {
+        scrub_value(&mut after);
     }
-    text.split_whitespace().map(|w| if has_key_shape(w) { WITHHELD } else { w }).collect::<Vec<_>>().join(" ")
+    after
 }
 
 /// [`scrub`] on every string in `value`, at any depth.

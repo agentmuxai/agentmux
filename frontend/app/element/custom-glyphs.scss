@@ -1,0 +1,30 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The app's own icon glyphs, drawn here as SVG and drawn by the browser as a mask in the text colour, so they scale
+// with the font size, follow `currentColor` and need no font build. Used by name like the kit's other glyphs:
+// `icon="custom@arrows-to-dot"` (the kit's Button and `makeIconClass`). One 16-unit square each, filled shapes only,
+// so they read at 12 to 16 px next to Font Awesome's solid icons.
+//
+// To add one: a `@include glyph(name, "<svg shapes>")` below. The shapes are SVG elements with `<` as `%3C`, `>` as
+// `%3E`, and single quotes around attribute values.
+
+@mixin glyph($name, $shapes) {
+    .fa-kit.fa-#{$name}::before {
+        content: "";
+        display: inline-block;
+        width: 1em;
+        height: 1em;
+        vertical-align: -0.125em;
+        background-color: currentColor;
+        -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E#{$shapes}%3C/svg%3E") center / contain no-repeat;
+        mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E#{$shapes}%3C/svg%3E") center / contain no-repeat;
+    }
+}
+
+// Four arrows in to a dot: everything gathered to one point. Compact in the composer strip (summarize and trim
+// the history), which a size glyph ("compress", the tool panel's shrink) said wrongly.
+@include glyph(
+    arrows-to-dot,
+    "%3Cpath d='M5.5 1h5L8 4.2zM5.5 15h5L8 11.8zM1 5.5v5L4.2 8zM15 5.5v5L11.8 8z'/%3E%3Ccircle cx='8' cy='8' r='1.6'/%3E"
+);

@@ -222,6 +222,9 @@ impl RunLedger {
         match self.store.job_run_stop(&run.id, infra_status, why, summary, now_ms()) {
             Ok(true) => {
                 self.interrupt_block(&run.block_id);
+                if let Some(drone_run) = run.links["drone_run_id"].as_str() {
+                    crate::backend::drone_cancel::cancel_run(drone_run, summary);
+                }
                 self.reap_worker(&run.id);
                 self.run_changed(&run.id);
                 super::pending_wake().notify_one();
@@ -252,6 +255,18 @@ impl RunLedger {
             }
         }
         stopped
+    }
+
+    /// A Drone run a restart left open, that a job started and whose job's
+    /// `timeout_minutes` ran out while AgentMux was down: close it as timed out
+    /// (the way the timeout pass does) and say so, so it is not taken up again
+    /// and able to act before the first pass. `false` for a run with no such
+    /// timeout, or one that has time left.
+    pub fn close_if_past_timeout(&self, drone_run_id: &str) -> bool {
+        let Some(run) = self.open_run_of_drone(drone_run_id).and_then(|id| self.store.job_run_get(&id).ok().flatten()) else { return false };
+        let Some(minutes) = self.job(&run.job_id).and_then(|j| j.policy.timeout_minutes) else { return false };
+        now_ms() - run.started_at_ms >= i64::from(minutes) * 60_000
+            && self.stop_run(&run, infra::TIMEOUT, reason::TIMEOUT, &format!("stopped after {minutes} minutes (timeout_minutes)"))
     }
 
     /// [`policy::decide`] for `job` now.

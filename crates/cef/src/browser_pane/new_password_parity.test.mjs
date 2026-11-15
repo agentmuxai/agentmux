@@ -118,7 +118,8 @@ const CASES = [
     {
         name: "a form with a current-password field is a change, whatever else it holds",
         html: `<form><input id=cur type=password autocomplete="current-password"><input id=pw type=password autocomplete="new-password"><input id=pw2 type=password autocomplete="new-password"></form>`,
-        fields: { cur: { fresh: false, change: true }, pw: { fresh: false, change: true }, pw2: { fresh: false, change: true } },
+        // The probe refuses the current-password field itself; asked about either new one it says it is a change.
+        fields: { cur: { fresh: false, change: false }, pw: { fresh: false, change: true }, pw2: { fresh: false, change: true } },
     },
     {
         name: "no form: the page's one password and a Create account button",
@@ -146,7 +147,9 @@ describe("a field for a new password: the page's listener and the agent's probe 
                 const isPassword = field(id).type === "password";
                 const heard = listens(field(id));
                 const answer = isPassword ? probe(id) : { error: "not a password field" };
-                const probed = typeof answer.field === "string" && answer.field.length > 0;
+                // A change form is not a sign-up: the listener offers nothing on focus there, and the probe answers
+                // `change: true` with the field for the new password rather than taking the named field for a new one.
+                const probed = answer.change !== true && typeof answer.field === "string" && answer.field.length > 0;
                 expect(probed, `${id}: the probe and the listener must agree`).toBe(heard);
                 expect({ id, fresh: heard }).toEqual({ id, fresh: want.fresh });
                 expect({ id, change: answer.change === true }).toEqual({ id, change: want.change === true });
@@ -162,6 +165,17 @@ describe("a field for a new password: the page's listener and the agent's probe 
         expect(second.field).toBeTruthy();
         expect(field("pw").hasAttribute("data-agentmux-signup")).toBe(false);
         expect(field("pw2").getAttribute("data-agentmux-signup")).toBe(second.field);
+    });
+
+    it("in a password change the probe marks the form's field for the new password, never the current one", () => {
+        document.body.innerHTML = `<form><input id=cur type=password autocomplete="current-password"><input id=pw type=password><input id=pw2 type=password></form>`;
+        expect(probe("cur").error).toMatch(/current/);
+        const answer = probe("pw2");
+        expect(answer.change).toBe(true);
+        expect(answer.field).toBeTruthy();
+        expect(field("pw").getAttribute("data-agentmux-signup")).toBe(answer.field);
+        expect(field("cur").hasAttribute("data-agentmux-signup")).toBe(false);
+        expect(field("pw2").hasAttribute("data-agentmux-signup")).toBe(false);
     });
 
     it("the probe refuses a field the person cannot see, as the listener never offers one", () => {

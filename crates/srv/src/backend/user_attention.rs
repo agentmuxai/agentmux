@@ -18,6 +18,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use super::mps::Broker;
 use super::storage::store::Store;
 
+/// Every kind a call to action can carry. The status bar's summary gives each one a part and a place to answer it
+/// (`frontend/app/statusbar/summary-kinds.ts`); a test there reads this list, so a new kind has to be given both.
+pub const KINDS: [&str; 7] = ["browser", "consent", "confirm", "vault", "widget", "upgrade", "desktop"];
+
 /// One call to action srv holds open: the `userattention` event's payload
 /// (`mps_events::UserAttention`), and a row of `notify.attention`'s list.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
@@ -26,7 +30,8 @@ pub struct UserAttentionEvent {
     pub key: String,
     /// The pane it's in; empty for none.
     pub block_id: String,
-    /// `browser`, `consent`, `widget`, or `confirm` (a pane asks the person about their own click).
+    /// One of [`KINDS`]: `browser`, `consent`, `confirm` (a pane asks the person about their own click), `vault`,
+    /// `widget`, `upgrade` or `desktop`.
     pub kind: String,
     pub text: String,
     /// The windows showing it; empty means every window.
@@ -60,6 +65,7 @@ impl Asking {
     /// Announces a call to action in pane `block_id` (empty: no pane) of
     /// kind `kind` (`browser`, `consent`, `widget`, `confirm`), described by `text`.
     pub fn start(broker: &Arc<Broker>, store: &Store, block_id: &str, kind: &str, text: &str) -> Self {
+        debug_assert!(KINDS.contains(&kind), "user attention kind {kind:?} is not in KINDS: give it a part in the status bar summary");
         let window_ids = if block_id.is_empty() {
             Vec::new()
         } else {

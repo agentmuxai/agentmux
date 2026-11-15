@@ -39,7 +39,12 @@ interface WaitEntry {
     text?: string;
     /** What it wants in a few words, led by a verb ("asks to approve a Bash call"), for the toast and the list. */
     what: string;
+    /** The kind srv announced it as (`vault`, `browser`, `consent`…); absent for an agent's own question or permission. */
+    kind?: string;
 }
+
+/** In a pane's `kinds`, a wait that srv did not announce: the agent's own question, permission or shutdown ask, or a pane's card. */
+export const OWN_WAIT = "own";
 
 const waiting = new Map<string, Map<string, WaitEntry>>();
 /** `blockId` → when its first source began waiting (unix ms). */
@@ -61,6 +66,8 @@ export interface WaitingOptions {
     stillWaiting?: () => boolean;
     /** What it wants in a few words, led by a verb. Absent, a default from the source's name. */
     what?: string;
+    /** The kind srv announced it as; the status bar's summary sorts a wait into a part by it. */
+    kind?: string;
 }
 
 /** The default `what` of a source that gives none. */
@@ -85,7 +92,7 @@ export function startWaitingForYou(blockId: string, source: string, text?: strin
         waiting.set(blockId, sources);
     }
     const first = sources.size === 0;
-    sources.set(source, { text, what: opts.what ?? defaultWhat(source, text) });
+    sources.set(source, { text, what: opts.what ?? defaultWhat(source, text), kind: opts.kind });
     if (first) since.set(blockId, Date.now());
     bump();
     if (opts.stillWaiting) watch(blockId, source, opts.stillWaiting);
@@ -115,7 +122,11 @@ export function endWaitingForYou(blockId: string, source: string, reason: "submi
     watches.delete(key);
     const sources = waiting.get(blockId);
     if (!sources?.delete(source)) return;
-    if (sources.size > 0) return;
+    if (sources.size > 0) {
+        // What the pane still waits on changed (its kinds), though it still waits.
+        bump();
+        return;
+    }
     waiting.delete(blockId);
     since.delete(blockId);
     bump();
@@ -129,6 +140,18 @@ export interface WaitingPane {
     what: string;
     /** When it began to wait (unix ms). */
     since: number;
+    /** The kind of each of its waits: srv's (`vault`, `browser`…), or [`OWN_WAIT`] for a question or permission. */
+    kinds?: string[];
+}
+
+/** A call to action that belongs to no pane (an `app:` request): a consent, an install, an upgrade ask with no pane. */
+export interface WaitingApp {
+    /** srv's key for it. */
+    key: string;
+    kind: string;
+    what: string;
+    /** When it began (unix ms). */
+    since: number;
 }
 
 /** The panes of this window that wait on the user, oldest first; reactive. A pane that belongs to no
@@ -139,7 +162,22 @@ export function waitingPanes(): WaitingPane[] {
     for (const [blockId, sources] of waiting) {
         if (blockId.startsWith(APP_KEY_PREFIX)) continue;
         const first = sources.values().next().value;
-        if (first) out.push({ blockId, what: first.what, since: since.get(blockId) ?? 0 });
+        if (!first) continue;
+        const kinds = [...new Set([...sources.values()].map((e) => e.kind || OWN_WAIT))];
+        out.push({ blockId, what: first.what, since: since.get(blockId) ?? 0, kinds });
+    }
+    return out.sort((a, b) => a.since - b.since);
+}
+
+/** The requests that belong to no pane, oldest first; reactive. They play the tone while the window is not in front, so
+ *  the status bar lists them: a tone must have a row to find. */
+export function waitingApps(): WaitingApp[] {
+    version();
+    const out: WaitingApp[] = [];
+    for (const [blockId, sources] of waiting) {
+        if (!blockId.startsWith(APP_KEY_PREFIX)) continue;
+        const first = sources.values().next().value;
+        if (first) out.push({ key: blockId.slice(APP_KEY_PREFIX.length), kind: first.kind ?? "", what: first.what, since: since.get(blockId) ?? 0 });
     }
     return out.sort((a, b) => a.since - b.since);
 }
@@ -180,6 +218,10 @@ function whatForKind(kind: string): string {
             return "asks to install a widget";
         case "vault":
             return "needs a secret from you";
+        case "upgrade":
+            return "asks to upgrade AgentMux";
+        case "desktop":
+            return "asks to use your desktop";
         default:
             return "needs you";
     }
@@ -200,7 +242,7 @@ export function applyUserAttention(a: UserAttention, thisWindow: string): void {
     if (a.active && a.kind === "browser" && !browserWaitsShown()) return;
     const agentWaits = AGENT_WAITS.has(a.kind);
     const source = agentWaits ? `${AGENT_SOURCE}${a.key}` : `srv:${a.key}`;
-    if (a.active) startWaitingForYou(blockId, source, a.text, { what: whatForKind(a.kind) });
+    if (a.active) startWaitingForYou(blockId, source, a.text, { what: whatForKind(a.kind), kind: a.kind });
     else endWaitingForYou(blockId, source, "submitted");
     if (agentWaits && a.block_id) {
         // Loaded when used: the pane hooks that keep the meta import this registry.

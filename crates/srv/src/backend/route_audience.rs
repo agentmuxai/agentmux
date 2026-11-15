@@ -40,6 +40,8 @@ pub const GLOBAL_MEMORY: &str = "Global Memory is read by every native agent at 
 pub const SRV_DOES_IT: &str = "srv does this for container agents itself.";
 /// Peer-to-peer routes between AgentMux instances.
 pub const INSTANCE_ONLY: &str = "this route is for other AgentMux instances, not for agents.";
+/// The local hook an event job offers to scripts on this computer.
+pub const LOCAL_SCRIPTS: &str = "this is the hook a job offers to scripts on this computer, with its own secret; an agent starts a job with Run now.";
 /// What a path with no entry is told.
 pub const UNCLASSIFIED: &str = "this route has not been classified for container agents yet. Ask your leader to have its audience set.";
 
@@ -160,6 +162,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/agentmux/stream-file"), Audience::Everyone),
     (Match::Route("/agentmux/stream-file/*path"), Audience::Everyone),
     (Match::Route("/agentmux/widget-files/:id/:hash/:key/*path"), Audience::Everyone),
+    (Match::Route("/agentmux/hook/:job"), Audience::AppOnly(LOCAL_SCRIPTS)),
     (Match::Route("/agentmux/widget-sdk/:file"), Audience::Everyone),
     (Match::Route("/api/v1/model/:route/*tail"), Audience::Everyone),
     (Match::Route("/agentmux/work"), Audience::Everyone),
@@ -177,6 +180,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/agentmux/work/boards"), Audience::Everyone),
     (Match::Route("/agentmux/work/claim"), Audience::Everyone),
     (Match::Route("/agentmux/work/media"), Audience::Everyone),
+    (Match::Route("/agentmux/work/:id"), Audience::Everyone),
     (Match::Route("/api/bus/agents"), Audience::Everyone),
     (Match::Route("/api/bus/broadcast"), Audience::Everyone),
     (Match::Route("/api/bus/inject"), Audience::Everyone),
@@ -270,6 +274,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/containers"), Audience::Everyone),
     (Match::Route("/api/v1/message-stats"), Audience::Everyone),
     (Match::Route("/api/v1/pr-flow"), Audience::Everyone),
+    (Match::Route("/api/v1/reviews"), Audience::Everyone),
     (Match::Route("/api/v1/task-flow"), Audience::Everyone),
     (Match::Route("/api/v1/file/rename"), Audience::Everyone),
     (Match::Route("/api/v1/muxspect/background-tasks"), Audience::Everyone),

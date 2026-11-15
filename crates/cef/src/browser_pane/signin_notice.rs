@@ -19,7 +19,8 @@
 //! - tells srv when the person focuses a field for a new password
 //!   (`credential.Signup`, §6), so the pane's key button offers a strong
 //!   password, and hands it a sign-up form when one is sent
-//!   (`credential.SignupSent`).
+//!   (`credential.SignupSent`) and a password-change form when one is sent
+//!   (`credential.ChangeSent`, §7.3).
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -83,6 +84,12 @@ pub(crate) fn note_world(browser_id: i32, session: Option<&str>, frame: &str, co
     list.push(World { session: session.map(str::to_string), context, frame: frame.to_string(), origin: origin.to_string() });
 }
 
+/// The listener worlds of `browser_id`'s frames: the DevTools session that made each (`None` for the
+/// page's own) and its execution context.
+pub(super) fn worlds_of(browser_id: i32) -> Vec<(Option<String>, i64)> {
+    WORLDS.lock().get(&browser_id).map(|l| l.iter().map(|w| (w.session.clone(), w.context)).collect()).unwrap_or_default()
+}
+
 /// Keep only the worlds of frames still in the page.
 pub(crate) fn keep_frames(browser_id: i32, live: &std::collections::HashSet<String>) {
     if let Some(list) = WORLDS.lock().get_mut(&browser_id) {
@@ -99,6 +106,7 @@ pub(crate) fn forget(browser_id: i32) {
     SIGNUPS.lock().remove(&browser_id);
     // What is queued still goes; then the pane's sender ends.
     SENDERS.lock().remove(&browser_id);
+    super::signin_list::forget(browser_id);
 }
 
 /// The origin of the frame whose world is `context` in `session`, if it is one a
@@ -192,6 +200,20 @@ enum Notice {
     },
     /// A sign-up form was sent (§6.2).
     Signup { username: Secret, password: Secret },
+    /// A password-change form was sent (§7.3): the account's user name and the new password. The current
+    /// password is never read.
+    Change { username: Secret, password: Secret },
+    /// The person clicked, or pressed Up or Down, in a login field: open the list of saved sign-ins
+    /// (§P2.3). `text` is what a user name field holds, which filters the list.
+    Open {
+        role: String,
+        #[serde(default)]
+        text: Option<Secret>,
+    },
+    /// A key the list took: Up, Down, Enter, Tab or Escape.
+    Key { key: String },
+    /// The person pressed elsewhere on the page: the list closes.
+    Close,
 }
 
 /// Take our binding's call out of the DevTools event stream: true when `message`
@@ -212,12 +234,21 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
         return true;
     };
     let Ok(notice) = serde_json::from_str::<Notice>(&params.payload.0) else { return true };
-    if matches!(notice, Notice::Signin { .. } | Notice::Signup { .. }) {
+    if matches!(notice, Notice::Signin { .. } | Notice::Signup { .. } | Notice::Change { .. }) {
         if let Some(frame) = frame_of(browser_id, called.session.as_deref(), params.context) {
             SIGNIN_FRAME.lock().insert(browser_id, (frame, Instant::now()));
         }
     }
     let Some((state, block_id)) = super::side_button_cdp::pane_of(browser_id) else { return true };
+    if matches!(notice, Notice::Open { .. } | Notice::Key { .. } | Notice::Close) {
+        // An agent's click or key is as trusted as the person's here: nothing about the list moves while one is
+        // reaching the pane (§P2.4 item 1).
+        if super::agent_input::quiet(browser_id) {
+            let (method, args) = list_report(notice, &block_id, &origin);
+            super::signin_list::send(state, browser_id, called.session, params.context, method, args);
+        }
+        return true;
+    }
     let (method, args) = match notice {
         Notice::Signin { username, password } => {
             NOTICED.lock().insert(browser_id, Instant::now());
@@ -243,9 +274,24 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
             NOTICED.lock().insert(browser_id, Instant::now());
             ("SignupSent", serde_json::json!({ "block_id": block_id, "origin": origin, "username": username.0.as_str(), "password": password.0.as_str() }))
         }
+        Notice::Change { username, password } => {
+            // Like a sign-up: the password an agent changed it to confirms it; one typed by hand is offered "Update password?".
+            NOTICED.lock().insert(browser_id, Instant::now());
+            ("ChangeSent", serde_json::json!({ "block_id": block_id, "origin": origin, "username": username.0.as_str(), "password": password.0.as_str() }))
+        }
+        Notice::Open { .. } | Notice::Key { .. } | Notice::Close => return true,
     };
     send(state, browser_id, method, args);
     true
+}
+
+/// What a report about the list of saved sign-ins is to srv: the method and its arguments.
+fn list_report(notice: Notice, block_id: &str, origin: &str) -> Call {
+    match notice {
+        Notice::Open { role, text } => ("FieldOpen", serde_json::json!({ "block_id": block_id, "origin": origin, "role": role, "text": text.as_ref().map(|t| t.0.as_str()) })),
+        Notice::Key { key } => ("FieldKey", serde_json::json!({ "block_id": block_id, "key": key })),
+        _ => ("FieldClose", serde_json::json!({ "block_id": block_id })),
+    }
 }
 
 /// Every (browser, origin) whose page showed a sign-in form, as told to srv.
@@ -272,7 +318,8 @@ pub(crate) fn on_main_commit(browser_id: i32) {
     let recent = NOTICED.lock().get(&browser_id).is_some_and(|at| at.elapsed() < HELD * 2);
     let had_form = FORMS.lock().remove(&browser_id).is_some();
     let had_signup = SIGNUPS.lock().remove(&browser_id);
-    if !recent && !had_form && !had_signup {
+    let had_list = super::signin_list::take_opened(browser_id);
+    if !recent && !had_form && !had_signup && !had_list {
         return;
     }
     let Some((state, block_id)) = super::side_button_cdp::pane_of(browser_id) else { return };

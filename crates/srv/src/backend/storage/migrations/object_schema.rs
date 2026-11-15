@@ -232,6 +232,18 @@ pub(super) const OBJECT_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_agent_
         CREATE INDEX IF NOT EXISTS idx_drone_runs_status
             ON db_drone_runs(status);
 
+        -- A run's checkpoints, step 0 whole and then one diff per step (m0050).
+        -- No FK to db_drone_runs: the run's row is written after its first
+        -- checkpoint.
+        CREATE TABLE IF NOT EXISTS db_drone_checkpoints (
+            run_id     TEXT NOT NULL,
+            step       INTEGER NOT NULL,
+            kind       TEXT NOT NULL,
+            body       BLOB NOT NULL,
+            written_at INTEGER NOT NULL,
+            PRIMARY KEY (run_id, step)
+        );
+
         -- A saved graph per drone, beside the definitions (m0049). No FK to
         -- db_drone_definitions: a version of a drone in another store is still
         -- saved (the same reason m0038 drops the runs' FK).

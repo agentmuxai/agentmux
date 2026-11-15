@@ -11,18 +11,19 @@
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
 import { AUDIO_EXTENSIONS, extOf, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 
-export type ViewerId = "text" | "image" | "media" | "pdf" | "info";
+export type ViewerId = "text" | "image" | "media" | "pdf" | "hex" | "info";
 
 /** readeditorfile's cap: a larger text file isn't loaded into CodeMirror. */
 export const TEXT_MAX_BYTES = 10_000_000;
 
-export const VIEWER_IDS: readonly ViewerId[] = ["text", "image", "media", "pdf", "info"];
+export const VIEWER_IDS: readonly ViewerId[] = ["text", "image", "media", "pdf", "hex", "info"];
 
 export const VIEWER_LABELS: Record<ViewerId, { label: string; icon: string }> = {
     text: { label: "Text", icon: "file-lines" },
     image: { label: "Image", icon: "image" },
     media: { label: "Audio and video", icon: "film" },
     pdf: { label: "PDF", icon: "file-pdf" },
+    hex: { label: "Hex", icon: "table-cells" },
     info: { label: "File info", icon: "circle-info" },
 };
 
@@ -33,26 +34,31 @@ export function isViewerId(v: unknown): v is ViewerId {
 /** The probe of a file, as far as the viewers need it. */
 export type FileProbe = FileProbeResult;
 
-/** The viewers that can show the file, the default first. */
+/** The viewers that can show the file, the default first. Every file can
+ *  be shown as hex: its bytes are read in parts, whatever its size. */
 export function viewerOptions(probe: FileProbe): ViewerId[] {
-    const textOk = probe.size <= TEXT_MAX_BYTES;
+    const text: ViewerId[] = probe.size <= TEXT_MAX_BYTES ? ["text"] : [];
     switch (probe.kind) {
         case "text":
-            return textOk ? ["text", "info"] : ["info"];
+            return [...text, "info", "hex"];
         case "svg":
-            return textOk ? ["image", "text", "info"] : ["image", "info"];
+            return ["image", ...text, "info", "hex"];
         case "image":
-            // Text last: a way out when the probe was wrong about a file.
-            return textOk ? ["image", "info", "text"] : ["image", "info"];
+            // Text after the card: a way out when the probe was wrong about a file.
+            return ["image", "info", ...text, "hex"];
         case "audio":
         case "video":
-            return ["media", "info"];
+            return ["media", "info", "hex"];
         case "pdf":
-            return textOk ? ["pdf", "info", "text"] : ["pdf", "info"];
+            return ["pdf", "info", ...text, "hex"];
+        case "other":
+            // Binary of no kind the probe knows: its bytes.
+            return ["hex", "info", ...text];
         default:
-            // Binary nothing renders: the info card, or the bytes as text
-            // ("Open as text anyway") while it fits the editor.
-            return textOk ? ["info", "text"] : ["info"];
+            // A kind with a name and no viewer yet (an archive, a database, a
+            // font, an Office document): the info card, which says what it is
+            // and opens it with the system's app.
+            return ["info", ...text, "hex"];
     }
 }
 
@@ -65,14 +71,22 @@ export function chooseViewer(probe: FileProbe, override?: string): ViewerId {
 }
 
 /** A dropped file with no host path, by its name and MIME type: shown from
- *  its bytes in the image or media viewer, else the info card. */
-export function viewerForDropped(name: string, type: string): ViewerId {
+ *  its bytes in the image, media or PDF viewer, else the info card. The
+ *  user's choice of the card or of hex wins: both show any bytes. */
+export function viewerForDropped(name: string, type: string, override?: string): ViewerId {
+    if (override === "info" || override === "hex") return override;
     const ext = extOf(name);
     if (type.startsWith("image/") || IMAGE_EXTENSIONS.includes(ext)) return "image";
     if (type.startsWith("video/") || type.startsWith("audio/")) return "media";
     if (type === "application/pdf" || ext === "pdf") return "pdf";
     if (VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext)) return "media";
     return "info";
+}
+
+/** The viewers a dropped file can be shown in, its own first. */
+export function droppedViewerOptions(name: string, type: string): ViewerId[] {
+    const own = viewerForDropped(name, type);
+    return own === "info" ? ["info", "hex"] : [own, "info", "hex"];
 }
 
 /** Opening these with the system runs them: the editor asks first. */

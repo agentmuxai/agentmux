@@ -182,6 +182,14 @@ pub(super) fn pane_of(browser_id: i32) -> Option<(Arc<AppState>, String)> {
     PANES.lock().get(&browser_id).map(|p| (p.state.clone(), p.block_id.clone()))
 }
 
+/// Run `expression` in the listener's world `context` (of `session`, or the page's own) of `browser_id`.
+/// For the few things the host tells its own listener, never anything the page sent.
+pub(super) async fn eval_in(browser_id: i32, session: Option<&str>, context: i64, expression: &str) {
+    let Some((state, label)) = PANES.lock().get(&browser_id).map(|p| (p.state.clone(), p.label.clone())) else { return };
+    let mut cdp = CdpSession::attach(&state, &label).in_session(session);
+    let _ = cdp.call("Runtime.evaluate", json!({ "contextId": context, "expression": expression, "returnByValue": true })).await;
+}
+
 /// The DevTools agent detached: the binding is gone, so add it again (the next
 /// CDP call attaches a new session).
 pub fn reinstall(browser_id: i32) {

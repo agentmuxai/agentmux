@@ -49,5 +49,6 @@ refreshWorkspaceList
     <div data-item="7" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
     <div data-item="8" data-label="Command Palette" data-icon="magnifying-glass" data-shortcut="<view:command-palette>" data-checked="undefined" data-keepopen="undefined" data-divider="false">
     <div data-item="9" data-label="Online Docs" data-icon="book" data-checked="undefined" data-keepopen="undefined" data-divider="false">
-    <div data-item="10" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
-    <div data-item="11" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="10" data-label="Reload Window" data-icon="rotate-right" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="11" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="12" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">

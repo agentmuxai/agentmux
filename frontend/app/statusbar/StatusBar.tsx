@@ -12,12 +12,11 @@ import { BrowserPauseAllStatus } from "./BrowserPauseAllStatus";
 import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
-import { AgentCountsStatus } from "./AgentCountsStatus";
+import { SummaryStatus } from "./SummaryStatus";
 import { LastSoundStatus } from "./LastSoundStatus";
-import { attentionItems } from "@/app/notification/attention-list";
+import { useSummary } from "./use-summary";
 import { ambientFailingCount } from "@/app/store/ambient-health";
 import { FIT_TIERS, slotDropAt, type DropAt } from "./status-bar-fit";
-import { VaultRequestsStatus } from "./VaultRequestsStatus";
 import { MultiInputStatus } from "./MultiInputStatus";
 import { MuxBusIndicator } from "./MuxBusIndicator";
 import { registerStatusBarItem, statusBarItems, type StatusBarItem } from "./status-bar-registry";
@@ -96,8 +95,8 @@ const VersionChip = (): JSX.Element => {
 
 let builtinsRegistered = false;
 
-/** Which fit tier hides each of AgentMux's items in a narrow bar (the rest stay: the backend dot, vault
- *  requests, update and version notices). Higher tiers hide more; before it goes, system-stats sheds its
+/** Which fit tier hides each of AgentMux's items in a narrow bar (the rest stay: the backend dot, update and
+ *  version notices). Higher tiers hide more; before it goes, system-stats sheds its
  *  readouts in StatusBar.scss. */
 const DROP_AT: Record<string, DropAt | undefined> = {
     gpu: 2,
@@ -105,7 +104,8 @@ const DROP_AT: Record<string, DropAt | undefined> = {
     "token-usage": 2,
     // The first to go, at a tier of its own: it comes and goes on its own, so it never takes another readout with it.
     "last-sound": 0,
-    "agent-counts": 3,
+    // The agents part goes at tier 2, so an item with nothing waiting goes with it; while anything waits it is kept (slotDropAt).
+    summary: 2,
     "browser-pause-all": 3,
     "multi-input": 3,
     config: 3,
@@ -129,8 +129,7 @@ function registerBuiltinStatusBarItems(): void {
         ["system-stats", "left", () => <SystemStats />],
         ["gpu", "left", () => <GpuStatus />],
         ["last-sound", "right", () => <LastSoundStatus />],
-        ["agent-counts", "right", () => <AgentCountsStatus />],
-        ["vault-requests", "right", () => <VaultRequestsStatus />],
+        ["summary", "right", () => <SummaryStatus />],
         ["browser-pause-all", "right", () => <BrowserPauseAllStatus />],
         ["multi-input", "right", () => <MultiInputStatus />],
         ["history-usage", "right", () => <HistoryUsageIndicator />],
@@ -152,6 +151,8 @@ function registerBuiltinStatusBarItems(): void {
 
 const StatusBar = (): JSX.Element => {
     registerBuiltinStatusBarItems();
+    // The summary is kept while anything waits on the person: an ask, a Vault request, a Kanban task.
+    const summary = useSummary({});
     let barRef: HTMLDivElement | undefined;
     useWidthFit(() => barRef, FIT_TIERS, (el) => [...el.querySelectorAll(".status-bar-left, .status-bar-right")], chromeZoomAtom);
     // The separator goes with its item, so a hidden item leaves none behind.
@@ -161,7 +162,7 @@ const StatusBar = (): JSX.Element => {
             data-drop-at={slotDropAt(
                 item.id,
                 item.dropAt ?? (item.id.startsWith("agentmux:") ? undefined : WIDGET_DROP_AT),
-                attentionItems().length > 0,
+                summary().waiting > 0,
                 ambientFailingCount() > 0
             )}
         >

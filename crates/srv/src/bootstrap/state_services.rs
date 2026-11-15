@@ -119,19 +119,23 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
     if let Some(templates) = backend::job_templates::service() {
         backend::jobs::watchdog::start(run_ledger.clone(), std::sync::Arc::new(templates.clone()));
     }
+    // Drone runs that kept checkpoints go on from their newest; the rest of what the
+    // old process left open is closed as interrupted.
+    let resuming = crate::server::drone_resume::resume_runs(state, Some(&run_ledger)).await;
     {
         let ledger = run_ledger.clone();
-        let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart()).await;
+        let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart_except(&resuming)).await;
     }
     // A paused job's slots are counted as skips (jobs spec §3.3).
     if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
         backend::jobs::paused::spawn(jobs_store, run_ledger.clone());
     }
     state.cron_scheduler.install_runs(run_ledger);
-    // An `app_event` job's runs start when the broker reports the event it names; a `file_watch` job's, when its folder changes.
+    // An `app_event` job's runs start when the broker reports the event it names; a `file_watch` job's, when its folder changes; a `poll` job's, when its query finds something new.
     if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
         backend::jobs::app_events::spawn(&state.broker, state.mstore.clone(), jobs_store.clone(), state.cron_scheduler.clone());
-        backend::jobs::file_watch::spawn(&state.broker, state.fs_watch_pool.clone(), jobs_store, state.cron_scheduler.clone());
+        backend::jobs::file_watch::spawn(&state.broker, state.fs_watch_pool.clone(), jobs_store.clone(), state.cron_scheduler.clone());
+        backend::jobs::poll::spawn(jobs_store, state.cron_scheduler.clone(), crate::drone::executor::blocks::app_query::poll_check());
     }
 
     // Start persistent cron scheduler — load enabled jobs from DB, fire any

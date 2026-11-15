@@ -20,16 +20,19 @@ pub mod caps;
 pub mod cloud_events;
 pub mod cloud_hub;
 pub mod definition;
+pub mod expect;
 pub mod file_watch;
 pub mod follower;
 pub mod from_template;
 pub mod incidents;
 pub mod paused;
 pub mod policy;
+pub mod poll;
 pub mod remote;
 pub mod reporters;
 pub mod reservation;
 pub mod verdict;
+pub mod webhook_local;
 pub mod watchdog;
 
 use std::sync::Arc;
@@ -593,6 +596,17 @@ impl RunLedger {
         self.turn_finished(run_id, infra_status, Some(drone_cost(block_states)), error);
     }
 
+    /// A Drone run was cancelled: its row closes `interrupted` with the reason,
+    /// unless whoever stopped it (a timeout, `cancel_other`) closed it already.
+    pub fn drone_stopped(
+        &self,
+        run_id: &str,
+        block_states: &std::collections::HashMap<String, crate::backend::storage::drone_types::BlockState>,
+        reason: &str,
+    ) {
+        self.turn_finished(run_id, infra::INTERRUPTED, Some(drone_cost(block_states)), reason);
+    }
+
     /// After a restart: close what this channel left open (§3.2). Cron runs
     /// still `scheduled` or `running`, and Drone runs still `running`, were
     /// interrupted, in the ledger and in `db_drone_runs`; so were the runs
@@ -601,7 +615,27 @@ impl RunLedger {
     /// stay: they wait for their agent across a restart. Call before the
     /// scheduler starts.
     pub fn recover_after_restart(&self) -> usize {
+        self.recover_after_restart_except(&std::collections::HashSet::new())
+    }
+
+    /// The open ledger row of Drone run `drone_run_id`, written by this channel:
+    /// the one a run taken up again after a restart goes on under.
+    pub fn open_run_of_drone(&self, drone_run_id: &str) -> Option<String> {
+        let sources: [(&str, &[&str]); 2] = [(SOURCE_CRON, &[state::SCHEDULED, state::RUNNING]), (SOURCE_DRONE, &[state::RUNNING])];
+        sources
+            .into_iter()
+            .flat_map(|(source, states)| self.store.job_runs_open_recorded_by(&self.channel, source, states).unwrap_or_default())
+            .find(|r| r.links["drone_run_id"].as_str() == Some(drone_run_id))
+            .map(|r| r.id)
+    }
+
+    /// [`recover_after_restart`](Self::recover_after_restart), except that the
+    /// Drone runs in `resuming` (by Drone run id) are being taken up again from
+    /// their checkpoints: their rows stay open, in the ledger and in
+    /// `db_drone_runs`, and they finish as any run does.
+    pub fn recover_after_restart_except(&self, resuming: &std::collections::HashSet<String>) -> usize {
         let now = now_ms();
+        let is_resuming = |r: &JobRun| r.links["drone_run_id"].as_str().is_some_and(|d| resuming.contains(d));
         let open = |source: &str, states: &[&str]| {
             self.store.job_runs_open_recorded_by(&self.channel, source, states).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "jobs: couldn't read open runs");
@@ -622,7 +656,7 @@ impl RunLedger {
         for run in &followed_elsewhere {
             self.follower.watch(&run.id, now);
         }
-        let stale = ours.into_iter().chain(open(SOURCE_DRONE, &[state::RUNNING])).chain(followed_here);
+        let stale = ours.into_iter().chain(open(SOURCE_DRONE, &[state::RUNNING])).chain(followed_here).filter(|r| !is_resuming(r));
         let mut jobs = std::collections::BTreeSet::new();
         for run in stale {
             if self.store.job_run_finish(&run.id, infra::INTERRUPTED, None, "AgentMux restarted during this run", now).unwrap_or(false) {
@@ -631,7 +665,8 @@ impl RunLedger {
             }
         }
         if let Some(mstore) = &self.mstore {
-            match mstore.drone_runs_mark_interrupted(DRONE_STATUS_INTERRUPTED, now) {
+            let except: Vec<String> = resuming.iter().cloned().collect();
+            match mstore.drone_runs_mark_interrupted(DRONE_STATUS_INTERRUPTED, now, &except) {
                 Ok(n) if n > 0 => tracing::info!(count = n, "jobs: Drone runs interrupted by the restart marked"),
                 Ok(_) => {}
                 Err(e) => tracing::warn!(error = %e, "jobs: couldn't mark interrupted Drone runs"),

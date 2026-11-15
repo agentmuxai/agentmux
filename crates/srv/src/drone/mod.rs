@@ -23,7 +23,10 @@
 pub mod checkpoint;
 pub mod data_flow;
 pub mod executor;
+pub mod payload_schema;
 pub(crate) mod host;
+pub mod recorder;
+pub mod replay;
 pub mod state;
 pub use crate::backend::storage::drone_store as storage;
 pub mod transform;

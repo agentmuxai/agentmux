@@ -115,9 +115,12 @@ const UpdateStatus = (): JSX.Element => {
                 ref={chipRef}
                 class={`status-bar-item${clickable() ? " clickable" : ""}`}
                 onClick={clickable() ? handleClick : undefined}
-                // Not while its panel is open: the tip would draw over the panel's buttons.
-                data-tip={panelOpen() && hasPanel() ? undefined : tipFor(!!staged(), !!fromSrv(), clickable(), staged()?.state === "restarting")}
+                // A chip with a panel (a staged release) has no tip: its label says it, and a tip already
+                // showing under the pointer would stay drawn over the panel's buttons once it opens.
+                // Screen readers still get the sentence, as the description.
+                data-tip={hasPanel() ? undefined : tipFor(!!staged(), !!fromSrv(), clickable())}
                 aria-label={`Update: ${label()}`}
+                aria-description={hasPanel() ? tipFor(true, !!fromSrv(), clickable(), staged()?.state === "restarting") : undefined}
                 aria-haspopup={hasPanel() ? "dialog" : undefined}
                 aria-expanded={hasPanel() ? panelOpen() : undefined}
             >

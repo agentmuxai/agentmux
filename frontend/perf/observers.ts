@@ -15,6 +15,7 @@
  * every interaction, not just the first.
  */
 
+import { startFrameSampler } from "./frame-sample";
 import { startLongFrameObserver } from "./long-frames";
 import { peekMuxObject, makeORef } from "@/store/mos";
 import { createSlowInteractionLogger, type SlowInteraction } from "./slow-interactions";
@@ -100,13 +101,22 @@ function startEventObserver(): (() => void) | null {
     return () => observer.disconnect();
 }
 
+/** Frame times while there is input, one line per pane every five minutes (frame-sample.ts). */
+function startFrameSamplerObserver(): (() => void) | null {
+    if (typeof document === "undefined" || typeof requestAnimationFrame !== "function") return null;
+    return startFrameSampler({
+        windowLabel: new URLSearchParams(window.location.search).get("windowLabel") ?? "main",
+        viewOf: (blockId) => peekMuxObject<Block>(makeORef("block", blockId))?.meta?.view,
+    });
+}
+
 /**
  * Attach all Phase-0 observers. Call once at startup. Returns a cleanup
  * function that disconnects them — primarily for tests; production never
  * tears these down.
  */
 export function startAllObservers(): () => void {
-    const stops = [startLongTaskObserver(), startLongFrameObserver(), startEventObserver()].filter(
+    const stops = [startLongTaskObserver(), startLongFrameObserver(), startEventObserver(), startFrameSamplerObserver()].filter(
         (f): f is () => void => f != null,
     );
     return () => {

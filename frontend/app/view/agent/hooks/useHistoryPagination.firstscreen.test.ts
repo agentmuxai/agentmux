@@ -264,6 +264,15 @@ describe("the seam between the first screen and the rest", () => {
         expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
     });
 
+    it("a first screen that starts mid-response is used when the transcript is too large to open the usual way", async () => {
+        openTail.mockResolvedValue(tailOf(3, 6_000_000, { lines: [delta, user("b"), user("c")], size: 3_000_000_000 }));
+        usual();
+        const { docEvents } = mount();
+        await flush();
+        expect(docEvents).toHaveLength(1);
+        expect(RpcApi.BlockfileLineCountCommand).not.toHaveBeenCalled();
+    });
+
     it("a first screen that starts at a user message is used", async () => {
         openTail.mockResolvedValue(tailOf(3, 100));
         const { docEvents } = mount();

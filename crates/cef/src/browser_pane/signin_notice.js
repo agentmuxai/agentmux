@@ -65,6 +65,114 @@
     return [...group.querySelectorAll("button, input[type=submit]")].some((b) => SIGNUP_WORDS.test(b.textContent || b.value || ""));
   };
 
+  // The field for the new password of a password change (§7.3): a form that also holds a
+  // `current-password` field. It is the other password field marked `new-password`, else the first
+  // password field after the current one. The same rule as signup_probe.rs and signup_fill.rs.
+  const changeField = (group) => {
+    const passwords = inputsOf(group).filter((i) => i.type === "password");
+    const current = passwords.find((p) => autocomplete(p).includes("current-password"));
+    if (!current) return null;
+    const others = passwords.filter((p) => !autocomplete(p).includes("current-password"));
+    return others.find((p) => autocomplete(p).includes("new-password")) || others.find((p) => passwords.indexOf(p) > passwords.indexOf(current)) || null;
+  };
+  // The account's user name on a password change: its own field when the form has one for the password
+  // manager (often hidden), else the user name rules above.
+  const accountOf = (group, inputs, password) => {
+    const marked = [...group.querySelectorAll("input")].find((i) => isInput(i) && i.type !== "password" && /\b(username|email)\b/.test(autocomplete(i)) && i.value);
+    const user = marked || userIn(inputs, password);
+    return user ? user.value : "";
+  };
+
+  // The list of saved sign-ins (SPEC_VAULT_AUTOFILL_IN_BROWSER_PANE_2026_11_14.md §P2.3). The person's own
+  // click, or Up or Down, in a login field asks the host to open it; the pane draws it, so the page's field
+  // keeps focus and the page sees nothing. Only what the person did counts (`isTrusted`), and the host
+  // drops every one of these reports while an agent's input is reaching the pane (an agent's click is
+  // just as trusted here). What goes to the host is which kind of field it was and, for a user name
+  // field, the text typed so far (the list is filtered by it); never a password, never any other text.
+  // The host answers each report by setting `window.__agentmuxList` in this world, which the page can't
+  // reach: whether a list is showing, and whether one of its rows is selected, so a key is swallowed
+  // only when it belongs to the list.
+  const loginRole = (el) => {
+    if (!isInput(el)) return null;
+    const group = groupOf(el);
+    const inputs = inputsOf(group);
+    const passwords = inputs.filter((i) => i.type === "password");
+    if (el.type === "password") {
+      if (newPasswordField(el)) return "newpassword";
+      return changeField(group) === el ? null : "password";
+    }
+    if (!typed(el) || passwords.some(newPasswordField)) return null;
+    if (passwords.length) return userIn(inputs, passwords[0]) === el ? "username" : null;
+    return namedLikeUser(el) ? "username" : null;
+  };
+  const listState = () => window.__agentmuxList || {};
+  let askedList = false;
+  // The field the list was asked from: a key in any other field is the page's, and focus leaving it closes the list.
+  let listField = null;
+  const closeList = () => {
+    if (!askedList) return;
+    askedList = false;
+    listField = null;
+    report({ kind: "close" });
+  };
+  const askList = (el) => {
+    const role = loginRole(el);
+    if (!role) return false;
+    askedList = true;
+    listField = el;
+    report({ kind: "open", role, text: role === "username" ? el.value.slice(0, 64) : undefined });
+    return true;
+  };
+  window.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!e.isTrusted) return;
+      if (e.target instanceof Element && askList(e.target)) return;
+      closeList();
+    },
+    { capture: true }
+  );
+  window.addEventListener(
+    "focusin",
+    (e) => {
+      if (e.isTrusted && askedList && e.target !== listField) closeList();
+    },
+    { capture: true }
+  );
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (!e.isTrusted || !isInput(e.target)) return;
+      const shown = !!listState().shown;
+      if (shown && e.target !== listField) {
+        // The list belongs to another field: this key is the page's.
+        closeList();
+        return;
+      }
+      if (!shown) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") askList(e.target);
+        return;
+      }
+      const picked = !!listState().cursor;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Escape" || (e.key === "Enter" && picked)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (!(e.key === "Tab" && picked)) {
+        return;
+      }
+      report({ kind: "key", key: e.key });
+    },
+    { capture: true }
+  );
+  // The list follows what is typed in a user name field.
+  window.addEventListener(
+    "input",
+    (e) => {
+      if (e.isTrusted && askedList && isInput(e.target) && loginRole(e.target) === "username") askList(e.target);
+    },
+    { capture: true }
+  );
+
   const watchLeaving = (password) => {
     const until = performance.now() + WATCH_MS;
     const timer = setInterval(() => {
@@ -82,6 +190,16 @@
     if (now - lastAt < REPEAT_MS) return;
     const inputs = inputsOf(group);
     const passwords = inputs.filter((i) => i.type === "password");
+    // A password change (§7.3): srv confirms the password it made for it, or offers to save the one the
+    // person typed as the sign-in's new password.
+    const changed = changeField(group);
+    if (changed) {
+      if (!changed.value) return;
+      lastAt = now;
+      report({ kind: "change", username: accountOf(group, inputs, changed), password: changed.value });
+      watchLeaving(changed);
+      return;
+    }
     // A sign-up (§6): srv confirms the password it made for it, or offers to save
     // the one the person typed. The sign-in's user name rules find its user name.
     const fresh = passwords.find(newPasswordField);
@@ -93,7 +211,7 @@
       watchLeaving(fresh);
       return;
     }
-    // Other forms with two or three password fields, or one for a new password, are a password change (§7).
+    // Other forms with two or three password fields, or one for a new password, are not read.
     if (passwords.length > 1 || passwords.some((p) => autocomplete(p).includes("new-password"))) return;
     if (passwords.length === 1) {
       const password = passwords[0];

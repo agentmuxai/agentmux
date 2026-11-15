@@ -124,4 +124,41 @@ fn a_drone_run_event_is_tagged_by_its_kind() {
     );
     assert_eq!(run(RunEvent::RunDone { run_id: "r".into(), output: json!({"ok": true}) }), json!({ "kind": "run_done", "run_id": "r", "output": {"ok": true} }));
     assert_eq!(run(RunEvent::RunFailed { run_id: "r".into(), error: "e".into() }), json!({ "kind": "run_failed", "run_id": "r", "error": "e" }));
+    assert_eq!(run(RunEvent::RunCancelled { run_id: "r".into(), reason: "why".into() }), json!({ "kind": "run_cancelled", "run_id": "r", "reason": "why" }));
+    assert_eq!(
+        run(RunEvent::NeedsAttention { run_id: "r".into(), block_id: "b".into(), reason: "why".into() }),
+        json!({ "kind": "needs_attention", "run_id": "r", "block_id": "b", "reason": "why" })
+    );
+    assert_eq!(
+        run(RunEvent::AttentionAnswered { run_id: "r".into(), block_id: "b".into(), choice: "skip".into() }),
+        json!({ "kind": "attention_answered", "run_id": "r", "block_id": "b", "choice": "skip" })
+    );
+    assert_eq!(
+        run(RunEvent::Waiting { run_id: "r".into(), block_id: "w".into(), resume_at: Some(9), on: None, key: None }),
+        json!({ "kind": "waiting", "run_id": "r", "block_id": "w", "resume_at": 9 })
+    );
+    assert_eq!(
+        run(RunEvent::Waiting { run_id: "r".into(), block_id: "w".into(), resume_at: None, on: Some("e".into()), key: Some("k".into()) }),
+        json!({ "kind": "waiting", "run_id": "r", "block_id": "w", "on": "e", "key": "k" })
+    );
+    assert_eq!(run(RunEvent::WaitEnded { run_id: "r".into(), block_id: "w".into(), late: true }), json!({ "kind": "wait_ended", "run_id": "r", "block_id": "w", "late": true }));
+    assert_eq!(
+        run(RunEvent::ChildStarted { run_id: "r".into(), block_id: "c".into(), child_run_id: "k".into(), drone_id: "d".into(), version: 3 }),
+        json!({ "kind": "child_started", "run_id": "r", "block_id": "c", "child_run_id": "k", "drone_id": "d", "version": 3 })
+    );
+    assert_eq!(
+        run(RunEvent::ChildEnded { run_id: "r".into(), block_id: "c".into(), child_run_id: "k".into(), status: "done".into(), cost_usd: 0.5 }),
+        json!({ "kind": "child_ended", "run_id": "r", "block_id": "c", "child_run_id": "k", "status": "done", "cost_usd": 0.5 })
+    );
+    assert_eq!(run(RunEvent::Resumed { run_id: "r".into(), step: 4 }), json!({ "kind": "resumed", "run_id": "r", "step": 4 }));
+    assert_eq!(
+        run(RunEvent::StepCheckpointed { run_id: "r".into(), step: 3, block_id: Some("b".into()) }),
+        json!({ "kind": "step_checkpointed", "run_id": "r", "step": 3, "block_id": "b" })
+    );
+    assert_eq!(
+        run(RunEvent::StepCheckpointed { run_id: "r".into(), step: 0, block_id: None }),
+        json!({ "kind": "step_checkpointed", "run_id": "r", "step": 0 })
+    );
+    assert_eq!(run(RunEvent::LoopIteration { run_id: "r".into(), block_id: "g".into(), iteration: 2 }), json!({ "kind": "loop_iteration", "run_id": "r", "block_id": "g", "iteration": 2 }));
+    assert_eq!(run(RunEvent::CapReached { run_id: "r".into(), block_id: "g".into(), reason: "why".into() }), json!({ "kind": "cap_reached", "run_id": "r", "block_id": "g", "reason": "why" }));
 }

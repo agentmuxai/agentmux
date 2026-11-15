@@ -129,5 +129,5 @@ fn the_person_is_told_who_has_the_folder_and_what_to_do() {
 fn migrate_beside_another_version_stops_only_when_the_data_needs_preparing() {
     let owner = writer(10, 100, "0.60.10");
     assert_eq!(migrate_exit_code(&owner, None), 0);
-    assert_eq!(migrate_exit_code(&owner, Some("pending migrations".into())), 1);
+    assert_eq!(migrate_exit_code(&owner, Some("pending migrations".into())), agentmux_common::srv_stderr::SHARED_FOLDER_HELD_EXIT);
 }
