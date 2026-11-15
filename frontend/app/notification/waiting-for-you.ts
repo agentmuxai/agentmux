@@ -43,6 +43,9 @@ interface WaitEntry {
     kind?: string;
 }
 
+/** In a pane's `kinds`, a wait that srv did not announce: the agent's own question, permission or shutdown ask, or a pane's card. */
+export const OWN_WAIT = "own";
+
 const waiting = new Map<string, Map<string, WaitEntry>>();
 /** `blockId` → when its first source began waiting (unix ms). */
 const since = new Map<string, number>();
@@ -133,7 +136,7 @@ export interface WaitingPane {
     what: string;
     /** When it began to wait (unix ms). */
     since: number;
-    /** The srv kind of each of its waits that has one; empty when it waits only on its own question or permission. */
+    /** The kind of each of its waits: srv's (`vault`, `browser`…), or [`OWN_WAIT`] for a question or permission. */
     kinds?: string[];
 }
 
@@ -156,7 +159,7 @@ export function waitingPanes(): WaitingPane[] {
         if (blockId.startsWith(APP_KEY_PREFIX)) continue;
         const first = sources.values().next().value;
         if (!first) continue;
-        const kinds = [...sources.values()].map((e) => e.kind).filter((k): k is string => !!k);
+        const kinds = [...new Set([...sources.values()].map((e) => e.kind || OWN_WAIT))];
         out.push({ blockId, what: first.what, since: since.get(blockId) ?? 0, kinds });
     }
     return out.sort((a, b) => a.since - b.since);

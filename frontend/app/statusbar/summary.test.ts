@@ -9,7 +9,7 @@ import type { AttentionItem } from "@/app/notification/attention-list";
 import type { WaitingApp } from "@/app/notification/waiting-for-you";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
-import { summarize, type SummaryInput } from "./summary";
+import { isVaultOnly, summarize, type SummaryInput } from "./summary";
 import { KIND_PLACES } from "./summary-kinds";
 
 const item = (blockId: string, over: Partial<AttentionItem> = {}): AttentionItem => ({
@@ -39,6 +39,13 @@ describe("summarize", () => {
     it("sorts a pane into Asks, or Browser when all it waits on is a browser request", () => {
         const s = summarize(input({ items: [item("a"), item("b", { kinds: ["browser"], what: "needs you in the browser" })] }));
         expect(counts(s)).toMatchObject({ asks: 1, browser: 1 });
+    });
+
+    it("keeps a pane that waits on its own question as well as on a Vault or a browser request as an ask", () => {
+        const s = summarize(input({ items: [item("a", { kinds: ["own", "vault"] }), item("b", { kinds: ["own", "browser"] })], uses: [use("u1", { block_id: "a" })] }));
+        expect(counts(s)).toMatchObject({ asks: 2, browser: 0, vault: 1 });
+        expect(isVaultOnly(item("a", { kinds: ["own", "vault"] }))).toBe(false);
+        expect(isVaultOnly(item("a", { kinds: ["vault"] }))).toBe(true);
     });
 
     it("counts a pane that waits on a question and a browser request once, as an ask", () => {

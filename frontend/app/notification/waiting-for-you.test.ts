@@ -123,8 +123,8 @@ describe("waiting for you", () => {
             startWaitingForYou("b2", "permission", "Allow Bash?", { what: "asks to approve a Bash call" });
             startWaitingForYou("b2", "srv:k", "x");
             expect(waitingPanes()).toEqual([
-                { blockId: "b1", what: "asks you a question", since: 1000, kinds: [] },
-                { blockId: "b2", what: "asks to approve a Bash call", since: 2000, kinds: [] },
+                { blockId: "b1", what: "asks you a question", since: 1000, kinds: ["own"] },
+                { blockId: "b2", what: "asks to approve a Bash call", since: 2000, kinds: ["own"] },
             ]);
             endWaitingForYou("b1", "question");
             expect(waitingPanes().map((p) => p.blockId)).toEqual(["b2"]);
@@ -164,5 +164,12 @@ describe("what the status bar's summary reads of the registry", () => {
         applyUserAttention({ key: "u1", block_id: "", kind: "upgrade", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
         applyUserAttention({ key: "d1", block_id: "", kind: "desktop", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
         expect(waitingApps().map((a) => a.what)).toEqual(["asks to upgrade AgentMux", "asks to use your desktop"]);
+    });
+
+    it("lists an agent's own question beside a Vault wait, so the pane is not taken for a Vault-only one", () => {
+        __resetWaitingForYou();
+        startWaitingForYou("b9", "question", "Which branch?");
+        applyUserAttention({ key: "v9", block_id: "b9", kind: "vault", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
+        expect(waitingPanes()[0].kinds?.slice().sort()).toEqual(["own", "vault"]);
     });
 });

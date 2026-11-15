@@ -42,6 +42,7 @@ const agent = (id: string, state: AgentRuntime["state"]): AgentRuntime => ({
     provider: "claude",
     icon: "",
     runtime: "host",
+    block_id: id,
 });
 
 describe("AgentCountsStatus", () => {
@@ -232,6 +233,16 @@ describe("AgentCountsStatus", () => {
 
     it("still counts a pane that waits on a question as well as a Vault request", () => {
         render(() => <AgentCountsStatus rows={() => [agent("a", "waiting_on_user")]} items={() => [item("a", { kinds: ["vault", "consent"] })]} />);
+        expect(screen.getByText("1 waiting on you")).toBeTruthy();
+    });
+
+    it("takes off only the Vault-only panes that srv's rows count as waiting: another pane's wait is not undercounted", () => {
+        render(() => (
+            <AgentCountsStatus
+                rows={() => [agent("a", "waiting_on_user"), agent("b", "working")]}
+                items={() => [item("pane-of-b", { kinds: ["vault"] }), item("a", { kinds: ["own"] })]}
+            />
+        ));
         expect(screen.getByText("1 waiting on you")).toBeTruthy();
     });
 });

@@ -15,6 +15,7 @@ import { isLightThemeActive } from "@/app/block/pane-identity";
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { MOS, workspace } from "@/app/store/global";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
+import { vaultRequests, vaultUses } from "@/app/view/vault/vault-store";
 import { BROWSER_WHAT, browserWaitsShown } from "./browser-waits";
 import { waitingPanes, type WaitingPane } from "./waiting-for-you";
 
@@ -51,7 +52,9 @@ export function mergeAttention(
     rows: AgentRuntime[],
     seen: (blockId: string) => number,
     here: (blockId: string) => boolean | undefined = () => undefined,
-    paneName: (blockId: string) => string | undefined = () => undefined
+    paneName: (blockId: string) => string | undefined = () => undefined,
+    /** Whether the Vault holds a request from this pane: a wait that only srv's row reports is then a Vault wait. */
+    vaultAsks: (blockId: string) => boolean = () => false
 ): AttentionItem[] {
     const byBlock = new Map<string, AgentRuntime>();
     for (const r of rows) if (r.block_id) byBlock.set(r.block_id, r);
@@ -85,7 +88,7 @@ export function mergeAttention(
             color: r.color,
             what: r.waiting_in ? BROWSER_WHAT : REMOTE_WHAT,
             since: seen(blockId),
-            kinds: r.waiting_in ? ["browser"] : [],
+            kinds: r.waiting_in ? ["browser"] : vaultAsks(blockId) ? ["vault"] : [],
             local: here(blockId) !== false,
         });
     }
@@ -145,7 +148,8 @@ export function attentionItems(): AttentionItem[] {
             return t;
         },
         paneIsHere,
-        ownPaneName
+        ownPaneName,
+        (blockId) => vaultUses().some((u) => u.block_id === blockId) || vaultRequests().some((r) => r.block_id === blockId)
     );
     const live = new Set(items.map((i) => i.blockId));
     for (const id of firstSeen.keys()) if (!live.has(id)) firstSeen.delete(id);

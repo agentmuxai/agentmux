@@ -42,8 +42,9 @@ export function AgentCountsStatus(props: {
     const tasks = props.tasks ?? useKanbanNeeds();
     const counts = createMemo(() => {
         const c = runtimeCounts(rows());
-        // The rows count every agent that waits, a Vault wait included: take those off, as the Vault item has them.
-        const vaultOnly = (props.items ?? attentionItems)().filter(isVaultOnly).length;
+        // The rows count every agent that waits, a Vault wait included: take off those that are in a row, as the Vault item has them.
+        const waitingPanes = new Set(rows().filter((r) => r.state === "waiting_on_user").map((r) => r.waiting_in ?? r.block_id));
+        const vaultOnly = (props.items ?? attentionItems)().filter((i) => isVaultOnly(i) && waitingPanes.has(i.blockId)).length;
         // The list names panes: one that only this window's registry knows (an ask the rows do not carry) counts too.
         return { running: c.running, waiting: Math.max(c.waiting - vaultOnly, items().length) };
     });
