@@ -127,6 +127,7 @@ describe("the list of saved sign-ins, page side", () => {
     it("swallows Up, Down and Escape only while a list shows, and Enter only with a row selected", () => {
         document.body.innerHTML = SIGNIN;
         const l = install();
+        l.fire("pointerdown", { target: field("pw") });
         l.win.__agentmuxList = { shown: true, cursor: false };
         for (const key of ["ArrowDown", "ArrowUp", "Escape"]) {
             const e = l.fire("keydown", { key, target: field("pw") });
@@ -138,7 +139,7 @@ describe("the list of saved sign-ins, page side", () => {
             const e = l.fire("keydown", { key, target: field("pw") });
             expect(e.preventDefault, key).not.toHaveBeenCalled();
         }
-        expect(l.lists().map((r) => r.key)).toEqual(["ArrowDown", "ArrowUp", "Escape"]);
+        expect(l.lists().filter((r) => r.kind === "key").map((r) => r.key)).toEqual(["ArrowDown", "ArrowUp", "Escape"]);
         l.win.__agentmuxList = { shown: true, cursor: true };
         const enter = l.fire("keydown", { key: "Enter", target: field("pw") });
         expect(enter.preventDefault).toHaveBeenCalled();
@@ -153,10 +154,11 @@ describe("the list of saved sign-ins, page side", () => {
         field("user").value = "alice";
         field("pw").value = "hunter2";
         const l = install();
+        l.fire("pointerdown", { target: field("pw") });
         l.win.__agentmuxList = { shown: true, cursor: true };
         l.fire("keydown", { key: "Enter", target: field("pw") });
         // The page's form is reported once at install; the swallowed Enter is only a key for the list.
-        expect(l.reports.map((r) => r.kind).filter((k) => k !== "form")).toEqual(["key"]);
+        expect(l.reports.map((r) => r.kind).filter((k) => k !== "form")).toEqual(["open", "key"]);
     });
 
     it("follows what is typed in a user name field once the list was asked for", () => {
@@ -170,6 +172,31 @@ describe("the list of saved sign-ins, page side", () => {
         field("pw").value = "x";
         l.fire("input", { target: field("pw") });
         expect(l.lists().map((r) => [r.kind, r.text])).toEqual([["open", ""], ["open", "al"]]);
+    });
+
+    it("closes when focus leaves the field, and a key in another field is the page's", () => {
+        document.body.innerHTML = SIGNIN + "<input id=search type=text name=q>";
+        const l = install();
+        l.fire("pointerdown", { target: field("pw") });
+        l.win.__agentmuxList = { shown: true, cursor: true };
+        // Tab to the search box, then Down and Enter there: the page's keys, nothing swallowed.
+        l.fire("focusin", { target: field("search") });
+        expect(l.lists().map((r) => r.kind)).toEqual(["open", "close"]);
+        for (const key of ["ArrowDown", "Enter"]) {
+            const e = l.fire("keydown", { key, target: field("search") });
+            expect(e.preventDefault, key).not.toHaveBeenCalled();
+        }
+        expect(l.lists().map((r) => r.kind)).toEqual(["open", "close"]);
+    });
+
+    it("a key in another field before the host heard of the focus change is the page's too", () => {
+        document.body.innerHTML = SIGNIN + "<input id=search type=text name=q>";
+        const l = install();
+        l.fire("pointerdown", { target: field("pw") });
+        l.win.__agentmuxList = { shown: true, cursor: true };
+        const e = l.fire("keydown", { key: "Enter", target: field("search") });
+        expect(e.preventDefault).not.toHaveBeenCalled();
+        expect(l.lists().map((r) => r.kind)).toEqual(["open", "close"]);
     });
 
     it("keys in something that is not a field do nothing", () => {

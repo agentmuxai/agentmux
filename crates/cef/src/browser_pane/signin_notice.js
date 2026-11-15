@@ -107,10 +107,19 @@
   };
   const listState = () => window.__agentmuxList || {};
   let askedList = false;
+  // The field the list was asked from: a key in any other field is the page's, and focus leaving it closes the list.
+  let listField = null;
+  const closeList = () => {
+    if (!askedList) return;
+    askedList = false;
+    listField = null;
+    report({ kind: "close" });
+  };
   const askList = (el) => {
     const role = loginRole(el);
     if (!role) return false;
     askedList = true;
+    listField = el;
     report({ kind: "open", role, text: role === "username" ? el.value.slice(0, 64) : undefined });
     return true;
   };
@@ -119,10 +128,14 @@
     (e) => {
       if (!e.isTrusted) return;
       if (e.target instanceof Element && askList(e.target)) return;
-      if (askedList) {
-        askedList = false;
-        report({ kind: "close" });
-      }
+      closeList();
+    },
+    { capture: true }
+  );
+  window.addEventListener(
+    "focusin",
+    (e) => {
+      if (e.isTrusted && askedList && e.target !== listField) closeList();
     },
     { capture: true }
   );
@@ -131,6 +144,11 @@
     (e) => {
       if (!e.isTrusted || !isInput(e.target)) return;
       const shown = !!listState().shown;
+      if (shown && e.target !== listField) {
+        // The list belongs to another field: this key is the page's.
+        closeList();
+        return;
+      }
       if (!shown) {
         if (e.key === "ArrowDown" || e.key === "ArrowUp") askList(e.target);
         return;
