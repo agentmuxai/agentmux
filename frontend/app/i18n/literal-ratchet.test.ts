@@ -1,14 +1,28 @@
-// A ratchet on literal text in the files that have started to use the dictionary.
+// A ratchet on literal text in the app.
 //
-// A file that imports the i18n module says it is being translated. In it, a piece of visible text written in
-// the JSX, or in a label-like attribute, is text a translation will miss. A file may have none, unless it is
-// listed in `literals.baseline.json` with the number it had when it was listed; that number may only go down.
-// The baseline is the work still to do, in the open: migrating more of a file lowers its number (run with
-// I18N_BASELINE_UPDATE=1 to write the lower one), and a file that adopts the dictionary with text left in it
-// must list that text, which a reviewer sees in the diff.
+// Every .tsx file under frontend/app may hold no literal visible text, unless it is listed in
+// `literals.baseline.json` with the number it had when it was listed; that number may only go down. The baseline
+// is the work still to do, in the open, and its total is the progress meter of the translation work: migrating
+// a file lowers its number (run with I18N_BASELINE_UPDATE=1 to write the lower one), and a new file must start
+// clean, or list its text, which a reviewer sees in the diff.
 //
-// What counts: JSX text with a letter in it, and a string literal given to title, aria-label, placeholder,
-// alt, label, description or tooltip. The count is from the parsed file, not a pattern over text.
+// What counts, from the parsed file and not a pattern over text: JSX text with a letter in it; a string literal
+// given to title, aria-label, ariaLabel, placeholder, alt, label, description, tooltip, text or message; and, as
+// the content of a JSX child or one of those attributes written in braces, a string, a template literal, or the
+// string branches of a conditional, of ||, ?? and + (for example {open() ? "Hide" : "Show"}, label={`Save ${n}`}).
+//
+// What it cannot see, so a count of zero is not "the app is translated":
+//   - strings in .ts files (menus, command and setting registries, error messages and notices built in code,
+//     toasts, tray and window titles), and in the Rust side (srv and the host)
+//   - text assembled from parts, or chosen by a function, before it reaches the JSX; text a component receives
+//     as a prop from such a file
+//   - text set from script (document.title, aria-live announcements, tooltips given to tip() or title set in
+//     code), canvas or SVG text, and text inside images
+//   - the landing site, the docs site and the mobile app, which have their own code
+//   - dates, numbers, plurals and sort order: translated text can still be formatted the English way
+//   - whether the translation is right, and layout when a translation is longer than the English
+//   - a string that is a code, a model name, a path or a keyword is counted though it should not be translated:
+//     list it in the baseline and leave it
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +33,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const appDir = join(here, "..");
 const baselinePath = join(here, "literals.baseline.json");
 
-const ATTRIBUTES = new Set(["title", "aria-label", "placeholder", "alt", "label", "description", "tooltip"]);
+const ATTRIBUTES = new Set(["title", "aria-label", "ariaLabel", "placeholder", "alt", "label", "description", "tooltip", "text", "message"]);
 
 function sourceFiles(dir: string): string[] {
     const out: string[] = [];
@@ -36,6 +50,25 @@ function sourceFiles(dir: string): string[] {
 
 const HAS_LETTER = /\p{L}/u;
 
+/** The visible strings an expression can yield: its literals, template parts and the string branches of a conditional, ||, ?? and +. */
+function expressionStrings(node: ts.Expression): number {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return HAS_LETTER.test(node.text) ? 1 : 0;
+    if (ts.isTemplateExpression(node)) {
+        const text = node.head.text + node.templateSpans.map((span) => span.literal.text).join(" ");
+        return HAS_LETTER.test(text) ? 1 : 0;
+    }
+    if (ts.isParenthesizedExpression(node)) return expressionStrings(node.expression);
+    if (ts.isConditionalExpression(node)) return expressionStrings(node.whenTrue) + expressionStrings(node.whenFalse);
+    if (ts.isBinaryExpression(node)) {
+        const op = node.operatorToken.kind;
+        if (op === ts.SyntaxKind.AmpersandAmpersandToken) return expressionStrings(node.right);
+        if (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.PlusToken) {
+            return expressionStrings(node.left) + expressionStrings(node.right);
+        }
+    }
+    return 0;
+}
+
 /** How many pieces of literal visible text `source` (a .tsx file) holds. */
 export function countLiterals(source: string, fileName = "file.tsx"): number {
     const tree = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -44,8 +77,14 @@ export function countLiterals(source: string, fileName = "file.tsx"): number {
         if (ts.isJsxText(node)) {
             const text = node.getText().replace(/&\w+;|&#\d+;/g, " ").trim();
             if (HAS_LETTER.test(text)) count++;
-        } else if (ts.isJsxAttribute(node) && node.initializer && ts.isStringLiteral(node.initializer)) {
-            if (ATTRIBUTES.has(node.name.getText()) && HAS_LETTER.test(node.initializer.text)) count++;
+        } else if (ts.isJsxAttribute(node) && node.initializer && ATTRIBUTES.has(node.name.getText())) {
+            if (ts.isStringLiteral(node.initializer)) {
+                if (HAS_LETTER.test(node.initializer.text)) count++;
+            } else if (ts.isJsxExpression(node.initializer) && node.initializer.expression) {
+                count += expressionStrings(node.initializer.expression);
+            }
+        } else if (ts.isJsxExpression(node) && node.expression && (ts.isJsxElement(node.parent) || ts.isJsxFragment(node.parent))) {
+            count += expressionStrings(node.expression);
         }
         ts.forEachChild(node, visit);
     };
@@ -53,13 +92,10 @@ export function countLiterals(source: string, fileName = "file.tsx"): number {
     return count;
 }
 
-const USES_DICTIONARY = /from\s+"@\/app\/i18n\//;
-
 function currentCounts(): Record<string, number> {
     const counts: Record<string, number> = {};
     for (const file of sourceFiles(appDir)) {
         const text = readFileSync(file, "utf8");
-        if (!USES_DICTIONARY.test(text)) continue;
         const key = "frontend/app/" + relative(appDir, file).replace(/\\/g, "/");
         counts[key] = countLiterals(text, file);
     }
@@ -102,6 +138,31 @@ describe("countLiterals", () => {
         );`;
         // "Close", "Close pane", "Hello"; not data-testid, class, the t() calls, the entity or the number.
         expect(countLiterals(source)).toBe(3);
+    });
+
+    it("counts strings written in braces as a child or as a label-like attribute", () => {
+        const source = `export const A = (p) => (
+            <div>
+                <b>{open() ? "Hide" : "Show"}</b>
+                <i>{\`Reclaim \${size}…\`}</i>
+                <u>{name() || "Unnamed"}</u>
+                <s>{ready() && "Ready"}</s>
+                <button aria-label={\`Remove \${p.name}\`} title={p.busy ? "Wait" : t("x.y")} label={t("a.b")} />
+            </div>
+        );`;
+        // "Hide", "Show", the Reclaim template, "Unnamed", "Ready", the Remove template and "Wait".
+        expect(countLiterals(source)).toBe(7);
+    });
+
+    it("does not count strings that only decide something", () => {
+        const source = `export const A = (p) => (
+            <div class={p.kind === "wide" ? "a" : "b"}>
+                <Show when={p.mode === "full"}>{t("a.b")}</Show>
+                <input value={p.value ?? ""} onInput={() => set("agent:name", 1)} data-store="main store" />
+                {items().map((x) => x.label)}
+            </div>
+        );`;
+        expect(countLiterals(source)).toBe(0);
     });
 
     it("counts text in any script", () => {
