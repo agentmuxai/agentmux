@@ -31,6 +31,7 @@ const REVALIDATE: &str = "no-cache";
 /// Middleware for the served UI's files; see the module's rules.
 pub(crate) async fn ui_cache(mut req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
+    let is_get = req.method() == axum::http::Method::GET;
     let if_none_match = req.headers().get(header::IF_NONE_MATCH).cloned();
     req.headers_mut().remove(header::IF_MODIFIED_SINCE);
     let mut response = next.run(req).await;
@@ -46,8 +47,9 @@ pub(crate) async fn ui_cache(mut req: Request, next: Next) -> Response {
         return response;
     }
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static(REVALIDATE));
-    if response.status() != StatusCode::OK {
-        // A range of a file (206) has no validator of its own here.
+    if response.status() != StatusCode::OK || !is_get {
+        // A range of a file (206) has no validator of its own here, and a HEAD is answered with no body to hash: a tag
+        // made of nothing would be the same for every file and differ from the GET's.
         return response;
     }
     let (mut parts, body) = response.into_parts();

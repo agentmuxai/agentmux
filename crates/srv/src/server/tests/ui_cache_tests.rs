@@ -115,3 +115,19 @@ async fn after_an_upgrade_on_the_same_address_the_next_load_is_the_new_shell() {
     let boot_b = get(&r, "/early-boot.js", &[("if-none-match", h(&boot_a, "etag").unwrap())]).await;
     assert_eq!(boot_b.status, StatusCode::NOT_MODIFIED);
 }
+
+#[tokio::test]
+async fn a_head_request_gets_the_rule_but_no_validator_of_an_empty_body() {
+    let dir = build("<html>shell A</html>", "boot A", "app-abc123.js", "app A");
+    let r = router(dir.path());
+    for uri in ["/", "/early-boot.js"] {
+        let resp = r
+            .clone()
+            .oneshot(Request::builder().method("HEAD").uri(uri).header(header::HOST, "127.0.0.1:7777").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+        assert_eq!(resp.headers().get("cache-control").and_then(|v| v.to_str().ok()), Some("no-cache"), "{uri}");
+        assert!(resp.headers().get("etag").is_none(), "{uri}: a tag of no bytes is the same for every file");
+    }
+}
