@@ -89,7 +89,7 @@ interface RegionLayout {
 }
 
 /** One region's nodes at positions relative to its top left, and the size its nodes need. */
-function layoutRegion(keys: readonly string[], edges: readonly AtlasEdge[]): RegionLayout {
+function layoutRegion(keys: readonly string[], edges: readonly AtlasEdge[], gridCols = GRID_COLS): RegionLayout {
     const { roots, loners, children } = treesOf(keys, edges);
     const nodes = new Map<string, Placed>();
     let slot = 0;
@@ -114,7 +114,7 @@ function layoutRegion(keys: readonly string[], edges: readonly AtlasEdge[]): Reg
     const treeH = depthMax < 0 ? 0 : (depthMax + 1) * (NODE_H + GAP_Y) - GAP_Y;
 
     // The agents with no lead and no reports, in a grid under the trees.
-    const cols = Math.min(GRID_COLS, Math.max(loners.length, 1));
+    const cols = Math.min(gridCols, Math.max(loners.length, 1));
     const gridTop = treeH > 0 ? treeH + GAP_Y : 0;
     loners.forEach((k, i) => {
         nodes.set(k, { x: (i % cols) * (NODE_W + GAP_X), y: gridTop + Math.floor(i / cols) * (NODE_H + GAP_X) });
@@ -124,60 +124,180 @@ function layoutRegion(keys: readonly string[], edges: readonly AtlasEdge[]): Reg
     return { nodes, w: Math.max(treeW, gridW), h: gridTop + gridH };
 }
 
-export function layoutAtlas(graph: AtlasGraph): AtlasLayout {
+/** A pane's size, as the layout is formed for it. */
+export interface PaneShape {
+    w: number;
+    h: number;
+}
+
+/**
+ * The smallest scale the fitted view shrinks the map to: a card is then 84 by 29 px, the smallest where a name and
+ * a state still read. Under it the view fills the pane in the shorter direction and the person pans along the other.
+ */
+export const MIN_READABLE_K = 0.6;
+/** The largest scale a fit enlarges a small map to. */
+export const FIT_MAX_K = 1.5;
+/** The margin the fitted view leaves round the map (atlas-viewport.ts, FIT_MARGIN). */
+const FIT_PAD = 16;
+/** The columns the grid of agents with no lead may have, tried in turn. */
+const GRID_COLS_CHOICES = [2, 3, 4, 5, 6];
+
+/** A region's box before it is placed: its inner layout and the size it needs. */
+interface Slot {
+    key: string;
+    folds: boolean;
+    inner: RegionLayout;
+    w: number;
+    h: number;
+    innerH: number;
+}
+
+function slotOf(key: string, keys: readonly string[], folds: boolean, edges: readonly AtlasEdge[], cols: number): Slot {
+    const inner = layoutRegion(keys, edges, cols);
+    const w = Math.max(MIN_REGION_W, inner.w + PAD * 2);
+    const innerH = keys.length === 0 ? 0 : inner.h;
+    const h = HEAD + PAD + innerH + (folds ? (innerH > 0 ? GAP_X : 0) + FOLD_H : 0) + PAD;
+    return { key, folds, inner, w, h, innerH };
+}
+
+/**
+ * The slots in rows that wrap once a row would be wider than `wrapW`; the review bot and CI (`services`) stand in a
+ * row of their own after the machines.
+ */
+function shelfPack(slots: readonly Slot[], services: Slot | null, wrapW: number): AtlasLayout {
     const boxes: RegionBox[] = [];
     const nodes = new Map<string, Placed>();
     let x = 0;
     let y = 0;
     let rowH = 0;
     let width = 0;
-    const place = (key: string, keys: readonly string[], folds: boolean) => {
-        const inner = layoutRegion(keys, graph.edges);
-        const w = Math.max(MIN_REGION_W, inner.w + PAD * 2);
-        const innerH = keys.length === 0 ? 0 : inner.h;
-        const h = HEAD + PAD + innerH + (folds ? (innerH > 0 ? GAP_X : 0) + FOLD_H : 0) + PAD;
-        if (x > 0 && x + w > ROW_MAX_W) {
-            x = 0;
-            y += rowH + REGION_GAP;
-            rowH = 0;
-        }
+    const newRow = () => {
+        x = 0;
+        y += rowH + REGION_GAP;
+        rowH = 0;
+    };
+    const place = (s: Slot) => {
+        if (x > 0 && x + s.w > wrapW) newRow();
         // The nodes are centred in the region when it is wider than they are.
-        const offset = PAD + (w - PAD * 2 - inner.w) / 2;
-        for (const [node, p] of inner.nodes) nodes.set(node, { x: x + offset + p.x, y: y + HEAD + PAD + p.y });
-        boxes.push({ key, x, y, w, h, foldY: y + HEAD + PAD + innerH + (innerH > 0 ? GAP_X : 0) });
-        x += w + REGION_GAP;
-        rowH = Math.max(rowH, h);
+        const offset = PAD + (s.w - PAD * 2 - s.inner.w) / 2;
+        for (const [node, p] of s.inner.nodes) nodes.set(node, { x: x + offset + p.x, y: y + HEAD + PAD + p.y });
+        boxes.push({ key: s.key, x, y, w: s.w, h: s.h, foldY: y + HEAD + PAD + s.innerH + (s.innerH > 0 ? GAP_X : 0) });
+        x += s.w + REGION_GAP;
+        rowH = Math.max(rowH, s.h);
         width = Math.max(width, x - REGION_GAP);
     };
-    for (const region of graph.regions) {
-        const keys = [...region.shown, ...region.orphans].map((n) => n.key);
-        place(region.key, keys, region.folded.length > 0);
-    }
-    const services = graph.services.map((s) => s.key);
-    if (services.length > 0) {
-        if (x > 0) {
-            x = 0;
-            y += rowH + REGION_GAP;
-            rowH = 0;
-        }
-        place(SERVICES_REGION, services, false);
+    slots.forEach(place);
+    if (services) {
+        if (x > 0) newRow();
+        place(services);
     }
     return { regions: boxes, nodes, width, height: boxes.length === 0 ? 0 : y + rowH };
+}
+
+/** The scale the fitted view would show `layout` at in `pane`, before the readable floor. */
+export function fitScale(layout: { width: number; height: number }, pane: PaneShape): number {
+    if (layout.width <= 0 || layout.height <= 0) return FIT_MAX_K;
+    return Math.min((pane.w - FIT_PAD * 2) / layout.width, (pane.h - FIT_PAD * 2) / layout.height);
+}
+
+const rowsOf = (l: AtlasLayout): number => new Set(l.regions.map((r) => r.y)).size;
+
+/**
+ * The candidate that fits `pane` best: the largest scale (no larger than a fit enlarges to, and no smaller than
+ * a card reads at, where the overflow is then what counts), then the most of the pane covered, then the fewest rows.
+ */
+export function pickBest(candidates: readonly AtlasLayout[], pane: PaneShape): AtlasLayout {
+    const score = (l: AtlasLayout) => {
+        const k = Math.max(MIN_READABLE_K, Math.min(FIT_MAX_K, fitScale(l, pane)));
+        const raw = fitScale(l, pane);
+        return { k, raw, cover: Math.min(l.width * k, pane.w) * Math.min(l.height * k, pane.h), rows: rowsOf(l) };
+    };
+    let best = candidates[0];
+    let bs = score(best);
+    for (const c of candidates.slice(1)) {
+        const s = score(c);
+        // Under the floor every candidate shows at the floor, and the one that overflows least is the best.
+        const better =
+            s.k > bs.k + 1e-6 ||
+            (Math.abs(s.k - bs.k) <= 1e-6 && s.k <= MIN_READABLE_K + 1e-6 && s.raw > bs.raw + 1e-6) ||
+            (Math.abs(s.k - bs.k) <= 1e-6 &&
+                Math.abs(s.raw - bs.raw) <= 1e-6 &&
+                (s.cover > bs.cover + 1 || (Math.abs(s.cover - bs.cover) <= 1 && s.rows < bs.rows)));
+        if (better) {
+            best = c;
+            bs = s;
+        }
+    }
+    return best;
+}
+
+/** The widths a row of the slots may wrap at: the one that holds the first box, the first two, and so on. */
+function wrapWidths(slots: readonly Slot[]): number[] {
+    const out = new Set<number>();
+    let sum = 0;
+    for (const s of slots) {
+        sum += s.w;
+        out.add(sum);
+        sum += REGION_GAP;
+    }
+    return [...out];
+}
+
+/**
+ * Where each region and node stands. With the pane's size the layout is formed for it: the machine boxes keep their
+ * order and their insides, and the width a row wraps at and the columns of the grid of agents with no lead are the
+ * ones that fit the pane best (docs/specs/SPEC_ATLAS_AGENT_MAP_2026_11_13.md §6.5). Without it, the fixed ones.
+ */
+export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape): AtlasLayout {
+    const build = (cols: number) => {
+        const slots = graph.regions.map((r) =>
+            slotOf(
+                r.key,
+                [...r.shown, ...r.orphans].map((n) => n.key),
+                r.folded.length > 0,
+                graph.edges,
+                cols
+            )
+        );
+        const svc = graph.services.map((s) => s.key);
+        return { slots, services: svc.length > 0 ? slotOf(SERVICES_REGION, svc, false, graph.edges, cols) : null };
+    };
+    if (!pane || pane.w <= 0 || pane.h <= 0) {
+        const { slots, services } = build(GRID_COLS);
+        return shelfPack(slots, services, ROW_MAX_W);
+    }
+    const candidates: AtlasLayout[] = [];
+    for (const cols of GRID_COLS_CHOICES) {
+        const { slots, services } = build(cols);
+        // With no machine box (an empty or not-yet-loaded fleet, or only the services) there is no width to choose.
+        const wraps = slots.length > 0 ? wrapWidths(slots) : [ROW_MAX_W];
+        for (const wrapW of wraps) candidates.push(shelfPack(slots, services, wrapW));
+    }
+    return pickBest(candidates, pane);
 }
 
 /**
  * The By seat layout: every shown agent in one picture, whatever machine it is on, a lead above its reports. No
  * regions: the machine is the node's tint. Stopped agents are not drawn (the bar counts them). The containers no
  * agent uses stand with the agents that have no lead, and the review bot and CI in a row of their own under them
- * all, for the same reason as their region in the other layout.
+ * all, for the same reason as their region in the other layout. With the pane's size, the columns of the grid of
+ * agents with no lead are the ones that fit it best.
  */
-export function layoutBySeat(graph: AtlasGraph): AtlasLayout {
+export function layoutBySeat(graph: AtlasGraph, pane?: PaneShape): AtlasLayout {
+    if (!pane || pane.w <= 0 || pane.h <= 0) return seatWithCols(graph, GRID_COLS);
+    return pickBest(
+        GRID_COLS_CHOICES.map((cols) => seatWithCols(graph, cols)),
+        pane
+    );
+}
+
+function seatWithCols(graph: AtlasGraph, cols: number): AtlasLayout {
     const keys = [
         ...graph.regions.flatMap((r) => r.shown.map((a) => a.key)),
         ...graph.regions.flatMap((r) => r.orphans.map((o) => o.key)),
     ];
     const services = graph.services.map((s) => s.key);
-    const inner = layoutRegion(keys, graph.edges);
+    const inner = layoutRegion(keys, graph.edges, cols);
     const nodes = new Map<string, Placed>();
     for (const [key, p] of inner.nodes) nodes.set(key, { x: PAD + p.x, y: PAD + p.y });
     const servicesTop = keys.length === 0 ? 0 : inner.h + SERVICES_GAP;

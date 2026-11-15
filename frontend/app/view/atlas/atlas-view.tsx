@@ -439,9 +439,13 @@ function useAtlasSelection(data: AtlasData, zoom: AtlasPanZoom, layout: () => At
 export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): JSX.Element {
     const { data, ctx } = props;
     const mode = createMemo<AtlasLayoutMode>(() => readAtlasLayout(ctx.meta()));
-    const layout = createMemo<AtlasLayout>(() => (mode() === "seat" ? layoutBySeat(data.graph()) : layoutAtlas(data.graph())));
     const [selected, setSelected] = createSignal<string | null>(null);
+    // The pane is measured before the first draw and the layout is formed for its shape, so the first paint is
+    // already fitted (the view reads the layout lazily: it is made right below).
     const zoom = useAtlasPanZoom(() => layout(), mode, () => setSelected(null));
+    const layout = createMemo<AtlasLayout>(() =>
+        mode() === "seat" ? layoutBySeat(data.graph(), zoom.shape()) : layoutAtlas(data.graph(), zoom.shape())
+    );
     const sel = useAtlasSelection(data, zoom, layout);
     const shownCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.shown.length + r.orphans.length, 0));
     const stoppedCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.folded.length, 0));
