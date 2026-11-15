@@ -37,6 +37,8 @@ pub fn effect_of(kind: BlockKind, node: &FlowNode, body: Effect, resolve: &dyn F
         // again once the task it dedupes against is over, so its `dedupe` key does
         // not make a second run of it harmless.
         BlockKind::Task | BlockKind::Agent | BlockKind::Message | BlockKind::Notify | BlockKind::Spawn => Effect::Effectful,
+        // A command may change anything it can reach, and a restart cannot tell how far it got.
+        BlockKind::Run => Effect::Effectful,
         // The callee may do anything, and a restart cannot tell how far it got.
         BlockKind::Drone => Effect::Effectful,
         // The items already done would be done again, so it is as the body is.
@@ -102,7 +104,7 @@ mod tests {
 
     #[test]
     fn what_sends_starts_or_costs_is_effectful_and_so_is_a_task_whatever_its_dedupe_key() {
-        for kind in [BlockKind::Agent, BlockKind::Message, BlockKind::Notify, BlockKind::Spawn] {
+        for kind in [BlockKind::Agent, BlockKind::Message, BlockKind::Notify, BlockKind::Spawn, BlockKind::Run] {
             assert_eq!(of(kind, json!({})), Effect::Effectful, "{kind:?}");
         }
         assert_eq!(of(BlockKind::Task, json!({ "title": "x" })), Effect::Effectful);

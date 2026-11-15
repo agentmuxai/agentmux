@@ -23,6 +23,7 @@ pub mod oom;
 pub mod keychain_credentials;
 pub mod mount_source;
 pub mod mounts;
+pub mod oneshot;
 pub mod status_source;
 pub(crate) use self::mounts::container_memory_dir;
 pub mod pull;
