@@ -723,3 +723,24 @@ async fn a_wait_that_ends_in_time_leaves_no_limit_behind() {
     assert_eq!(kept.result, Ok(json!("late=false")));
     assert!(load(&kept.rows()).unwrap().unwrap().wait_timeouts.is_empty());
 }
+
+#[tokio::test]
+async fn an_event_wait_past_its_limit_does_not_open_its_key_again_so_a_resend_cannot_end_it() {
+    let graph = waiting(json!({ "on": "never", "timeout_seconds": 600 }), "unreached");
+    let c = stopped_at_its_wait(&graph).await;
+    let key = c.resume_on["wait"].clone();
+    let mut past = c.clone();
+    past.wait_timeouts.insert("wait".to_string(), agentmux_common::time::now_ms() - 1_000);
+
+    let (tx, mut events) = mpsc::unbounded_channel();
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let g = graph.clone();
+    let task = tokio::spawn(async move { resume((&g, &past, Limits::default()), &tx, &states).await.map_err(|e| match e { RunEnd::Failed(e) | RunEnd::Cancelled(e) => e }) });
+    // The source sends its event again at once: there is nothing to receive it, and no Waiting was announced.
+    let _ = drone_wait::signal(&key, json!({ "late": true }));
+    let why = task.await.unwrap().unwrap_err();
+    assert!(why.contains("timed out after 10 minutes"), "{why}");
+    while let Some(ev) = events.recv().await {
+        assert!(!matches!(ev, RunEvent::Waiting { .. }), "a wait that is over is not announced");
+    }
+}
