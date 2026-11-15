@@ -10,7 +10,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { drags, dragCleanup, colorOf, seatOfFn, blocks } = vi.hoisted(() => ({
-    drags: [] as { element: HTMLElement; getInitialData: () => unknown }[],
+    drags: [] as { element: HTMLElement; getInitialData: () => unknown; canDrag: () => boolean }[],
     dragCleanup: vi.fn(),
     colorOf: vi.fn(),
     seatOfFn: vi.fn(),
@@ -224,6 +224,16 @@ describe("KanbanCard: dragging", () => {
         expect(drags).toHaveLength(1);
         expect(drags[0].element).toBe(card);
         expect(drags[0].getInitialData()).toEqual({ type: kanbanCardItemType, id: "w5", num: 5 });
+    });
+
+    it("is not dragged by a press that began on a button in it, but is by one on the card", () => {
+        const { card } = mount(task(5, "open"));
+        const button = document.createElement("button");
+        card.appendChild(button);
+        button.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+        expect(drags[0].canDrag()).toBe(false);
+        card.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+        expect(drags[0].canDrag()).toBe(true);
     });
 
     it("lets a held task, and a Spec'd one, be dragged too", () => {
